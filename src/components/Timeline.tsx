@@ -10,13 +10,51 @@ import {
   Music,
   Film,
   GripVertical,
+  Image,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useState, useRef, useEffect, useCallback } from 'react';
-import type { TimelineClip } from '@/types';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import type { TimelineClip, TimelineTrack } from '@/types';
 import { formatSimpleTime } from '@/utils/time';
 
 const TRACK_HEIGHT = 56;
+const MIN_CLIP_WIDTH = 16;
+const SNAP_THRESHOLD_PX = 8;
+
+// Generate consistent waveform data for a clip
+function generateWaveform(clipId: string, width: number): number[] {
+  const peaks: number[] = [];
+  const barCount = Math.max(Math.floor(width / 3), 4);
+  const random = seededRandom(clipId);
+  for (let i = 0; i < barCount; i++) {
+    peaks.push(0.2 + random() * 0.8);
+  }
+  return peaks;
+}
+
+// Seeded random for consistent waveform display
+function seededRandom(seed: string): () => number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return function() {
+    hash = (hash * 16807 + 0) % 2147483647;
+    return (hash % 10001) / 10001;
+  };
+}
+
+// Generate frame thumbnails (simulated)
+function generateFrames(clipId: string, duration: number): number[] {
+  const frames: number[] = [];
+  const frameCount = Math.max(Math.floor(duration * 2), 4);
+  const random = seededRandom(clipId + '_frames');
+  for (let i = 0; i < frameCount; i++) {
+    frames.push(random());
+  }
+  return frames;
+}
 
 export function Timeline() {
   const {
@@ -27,6 +65,7 @@ export function Timeline() {
     selectedClipId,
     activeTool,
     selectedTrackId,
+    draggingClipId,
     selectClip,
     selectTrack,
     seek,
@@ -40,6 +79,7 @@ export function Timeline() {
     removeTrack,
     updateClip,
     totalDuration,
+    setDragPreview,
   } = useEditorStore();
 
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -49,6 +89,7 @@ export function Timeline() {
     startX: number;
     originalStartTime: number;
     trackId: string;
+    trackType: string;
   } | null>(null);
   const [resizeState, setResizeState] = useState<{
     clipId: string;
@@ -60,6 +101,7 @@ export function Timeline() {
     originalStartTime: number;
   } | null>(null);
   const [snapLine, setSnapLine] = useState<number | null>(null);
+  const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
 
   // Sync ruler and track scrolling
   const handleScroll = useCallback(() => {
@@ -80,7 +122,17 @@ export function Timeline() {
     const media = useEditorStore
       .getState()
       .mediaLibrary.find((m) => m.id === clip.mediaId);
-    return media || { name: 'Unknown', type: 'video' as const, duration: 30 };
+    return media || { name: 'Unknown', type: 'video' as const, duration: 30, url: '' };
+  };
+
+  // Check if a position would cause overlap (for visual feedback)
+  const checkOverlapAt = (track: TimelineTrack, startTime: number, duration: number, excludeClipId: string): boolean => {
+    const endTime = startTime + duration;
+    return track.clips.some((clip) => {
+      if (clip.id === excludeClipId) return false;
+      const clipEnd = clip.startTime + clip.duration;
+      return (startTime < clipEnd) && (endTime > clip.startTime);
+    });
   };
 
   // Handle timeline click (scrubbing)
@@ -88,7 +140,8 @@ export function Timeline() {
     if (activeTool === 'split') return;
     const rect = trackContainerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const x = e.clientX - rect.left + (trackContainerRef.current?.scrollLeft || 0);
+    const scroll = trackContainerRef.current?.scrollLeft || 0;
+    const x = e.clientX - rect.left + scroll;
     const time = x / zoomLevel;
     seek(Math.max(0, time));
   };
@@ -101,10 +154,14 @@ export function Timeline() {
   // Handle clip drag start
   const handleClipDragStart = (e: React.MouseEvent, clip: TimelineClip) => {
     if (e.button !== 0) return;
-    // Check if clicking on resize handle
+    const track = tracks.find(t => t.id === clip.trackId);
+    if (track?.locked) return;
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const relX = e.clientX - rect.left;
-    if (relX < 5) {
+
+    // Check if clicking on resize handle
+    if (relX < 6) {
       setResizeState({
         clipId: clip.id,
         edge: 'left',
@@ -117,7 +174,7 @@ export function Timeline() {
       e.stopPropagation();
       return;
     }
-    if (relX > rect.width - 5) {
+    if (relX > rect.width - 6) {
       setResizeState({
         clipId: clip.id,
         edge: 'right',
@@ -141,12 +198,13 @@ export function Timeline() {
       startX: e.clientX,
       originalStartTime: clip.startTime,
       trackId: clip.trackId,
+      trackType: track?.type || 'video',
     });
     selectClip(clip.id);
     e.stopPropagation();
   };
 
-  // Mouse move handler
+  // Mouse move handler - improved with better drag logic
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (dragState) {
@@ -155,8 +213,9 @@ export function Timeline() {
         let newTime = Math.max(0, dragState.originalStartTime + dt);
 
         // Snap to nearby clip edges
-        const snapThreshold = 10 / zoomLevel;
+        const snapThreshold = SNAP_THRESHOLD_PX / zoomLevel;
         let snapped = false;
+
         for (const track of tracks) {
           for (const clip of track.clips) {
             if (clip.id === dragState.clipId) continue;
@@ -172,22 +231,20 @@ export function Timeline() {
                 break;
               }
             }
-            const rightEdge = newTime + clip.duration;
-            for (const edge of edges) {
-              if (Math.abs(rightEdge - edge) < snapThreshold) {
-                newTime = edge - clip.duration;
-                snapped = true;
-                setSnapLine(edge * zoomLevel);
-                break;
-              }
-            }
             if (snapped) break;
           }
           if (snapped) break;
         }
-        if (!snapped) setSnapLine(null);
 
-        moveClip(dragState.clipId, newTime);
+        if (!snapped) {
+          setSnapLine(null);
+        }
+
+        // Update drag preview
+        setDragPreview(newTime, dragState.trackId);
+
+        // Move the clip with overlap protection
+        moveClip(dragState.clipId, newTime, dragState.trackId);
       }
 
       if (resizeState) {
@@ -229,6 +286,7 @@ export function Timeline() {
       if (dragState) {
         setDragState(null);
         setSnapLine(null);
+        setDragPreview(0, null);
         useEditorStore.getState().saveSnapshot();
       }
       if (resizeState) {
@@ -243,7 +301,7 @@ export function Timeline() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState, resizeState, zoomLevel, tracks, moveClip, updateClip]);
+  }, [dragState, resizeState, zoomLevel, tracks, moveClip, updateClip, setDragPreview]);
 
   // Handle drop from media panel
   const handleDrop = (e: React.DragEvent, trackId: string) => {
@@ -259,7 +317,7 @@ export function Timeline() {
     const startTime = Math.max(0, x / zoomLevel);
 
     const newClip: TimelineClip = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: generateId(),
       mediaId,
       trackId,
       startTime,
@@ -269,9 +327,11 @@ export function Timeline() {
       transform: { x: 0, y: 0, scale: 100, rotation: 0 },
       opacity: 1,
       speed: 1,
+      effects: [],
     };
 
     useEditorStore.getState().addClip(newClip);
+    setHoveredTrackId(null);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -280,23 +340,52 @@ export function Timeline() {
   };
 
   // Generate ruler markers
-  const generateRulerMarkers = () => {
-    const markers = [];
-    const interval = zoomLevel > 150 ? 1 : zoomLevel > 80 ? 5 : 10;
-    const maxTime = Math.max(totalDuration + 10, 60);
-    for (let t = 0; t <= maxTime; t += interval) {
-      markers.push(t);
+  const generateRulerMarkers = useMemo(() => {
+    const markers: number[] = [];
+    if (zoomLevel > 200) {
+      // 0.5 second intervals
+      for (let t = 0; t <= totalDuration + 30; t += 0.5) {
+        markers.push(t);
+      }
+    } else if (zoomLevel > 150) {
+      // 1 second intervals
+      for (let t = 0; t <= totalDuration + 30; t += 1) {
+        markers.push(t);
+      }
+    } else if (zoomLevel > 80) {
+      // 5 second intervals
+      for (let t = 0; t <= totalDuration + 30; t += 5) {
+        markers.push(t);
+      }
+    } else {
+      // 10 second intervals
+      for (let t = 0; t <= totalDuration + 30; t += 10) {
+        markers.push(t);
+      }
     }
     return markers;
-  };
+  }, [zoomLevel, totalDuration]);
 
-  const rulerMarkers = generateRulerMarkers();
+  const rulerMarkers = generateRulerMarkers;
 
   // Colors for clip types
-  const clipColors: Record<string, { bg: string; border: string; text: string }> = {
-    video: { bg: 'bg-blue-600/70', border: 'border-blue-500', text: 'text-blue-100' },
-    audio: { bg: 'bg-emerald-600/70', border: 'border-emerald-500', text: 'text-emerald-100' },
-    image: { bg: 'bg-amber-600/70', border: 'border-amber-500', text: 'text-amber-100' },
+  const clipColors: Record<string, { bg: string; border: string; text: string; hoverBorder: string }> = {
+    video: { bg: 'bg-blue-600/70', border: 'border-blue-500/50', text: 'text-blue-100', hoverBorder: 'hover:border-blue-400' },
+    audio: { bg: 'bg-emerald-600/70', border: 'border-emerald-500/50', text: 'text-emerald-100', hoverBorder: 'hover:border-emerald-400' },
+    image: { bg: 'bg-amber-600/70', border: 'border-amber-500/50', text: 'text-amber-100', hoverBorder: 'hover:border-amber-400' },
+  };
+
+  // Determine track index from mouse position (for drag to track functionality)
+  const getTrackFromMouseY = (clientY: number): TimelineTrack | null => {
+    const trackContainer = trackContainerRef.current;
+    if (!trackContainer) return null;
+    const rect = trackContainer.getBoundingClientRect();
+    const relY = clientY - rect.top + trackContainer.scrollTop - 28; // 28 is ruler height
+    const trackIndex = Math.floor(relY / TRACK_HEIGHT);
+    if (trackIndex >= 0 && trackIndex < tracks.length) {
+      return tracks[trackIndex];
+    }
+    return null;
   };
 
   return (
@@ -360,7 +449,7 @@ export function Timeline() {
             {tracks.map((track) => (
               <div
                 key={track.id}
-                className={`h-[${TRACK_HEIGHT}px] flex items-center px-2 border-b border-[#3e3e3e] ${
+                className={`flex items-center px-2 border-b border-[#3e3e3e] ${
                   selectedTrackId === track.id ? 'bg-[#3e3e3e]' : ''
                 }`}
                 style={{ height: TRACK_HEIGHT }}
@@ -446,19 +535,15 @@ export function Timeline() {
             ref={trackContainerRef}
             className="flex-1 overflow-auto relative"
             onClick={handleTimelineClick}
-            onDoubleClick={(e) => {
-              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              const x = e.clientX - rect.left + (trackContainerRef.current?.scrollLeft || 0);
-              const time = x / zoomLevel;
-              // Find clip under cursor and split
-              for (const track of tracks) {
-                for (const clip of track.clips) {
-                  if (time >= clip.startTime && time <= clip.startTime + clip.duration) {
-                    splitClip(clip.id, time);
-                    return;
-                  }
-                }
+            onDragOver={(e) => {
+              handleDragOver(e);
+              const track = getTrackFromMouseY(e.clientY);
+              if (track) {
+                setHoveredTrackId(track.id);
               }
+            }}
+            onDrop={(e) => {
+              setHoveredTrackId(null);
             }}
           >
             <div
@@ -481,11 +566,20 @@ export function Timeline() {
               {tracks.map((track) => (
                 <div
                   key={track.id}
-                  className="relative border-b border-[#3e3e3e]"
+                  className={`relative border-b border-[#3e3e3e] transition-colors ${
+                    hoveredTrackId === track.id ? 'bg-[#3e3e3e]/30' : ''
+                  }`}
                   style={{ height: TRACK_HEIGHT }}
                   onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, track.id)}
+                  onDrop={(e) => {
+                    const mediaId = e.dataTransfer.getData('application/procut-media');
+                    if (mediaId) {
+                      handleDrop(e, track.id);
+                    }
+                  }}
                   onClick={(e) => { e.stopPropagation(); selectTrack(track.id); }}
+                  onDragEnter={() => setHoveredTrackId(track.id)}
+                  onDragLeave={() => setHoveredTrackId(null)}
                 >
                   {/* Track background pattern */}
                   <div className="absolute inset-0 opacity-5">
@@ -508,15 +602,24 @@ export function Timeline() {
                     const media = getMediaInfo(clip);
                     const colors = clipColors[media.type] || clipColors.video;
                     const isSelected = selectedClipId === clip.id;
-                    const width = Math.max(clip.duration * zoomLevel, 10);
+                    const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
                     const left = clip.startTime * zoomLevel;
+                    const isDragging = draggingClipId === clip.id;
+
+                    // Generate frame thumbnails for video clips
+                    const frames = media.type === 'video' ? generateFrames(clip.id, clip.duration) : [];
+                    const frameCount = frames.length;
+                    const frameWidth = width / frameCount;
+
+                    // Generate waveform for audio clips
+                    const waveform = media.type === 'audio' ? generateWaveform(clip.id, width) : [];
 
                     return (
                       <div
                         key={clip.id}
-                        className={`absolute top-1 h-[${TRACK_HEIGHT - 8}px] rounded overflow-hidden cursor-pointer group select-none ${colors.bg} border ${colors.border} ${
+                        className={`absolute top-1 rounded overflow-hidden cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hoverBorder} transition-all duration-75 ${
                           isSelected ? 'ring-2 ring-white shadow-lg z-10' : 'hover:brightness-110'
-                        } ${track.locked ? 'opacity-50' : ''}`}
+                        } ${track.locked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
                         style={{
                           left: `${left}px`,
                           width: `${width}px`,
@@ -528,37 +631,63 @@ export function Timeline() {
                           selectClip(clip.id);
                         }}
                       >
+                        {/* Video frame thumbnails overlay */}
+                        {media.type === 'video' && frameCount > 0 && (
+                          <div className="absolute inset-0 flex overflow-hidden pointer-events-none">
+                            {frames.map((frameIntensity, fi) => (
+                              <div
+                                key={fi}
+                                className="h-full border-r border-white/5"
+                                style={{
+                                  width: `${frameWidth}px`,
+                                  backgroundColor: `rgba(59, 130, 246, ${0.1 + frameIntensity * 0.3})`,
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Audio waveform overlay */}
+                        {media.type === 'audio' && (
+                          <div className="absolute inset-x-0 bottom-0 flex items-end justify-center h-full px-1 pointer-events-none gap-px">
+                            {waveform.map((peak, i) => (
+                              <div
+                                key={i}
+                                className="flex-1 bg-white/40 rounded-full mx-px"
+                                style={{
+                                  height: `${Math.max(5, peak * 100)}%`,
+                                  minHeight: '2px',
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
+
                         {/* Resize handles */}
                         {!track.locked && (
                           <>
-                            <div className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/30 z-20" />
-                            <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize hover:bg-white/30 z-20" />
+                            <div className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40 z-20" />
+                            <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize hover:bg-white/40 z-20" />
                           </>
                         )}
 
                         {/* Clip content */}
-                        <div className="h-full flex flex-col px-1.5 py-0.5 overflow-hidden">
+                        <div className="relative h-full flex flex-col px-1.5 py-0.5 overflow-hidden z-10">
                           {/* Clip header */}
                           <div className="flex items-center gap-1 min-w-0">
                             {media.type === 'video' && <Film className="w-2.5 h-2.5 shrink-0 opacity-70" />}
                             {media.type === 'audio' && <Music className="w-2.5 h-2.5 shrink-0 opacity-70" />}
-                            {media.type === 'image' && (
-                              <svg className="w-2.5 h-2.5 shrink-0 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2" />
-                                <circle cx="8.5" cy="8.5" r="1.5" />
-                                <path d="M21 15l-5-5L5 21" />
-                              </svg>
-                            )}
+                            {media.type === 'image' && <Image className="w-2.5 h-2.5 shrink-0 opacity-70" />}
                             <span className={`text-[9px] font-medium truncate ${colors.text}`}>
                               {media.name}
                             </span>
                           </div>
 
-                          {/* Progress bar */}
+                          {/* Progress bar for video/audio */}
                           {media.type !== 'image' && (
-                            <div className="mt-auto h-2 bg-black/20 rounded-full overflow-hidden">
+                            <div className="mt-auto h-1.5 bg-black/20 rounded-full overflow-hidden">
                               <div
-                                className="h-full bg-white/30 rounded-full"
+                                className="h-full bg-white/30 rounded-full transition-all duration-150"
                                 style={{
                                   width: `${Math.min(100, ((currentTime - clip.startTime + clip.trimStart) / (media.duration - clip.trimStart - clip.trimEnd)) * 100)}%`,
                                   opacity:
@@ -591,25 +720,26 @@ export function Timeline() {
                           </button>
                         )}
 
-                        {/* Audio waveform visualization */}
-                        {media.type === 'audio' && (
-                          <div className="absolute inset-0 flex items-end pb-1 px-1 pointer-events-none opacity-40">
-                            {Array.from({ length: Math.floor(width / 4) }).map((_, i) => (
-                              <div
-                                key={i}
-                                className="flex-1 bg-white/40 mx-px"
-                                style={{
-                                  height: `${20 + Math.sin(i * 0.5) * 20 + Math.random() * 15}%`,
-                                }}
-                              />
-                            ))}
-                          </div>
+                        {/* Overlap warning indicator */}
+                        {checkOverlapAt(track, clip.startTime, clip.duration, clip.id) && (
+                          <div className="absolute top-0 left-0 w-full h-1 bg-red-500/80 animate-pulse" title="Overlap detected" />
                         )}
                       </div>
                     );
                   })}
                 </div>
               ))}
+
+              {/* Drop preview indicator */}
+              {hoveredTrackId && (
+                <div
+                  className="absolute left-0 right-0 border-2 border-amber-500/30 border-dashed pointer-events-none z-40"
+                  style={{
+                    top: `${tracks.findIndex(t => t.id === hoveredTrackId) * TRACK_HEIGHT}px`,
+                    height: TRACK_HEIGHT,
+                  }}
+                />
+              )}
 
               {/* Snap line */}
               {snapLine !== null && (
@@ -633,4 +763,8 @@ export function Timeline() {
       </div>
     </div>
   );
+}
+
+function generateId() {
+  return Math.random().toString(36).substr(2, 9);
 }

@@ -8,10 +8,13 @@ import {
   Maximize2,
   Settings2,
   Film,
+  SkipBack10,
+  SkipForward10,
+  RotateCcw,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { formatTime } from '@/utils/time';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 
 export function PreviewCanvas() {
   const {
@@ -35,12 +38,13 @@ export function PreviewCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const lastTimeRef = useRef<number>(0);
 
-  // Playback loop
+  // Playback loop - improved with delta time
   useEffect(() => {
     if (!isPlaying) return;
-    let lastTime = performance.now();
     let animId: number;
+    let lastTime = performance.now();
 
     const loop = (now: number) => {
       const dt = (now - lastTime) / 1000;
@@ -57,10 +61,10 @@ export function PreviewCanvas() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, currentTime, totalDuration, playbackSpeed]);
+  }, [isPlaying, currentTime, totalDuration, playbackSpeed, seek]);
 
-  // Render canvas
-  useEffect(() => {
+  // Render canvas with frame preview
+  const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -68,6 +72,7 @@ export function PreviewCanvas() {
 
     // Find the topmost visible clip at current time
     let activeClip = null;
+    let activeTrack = null;
     for (let i = tracks.length - 1; i >= 0; i--) {
       const track = tracks[i];
       if (track.hidden || track.type !== 'video') continue;
@@ -77,6 +82,7 @@ export function PreviewCanvas() {
           currentTime < clip.startTime + clip.duration
         ) {
           activeClip = clip;
+          activeTrack = track;
           break;
         }
       }
@@ -87,7 +93,7 @@ export function PreviewCanvas() {
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw background pattern
+    // Draw background pattern (checkerboard)
     ctx.fillStyle = '#1a1a1a';
     for (let x = 0; x < canvas.width; x += 20) {
       for (let y = 0; y < canvas.height; y += 20) {
@@ -98,7 +104,6 @@ export function PreviewCanvas() {
     }
 
     if (activeClip) {
-      // Draw clip preview based on type
       const mediaItem = useEditorStore
         .getState()
         .mediaLibrary.find((m) => m.id === activeClip!.mediaId);
@@ -108,13 +113,10 @@ export function PreviewCanvas() {
           (currentTime - activeClip.startTime + activeClip.trimStart) /
           (mediaItem.duration - activeClip.trimStart - activeClip.trimEnd);
 
-        // Draw colored preview block
-        const colors: Record<string, string> = {
-          video: '#3b82f6',
-          audio: '#10b981',
-          image: '#f59e0b',
-        };
-        const color = colors[mediaItem.type] || '#6b7280';
+        // Draw media specific backgrounds
+        const baseColor = mediaItem.type === 'video' ? '#3b82f6' : mediaItem.type === 'audio' ? '#10b981' : '#f59e0b';
+        const bgColor = mediaItem.type === 'video' ? '#1e3a5f' : mediaItem.type === 'audio' ? '#1a4a3e' : '#4a3b1a';
+        const color = mediaItem.type === 'video' ? '#60a5fa' : mediaItem.type === 'audio' ? '#34d399' : '#fbbf24';
 
         // Apply transform
         ctx.save();
@@ -129,11 +131,33 @@ export function PreviewCanvas() {
         // Draw the content
         const w = canvas.width * 0.8;
         const h = canvas.height * 0.8;
-        ctx.fillStyle = color + '30';
+        ctx.fillStyle = bgColor;
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.fillRect(-w / 2, -h / 2, w, h);
         ctx.strokeRect(-w / 2, -h / 2, w, h);
+
+        // Draw content type specific visuals
+        if (mediaItem.type === 'video') {
+          // Simulate video frame with animated bars
+          const frameIndex = Math.floor(progress * 10) % 10;
+          for (let i = 0; i < 5; i++) {
+            const barHeight = 20 + (Math.sin((frameIndex + i) * 0.8) * 0.5 + 0.5) * 40;
+            ctx.fillStyle = `rgba(96, 165, 250, ${0.3 + (i * 0.1)})`;
+            ctx.fillRect(-w / 2 + (i * w / 5) + 5, -h / 2 + (h - barHeight) / 2, w / 5 - 10, barHeight);
+          }
+        } else if (mediaItem.type === 'audio') {
+          // Simulate audio waveform
+          for (let i = 0; i < 50; i++) {
+            const amplitude = 5 + Math.sin(i * 0.3 + progress * 10) * 15 + 5;
+            ctx.fillStyle = `rgba(52, 211, 153, 0.5)`;
+            ctx.fillRect(-w / 2 + (i * w / 50), (h / 2) - amplitude, w / 50 - 1, amplitude * 2);
+          }
+        } else if (mediaItem.type === 'image') {
+          // Simulate image with a frame preview
+          ctx.fillStyle = 'rgba(251, 191, 36, 0.2)';
+          ctx.fillRect(-w / 2 + 20, -h / 2 + 20, w - 40, h - 40);
+        }
 
         // Draw gradient overlay
         const gradient = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
@@ -155,12 +179,12 @@ export function PreviewCanvas() {
 
         ctx.font = '10px system-ui, sans-serif';
         ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillText(`${Math.round(progress * 100)}%`, 0, 32);
+        ctx.fillText(`${Math.round(Math.min(progress, 1) * 100)}%`, 0, 32);
 
         ctx.restore();
       }
     } else {
-      // No active clip - show empty state
+      // No active clip - show empty state with instructions
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.font = '14px system-ui, sans-serif';
       ctx.textAlign = 'center';
@@ -180,6 +204,10 @@ export function PreviewCanvas() {
     ctx.textBaseline = 'middle';
     ctx.fillText(formatTime(currentTime), canvas.width - 12, 19);
   }, [currentTime, tracks, selectedClipId]);
+
+  useEffect(() => {
+    renderCanvas();
+  }, [renderCanvas]);
 
   const handleCanvasClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
     // Find topmost clip at current time
@@ -205,6 +233,18 @@ export function PreviewCanvas() {
 
   const handleTimelineSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     seek(Number(e.target.value));
+  };
+
+  const handleSkipBackward = () => {
+    seek(Math.max(0, currentTime - 10));
+  };
+
+  const handleSkipForward = () => {
+    seek(Math.min(totalDuration, currentTime + 10));
+  };
+
+  const handleRestart = () => {
+    seek(0);
   };
 
   const speedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -264,21 +304,30 @@ export function PreviewCanvas() {
           )}
         </button>
 
-        {/* Skip buttons */}
-        <button
-          onClick={() => seek(Math.max(0, currentTime - 1))}
-          className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
-          title="Skip Back 1s"
-        >
-          <SkipBack className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => seek(Math.min(totalDuration, currentTime + 1))}
-          className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
-          title="Skip Forward 1s"
-        >
-          <SkipForward className="w-4 h-4" />
-        </button>
+        {/* Skip controls */}
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={handleRestart}
+            className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
+            title="Restart"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleSkipBackward}
+            className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
+            title="Skip Back 10s"
+          >
+            <SkipBack className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleSkipForward}
+            className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
+            title="Skip Forward 10s"
+          >
+            <SkipForward className="w-4 h-4" />
+          </button>
+        </div>
 
         {/* Timecode */}
         <div className="flex items-center gap-1 text-xs font-mono">

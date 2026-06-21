@@ -9,6 +9,10 @@ export interface MediaItem {
   url: string;
   size?: number;
   createdAt: number;
+  // Metadata for preview
+  waveform?: number[];
+  thumbnails?: string[];
+  frameRate?: number;
 }
 
 // Transform for clips
@@ -17,6 +21,12 @@ export interface ClipTransform {
   y: number;
   scale: number;
   rotation: number;
+}
+
+// Waveform data for timeline visualization
+export interface WaveformData {
+  peaks: number[];
+  length: number;
 }
 
 // Timeline Clip
@@ -31,6 +41,10 @@ export interface TimelineClip {
   transform: ClipTransform;
   opacity: number;      // 0-1
   speed: number;        // playback speed multiplier
+  // Effects
+  effects: string[];
+  // For drag preview
+  isPreview?: boolean;
 }
 
 // Timeline Track
@@ -48,12 +62,12 @@ export interface TimelineTrack {
 export interface EditorState {
   // Media Library
   mediaLibrary: MediaItem[];
-  
+
   // Timeline
   tracks: TimelineTrack[];
   selectedClipId: string | null;
   selectedTrackId: string | null;
-  
+
   // Playback
   currentTime: number;
   isPlaying: boolean;
@@ -61,26 +75,31 @@ export interface EditorState {
   playbackSpeed: number;
   isMuted: boolean;
   volume: number;
-  
+
   // Timeline Zoom & Scroll
   zoomLevel: number;     // pixels per second
   scrollLeft: number;
-  
+
   // Tools
   activeTool: 'select' | 'split' | 'hand' | 'zoom';
-  
+
   // UI State
   showExportModal: boolean;
   showSettingsModal: boolean;
   activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects';
   activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio';
-  
+
   // Clipboard
   clipboardClip: TimelineClip | null;
-  
+
   // History for undo/redo
   history: EditorSnapshot[];
   historyIndex: number;
+
+  // Drag/Drop state
+  draggingClipId: string | null;
+  dragPreviewTime: number;
+  dragPreviewTrackId: string | null;
 }
 
 export interface EditorSnapshot {
@@ -99,3 +118,20 @@ export type PropertiesTab = 'transform' | 'color' | 'speed' | 'audio';
 
 // Time formatting utility type
 export type TimeFormat = 'HH:MM:SS' | 'MM:SS' | 'frames';
+
+// Transition definitions
+export interface Transition {
+  id: string;
+  name: string;
+  type: 'dissolve' | 'wipe' | 'zoom' | 'slide' | 'custom';
+  duration: number;
+  params: Record<string, unknown>;
+}
+
+// Effect definitions
+export interface Effect {
+  id: string;
+  name: string;
+  type: 'color' | 'filter' | 'transform' | 'audio';
+  params: Record<string, unknown>;
+}
