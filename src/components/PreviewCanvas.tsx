@@ -8,8 +8,6 @@ import {
   Maximize2,
   Settings2,
   Film,
-  SkipBack10,
-  SkipForward10,
   RotateCcw,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
