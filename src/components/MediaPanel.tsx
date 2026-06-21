@@ -10,15 +10,50 @@ import {
   Waves,
   Folder,
   Sun,
+  Droplets,
+  Zap,
+  Play,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef } from 'react';
 import type { MediaTab, MediaType } from '@/types';
 
+const TRANSITIONS = [
+  { name: 'Fade', color: 'from-amber-500/20 to-transparent', preview: 'Fade in/out between clips' },
+  { name: 'Cross Dissolve', color: 'from-purple-500/20 to-transparent', preview: 'Smooth blend transition' },
+  { name: 'Wipe Left', color: 'from-blue-500/20 to-transparent', preview: 'Horizontal wipe to left' },
+  { name: 'Wipe Right', color: 'from-blue-500/20 to-transparent', preview: 'Horizontal wipe to right' },
+  { name: 'Zoom In', color: 'from-cyan-500/20 to-transparent', preview: 'Zoom into next clip' },
+  { name: 'Zoom Out', color: 'from-cyan-500/20 to-transparent', preview: 'Zoom out from clip' },
+  { name: 'Slide Up', color: 'from-emerald-500/20 to-transparent', preview: 'Slide up transition' },
+  { name: 'Slide Down', color: 'from-emerald-500/20 to-transparent', preview: 'Slide down transition' },
+];
+
+const EFFECTS = [
+  { name: 'Brightness', icon: Sun, color: 'text-amber-400', value: 100 },
+  { name: 'Contrast', icon: Droplets, color: 'text-cyan-400', value: 100 },
+  { name: 'Saturation', icon: Waves, color: 'text-purple-400', value: 100 },
+  { name: 'Blur', icon: Droplets, color: 'text-blue-400', value: 0 },
+  { name: 'Sharpen', icon: Zap, color: 'text-yellow-400', value: 0 },
+  { name: 'Vignette', icon: Sun, color: 'text-rose-400', value: 0 },
+  { name: 'Color Grading', icon: Sparkles, color: 'text-emerald-400', value: 0 },
+  { name: 'Chroma Key', icon: Waves, color: 'text-green-400', value: 0 },
+];
+
+const AUDIO_PRESETS = [
+  { name: 'Ambient 1', duration: '3:24', bpm: 90 },
+  { name: 'Epic Music', duration: '2:45', bpm: 120 },
+  { name: 'Lo-Fi Beat', duration: '4:12', bpm: 85 },
+  { name: 'Nature Sounds', duration: '5:30', bpm: 0 },
+  { name: 'Upbeat Track', duration: '3:08', bpm: 140 },
+  { name: 'Dramatic Score', duration: '2:55', bpm: 100 },
+];
+
 export function MediaPanel() {
   const { mediaLibrary, activeMediaTab, setActiveMediaTab } = useEditorStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
@@ -179,13 +214,36 @@ export function MediaPanel() {
                       key={media.id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, media.id)}
-                      className={`${getMediaColor(media.type)} border rounded p-2 cursor-grab hover:brightness-110 transition-all group`}
+                      onMouseEnter={() => setHoveredItem(media.id)}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className={`${getMediaColor(media.type)} border rounded p-2 cursor-grab hover:brightness-110 transition-all group relative`}
                     >
-                      <div className="flex items-center justify-center h-12 mb-1.5">
+                      {/* Media preview thumbnail */}
+                      <div className="flex items-center justify-center h-12 mb-1.5 relative">
                         {getMediaIcon(media.type)}
+                        {media.type === 'video' && (
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="w-6 h-6 bg-black/50 rounded-full flex items-center justify-center">
+                              <Play className="w-3 h-3 text-white ml-0.5" fill="white" />
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <p className="text-[10px] text-white truncate">{media.name}</p>
                       <p className="text-[9px] text-[#a0a0a0]">{formatDuration(media.duration)}</p>
+
+                      {/* Quick preview tooltip */}
+                      {hoveredItem === media.id && media.type === 'video' && (
+                        <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded p-1.5 text-[9px] text-[#a0a0a0] z-50 shadow-lg">
+                          <div className="flex items-center gap-1 mb-1">
+                            <Film className="w-2.5 h-2.5 text-blue-400" />
+                            <span>Video Preview</span>
+                          </div>
+                          <div className="h-1 bg-[#3e3e3e] rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500/50 w-1/3 rounded-full" />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -196,6 +254,8 @@ export function MediaPanel() {
                       key={media.id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, media.id)}
+                      onMouseEnter={() => setHoveredItem(media.id)}
+                      onMouseLeave={() => setHoveredItem(null)}
                       className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] cursor-grab border-b border-[#3e3e3e] transition-colors group"
                     >
                       {getMediaIcon(media.type)}
@@ -205,6 +265,11 @@ export function MediaPanel() {
                           {formatDuration(media.duration)} · {formatSize(media.size)}
                         </p>
                       </div>
+                      {media.type === 'video' && (
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Play className="w-3 h-3 text-[#a0a0a0]" />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -215,19 +280,41 @@ export function MediaPanel() {
 
         {activeMediaTab === 'transitions' && (
           <div className="flex-1 overflow-y-auto p-2">
-            <p className="text-xs text-[#a0a0a0] mb-3">Drag transitions to timeline</p>
-            {['Fade', 'Cross Dissolve', 'Wipe Left', 'Wipe Right', 'Zoom In', 'Zoom Out', 'Slide Up', 'Slide Down'].map((name) => (
+            <p className="text-xs text-[#a0a0a0] mb-3">Drag transitions between clips on timeline</p>
+            {TRANSITIONS.map((transition) => (
               <div
-                key={name}
+                key={transition.name}
                 draggable
                 onDragStart={(e) => {
-                  e.dataTransfer.setData('application/procut-transition', name);
+                  e.dataTransfer.setData('application/procut-transition', transition.name);
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
-                className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors"
+                onMouseEnter={() => setHoveredItem(transition.name)}
+                onMouseLeave={() => setHoveredItem(null)}
+                className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group relative"
               >
-                <Sparkles className="w-4 h-4 text-purple-400" />
-                <span className="text-xs text-white">{name}</span>
+                {/* Transition preview thumbnail */}
+                <div className={`w-8 h-8 rounded bg-gradient-to-r ${transition.color} flex items-center justify-center border border-[#3e3e3e]`}>
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-xs text-white block">{transition.name}</span>
+                  <span className="text-[9px] text-[#a0a0a0]">{transition.preview}</span>
+                </div>
+
+                {/* Preview tooltip */}
+                {hoveredItem === transition.name && (
+                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded p-2 text-[9px] text-[#a0a0a0] z-50 shadow-lg">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                      <span>Transition Preview</span>
+                    </div>
+                    <div className="h-1 bg-[#3e3e3e] rounded-full overflow-hidden">
+                      <div className="h-full bg-purple-500/50 w-1/2 rounded-full" />
+                    </div>
+                    <p className="mt-1 text-[8px]">{transition.preview}</p>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -236,17 +323,48 @@ export function MediaPanel() {
         {activeMediaTab === 'audio' && (
           <div className="flex-1 overflow-y-auto p-2">
             <p className="text-xs text-[#a0a0a0] mb-3">Audio Library</p>
-            {['Ambient 1', 'Epic Music', 'Lo-Fi Beat', 'Nature Sounds', 'Upbeat Track', 'Dramatic Score'].map((name) => (
+            {AUDIO_PRESETS.map((audio) => (
               <div
-                key={name}
+                key={audio.name}
                 draggable
-                className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors"
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/procut-audio', audio.name);
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
+                onMouseEnter={() => setHoveredItem(audio.name)}
+                onMouseLeave={() => setHoveredItem(null)}
+                className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group"
               >
-                <Music className="w-4 h-4 text-emerald-400" />
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs text-white truncate block">{name}</span>
-                  <span className="text-[9px] text-[#a0a0a0]">Audio Track</span>
+                <div className="w-8 h-8 rounded bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                  <Music className="w-4 h-4 text-emerald-400" />
                 </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-xs text-white truncate block">{audio.name}</span>
+                  <span className="text-[9px] text-[#a0a0a0]">
+                    {audio.duration}{audio.bpm > 0 ? ` · ${audio.bpm} BPM` : ''}
+                  </span>
+                </div>
+
+                {/* Audio waveform preview */}
+                {hoveredItem === audio.name && (
+                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded p-2 text-[9px] text-[#a0a0a0] z-50 shadow-lg">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Music className="w-2.5 h-2.5 text-emerald-400" />
+                      <span>Audio Preview</span>
+                    </div>
+                    <div className="flex items-end gap-px h-6">
+                      {Array.from({ length: 20 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="flex-1 bg-emerald-500/40 rounded-full"
+                          style={{
+                            height: `${20 + Math.sin(i * 0.5) * 15 + Math.random() * 25}%`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -255,24 +373,47 @@ export function MediaPanel() {
         {activeMediaTab === 'effects' && (
           <div className="flex-1 overflow-y-auto p-2">
             <p className="text-xs text-[#a0a0a0] mb-3">Video Effects</p>
-            {[
-              { name: 'Brightness', icon: Sun },
-              { name: 'Contrast', icon: Sparkles },
-              { name: 'Saturation', icon: Waves },
-              { name: 'Blur', icon: Waves },
-              { name: 'Sharpen', icon: Sparkles },
-              { name: 'Vignette', icon: Sun },
-              { name: 'Color Grading', icon: Sparkles },
-              { name: 'Chroma Key', icon: Waves },
-            ].map(({ name, icon: Icon }) => (
-              <div
-                key={name}
-                className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-pointer border-b border-[#3e3e3e] transition-colors"
-              >
-                <Icon className="w-4 h-4 text-cyan-400" />
-                <span className="text-xs text-white">{name}</span>
-              </div>
-            ))}
+            {EFFECTS.map((effect) => {
+              const Icon = effect.icon;
+              return (
+                <div
+                  key={effect.name}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/procut-effect', effect.name);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  onMouseEnter={() => setHoveredItem(effect.name)}
+                  onMouseLeave={() => setHoveredItem(null)}
+                  className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group relative"
+                >
+                  <div className={`w-8 h-8 rounded bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center`}>
+                    <Icon className={`w-4 h-4 ${effect.color}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs text-white block">{effect.name}</span>
+                    <span className="text-[9px] text-[#a0a0a0]">
+                      {effect.value === 0 ? 'Click to apply' : `Default: ${effect.value}%`}
+                    </span>
+                  </div>
+
+                  {/* Effect preview tooltip */}
+                  {hoveredItem === effect.name && (
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded p-2 text-[9px] text-[#a0a0a0] z-50 shadow-lg">
+                      <div className="flex items-center gap-1 mb-1">
+                        <Icon className={`w-2.5 h-2.5 ${effect.color}`} />
+                        <span>Effect Preview</span>
+                      </div>
+                      <div className="h-1 bg-[#3e3e3e] rounded-full overflow-hidden">
+                        <div className={`h-full ${effect.color.replace('text-', 'bg-')}/50 rounded-full`}
+                          style={{ width: `${effect.value}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
