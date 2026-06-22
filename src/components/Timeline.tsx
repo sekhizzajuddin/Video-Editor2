@@ -1324,6 +1324,7 @@ export function Timeline() {
                         }}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (e.ctrlKey || e.metaKey) return;
                           selectClip(clip.id);
                         }}
                       >
