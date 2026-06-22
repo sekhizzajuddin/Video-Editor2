@@ -255,6 +255,10 @@ export function Timeline() {
     trackIdx: number;
   } | null>(null);
 
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const [scrubMouseX, setScrubMouseX] = useState<number>(0);
+
   // ── Scroll sync ─────────────────────────────────────────────────────────
 
   const handleScroll = useCallback(() => {
@@ -351,11 +355,21 @@ export function Timeline() {
     [activeTool, zoomLevel, seek],
   );
 
-  const handleRulerClick = useCallback(
+  const handleRulerMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      setIsScrubbing(true);
+
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left + scrollLeft;
-      seek(Math.max(0, x / zoomLevel));
+      const time = Math.max(0, x / zoomLevel);
+      
+      setScrubTime(time);
+      setScrubMouseX(e.clientX);
+      seek(time);
+
+      e.preventDefault();
+      e.stopPropagation();
     },
     [scrollLeft, zoomLevel, seek],
   );

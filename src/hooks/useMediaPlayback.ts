@@ -48,6 +48,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
   const lastRealTimeRef = useRef<number>(performance.now());
   const wasPlayingRef = useRef<boolean>(isPlaying);
 
+  // Queue to hold pending seek requests for video elements during scrubbing/seeking
+  const pendingSeeksRef = useRef<Map<string, number>>(new Map());
+
   // Trigger a custom event on window so PreviewCanvas can redraw immediately on async frame seek
   const triggerRedraw = useCallback(() => {
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
@@ -120,8 +123,20 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         el.src = media.url;
         el.style.display = 'none';
 
-        // Add seeked and timeupdate handlers to trigger canvas redraws
-        el.addEventListener('seeked', triggerRedraw);
+        // Seeked handler that checks for subsequent pending seeks before triggering redraw
+        const handleSeeked = () => {
+          const pendingTime = pendingSeeksRef.current.get(clipId);
+          if (pendingTime !== undefined) {
+            pendingSeeksRef.current.delete(clipId);
+            el.currentTime = pendingTime;
+          } else {
+            triggerRedraw();
+          }
+        };
+
+        (el as any)._handleSeeked = handleSeeked;
+
+        el.addEventListener('seeked', handleSeeked);
         el.addEventListener('timeupdate', triggerRedraw);
         el.addEventListener('canplay', triggerRedraw);
 
@@ -143,14 +158,18 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       if (!neededClips.has(clipId)) {
         entry.el.pause();
         if (entry.type === 'video') {
-          entry.el.removeEventListener('seeked', triggerRedraw);
-          entry.el.removeEventListener('timeupdate', triggerRedraw);
-          entry.el.removeEventListener('canplay', triggerRedraw);
+          const el = entry.el as any;
+          if (el._handleSeeked) {
+            el.removeEventListener('seeked', el._handleSeeked);
+          }
+          el.removeEventListener('timeupdate', triggerRedraw);
+          el.removeEventListener('canplay', triggerRedraw);
         }
         entry.el.src = '';
         entry.el.remove();
         pool.delete(clipId);
         videoMap.delete(clipId);
+        pendingSeeksRef.current.delete(clipId);
       }
     }
   }, [tracks, mediaLibrary, triggerRedraw]);
@@ -206,7 +225,11 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         const drift = Math.abs(currentMediaTime - mediaTime);
 
         if (forceSeek || drift > 0.35) {
-          entry.el.currentTime = mediaTime;
+          if (entry.el.seeking) {
+            pendingSeeksRef.current.set(clipId, mediaTime);
+          } else {
+            entry.el.currentTime = mediaTime;
+          }
         }
 
         // Play if paused
@@ -233,11 +256,19 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
 
     for (const clip of clips) {
       const entry = pool.get(clip.clipId);
-      if (!entry) continue;
+      if (!entry || entry.type !== 'video') continue;
 
+      const el = entry.el as HTMLVideoElement;
       const mediaTime = currentTime - clip.clipStart + clip.trimStart;
-      if (Math.abs(entry.el.currentTime - mediaTime) > 0.03) {
-        entry.el.currentTime = mediaTime;
+
+      if (el.seeking) {
+        // Coalesce seeks: store the latest target time to seek to once the current seek finishes
+        pendingSeeksRef.current.set(clip.clipId, mediaTime);
+      } else {
+        const drift = Math.abs(el.currentTime - mediaTime);
+        if (drift > 0.03) {
+          el.currentTime = mediaTime;
+        }
       }
     }
   }, [currentTime, isPlaying, activeClips]);
@@ -249,15 +280,19 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       for (const [, entry] of pool) {
         entry.el.pause();
         if (entry.type === 'video') {
-          entry.el.removeEventListener('seeked', triggerRedraw);
-          entry.el.removeEventListener('timeupdate', triggerRedraw);
-          entry.el.removeEventListener('canplay', triggerRedraw);
+          const el = entry.el as any;
+          if (el._handleSeeked) {
+            el.removeEventListener('seeked', el._handleSeeked);
+          }
+          el.removeEventListener('timeupdate', triggerRedraw);
+          el.removeEventListener('canplay', triggerRedraw);
         }
         entry.el.src = '';
         entry.el.remove();
       }
       pool.clear();
       videoMapRef.current.clear();
+      pendingSeeksRef.current.clear();
     };
   }, [triggerRedraw]);
 
