@@ -770,6 +770,7 @@ export function Timeline() {
     computeSnap,
     getTrackFromMouseY,
     getMediaSafe,
+    activeTool,
   ]);
 
   // ── Drop from media panel ───────────────────────────────────────────────
