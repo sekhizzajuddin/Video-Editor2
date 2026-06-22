@@ -10,73 +10,6 @@ import type {
   EditorSnapshot,
 } from '@/types';
 
-// Demo media items
-const DEMO_MEDIA: MediaItem[] = [
-  {
-    id: 'demo-video-1',
-    name: 'Beach Sunrise.mp4',
-    type: 'video',
-    duration: 15,
-    url: '',
-    size: 24580000,
-    createdAt: Date.now() - 86400000,
-  },
-  {
-    id: 'demo-video-2',
-    name: 'City Drone.mp4',
-    type: 'video',
-    duration: 12,
-    url: '',
-    size: 18920000,
-    createdAt: Date.now() - 72000000,
-  },
-  {
-    id: 'demo-video-3',
-    name: 'Forest Walk.mp4',
-    type: 'video',
-    duration: 20,
-    url: '',
-    size: 32100000,
-    createdAt: Date.now() - 60000000,
-  },
-  {
-    id: 'demo-audio-1',
-    name: 'Ambient Music.mp3',
-    type: 'audio',
-    duration: 45,
-    url: '',
-    size: 5400000,
-    createdAt: Date.now() - 90000000,
-  },
-  {
-    id: 'demo-audio-2',
-    name: 'Voiceover.mp3',
-    type: 'audio',
-    duration: 18,
-    url: '',
-    size: 2100000,
-    createdAt: Date.now() - 48000000,
-  },
-  {
-    id: 'demo-image-1',
-    name: 'Title Card.png',
-    type: 'image',
-    duration: 5,
-    url: '',
-    size: 1200000,
-    createdAt: Date.now() - 36000000,
-  },
-  {
-    id: 'demo-image-2',
-    name: 'Logo.png',
-    type: 'image',
-    duration: 3,
-    url: '',
-    size: 450000,
-    createdAt: Date.now() - 24000000,
-  },
-];
-
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 // Create empty tracks
@@ -93,15 +26,6 @@ const createEmptyTracks = (): TimelineTrack[] => [
   {
     id: 'v2',
     name: 'V2',
-    type: 'video',
-    clips: [],
-    locked: false,
-    muted: false,
-    hidden: false,
-  },
-  {
-    id: 'v3',
-    name: 'V3',
     type: 'video',
     clips: [],
     locked: false,
@@ -153,136 +77,43 @@ function findNonOverlappingPosition(
   let startTime = Math.max(0, desiredStart);
   const endTime = startTime + duration;
 
-  // Check if the position is already clear
   if (!checkOverlap(clips, startTime, duration, excludeClipId)) {
     return startTime;
   }
 
-  // Try to find an empty slot after the desired position
   let bestStart = -1;
   const sortedClips = [...clips].sort((a, b) => a.startTime - b.startTime);
 
-  // Try after each clip
-  let lastEnd = 0;
   for (const clip of sortedClips) {
     if (clip.id === excludeClipId) continue;
     const clipEnd = clip.startTime + clip.duration;
     if (clip.startTime >= endTime || clipEnd <= startTime) {
-      // No overlap with this clip
       continue;
     }
-    // Try placing after this clip
     const tryStart = clipEnd;
     if (!checkOverlap(clips, tryStart, duration, excludeClipId)) {
       if (bestStart === -1 || tryStart < bestStart) {
         bestStart = tryStart;
       }
     }
-    lastEnd = Math.max(lastEnd, clipEnd);
   }
 
-  // If no slot found, place at the end
   if (bestStart === -1) {
+    const lastEnd = sortedClips.reduce((max, c) => {
+      if (c.id === excludeClipId) return max;
+      return Math.max(max, c.startTime + c.duration);
+    }, 0);
     bestStart = lastEnd;
   }
 
   return bestStart;
 }
 
-// Create demo clips
-const createDemoClips = (): { tracks: TimelineTrack[]; totalDuration: number } => {
-  const tracks = createEmptyTracks();
-
-  // Add clips to V1
-  tracks[0].clips = [
-    {
-      id: generateId(),
-      mediaId: 'demo-video-1',
-      trackId: 'v1',
-      startTime: 0,
-      duration: 8,
-      trimStart: 0,
-      trimEnd: 7,
-      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-      opacity: 1,
-      speed: 1,
-      effects: [],
-    },
-    {
-      id: generateId(),
-      mediaId: 'demo-video-2',
-      trackId: 'v1',
-      startTime: 8,
-      duration: 6,
-      trimStart: 0,
-      trimEnd: 6,
-      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-      opacity: 1,
-      speed: 1,
-      effects: [],
-    },
-  ];
-
-  // Add image clip to V2
-  tracks[1].clips = [
-    {
-      id: generateId(),
-      mediaId: 'demo-image-1',
-      trackId: 'v2',
-      startTime: 3,
-      duration: 5,
-      trimStart: 0,
-      trimEnd: 0,
-      transform: { x: 0, y: 0, scale: 80, rotation: 0 },
-      opacity: 0.85,
-      speed: 1,
-      effects: [],
-    },
-  ];
-
-  // Add audio clips to A1
-  tracks[3].clips = [
-    {
-      id: generateId(),
-      mediaId: 'demo-audio-1',
-      trackId: 'a1',
-      startTime: 0,
-      duration: 20,
-      trimStart: 0,
-      trimEnd: 25,
-      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-      opacity: 1,
-      speed: 1,
-      effects: [],
-    },
-  ];
-
-  // Add audio clips to A2
-  tracks[4].clips = [
-    {
-      id: generateId(),
-      mediaId: 'demo-audio-2',
-      trackId: 'a2',
-      startTime: 10,
-      duration: 8,
-      trimStart: 0,
-      trimEnd: 10,
-      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-      opacity: 1,
-      speed: 1,
-      effects: [],
-    },
-  ];
-
-  const totalDuration = 25;
-
-  return { tracks, totalDuration };
-};
-
 interface EditorActions {
   // Media Library
   addMedia: (item: MediaItem) => void;
   removeMedia: (id: string) => void;
+  updateMediaMetadata: (id: string, updates: Partial<MediaItem>) => void;
 
   // Timeline Operations
   addClip: (clip: TimelineClip) => void;
@@ -341,13 +172,15 @@ interface EditorActions {
   setDraggingClipId: (id: string | null) => void;
   setDragPreview: (time: number, trackId: string | null) => void;
 
-  // Demo
-  loadDemoProject: () => void;
+  // Project
   resetProject: () => void;
+
+  // Computed: recalculate total duration from all clips
+  recalcTotalDuration: () => void;
 }
 
 const initialState: EditorState = {
-  mediaLibrary: DEMO_MEDIA,
+  mediaLibrary: [],
   tracks: createEmptyTracks(),
   selectedClipId: null,
   selectedTrackId: null,
@@ -383,19 +216,38 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot();
   },
   removeMedia: (id) => {
+    // Also remove any clips referencing this media
     set((state) => ({
       mediaLibrary: state.mediaLibrary.filter((m) => m.id !== id),
+      tracks: state.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.filter((c) => c.mediaId !== id),
+      })),
     }));
+    // Revoke the object URL to free memory
+    const media = get().mediaLibrary.find((m) => m.id === id);
+    if (media?.url) {
+      try { URL.revokeObjectURL(media.url); } catch { /* ignore */ }
+    }
+    if (media?.thumbnail) {
+      try { URL.revokeObjectURL(media.thumbnail); } catch { /* ignore */ }
+    }
+    get().recalcTotalDuration();
     get().saveSnapshot();
+  },
+  updateMediaMetadata: (id, updates) => {
+    set((state) => ({
+      mediaLibrary: state.mediaLibrary.map((m) =>
+        m.id === id ? { ...m, ...updates } : m
+      ),
+    }));
   },
 
   // Timeline Operations
   addClip: (clip) => {
     const state = get();
-    // Check for overlap before adding
     const targetTrack = state.tracks.find((t) => t.id === clip.trackId);
     if (targetTrack) {
-      // Adjust position to avoid overlap
       clip.startTime = findNonOverlappingPosition(
         targetTrack.clips,
         clip.startTime,
@@ -412,6 +264,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       });
       return { tracks: newTracks, selectedClipId: clip.id };
     });
+    get().recalcTotalDuration();
     get().saveSnapshot();
   },
 
@@ -426,6 +279,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
       };
     });
+    get().recalcTotalDuration();
     get().saveSnapshot();
   },
 
@@ -441,18 +295,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
   },
 
-  // Move clip with overlap protection
   moveClip: (clipId, newStartTime, newTrackId) => {
     const state = get();
     let foundClip: TimelineClip | undefined;
-    let sourceTrackId: string | undefined;
 
     for (const track of state.tracks) {
       const clip = track.clips.find((c) => c.id === clipId);
       if (clip) {
         foundClip = { ...clip, startTime: newStartTime };
         if (newTrackId) foundClip.trackId = newTrackId;
-        sourceTrackId = track.id;
         break;
       }
     }
@@ -460,8 +311,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (!foundClip) return false;
 
     const targetTrackId = newTrackId || foundClip.trackId;
-
-    // Check for overlap on the target track
     const targetTrack = state.tracks.find((t) => t.id === targetTrackId);
     if (targetTrack) {
       const otherClips = targetTrack.clips.filter((c) => c.id !== clipId);
@@ -492,11 +341,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks: finalTracks };
     });
 
+    get().recalcTotalDuration();
     get().saveSnapshot();
     return true;
   },
 
-  // Preview if a move is possible (returns info about the move)
   tryMoveClip: (clipId, newStartTime, newTrackId) => {
     const state = get();
     let foundClip: TimelineClip | undefined;
@@ -630,6 +479,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set((state) => ({
       tracks: state.tracks.filter((t) => t.id !== trackId),
     }));
+    get().recalcTotalDuration();
     get().saveSnapshot();
   },
 
@@ -729,18 +579,31 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setDraggingClipId: (id) => set({ draggingClipId: id }),
   setDragPreview: (time, trackId) => set({ dragPreviewTime: time, dragPreviewTrackId: trackId }),
 
-  // Demo
-  loadDemoProject: () => {
-    const { tracks, totalDuration } = createDemoClips();
-    set({ tracks, totalDuration, currentTime: 0, selectedClipId: null });
-  },
+  // Project
   resetProject: () => {
-    set({
-      tracks: createEmptyTracks(),
-      currentTime: 0,
-      isPlaying: false,
-      selectedClipId: null,
-      totalDuration: 30,
+    // Revoke all object URLs
+    const { mediaLibrary } = get();
+    mediaLibrary.forEach((m) => {
+      if (m.url) try { URL.revokeObjectURL(m.url); } catch { /* ignore */ }
+      if (m.thumbnail) try { URL.revokeObjectURL(m.thumbnail); } catch { /* ignore */ }
     });
+    set({
+      ...initialState,
+      tracks: createEmptyTracks(),
+    });
+  },
+
+  // Recalculate total duration from all clips
+  recalcTotalDuration: () => {
+    const { tracks } = get();
+    let maxEnd = 0;
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        const end = clip.startTime + clip.duration;
+        if (end > maxEnd) maxEnd = end;
+      }
+    }
+    // Add some padding, minimum 30s
+    set({ totalDuration: Math.max(30, maxEnd + 10) });
   },
 }));

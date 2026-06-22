@@ -6,13 +6,17 @@ export interface MediaItem {
   name: string;
   type: MediaType;
   duration: number; // in seconds
-  url: string;
+  url: string;      // object URL for the file blob
   size?: number;
   createdAt: number;
-  // Metadata for preview
-  waveform?: number[];
-  thumbnails?: string[];
-  frameRate?: number;
+  // Real metadata from probing
+  thumbnail?: string;       // object URL for a thumbnail frame (video/image)
+  waveformPeaks?: number[]; // normalized audio peaks [0..1]
+  frameRate?: number;       // detected or default fps (30)
+  width?: number;           // video/image width
+  height?: number;          // video/image height
+  // Frame strip for timeline rendering
+  frameStrip?: string[];    // array of data URLs for frame thumbnails
 }
 
 // Transform for clips

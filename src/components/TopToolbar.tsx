@@ -11,12 +11,12 @@ import {
   FolderOpen,
   Plus,
   ChevronDown,
-  Sun,
   RotateCcw,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { probeFile } from '@/utils/mediaProbe';
 
 export function TopToolbar() {
   const {
@@ -28,12 +28,12 @@ export function TopToolbar() {
     history,
     setShowExportModal,
     setShowSettingsModal,
-    loadDemoProject,
     resetProject,
     copyClip,
     pasteClip,
     cutClip,
     duplicateClip,
+    addMedia,
   } = useEditorStore();
 
   const [showFileMenu, setShowFileMenu] = useState(false);
@@ -51,29 +51,20 @@ export function TopToolbar() {
     { id: 'zoom', icon: ZoomIn, label: 'Zoom', shortcut: 'Z' },
   ];
 
-  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    Array.from(files).forEach((file) => {
-      const url = URL.createObjectURL(file);
-      const type = file.type.startsWith('video/')
-        ? 'video'
-        : file.type.startsWith('audio/')
-        ? 'audio'
-        : 'image';
-      const { addMedia } = useEditorStore.getState();
-      addMedia({
-        id: Math.random().toString(36).substr(2, 9),
-        name: file.name,
-        type: type as 'video' | 'audio' | 'image',
-        duration: type === 'image' ? 5 : 30,
-        url,
-        size: file.size,
-        createdAt: Date.now(),
-      });
-    });
+    for (const file of Array.from(files)) {
+      try {
+        const mediaItem = await probeFile(file);
+        addMedia(mediaItem);
+      } catch (err) {
+        console.error(`Failed to import ${file.name}:`, err);
+      }
+    }
     setShowFileMenu(false);
-  };
+    e.target.value = '';
+  }, [addMedia]);
 
   return (
     <div className="h-12 bg-[#1e1e1e] border-b border-[#3e3e3e] flex items-center px-3 select-none z-50">
@@ -245,15 +236,6 @@ export function TopToolbar() {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={loadDemoProject}
-          className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1.5 transition-colors"
-        >
-          <Sun className="w-3.5 h-3.5" /> Load Demo
-        </button>
-
-        <div className="w-px h-5 bg-[#3e3e3e]" />
-
         <button
           onClick={() => setShowExportModal(true)}
           className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded flex items-center gap-1.5 transition-colors font-medium"

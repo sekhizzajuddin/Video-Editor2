@@ -11,9 +11,47 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { formatTime } from '@/utils/time';
 import { useRef, useEffect, useState, useCallback } from 'react';
 
+// ---------------------------------------------------------------------------
+// Image cache – shared across renders, keyed by mediaId.
+// Each entry holds the HTMLImageElement (or a loading promise so we don't
+// kick off duplicate loads).
+// ---------------------------------------------------------------------------
+const imageCache = new Map<string, HTMLImageElement>();
+const imageLoading = new Set<string>();
+
+function getCachedImage(
+  mediaId: string,
+  url: string,
+  onLoad: () => void,
+): HTMLImageElement | null {
+  const cached = imageCache.get(mediaId);
+  if (cached && cached.complete && cached.naturalWidth > 0) return cached;
+
+  // Already loading – wait for the existing load to resolve
+  if (imageLoading.has(mediaId)) return null;
+
+  imageLoading.add(mediaId);
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    imageCache.set(mediaId, img);
+    imageLoading.delete(mediaId);
+    onLoad(); // trigger a re-render / re-draw
+  };
+  img.onerror = () => {
+    imageLoading.delete(mediaId);
+  };
+  img.src = url;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export function PreviewCanvas() {
   const {
     currentTime,
@@ -30,15 +68,24 @@ export function PreviewCanvas() {
     selectClip,
     playbackSpeed,
     setPlaybackSpeed,
+    mediaLibrary,
   } = useEditorStore();
+
+  // Real video elements for drawing frames
+  const videoElements = useMediaPlayback();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const lastTimeRef = useRef<number>(0);
 
-  // Playback loop - improved with delta time
+  // A counter we bump to force re-render when an image finishes loading
+  const [imageRevision, setImageRevision] = useState(0);
+  const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
+
+  // -------------------------------------------------------------------
+  // Playback loop – advance currentTime via rAF when playing
+  // -------------------------------------------------------------------
   useEffect(() => {
     if (!isPlaying) return;
     let animId: number;
@@ -61,155 +108,164 @@ export function PreviewCanvas() {
     return () => cancelAnimationFrame(animId);
   }, [isPlaying, currentTime, totalDuration, playbackSpeed, seek]);
 
-  // Render canvas with frame preview
+  // -------------------------------------------------------------------
+  // Canvas rendering – called whenever time, tracks, or images change
+  // -------------------------------------------------------------------
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Find the topmost visible clip at current time
-    let activeClip = null;
-    let activeTrack = null;
-    for (let i = tracks.length - 1; i >= 0; i--) {
-      const track = tracks[i];
-      if (track.hidden || track.type !== 'video') continue;
-      for (const clip of track.clips) {
-        if (
-          currentTime >= clip.startTime &&
-          currentTime < clip.startTime + clip.duration
-        ) {
-          activeClip = clip;
-          activeTrack = track;
-          break;
-        }
-      }
-      if (activeClip) break;
-    }
+    const W = canvas.width; // 854
+    const H = canvas.height; // 480
 
-    // Draw preview
+    // 1. Clear to dark background
     ctx.fillStyle = '#0a0a0a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, W, H);
 
-    // Draw background pattern (checkerboard)
-    ctx.fillStyle = '#1a1a1a';
-    for (let x = 0; x < canvas.width; x += 20) {
-      for (let y = 0; y < canvas.height; y += 20) {
-        if ((x / 20 + y / 20) % 2 === 0) {
-          ctx.fillRect(x, y, 20, 20);
+    // 2. Checkerboard for transparent areas
+    ctx.fillStyle = '#141414';
+    const gridSize = 16;
+    for (let x = 0; x < W; x += gridSize) {
+      for (let y = 0; y < H; y += gridSize) {
+        if (((x / gridSize) + (y / gridSize)) % 2 === 0) {
+          ctx.fillRect(x, y, gridSize, gridSize);
         }
       }
     }
 
-    if (activeClip) {
-      const mediaItem = useEditorStore
-        .getState()
-        .mediaLibrary.find((m) => m.id === activeClip!.mediaId);
+    // 3. Collect video tracks sorted bottom-to-top (V1 draws first)
+    const videoTracks = tracks
+      .filter((t) => t.type === 'video' && !t.hidden)
+      .sort((a, b) => {
+        // v1, v2, v3 … – parse the numeric suffix for ordering
+        const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+        return numA - numB; // lower number drawn first (bottom layer)
+      });
 
-      if (mediaItem) {
-        const progress =
-          (currentTime - activeClip.startTime + activeClip.trimStart) /
-          (mediaItem.duration - activeClip.trimStart - activeClip.trimEnd);
+    let anyClipDrawn = false;
 
-        // Draw media specific backgrounds
-        const baseColor = mediaItem.type === 'video' ? '#3b82f6' : mediaItem.type === 'audio' ? '#10b981' : '#f59e0b';
-        const bgColor = mediaItem.type === 'video' ? '#1e3a5f' : mediaItem.type === 'audio' ? '#1a4a3e' : '#4a3b1a';
-        const color = mediaItem.type === 'video' ? '#60a5fa' : mediaItem.type === 'audio' ? '#34d399' : '#fbbf24';
+    for (const track of videoTracks) {
+      // Find the clip active at currentTime on this track
+      const clip = track.clips.find(
+        (c) =>
+          currentTime >= c.startTime && currentTime < c.startTime + c.duration,
+      );
+      if (!clip) continue;
 
-        // Apply transform
-        ctx.save();
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
-        ctx.translate(cx, cy);
-        ctx.scale(activeClip.transform.scale / 100, activeClip.transform.scale / 100);
-        ctx.rotate((activeClip.transform.rotation * Math.PI) / 180);
-        ctx.translate(activeClip.transform.x, activeClip.transform.y);
-        ctx.globalAlpha = activeClip.opacity;
+      const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+      if (!mediaItem) continue;
 
-        // Draw the content
-        const w = canvas.width * 0.8;
-        const h = canvas.height * 0.8;
-        ctx.fillStyle = bgColor;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.fillRect(-w / 2, -h / 2, w, h);
-        ctx.strokeRect(-w / 2, -h / 2, w, h);
+      // Compute the media-local time for this clip
+      const _mediaTime = currentTime - clip.startTime + clip.trimStart;
 
-        // Draw content type specific visuals
-        if (mediaItem.type === 'video') {
-          // Simulate video frame with animated bars
-          const frameIndex = Math.floor(progress * 10) % 10;
-          for (let i = 0; i < 5; i++) {
-            const barHeight = 20 + (Math.sin((frameIndex + i) * 0.8) * 0.5 + 0.5) * 40;
-            ctx.fillStyle = `rgba(96, 165, 250, ${0.3 + (i * 0.1)})`;
-            ctx.fillRect(-w / 2 + (i * w / 5) + 5, -h / 2 + (h - barHeight) / 2, w / 5 - 10, barHeight);
-          }
-        } else if (mediaItem.type === 'audio') {
-          // Simulate audio waveform
-          for (let i = 0; i < 50; i++) {
-            const amplitude = 5 + Math.sin(i * 0.3 + progress * 10) * 15 + 5;
-            ctx.fillStyle = `rgba(52, 211, 153, 0.5)`;
-            ctx.fillRect(-w / 2 + (i * w / 50), (h / 2) - amplitude, w / 50 - 1, amplitude * 2);
-          }
-        } else if (mediaItem.type === 'image') {
-          // Simulate image with a frame preview
-          ctx.fillStyle = 'rgba(251, 191, 36, 0.2)';
-          ctx.fillRect(-w / 2 + 20, -h / 2 + 20, w - 40, h - 40);
+      // Set up transform
+      ctx.save();
+      ctx.globalAlpha = clip.opacity;
+
+      const cx = W / 2;
+      const cy = H / 2;
+      ctx.translate(cx + clip.transform.x, cy + clip.transform.y);
+      ctx.scale(clip.transform.scale / 100, clip.transform.scale / 100);
+      ctx.rotate((clip.transform.rotation * Math.PI) / 180);
+
+      // ---------------------------------------------------------------
+      // Draw the actual media content
+      // ---------------------------------------------------------------
+      if (mediaItem.type === 'video') {
+        const videoEl = videoElements.get(mediaItem.id);
+        if (videoEl && videoEl.readyState >= 2) {
+          // readyState >= HAVE_CURRENT_DATA
+          // Fit the video into the canvas while preserving aspect ratio
+          const vw = videoEl.videoWidth || W;
+          const vh = videoEl.videoHeight || H;
+          const scale = Math.min(W / vw, H / vh);
+          const dw = vw * scale;
+          const dh = vh * scale;
+          ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
+          anyClipDrawn = true;
+        } else {
+          // Video not ready yet – draw placeholder
+          drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'VIDEO', '#3b82f6');
+          anyClipDrawn = true;
         }
-
-        // Draw gradient overlay
-        const gradient = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
-        gradient.addColorStop(0, color + '40');
-        gradient.addColorStop(1, color + '10');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(-w / 2, -h / 2, w, h);
-
-        // Draw media icon and info
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.font = 'bold 18px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(mediaItem.type.toUpperCase(), 0, -10);
-
-        ctx.font = '11px system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText(mediaItem.name, 0, 15);
-
-        ctx.font = '10px system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillText(`${Math.round(Math.min(progress, 1) * 100)}%`, 0, 32);
-
-        ctx.restore();
+      } else if (mediaItem.type === 'image') {
+        const img = getCachedImage(mediaItem.id, mediaItem.url, requestRedraw);
+        if (img) {
+          const iw = img.naturalWidth || W;
+          const ih = img.naturalHeight || H;
+          const scale = Math.min(W / iw, H / ih);
+          const dw = iw * scale;
+          const dh = ih * scale;
+          ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+          anyClipDrawn = true;
+        } else {
+          // Image still loading – placeholder
+          drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'IMAGE', '#f59e0b');
+          anyClipDrawn = true;
+        }
       }
-    } else {
-      // No active clip - show empty state with instructions
+
+      ctx.restore();
+    }
+
+    // 4. Empty state
+    if (!anyClipDrawn) {
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.font = '14px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('No clip at current position', canvas.width / 2, canvas.height / 2 - 10);
+      ctx.fillText('No clip at current position', W / 2, H / 2 - 10);
       ctx.font = '11px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.2)';
-      ctx.fillText('Add clips to the timeline to preview', canvas.width / 2, canvas.height / 2 + 12);
+      ctx.fillText('Add clips to the timeline to preview', W / 2, H / 2 + 12);
     }
 
-    // Draw timecode overlay
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(canvas.width - 100, 8, 92, 22);
-    ctx.fillStyle = '#fbbf24';
+    // 5. Timecode overlay – top-right
+    ctx.globalAlpha = 1;
+    const tcText = formatTime(currentTime);
     ctx.font = 'bold 12px monospace';
+    const tcMetrics = ctx.measureText(tcText);
+    const tcPadX = 8;
+    const tcPadY = 4;
+    const tcW = tcMetrics.width + tcPadX * 2;
+    const tcH = 20;
+    const tcX = W - tcW - 8;
+    const tcY = 8;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.beginPath();
+    ctx.roundRect(tcX, tcY, tcW, tcH, 4);
+    ctx.fill();
+    ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    ctx.fillText(formatTime(currentTime), canvas.width - 12, 19);
-  }, [currentTime, tracks, selectedClipId]);
+    ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw]);
 
+  // Kick off render whenever dependencies change
   useEffect(() => {
     renderCanvas();
   }, [renderCanvas]);
 
+  // During playback, also schedule continuous redraws so video frames update
+  useEffect(() => {
+    if (!isPlaying) return;
+    let id: number;
+    const draw = () => {
+      renderCanvas();
+      id = requestAnimationFrame(draw);
+    };
+    id = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(id);
+  }, [isPlaying, renderCanvas]);
+
+  // -------------------------------------------------------------------
+  // Interaction handlers
+  // -------------------------------------------------------------------
   const handleCanvasClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Find topmost clip at current time
-    let topClip = null;
+    // Select the topmost clip at current time
     for (let i = tracks.length - 1; i >= 0; i--) {
       const track = tracks[i];
       if (track.hidden || track.type !== 'video') continue;
@@ -218,14 +274,10 @@ export function PreviewCanvas() {
           currentTime >= clip.startTime &&
           currentTime < clip.startTime + clip.duration
         ) {
-          topClip = clip;
-          break;
+          selectClip(clip.id);
+          return;
         }
       }
-      if (topClip) break;
-    }
-    if (topClip) {
-      selectClip(topClip.id);
     }
   };
 
@@ -233,26 +285,50 @@ export function PreviewCanvas() {
     seek(Number(e.target.value));
   };
 
-  const handleSkipBackward = () => {
-    seek(Math.max(0, currentTime - 10));
+  const handleSkipBackward = () => seek(Math.max(0, currentTime - 10));
+  const handleSkipForward = () => seek(Math.min(totalDuration, currentTime + 10));
+  const handleRestart = () => seek(0);
+
+  const handleToggleFullscreen = () => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
   };
 
-  const handleSkipForward = () => {
-    seek(Math.min(totalDuration, currentTime + 10));
-  };
-
-  const handleRestart = () => {
-    seek(0);
-  };
+  // Listen for fullscreen exit via Esc
+  useEffect(() => {
+    const handler = () => {
+      if (!document.fullscreenElement) setIsFullscreen(false);
+    };
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   const speedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 
+  // Close speed menu when clicking elsewhere
+  useEffect(() => {
+    if (!showSpeedMenu) return;
+    const close = () => setShowSpeedMenu(false);
+    window.addEventListener('click', close, { once: true });
+    return () => window.removeEventListener('click', close);
+  }, [showSpeedMenu]);
+
+  // -------------------------------------------------------------------
+  // JSX
+  // -------------------------------------------------------------------
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e]">
       {/* Canvas Container */}
       <div
         ref={containerRef}
-        className="flex-1 flex items-center justify-center p-4 bg-black relative"
+        className="flex-1 flex items-center justify-center p-4 bg-black relative overflow-hidden"
       >
         <canvas
           ref={canvasRef}
@@ -263,12 +339,12 @@ export function PreviewCanvas() {
           style={{ aspectRatio: '16/9' }}
         />
 
-        {/* Overlay controls */}
+        {/* Overlay: fullscreen + settings (top-left) */}
         <div className="absolute top-3 left-3 flex gap-2">
           <button
-            onClick={() => setIsFullscreen(!isFullscreen)}
+            onClick={handleToggleFullscreen}
             className="p-1.5 bg-black/50 hover:bg-black/70 rounded text-white/70 hover:text-white transition-colors"
-            title="Fullscreen"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
@@ -280,16 +356,16 @@ export function PreviewCanvas() {
           </button>
         </div>
 
-        {/* Overlay info */}
+        {/* Overlay: resolution info (bottom-right) */}
         <div className="absolute bottom-3 right-3 flex items-center gap-2 bg-black/50 rounded px-2 py-1">
           <Film className="w-3 h-3 text-[#a0a0a0]" />
-          <span className="text-[10px] text-[#a0a0a0]">854 x 480</span>
+          <span className="text-[10px] text-[#a0a0a0]">854 × 480</span>
         </div>
       </div>
 
       {/* Playback Controls */}
       <div className="h-14 bg-[#252525] border-t border-[#3e3e3e] flex items-center px-4 gap-3">
-        {/* Play/Pause */}
+        {/* Play / Pause */}
         <button
           onClick={togglePlayback}
           className="p-2 text-white hover:bg-[#3e3e3e] rounded-full transition-colors"
@@ -350,7 +426,10 @@ export function PreviewCanvas() {
         {/* Speed Control */}
         <div className="relative">
           <button
-            onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowSpeedMenu(!showSpeedMenu);
+            }}
             className="px-2 py-1 text-[11px] text-[#a0a0a0] hover:text-white bg-[#1e1e1e] rounded border border-[#3e3e3e] transition-colors"
           >
             {playbackSpeed}x
@@ -360,7 +439,11 @@ export function PreviewCanvas() {
               {speedOptions.map((s) => (
                 <button
                   key={s}
-                  onClick={() => { setPlaybackSpeed(s); setShowSpeedMenu(false); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPlaybackSpeed(s);
+                    setShowSpeedMenu(false);
+                  }}
                   className={`w-full px-3 py-1 text-xs text-left transition-colors ${
                     playbackSpeed === s
                       ? 'text-amber-400 bg-[#3e3e3e]'
@@ -398,4 +481,52 @@ export function PreviewCanvas() {
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Helper: draw a styled placeholder when the real media isn't ready yet
+// ---------------------------------------------------------------------------
+function drawMediaPlaceholder(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  name: string,
+  typeLabel: string,
+  accentColor: string,
+) {
+  const pw = W * 0.6;
+  const ph = H * 0.5;
+  const px = -pw / 2;
+  const py = -ph / 2;
+
+  // Background
+  ctx.fillStyle = accentColor + '18'; // very faint tint
+  ctx.beginPath();
+  ctx.roundRect(px, py, pw, ph, 8);
+  ctx.fill();
+
+  // Border
+  ctx.strokeStyle = accentColor + '60';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(px, py, pw, ph, 8);
+  ctx.stroke();
+
+  // Type label
+  ctx.fillStyle = accentColor;
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(typeLabel, 0, -8);
+
+  // File name
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '11px system-ui, sans-serif';
+  const truncated = name.length > 30 ? name.slice(0, 27) + '…' : name;
+  ctx.fillText(truncated, 0, 12);
+
+  // Loading dots
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.fillText('Loading…', 0, 28);
 }

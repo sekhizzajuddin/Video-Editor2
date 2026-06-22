@@ -1,9 +1,26 @@
-import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw } from 'lucide-react';
+import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { probeFile } from '@/utils/mediaProbe';
 
 export function SettingsModal() {
-  const { showSettingsModal, setShowSettingsModal, resetProject, loadDemoProject } = useEditorStore();
+  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia } = useEditorStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      try {
+        const mediaItem = await probeFile(file);
+        addMedia(mediaItem);
+      } catch (err) {
+        console.error(`Failed to import ${file.name}:`, err);
+      }
+    }
+    setShowSettingsModal(false);
+    e.target.value = '';
+  }, [addMedia, setShowSettingsModal]);
   const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance'>('general');
   const [autosave, setAutosave] = useState(true);
   const [showWaveforms, setShowWaveforms] = useState(true);
@@ -162,12 +179,20 @@ export function SettingsModal() {
                   <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Project Actions</h3>
                   <div className="space-y-2">
                     <button
-                      onClick={() => { loadDemoProject(); setShowSettingsModal(false); }}
+                      onClick={() => fileInputRef.current?.click()}
                       className="w-full px-3 py-2 bg-[#252525] border border-[#3e3e3e] rounded text-xs text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors flex items-center gap-2"
                     >
-                      <HardDrive className="w-3.5 h-3.5" />
-                      Load Demo Project
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Import Media Files
                     </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="video/*,audio/*,image/*"
+                      onChange={handleImport}
+                      className="hidden"
+                    />
                     <button
                       onClick={() => { resetProject(); setShowSettingsModal(false); }}
                       className="w-full px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-2"

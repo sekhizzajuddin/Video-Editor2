@@ -65,10 +65,14 @@ input[type="range"]::-moz-range-thumb {
   -webkit-user-select: none;
 }
 
-/* Canvas crisp rendering */
+/* Canvas rendering */
 canvas {
   image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
+}
+
+/* Video preview canvas — smooth for real video frames */
+canvas.preview-canvas {
+  image-rendering: auto;
 }
 
 /* Smooth transitions */
@@ -101,4 +105,63 @@ canvas {
 
 .tooltip:hover::after {
   opacity: 1;
+}
+
+/* Timeline clip frame strip */
+.clip-frame-strip {
+  display: flex;
+  overflow: hidden;
+  height: 100%;
+}
+
+.clip-frame-strip img {
+  height: 100%;
+  width: auto;
+  object-fit: cover;
+  flex-shrink: 0;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+/* Waveform bars in timeline clips */
+.clip-waveform {
+  display: flex;
+  align-items: center;
+  gap: 0.5px;
+  padding: 2px;
+  height: 100%;
+}
+
+.clip-waveform-bar {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 1px;
+  min-width: 1px;
+}
+
+/* Drag-drop overlay animation */
+@keyframes dropzone-pulse {
+  0%, 100% { border-color: rgba(245, 158, 11, 0.3); }
+  50% { border-color: rgba(245, 158, 11, 0.7); }
+}
+
+.drag-drop-zone-active {
+  animation: dropzone-pulse 1.5s ease-in-out infinite;
+}
+
+/* Import progress shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.import-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(245, 158, 11, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
 }
