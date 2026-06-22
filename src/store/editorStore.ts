@@ -348,7 +348,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
 
     get().recalcTotalDuration();
-    get().saveSnapshot();
     return true;
   },
 
