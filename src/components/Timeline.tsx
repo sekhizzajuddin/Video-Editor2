@@ -299,6 +299,9 @@ export function Timeline() {
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [scrubMouseX, setScrubMouseX] = useState<number>(0);
 
+  const [hoverCutClipId, setHoverCutClipId] = useState<string | null>(null);
+  const [hoverCutX, setHoverCutX] = useState<number | null>(null);
+
   // ── Scroll sync ─────────────────────────────────────────────────────────
 
   const handleScroll = useCallback(() => {
@@ -510,7 +513,8 @@ export function Timeline() {
 
       // Split tool
       if (activeTool === 'split') {
-        handleSplit(clip.id);
+        const clickTime = clip.startTime + relX / zoomLevel;
+        splitClip(clip.id, clickTime);
         return;
       }
 
@@ -526,7 +530,7 @@ export function Timeline() {
       selectClip(clip.id);
       e.stopPropagation();
     },
-    [tracks, activeTool, handleSplit, selectClip],
+    [tracks, activeTool, splitClip, zoomLevel, selectClip],
   );
 
   // ── Global mouse move / up for drag & resize ───────────────────────────
@@ -1098,6 +1102,19 @@ export function Timeline() {
                         } ${track.locked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
                         style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
                         onMouseDown={(e) => handleClipMouseDown(e, clip)}
+                        onMouseMove={(e) => {
+                          if (activeTool === 'split') {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setHoverCutX(e.clientX - rect.left);
+                            setHoverCutClipId(clip.id);
+                          }
+                        }}
+                        onMouseLeave={() => {
+                          if (activeTool === 'split') {
+                            setHoverCutX(null);
+                            setHoverCutClipId(null);
+                          }
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           selectClip(clip.id);
@@ -1182,6 +1199,18 @@ export function Timeline() {
                             {clip.duration.toFixed(1)}s
                           </div>
                         </div>
+
+                        {/* ── Razor preview cut line ────────────────── */}
+                        {activeTool === 'split' && hoverCutClipId === clip.id && hoverCutX !== null && (
+                          <div
+                            className="absolute top-0 bottom-0 w-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none shadow"
+                            style={{
+                              left: `${hoverCutX}px`,
+                              outline: '1px dashed white',
+                              outlineOffset: '-1.5px',
+                            }}
+                          />
+                        )}
 
                         {/* ── Split button ───────────────────────────── */}
                         {!track.locked && (

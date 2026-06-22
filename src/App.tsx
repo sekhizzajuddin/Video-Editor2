@@ -92,7 +92,36 @@ function App() {
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             copyClip();
+          } else {
+            e.preventDefault();
+            setActiveTool('split');
           }
+          break;
+        case 'k':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (selectedClipId) {
+              splitClip(selectedClipId, currentTime);
+            } else {
+              tracks.forEach((track) => {
+                track.clips.forEach((clip) => {
+                  if (currentTime > clip.startTime && currentTime < clip.startTime + clip.duration) {
+                    splitClip(clip.id, currentTime);
+                  }
+                });
+              });
+            }
+          }
+          break;
+        case 'arrowleft':
+          e.preventDefault();
+          const stepLeft = e.shiftKey ? 1.0 : (1 / 30);
+          useEditorStore.getState().seek(Math.max(0, currentTime - stepLeft));
+          break;
+        case 'arrowright':
+          e.preventDefault();
+          const stepRight = e.shiftKey ? 1.0 : (1 / 30);
+          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + stepRight));
           break;
         case 'x':
           if (e.ctrlKey || e.metaKey) {

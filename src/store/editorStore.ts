@@ -179,9 +179,10 @@ interface EditorActions {
   recalcTotalDuration: () => void;
 }
 
+const defaultTracks = createEmptyTracks();
 const initialState: EditorState = {
   mediaLibrary: [],
-  tracks: createEmptyTracks(),
+  tracks: defaultTracks,
   selectedClipId: null,
   selectedTrackId: null,
   currentTime: 0,
@@ -198,8 +199,13 @@ const initialState: EditorState = {
   activeMediaTab: 'project',
   activePropertiesTab: 'transform',
   clipboardClip: null,
-  history: [],
-  historyIndex: -1,
+  history: [
+    {
+      tracks: JSON.parse(JSON.stringify(defaultTracks)),
+      currentTime: 0,
+    },
+  ],
+  historyIndex: 0,
   draggingClipId: null,
   dragPreviewTime: 0,
   dragPreviewTrackId: null,
@@ -594,9 +600,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (m.url) try { URL.revokeObjectURL(m.url); } catch { /* ignore */ }
       if (m.thumbnail) try { URL.revokeObjectURL(m.thumbnail); } catch { /* ignore */ }
     });
+    const freshTracks = createEmptyTracks();
     set({
       ...initialState,
-      tracks: createEmptyTracks(),
+      tracks: freshTracks,
+      history: [
+        {
+          tracks: JSON.parse(JSON.stringify(freshTracks)),
+          currentTime: 0,
+        },
+      ],
+      historyIndex: 0,
     });
   },
 

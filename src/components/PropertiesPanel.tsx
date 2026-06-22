@@ -183,6 +183,10 @@ export function PropertiesPanel() {
                             transform: { ...selectedClip.transform, x: Number(e.target.value) },
                           })
                         }
+                        onBlur={() => useEditorStore.getState().saveSnapshot()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        }}
                         className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
@@ -196,6 +200,10 @@ export function PropertiesPanel() {
                             transform: { ...selectedClip.transform, y: Number(e.target.value) },
                           })
                         }
+                        onBlur={() => useEditorStore.getState().saveSnapshot()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        }}
                         className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
@@ -233,6 +241,7 @@ export function PropertiesPanel() {
                           },
                         })
                       }
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
@@ -272,6 +281,7 @@ export function PropertiesPanel() {
                           },
                         })
                       }
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
@@ -309,6 +319,7 @@ export function PropertiesPanel() {
                           opacity: Number(e.target.value),
                         })
                       }
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
@@ -357,6 +368,7 @@ export function PropertiesPanel() {
                   onChange={(e) =>
                     updateClip(selectedClip.id, { speed: Number(e.target.value) })
                   }
+                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                   className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                 />
                 <span className="text-[11px] text-white w-10 text-right">
@@ -383,6 +395,10 @@ export function PropertiesPanel() {
                         startTime: Number(e.target.value),
                       })
                     }
+                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    }}
                     className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                   />
                 </div>
@@ -402,6 +418,10 @@ export function PropertiesPanel() {
                         trimStart: Number(e.target.value),
                       })
                     }
+                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    }}
                     className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                   />
                 </div>
@@ -417,6 +437,10 @@ export function PropertiesPanel() {
                         trimEnd: Number(e.target.value),
                       })
                     }
+                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    }}
                     className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                   />
                 </div>
