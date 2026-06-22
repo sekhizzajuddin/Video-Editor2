@@ -241,7 +241,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         }
       } else {
         // Calculate the media time corresponding to currentTime
-        const mediaTime = (currentTime - clip.clipStart) * clip.speed + clip.trimStart;
+        const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+        const maxDuration = mediaItem ? mediaItem.duration : 10000;
+        const mediaTime = Math.max(0, Math.min(maxDuration, (currentTime - clip.clipStart) * clip.speed + clip.trimStart));
 
         // Update volume & mute state ONLY if changed to save CPU/stutter
         const isMutedTrack = clip.trackMuted || isMuted;
@@ -284,7 +286,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         entry.el.pause();
       }
     }
-  }, [isPlaying, currentTime, volume, isMuted, playbackSpeed, activeClips]);
+  }, [isPlaying, currentTime, volume, isMuted, playbackSpeed, activeClips, mediaLibrary]);
 
   // On seek (when not playing), update video elements for frame display
   useEffect(() => {
@@ -298,7 +300,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       if (!entry || entry.type !== 'video') continue;
 
       const el = entry.el as HTMLVideoElement;
-      const mediaTime = (currentTime - clip.clipStart) * clip.speed + clip.trimStart;
+      const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+      const maxDuration = mediaItem ? mediaItem.duration : 10000;
+      const mediaTime = Math.max(0, Math.min(maxDuration, (currentTime - clip.clipStart) * clip.speed + clip.trimStart));
 
       if (el.seeking) {
         // Coalesce seeks: store the latest target time to seek to once the current seek finishes
@@ -310,7 +314,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         }
       }
     }
-  }, [currentTime, isPlaying, activeClips]);
+  }, [currentTime, isPlaying, activeClips, mediaLibrary]);
 
   // Cleanup all on unmount
   useEffect(() => {
