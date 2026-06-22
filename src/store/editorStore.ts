@@ -435,7 +435,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Timeline View
   setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
   setScrollLeft: (scroll) => set({ scrollLeft: scroll }),
-  zoomIn: () => set((state) => ({ zoomLevel: Math.min(state.zoomLevel + 20, 300) })),
+  zoomIn: () => set((state) => ({ zoomLevel: Math.min(state.zoomLevel + 20, 400) })),
   zoomOut: () => set((state) => ({ zoomLevel: Math.max(state.zoomLevel - 20, 20) })),
 
   // Track Operations

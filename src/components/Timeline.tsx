@@ -659,7 +659,12 @@ export function Timeline() {
     let minorInterval = 0.1;
     let labelMedium = true;
 
-    if (zoomLevel >= 150) {
+    if (zoomLevel >= 250) {
+      majorInterval = 0.5;
+      mediumInterval = 0.1;
+      minorInterval = 0.02;
+      labelMedium = true;
+    } else if (zoomLevel >= 150) {
       majorInterval = 1.0;
       mediumInterval = 0.5;
       minorInterval = 0.1;
@@ -688,20 +693,20 @@ export function Timeline() {
 
     const maxTime = totalDuration + 30;
 
-    const minorDecis = Math.round(minorInterval * 10);
-    const mediumDecis = Math.round(mediumInterval * 10);
-    const majorDecis = Math.round(majorInterval * 10);
-    const maxDecis = Math.round(maxTime * 10);
+    const minorCentis = Math.round(minorInterval * 100);
+    const mediumCentis = Math.round(mediumInterval * 100);
+    const majorCentis = Math.round(majorInterval * 100);
+    const maxCentis = Math.round(maxTime * 100);
 
-    for (let d = 0; d <= maxDecis; d += minorDecis) {
-      const time = d / 10;
+    for (let c = 0; c <= maxCentis; c += minorCentis) {
+      const time = c / 100;
       let type: 'major' | 'medium' | 'minor' = 'minor';
       let label = '';
 
-      if (d % majorDecis === 0) {
+      if (c % majorCentis === 0) {
         type = 'major';
         label = formatCentisecondTime(time);
-      } else if (d % mediumDecis === 0) {
+      } else if (c % mediumCentis === 0) {
         type = 'medium';
         if (labelMedium) {
           label = formatCentisecondTime(time);
