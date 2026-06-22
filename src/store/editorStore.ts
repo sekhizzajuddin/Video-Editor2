@@ -120,6 +120,7 @@ interface EditorActions {
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string) => boolean;
+  moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[]) => void;
   tryMoveClip: (clipId: string, newStartTime: number, newTrackId?: string) => { canMove: boolean; newPosition: number };
   splitClip: (clipId: string, splitTime: number) => void;
   selectClip: (clipId: string | null) => void;
@@ -282,10 +283,32 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ? state.selectedClipIds
         : [clipId];
 
-      const newTracks = state.tracks.map((track) => ({
-        ...track,
-        clips: track.clips.filter((c) => !idsToRemove.includes(c.id)),
-      }));
+      const newTracks = state.tracks.map((track) => {
+        const remainingClips = track.clips.filter((c) => !idsToRemove.includes(c.id));
+        const deletedClips = track.clips.filter((c) => idsToRemove.includes(c.id));
+
+        if (state.activeTool === 'ripple' && deletedClips.length > 0) {
+          const sortedDeleted = [...deletedClips].sort((a, b) => a.startTime - b.startTime);
+          const shiftedClips = remainingClips.map((clip) => {
+            const deletedBefore = sortedDeleted.filter((d) => d.startTime < clip.startTime);
+            const totalShift = deletedBefore.reduce((sum, d) => sum + d.duration, 0);
+            return {
+              ...clip,
+              startTime: Math.max(0, clip.startTime - totalShift),
+            };
+          });
+
+          return {
+            ...track,
+            clips: shiftedClips,
+          };
+        }
+
+        return {
+          ...track,
+          clips: remainingClips,
+        };
+      });
 
       const newSelectedClipIds = state.selectedClipIds.filter((id) => !idsToRemove.includes(id));
       const newSelectedClipId =
@@ -363,6 +386,52 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
     get().recalcTotalDuration();
     return true;
+  },
+
+  moveClips: (updates) => {
+    set((state) => {
+      const newTracks = state.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
+      }));
+
+      const movingClipsMap = new Map<string, TimelineClip>();
+      for (const update of updates) {
+        for (const track of newTracks) {
+          const idx = track.clips.findIndex((c) => c.id === update.clipId);
+          if (idx !== -1) {
+            const [clip] = track.clips.splice(idx, 1);
+            movingClipsMap.set(update.clipId, clip);
+            break;
+          }
+        }
+      }
+
+      const sortedUpdates = [...updates].sort((a, b) => a.newStartTime - b.newStartTime);
+
+      for (const update of sortedUpdates) {
+        const clip = movingClipsMap.get(update.clipId);
+        if (!clip) continue;
+
+        const targetTrackId = update.newTrackId || clip.trackId;
+        const targetTrack = newTracks.find((t) => t.id === targetTrackId);
+
+        if (targetTrack) {
+          const adjustedStart = findNonOverlappingPosition(
+            targetTrack.clips,
+            update.newStartTime,
+            clip.duration,
+            clip.id
+          );
+          clip.startTime = adjustedStart;
+          clip.trackId = targetTrackId;
+          targetTrack.clips.push(clip);
+        }
+      }
+
+      return { tracks: newTracks };
+    });
+    get().recalcTotalDuration();
   },
 
   tryMoveClip: (clipId, newStartTime, newTrackId) => {

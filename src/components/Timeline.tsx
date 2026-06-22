@@ -247,6 +247,7 @@ export function Timeline() {
     seek,
     splitClip,
     moveClip,
+    moveClips,
     zoomIn,
     zoomOut,
     toggleTrackLock,
@@ -615,17 +616,28 @@ export function Timeline() {
       }
 
       // Normal drag (Select tool or default)
-      const isAlreadySelected = selectedClipIds.includes(clip.id);
-      let draggedClips = [];
+      let currentSelectedIds = selectedClipIds;
+      if (e.ctrlKey || e.metaKey) {
+        const isAlreadySel = selectedClipIds.includes(clip.id);
+        currentSelectedIds = isAlreadySel
+          ? selectedClipIds.filter((id) => id !== clip.id)
+          : [...selectedClipIds, clip.id];
+        selectClips(currentSelectedIds);
+      } else {
+        const isAlreadySelected = selectedClipIds.includes(clip.id);
+        if (!isAlreadySelected) {
+          selectClip(clip.id);
+          currentSelectedIds = [clip.id];
+        }
+      }
 
-      if (isAlreadySelected) {
-        draggedClips = selectedClipIds.map((id) => {
+      // Populate draggedClips from the final list of selected IDs (only if clicked clip is selected)
+      let draggedClips: { id: string; originalStartTime: number; trackId: string }[] = [];
+      if (currentSelectedIds.includes(clip.id)) {
+        draggedClips = currentSelectedIds.map((id) => {
           const c = tracks.flatMap((t) => t.clips).find((x) => x.id === id);
           return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
         });
-      } else {
-        selectClip(clip.id);
-        draggedClips = [{ id: clip.id, originalStartTime: clip.startTime, trackId: clip.trackId }];
       }
 
       setDragState({
@@ -660,7 +672,7 @@ export function Timeline() {
       }
 
       // ─ Clip drag ────────────────────────────────────────────────────
-      if (dragState) {
+      if (dragState && dragState.draggedClips && dragState.draggedClips.length > 0) {
         const dx = e.clientX - dragState.startX;
         const dt = dx / zoomLevel;
         let newTime = Math.max(0, dragState.originalStartTime + dt);
@@ -682,23 +694,41 @@ export function Timeline() {
         // Calculate final displacement of primary clip
         const finalDt = newTime - dragState.originalStartTime;
 
-        if (dragState.draggedClips && dragState.draggedClips.length > 1) {
+        if (dragState.draggedClips.length > 1) {
           // Clear single-clip drag preview
           setDragPreview(0, null);
 
-          // Move all selected clips horizontally
-          const sortedClips = [...dragState.draggedClips];
-          if (finalDt > 0) {
-            sortedClips.sort((a, b) => b.originalStartTime - a.originalStartTime);
-          } else {
-            sortedClips.sort((a, b) => a.originalStartTime - b.originalStartTime);
-          }
+          // Calculate track index delta
+          const sourceTrackIdx = tracks.findIndex((t) => t.id === dragState.trackId);
+          const targetTrackIdx = tracks.findIndex((t) => t.id === targetTrackId);
+          const trackDelta = targetTrackIdx - sourceTrackIdx;
 
-          sortedClips.forEach((c) => {
+          // Prepare updates for all dragged clips
+          const updates = dragState.draggedClips.map((c) => {
             const clipNewTime = Math.max(0, c.originalStartTime + finalDt);
-            moveClip(c.id, clipNewTime, c.trackId);
+            
+            // Find target track relative to this clip's original track
+            const clipTrackIdx = tracks.findIndex((t) => t.id === c.trackId);
+            const newTrackIdx = clipTrackIdx + trackDelta;
+            const originalTrack = tracks.find((t) => t.id === c.trackId);
+            const targetTrack = tracks[newTrackIdx];
+
+            // Only switch track if it's a valid track of the same type (video/audio)
+            const targetTrackIdForClip =
+              targetTrack && originalTrack && targetTrack.type === originalTrack.type
+                ? targetTrack.id
+                : c.trackId;
+
+            return {
+              clipId: c.id,
+              newStartTime: clipNewTime,
+              newTrackId: targetTrackIdForClip,
+            };
           });
-        } else {
+
+          // Call moveClips in a single transaction
+          moveClips(updates);
+        } else if (dragState.draggedClips.length === 1) {
           // Single clip drag (allows track switching)
           setDragPreview(newTime, targetTrackId);
           moveClip(dragState.clipId, newTime, targetTrackId);
@@ -881,6 +911,7 @@ export function Timeline() {
     zoomLevel,
     tracks,
     moveClip,
+    moveClips,
     updateClip,
     setDragPreview,
     computeSnap,
