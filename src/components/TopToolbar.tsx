@@ -14,6 +14,7 @@ import {
   RotateCcw,
   ArrowLeftRight,
   ArrowRightToLine,
+  ArrowLeftToLine,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
@@ -49,6 +50,7 @@ export function TopToolbar() {
   const tools: { id: EditorTool; icon: any; label: string; shortcut: string }[] = [
     { id: 'select', icon: MousePointer2, label: 'Select', shortcut: 'V' },
     { id: 'trackSelect', icon: ArrowRightToLine, label: 'Track Select Forward', shortcut: 'A' },
+    { id: 'trackSelectBackward', icon: ArrowLeftToLine, label: 'Track Select Backward', shortcut: 'Shift+A' },
     { id: 'ripple', icon: ArrowLeftRight, label: 'Ripple Edit', shortcut: 'B' },
     { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
     { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },

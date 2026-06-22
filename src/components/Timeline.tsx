@@ -569,6 +569,44 @@ export function Timeline() {
         return;
       }
 
+      // Track Select Backward Tool
+      if (activeTool === 'trackSelectBackward') {
+        const clickTime = clip.startTime + relX / zoomLevel;
+        let matchingIds: string[] = [];
+        if (e.shiftKey) {
+          if (track) {
+            matchingIds = track.clips
+              .filter((c) => c.startTime <= clickTime)
+              .map((c) => c.id);
+          }
+        } else {
+          matchingIds = tracks
+            .flatMap((t) => t.clips)
+            .filter((c) => c.startTime <= clickTime)
+            .map((c) => c.id);
+        }
+
+        selectClips(matchingIds);
+
+        const draggedClips = matchingIds.map((id) => {
+          const c = tracks.flatMap((t) => t.clips).find((x) => x.id === id);
+          return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
+        });
+
+        setDragState({
+          clipId: clip.id,
+          startX: e.clientX,
+          startY: e.clientY,
+          originalStartTime: clip.startTime,
+          trackId: clip.trackId,
+          trackType: track?.type || 'video',
+          draggedClips,
+        });
+
+        e.stopPropagation();
+        return;
+      }
+
       // Split tool
       if (activeTool === 'split') {
         const clickTime = clip.startTime + relX / zoomLevel;

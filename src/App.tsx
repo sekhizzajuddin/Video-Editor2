@@ -94,6 +94,8 @@ function App() {
           if (e.ctrlKey || e.metaKey) {
             const allClipIds = tracks.flatMap((t) => t.clips).map((c) => c.id);
             selectClips(allClipIds);
+          } else if (e.shiftKey) {
+            setActiveTool('trackSelectBackward');
           } else {
             setActiveTool('trackSelect');
           }
@@ -131,13 +133,37 @@ function App() {
           break;
         case 'arrowleft':
           e.preventDefault();
-          const stepLeft = e.shiftKey ? 1.0 : (1 / 30);
-          useEditorStore.getState().seek(Math.max(0, currentTime - stepLeft));
+          if (e.altKey) {
+            const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+            if (selectedClip) {
+              const refTime = selectedClip.startTime;
+              const matchingIds = tracks
+                .flatMap((t) => t.clips)
+                .filter((c) => c.startTime <= refTime)
+                .map((c) => c.id);
+              selectClips(matchingIds);
+            }
+          } else {
+            const stepLeft = e.shiftKey ? 1.0 : (1 / 30);
+            useEditorStore.getState().seek(Math.max(0, currentTime - stepLeft));
+          }
           break;
         case 'arrowright':
           e.preventDefault();
-          const stepRight = e.shiftKey ? 1.0 : (1 / 30);
-          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + stepRight));
+          if (e.altKey) {
+            const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+            if (selectedClip) {
+              const refTime = selectedClip.startTime;
+              const matchingIds = tracks
+                .flatMap((t) => t.clips)
+                .filter((c) => c.startTime >= refTime)
+                .map((c) => c.id);
+              selectClips(matchingIds);
+            }
+          } else {
+            const stepRight = e.shiftKey ? 1.0 : (1 / 30);
+            useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + stepRight));
+          }
           break;
         case 'x':
           if (e.ctrlKey || e.metaKey) {

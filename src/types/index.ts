@@ -88,7 +88,7 @@ export interface EditorState {
   scrollLeft: number;
 
   // Tools
-  activeTool: 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect';
+  activeTool: 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward';
 
   // UI State
   showExportModal: boolean;
@@ -115,7 +115,7 @@ export interface EditorSnapshot {
 }
 
 // Tool Types
-export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect';
+export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward';
 
 // Media Tab Types
 export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects';
