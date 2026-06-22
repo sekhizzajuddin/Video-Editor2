@@ -262,26 +262,63 @@ export function PreviewCanvas() {
           if (currentTime >= leftSec && currentTime < rightSec) {
             const t = (currentTime - leftSec) / duration;
             const type = trans.type;
+            const nameLower = trans.name.toLowerCase();
 
-            if (type === 'dissolve') {
+            if (nameLower.includes('dissolve')) {
+              // Cross Dissolve
               drawSingleClip(clipA, 1 - t);
               drawSingleClip(clipB, t);
+            } else if (nameLower.includes('fade')) {
+              // Dip to Black / Fade
+              if (t < 0.5) {
+                drawSingleClip(clipA, 1 - t * 2);
+              } else {
+                drawSingleClip(clipB, (t - 0.5) * 2);
+              }
             } else if (type === 'wipe') {
-              drawSingleClip(clipA, 1);
-              ctx.save();
-              ctx.beginPath();
-              ctx.rect(0, 0, W * t, H);
-              ctx.clip();
-              drawSingleClip(clipB, 1);
-              ctx.restore();
+              if (nameLower.includes('left')) {
+                // Wipe Right to Left
+                drawSingleClip(clipA, 1);
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(W * (1 - t), 0, W * t, H);
+                ctx.clip();
+                drawSingleClip(clipB, 1);
+                ctx.restore();
+              } else {
+                // Wipe Left to Right (Default/Right)
+                drawSingleClip(clipA, 1);
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, 0, W * t, H);
+                ctx.clip();
+                drawSingleClip(clipB, 1);
+                ctx.restore();
+              }
             } else if (type === 'slide') {
-              drawSingleClip(clipA, 1, { translateX: -W * t });
-              drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
+              if (nameLower.includes('up')) {
+                drawSingleClip(clipA, 1, { translateY: -H * t });
+                drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
+              } else if (nameLower.includes('down')) {
+                drawSingleClip(clipA, 1, { translateY: H * t });
+                drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
+              } else {
+                // Default Slide (Left to Right)
+                drawSingleClip(clipA, 1, { translateX: -W * t });
+                drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
+              }
             } else if (type === 'zoom') {
-              drawSingleClip(clipA, 1 - t);
-              drawSingleClip(clipB, t, { scale: t });
+              if (nameLower.includes('out')) {
+                // Zoom Out
+                drawSingleClip(clipB, 1);
+                drawSingleClip(clipA, 1 - t, { scale: 1 - t });
+              } else {
+                // Zoom In
+                drawSingleClip(clipA, 1 - t);
+                drawSingleClip(clipB, t, { scale: t });
+              }
             } else {
-              // Fallback dissolve
+              // Fallback
               drawSingleClip(clipA, 1 - t);
               drawSingleClip(clipB, t);
             }

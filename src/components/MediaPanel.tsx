@@ -21,6 +21,9 @@ import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback } from 'react';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
+import demoA from '../assets/transition_demo_a.webp';
+import demoB from '../assets/transition_demo_b.webp';
+import { useEffect } from 'react';
 
 const TRANSITIONS = [
   { name: 'Fade', color: 'from-amber-500/20 to-transparent', preview: 'Fade in/out between clips' },
@@ -467,28 +470,12 @@ export function MediaPanel() {
 
         {activeMediaTab === 'transitions' && (
           <div className="flex-1 overflow-y-auto p-2">
-            <p className="text-xs text-[#a0a0a0] mb-3">Drag transitions between clips on timeline</p>
-            {TRANSITIONS.map((transition) => (
-              <div
-                key={transition.name}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/procut-transition', transition.name);
-                  e.dataTransfer.effectAllowed = 'copy';
-                }}
-                onMouseEnter={() => setHoveredItem(transition.name)}
-                onMouseLeave={() => setHoveredItem(null)}
-                className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group relative"
-              >
-                <div className={`w-8 h-8 rounded bg-gradient-to-r ${transition.color} flex items-center justify-center border border-[#3e3e3e]`}>
-                  <Sparkles className="w-4 h-4 text-purple-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs text-white block">{transition.name}</span>
-                  <span className="text-[9px] text-[#a0a0a0]">{transition.preview}</span>
-                </div>
-              </div>
-            ))}
+            <p className="text-xs text-[#a0a0a0] mb-3">Drag transitions between clips on timeline (Hover to preview)</p>
+            <div className="grid grid-cols-2 gap-2">
+              {TRANSITIONS.map((transition) => (
+                <TransitionCard key={transition.name} transition={transition} />
+              ))}
+            </div>
           </div>
         )}
 
@@ -533,6 +520,178 @@ export function MediaPanel() {
         onChange={handleImport}
         className="hidden"
       />
+    </div>
+  );
+}
+
+interface TransitionCardProps {
+  transition: {
+    name: string;
+    color: string;
+    preview: string;
+  };
+}
+
+function TransitionCard({ transition }: TransitionCardProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isHovered, setIsHovered] = useState(false);
+  const animationRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const W = canvas.width;
+    const H = canvas.height;
+
+    // Preload transition demo images
+    const imgA = new window.Image();
+    imgA.src = demoA;
+    const imgB = new window.Image();
+    imgB.src = demoB;
+
+    let start: number | null = null;
+    const duration = 1500; // 1.5s loop duration
+
+    const draw = (t: number) => {
+      ctx.clearRect(0, 0, W, H);
+      const nameLower = transition.name.toLowerCase();
+
+      const drawImageCover = (img: HTMLImageElement, opacity: number, scaleMultiplier: number = 1, tx: number = 0, ty: number = 0) => {
+        if (!img.complete || img.naturalWidth === 0) {
+          ctx.fillStyle = img === imgA ? '#ef4444' : '#3b82f6';
+          ctx.globalAlpha = opacity;
+          ctx.fillRect(0, 0, W, H);
+          ctx.globalAlpha = 1.0;
+          return;
+        }
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.translate(W / 2 + tx, H / 2 + ty);
+        ctx.scale(scaleMultiplier, scaleMultiplier);
+
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+        const scale = Math.max(W / iw, H / ih);
+        const dw = iw * scale;
+        const dh = ih * scale;
+
+        ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+      };
+
+      if (nameLower.includes('dissolve')) {
+        drawImageCover(imgA, 1 - t);
+        drawImageCover(imgB, t);
+      } else if (nameLower.includes('fade')) {
+        if (t < 0.5) {
+          drawImageCover(imgA, 1 - t * 2);
+        } else {
+          drawImageCover(imgB, (t - 0.5) * 2);
+        }
+      } else if (nameLower.includes('wipe')) {
+        if (nameLower.includes('left')) {
+          drawImageCover(imgA, 1);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(W * (1 - t), 0, W * t, H);
+          ctx.clip();
+          drawImageCover(imgB, 1);
+          ctx.restore();
+        } else {
+          drawImageCover(imgA, 1);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, W * t, H);
+          ctx.clip();
+          drawImageCover(imgB, 1);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('slide')) {
+        if (nameLower.includes('up')) {
+          drawImageCover(imgA, 1, 1, 0, -H * t);
+          drawImageCover(imgB, 1, 1, 0, H * (1 - t));
+        } else if (nameLower.includes('down')) {
+          drawImageCover(imgA, 1, 1, 0, H * t);
+          drawImageCover(imgB, 1, 1, 0, -H * (1 - t));
+        } else {
+          drawImageCover(imgA, 1, 1, -W * t, 0);
+          drawImageCover(imgB, 1, 1, W * (1 - t), 0);
+        }
+      } else if (nameLower.includes('zoom')) {
+        if (nameLower.includes('out')) {
+          drawImageCover(imgB, 1);
+          drawImageCover(imgA, 1 - t, 1 - t);
+        } else {
+          drawImageCover(imgA, 1 - t);
+          drawImageCover(imgB, t, t);
+        }
+      } else {
+        drawImageCover(imgA, 1 - t);
+        drawImageCover(imgB, t);
+      }
+    };
+
+    const animate = (timestamp: number) => {
+      if (!start) start = timestamp;
+      const elapsed = timestamp - start;
+      const progress = (elapsed % duration) / duration;
+      draw(progress);
+      if (isHovered) {
+        animationRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    if (isHovered) {
+      animationRef.current = requestAnimationFrame(animate);
+    } else {
+      draw(0);
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    }
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isHovered]);
+
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('application/procut-transition', transition.name);
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="flex flex-col bg-[#1a1a1a] border border-[#3e3e3e] hover:border-purple-500 rounded overflow-hidden cursor-grab transition-all duration-150 relative group"
+    >
+      <div className="w-full aspect-video bg-black relative">
+        <canvas
+          ref={canvasRef}
+          width={160}
+          height={90}
+          className="w-full h-full object-cover"
+        />
+        {!isHovered && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none transition-opacity group-hover:opacity-0">
+            <Sparkles className="w-5 h-5 text-purple-400/80 animate-pulse" />
+          </div>
+        )}
+      </div>
+      <div className="p-1.5 flex flex-col min-w-0 bg-[#252525]">
+        <span className="text-[10px] text-white font-medium truncate block">
+          {transition.name}
+        </span>
+        <span className="text-[8px] text-[#a0a0a0] truncate">
+          {transition.preview}
+        </span>
+      </div>
     </div>
   );
 }

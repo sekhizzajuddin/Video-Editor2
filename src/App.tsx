@@ -28,6 +28,8 @@ function App() {
     currentTime,
     tracks,
     selectClips,
+    selectedTransitionClipId,
+    removeTransition,
   } = useEditorStore();
 
   const [leftWidth, setLeftWidth] = useState(250);
@@ -87,6 +89,9 @@ function App() {
           if (selectedClipId) {
             e.preventDefault();
             removeClip(selectedClipId);
+          } else if (selectedTransitionClipId) {
+            e.preventDefault();
+            removeTransition(selectedTransitionClipId);
           }
           break;
         case 'r':
