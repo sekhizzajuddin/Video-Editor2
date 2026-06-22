@@ -66,6 +66,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       trimStart: number;
       trackMuted: boolean;
       trackType: 'video' | 'audio';
+      speed: number;
     }[] = [];
 
     const addedClipIds = new Set<string>();
@@ -81,6 +82,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         trimStart: clip.trimStart,
         trackMuted: track.muted,
         trackType: track.type,
+        speed: clip.speed,
       });
     };
 
@@ -239,7 +241,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         }
       } else {
         // Calculate the media time corresponding to currentTime
-        const mediaTime = currentTime - clip.clipStart + clip.trimStart;
+        const mediaTime = (currentTime - clip.clipStart) * clip.speed + clip.trimStart;
 
         // Update volume & mute state ONLY if changed to save CPU/stutter
         const isMutedTrack = clip.trackMuted || isMuted;
@@ -252,8 +254,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         }
 
         // Sync playback rate ONLY if changed
-        if (entry.el.playbackRate !== playbackSpeed) {
-          entry.el.playbackRate = playbackSpeed;
+        const targetSpeed = playbackSpeed * clip.speed;
+        if (entry.el.playbackRate !== targetSpeed) {
+          entry.el.playbackRate = targetSpeed;
         }
 
         // Seek to the correct time if we just started, if the user seeked, or if we have high drift
@@ -295,7 +298,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       if (!entry || entry.type !== 'video') continue;
 
       const el = entry.el as HTMLVideoElement;
-      const mediaTime = currentTime - clip.clipStart + clip.trimStart;
+      const mediaTime = (currentTime - clip.clipStart) * clip.speed + clip.trimStart;
 
       if (el.seeking) {
         // Coalesce seeks: store the latest target time to seek to once the current seek finishes

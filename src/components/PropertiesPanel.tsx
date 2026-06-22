@@ -484,9 +484,15 @@ export function PropertiesPanel() {
                   max={3}
                   step={0.25}
                   value={selectedClip.speed}
-                  onChange={(e) =>
-                    updateClip(selectedClip.id, { speed: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                    const newSpeed = Number(e.target.value);
+                    const sourceDuration = selectedClip.duration * selectedClip.speed;
+                    const newDuration = sourceDuration / newSpeed;
+                    updateClip(selectedClip.id, {
+                      speed: newSpeed,
+                      duration: newDuration,
+                    });
+                  }}
                   onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                   className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                 />

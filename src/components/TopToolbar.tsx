@@ -15,6 +15,7 @@ import {
   ArrowLeftRight,
   ArrowRightToLine,
   ArrowLeftToLine,
+  Timer,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
@@ -52,6 +53,7 @@ export function TopToolbar() {
     { id: 'trackSelect', icon: ArrowRightToLine, label: 'Track Select Forward', shortcut: 'A' },
     { id: 'trackSelectBackward', icon: ArrowLeftToLine, label: 'Track Select Backward', shortcut: 'Shift+A' },
     { id: 'ripple', icon: ArrowLeftRight, label: 'Ripple Edit', shortcut: 'B' },
+    { id: 'rateStretch', icon: Timer, label: 'Rate Stretch', shortcut: 'R' },
     { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
     { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },
     { id: 'zoom', icon: ZoomIn, label: 'Zoom', shortcut: 'Z' },

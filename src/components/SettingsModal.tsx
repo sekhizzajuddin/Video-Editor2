@@ -41,6 +41,7 @@ export function SettingsModal() {
     { key: 'A', action: 'Track Select Forward Tool' },
     { key: 'Shift + A', action: 'Track Select Backward Tool' },
     { key: 'B', action: 'Ripple Edit Tool' },
+    { key: 'R', action: 'Rate Stretch Tool' },
     { key: 'S / C', action: 'Split Tool' },
     { key: 'H', action: 'Hand Tool' },
     { key: 'Z', action: 'Zoom Tool' },

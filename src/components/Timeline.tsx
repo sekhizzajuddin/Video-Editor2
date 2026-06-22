@@ -416,6 +416,7 @@ export function Timeline() {
     originalTrimStart: number;
     originalTrimEnd: number;
     originalStartTime: number;
+    originalSpeed: number;
     siblingClip?: {
       id: string;
       originalTrimStart: number;
@@ -697,7 +698,7 @@ export function Timeline() {
       const relX = e.clientX - rect.left;
 
       let rippleClips: { id: string; originalStartTime: number }[] = [];
-      if (activeTool === 'ripple' && track) {
+      if ((activeTool === 'ripple' || activeTool === 'rateStretch') && track) {
         rippleClips = track.clips
           .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
           .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
@@ -734,6 +735,7 @@ export function Timeline() {
           originalTrimStart: clip.trimStart,
           originalTrimEnd: clip.trimEnd,
           originalStartTime: clip.startTime,
+          originalSpeed: clip.speed,
           siblingClip: sibling,
           rippleClips,
         });
@@ -772,6 +774,7 @@ export function Timeline() {
           originalTrimStart: clip.trimStart,
           originalTrimEnd: clip.trimEnd,
           originalStartTime: clip.startTime,
+          originalSpeed: clip.speed,
           siblingClip: sibling,
           rippleClips,
         });
@@ -937,6 +940,61 @@ export function Timeline() {
 
         const media = getMediaSafe(clip);
         const sourceDuration = media.duration || 30;
+
+        if (activeTool === 'rateStretch') {
+          const originalSpeed = resizeState.originalSpeed || 1.0;
+          const sourceContentDuration = resizeState.originalDuration * originalSpeed;
+
+          if (resizeState.edge === 'right') {
+            const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+            const newSpeed = sourceContentDuration / newDuration;
+            const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
+            const clampedDuration = sourceContentDuration / clampedSpeed;
+            const delta = clampedDuration - resizeState.originalDuration;
+
+            updateClip(resizeState.clipId, {
+              duration: clampedDuration,
+              speed: clampedSpeed,
+              trimStart: resizeState.originalTrimStart,
+              trimEnd: resizeState.originalTrimEnd,
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + delta,
+                });
+              });
+            }
+          } else {
+            const shrink = -dt;
+            const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
+            const newSpeed = sourceContentDuration / newDuration;
+            const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
+            let clampedDuration = sourceContentDuration / clampedSpeed;
+            let shift = resizeState.originalDuration - clampedDuration;
+            shift = Math.max(-resizeState.originalStartTime, shift);
+            clampedDuration = resizeState.originalDuration - shift;
+            const finalSpeed = Math.min(20, Math.max(0.1, sourceContentDuration / clampedDuration));
+
+            updateClip(resizeState.clipId, {
+              startTime: resizeState.originalStartTime + shift,
+              duration: clampedDuration,
+              speed: finalSpeed,
+              trimStart: resizeState.originalTrimStart,
+              trimEnd: resizeState.originalTrimEnd,
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + shift,
+                });
+              });
+            }
+          }
+          return;
+        }
 
         if (activeTool === 'ripple') {
           if (resizeState.edge === 'right') {
@@ -1257,6 +1315,22 @@ export function Timeline() {
 
   return (
     <div className="h-full flex flex-col bg-[#1e1e1e] border-t border-[#3e3e3e]" ref={timelineRef}>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes rateStretchPulse {
+          0% {
+            box-shadow: 0 0 0 0px rgba(168, 85, 247, 0.7), inset 0 0 0 1px rgba(168, 85, 247, 0.5);
+          }
+          70% {
+            box-shadow: 0 0 0 8px rgba(168, 85, 247, 0), inset 0 0 0 2px rgba(168, 85, 247, 0.8);
+          }
+          100% {
+            box-shadow: 0 0 0 0px rgba(168, 85, 247, 0), inset 0 0 0 1px rgba(168, 85, 247, 0.5);
+          }
+        }
+        .rate-stretch-active {
+          animation: rateStretchPulse 1.5s infinite ease-in-out;
+        }
+      `}} />
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div className="h-8 flex items-center px-2 bg-[#252525] border-b border-[#3e3e3e] shrink-0">
         {/* Zoom */}
@@ -1521,7 +1595,11 @@ export function Timeline() {
                       <div
                         key={clip.id}
                         className={`absolute top-1 rounded overflow-hidden cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hover} transition-all duration-75 ${
-                          isSelected ? 'ring-2 ring-white shadow-lg z-10' : 'hover:brightness-110'
+                          isSelected
+                            ? activeTool === 'rateStretch'
+                              ? 'ring-2 ring-purple-500 shadow-lg z-10 rate-stretch-active'
+                              : 'ring-2 ring-white shadow-lg z-10'
+                            : 'hover:brightness-110'
                         } ${track.locked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
                         style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
                         onMouseDown={(e) => handleClipMouseDown(e, clip)}

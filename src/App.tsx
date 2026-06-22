@@ -89,6 +89,12 @@ function App() {
             removeClip(selectedClipId);
           }
           break;
+        case 'r':
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            setActiveTool('rateStretch');
+          }
+          break;
         case 'a':
           e.preventDefault();
           if (e.ctrlKey || e.metaKey) {
