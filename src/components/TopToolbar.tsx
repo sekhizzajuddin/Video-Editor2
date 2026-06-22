@@ -12,6 +12,7 @@ import {
   Plus,
   ChevronDown,
   RotateCcw,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
@@ -44,9 +45,10 @@ export function TopToolbar() {
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
 
-  const tools: { id: EditorTool; icon: typeof Scissors; label: string; shortcut: string }[] = [
+  const tools: { id: EditorTool; icon: any; label: string; shortcut: string }[] = [
     { id: 'select', icon: MousePointer2, label: 'Select', shortcut: 'V' },
-    { id: 'split', icon: Scissors, label: 'Split', shortcut: 'S' },
+    { id: 'ripple', icon: ArrowLeftRight, label: 'Ripple Edit', shortcut: 'B' },
+    { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
     { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },
     { id: 'zoom', icon: ZoomIn, label: 'Zoom', shortcut: 'Z' },
   ];

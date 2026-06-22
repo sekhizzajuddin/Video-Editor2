@@ -285,6 +285,10 @@ export function Timeline() {
       originalStartTime: number;
       speed: number;
     };
+    rippleClips?: {
+      id: string;
+      originalStartTime: number;
+    }[];
   } | null>(null);
 
   const [snapLine, setSnapLine] = useState<number | null>(null);
@@ -437,6 +441,13 @@ export function Timeline() {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const relX = e.clientX - rect.left;
 
+      let rippleClips: { id: string; originalStartTime: number }[] = [];
+      if (activeTool === 'ripple' && track) {
+        rippleClips = track.clips
+          .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
+          .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
+      }
+
       // Left resize handle
       if (relX < 6) {
         let sibling: any = undefined;
@@ -469,6 +480,7 @@ export function Timeline() {
           originalTrimEnd: clip.trimEnd,
           originalStartTime: clip.startTime,
           siblingClip: sibling,
+          rippleClips,
         });
         e.stopPropagation();
         return;
@@ -506,6 +518,7 @@ export function Timeline() {
           originalTrimEnd: clip.trimEnd,
           originalStartTime: clip.startTime,
           siblingClip: sibling,
+          rippleClips,
         });
         e.stopPropagation();
         return;
@@ -585,6 +598,52 @@ export function Timeline() {
 
         const media = getMediaSafe(clip);
         const sourceDuration = media.duration || 30;
+
+        if (activeTool === 'ripple') {
+          if (resizeState.edge === 'right') {
+            const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+            const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+            const clamped = Math.min(newDuration, maxDuration);
+            const delta = clamped - resizeState.originalDuration;
+
+            const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
+            updateClip(resizeState.clipId, {
+              duration: clamped,
+              trimEnd: Math.max(0, newTrimEnd),
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + delta,
+                });
+              });
+            }
+          } else {
+            const shrink = -dt;
+            const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
+            const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
+            let clamped = Math.min(newDuration, maxDuration);
+            let shift = resizeState.originalDuration - clamped;
+            shift = Math.max(-resizeState.originalStartTime, shift);
+            clamped = resizeState.originalDuration - shift;
+
+            updateClip(resizeState.clipId, {
+              startTime: resizeState.originalStartTime + shift,
+              duration: clamped,
+              trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + shift,
+                });
+              });
+            }
+          }
+          return;
+        }
 
         if (resizeState.edge === 'right') {
           let newDuration = Math.max(0.1, resizeState.originalDuration + dt);
@@ -1175,8 +1234,16 @@ export function Timeline() {
                         {/* ── Resize handles ────────────────────────── */}
                         {!track.locked && (
                           <>
-                            <div className="absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize hover:bg-white/40 z-20" />
-                            <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize hover:bg-white/40 z-20" />
+                            <div
+                              className={`absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize z-20 transition-colors ${
+                                activeTool === 'ripple' ? 'hover:bg-amber-500' : 'hover:bg-white/40'
+                              }`}
+                            />
+                            <div
+                              className={`absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize z-20 transition-colors ${
+                                activeTool === 'ripple' ? 'hover:bg-amber-500' : 'hover:bg-white/40'
+                              }`}
+                            />
                           </>
                         )}
 

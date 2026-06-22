@@ -87,7 +87,7 @@ export interface EditorState {
   scrollLeft: number;
 
   // Tools
-  activeTool: 'select' | 'split' | 'hand' | 'zoom';
+  activeTool: 'select' | 'split' | 'hand' | 'zoom' | 'ripple';
 
   // UI State
   showExportModal: boolean;
@@ -114,7 +114,7 @@ export interface EditorSnapshot {
 }
 
 // Tool Types
-export type EditorTool = 'select' | 'split' | 'hand' | 'zoom';
+export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple';
 
 // Media Tab Types
 export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects';

@@ -88,6 +88,12 @@ function App() {
             removeClip(selectedClipId);
           }
           break;
+        case 'b':
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            setActiveTool('ripple');
+          }
+          break;
         case 'c':
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
