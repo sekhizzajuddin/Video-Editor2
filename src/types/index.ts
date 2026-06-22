@@ -49,6 +49,8 @@ export interface TimelineClip {
   effects: string[];
   // For drag preview
   isPreview?: boolean;
+  // Kinship tracking for split clips
+  splitGroupId?: string;
 }
 
 // Timeline Track

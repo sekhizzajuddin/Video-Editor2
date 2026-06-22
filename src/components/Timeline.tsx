@@ -277,6 +277,14 @@ export function Timeline() {
     originalTrimStart: number;
     originalTrimEnd: number;
     originalStartTime: number;
+    siblingClip?: {
+      id: string;
+      originalTrimStart: number;
+      originalTrimEnd: number;
+      originalDuration: number;
+      originalStartTime: number;
+      speed: number;
+    };
   } | null>(null);
 
   const [snapLine, setSnapLine] = useState<number | null>(null);
@@ -428,6 +436,27 @@ export function Timeline() {
 
       // Left resize handle
       if (relX < 6) {
+        let sibling: any = undefined;
+        if (clip.splitGroupId) {
+          const track = tracks.find((t) => t.id === clip.trackId);
+          if (track) {
+            const siblingClips = track.clips
+              .filter((c) => c.id !== clip.id && c.splitGroupId === clip.splitGroupId)
+              .sort((a, b) => a.trimStart - b.trimStart);
+            const prev = siblingClips.reverse().find((c) => c.trimStart + c.duration <= clip.trimStart + 0.001);
+            if (prev) {
+              sibling = {
+                id: prev.id,
+                originalTrimStart: prev.trimStart,
+                originalTrimEnd: prev.trimEnd,
+                originalDuration: prev.duration,
+                originalStartTime: prev.startTime,
+                speed: prev.speed,
+              };
+            }
+          }
+        }
+
         setResizeState({
           clipId: clip.id,
           edge: 'left',
@@ -436,6 +465,7 @@ export function Timeline() {
           originalTrimStart: clip.trimStart,
           originalTrimEnd: clip.trimEnd,
           originalStartTime: clip.startTime,
+          siblingClip: sibling,
         });
         e.stopPropagation();
         return;
@@ -443,6 +473,27 @@ export function Timeline() {
 
       // Right resize handle
       if (relX > rect.width - 6) {
+        let sibling: any = undefined;
+        if (clip.splitGroupId) {
+          const track = tracks.find((t) => t.id === clip.trackId);
+          if (track) {
+            const siblingClips = track.clips
+              .filter((c) => c.id !== clip.id && c.splitGroupId === clip.splitGroupId)
+              .sort((a, b) => a.trimStart - b.trimStart);
+            const next = siblingClips.find((c) => c.trimStart >= clip.trimStart + clip.duration - 0.001);
+            if (next) {
+              sibling = {
+                id: next.id,
+                originalTrimStart: next.trimStart,
+                originalTrimEnd: next.trimEnd,
+                originalDuration: next.duration,
+                originalStartTime: next.startTime,
+                speed: next.speed,
+              };
+            }
+          }
+        }
+
         setResizeState({
           clipId: clip.id,
           edge: 'right',
@@ -451,6 +502,7 @@ export function Timeline() {
           originalTrimStart: clip.trimStart,
           originalTrimEnd: clip.trimEnd,
           originalStartTime: clip.startTime,
+          siblingClip: sibling,
         });
         e.stopPropagation();
         return;
@@ -531,10 +583,42 @@ export function Timeline() {
         const sourceDuration = media.duration || 30;
 
         if (resizeState.edge === 'right') {
-          const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-          const maxDuration = sourceDuration - clip.trimStart - resizeState.originalTrimEnd;
-          const clamped = Math.min(newDuration, maxDuration);
-          const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped);
+          let newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+          const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+          let clamped = Math.min(newDuration, maxDuration);
+
+          if (resizeState.siblingClip) {
+            const sib = resizeState.siblingClip;
+            const newAEnd = clip.trimStart + clamped * clip.speed;
+            if (newAEnd > sib.originalTrimStart) {
+              let deltaSource = newAEnd - sib.originalTrimStart;
+              let delta = deltaSource / sib.speed;
+              
+              // Clamp so sibling duration doesn't shrink below 0.1s
+              const maxDelta = sib.originalDuration - 0.1;
+              if (delta > maxDelta) {
+                delta = Math.max(0, maxDelta);
+                deltaSource = delta * sib.speed;
+                clamped = (sib.originalTrimStart + deltaSource - clip.trimStart) / clip.speed;
+              }
+
+              // Update sibling boundary in tandem
+              updateClip(sib.id, {
+                trimStart: sib.originalTrimStart + deltaSource,
+                duration: sib.originalDuration - delta,
+                startTime: sib.originalStartTime + delta,
+              });
+            } else {
+              // Restore sibling state if user dragged back
+              updateClip(sib.id, {
+                trimStart: sib.originalTrimStart,
+                duration: sib.originalDuration,
+                startTime: sib.originalStartTime,
+              });
+            }
+          }
+
+          const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
           updateClip(resizeState.clipId, {
             duration: clamped,
             trimEnd: Math.max(0, newTrimEnd),
@@ -542,13 +626,45 @@ export function Timeline() {
         } else {
           const shrink = -dt;
           const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
-          const maxDuration = sourceDuration - resizeState.originalTrimStart - clip.trimEnd;
-          const clamped = Math.min(newDuration, maxDuration);
-          const shift = resizeState.originalDuration - clamped;
+          const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
+          let clamped = Math.min(newDuration, maxDuration);
+          let shift = resizeState.originalDuration - clamped;
+
+          if (resizeState.siblingClip) {
+            const sib = resizeState.siblingClip;
+            const newBStart = resizeState.originalTrimStart + shift * clip.speed;
+            if (newBStart < sib.originalTrimStart + sib.originalDuration * sib.speed) {
+              let deltaSource = (sib.originalTrimStart + sib.originalDuration * sib.speed) - newBStart;
+              let delta = deltaSource / sib.speed;
+              
+              // Clamp so sibling duration doesn't shrink below 0.1s
+              const maxDelta = sib.originalDuration - 0.1;
+              if (delta > maxDelta) {
+                delta = Math.max(0, maxDelta);
+                deltaSource = delta * sib.speed;
+                const allowedNewBStart = sib.originalTrimStart + sib.originalDuration * sib.speed - deltaSource;
+                shift = (allowedNewBStart - resizeState.originalTrimStart) / clip.speed;
+                clamped = resizeState.originalDuration - shift;
+              }
+
+              // Update sibling boundary in tandem
+              updateClip(sib.id, {
+                trimEnd: sib.originalTrimEnd + deltaSource,
+                duration: sib.originalDuration - delta,
+              });
+            } else {
+              // Restore sibling state if user dragged back
+              updateClip(sib.id, {
+                trimEnd: sib.originalTrimEnd,
+                duration: sib.originalDuration,
+              });
+            }
+          }
+
           updateClip(resizeState.clipId, {
             startTime: resizeState.originalStartTime + shift,
             duration: clamped,
-            trimStart: Math.max(0, resizeState.originalTrimStart + shift),
+            trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
           });
         }
       }

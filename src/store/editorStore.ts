@@ -389,20 +389,24 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
         if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration) return track;
 
+        const groupId = clip.splitGroupId || generateId();
+
         const leftClip: TimelineClip = {
           ...clip,
           id: generateId(),
+          splitGroupId: groupId,
           duration: relativeSplitTime,
-          trimEnd: clip.trimEnd + (clip.duration - relativeSplitTime),
+          trimEnd: clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
           effects: [...clip.effects],
         };
 
         const rightClip: TimelineClip = {
           ...clip,
           id: generateId(),
+          splitGroupId: groupId,
           startTime: splitTime,
           duration: clip.duration - relativeSplitTime,
-          trimStart: clip.trimStart + relativeSplitTime,
+          trimStart: clip.trimStart + relativeSplitTime * clip.speed,
           effects: [...clip.effects],
         };
 
@@ -413,6 +417,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       });
       return { tracks: newTracks };
     });
+    get().recalcTotalDuration();
     get().saveSnapshot();
   },
 
@@ -496,7 +501,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === selectedClipId);
       if (clip) {
-        set({ clipboardClip: { ...clip, id: generateId(), effects: [...clip.effects] } });
+        set({ clipboardClip: { ...clip, id: generateId(), splitGroupId: undefined, effects: [...clip.effects] } });
         break;
       }
     }
@@ -508,6 +513,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       ...clipboardClip,
       id: generateId(),
       startTime: currentTime,
+      splitGroupId: undefined,
       isPreview: false,
     };
     get().addClip(pastedClip);
@@ -528,6 +534,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           ...clip,
           id: generateId(),
           startTime: clip.startTime + clip.duration,
+          splitGroupId: undefined,
           effects: [...clip.effects],
           isPreview: false,
         };
