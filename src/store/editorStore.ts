@@ -123,6 +123,7 @@ interface EditorActions {
   tryMoveClip: (clipId: string, newStartTime: number, newTrackId?: string) => { canMove: boolean; newPosition: number };
   splitClip: (clipId: string, splitTime: number) => void;
   selectClip: (clipId: string | null) => void;
+  selectClips: (clipIds: string[]) => void;
   selectTrack: (trackId: string | null) => void;
 
   // Playback
@@ -184,6 +185,7 @@ const initialState: EditorState = {
   mediaLibrary: [],
   tracks: defaultTracks,
   selectedClipId: null,
+  selectedClipIds: [],
   selectedTrackId: null,
   currentTime: 0,
   isPlaying: false,
@@ -268,7 +270,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
         return track;
       });
-      return { tracks: newTracks, selectedClipId: clip.id };
+      return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
     });
     get().recalcTotalDuration();
     get().saveSnapshot();
@@ -276,13 +278,25 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   removeClip: (clipId) => {
     set((state) => {
+      const idsToRemove = state.selectedClipIds.includes(clipId)
+        ? state.selectedClipIds
+        : [clipId];
+
       const newTracks = state.tracks.map((track) => ({
         ...track,
-        clips: track.clips.filter((c) => c.id !== clipId),
+        clips: track.clips.filter((c) => !idsToRemove.includes(c.id)),
       }));
+
+      const newSelectedClipIds = state.selectedClipIds.filter((id) => !idsToRemove.includes(id));
+      const newSelectedClipId =
+        state.selectedClipId && idsToRemove.includes(state.selectedClipId)
+          ? (newSelectedClipIds[0] || null)
+          : state.selectedClipId;
+
       return {
         tracks: newTracks,
-        selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+        selectedClipId: newSelectedClipId,
+        selectedClipIds: newSelectedClipIds,
       };
     });
     get().recalcTotalDuration();
@@ -426,7 +440,16 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot();
   },
 
-  selectClip: (clipId) => set({ selectedClipId: clipId }),
+  selectClip: (clipId) =>
+    set({
+      selectedClipId: clipId,
+      selectedClipIds: clipId ? [clipId] : [],
+    }),
+  selectClips: (clipIds) =>
+    set({
+      selectedClipIds: clipIds,
+      selectedClipId: clipIds[0] || null,
+    }),
   selectTrack: (trackId) => set({ selectedTrackId: trackId }),
 
   // Playback

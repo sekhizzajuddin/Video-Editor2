@@ -72,6 +72,7 @@ export interface EditorState {
   // Timeline
   tracks: TimelineTrack[];
   selectedClipId: string | null;
+  selectedClipIds: string[];
   selectedTrackId: string | null;
 
   // Playback
@@ -87,7 +88,7 @@ export interface EditorState {
   scrollLeft: number;
 
   // Tools
-  activeTool: 'select' | 'split' | 'hand' | 'zoom' | 'ripple';
+  activeTool: 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect';
 
   // UI State
   showExportModal: boolean;
@@ -114,7 +115,7 @@ export interface EditorSnapshot {
 }
 
 // Tool Types
-export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple';
+export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect';
 
 // Media Tab Types
 export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects';

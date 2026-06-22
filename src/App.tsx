@@ -27,6 +27,7 @@ function App() {
     zoomOut,
     currentTime,
     tracks,
+    selectClips,
   } = useEditorStore();
 
   const [leftWidth, setLeftWidth] = useState(250);
@@ -86,6 +87,15 @@ function App() {
           if (selectedClipId) {
             e.preventDefault();
             removeClip(selectedClipId);
+          }
+          break;
+        case 'a':
+          e.preventDefault();
+          if (e.ctrlKey || e.metaKey) {
+            const allClipIds = tracks.flatMap((t) => t.clips).map((c) => c.id);
+            selectClips(allClipIds);
+          } else {
+            setActiveTool('trackSelect');
           }
           break;
         case 'b':
@@ -186,6 +196,7 @@ function App() {
       zoomOut,
       currentTime,
       tracks,
+      selectClips,
     ]
   );
 

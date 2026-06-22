@@ -236,11 +236,13 @@ export function Timeline() {
     zoomLevel,
     scrollLeft,
     selectedClipId,
+    selectedClipIds,
     activeTool,
     selectedTrackId,
     draggingClipId,
     totalDuration,
     selectClip,
+    selectClips,
     selectTrack,
     seek,
     splitClip,
@@ -267,6 +269,11 @@ export function Timeline() {
     originalStartTime: number;
     trackId: string;
     trackType: string;
+    draggedClips?: {
+      id: string;
+      originalStartTime: number;
+      trackId: string;
+    }[];
   } | null>(null);
 
   const [resizeState, setResizeState] = useState<{
@@ -524,6 +531,44 @@ export function Timeline() {
         return;
       }
 
+      // Track Select Forward Tool
+      if (activeTool === 'trackSelect') {
+        const clickTime = clip.startTime + relX / zoomLevel;
+        let matchingIds: string[] = [];
+        if (e.shiftKey) {
+          if (track) {
+            matchingIds = track.clips
+              .filter((c) => c.startTime >= clickTime)
+              .map((c) => c.id);
+          }
+        } else {
+          matchingIds = tracks
+            .flatMap((t) => t.clips)
+            .filter((c) => c.startTime >= clickTime)
+            .map((c) => c.id);
+        }
+
+        selectClips(matchingIds);
+
+        const draggedClips = matchingIds.map((id) => {
+          const c = tracks.flatMap((t) => t.clips).find((x) => x.id === id);
+          return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
+        });
+
+        setDragState({
+          clipId: clip.id,
+          startX: e.clientX,
+          startY: e.clientY,
+          originalStartTime: clip.startTime,
+          trackId: clip.trackId,
+          trackType: track?.type || 'video',
+          draggedClips,
+        });
+
+        e.stopPropagation();
+        return;
+      }
+
       // Split tool
       if (activeTool === 'split') {
         const clickTime = clip.startTime + relX / zoomLevel;
@@ -531,7 +576,20 @@ export function Timeline() {
         return;
       }
 
-      // Normal drag
+      // Normal drag (Select tool or default)
+      const isAlreadySelected = selectedClipIds.includes(clip.id);
+      let draggedClips = [];
+
+      if (isAlreadySelected) {
+        draggedClips = selectedClipIds.map((id) => {
+          const c = tracks.flatMap((t) => t.clips).find((x) => x.id === id);
+          return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
+        });
+      } else {
+        selectClip(clip.id);
+        draggedClips = [{ id: clip.id, originalStartTime: clip.startTime, trackId: clip.trackId }];
+      }
+
       setDragState({
         clipId: clip.id,
         startX: e.clientX,
@@ -539,11 +597,12 @@ export function Timeline() {
         originalStartTime: clip.startTime,
         trackId: clip.trackId,
         trackType: track?.type || 'video',
+        draggedClips,
       });
-      selectClip(clip.id);
+
       e.stopPropagation();
     },
-    [tracks, activeTool, splitClip, zoomLevel, selectClip],
+    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds],
   );
 
   // ── Global mouse move / up for drag & resize ───────────────────────────
@@ -582,11 +641,30 @@ export function Timeline() {
         newTime = snappedTime;
         setSnapLine(snapPos);
 
-        // Visual preview
-        setDragPreview(newTime, targetTrackId);
+        // Calculate final displacement of primary clip
+        const finalDt = newTime - dragState.originalStartTime;
 
-        // Move with overlap protection
-        moveClip(dragState.clipId, newTime, targetTrackId);
+        if (dragState.draggedClips && dragState.draggedClips.length > 1) {
+          // Clear single-clip drag preview
+          setDragPreview(0, null);
+
+          // Move all selected clips horizontally
+          const sortedClips = [...dragState.draggedClips];
+          if (finalDt > 0) {
+            sortedClips.sort((a, b) => b.originalStartTime - a.originalStartTime);
+          } else {
+            sortedClips.sort((a, b) => a.originalStartTime - b.originalStartTime);
+          }
+
+          sortedClips.forEach((c) => {
+            const clipNewTime = Math.max(0, c.originalStartTime + finalDt);
+            moveClip(c.id, clipNewTime, c.trackId);
+          });
+        } else {
+          // Single clip drag (allows track switching)
+          setDragPreview(newTime, targetTrackId);
+          moveClip(dragState.clipId, newTime, targetTrackId);
+        }
       }
 
       // ─ Clip resize ──────────────────────────────────────────────────
@@ -1145,7 +1223,7 @@ export function Timeline() {
                   {track.clips.map((clip) => {
                     const media = getMediaSafe(clip);
                     const colors = CLIP_COLORS[media.type] || CLIP_COLORS.video;
-                    const isSelected = selectedClipId === clip.id;
+                    const isSelected = selectedClipIds.includes(clip.id);
                     const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
                     const left = clip.startTime * zoomLevel;
                     const isDragging = draggingClipId === clip.id;
