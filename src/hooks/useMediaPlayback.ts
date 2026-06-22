@@ -125,12 +125,11 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
 
         // Seeked handler that checks for subsequent pending seeks before triggering redraw
         const handleSeeked = () => {
+          triggerRedraw();
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
             pendingSeeksRef.current.delete(clipId);
             el.currentTime = pendingTime;
-          } else {
-            triggerRedraw();
           }
         };
 

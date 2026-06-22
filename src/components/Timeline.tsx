@@ -28,6 +28,38 @@ const FPS = 30;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function formatCentisecondTime(time: number): string {
+  if (isNaN(time) || time < 0) time = 0;
+  const totalCentis = Math.round(time * 100);
+  const mins = Math.floor(totalCentis / 6000);
+  const secs = Math.floor((totalCentis % 6000) / 100);
+  const centis = totalCentis % 100;
+
+  const secsStr = mins > 0 ? secs.toString().padStart(2, '0') : secs.toString();
+  const centisStr = centis.toString().padStart(2, '0');
+
+  if (mins > 0) {
+    return `${mins}:${secsStr}:${centisStr}`;
+  }
+  return `${secsStr}:${centisStr}`;
+}
+
+function formatDetailedTooltipTime(seconds: number): string {
+  if (isNaN(seconds) || seconds < 0) seconds = 0;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+
+  const secsStr = mins > 0 ? secs.toString().padStart(2, '0') : secs.toString();
+  const msStr = ms.toString().padStart(3, '0');
+
+  if (mins > 0) {
+    return `${mins}:${secsStr}.${msStr}`;
+  }
+  return `${secsStr}.${msStr}s`;
+}
+
+
 function generateId(): string {
   return Math.random().toString(36).substr(2, 9);
 }
@@ -449,6 +481,18 @@ export function Timeline() {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
+      // ─ Playhead scrubbing ──────────────────────────────────────────
+      if (isScrubbing) {
+        const rect = trackContainerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const x = e.clientX - rect.left + scrollLeft;
+          const time = Math.max(0, x / zoomLevel);
+          seek(time);
+          setScrubTime(time);
+          setScrubMouseX(e.clientX);
+        }
+      }
+
       // ─ Clip drag ────────────────────────────────────────────────────
       if (dragState) {
         const dx = e.clientX - dragState.startX;
@@ -511,6 +555,10 @@ export function Timeline() {
     };
 
     const handleMouseUp = () => {
+      if (isScrubbing) {
+        setIsScrubbing(false);
+        setScrubTime(null);
+      }
       if (dragState) {
         setDragState(null);
         setSnapLine(null);
@@ -532,6 +580,9 @@ export function Timeline() {
   }, [
     dragState,
     resizeState,
+    isScrubbing,
+    scrollLeft,
+    seek,
     zoomLevel,
     tracks,
     moveClip,
@@ -601,43 +652,65 @@ export function Timeline() {
   // ── Ruler markers ───────────────────────────────────────────────────────
 
   const rulerData = useMemo(() => {
-    const isFrameMode = zoomLevel > 200;
-    const markers: { time: number; label: string; major: boolean }[] = [];
+    const markers: { time: number; label: string; type: 'major' | 'medium' | 'minor' }[] = [];
 
-    if (isFrameMode) {
-      // Frame‑accurate ruler at 30 fps
-      const frameDuration = 1 / FPS;
-      const totalFrames = Math.ceil((totalDuration + 10) * FPS);
-      for (let f = 0; f <= totalFrames; f++) {
-        const time = f * frameDuration;
-        const isMajor = f % FPS === 0; // every second
-        const isMinor = f % 5 === 0;   // every 5 frames
-        if (isMajor) {
-          markers.push({ time, label: `${formatSimpleTime(time)}`, major: true });
-        } else if (isMinor) {
-          markers.push({ time, label: `${f % FPS}f`, major: false });
-        }
-      }
+    let majorInterval = 1.0;
+    let mediumInterval = 0.5;
+    let minorInterval = 0.1;
+    let labelMedium = true;
+
+    if (zoomLevel >= 150) {
+      majorInterval = 1.0;
+      mediumInterval = 0.5;
+      minorInterval = 0.1;
+      labelMedium = true;
+    } else if (zoomLevel >= 80) {
+      majorInterval = 2.0;
+      mediumInterval = 1.0;
+      minorInterval = 0.2;
+      labelMedium = true;
+    } else if (zoomLevel >= 40) {
+      majorInterval = 5.0;
+      mediumInterval = 2.5;
+      minorInterval = 0.5;
+      labelMedium = true;
+    } else if (zoomLevel >= 20) {
+      majorInterval = 10.0;
+      mediumInterval = 5.0;
+      minorInterval = 1.0;
+      labelMedium = false;
     } else {
-      // Time‑based markers
-      let interval: number;
-      if (zoomLevel > 150) interval = 1;
-      else if (zoomLevel > 80) interval = 5;
-      else if (zoomLevel > 40) interval = 10;
-      else interval = 30;
+      majorInterval = 30.0;
+      mediumInterval = 10.0;
+      minorInterval = 2.0;
+      labelMedium = false;
+    }
 
-      for (let t = 0; t <= totalDuration + 30; t += interval) {
-        markers.push({ time: t, label: formatSimpleTime(t), major: true });
-        // Sub‑markers
-        if (interval >= 5) {
-          for (let s = 1; s < (interval >= 10 ? 5 : interval); s++) {
-            const subTime = t + s * (interval / 5);
-            if (subTime <= totalDuration + 30) {
-              markers.push({ time: subTime, label: '', major: false });
-            }
-          }
+    const maxTime = totalDuration + 30;
+
+    const minorDecis = Math.round(minorInterval * 10);
+    const mediumDecis = Math.round(mediumInterval * 10);
+    const majorDecis = Math.round(majorInterval * 10);
+    const maxDecis = Math.round(maxTime * 10);
+
+    for (let d = 0; d <= maxDecis; d += minorDecis) {
+      const time = d / 10;
+      let type: 'major' | 'medium' | 'minor' = 'minor';
+      let label = '';
+
+      if (d % majorDecis === 0) {
+        type = 'major';
+        label = formatCentisecondTime(time);
+      } else if (d % mediumDecis === 0) {
+        type = 'medium';
+        if (labelMedium) {
+          label = formatCentisecondTime(time);
         }
+      } else {
+        type = 'minor';
       }
+
+      markers.push({ time, label, type });
     }
 
     return markers;
@@ -772,34 +845,63 @@ export function Timeline() {
           </div>
         </div>
 
-        {/* ── Timeline tracks area ───────────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden relative">
+          {/* Floating Scrub Tooltip */}
+          {isScrubbing && (
+            <div
+              className="absolute z-50 bg-[#141414]/95 text-amber-400 text-[10px] font-bold px-2 py-1 rounded border border-[#3e3e3e] shadow-2xl pointer-events-none -translate-x-1/2 flex items-center gap-1.5"
+              style={{
+                left: `${currentTime * zoomLevel - scrollLeft}px`,
+                top: `${RULER_HEIGHT + 6}px`,
+              }}
+            >
+              {/* Tooltip caret */}
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#141414] border-t border-l border-[#3e3e3e] rotate-45" />
+              <span className="relative z-10 tabular-nums">
+                {formatDetailedTooltipTime(currentTime)}
+              </span>
+            </div>
+          )}
+
           {/* ── Ruler ──────────────────────────────────────────────── */}
           <div
-            className="bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer"
+            className="bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer select-none"
             style={{ height: RULER_HEIGHT }}
-            onClick={handleRulerClick}
+            onMouseDown={handleRulerMouseDown}
           >
             <div
               className="absolute top-0 left-0 h-full"
               style={{ width: `${timelineWidth}px`, transform: `translateX(-${scrollLeft}px)` }}
             >
-              {rulerData.map((m, i) => (
-                <div
-                  key={i}
-                  className="absolute top-0 h-full flex flex-col items-start"
-                  style={{ left: `${m.time * zoomLevel}px` }}
-                >
+              {rulerData.map((m, i) => {
+                let tickHeight = '14px';
+                let tickColor = 'bg-[#a0a0a0]';
+                if (m.type === 'medium') {
+                  tickHeight = '10.5px';
+                  tickColor = 'bg-[#888888]';
+                } else if (m.type === 'minor') {
+                  tickHeight = '7px';
+                  tickColor = 'bg-[#555555]';
+                }
+
+                return (
                   <div
-                    className={`w-px ${m.major ? 'h-3 bg-[#a0a0a0]' : 'h-1.5 bg-[#666]'}`}
-                  />
-                  {m.label && (
-                    <span className="text-[9px] text-[#a0a0a0] pl-0.5 mt-0.5 whitespace-nowrap">
-                      {m.label}
-                    </span>
-                  )}
-                </div>
-              ))}
+                    key={i}
+                    className="absolute top-0 h-full flex flex-col items-start pointer-events-none"
+                    style={{ left: `${m.time * zoomLevel}px` }}
+                  >
+                    <div
+                      className={`w-px ${tickColor}`}
+                      style={{ height: tickHeight }}
+                    />
+                    {m.label && (
+                      <span className="text-[9px] text-[#a0a0a0] pl-0.5 mt-0.5 whitespace-nowrap tabular-nums">
+                        {m.label}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
 
               {/* Playhead on ruler */}
               <div
@@ -820,7 +922,7 @@ export function Timeline() {
             <div className="relative" style={{ width: `${timelineWidth}px`, minHeight: '100%' }}>
               {/* Grid lines aligned with ruler markers */}
               {rulerData
-                .filter((m) => m.major)
+                .filter((m) => m.type === 'major')
                 .map((m, i) => (
                   <div
                     key={`g-${i}`}
