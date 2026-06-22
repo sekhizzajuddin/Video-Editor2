@@ -86,11 +86,20 @@ export function PreviewCanvas() {
   // Listen to frame update events from useMediaPlayback (like seek complete)
   useEffect(() => {
     const handleFrameUpdate = () => {
-      requestRedraw();
+      // ONLY redraw if not playing! (During playback, requestAnimationFrame is already redrawing at 60 FPS)
+      if (!useEditorStore.getState().isPlaying) {
+        requestRedraw();
+      }
     };
     window.addEventListener('procut-frame-updated', handleFrameUpdate);
     return () => window.removeEventListener('procut-frame-updated', handleFrameUpdate);
   }, [requestRedraw]);
+
+  // Keep a mutable ref of currentTime so the playback loop effect doesn't tear down/setup on every frame
+  const currentTimeRef = useRef(currentTime);
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
 
   // -------------------------------------------------------------------
   // Playback loop – advance currentTime via rAF when playing
@@ -103,7 +112,7 @@ export function PreviewCanvas() {
     const loop = (now: number) => {
       const dt = (now - lastTime) / 1000;
       lastTime = now;
-      const newTime = currentTime + dt * playbackSpeed;
+      const newTime = currentTimeRef.current + dt * playbackSpeed;
       if (newTime >= totalDuration) {
         seek(0);
         useEditorStore.getState().pause();
@@ -115,7 +124,7 @@ export function PreviewCanvas() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, currentTime, totalDuration, playbackSpeed, seek]);
+  }, [isPlaying, totalDuration, playbackSpeed, seek]);
 
   // -------------------------------------------------------------------
   // Canvas rendering – called whenever time, tracks, or images change

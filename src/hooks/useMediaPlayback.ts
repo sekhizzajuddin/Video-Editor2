@@ -43,6 +43,11 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
   const isMuted = useEditorStore((s) => s.isMuted);
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
 
+  // Keep track of expected playback time to detect manual user seeks
+  const lastTimeRef = useRef<number>(currentTime);
+  const lastRealTimeRef = useRef<number>(performance.now());
+  const wasPlayingRef = useRef<boolean>(isPlaying);
+
   // Trigger a custom event on window so PreviewCanvas can redraw immediately on async frame seek
   const triggerRedraw = useCallback(() => {
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
@@ -150,11 +155,24 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     }
   }, [tracks, mediaLibrary, triggerRedraw]);
 
-  // Sync playback state — play / pause / seek
+  // Sync playback state — play / pause / seek / volume / speed
   useEffect(() => {
     const pool = poolRef.current;
     const clips = activeClips();
     const playingIds = new Set(clips.map((c) => c.clipId));
+
+    const now = performance.now();
+    const elapsedRealTime = (now - lastRealTimeRef.current) / 1000;
+    const expectedPlaybackTime = lastTimeRef.current + elapsedRealTime * playbackSpeed;
+
+    // Detect if playback has just started, or if the user performed a manual seek
+    const playStarted = isPlaying && !wasPlayingRef.current;
+    const userSeeked = Math.abs(currentTime - expectedPlaybackTime) > 0.15;
+    const forceSeek = playStarted || userSeeked;
+
+    lastTimeRef.current = currentTime;
+    lastRealTimeRef.current = now;
+    wasPlayingRef.current = isPlaying;
 
     for (const [clipId, entry] of pool) {
       const clip = clips.find((c) => c.clipId === clipId);
@@ -168,19 +186,26 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         // Calculate the media time corresponding to currentTime
         const mediaTime = currentTime - clip.clipStart + clip.trimStart;
 
-        // Update volume & mute state
+        // Update volume & mute state ONLY if changed to save CPU/stutter
         const isMutedTrack = clip.trackMuted || isMuted;
-        entry.el.muted = isMutedTrack;
-        entry.el.volume = isMutedTrack ? 0 : volume;
+        if (entry.el.muted !== isMutedTrack) {
+          entry.el.muted = isMutedTrack;
+        }
+        const targetVolume = isMutedTrack ? 0 : volume;
+        if (entry.el.volume !== targetVolume) {
+          entry.el.volume = targetVolume;
+        }
 
-        // Sync playback rate
+        // Sync playback rate ONLY if changed
         if (entry.el.playbackRate !== playbackSpeed) {
           entry.el.playbackRate = playbackSpeed;
         }
 
-        // Seek if needed (if >0.2s out of sync)
-        const drift = Math.abs(entry.el.currentTime - mediaTime);
-        if (drift > 0.2) {
+        // Seek to the correct time if we just started, if the user seeked, or if we have high drift
+        const currentMediaTime = entry.el.currentTime;
+        const drift = Math.abs(currentMediaTime - mediaTime);
+
+        if (forceSeek || drift > 0.35) {
           entry.el.currentTime = mediaTime;
         }
 
