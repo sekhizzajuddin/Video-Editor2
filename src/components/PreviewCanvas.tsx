@@ -65,11 +65,14 @@ export function PreviewCanvas() {
     toggleMute,
     tracks,
     selectedClipId,
+    selectedClipIds,
     selectClip,
     playbackSpeed,
     setPlaybackSpeed,
     mediaLibrary,
   } = useEditorStore();
+
+  const hasClips = tracks.some((t) => t.clips.length > 0);
 
   // Real video elements for drawing frames
   const videoElements = useMediaPlayback();
@@ -113,18 +116,54 @@ export function PreviewCanvas() {
       const dt = (now - lastTime) / 1000;
       lastTime = now;
       const newTime = currentTimeRef.current + dt * playbackSpeed;
-      if (newTime >= totalDuration) {
+
+      const state = useEditorStore.getState();
+      const allClips = state.tracks.flatMap((t) => t.clips);
+
+      if (selectedClipIds.length > 0) {
+        // Selection Loop Playback Mode
+        const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
+        if (selectedClips.length > 0) {
+          let minStart = Infinity;
+          let maxEnd = -Infinity;
+          for (const c of selectedClips) {
+            if (c.startTime < minStart) minStart = c.startTime;
+            const end = c.startTime + c.duration;
+            if (end > maxEnd) maxEnd = end;
+          }
+
+          if (newTime >= maxEnd || newTime < minStart) {
+            seek(minStart);
+            currentTimeRef.current = minStart;
+          } else {
+            seek(newTime);
+          }
+          animId = requestAnimationFrame(loop);
+          return;
+        }
+      }
+
+      // Default Playback Mode (Cap at sequence end)
+      let maxEndSequence = 0;
+      for (const c of allClips) {
+        const end = c.startTime + c.duration;
+        if (end > maxEndSequence) maxEndSequence = end;
+      }
+
+      if (newTime >= maxEndSequence) {
         seek(0);
-        useEditorStore.getState().pause();
+        currentTimeRef.current = 0;
+        state.pause();
         return;
       }
+
       seek(newTime);
       animId = requestAnimationFrame(loop);
     };
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, totalDuration, playbackSpeed, seek]);
+  }, [isPlaying, playbackSpeed, seek, selectedClipIds]);
 
   // -------------------------------------------------------------------
   // Canvas rendering – called whenever time, tracks, or images change
@@ -496,9 +535,12 @@ export function PreviewCanvas() {
       <div className="h-14 bg-[#252525] border-t border-[#3e3e3e] flex items-center px-4 gap-3">
         {/* Play / Pause */}
         <button
-          onClick={togglePlayback}
-          className="p-2 text-white hover:bg-[#3e3e3e] rounded-full transition-colors"
-          title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+          onClick={hasClips ? togglePlayback : undefined}
+          disabled={!hasClips}
+          className={`p-2 text-white rounded-full transition-colors ${
+            hasClips ? 'hover:bg-[#3e3e3e]' : 'opacity-40 cursor-not-allowed'
+          }`}
+          title={!hasClips ? 'No media on timeline' : isPlaying ? 'Pause (Space)' : 'Play (Space)'}
         >
           {isPlaying ? (
             <Pause className="w-5 h-5" fill="white" />

@@ -570,6 +570,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   splitClip: (clipId, splitTime) => {
     set((state) => {
+      const isSelected = state.selectedClipIds.includes(clipId);
+      let leftClipId = '';
+
       const newTracks = state.tracks.map((track) => {
         const clipIndex = track.clips.findIndex((c) => c.id === clipId);
         if (clipIndex === -1) return track;
@@ -580,10 +583,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration) return track;
 
         const groupId = clip.splitGroupId || generateId();
+        leftClipId = generateId();
+        const rightClipId = generateId();
 
         const leftClip: TimelineClip = {
           ...clip,
-          id: generateId(),
+          id: leftClipId,
           splitGroupId: groupId,
           duration: relativeSplitTime,
           trimEnd: clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
@@ -592,12 +597,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
         const rightClip: TimelineClip = {
           ...clip,
-          id: generateId(),
+          id: rightClipId,
           splitGroupId: groupId,
           startTime: splitTime,
           duration: clip.duration - relativeSplitTime,
           trimStart: clip.trimStart + relativeSplitTime * clip.speed,
           effects: [...clip.effects],
+          transitionIn: undefined, // Clear transition on the second half of the split
         };
 
         const newClips = [...track.clips];
@@ -605,6 +611,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
         return { ...track, clips: newClips };
       });
+
+      if (isSelected && leftClipId) {
+        return {
+          tracks: newTracks,
+          selectedClipId: leftClipId,
+          selectedClipIds: [leftClipId],
+        };
+      }
+
       return { tracks: newTracks };
     });
     get().recalcTotalDuration();
@@ -675,9 +690,51 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   // Playback
-  play: () => set({ isPlaying: true }),
+  play: () => {
+    const { tracks, selectedClipIds, currentTime } = get();
+    const allClips = tracks.flatMap((t) => t.clips);
+    if (allClips.length === 0) return;
+
+    if (selectedClipIds.length > 0) {
+      const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
+      if (selectedClips.length > 0) {
+        let minStart = Infinity;
+        let maxEnd = -Infinity;
+        for (const c of selectedClips) {
+          if (c.startTime < minStart) minStart = c.startTime;
+          const end = c.startTime + c.duration;
+          if (end > maxEnd) maxEnd = end;
+        }
+        if (currentTime < minStart || currentTime >= maxEnd) {
+          set({ currentTime: minStart });
+        }
+      }
+    }
+    set({ isPlaying: true });
+  },
   pause: () => set({ isPlaying: false }),
-  togglePlayback: () => set((state) => ({ isPlaying: !state.isPlaying })),
+  togglePlayback: () => {
+    const { tracks, isPlaying, selectedClipIds, currentTime } = get();
+    const allClips = tracks.flatMap((t) => t.clips);
+    if (allClips.length === 0 && !isPlaying) return;
+
+    if (!isPlaying && selectedClipIds.length > 0) {
+      const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
+      if (selectedClips.length > 0) {
+        let minStart = Infinity;
+        let maxEnd = -Infinity;
+        for (const c of selectedClips) {
+          if (c.startTime < minStart) minStart = c.startTime;
+          const end = c.startTime + c.duration;
+          if (end > maxEnd) maxEnd = end;
+        }
+        if (currentTime < minStart || currentTime >= maxEnd) {
+          set({ currentTime: minStart });
+        }
+      }
+    }
+    set((state) => ({ isPlaying: !state.isPlaying }));
+  },
   seek: (time) => set({ currentTime: Math.max(0, time) }),
   setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
   setVolume: (volume) => set({ volume, isMuted: volume === 0 }),

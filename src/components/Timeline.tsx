@@ -509,6 +509,7 @@ export function Timeline() {
   const {
     tracks,
     currentTime,
+    isPlaying,
     zoomLevel,
     scrollLeft,
     selectedClipId,
@@ -543,6 +544,7 @@ export function Timeline() {
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
+  const trackHeadersRef = useRef<HTMLDivElement>(null);
 
   const [dragState, setDragState] = useState<{
     clipId: string;
@@ -605,16 +607,47 @@ export function Timeline() {
 
   const handleScroll = useCallback(() => {
     if (trackContainerRef.current) {
-      useEditorStore.getState().setScrollLeft(trackContainerRef.current.scrollLeft);
+      const target = trackContainerRef.current;
+      useEditorStore.getState().setScrollLeft(target.scrollLeft);
+      // Sync vertical scroll to headers
+      if (trackHeadersRef.current && trackHeadersRef.current.scrollTop !== target.scrollTop) {
+        trackHeadersRef.current.scrollTop = target.scrollTop;
+      }
     }
   }, []);
 
+  const handleHeadersScroll = useCallback(() => {
+    if (trackHeadersRef.current && trackContainerRef.current) {
+      const target = trackHeadersRef.current;
+      if (trackContainerRef.current.scrollTop !== target.scrollTop) {
+        trackContainerRef.current.scrollTop = target.scrollTop;
+      }
+    }
+  }, []);
+
+  // ── Auto-scroll timeline during playback ──────────────────────────────────
   useEffect(() => {
-    const el = trackContainerRef.current;
-    if (!el) return;
-    el.addEventListener('scroll', handleScroll);
-    return () => el.removeEventListener('scroll', handleScroll);
-  }, [handleScroll]);
+    if (!isPlaying) return;
+    const container = trackContainerRef.current;
+    if (!container) return;
+
+    const visibleWidth = container.clientWidth;
+    const totalMediaWidth = totalDuration * zoomLevel;
+    if (totalMediaWidth <= visibleWidth) return;
+
+    const playheadX = currentTime * zoomLevel;
+    const thresholdX = container.scrollLeft + visibleWidth * 0.6;
+
+    if (playheadX > thresholdX) {
+      const targetScroll = playheadX - visibleWidth * 0.6;
+      container.scrollLeft = targetScroll;
+      useEditorStore.getState().setScrollLeft(targetScroll);
+    } else if (playheadX < container.scrollLeft) {
+      const targetScroll = Math.max(0, playheadX - visibleWidth * 0.1);
+      container.scrollLeft = targetScroll;
+      useEditorStore.getState().setScrollLeft(targetScroll);
+    }
+  }, [currentTime, isPlaying, zoomLevel, totalDuration]);
 
   // ── Media lookup ────────────────────────────────────────────────────────
 
@@ -1344,7 +1377,7 @@ export function Timeline() {
       if (!media) return;
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const x = e.clientX - rect.left + (trackContainerRef.current?.scrollLeft || 0);
+      const x = e.clientX - rect.left;
       const startTime = Math.max(0, x / zoomLevel);
 
       const newClip: TimelineClip = {
@@ -1374,7 +1407,7 @@ export function Timeline() {
       e.dataTransfer.dropEffect = 'copy';
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const x = e.clientX - rect.left + (trackContainerRef.current?.scrollLeft || 0);
+      const x = e.clientX - rect.left;
       const trackIdx = tracks.findIndex((t) => t.id === trackId);
 
       // Read media to determine width
@@ -1563,7 +1596,12 @@ export function Timeline() {
           <div className="bg-[#2d2d2d] border-b border-[#3e3e3e] shrink-0" style={{ height: RULER_HEIGHT }} />
 
           {/* Headers */}
-          <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
+          <div
+            ref={trackHeadersRef}
+            className="flex-1 overflow-y-auto"
+            style={{ scrollbarWidth: 'none' }}
+            onScroll={handleHeadersScroll}
+          >
             {tracks.map((track) => (
               <div
                 key={track.id}
@@ -1693,6 +1731,7 @@ export function Timeline() {
             ref={trackContainerRef}
             className="flex-1 overflow-auto relative"
             onClick={handleTimelineClick}
+            onScroll={handleScroll}
           >
             <div className="relative" style={{ width: `${timelineWidth}px`, minHeight: '100%' }}>
               {/* Grid lines aligned with ruler markers */}
