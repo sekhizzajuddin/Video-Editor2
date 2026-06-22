@@ -248,6 +248,7 @@ export function Timeline() {
     splitClip,
     moveClip,
     moveClips,
+    resolveOverlaps,
     zoomIn,
     zoomOut,
     toggleTrackLock,
@@ -268,6 +269,7 @@ export function Timeline() {
     startX: number;
     startY: number;
     originalStartTime: number;
+    originalScrollLeft: number;
     trackId: string;
     trackType: string;
     draggedClips?: {
@@ -276,6 +278,10 @@ export function Timeline() {
       trackId: string;
     }[];
   } | null>(null);
+
+  const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dragMouseXRef = useRef<number | null>(null);
+  const dragMouseYRef = useRef<number | null>(null);
 
   const [resizeState, setResizeState] = useState<{
     clipId: string;
@@ -395,6 +401,122 @@ export function Timeline() {
     },
     [zoomLevel, currentTime, tracks],
   );
+
+  const updateDragPosition = useCallback((clientX: number, clientY: number, currScrollLeft: number) => {
+    if (!dragState || !dragState.draggedClips || dragState.draggedClips.length === 0) return;
+
+    const dx = (clientX - dragState.startX) + (currScrollLeft - dragState.originalScrollLeft);
+    const dt = dx / zoomLevel;
+    let newTime = Math.max(0, dragState.originalStartTime + dt);
+
+    const hoverTrack = getTrackFromMouseY(clientY);
+    const targetTrackId =
+      hoverTrack && hoverTrack.type === dragState.trackType ? hoverTrack.id : dragState.trackId;
+
+    const movingClip = tracks.flatMap((t) => t.clips).find((c) => c.id === dragState.clipId);
+    const movingDuration = movingClip?.duration ?? 0;
+
+    const { snappedTime, snapPos } = computeSnap(newTime, dragState.clipId, movingDuration);
+    newTime = snappedTime;
+    setSnapLine(snapPos);
+
+    const finalDt = newTime - dragState.originalStartTime;
+
+    if (dragState.draggedClips.length > 1) {
+      setDragPreview(0, null);
+
+      const sourceTrackIdx = tracks.findIndex((t) => t.id === dragState.trackId);
+      const targetTrackIdx = tracks.findIndex((t) => t.id === targetTrackId);
+      const trackDelta = targetTrackIdx - sourceTrackIdx;
+
+      const updates = dragState.draggedClips.map((c) => {
+        const clipNewTime = Math.max(0, c.originalStartTime + finalDt);
+        
+        const clipTrackIdx = tracks.findIndex((t) => t.id === c.trackId);
+        const newTrackIdx = clipTrackIdx + trackDelta;
+        const originalTrack = tracks.find((t) => t.id === c.trackId);
+        const targetTrack = tracks[newTrackIdx];
+
+        const targetTrackIdForClip =
+          targetTrack && originalTrack && targetTrack.type === originalTrack.type
+            ? targetTrack.id
+            : c.trackId;
+
+        return {
+          clipId: c.id,
+          newStartTime: clipNewTime,
+          newTrackId: targetTrackIdForClip,
+        };
+      });
+
+      moveClips(updates);
+    } else if (dragState.draggedClips.length === 1) {
+      setDragPreview(newTime, targetTrackId);
+      moveClip(dragState.clipId, newTime, targetTrackId);
+    }
+  }, [dragState, tracks, zoomLevel, getTrackFromMouseY, computeSnap, moveClips, moveClip, setDragPreview]);
+
+  const updateDragPositionRef = useRef(updateDragPosition);
+  useEffect(() => {
+    updateDragPositionRef.current = updateDragPosition;
+  }, [updateDragPosition]);
+
+  // Auto-scroll loop when dragging
+  useEffect(() => {
+    if (!dragState) {
+      if (scrollIntervalRef.current) {
+        clearInterval(scrollIntervalRef.current);
+        scrollIntervalRef.current = null;
+      }
+      dragMouseXRef.current = null;
+      dragMouseYRef.current = null;
+      return;
+    }
+
+    const checkScroll = () => {
+      const container = trackContainerRef.current;
+      if (!container || dragMouseXRef.current === null || dragMouseYRef.current === null) return;
+
+      const rect = container.getBoundingClientRect();
+      const mouseX = dragMouseXRef.current;
+      const mouseY = dragMouseYRef.current;
+
+      const scrollSpeed = 8; // pixels per tick
+      const edgeThreshold = 40; // distance from edge in pixels
+      let scrolled = false;
+      let nextScrollLeft = container.scrollLeft;
+
+      if (mouseX > rect.right - edgeThreshold) {
+        nextScrollLeft = Math.min(
+          container.scrollWidth - container.clientWidth,
+          container.scrollLeft + scrollSpeed
+        );
+        if (nextScrollLeft !== container.scrollLeft) {
+          container.scrollLeft = nextScrollLeft;
+          scrolled = true;
+        }
+      } else if (mouseX < rect.left + edgeThreshold) {
+        nextScrollLeft = Math.max(0, container.scrollLeft - scrollSpeed);
+        if (nextScrollLeft !== container.scrollLeft) {
+          container.scrollLeft = nextScrollLeft;
+          scrolled = true;
+        }
+      }
+
+      if (scrolled) {
+        updateDragPositionRef.current(mouseX, mouseY, nextScrollLeft);
+      }
+    };
+
+    scrollIntervalRef.current = setInterval(checkScroll, 16);
+
+    return () => {
+      if (scrollIntervalRef.current) {
+        clearInterval(scrollIntervalRef.current);
+        scrollIntervalRef.current = null;
+      }
+    };
+  }, [dragState]);
 
   // ── Timeline / ruler click (scrub) ──────────────────────────────────────
 
@@ -561,6 +683,7 @@ export function Timeline() {
           startX: e.clientX,
           startY: e.clientY,
           originalStartTime: clip.startTime,
+          originalScrollLeft: scrollLeft,
           trackId: clip.trackId,
           trackType: track?.type || 'video',
           draggedClips,
@@ -599,6 +722,7 @@ export function Timeline() {
           startX: e.clientX,
           startY: e.clientY,
           originalStartTime: clip.startTime,
+          originalScrollLeft: scrollLeft,
           trackId: clip.trackId,
           trackType: track?.type || 'video',
           draggedClips,
@@ -645,6 +769,7 @@ export function Timeline() {
         startX: e.clientX,
         startY: e.clientY,
         originalStartTime: clip.startTime,
+        originalScrollLeft: scrollLeft,
         trackId: clip.trackId,
         trackType: track?.type || 'video',
         draggedClips,
@@ -652,7 +777,7 @@ export function Timeline() {
 
       e.stopPropagation();
     },
-    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds],
+    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, scrollLeft],
   );
 
   // ── Global mouse move / up for drag & resize ───────────────────────────
@@ -673,66 +798,9 @@ export function Timeline() {
 
       // ─ Clip drag ────────────────────────────────────────────────────
       if (dragState && dragState.draggedClips && dragState.draggedClips.length > 0) {
-        const dx = e.clientX - dragState.startX;
-        const dt = dx / zoomLevel;
-        let newTime = Math.max(0, dragState.originalStartTime + dt);
-
-        // Determine which track the cursor is hovering over
-        const hoverTrack = getTrackFromMouseY(e.clientY);
-        const targetTrackId =
-          hoverTrack && hoverTrack.type === dragState.trackType ? hoverTrack.id : dragState.trackId;
-
-        // Find the clip to get its duration for snap calculations
-        const movingClip = tracks.flatMap((t) => t.clips).find((c) => c.id === dragState.clipId);
-        const movingDuration = movingClip?.duration ?? 0;
-
-        // Snap
-        const { snappedTime, snapPos } = computeSnap(newTime, dragState.clipId, movingDuration);
-        newTime = snappedTime;
-        setSnapLine(snapPos);
-
-        // Calculate final displacement of primary clip
-        const finalDt = newTime - dragState.originalStartTime;
-
-        if (dragState.draggedClips.length > 1) {
-          // Clear single-clip drag preview
-          setDragPreview(0, null);
-
-          // Calculate track index delta
-          const sourceTrackIdx = tracks.findIndex((t) => t.id === dragState.trackId);
-          const targetTrackIdx = tracks.findIndex((t) => t.id === targetTrackId);
-          const trackDelta = targetTrackIdx - sourceTrackIdx;
-
-          // Prepare updates for all dragged clips
-          const updates = dragState.draggedClips.map((c) => {
-            const clipNewTime = Math.max(0, c.originalStartTime + finalDt);
-            
-            // Find target track relative to this clip's original track
-            const clipTrackIdx = tracks.findIndex((t) => t.id === c.trackId);
-            const newTrackIdx = clipTrackIdx + trackDelta;
-            const originalTrack = tracks.find((t) => t.id === c.trackId);
-            const targetTrack = tracks[newTrackIdx];
-
-            // Only switch track if it's a valid track of the same type (video/audio)
-            const targetTrackIdForClip =
-              targetTrack && originalTrack && targetTrack.type === originalTrack.type
-                ? targetTrack.id
-                : c.trackId;
-
-            return {
-              clipId: c.id,
-              newStartTime: clipNewTime,
-              newTrackId: targetTrackIdForClip,
-            };
-          });
-
-          // Call moveClips in a single transaction
-          moveClips(updates);
-        } else if (dragState.draggedClips.length === 1) {
-          // Single clip drag (allows track switching)
-          setDragPreview(newTime, targetTrackId);
-          moveClip(dragState.clipId, newTime, targetTrackId);
-        }
+        dragMouseXRef.current = e.clientX;
+        dragMouseYRef.current = e.clientY;
+        updateDragPosition(e.clientX, e.clientY, scrollLeft);
       }
 
       // ─ Clip resize ──────────────────────────────────────────────────
@@ -885,6 +953,10 @@ export function Timeline() {
         setScrubTime(null);
       }
       if (dragState) {
+        const draggedIds = dragState.draggedClips?.map((c) => c.id) || [];
+        if (draggedIds.length > 0) {
+          useEditorStore.getState().resolveOverlaps(draggedIds);
+        }
         setDragState(null);
         setSnapLine(null);
         setDragPreview(0, null);
@@ -912,6 +984,8 @@ export function Timeline() {
     tracks,
     moveClip,
     moveClips,
+    updateDragPosition,
+    resolveOverlaps,
     updateClip,
     setDragPreview,
     computeSnap,

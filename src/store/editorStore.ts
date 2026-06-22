@@ -119,8 +119,9 @@ interface EditorActions {
   addClip: (clip: TimelineClip) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>) => void;
-  moveClip: (clipId: string, newStartTime: number, newTrackId?: string) => boolean;
-  moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[]) => void;
+  moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
+  moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[], resolveOverlap?: boolean) => void;
+  resolveOverlaps: (clipIds: string[]) => void;
   tryMoveClip: (clipId: string, newStartTime: number, newTrackId?: string) => { canMove: boolean; newPosition: number };
   splitClip: (clipId: string, splitTime: number) => void;
   selectClip: (clipId: string | null) => void;
@@ -254,16 +255,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Timeline Operations
   addClip: (clip) => {
-    const state = get();
-    const targetTrack = state.tracks.find((t) => t.id === clip.trackId);
-    if (targetTrack) {
-      clip.startTime = findNonOverlappingPosition(
-        targetTrack.clips,
-        clip.startTime,
-        clip.duration
-      );
-    }
-
     set((state) => {
       const newTracks = state.tracks.map((track) => {
         if (track.id === clip.trackId) {
@@ -274,6 +265,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
     });
     get().recalcTotalDuration();
+    get().resolveOverlaps([clip.id]);
     get().saveSnapshot();
   },
 
@@ -338,7 +330,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
   },
 
-  moveClip: (clipId, newStartTime, newTrackId) => {
+  moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
     const state = get();
     let foundClip: TimelineClip | undefined;
 
@@ -356,14 +348,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const targetTrackId = newTrackId || foundClip.trackId;
     const targetTrack = state.tracks.find((t) => t.id === targetTrackId);
     if (targetTrack) {
-      const otherClips = targetTrack.clips.filter((c) => c.id !== clipId);
-      const adjustedStart = findNonOverlappingPosition(
-        otherClips,
-        newStartTime,
-        foundClip.duration,
-        clipId
-      );
-      foundClip.startTime = adjustedStart;
+      if (resolveOverlap) {
+        const otherClips = targetTrack.clips.filter((c) => c.id !== clipId);
+        const adjustedStart = findNonOverlappingPosition(
+          otherClips,
+          newStartTime,
+          foundClip.duration,
+          clipId
+        );
+        foundClip.startTime = adjustedStart;
+      } else {
+        foundClip.startTime = Math.max(0, newStartTime);
+      }
     }
 
     set((state) => {
@@ -388,7 +384,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     return true;
   },
 
-  moveClips: (updates) => {
+  moveClips: (updates, resolveOverlap = false) => {
     set((state) => {
       const newTracks = state.tracks.map((track) => ({
         ...track,
@@ -417,13 +413,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const targetTrack = newTracks.find((t) => t.id === targetTrackId);
 
         if (targetTrack) {
-          const adjustedStart = findNonOverlappingPosition(
-            targetTrack.clips,
-            update.newStartTime,
-            clip.duration,
-            clip.id
-          );
-          clip.startTime = adjustedStart;
+          if (resolveOverlap) {
+            const adjustedStart = findNonOverlappingPosition(
+              targetTrack.clips,
+              update.newStartTime,
+              clip.duration,
+              clip.id
+            );
+            clip.startTime = adjustedStart;
+          } else {
+            clip.startTime = Math.max(0, update.newStartTime);
+          }
           clip.trackId = targetTrackId;
           targetTrack.clips.push(clip);
         }
@@ -431,6 +431,99 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       return { tracks: newTracks };
     });
+    get().recalcTotalDuration();
+  },
+
+  resolveOverlaps: (clipIds) => {
+    if (clipIds.length === 0) return;
+
+    set((state) => {
+      const newTracks = state.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
+      }));
+
+      const checkOverlapLocal = (
+        clips: TimelineClip[],
+        startTime: number,
+        duration: number,
+        excludeClipId: string
+      ): boolean => {
+        const endTime = startTime + duration;
+        return clips.some((clip) => {
+          if (clip.id === excludeClipId || clipIds.includes(clip.id)) return false;
+          const clipEnd = clip.startTime + clip.duration;
+          return startTime < clipEnd && endTime > clip.startTime;
+        });
+      };
+
+      for (const clipId of clipIds) {
+        let currentClip: TimelineClip | undefined;
+        let currentTrack: TimelineTrack | undefined;
+
+        for (const track of newTracks) {
+          currentClip = track.clips.find((c) => c.id === clipId);
+          if (currentClip) {
+            currentTrack = track;
+            break;
+          }
+        }
+
+        if (!currentClip || !currentTrack) continue;
+
+        const otherClipsOnTrack = currentTrack.clips.filter((c) => c.id !== clipId);
+        const hasOverlap = checkOverlapLocal(otherClipsOnTrack, currentClip.startTime, currentClip.duration, clipId);
+
+        if (hasOverlap) {
+          const sameTypeTracks = newTracks.filter((t) => t.type === currentTrack!.type);
+          let foundTrackId = '';
+
+          for (const track of sameTypeTracks) {
+            const trackClips = track.clips.filter((c) => c.id !== clipId);
+            const overlapsOnThisTrack = checkOverlapLocal(trackClips, currentClip.startTime, currentClip.duration, clipId);
+            if (!overlapsOnThisTrack) {
+              foundTrackId = track.id;
+              break;
+            }
+          }
+
+          if (foundTrackId) {
+            if (foundTrackId !== currentTrack.id) {
+              currentTrack.clips = currentTrack.clips.filter((c) => c.id !== clipId);
+              currentClip.trackId = foundTrackId;
+              const targetTrack = newTracks.find((t) => t.id === foundTrackId);
+              if (targetTrack) {
+                targetTrack.clips.push(currentClip);
+              }
+            }
+          } else {
+            const sameTypeCount = sameTypeTracks.length;
+            const newTrackId = `${currentTrack.type === 'video' ? 'v' : 'a'}${sameTypeCount + 1}`;
+            const newTrackName = newTrackId.toUpperCase();
+
+            const newTrack: TimelineTrack = {
+              id: newTrackId,
+              name: newTrackName,
+              type: currentTrack.type,
+              clips: [],
+              locked: false,
+              muted: false,
+              hidden: false,
+            };
+
+            currentTrack.clips = currentTrack.clips.filter((c) => c.id !== clipId);
+            currentClip.trackId = newTrackId;
+            newTrack.clips.push(currentClip);
+
+            const lastIdx = newTracks.map((t) => t.type).lastIndexOf(currentTrack.type);
+            newTracks.splice(lastIdx + 1, 0, newTrack);
+          }
+        }
+      }
+
+      return { tracks: newTracks };
+    });
+
     get().recalcTotalDuration();
   },
 
