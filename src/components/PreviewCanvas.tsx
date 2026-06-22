@@ -194,8 +194,7 @@ export function PreviewCanvas() {
       // ---------------------------------------------------------------
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
-        if (videoEl && videoEl.readyState >= 2) {
-          // readyState >= HAVE_CURRENT_DATA
+        if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
           // Fit the video into the canvas while preserving aspect ratio
           const vw = videoEl.videoWidth || W;
           const vh = videoEl.videoHeight || H;
