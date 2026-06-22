@@ -67,22 +67,59 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       trackMuted: boolean;
       trackType: 'video' | 'audio';
     }[] = [];
+
+    const addedClipIds = new Set<string>();
+
+    const addIfNew = (clip: any, track: any) => {
+      if (addedClipIds.has(clip.id)) return;
+      addedClipIds.add(clip.id);
+      result.push({
+        clipId: clip.id,
+        mediaId: clip.mediaId,
+        clipStart: clip.startTime,
+        clipDuration: clip.duration,
+        trimStart: clip.trimStart,
+        trackMuted: track.muted,
+        trackType: track.type,
+      });
+    };
+
     for (const track of tracks) {
       if (track.hidden) continue;
-      for (const clip of track.clips) {
-        if (
-          currentTime >= clip.startTime &&
-          currentTime < clip.startTime + clip.duration
-        ) {
-          result.push({
-            clipId: clip.id,
-            mediaId: clip.mediaId,
-            clipStart: clip.startTime,
-            clipDuration: clip.duration,
-            trimStart: clip.trimStart,
-            trackMuted: track.muted,
-            trackType: track.type,
-          });
+      
+      const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+
+      for (let idx = 0; idx < sortedClips.length; idx++) {
+        const clip = sortedClips[idx];
+
+        // 1. Check normal active state
+        const isNormallyActive =
+          currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration;
+        if (isNormallyActive) {
+          addIfNew(clip, track);
+        }
+
+        // 2. Check transition at this clip's start (if idx > 0)
+        if (idx > 0) {
+          const prevClip = sortedClips[idx - 1];
+          const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
+          if (Math.abs(gap) < 0.1 && clip.transitionIn) {
+            const duration = clip.transitionIn.duration;
+            const alignment = clip.transitionIn.params?.alignment || 'center';
+            let leftSec = clip.startTime - duration / 2;
+            if (alignment === 'left') {
+              leftSec = clip.startTime;
+            } else if (alignment === 'right') {
+              leftSec = clip.startTime - duration;
+            }
+            const rightSec = leftSec + duration;
+
+            if (currentTime >= leftSec && currentTime < rightSec) {
+              // Both clips are active in this transition zone
+              addIfNew(prevClip, track);
+              addIfNew(clip, track);
+            }
+          }
         }
       }
     }

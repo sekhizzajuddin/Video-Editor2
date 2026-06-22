@@ -26,9 +26,26 @@ export function PropertiesPanel() {
     duplicateClip,
     splitClip,
     currentTime,
+    selectedTransitionClipId,
+    updateTransition,
+    removeTransition,
   } = useEditorStore();
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+
+  // Find the selected transition
+  let selectedTransitionClip = null;
+  let selectedTransition = null;
+  if (selectedTransitionClipId) {
+    for (const track of tracks) {
+      const clip = track.clips.find((c) => c.id === selectedTransitionClipId);
+      if (clip && clip.transitionIn) {
+        selectedTransitionClip = clip;
+        selectedTransition = clip.transitionIn;
+        break;
+      }
+    }
+  }
 
   // Find the selected clip
   let selectedClip = null;
@@ -52,6 +69,108 @@ export function PropertiesPanel() {
     { id: 'speed', label: 'Speed', icon: Gauge },
     { id: 'audio', label: 'Audio', icon: Music },
   ];
+
+  if (selectedTransition && selectedTransitionClip) {
+    const alignment = selectedTransition.params?.alignment as string || 'center';
+
+    return (
+      <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
+        {/* Header */}
+        <div className="p-4 border-b border-[#3e3e3e] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-purple-600/20 text-purple-400 rounded">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Transition Settings</h3>
+              <p className="text-[11px] text-[#a0a0a0] truncate max-w-[180px]">
+                {selectedTransition.name}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => useEditorStore.getState().selectTransition(null)}
+            className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+          {/* Transition Type Info */}
+          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
+            <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider block mb-1">
+              Effect Type
+            </span>
+            <span className="text-sm text-white font-medium capitalize">
+              {selectedTransition.type}
+            </span>
+          </div>
+
+          {/* Duration Slider */}
+          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="text-xs text-white font-medium">Duration</label>
+              <span className="text-xs font-mono text-purple-300">
+                {selectedTransition.duration.toFixed(1)}s
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0.1}
+                max={5.0}
+                step={0.1}
+                value={selectedTransition.duration}
+                onChange={(e) =>
+                  updateTransition(selectedTransitionClip.id, {
+                    duration: parseFloat(e.target.value),
+                  })
+                }
+                className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
+              />
+            </div>
+            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+              <span>0.1s</span>
+              <span>5.0s</span>
+            </div>
+          </div>
+
+          {/* Alignment Selector */}
+          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <label className="text-xs text-white font-medium block">Alignment</label>
+            <div className="relative">
+              <select
+                value={alignment}
+                onChange={(e) =>
+                  updateTransition(selectedTransitionClip.id, {
+                    params: { ...selectedTransition.params, alignment: e.target.value },
+                  })
+                }
+                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+              >
+                <option value="center">Center at Cut</option>
+                <option value="left">Start at Cut</option>
+                <option value="right">End at Cut</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Delete Button */}
+          <button
+            onClick={() => removeTransition(selectedTransitionClip.id)}
+            className="w-full py-2 bg-red-600/10 hover:bg-red-600 border border-red-500/20 hover:border-red-500 text-red-400 hover:text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 mt-4"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Remove Transition
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!selectedClip) {
     return (

@@ -165,28 +165,35 @@ export function PreviewCanvas() {
 
     let anyClipDrawn = false;
 
-    for (const track of videoTracks) {
-      // Find the clip active at currentTime on this track
-      const clip = track.clips.find(
-        (c) =>
-          currentTime >= c.startTime && currentTime < c.startTime + c.duration,
-      );
-      if (!clip) continue;
-
+    // Helper to draw a single clip with custom opacity/transform multipliers
+    const drawSingleClip = (
+      clip: any,
+      opacityMultiplier: number = 1,
+      extraTransform?: { translateX?: number; translateY?: number; scale?: number }
+    ) => {
       const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
-      if (!mediaItem) continue;
-
-      // Compute the media-local time for this clip
-      const _mediaTime = currentTime - clip.startTime + clip.trimStart;
+      if (!mediaItem) return;
 
       // Set up transform
       ctx.save();
-      ctx.globalAlpha = clip.opacity;
+      ctx.globalAlpha = clip.opacity * opacityMultiplier;
 
       const cx = W / 2;
       const cy = H / 2;
-      ctx.translate(cx + clip.transform.x, cy + clip.transform.y);
-      ctx.scale(clip.transform.scale / 100, clip.transform.scale / 100);
+
+      let tx = cx;
+      let ty = cy;
+      if (extraTransform?.translateX !== undefined) tx += extraTransform.translateX;
+      if (extraTransform?.translateY !== undefined) ty += extraTransform.translateY;
+
+      ctx.translate(tx, ty);
+      ctx.translate(clip.transform.x, clip.transform.y);
+
+      let finalScale = clip.transform.scale / 100;
+      if (extraTransform?.scale !== undefined) {
+        finalScale *= extraTransform.scale;
+      }
+      ctx.scale(finalScale, finalScale);
       ctx.rotate((clip.transform.rotation * Math.PI) / 180);
 
       // ---------------------------------------------------------------
@@ -226,6 +233,74 @@ export function PreviewCanvas() {
       }
 
       ctx.restore();
+    };
+
+    for (const track of videoTracks) {
+      // Sort clips to find adjacent clips and active transition zones
+      const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+      let transitionHandled = false;
+
+      // Check if currentTime falls into any active transition zone
+      for (let idx = 1; idx < sortedClips.length; idx++) {
+        const clipB = sortedClips[idx];
+        const clipA = sortedClips[idx - 1];
+        const gap = clipB.startTime - (clipA.startTime + clipA.duration);
+
+        if (Math.abs(gap) < 0.1 && clipB.transitionIn) {
+          const trans = clipB.transitionIn;
+          const duration = trans.duration;
+          const alignment = trans.params?.alignment || 'center';
+
+          let leftSec = clipB.startTime - duration / 2;
+          if (alignment === 'left') {
+            leftSec = clipB.startTime;
+          } else if (alignment === 'right') {
+            leftSec = clipB.startTime - duration;
+          }
+          const rightSec = leftSec + duration;
+
+          if (currentTime >= leftSec && currentTime < rightSec) {
+            const t = (currentTime - leftSec) / duration;
+            const type = trans.type;
+
+            if (type === 'dissolve') {
+              drawSingleClip(clipA, 1 - t);
+              drawSingleClip(clipB, t);
+            } else if (type === 'wipe') {
+              drawSingleClip(clipA, 1);
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(0, 0, W * t, H);
+              ctx.clip();
+              drawSingleClip(clipB, 1);
+              ctx.restore();
+            } else if (type === 'slide') {
+              drawSingleClip(clipA, 1, { translateX: -W * t });
+              drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
+            } else if (type === 'zoom') {
+              drawSingleClip(clipA, 1 - t);
+              drawSingleClip(clipB, t, { scale: t });
+            } else {
+              // Fallback dissolve
+              drawSingleClip(clipA, 1 - t);
+              drawSingleClip(clipB, t);
+            }
+
+            transitionHandled = true;
+            break;
+          }
+        }
+      }
+
+      if (transitionHandled) continue;
+
+      // Find the clip active at currentTime on this track normally
+      const clip = sortedClips.find(
+        (c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration,
+      );
+      if (!clip) continue;
+
+      drawSingleClip(clip, 1);
     }
 
     // 4. Empty state

@@ -8,6 +8,7 @@ import type {
   MediaTab,
   PropertiesTab,
   EditorSnapshot,
+  Transition,
 } from '@/types';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -180,6 +181,12 @@ interface EditorActions {
 
   // Computed: recalculate total duration from all clips
   recalcTotalDuration: () => void;
+
+  // Transitions
+  setShowTransitionLayer: (show: boolean) => void;
+  selectTransition: (clipId: string | null) => void;
+  updateTransition: (clipId: string, updates: Partial<Transition>) => void;
+  removeTransition: (clipId: string) => void;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -213,6 +220,8 @@ const initialState: EditorState = {
   draggingClipId: null,
   dragPreviewTime: 0,
   dragPreviewTrackId: null,
+  showTransitionLayer: true,
+  selectedTransitionClipId: null,
 };
 
 export const useEditorStore = create<EditorState & EditorActions>((set, get) => ({
@@ -606,13 +615,64 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set({
       selectedClipId: clipId,
       selectedClipIds: clipId ? [clipId] : [],
+      selectedTransitionClipId: null,
     }),
   selectClips: (clipIds) =>
     set({
       selectedClipIds: clipIds,
       selectedClipId: clipIds[0] || null,
+      selectedTransitionClipId: null,
     }),
   selectTrack: (trackId) => set({ selectedTrackId: trackId }),
+
+  // Transitions
+  setShowTransitionLayer: (show) => set({ showTransitionLayer: show }),
+  selectTransition: (clipId) =>
+    set({
+      selectedTransitionClipId: clipId,
+      selectedClipId: null,
+      selectedClipIds: [],
+    }),
+  updateTransition: (clipId, updates) => {
+    set((state) => {
+      const newTracks = state.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) => {
+          if (clip.id === clipId && clip.transitionIn) {
+            return {
+              ...clip,
+              transitionIn: { ...clip.transitionIn, ...updates },
+            };
+          }
+          return clip;
+        }),
+      }));
+      return { tracks: newTracks };
+    });
+    get().saveSnapshot();
+  },
+  removeTransition: (clipId) => {
+    set((state) => {
+      const newTracks = state.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) => {
+          if (clip.id === clipId) {
+            return {
+              ...clip,
+              transitionIn: undefined,
+            };
+          }
+          return clip;
+        }),
+      }));
+      return {
+        tracks: newTracks,
+        selectedTransitionClipId:
+          state.selectedTransitionClipId === clipId ? null : state.selectedTransitionClipId,
+      };
+    });
+    get().saveSnapshot();
+  },
 
   // Playback
   play: () => set({ isPlaying: true }),

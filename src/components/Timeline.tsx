@@ -11,6 +11,8 @@ import {
   Film,
   GripVertical,
   Image,
+  X,
+  Sparkles,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -227,6 +229,125 @@ function WaveformOverlay({
   );
 }
 
+// ─── Transitions Sub-Component ────────────────────────────────────────────────
+
+interface TransitionTargetProps {
+  clipId: string;
+  trackId: string;
+  left: number;
+  width: number;
+  hasTransition: boolean;
+  transitionName?: string;
+  isSelected: boolean;
+  zoomLevel: number;
+}
+
+function TransitionTarget({
+  clipId,
+  trackId,
+  left,
+  width,
+  hasTransition,
+  transitionName,
+  isSelected,
+  zoomLevel,
+}: TransitionTargetProps) {
+  const { selectTransition, updateTransition, removeTransition } = useEditorStore();
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/procut-transition')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const name = e.dataTransfer.getData('application/procut-transition');
+    if (!name) return;
+
+    let type: 'dissolve' | 'wipe' | 'zoom' | 'slide' = 'dissolve';
+    if (name.toLowerCase().includes('wipe')) type = 'wipe';
+    else if (name.toLowerCase().includes('zoom')) type = 'zoom';
+    else if (name.toLowerCase().includes('slide')) type = 'slide';
+
+    const newTransition = {
+      id: Math.random().toString(36).substr(2, 9),
+      name,
+      type,
+      duration: 1.0,
+      params: { alignment: 'center' },
+    };
+
+    useEditorStore.getState().updateClip(clipId, {
+      transitionIn: newTransition,
+    });
+    useEditorStore.getState().saveSnapshot();
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    selectTransition(clipId);
+  };
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    removeTransition(clipId);
+  };
+
+  if (hasTransition) {
+    return (
+      <div
+        className={`absolute top-2 bottom-2 rounded-sm z-30 flex items-center justify-between px-1.5 cursor-pointer text-white text-[9px] font-semibold select-none border transition-all ${
+          isSelected
+            ? 'bg-purple-600 border-purple-300 ring-1 ring-purple-300 shadow-lg'
+            : 'bg-purple-700/80 border-purple-600 hover:bg-purple-600 hover:border-purple-500'
+        }`}
+        style={{ left: `${left}px`, width: `${width}px` }}
+        onClick={handleClick}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <div className="truncate flex items-center gap-1 flex-1 min-w-0">
+          <span className="truncate">{transitionName}</span>
+        </div>
+        <button
+          onClick={handleDelete}
+          className="p-0.5 hover:bg-purple-500 rounded text-purple-200 hover:text-white shrink-0 ml-1 transition-colors"
+          title="Delete Transition"
+        >
+          <X className="w-2.5 h-2.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`absolute top-1 bottom-1 z-30 transition-all rounded ${
+        isDragOver
+          ? 'bg-purple-500/40 border-2 border-dashed border-purple-400 w-12 -translate-x-4'
+          : 'bg-purple-500/5 hover:bg-purple-500/20 border border-transparent hover:border-purple-500/30'
+      }`}
+      style={{
+        left: `${left}px`,
+        width: isDragOver ? undefined : `${width}px`,
+      }}
+    />
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export function Timeline() {
@@ -257,6 +378,10 @@ export function Timeline() {
     removeTrack,
     updateClip,
     setDragPreview,
+    showTransitionLayer,
+    selectedTransitionClipId,
+    setShowTransitionLayer,
+    selectTransition,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -1173,6 +1298,21 @@ export function Timeline() {
           </button>
         </div>
 
+        <div className="w-px h-4 bg-[#3e3e3e] mx-2" />
+
+        {/* Transition Toggle */}
+        <button
+          onClick={() => setShowTransitionLayer(!showTransitionLayer)}
+          title={showTransitionLayer ? "Hide Transition Layer" : "Show Transition Layer"}
+          className={`px-2 py-0.5 text-[10px] rounded flex items-center gap-1 transition-colors ${
+            showTransitionLayer
+              ? 'bg-purple-600/30 text-purple-300 border border-purple-500/30 font-semibold'
+              : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
+          }`}
+        >
+          <Sparkles className="w-3 h-3" /> Transitions
+        </button>
+
         <div className="flex-1" />
 
         {/* Tool indicator */}
@@ -1355,6 +1495,8 @@ export function Timeline() {
                   onClick={(e) => {
                     e.stopPropagation();
                     selectTrack(track.id);
+                    selectClip(null);
+                    selectTransition(null);
                   }}
                 >
                   {/* Faint track type label */}
@@ -1526,6 +1668,53 @@ export function Timeline() {
                       </div>
                     );
                   })}
+
+                  {/* ── Transitions Layer ───────────────────────────── */}
+                  {showTransitionLayer && !track.locked && (() => {
+                    const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+                    return sortedClips.map((clip, idx) => {
+                      if (idx === 0) return null;
+                      const prevClip = sortedClips[idx - 1];
+                      const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
+                      
+                      if (Math.abs(gap) < 0.1) {
+                        const intersectionTime = clip.startTime;
+                        const hasTransition = !!clip.transitionIn;
+                        
+                        const transition = clip.transitionIn;
+                        const duration = transition?.duration ?? 1.0;
+                        const alignment = transition?.params?.alignment as 'center' | 'left' | 'right' || 'center';
+                        
+                        const widthSec = hasTransition ? duration : 0.4;
+                        const widthPx = Math.max(16, widthSec * zoomLevel);
+                        
+                        let leftSec = intersectionTime - widthSec / 2;
+                        if (alignment === 'left') {
+                          leftSec = intersectionTime;
+                        } else if (alignment === 'right') {
+                          leftSec = intersectionTime - widthSec;
+                        }
+                        const leftPx = leftSec * zoomLevel;
+                        
+                        const isSelected = selectedTransitionClipId === clip.id;
+                        
+                        return (
+                          <TransitionTarget
+                            key={`trans-${clip.id}`}
+                            clipId={clip.id}
+                            trackId={track.id}
+                            left={leftPx}
+                            width={widthPx}
+                            hasTransition={hasTransition}
+                            transitionName={transition?.name}
+                            isSelected={isSelected}
+                            zoomLevel={zoomLevel}
+                          />
+                        );
+                      }
+                      return null;
+                    });
+                  })()}
                 </div>
               ))}
 

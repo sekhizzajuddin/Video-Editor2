@@ -51,6 +51,8 @@ export interface TimelineClip {
   isPreview?: boolean;
   // Kinship tracking for split clips
   splitGroupId?: string;
+  // Transition at the beginning of the clip (blending previous clip into this one)
+  transitionIn?: Transition;
 }
 
 // Timeline Track
@@ -107,6 +109,10 @@ export interface EditorState {
   draggingClipId: string | null;
   dragPreviewTime: number;
   dragPreviewTrackId: string | null;
+
+  // Transitions UI State
+  showTransitionLayer: boolean;
+  selectedTransitionClipId: string | null;
 }
 
 export interface EditorSnapshot {
