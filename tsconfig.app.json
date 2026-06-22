@@ -12,6 +12,12 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@openreel/core": [
+        "./packages/core/src"
+      ],
+      "@openreel/core/*": [
+        "./packages/core/src/*"
       ]
     },
     /* Bundler mode */

@@ -16,6 +16,7 @@ import { useEditorStore } from '@/store/editorStore';
 
 interface MediaElement {
   el: HTMLVideoElement | HTMLAudioElement;
+  clipId: string;
   mediaId: string;
   type: 'video' | 'audio';
 }
@@ -23,32 +24,34 @@ interface MediaElement {
 /**
  * Hook that manages real playback of video/audio clips on the timeline.
  *
- * It creates a pool of hidden media elements, one per unique media item
+ * It creates a pool of hidden media elements, one per unique clip
  * currently placed on the timeline. During playback it syncs their
  * currentTime to the editor's currentTime and handles play/pause.
  *
- * Returns a Map of mediaId → HTMLVideoElement for the preview canvas
+ * Returns a Map of clipId → HTMLVideoElement for the preview canvas
  * to draw video frames from.
  */
 export function useMediaPlayback(): Map<string, HTMLVideoElement> {
   const poolRef = useRef<Map<string, MediaElement>>(new Map());
   const videoMapRef = useRef<Map<string, HTMLVideoElement>>(new Map());
-  const lastSyncedTime = useRef<number>(-1);
-  const isPlayingRef = useRef(false);
 
-  // Determine which media IDs are actively on the timeline
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
   const isPlaying = useEditorStore((s) => s.isPlaying);
   const currentTime = useEditorStore((s) => s.currentTime);
   const volume = useEditorStore((s) => s.volume);
   const isMuted = useEditorStore((s) => s.isMuted);
+  const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
 
-  isPlayingRef.current = isPlaying;
+  // Trigger a custom event on window so PreviewCanvas can redraw immediately on async frame seek
+  const triggerRedraw = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('procut-frame-updated'));
+  }, []);
 
-  // Build set of active media IDs and their clip timings
+  // Build set of active clips
   const activeClips = useCallback(() => {
     const result: {
+      clipId: string;
       mediaId: string;
       clipStart: number;
       clipDuration: number;
@@ -57,12 +60,14 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       trackType: 'video' | 'audio';
     }[] = [];
     for (const track of tracks) {
+      if (track.hidden) continue;
       for (const clip of track.clips) {
         if (
           currentTime >= clip.startTime &&
           currentTime < clip.startTime + clip.duration
         ) {
           result.push({
+            clipId: clip.id,
             mediaId: clip.mediaId,
             clipStart: clip.startTime,
             clipDuration: clip.duration,
@@ -76,12 +81,18 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     return result;
   }, [tracks, currentTime]);
 
-  // Ensure media elements exist for all timeline media
+  // Ensure media elements exist for all timeline clips
   useEffect(() => {
-    const neededMediaIds = new Set<string>();
+    const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio' }>();
     for (const track of tracks) {
       for (const clip of track.clips) {
-        neededMediaIds.add(clip.mediaId);
+        const media = mediaLibrary.find((m) => m.id === clip.mediaId);
+        if (media && media.url) {
+          neededClips.set(clip.id, {
+            mediaId: clip.mediaId,
+            type: media.type === 'video' ? 'video' : 'audio',
+          });
+        }
       }
     }
 
@@ -89,59 +100,64 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     const videoMap = videoMapRef.current;
 
     // Create missing elements
-    for (const mediaId of neededMediaIds) {
-      if (pool.has(mediaId)) continue;
+    for (const [clipId, info] of neededClips) {
+      if (pool.has(clipId)) continue;
 
-      const media = mediaLibrary.find((m) => m.id === mediaId);
+      const media = mediaLibrary.find((m) => m.id === info.mediaId);
       if (!media || !media.url) continue;
 
-      if (media.type === 'video') {
+      if (info.type === 'video') {
         const el = document.createElement('video');
         el.preload = 'auto';
-        el.muted = true; // Video elements muted; we play audio from separate audio context or elements
+        el.muted = false; // Muted = false so we can hear video audio
         el.playsInline = true;
         el.crossOrigin = 'anonymous';
         el.src = media.url;
         el.style.display = 'none';
+
+        // Add seeked and timeupdate handlers to trigger canvas redraws
+        el.addEventListener('seeked', triggerRedraw);
+        el.addEventListener('timeupdate', triggerRedraw);
+        el.addEventListener('canplay', triggerRedraw);
+
         document.body.appendChild(el);
-        pool.set(mediaId, { el, mediaId, type: 'video' });
-        videoMap.set(mediaId, el);
-      } else if (media.type === 'audio') {
+        pool.set(clipId, { el, clipId, mediaId: info.mediaId, type: 'video' });
+        videoMap.set(clipId, el);
+      } else if (info.type === 'audio') {
         const el = document.createElement('audio');
         el.preload = 'auto';
         el.src = media.url;
         el.style.display = 'none';
         document.body.appendChild(el);
-        pool.set(mediaId, { el, mediaId, type: 'audio' });
+        pool.set(clipId, { el, clipId, mediaId: info.mediaId, type: 'audio' });
       }
     }
 
     // Remove elements that are no longer on the timeline
-    for (const [mediaId, entry] of pool) {
-      if (!neededMediaIds.has(mediaId)) {
+    for (const [clipId, entry] of pool) {
+      if (!neededClips.has(clipId)) {
         entry.el.pause();
+        if (entry.type === 'video') {
+          entry.el.removeEventListener('seeked', triggerRedraw);
+          entry.el.removeEventListener('timeupdate', triggerRedraw);
+          entry.el.removeEventListener('canplay', triggerRedraw);
+        }
         entry.el.src = '';
         entry.el.remove();
-        pool.delete(mediaId);
-        videoMap.delete(mediaId);
+        pool.delete(clipId);
+        videoMap.delete(clipId);
       }
     }
-
-    return () => {
-      // Cleanup on unmount
-    };
-  }, [tracks, mediaLibrary]);
+  }, [tracks, mediaLibrary, triggerRedraw]);
 
   // Sync playback state — play / pause / seek
   useEffect(() => {
     const pool = poolRef.current;
     const clips = activeClips();
+    const playingIds = new Set(clips.map((c) => c.clipId));
 
-    // Set of media IDs that should be playing right now
-    const playingIds = new Set(clips.map((c) => c.mediaId));
-
-    for (const [mediaId, entry] of pool) {
-      const clip = clips.find((c) => c.mediaId === mediaId);
+    for (const [clipId, entry] of pool) {
+      const clip = clips.find((c) => c.clipId === clipId);
 
       if (!clip || !isPlaying) {
         // Pause this element
@@ -152,14 +168,19 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         // Calculate the media time corresponding to currentTime
         const mediaTime = currentTime - clip.clipStart + clip.trimStart;
 
-        // Update volume
-        if (entry.type === 'audio') {
-          (entry.el as HTMLAudioElement).volume = clip.trackMuted || isMuted ? 0 : volume;
+        // Update volume & mute state
+        const isMutedTrack = clip.trackMuted || isMuted;
+        entry.el.muted = isMutedTrack;
+        entry.el.volume = isMutedTrack ? 0 : volume;
+
+        // Sync playback rate
+        if (entry.el.playbackRate !== playbackSpeed) {
+          entry.el.playbackRate = playbackSpeed;
         }
 
-        // Seek if needed (if >0.3s out of sync)
+        // Seek if needed (if >0.2s out of sync)
         const drift = Math.abs(entry.el.currentTime - mediaTime);
-        if (drift > 0.3) {
+        if (drift > 0.2) {
           entry.el.currentTime = mediaTime;
         }
 
@@ -171,12 +192,12 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     }
 
     // Pause elements that aren't active
-    for (const [mediaId, entry] of pool) {
-      if (!playingIds.has(mediaId) && !entry.el.paused) {
+    for (const [clipId, entry] of pool) {
+      if (!playingIds.has(clipId) && !entry.el.paused) {
         entry.el.pause();
       }
     }
-  }, [isPlaying, currentTime, volume, isMuted, activeClips]);
+  }, [isPlaying, currentTime, volume, isMuted, playbackSpeed, activeClips]);
 
   // On seek (when not playing), update video elements for frame display
   useEffect(() => {
@@ -186,16 +207,14 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     const clips = activeClips();
 
     for (const clip of clips) {
-      const entry = pool.get(clip.mediaId);
+      const entry = pool.get(clip.clipId);
       if (!entry) continue;
 
       const mediaTime = currentTime - clip.clipStart + clip.trimStart;
-      if (Math.abs(entry.el.currentTime - mediaTime) > 0.05) {
+      if (Math.abs(entry.el.currentTime - mediaTime) > 0.03) {
         entry.el.currentTime = mediaTime;
       }
     }
-
-    lastSyncedTime.current = currentTime;
   }, [currentTime, isPlaying, activeClips]);
 
   // Cleanup all on unmount
@@ -204,13 +223,18 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       const pool = poolRef.current;
       for (const [, entry] of pool) {
         entry.el.pause();
+        if (entry.type === 'video') {
+          entry.el.removeEventListener('seeked', triggerRedraw);
+          entry.el.removeEventListener('timeupdate', triggerRedraw);
+          entry.el.removeEventListener('canplay', triggerRedraw);
+        }
         entry.el.src = '';
         entry.el.remove();
       }
       pool.clear();
       videoMapRef.current.clear();
     };
-  }, []);
+  }, [triggerRedraw]);
 
   return videoMapRef.current;
 }

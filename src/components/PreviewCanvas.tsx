@@ -83,6 +83,15 @@ export function PreviewCanvas() {
   const [imageRevision, setImageRevision] = useState(0);
   const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
 
+  // Listen to frame update events from useMediaPlayback (like seek complete)
+  useEffect(() => {
+    const handleFrameUpdate = () => {
+      requestRedraw();
+    };
+    window.addEventListener('procut-frame-updated', handleFrameUpdate);
+    return () => window.removeEventListener('procut-frame-updated', handleFrameUpdate);
+  }, [requestRedraw]);
+
   // -------------------------------------------------------------------
   // Playback loop – advance currentTime via rAF when playing
   // -------------------------------------------------------------------
@@ -175,7 +184,7 @@ export function PreviewCanvas() {
       // Draw the actual media content
       // ---------------------------------------------------------------
       if (mediaItem.type === 'video') {
-        const videoEl = videoElements.get(mediaItem.id);
+        const videoEl = videoElements.get(clip.id);
         if (videoEl && videoEl.readyState >= 2) {
           // readyState >= HAVE_CURRENT_DATA
           // Fit the video into the canvas while preserving aspect ratio
