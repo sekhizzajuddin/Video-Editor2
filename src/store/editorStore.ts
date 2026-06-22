@@ -518,6 +518,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
               locked: false,
               muted: false,
               hidden: false,
+              isDynamic: true,
             };
 
             currentTrack.clips = currentTrack.clips.filter((c) => c.id !== clipId);
@@ -915,17 +916,26 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
   },
 
-  // Recalculate total duration from all clips
+  // Recalculate total duration from all clips and clean up empty custom tracks
   recalcTotalDuration: () => {
     const { tracks } = get();
+    
+    // Filter out custom tracks that are dynamic and empty
+    const cleanedTracks = tracks.filter(
+      (t) => !(t.isDynamic && t.clips.length === 0)
+    );
+
     let maxEnd = 0;
-    for (const track of tracks) {
+    for (const track of cleanedTracks) {
       for (const clip of track.clips) {
         const end = clip.startTime + clip.duration;
         if (end > maxEnd) maxEnd = end;
       }
     }
     // Add some padding, minimum 30s
-    set({ totalDuration: Math.max(30, maxEnd + 10) });
+    set({
+      tracks: cleanedTracks,
+      totalDuration: Math.max(30, maxEnd + 10),
+    });
   },
 }));

@@ -64,6 +64,7 @@ export interface TimelineTrack {
   locked: boolean;
   muted: boolean;
   hidden: boolean;
+  isDynamic?: boolean;
 }
 
 // Editor State

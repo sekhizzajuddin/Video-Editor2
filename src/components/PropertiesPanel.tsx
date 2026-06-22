@@ -352,6 +352,7 @@ export function PropertiesPanel() {
                       min={10}
                       max={200}
                       value={selectedClip.transform.scale}
+                      title="Double-click to reset to 100%"
                       onChange={(e) =>
                         updateClip(selectedClip.id, {
                           transform: {
@@ -361,6 +362,15 @@ export function PropertiesPanel() {
                         })
                       }
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      onDoubleClick={() => {
+                        updateClip(selectedClip.id, {
+                          transform: {
+                            ...selectedClip.transform,
+                            scale: 100,
+                          },
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
@@ -392,6 +402,7 @@ export function PropertiesPanel() {
                       min={-180}
                       max={180}
                       value={selectedClip.transform.rotation}
+                      title="Double-click to reset to 0°"
                       onChange={(e) =>
                         updateClip(selectedClip.id, {
                           transform: {
@@ -401,6 +412,15 @@ export function PropertiesPanel() {
                         })
                       }
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      onDoubleClick={() => {
+                        updateClip(selectedClip.id, {
+                          transform: {
+                            ...selectedClip.transform,
+                            rotation: 0,
+                          },
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
@@ -433,12 +453,19 @@ export function PropertiesPanel() {
                       max={1}
                       step={0.01}
                       value={selectedClip.opacity}
+                      title="Double-click to reset to 100%"
                       onChange={(e) =>
                         updateClip(selectedClip.id, {
                           opacity: Number(e.target.value),
                         })
                       }
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      onDoubleClick={() => {
+                        updateClip(selectedClip.id, {
+                          opacity: 1,
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
@@ -484,6 +511,7 @@ export function PropertiesPanel() {
                   max={3}
                   step={0.25}
                   value={selectedClip.speed}
+                  title="Double-click to reset to 1.0x"
                   onChange={(e) => {
                     const newSpeed = Number(e.target.value);
                     const sourceDuration = selectedClip.duration * selectedClip.speed;
@@ -494,6 +522,16 @@ export function PropertiesPanel() {
                     });
                   }}
                   onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                  onDoubleClick={() => {
+                    const newSpeed = 1.0;
+                    const sourceDuration = selectedClip.duration * selectedClip.speed;
+                    const newDuration = sourceDuration / newSpeed;
+                    updateClip(selectedClip.id, {
+                      speed: newSpeed,
+                      duration: newDuration,
+                    });
+                    useEditorStore.getState().saveSnapshot();
+                  }}
                   className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                 />
                 <span className="text-[11px] text-white w-10 text-right">
