@@ -408,24 +408,21 @@ export function PropertiesPanel() {
 
         // Apply corrections to make every clip match the reference
         for (const analysis of clipAnalyses) {
-          // 1. Volume: match RMS loudness to the reference clip
+          // 1. Volume: gently match RMS loudness to reference (±6 dB max)
           const loudnessDiff = reference.rmsDb - analysis.rmsDb;
-          const volumeAdjust = Math.max(-12, Math.min(12, Math.round(loudnessDiff)));
+          const volumeAdjust = Math.max(-6, Math.min(6, Math.round(loudnessDiff * 0.7)));
 
-          // 2. Bass/Treble EQ: match spectral balance to the reference
+          // 2. Bass/Treble EQ: subtle spectral matching (±4 dB max)
           const spectralDiff = reference.spectralCenter - analysis.spectralCenter;
-          // Positive spectralDiff = reference is brighter, so boost treble / cut bass
-          // Negative = reference is warmer, so boost bass / cut treble
-          const bassAdjust = Math.round(Math.max(-8, Math.min(8, spectralDiff * -40)));
-          const trebleAdjust = Math.round(Math.max(-8, Math.min(8, spectralDiff * 40)));
+          const bassAdjust = Math.round(Math.max(-4, Math.min(4, spectralDiff * -20)));
+          const trebleAdjust = Math.round(Math.max(-4, Math.min(4, spectralDiff * 20)));
 
-          // 3. Formant/Character: match vocal brightness via zero-crossing rate
+          // 3. Formant/Character: gentle vocal tone matching (±25 max)
           const zcrDiff = reference.zeroCrossRate - analysis.zeroCrossRate;
-          // Map ZCR difference to formant adjustment (-100 to 100)
-          const formantAdjust = Math.round(Math.max(-60, Math.min(60, zcrDiff * 800)));
+          const formantAdjust = Math.round(Math.max(-25, Math.min(25, zcrDiff * 350)));
 
-          // 4. Pitch: nudge slightly based on ZCR difference (higher ZCR ≈ higher pitch)
-          const pitchAdjust = Math.round(Math.max(-3, Math.min(3, zcrDiff * 50)));
+          // 4. Pitch: very subtle nudge (±1 semitone max — keeps voice natural)
+          const pitchAdjust = Math.round(Math.max(-1, Math.min(1, zcrDiff * 20)));
 
           const newSettings = {
             ...analysis.currentSettings,

@@ -339,33 +339,34 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         (entry.pitchNode as any).humanize = audioSettings.humanize;
       }
 
+      // Smooth ramp time constant (seconds) — prevents pops/clicks on parameter changes
+      const rampTime = 0.08;
+      const ctxTime = entry.audioCtx?.currentTime || 0;
+
       // Update Vocal Filter (notch metallic resonance or manual formant)
       if (entry.vocalFilter) {
-        if (audioSettings.humanize) {
-          entry.vocalFilter.gain.value = -5.0;
-        } else {
-          entry.vocalFilter.gain.value = audioSettings.voiceFormant * -0.05;
-        }
+        const targetGain = audioSettings.humanize ? -5.0 : audioSettings.voiceFormant * -0.05;
+        entry.vocalFilter.gain.setTargetAtTime(targetGain, ctxTime, rampTime);
       }
 
       // Update Bass / Treble Equalizers
       if (entry.bassFilter) {
         const baseBass = audioSettings.bass + (audioSettings.humanize ? 1.5 : 0);
-        entry.bassFilter.gain.value = Math.max(-15, Math.min(15, baseBass));
+        entry.bassFilter.gain.setTargetAtTime(Math.max(-15, Math.min(15, baseBass)), ctxTime, rampTime);
       }
       if (entry.trebleFilter) {
         const baseTreble = audioSettings.treble + (audioSettings.humanize ? 1.0 : 0);
-        entry.trebleFilter.gain.value = Math.max(-15, Math.min(15, baseTreble));
+        entry.trebleFilter.gain.setTargetAtTime(Math.max(-15, Math.min(15, baseTreble)), ctxTime, rampTime);
       }
 
       // Update Stereo Panning
       if (entry.pannerNode) {
-        entry.pannerNode.pan.value = Math.max(-1, Math.min(1, audioSettings.pan / 100));
+        entry.pannerNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, audioSettings.pan / 100)), ctxTime, rampTime);
       }
 
       // Update Room Ambience feedback wet volume
       if (entry.delayGain) {
-        entry.delayGain.gain.value = audioSettings.humanize ? 0.20 : 0.0;
+        entry.delayGain.gain.setTargetAtTime(audioSettings.humanize ? 0.20 : 0.0, ctxTime, rampTime);
       }
 
       // Update volume & mute state
@@ -387,7 +388,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       const finalVolume = globalMuted ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier;
 
       if (entry.gainNode) {
-        entry.gainNode.gain.value = finalVolume;
+        entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
         // Force base element unmuted and full volume so output goes to Web Audio
         if (entry.el.volume !== 1) entry.el.volume = 1;
         if (entry.el.muted !== false) entry.el.muted = false;
@@ -467,6 +468,17 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: Cubic Hermite interpolation for artifact-free resampling
+// ---------------------------------------------------------------------------
+function cubicInterp(y0: number, y1: number, y2: number, y3: number, t: number): number {
+  const a = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+  const b = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+  const c = -0.5 * y0 + 0.5 * y2;
+  const d = y1;
+  return ((a * t + b) * t + c) * t + d;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: initialize Web Audio graph for real-time panning, pitch, humanizer, and EQ
 // ---------------------------------------------------------------------------
 function initAudioGraph(entry: MediaElement) {
@@ -477,17 +489,30 @@ function initAudioGraph(entry: MediaElement) {
     const audioCtx = new AudioContextClass() as AudioContext;
     const sourceNode = audioCtx.createMediaElementSource(entry.el);
 
-    // 1. Granular resampling pitch shifter node (Stereo)
+    // 1. Overlap-Add Hann-windowed granular pitch shifter (Stereo)
+    //    Uses two overlapping grains with 50% overlap and Hann windows
+    //    for artifact-free, smooth pitch shifting.
     const bufferSize = 4096;
     const pitchNode = audioCtx.createScriptProcessor(bufferSize, 2, 2);
     (pitchNode as any).pitch = 0;
     (pitchNode as any).humanize = false;
 
+    const grainSize = 2048; // Grain length in samples
+    const overlap = grainSize / 2; // 50% overlap
     const bufferLen = 65536;
     const writeBufL = new Float32Array(bufferLen);
     const writeBufR = new Float32Array(bufferLen);
     let writePos = 0;
-    let readPos = 0;
+    let readPosA = 0; // Grain A read head
+    let readPosB = overlap; // Grain B read head (offset by 50%)
+    let grainCounterA = 0; // Sample counter within grain A
+    let grainCounterB = overlap; // Sample counter within grain B
+
+    // Precompute Hann window
+    const hannWindow = new Float32Array(grainSize);
+    for (let i = 0; i < grainSize; i++) {
+      hannWindow[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / grainSize));
+    }
 
     pitchNode.onaudioprocess = (e) => {
       const inputL = e.inputBuffer.getChannelData(0);
@@ -500,13 +525,13 @@ function initAudioGraph(entry: MediaElement) {
 
       let jitter = 0;
       if (isHumanize) {
-        // Subtle 5.5 Hz micro-vibrato (jitter) simulating human throat variation
+        // Subtle 5.5 Hz micro-vibrato simulating human throat variation
         const time = e.playbackTime || (Date.now() / 1000);
-        jitter = Math.sin(time * 2 * Math.PI * 5.5) * 0.08;
+        jitter = Math.sin(time * 2 * Math.PI * 5.5) * 0.06;
       }
 
       const semitones = pitch + jitter;
-      if (semitones === 0) {
+      if (Math.abs(semitones) < 0.01) {
         outputL.set(inputL);
         outputR.set(inputR);
         return;
@@ -515,24 +540,53 @@ function initAudioGraph(entry: MediaElement) {
       const ratio = Math.pow(2, semitones / 12);
 
       for (let i = 0; i < inputL.length; i++) {
+        // Write input into circular buffer
         writeBufL[writePos] = inputL[i];
         writeBufR[writePos] = inputR[i];
 
-        const readInt = Math.floor(readPos);
-        const nextInt = (readInt + 1) % bufferLen;
-        const frac = readPos - readInt;
+        // Grain A: windowed read with cubic interpolation
+        const winA = hannWindow[grainCounterA % grainSize];
+        const rA = readPosA;
+        const iA0 = ((Math.floor(rA) - 1) + bufferLen) % bufferLen;
+        const iA1 = Math.floor(rA) % bufferLen;
+        const iA2 = (iA1 + 1) % bufferLen;
+        const iA3 = (iA1 + 2) % bufferLen;
+        const fA = rA - Math.floor(rA);
+        // Cubic Hermite interpolation for smooth resampling
+        const cubicL_A = cubicInterp(writeBufL[iA0], writeBufL[iA1], writeBufL[iA2], writeBufL[iA3], fA);
+        const cubicR_A = cubicInterp(writeBufR[iA0], writeBufR[iA1], writeBufR[iA2], writeBufR[iA3], fA);
 
-        // Linear interpolation resampler
-        outputL[i] = writeBufL[readInt] * (1 - frac) + writeBufL[nextInt] * frac;
-        outputR[i] = writeBufR[readInt] * (1 - frac) + writeBufR[nextInt] * frac;
+        // Grain B: windowed read with cubic interpolation
+        const winB = hannWindow[grainCounterB % grainSize];
+        const rB = readPosB;
+        const iB0 = ((Math.floor(rB) - 1) + bufferLen) % bufferLen;
+        const iB1 = Math.floor(rB) % bufferLen;
+        const iB2 = (iB1 + 1) % bufferLen;
+        const iB3 = (iB1 + 2) % bufferLen;
+        const fB = rB - Math.floor(rB);
+        const cubicL_B = cubicInterp(writeBufL[iB0], writeBufL[iB1], writeBufL[iB2], writeBufL[iB3], fB);
+        const cubicR_B = cubicInterp(writeBufR[iB0], writeBufR[iB1], writeBufR[iB2], writeBufR[iB3], fB);
+
+        // Overlap-add the two windowed grains
+        outputL[i] = cubicL_A * winA + cubicL_B * winB;
+        outputR[i] = cubicR_A * winA + cubicR_B * winB;
 
         writePos = (writePos + 1) % bufferLen;
-        readPos = (readPos + ratio) % bufferLen;
+        readPosA = (readPosA + ratio + bufferLen) % bufferLen;
+        readPosB = (readPosB + ratio + bufferLen) % bufferLen;
+        grainCounterA++;
+        grainCounterB++;
 
-        // Drift protection
-        const diff = (writePos - readPos + bufferLen) % bufferLen;
-        if (diff < bufferSize || diff > bufferSize * 4) {
-          readPos = (writePos - bufferSize * 2 + bufferLen) % bufferLen;
+        // Reset grain A when it completes a cycle
+        if (grainCounterA >= grainSize) {
+          grainCounterA = 0;
+          // Snap grain A read head near the write head to stay in sync
+          readPosA = (writePos - grainSize + bufferLen) % bufferLen;
+        }
+        // Reset grain B when it completes a cycle
+        if (grainCounterB >= grainSize) {
+          grainCounterB = 0;
+          readPosB = (writePos - grainSize + bufferLen) % bufferLen;
         }
       }
     };
