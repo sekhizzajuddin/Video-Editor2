@@ -249,6 +249,17 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     const userSeeked = Math.abs(currentTime - expectedPlaybackTime) > 0.15;
     const forceSeek = playStarted || userSeeked;
 
+    // Detect if a transition has just ended (a previously active clip became inactive while we are still playing)
+    let transitionEnded = false;
+    if (isPlaying && wasPlayingRef.current) {
+      for (const oldId of lastActiveClipIdsRef.current) {
+        if (!playingIds.has(oldId)) {
+          transitionEnded = true;
+          break;
+        }
+      }
+    }
+
     lastTimeRef.current = currentTime;
     lastRealTimeRef.current = now;
     wasPlayingRef.current = isPlaying;
@@ -279,13 +290,16 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
           speedRamp: clip.speedRamp
         }, currentTime)));
 
-        // Seek to the correct time if we just started, if the user seeked, if the clip just activated, or if we have high drift
+        // Seek to the correct time if we just started, if the user seeked, if the clip just activated, if the transition ended, or if we have high drift
         const currentMediaTime = entry.el.currentTime;
         const drift = Math.abs(currentMediaTime - mediaTime);
         const justActivated = !lastActiveClipIdsRef.current.has(clipId);
-        const clipForceSeek = forceSeek || justActivated;
+        const clipForceSeek = forceSeek || justActivated || transitionEnded;
 
-        if (clipForceSeek || drift > 0.15) {
+        // Use a tighter drift limit during transitions (multiple clips active) to keep audio phases aligned
+        const driftLimit = clips.length > 1 ? 0.05 : 0.15;
+
+        if (clipForceSeek || drift > driftLimit) {
           if (drift > 0.02) {
             if (entry.el.seeking) {
               pendingSeeksRef.current.set(clipId, mediaTime);
