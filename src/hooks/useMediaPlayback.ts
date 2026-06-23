@@ -230,7 +230,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     }
   }, [tracks, mediaLibrary, triggerRedraw]);
 
-  // Sync playback state — play / pause / seek / volume / speed
+  // Sync playback state — play / pause / seek
   useEffect(() => {
     const pool = poolRef.current;
     const clips = activeClips();
@@ -268,103 +268,6 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         const maxDuration = mediaItem ? mediaItem.duration : 10000;
         const mediaTime = Math.max(0, Math.min(maxDuration, (currentTime - clip.clipStart) * clip.speed + clip.trimStart));
 
-        // Fetch advanced audio settings
-        const targetTrack = tracks.find((t) => t.clips.some((c) => c.id === clipId));
-        const fullClip = targetTrack?.clips.find((c) => c.id === clipId);
-        const audioSettings = fullClip?.audioSettings || {
-          volume: 0,
-          pan: 0,
-          fadeIn: 0,
-          fadeOut: 0,
-          bass: 0,
-          treble: 0,
-          muted: false,
-          preservePitch: true,
-          pitch: 0,
-          voiceFormant: 0,
-          humanize: false,
-        };
-
-        // Apply Speed Preserves Pitch
-        const targetPreserve = audioSettings.preservePitch;
-        if (entry.el.preservesPitch !== targetPreserve) {
-          entry.el.preservesPitch = targetPreserve;
-        }
-
-        // Update Pitch Shifter parameters
-        if (entry.pitchNode) {
-          (entry.pitchNode as any).pitch = audioSettings.pitch;
-          (entry.pitchNode as any).humanize = audioSettings.humanize;
-        }
-
-        // Update Vocal Filter (notch metallic resonance or manual formant)
-        if (entry.vocalFilter) {
-          if (audioSettings.humanize) {
-            entry.vocalFilter.gain.value = -5.0;
-          } else {
-            entry.vocalFilter.gain.value = audioSettings.voiceFormant * -0.05;
-          }
-        }
-
-        // Update Bass / Treble Equalizers
-        if (entry.bassFilter) {
-          const baseBass = audioSettings.bass + (audioSettings.humanize ? 1.5 : 0);
-          entry.bassFilter.gain.value = Math.max(-15, Math.min(15, baseBass));
-        }
-        if (entry.trebleFilter) {
-          const baseTreble = audioSettings.treble + (audioSettings.humanize ? 1.0 : 0);
-          entry.trebleFilter.gain.value = Math.max(-15, Math.min(15, baseTreble));
-        }
-
-        // Update Stereo Panning
-        if (entry.pannerNode) {
-          entry.pannerNode.pan.value = Math.max(-1, Math.min(1, audioSettings.pan / 100));
-        }
-
-        // Update Room Ambience feedback wet volume
-        if (entry.delayGain) {
-          entry.delayGain.gain.value = audioSettings.humanize ? 0.20 : 0.0;
-        }
-
-        // Update volume & mute state
-        const isMutedTrack = clip.trackMuted || isMuted;
-        const globalMuted = isMutedTrack || audioSettings.muted;
-
-        const clipElapsed = currentTime - clip.clipStart;
-        let fadeInMultiplier = 1;
-        if (audioSettings.fadeIn > 0) {
-          fadeInMultiplier = Math.min(1, Math.max(0, clipElapsed / audioSettings.fadeIn));
-        }
-        let fadeOutMultiplier = 1;
-        if (audioSettings.fadeOut > 0) {
-          const timeLeft = clip.clipDuration - clipElapsed;
-          fadeOutMultiplier = Math.min(1, Math.max(0, timeLeft / audioSettings.fadeOut));
-        }
-
-        const linearGain = Math.pow(10, audioSettings.volume / 20);
-        const finalVolume = globalMuted ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier;
-
-        if (entry.gainNode) {
-          entry.gainNode.gain.value = finalVolume;
-          // Force base element unmuted and full volume so output goes to Web Audio
-          if (entry.el.volume !== 1) entry.el.volume = 1;
-          if (entry.el.muted !== false) entry.el.muted = false;
-        } else {
-          // Fallback to HTML5 elements directly
-          if (entry.el.muted !== globalMuted) {
-            entry.el.muted = globalMuted;
-          }
-          if (entry.el.volume !== finalVolume) {
-            entry.el.volume = finalVolume;
-          }
-        }
-
-        // Sync playback rate ONLY if changed
-        const targetSpeed = playbackSpeed * clip.speed;
-        if (entry.el.playbackRate !== targetSpeed) {
-          entry.el.playbackRate = targetSpeed;
-        }
-
         // Seek to the correct time if we just started, if the user seeked, or if we have high drift
         const currentMediaTime = entry.el.currentTime;
         const drift = Math.abs(currentMediaTime - mediaTime);
@@ -390,7 +293,121 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         entry.el.pause();
       }
     }
-  }, [isPlaying, currentTime, volume, isMuted, playbackSpeed, activeClips, mediaLibrary]);
+  }, [isPlaying, currentTime, playbackSpeed, activeClips, mediaLibrary]);
+
+  // Reactively sync audio parameters (volume, EQ, pitch, etc.) for all clips in the pool
+  useEffect(() => {
+    const pool = poolRef.current;
+    for (const [clipId, entry] of pool) {
+      // Find the clip in the tracks
+      let fullClip = null;
+      let targetTrack = null;
+      for (const track of tracks) {
+        const found = track.clips.find((c) => c.id === clipId);
+        if (found) {
+          fullClip = found;
+          targetTrack = track;
+          break;
+        }
+      }
+
+      if (!fullClip) continue;
+
+      const audioSettings = fullClip.audioSettings || {
+        volume: 0,
+        pan: 0,
+        fadeIn: 0,
+        fadeOut: 0,
+        bass: 0,
+        treble: 0,
+        muted: false,
+        preservePitch: true,
+        pitch: 0,
+        voiceFormant: 0,
+        humanize: false,
+      };
+
+      // Apply Speed Preserves Pitch
+      const targetPreserve = audioSettings.preservePitch;
+      if (entry.el.preservesPitch !== targetPreserve) {
+        entry.el.preservesPitch = targetPreserve;
+      }
+
+      // Update Pitch Shifter parameters
+      if (entry.pitchNode) {
+        (entry.pitchNode as any).pitch = audioSettings.pitch;
+        (entry.pitchNode as any).humanize = audioSettings.humanize;
+      }
+
+      // Update Vocal Filter (notch metallic resonance or manual formant)
+      if (entry.vocalFilter) {
+        if (audioSettings.humanize) {
+          entry.vocalFilter.gain.value = -5.0;
+        } else {
+          entry.vocalFilter.gain.value = audioSettings.voiceFormant * -0.05;
+        }
+      }
+
+      // Update Bass / Treble Equalizers
+      if (entry.bassFilter) {
+        const baseBass = audioSettings.bass + (audioSettings.humanize ? 1.5 : 0);
+        entry.bassFilter.gain.value = Math.max(-15, Math.min(15, baseBass));
+      }
+      if (entry.trebleFilter) {
+        const baseTreble = audioSettings.treble + (audioSettings.humanize ? 1.0 : 0);
+        entry.trebleFilter.gain.value = Math.max(-15, Math.min(15, baseTreble));
+      }
+
+      // Update Stereo Panning
+      if (entry.pannerNode) {
+        entry.pannerNode.pan.value = Math.max(-1, Math.min(1, audioSettings.pan / 100));
+      }
+
+      // Update Room Ambience feedback wet volume
+      if (entry.delayGain) {
+        entry.delayGain.gain.value = audioSettings.humanize ? 0.20 : 0.0;
+      }
+
+      // Update volume & mute state
+      const isMutedTrack = targetTrack?.muted || isMuted;
+      const globalMuted = isMutedTrack || audioSettings.muted;
+
+      const clipElapsed = currentTime - fullClip.startTime;
+      let fadeInMultiplier = 1;
+      if (audioSettings.fadeIn > 0) {
+        fadeInMultiplier = Math.min(1, Math.max(0, clipElapsed / audioSettings.fadeIn));
+      }
+      let fadeOutMultiplier = 1;
+      if (audioSettings.fadeOut > 0) {
+        const timeLeft = fullClip.duration - clipElapsed;
+        fadeOutMultiplier = Math.min(1, Math.max(0, timeLeft / audioSettings.fadeOut));
+      }
+
+      const linearGain = Math.pow(10, audioSettings.volume / 20);
+      const finalVolume = globalMuted ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier;
+
+      if (entry.gainNode) {
+        entry.gainNode.gain.value = finalVolume;
+        // Force base element unmuted and full volume so output goes to Web Audio
+        if (entry.el.volume !== 1) entry.el.volume = 1;
+        if (entry.el.muted !== false) entry.el.muted = false;
+      } else {
+        // Fallback to HTML5 elements directly
+        if (entry.el.muted !== globalMuted) {
+          entry.el.muted = globalMuted;
+        }
+        if (entry.el.volume !== finalVolume) {
+          entry.el.volume = finalVolume;
+        }
+      }
+
+      // Sync playback rate ONLY if changed
+      const targetSpeed = playbackSpeed * fullClip.speed;
+      if (entry.el.playbackRate !== targetSpeed) {
+        entry.el.playbackRate = targetSpeed;
+      }
+    }
+  }, [tracks, volume, isMuted, playbackSpeed, currentTime]);
 
   // On seek (when not playing), update video elements for frame display
   useEffect(() => {
@@ -514,7 +531,7 @@ function initAudioGraph(entry: MediaElement) {
 
         // Drift protection
         const diff = (writePos - readPos + bufferLen) % bufferLen;
-        if (diff > bufferSize * 4) {
+        if (diff < bufferSize || diff > bufferSize * 4) {
           readPos = (writePos - bufferSize * 2 + bufferLen) % bufferLen;
         }
       }
