@@ -44,6 +44,20 @@ export interface ClipColorFilters {
   vignette: number;      // -100 to 100 (White to Black border)
 }
 
+export interface ClipAudioSettings {
+  volume: number;       // -40 to 12 dB (default 0 dB)
+  pan: number;          // -100 to 100 (default 0, center)
+  fadeIn: number;       // 0 to 5 seconds (default 0)
+  fadeOut: number;      // 0 to 5 seconds (default 0)
+  bass: number;         // -15 to 15 dB (default 0)
+  treble: number;       // -15 to 15 dB (default 0)
+  muted: boolean;       // individual clip mute (default false)
+  preservePitch: boolean; // maintain pitch when speed changes (default true)
+  pitch: number;        // -12 to 12 semitones (default 0)
+  voiceFormant: number; // -100 to 100 (default 0)
+  humanize: boolean;    // one-click AI humanizer toggle (default false)
+}
+
 // Timeline Clip
 export interface TimelineClip {
   id: string;
@@ -66,6 +80,8 @@ export interface TimelineClip {
   transitionIn?: Transition;
   // Premiere Pro-style color grading filters
   colorFilters?: ClipColorFilters;
+  // Premiere Pro-style advanced audio configurations
+  audioSettings?: ClipAudioSettings;
 }
 
 // Timeline Track

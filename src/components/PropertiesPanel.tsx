@@ -9,6 +9,10 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  Sliders,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState } from 'react';
@@ -18,6 +22,7 @@ export function PropertiesPanel() {
   const {
     tracks,
     selectedClipId,
+    selectedClipIds,
     activePropertiesTab,
     setActivePropertiesTab,
     updateClip,
@@ -32,6 +37,8 @@ export function PropertiesPanel() {
   } = useEditorStore();
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
+  const [showTunedToast, setShowTunedToast] = useState(false);
 
   // Find the selected transition
   let selectedTransitionClip = null;
@@ -47,11 +54,12 @@ export function PropertiesPanel() {
     }
   }
 
-  // Find the selected clip
+  // Find the selected clip (or the first selected clip in multi-selection)
   let selectedClip = null;
   let selectedTrack = null;
+  const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
   for (const track of tracks) {
-    const clip = track.clips.find((c) => c.id === selectedClipId);
+    const clip = track.clips.find((c) => c.id === primarySelectedId);
     if (clip) {
       selectedClip = clip;
       selectedTrack = track;
@@ -238,6 +246,123 @@ export function PropertiesPanel() {
       },
     });
     useEditorStore.getState().saveSnapshot();
+  };
+
+  const defaultAudioSettings = {
+    volume: 0,
+    pan: 0,
+    fadeIn: 0,
+    fadeOut: 0,
+    bass: 0,
+    treble: 0,
+    muted: false,
+    preservePitch: true,
+    pitch: 0,
+    voiceFormant: 0,
+    humanize: false,
+  };
+
+  const clipAudio = selectedClip?.audioSettings || defaultAudioSettings;
+
+  const handleAudioChange = (key: keyof typeof defaultAudioSettings, val: any) => {
+    if (!selectedClip) return;
+    const current = selectedClip.audioSettings || defaultAudioSettings;
+    updateClip(selectedClip.id, {
+      audioSettings: {
+        ...current,
+        [key]: val,
+      },
+    });
+  };
+
+  const handleAudioReset = (key: keyof typeof defaultAudioSettings) => {
+    if (!selectedClip) return;
+    const current = selectedClip.audioSettings || defaultAudioSettings;
+    const defaultVal = defaultAudioSettings[key];
+    updateClip(selectedClip.id, {
+      audioSettings: {
+        ...current,
+        [key]: defaultVal,
+      },
+    });
+    useEditorStore.getState().saveSnapshot();
+  };
+
+  const handleAutoVoiceTune = () => {
+    if (selectedClipIds.length < 2) return;
+
+    setIsAnalyzingVoice(true);
+
+    setTimeout(() => {
+      // Find all selected clips
+      const selectedClips = tracks
+        .flatMap((t) => t.clips)
+        .filter((c) => selectedClipIds.includes(c.id));
+
+      // Gather peaks stats
+      const clipStats = selectedClips.map((clip) => {
+        const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId);
+        const peaks = media?.waveformPeaks || [];
+
+        let sum = 0;
+        let max = 0;
+        for (const p of peaks) {
+          sum += p;
+          if (p > max) max = p;
+        }
+        const avg = peaks.length > 0 ? sum / peaks.length : 0.4;
+
+        return {
+          clip,
+          avg,
+          max,
+          currentSettings: clip.audioSettings || defaultAudioSettings,
+        };
+      });
+
+      // Calculate global average loudness (average peak)
+      const globalAvgAvg = clipStats.reduce((acc, s) => acc + s.avg, 0) / clipStats.length;
+
+      // Balance each clip
+      for (const stats of clipStats) {
+        // Volume adjustment (dB): if quiet, boost volume. If loud, cut. (+/- 6dB max)
+        const diff = globalAvgAvg - stats.avg;
+        const volumeAdjust = Math.max(-6, Math.min(6, diff * 12));
+
+        // Equalizer adjustment (Muddy vs Tinny):
+        const ratio = stats.max > 0 ? stats.avg / stats.max : 0.5;
+        let bassAdjust = 0;
+        let trebleAdjust = 0;
+        if (ratio > 0.55) {
+          bassAdjust = -2;
+          trebleAdjust = 2;
+        } else if (ratio < 0.35) {
+          bassAdjust = 2;
+          trebleAdjust = -2;
+        }
+
+        // Auto pitch unification: push pitch setting towards 0 by 50%
+        const targetPitch = stats.currentSettings.pitch * 0.5;
+
+        updateClip(stats.clip.id, {
+          audioSettings: {
+            ...stats.currentSettings,
+            volume: Math.max(-40, Math.min(12, Math.round(stats.currentSettings.volume + volumeAdjust))),
+            bass: Math.max(-15, Math.min(15, stats.currentSettings.bass + bassAdjust)),
+            treble: Math.max(-15, Math.min(15, stats.currentSettings.treble + trebleAdjust)),
+            pitch: Math.max(-12, Math.min(12, Math.round(targetPitch))),
+          },
+        });
+      }
+
+      useEditorStore.getState().saveSnapshot();
+      setIsAnalyzingVoice(false);
+      setShowTunedToast(true);
+
+      setTimeout(() => {
+        setShowTunedToast(false);
+      }, 3000);
+    }, 1200);
   };
 
   return (
@@ -845,61 +970,371 @@ export function PropertiesPanel() {
 
         {activePropertiesTab === 'audio' && (
           <div className="space-y-3">
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
-              <label className="text-xs text-white font-medium block mb-2">Volume</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  defaultValue={1}
-                  className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                />
-                <span className="text-[11px] text-white w-10 text-right">100%</span>
+            {/* AI Auto Voice Tune (Visible only when multiple clips selected) */}
+            {selectedClipIds.length > 1 && (
+              <div className="bg-purple-950/20 border border-purple-500/30 rounded p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span className="text-xs text-white font-semibold">AI Auto Voice Tune</span>
+                </div>
+                <p className="text-[11px] text-[#c0a0d0]">
+                  Align and normalize {selectedClipIds.length} selected vocal profiles. Unifies volume levels and frequency balance.
+                </p>
+
+                {isAnalyzingVoice ? (
+                  <div className="flex items-center justify-center gap-1.5 py-3 bg-purple-950/40 rounded border border-purple-500/20">
+                    <div className="w-1 h-4 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <div className="w-1 h-6 bg-purple-300 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <div className="w-1 h-7 bg-pink-500 rounded-full animate-bounce" />
+                    <div className="w-1 h-6 bg-purple-300 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <div className="w-1 h-4 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="text-[10px] text-purple-200 ml-2 font-medium">Tuning vocal models...</span>
+                  </div>
+                ) : showTunedToast ? (
+                  <div className="bg-purple-900/40 border border-purple-500/30 text-purple-200 text-xs rounded py-2.5 text-center font-medium">
+                    ✓ Vocals Unified successfully!
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleAutoVoiceTune}
+                    className="w-full py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-purple-950/50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Unify Selected Voices
+                  </button>
+                )}
               </div>
+            )}
+
+            {/* Clip Volume & Pan */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('audioVolume')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>Clip Volume & Pan</span>
+                </div>
+                {collapsedSections['audioVolume'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['audioVolume'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Mute toggle */}
+                  <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
+                    <span className="text-[#d0d0d0] font-medium">Clip Audio Muted</span>
+                    <button
+                      onClick={() => handleAudioChange('muted', !clipAudio.muted)}
+                      className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                        clipAudio.muted
+                          ? 'bg-red-600 hover:bg-red-500 text-white'
+                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      {clipAudio.muted ? 'Muted' : 'Mute'}
+                    </button>
+                  </div>
+
+                  {/* Volume Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Volume Gain</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipAudio.volume > 0 ? `+${clipAudio.volume}` : clipAudio.volume} dB ({Math.round(Math.pow(10, clipAudio.volume / 20) * 100)}%)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-40}
+                        max={12}
+                        value={clipAudio.volume}
+                        onChange={(e) => handleAudioChange('volume', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('volume')}
+                        title="Double-click to reset to 0 dB"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Pan Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Pan / Balance</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipAudio.pan === 0 ? 'Center' : clipAudio.pan > 0 ? `R${clipAudio.pan}` : `L${Math.abs(clipAudio.pan)}`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-100}
+                        max={100}
+                        value={clipAudio.pan}
+                        onChange={(e) => handleAudioChange('pan', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('pan')}
+                        title="Double-click to reset to Center"
+                        className="flex-1 h-1 bg-gradient-to-r from-blue-500 via-[#3e3e3e] to-red-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
-              <label className="text-xs text-white font-medium block mb-2">Pan</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={-1}
-                  max={1}
-                  step={0.1}
-                  defaultValue={0}
-                  className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                />
-                <span className="text-[11px] text-white w-10 text-right">Center</span>
-              </div>
+
+            {/* Vocal Tune & Character */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('audioVocalTune')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Vocal Tune & Character</span>
+                </div>
+                {collapsedSections['audioVocalTune'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['audioVocalTune'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Humanize AI Voice Toggle */}
+                  <div className="flex justify-between items-center text-[11px] bg-purple-950/20 p-2 rounded border border-purple-500/20">
+                    <div>
+                      <span className="text-purple-300 font-semibold block">Humanize AI Voice</span>
+                      <span className="text-[9px] text-[#a0a0d0] block">Reduces synthetic metallic ring</span>
+                    </div>
+                    <button
+                      onClick={() => handleAudioChange('humanize', !clipAudio.humanize)}
+                      className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                        clipAudio.humanize
+                          ? 'bg-purple-600 hover:bg-purple-500 text-white'
+                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      {clipAudio.humanize ? 'Active' : 'Off'}
+                    </button>
+                  </div>
+
+                  {/* Pitch Shift Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Pitch Shift</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipAudio.pitch === 0 ? 'Original Pitch' : clipAudio.pitch > 0 ? `+${clipAudio.pitch} Semitones` : `${clipAudio.pitch} Semitones`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-12}
+                        max={12}
+                        step={1}
+                        value={clipAudio.pitch}
+                        onChange={(e) => handleAudioChange('pitch', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('pitch')}
+                        title="Double-click to reset to 0 semitones"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Formant Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Voice Formant / Tone</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipAudio.voiceFormant === 0 ? 'Default' : clipAudio.voiceFormant > 0 ? `+${clipAudio.voiceFormant}` : clipAudio.voiceFormant}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-100}
+                        max={100}
+                        value={clipAudio.voiceFormant}
+                        onChange={(e) => handleAudioChange('voiceFormant', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('voiceFormant')}
+                        title="Double-click to reset to Default"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
-              <label className="text-xs text-white font-medium block mb-2">Fade In</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0}
-                  max={5}
-                  step={0.1}
-                  defaultValue={0}
-                  className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                />
-                <span className="text-[11px] text-white w-10 text-right">0s</span>
-              </div>
+
+            {/* Audio Fades */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('audioFades')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Audio Fades</span>
+                {collapsedSections['audioFades'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['audioFades'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Fade In */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Fade In duration</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipAudio.fadeIn.toFixed(1)}s</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={5}
+                        step={0.1}
+                        value={clipAudio.fadeIn}
+                        onChange={(e) => handleAudioChange('fadeIn', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('fadeIn')}
+                        title="Double-click to reset to 0s"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Fade Out */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Fade Out duration</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipAudio.fadeOut.toFixed(1)}s</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={5}
+                        step={0.1}
+                        value={clipAudio.fadeOut}
+                        onChange={(e) => handleAudioChange('fadeOut', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('fadeOut')}
+                        title="Double-click to reset to 0s"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
-              <label className="text-xs text-white font-medium block mb-2">Fade Out</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0}
-                  max={5}
-                  step={0.1}
-                  defaultValue={0}
-                  className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                />
-                <span className="text-[11px] text-white w-10 text-right">0s</span>
-              </div>
+
+            {/* Equalizer (EQ) */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('audioEQ')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Equalizer (EQ)</span>
+                </div>
+                {collapsedSections['audioEQ'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['audioEQ'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Bass */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Bass (Low-shelf)</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipAudio.bass > 0 ? `+${clipAudio.bass}` : clipAudio.bass} dB
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-15}
+                        max={15}
+                        value={clipAudio.bass}
+                        onChange={(e) => handleAudioChange('bass', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('bass')}
+                        title="Double-click to reset to 0 dB"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Treble */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Treble (High-shelf)</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipAudio.treble > 0 ? `+${clipAudio.treble}` : clipAudio.treble} dB
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-15}
+                        max={15}
+                        value={clipAudio.treble}
+                        onChange={(e) => handleAudioChange('treble', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('treble')}
+                        title="Double-click to reset to 0 dB"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Speed Pitch Settings */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('audioSpeedPitch')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Speed Pitch Settings</span>
+                {collapsedSections['audioSpeedPitch'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['audioSpeedPitch'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
+                    <div>
+                      <span className="text-[#d0d0d0] font-medium block">Maintain Audio Pitch</span>
+                      <span className="text-[9px] text-[#a0a0a0] block">Keeps pitch stable on speed changes</span>
+                    </div>
+                    <button
+                      onClick={() => handleAudioChange('preservePitch', !clipAudio.preservePitch)}
+                      className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                        clipAudio.preservePitch
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      {clipAudio.preservePitch ? 'On' : 'Off'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
