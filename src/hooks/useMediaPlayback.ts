@@ -296,11 +296,14 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         const justActivated = !lastActiveClipIdsRef.current.has(clipId);
         const clipForceSeek = forceSeek || justActivated || transitionEnded;
 
-        // Use a tighter drift limit during transitions (multiple clips active) to keep audio phases aligned
-        const driftLimit = clips.length > 1 ? 0.05 : 0.15;
+        // Relaxed drift limit (250ms) during normal playback to avoid stuttering/seeking loops.
+        // During force-seeking (play start, user seek, first activation), we use a tighter limit (50ms).
+        const driftLimit = 0.25;
 
         if (clipForceSeek || drift > driftLimit) {
-          if (drift > 0.02) {
+          const forceSeekThreshold = 0.05; // 50ms
+          const threshold = clipForceSeek ? forceSeekThreshold : driftLimit;
+          if (drift > threshold) {
             if (entry.el.seeking) {
               pendingSeeksRef.current.set(clipId, mediaTime);
             } else {
@@ -465,6 +468,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
 
       // Calculate transition volume cross-fade multiplier
       let transitionVolumeMultiplier = 1;
+      let isTransitionMuted = false;
       
       // Check if this clip is the incoming clip in a transition
       if (fullClip.transitionIn) {
@@ -479,16 +483,42 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         const rightSec = leftSec + transDur;
         if (currentTime >= leftSec && currentTime < rightSec) {
           const t = (currentTime - leftSec) / transDur;
-          // Incoming clip fades in
-          transitionVolumeMultiplier = t;
+          
+          // Check if split clip boundary transition (same mediaId and continuous media time) to prevent double play/echo
+          let isSplitClipTransition = false;
+          if (targetTrack) {
+            const sortedClips = [...targetTrack.clips].sort((a, b) => a.startTime - b.startTime);
+            const clipIdx = sortedClips.findIndex((c) => c.id === clipId);
+            if (clipIdx > 0) {
+              const prevClip = sortedClips[clipIdx - 1];
+              if (prevClip.mediaId === fullClip.mediaId) {
+                // Verify if the media times at the boundary are continuous (e.g. difference < 0.1s)
+                const prevMediaTime = getMediaTimeForClip(prevClip, fullClip.startTime);
+                const currMediaTime = getMediaTimeForClip(fullClip, fullClip.startTime);
+                if (Math.abs(prevMediaTime - currMediaTime) < 0.1) {
+                  isSplitClipTransition = true;
+                  // Mute incoming clip until the split point (fullClip.startTime)
+                  if (currentTime < fullClip.startTime) {
+                    isTransitionMuted = true;
+                  }
+                }
+              }
+            }
+          }
+          
+          if (!isSplitClipTransition) {
+            // Incoming clip fades in for different media files
+            transitionVolumeMultiplier = t;
+          }
         }
       }
       
       // Check if this clip is the outgoing clip in a transition (by checking the next clip)
       if (targetTrack) {
-        const clipIdx = targetTrack.clips.findIndex((c) => c.id === clipId);
-        if (clipIdx !== -1 && clipIdx < targetTrack.clips.length - 1) {
-          const nextClip = targetTrack.clips[clipIdx + 1];
+        const sortedClips = [...targetTrack.clips].sort((a, b) => a.startTime - b.startTime);
+        const clipIdx = sortedClips.findIndex((c) => c.id === clipId);
+        if (clipIdx !== -1 && clipIdx < sortedClips.length - 1) {
+          const nextClip = sortedClips[clipIdx + 1];
           if (nextClip.transitionIn) {
             const transDur = nextClip.transitionIn.duration;
             const alignment = nextClip.transitionIn.params?.alignment || 'center';
@@ -501,15 +531,33 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
             const rightSec = leftSec + transDur;
             if (currentTime >= leftSec && currentTime < rightSec) {
               const t = (currentTime - leftSec) / transDur;
-              // Outgoing clip fades out
-              transitionVolumeMultiplier = 1 - t;
+              
+              // Check if split clip boundary transition (same mediaId and continuous media time) to prevent double play/echo
+              let isSplitClipTransition = false;
+              if (nextClip.mediaId === fullClip.mediaId) {
+                // Verify if the media times at the boundary are continuous (e.g. difference < 0.1s)
+                const prevMediaTime = getMediaTimeForClip(fullClip, nextClip.startTime);
+                const currMediaTime = getMediaTimeForClip(nextClip, nextClip.startTime);
+                if (Math.abs(prevMediaTime - currMediaTime) < 0.1) {
+                  isSplitClipTransition = true;
+                  // Mute outgoing clip from the split point (nextClip.startTime) onwards
+                  if (currentTime >= nextClip.startTime) {
+                    isTransitionMuted = true;
+                  }
+                }
+              }
+              
+              if (!isSplitClipTransition) {
+                // Outgoing clip fades out for different media files
+                transitionVolumeMultiplier = 1 - t;
+              }
             }
           }
         }
       }
 
       const linearGain = Math.pow(10, audioSettings.volume / 20);
-      const finalVolume = globalMuted ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
+      const finalVolume = (globalMuted || isTransitionMuted) ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
 
       if (entry.gainNode) {
         entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
