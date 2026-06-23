@@ -59,6 +59,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
   const lastTimeRef = useRef<number>(currentTime);
   const lastRealTimeRef = useRef<number>(performance.now());
   const wasPlayingRef = useRef<boolean>(isPlaying);
+  const lastActiveClipIdsRef = useRef<Set<string>>(new Set());
 
   // Queue to hold pending seek requests for video elements during scrubbing/seeking
   const pendingSeeksRef = useRef<Map<string, number>>(new Map());
@@ -278,11 +279,13 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
           speedRamp: clip.speedRamp
         }, currentTime)));
 
-        // Seek to the correct time if we just started, if the user seeked, or if we have high drift
+        // Seek to the correct time if we just started, if the user seeked, if the clip just activated, or if we have high drift
         const currentMediaTime = entry.el.currentTime;
         const drift = Math.abs(currentMediaTime - mediaTime);
+        const justActivated = !lastActiveClipIdsRef.current.has(clipId);
+        const clipForceSeek = forceSeek || justActivated;
 
-        if (forceSeek || drift > 0.35) {
+        if (clipForceSeek || drift > 0.15) {
           if (entry.el.seeking) {
             pendingSeeksRef.current.set(clipId, mediaTime);
           } else {
@@ -297,13 +300,39 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       }
     }
 
-    // Pause elements that aren't active
+    // Pause and pre-seek inactive elements to their start position (trimStart) so they play instantly and seamlessly
     for (const [clipId, entry] of pool) {
-      if (!playingIds.has(clipId) && !entry.el.paused) {
-        entry.el.pause();
+      const isActive = playingIds.has(clipId);
+      if (!isActive) {
+        if (!entry.el.paused) {
+          entry.el.pause();
+        }
+        
+        // Find the clip in tracks to get its trimStart
+        let fullClip = null;
+        for (const track of tracks) {
+          const found = track.clips.find((c) => c.id === clipId);
+          if (found) {
+            fullClip = found;
+            break;
+          }
+        }
+        if (fullClip) {
+          const targetTime = fullClip.trimStart;
+          if (Math.abs(entry.el.currentTime - targetTime) > 0.1) {
+            if (!entry.el.seeking) {
+              entry.el.currentTime = targetTime;
+            } else {
+              pendingSeeksRef.current.set(clipId, targetTime);
+            }
+          }
+        }
       }
     }
-  }, [isPlaying, currentTime, playbackSpeed, activeClips, mediaLibrary]);
+
+    // Update active clip IDs ref
+    lastActiveClipIdsRef.current = playingIds;
+  }, [isPlaying, currentTime, playbackSpeed, activeClips, mediaLibrary, tracks]);
 
   // Reactively sync audio parameters (volume, EQ, pitch, etc.) for all clips in the pool
   useEffect(() => {
