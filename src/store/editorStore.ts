@@ -198,7 +198,7 @@ const initialState: EditorState = {
   selectedTrackId: null,
   currentTime: 0,
   isPlaying: false,
-  totalDuration: 30,
+  totalDuration: 0,
   playbackSpeed: 1,
   isMuted: false,
   volume: 1,
@@ -932,10 +932,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         if (end > maxEnd) maxEnd = end;
       }
     }
-    // Add some padding, minimum 30s
+    // Set totalDuration exactly to maxEnd
     set({
       tracks: cleanedTracks,
-      totalDuration: Math.max(30, maxEnd + 10),
+      totalDuration: maxEnd,
     });
   },
 }));
