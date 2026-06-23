@@ -235,9 +235,25 @@ export function PreviewCanvas() {
       ctx.scale(finalScale, finalScale);
       ctx.rotate((clip.transform.rotation * Math.PI) / 180);
 
+      // Default filters fallback
+      const filters = clip.colorFilters || {
+        temperature: 0,
+        tint: 0,
+        exposure: 0,
+        contrast: 100,
+        saturation: 100,
+        blur: 0,
+        fadedFilm: 0,
+        vignette: 0,
+      };
+
       // ---------------------------------------------------------------
       // Draw the actual media content
       // ---------------------------------------------------------------
+      let dw = W;
+      let dh = H;
+      let hasRealMedia = false;
+
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
         if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
@@ -245,9 +261,14 @@ export function PreviewCanvas() {
           const vw = videoEl.videoWidth || W;
           const vh = videoEl.videoHeight || H;
           const scale = Math.min(W / vw, H / vh);
-          const dw = vw * scale;
-          const dh = vh * scale;
+          dw = vw * scale;
+          dh = vh * scale;
+
+          // Apply standard filters
+          ctx.filter = `brightness(${100 + filters.exposure}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) blur(${filters.blur}px)`;
           ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
+          ctx.filter = 'none';
+          hasRealMedia = true;
           anyClipDrawn = true;
         } else {
           // Video not ready yet – draw placeholder
@@ -260,15 +281,25 @@ export function PreviewCanvas() {
           const iw = img.naturalWidth || W;
           const ih = img.naturalHeight || H;
           const scale = Math.min(W / iw, H / ih);
-          const dw = iw * scale;
-          const dh = ih * scale;
+          dw = iw * scale;
+          dh = ih * scale;
+
+          // Apply standard filters
+          ctx.filter = `brightness(${100 + filters.exposure}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) blur(${filters.blur}px)`;
           ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+          ctx.filter = 'none';
+          hasRealMedia = true;
           anyClipDrawn = true;
         } else {
           // Image still loading – placeholder
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'IMAGE', '#f59e0b');
           anyClipDrawn = true;
         }
+      }
+
+      // Apply temperature, tint, faded film, and vignette overlays on top of the drawn media
+      if (hasRealMedia) {
+        applyColorOverlays(ctx, dw, dh, filters);
       }
 
       ctx.restore();
@@ -700,4 +731,75 @@ function drawMediaPlaceholder(
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.font = '10px system-ui, sans-serif';
   ctx.fillText('Loading…', 0, 28);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: apply Temperature, Tint, Faded Film, and Vignette color overlays
+// ---------------------------------------------------------------------------
+function applyColorOverlays(
+  ctx: CanvasRenderingContext2D,
+  dw: number,
+  dh: number,
+  filters: any
+) {
+  const { temperature, tint, fadedFilm, vignette } = filters;
+
+  // 1. Temperature: Cool (Cyan) to Warm (Amber/Orange)
+  if (temperature !== 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'color';
+    // Warm: amber `#ff8c00`. Cool: cyan `#00bfff`.
+    ctx.fillStyle = temperature > 0 ? '#ff8c00' : '#00bfff';
+    ctx.globalAlpha = Math.min(1, Math.max(0, Math.abs(temperature) / 400));
+    ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  }
+
+  // 2. Tint: Green to Magenta
+  if (tint !== 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'color';
+    // Positive: magenta `#ff00ff`. Negative: green `#00ff00`.
+    ctx.fillStyle = tint > 0 ? '#ff00ff' : '#00ff00';
+    ctx.globalAlpha = Math.min(1, Math.max(0, Math.abs(tint) / 400));
+    ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  }
+
+  // 3. Faded Film wash
+  if (fadedFilm > 0) {
+    ctx.save();
+    // screen composite operation with middle gray washes out shadow/black levels
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = '#808080';
+    ctx.globalAlpha = Math.min(1, Math.max(0, fadedFilm / 400));
+    ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  }
+
+  // 4. Vignette: Positive (black vignette) or Negative (white vignette)
+  if (vignette !== 0) {
+    ctx.save();
+
+    const radius = Math.sqrt(dw * dw + dh * dh) / 2;
+    const grad = ctx.createRadialGradient(0, 0, radius * 0.4, 0, 0, radius);
+
+    const isDark = vignette > 0;
+    const color = isDark ? '0,0,0' : '255,255,255';
+    const alpha = Math.min(1, Math.max(0, Math.abs(vignette) / 100));
+
+    grad.addColorStop(0, `rgba(${color}, 0)`);
+    grad.addColorStop(0.5, `rgba(${color}, ${alpha * 0.2})`);
+    grad.addColorStop(1, `rgba(${color}, ${alpha})`);
+
+    if (isDark) {
+      ctx.globalCompositeOperation = 'multiply';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  }
 }

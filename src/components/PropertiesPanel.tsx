@@ -203,6 +203,43 @@ export function PropertiesPanel() {
     );
   }
 
+  const defaultColorFilters = {
+    temperature: 0,
+    tint: 0,
+    exposure: 0,
+    contrast: 100,
+    saturation: 100,
+    blur: 0,
+    fadedFilm: 0,
+    vignette: 0,
+  };
+
+  const clipFilters = selectedClip.colorFilters || defaultColorFilters;
+
+  const handleFilterChange = (key: keyof typeof defaultColorFilters, val: number) => {
+    if (!selectedClip) return;
+    const current = selectedClip.colorFilters || defaultColorFilters;
+    updateClip(selectedClip.id, {
+      colorFilters: {
+        ...current,
+        [key]: val,
+      },
+    });
+  };
+
+  const handleFilterReset = (key: keyof typeof defaultColorFilters) => {
+    if (!selectedClip) return;
+    const current = selectedClip.colorFilters || defaultColorFilters;
+    const defaultVal = defaultColorFilters[key];
+    updateClip(selectedClip.id, {
+      colorFilters: {
+        ...current,
+        [key]: defaultVal,
+      },
+    });
+    useEditorStore.getState().saveSnapshot();
+  };
+
   return (
     <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
       {/* Tabs */}
@@ -480,23 +517,217 @@ export function PropertiesPanel() {
 
         {activePropertiesTab === 'color' && (
           <div className="space-y-3">
-            {['Brightness', 'Contrast', 'Saturation', 'Hue', 'Blur'].map((name) => (
-              <div key={name} className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
-                <label className="text-xs text-white font-medium block mb-2">{name}</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={0}
-                    max={200}
-                    defaultValue={name === 'Blur' ? 0 : 100}
-                    className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                  />
-                  <span className="text-[11px] text-white w-10 text-right">
-                    {name === 'Blur' ? '0' : '100'}
-                  </span>
+            {/* Basic Correction Section */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('colorBasic')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Basic Correction</span>
+                {collapsedSections['colorBasic'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['colorBasic'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Temperature */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Temperature</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipFilters.temperature > 0 ? `+${clipFilters.temperature}` : clipFilters.temperature}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-100}
+                        max={100}
+                        value={clipFilters.temperature}
+                        onChange={(e) => handleFilterChange('temperature', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('temperature')}
+                        title="Double-click to reset to 0"
+                        className="flex-1 h-1 bg-gradient-to-r from-blue-500 via-[#3e3e3e] to-orange-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tint */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Tint</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipFilters.tint > 0 ? `+${clipFilters.tint}` : clipFilters.tint}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-100}
+                        max={100}
+                        value={clipFilters.tint}
+                        onChange={(e) => handleFilterChange('tint', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('tint')}
+                        title="Double-click to reset to 0"
+                        className="flex-1 h-1 bg-gradient-to-r from-green-500 via-[#3e3e3e] to-pink-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Exposure */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Exposure</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipFilters.exposure > 0 ? `+${clipFilters.exposure}` : clipFilters.exposure}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-100}
+                        max={100}
+                        value={clipFilters.exposure}
+                        onChange={(e) => handleFilterChange('exposure', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('exposure')}
+                        title="Double-click to reset to 0"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Contrast */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Contrast</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipFilters.contrast}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={200}
+                        value={clipFilters.contrast}
+                        onChange={(e) => handleFilterChange('contrast', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('contrast')}
+                        title="Double-click to reset to 100%"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Saturation */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Saturation</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipFilters.saturation}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={200}
+                        value={clipFilters.saturation}
+                        onChange={(e) => handleFilterChange('saturation', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('saturation')}
+                        title="Double-click to reset to 100%"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Blur */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Blur</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipFilters.blur}px</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={20}
+                        value={clipFilters.blur}
+                        onChange={(e) => handleFilterChange('blur', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('blur')}
+                        title="Double-click to reset to 0px"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )}
+            </div>
+
+            {/* Creative Section */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('colorCreative')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Creative</span>
+                {collapsedSections['colorCreative'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['colorCreative'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Faded Film */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Faded Film</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipFilters.fadedFilm}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={clipFilters.fadedFilm}
+                        onChange={(e) => handleFilterChange('fadedFilm', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('fadedFilm')}
+                        title="Double-click to reset to 0%"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Vignette */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Vignette</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {clipFilters.vignette > 0 ? `+${clipFilters.vignette}` : clipFilters.vignette}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-100}
+                        max={100}
+                        value={clipFilters.vignette}
+                        onChange={(e) => handleFilterChange('vignette', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleFilterReset('vignette')}
+                        title="Double-click to reset to 0"
+                        className="flex-1 h-1 bg-gradient-to-r from-white via-[#3e3e3e] to-black rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

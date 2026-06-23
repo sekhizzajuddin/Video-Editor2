@@ -33,6 +33,17 @@ export interface WaveformData {
   length: number;
 }
 
+export interface ClipColorFilters {
+  temperature: number;   // -100 to 100 (Cool to Warm)
+  tint: number;          // -100 to 100 (Green to Magenta)
+  exposure: number;      // -100 to 100 (Darker to Brighter)
+  contrast: number;      // 0 to 200 (Default 100)
+  saturation: number;    // 0 to 200 (Default 100)
+  blur: number;          // 0 to 20 (Default 0)
+  fadedFilm: number;     // 0 to 100 (Default 0)
+  vignette: number;      // -100 to 100 (White to Black border)
+}
+
 // Timeline Clip
 export interface TimelineClip {
   id: string;
@@ -53,6 +64,8 @@ export interface TimelineClip {
   splitGroupId?: string;
   // Transition at the beginning of the clip (blending previous clip into this one)
   transitionIn?: Transition;
+  // Premiere Pro-style color grading filters
+  colorFilters?: ClipColorFilters;
 }
 
 // Timeline Track
