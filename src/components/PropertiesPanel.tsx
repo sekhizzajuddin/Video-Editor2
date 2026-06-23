@@ -15,8 +15,45 @@ import {
   Sliders,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { PropertiesTab } from '@/types';
+import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
+
+const PRESETS = {
+  slowMo: [
+    { position: 0.0, speed: 1.0 },
+    { position: 0.25, speed: 1.0 },
+    { position: 0.5, speed: 0.3 },
+    { position: 0.75, speed: 1.0 },
+    { position: 1.0, speed: 1.0 },
+  ],
+  speedUp: [
+    { position: 0.0, speed: 0.5 },
+    { position: 0.4, speed: 0.5 },
+    { position: 0.7, speed: 2.0 },
+    { position: 1.0, speed: 2.0 },
+  ],
+  slowDown: [
+    { position: 0.0, speed: 2.0 },
+    { position: 0.3, speed: 2.0 },
+    { position: 0.6, speed: 0.5 },
+    { position: 1.0, speed: 0.5 },
+  ],
+  flash: [
+    { position: 0.0, speed: 1.0 },
+    { position: 0.35, speed: 1.0 },
+    { position: 0.5, speed: 3.5 },
+    { position: 0.65, speed: 1.0 },
+    { position: 1.0, speed: 1.0 },
+  ],
+  cinematic: [
+    { position: 0.0, speed: 1.0 },
+    { position: 0.2, speed: 1.0 },
+    { position: 0.4, speed: 0.25 },
+    { position: 0.75, speed: 0.25 },
+    { position: 1.0, speed: 1.0 },
+  ],
+};
 
 export function PropertiesPanel() {
   const {
@@ -66,6 +103,75 @@ export function PropertiesPanel() {
       break;
     }
   }
+
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const isRamped = selectedClip ? !!(selectedClip.speedRamp && selectedClip.speedRamp.length >= 2) : false;
+
+  useEffect(() => {
+    if (draggingIndex === null || !selectedClip) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!svgRef.current) return;
+      const rect = svgRef.current.getBoundingClientRect();
+      let p = (e.clientX - rect.left) / rect.width;
+      let sY = (e.clientY - rect.top) / rect.height;
+
+      p = Math.max(0, Math.min(1, p));
+      let speed = 0.1 + (1 - sY) * 3.9;
+      speed = Math.max(0.1, Math.min(4.0, speed));
+      speed = Math.round(speed * 100) / 100;
+      p = Math.round(p * 100) / 100;
+
+      const ramp = [...(selectedClip.speedRamp || [])];
+      if (ramp[draggingIndex]) {
+        const isBoundary = draggingIndex === 0 || draggingIndex === ramp.length - 1;
+        const minP = draggingIndex > 0 ? ramp[draggingIndex - 1].position + 0.01 : 0.0;
+        const maxP = draggingIndex < ramp.length - 1 ? ramp[draggingIndex + 1].position - 0.01 : 1.0;
+
+        ramp[draggingIndex] = {
+          position: isBoundary ? (draggingIndex === 0 ? 0.0 : 1.0) : Math.max(minP, Math.min(maxP, p)),
+          speed: speed,
+        };
+        updateClip(selectedClip.id, { speedRamp: ramp });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setDraggingIndex(null);
+      useEditorStore.getState().saveSnapshot();
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingIndex, selectedClip, updateClip]);
+
+  const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    const target = e.target as SVGElement;
+    if (target.tagName === 'circle') return;
+
+    if (!svgRef.current || !selectedClip) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    let p = (e.clientX - rect.left) / rect.width;
+    let sY = (e.clientY - rect.top) / rect.height;
+
+    p = Math.max(0, Math.min(1, p));
+    let speed = 0.1 + (1 - sY) * 3.9;
+    speed = Math.max(0.1, Math.min(4.0, speed));
+    speed = Math.round(speed * 100) / 100;
+    p = Math.round(p * 100) / 100;
+
+    const ramp = [...(selectedClip.speedRamp || [])];
+    ramp.push({ position: p, speed });
+    ramp.sort((a, b) => a.position - b.position);
+
+    updateClip(selectedClip.id, { speedRamp: ramp });
+    useEditorStore.getState().saveSnapshot();
+  };
 
   const toggleSection = (section: string) => {
     setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -330,8 +436,12 @@ export function PropertiesPanel() {
 
             // Calculate the analysis window based on clip trim/duration
             const startSample = Math.floor(clip.trimStart * sampleRate);
+            const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
+            const mediaDuration = hasRamp
+              ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
+              : clip.duration * clip.speed;
             const endSample = Math.min(
-              Math.floor((clip.trimStart + clip.duration * clip.speed) * sampleRate),
+              Math.floor((clip.trimStart + mediaDuration) * sampleRate),
               rawData.length
             );
             const window = rawData.slice(startSample, endSample);
@@ -408,21 +518,21 @@ export function PropertiesPanel() {
 
         // Apply corrections to make every clip match the reference
         for (const analysis of clipAnalyses) {
-          // 1. Volume: gently match RMS loudness to reference (±6 dB max)
+          // 1. Volume: closely match RMS loudness to reference (±12 dB max)
           const loudnessDiff = reference.rmsDb - analysis.rmsDb;
-          const volumeAdjust = Math.max(-6, Math.min(6, Math.round(loudnessDiff * 0.7)));
+          const volumeAdjust = Math.max(-12, Math.min(12, Math.round(loudnessDiff * 0.95)));
 
-          // 2. Bass/Treble EQ: subtle spectral matching (±4 dB max)
+          // 2. Bass/Treble EQ: matching tone (±12 dB max)
           const spectralDiff = reference.spectralCenter - analysis.spectralCenter;
-          const bassAdjust = Math.round(Math.max(-4, Math.min(4, spectralDiff * -20)));
-          const trebleAdjust = Math.round(Math.max(-4, Math.min(4, spectralDiff * 20)));
+          const bassAdjust = Math.round(Math.max(-12, Math.min(12, spectralDiff * -45)));
+          const trebleAdjust = Math.round(Math.max(-12, Math.min(12, spectralDiff * 45)));
 
-          // 3. Formant/Character: gentle vocal tone matching (±25 max)
+          // 3. Formant/Character: voice character matching (±75 max)
           const zcrDiff = reference.zeroCrossRate - analysis.zeroCrossRate;
-          const formantAdjust = Math.round(Math.max(-25, Math.min(25, zcrDiff * 350)));
+          const formantAdjust = Math.round(Math.max(-75, Math.min(75, zcrDiff * 800)));
 
-          // 4. Pitch: very subtle nudge (±1 semitone max — keeps voice natural)
-          const pitchAdjust = Math.round(Math.max(-1, Math.min(1, zcrDiff * 20)));
+          // 4. Pitch: unify speaker fundamental pitch (±5 semitones max)
+          const pitchAdjust = Math.round(Math.max(-5, Math.min(5, zcrDiff * 75)));
 
           const newSettings = {
             ...analysis.currentSettings,
@@ -943,6 +1053,7 @@ export function PropertiesPanel() {
 
         {activePropertiesTab === 'speed' && (
           <div className="space-y-3">
+            {/* Speed range input */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
               <label className="text-xs text-white font-medium block mb-2">Speed</label>
               <div className="flex items-center gap-2">
@@ -951,8 +1062,9 @@ export function PropertiesPanel() {
                   min={0.25}
                   max={3}
                   step={0.25}
-                  value={selectedClip.speed}
-                  title="Double-click to reset to 1.0x"
+                  value={isRamped ? 1.0 : selectedClip.speed}
+                  disabled={isRamped}
+                  title={isRamped ? "Disable Speed Ramping to adjust flat speed" : "Double-click to reset to 1.0x"}
                   onChange={(e) => {
                     const newSpeed = Number(e.target.value);
                     const sourceDuration = selectedClip.duration * selectedClip.speed;
@@ -964,6 +1076,7 @@ export function PropertiesPanel() {
                   }}
                   onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                   onDoubleClick={() => {
+                    if (isRamped) return;
                     const newSpeed = 1.0;
                     const sourceDuration = selectedClip.duration * selectedClip.speed;
                     const newDuration = sourceDuration / newSpeed;
@@ -973,13 +1086,314 @@ export function PropertiesPanel() {
                     });
                     useEditorStore.getState().saveSnapshot();
                   }}
-                  className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                  className={`flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full ${
+                    isRamped
+                      ? 'bg-[#222] [&::-webkit-slider-thumb]:bg-[#444] cursor-not-allowed'
+                      : 'bg-[#3e3e3e] [&::-webkit-slider-thumb]:bg-amber-500'
+                  }`}
                 />
-                <span className="text-[11px] text-white w-10 text-right">
-                  {selectedClip.speed}x
+                <span className="text-[11px] text-white w-12 text-right select-none font-mono">
+                  {isRamped ? 'Ramped' : `${selectedClip.speed.toFixed(2)}x`}
                 </span>
               </div>
             </div>
+
+            {/* Speed Ramping Toggle & Editor */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-white font-medium">Speed Ramping</label>
+                <input
+                  type="checkbox"
+                  checked={isRamped}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      updateClip(selectedClip.id, {
+                        speedRamp: [
+                          { position: 0.0, speed: selectedClip.speed },
+                          { position: 1.0, speed: selectedClip.speed },
+                        ],
+                      });
+                    } else {
+                      updateClip(selectedClip.id, { speedRamp: undefined });
+                    }
+                    useEditorStore.getState().saveSnapshot();
+                  }}
+                  className="rounded border-[#3e3e3e] bg-[#1e1e1e] text-amber-500 focus:ring-0 cursor-pointer h-4 w-4"
+                />
+              </div>
+
+              {isRamped && (
+                <div className="space-y-3 pt-2">
+                  {/* SVG Editor */}
+                  <div className="relative bg-[#1e1e1e] border border-[#3e3e3e] rounded p-1">
+                    <svg
+                      ref={svgRef}
+                      viewBox="0 0 240 100"
+                      preserveAspectRatio="none"
+                      className="w-full h-28 cursor-crosshair select-none"
+                      onClick={handleSvgClick}
+                    >
+                      {/* Grid Lines */}
+                      {[0.5, 1.0, 2.0, 3.0, 4.0].map((s) => {
+                        const y = 100 - ((s - 0.1) / 3.9) * 90 - 5;
+                        return (
+                          <g key={s}>
+                            <line
+                              x1={0}
+                              y1={y}
+                              x2={240}
+                              y2={y}
+                              stroke={s === 1.0 ? '#555' : '#333'}
+                              strokeWidth={s === 1.0 ? 1 : 0.5}
+                              strokeDasharray={s === 1.0 ? '' : '3 3'}
+                            />
+                            <text
+                              x={4}
+                              y={y - 2}
+                              fill="#666"
+                              fontSize="6"
+                              className="pointer-events-none select-none font-mono"
+                            >
+                              {s}x
+                            </text>
+                          </g>
+                        );
+                      })}
+
+                      {/* Slow-mo zone shading */}
+                      <rect
+                        x={0}
+                        y={100 - ((1.0 - 0.1) / 3.9) * 90 - 5}
+                        width={240}
+                        height={((1.0 - 0.1) / 3.9) * 90}
+                        fill="rgba(59, 130, 246, 0.03)"
+                        className="pointer-events-none"
+                      />
+
+                      {/* Fast zone shading */}
+                      <rect
+                        x={0}
+                        y={5}
+                        width={240}
+                        height={100 - ((1.0 - 0.1) / 3.9) * 90 - 10}
+                        fill="rgba(239, 68, 68, 0.03)"
+                        className="pointer-events-none"
+                      />
+
+                      {/* The Spline Curve */}
+                      <path
+                        d={(() => {
+                          const pts: string[] = [];
+                          const ramp = selectedClip.speedRamp || [];
+                          for (let x = 0; x <= 240; x += 4) {
+                            const p = x / 240;
+                            const speed = getSpeedAtPosition(ramp, p);
+                            const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
+                            pts.push(`${x},${y}`);
+                          }
+                          return `M ${pts.join(' L ')}`;
+                        })()}
+                        stroke="#f59e0b"
+                        strokeWidth={2}
+                        fill="none"
+                        className="pointer-events-none"
+                      />
+
+                      {/* Playhead Indicator */}
+                      {(() => {
+                        const isPlayheadInClip =
+                          currentTime >= selectedClip.startTime &&
+                          currentTime <= selectedClip.startTime + selectedClip.duration;
+                        if (!isPlayheadInClip) return null;
+                        const p = (currentTime - selectedClip.startTime) / selectedClip.duration;
+                        const x = p * 240;
+                        const speed = getSpeedAtPosition(selectedClip.speedRamp, p);
+                        const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
+                        return (
+                          <g>
+                            <line
+                              x1={x}
+                              y1={0}
+                              x2={x}
+                              y2={100}
+                              stroke="#ec4899"
+                              strokeWidth={1.5}
+                              strokeDasharray="2 2"
+                              className="pointer-events-none"
+                            />
+                            <circle
+                              cx={x}
+                              cy={y}
+                              r={4}
+                              fill="#ec4899"
+                              className="pointer-events-none"
+                            />
+                          </g>
+                        );
+                      })()}
+
+                      {/* Keyframe Draggable Handles */}
+                      {(selectedClip.speedRamp || []).map((kf, idx) => {
+                        const x = kf.position * 240;
+                        const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
+                        const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
+                        return (
+                          <circle
+                            key={idx}
+                            cx={x}
+                            cy={y}
+                            r={draggingIndex === idx ? 5 : 3.5}
+                            fill={draggingIndex === idx ? '#ec4899' : '#f59e0b'}
+                            stroke="#fff"
+                            strokeWidth={1}
+                            className="cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setDraggingIndex(idx);
+                            }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              if (isBoundary) return;
+                              const ramp = [...(selectedClip.speedRamp || [])];
+                              if (ramp.length > 2) {
+                                ramp.splice(idx, 1);
+                                updateClip(selectedClip.id, { speedRamp: ramp });
+                                useEditorStore.getState().saveSnapshot();
+                              }
+                            }}
+                          >
+                            <title>
+                              {isBoundary ? "Drag vertically to adjust speed" : "Drag to adjust position & speed. Double-click to delete."}
+                            </title>
+                          </circle>
+                        );
+                      })}
+                    </svg>
+                  </div>
+                  <div className="text-[10px] text-[#888] flex justify-between px-1 select-none">
+                    <span>Double-click graph to add. Double-click keyframe to delete.</span>
+                  </div>
+
+                  {/* Preset Buttons */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-[#a0a0a0] block font-medium">Speed Ramp Presets</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {[
+                        { id: 'slowMo', label: 'Slow-Mo' },
+                        { id: 'speedUp', label: 'Speed Up' },
+                        { id: 'slowDown', label: 'Slow Down' },
+                        { id: 'flash', label: 'Flash' },
+                        { id: 'cinematic', label: 'Cinematic' },
+                      ].map((preset) => (
+                        <button
+                          key={preset.id}
+                          onClick={() => {
+                            const ramp = PRESETS[preset.id as keyof typeof PRESETS];
+                            updateClip(selectedClip.id, { speedRamp: ramp });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#333] border border-[#3e3e3e] rounded text-[10px] text-white transition-colors text-center truncate focus:outline-none"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => {
+                          updateClip(selectedClip.id, {
+                            speedRamp: [
+                              { position: 0.0, speed: 1.0 },
+                              { position: 1.0, speed: 1.0 },
+                            ],
+                          });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-red-950/40 hover:border-red-900 border border-[#3e3e3e] rounded text-[10px] text-[#ff6b6b] transition-colors text-center focus:outline-none"
+                      >
+                        Reset Ramp
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Keyframe List Details */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-[#a0a0a0] block font-medium">Keyframes</label>
+                    <div className="space-y-1 max-h-28 overflow-y-auto pr-1 custom-scrollbar">
+                      {(selectedClip.speedRamp || []).map((kf, idx) => {
+                        const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
+                        return (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between bg-[#1e1e1e] border border-[#3e3e3e] rounded px-2 py-0.5 text-[10px]"
+                          >
+                            <span className="text-amber-500 font-mono">#{idx + 1}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[#888]">Pos:</span>
+                              {isBoundary ? (
+                                <span className="text-white font-mono w-10 text-center">{idx === 0 ? '0%' : '100%'}</span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0.01}
+                                  max={0.99}
+                                  step={0.01}
+                                  value={kf.position}
+                                  onChange={(e) => {
+                                    const val = Math.max(0.01, Math.min(0.99, Number(e.target.value)));
+                                    const ramp = [...(selectedClip.speedRamp || [])];
+                                    const minP = idx > 0 ? ramp[idx - 1].position + 0.01 : 0.0;
+                                    const maxP = idx < ramp.length - 1 ? ramp[idx + 1].position - 0.01 : 1.0;
+                                    ramp[idx] = {
+                                      ...kf,
+                                      position: Math.max(minP, Math.min(maxP, val)),
+                                    };
+                                    updateClip(selectedClip.id, { speedRamp: ramp });
+                                  }}
+                                  onBlur={() => useEditorStore.getState().saveSnapshot()}
+                                  className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
+                                />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[#888]">Speed:</span>
+                              <input
+                                  type="number"
+                                  min={0.1}
+                                  max={4.0}
+                                  step={0.1}
+                                  value={kf.speed}
+                                  onChange={(e) => {
+                                    const val = Math.max(0.1, Math.min(4.0, Number(e.target.value)));
+                                    const ramp = [...(selectedClip.speedRamp || [])];
+                                    ramp[idx] = { ...kf, speed: val };
+                                    updateClip(selectedClip.id, { speedRamp: ramp });
+                                  }}
+                                  onBlur={() => useEditorStore.getState().saveSnapshot()}
+                                  className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
+                                />
+                            </div>
+                            <button
+                              disabled={isBoundary}
+                              onClick={() => {
+                                const ramp = [...(selectedClip.speedRamp || [])];
+                                ramp.splice(idx, 1);
+                                updateClip(selectedClip.id, { speedRamp: ramp });
+                                useEditorStore.getState().saveSnapshot();
+                              }}
+                              className="text-red-400 hover:text-red-500 disabled:opacity-30 disabled:pointer-events-none transition-colors focus:outline-none"
+                              title="Delete Keyframe"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Clip Timeline Settings */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -1003,11 +1417,13 @@ export function PropertiesPanel() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
-                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
               </div>
             </div>
+
+            {/* Trimming */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -1026,7 +1442,7 @@ export function PropertiesPanel() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
-                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
                 <div>
@@ -1045,7 +1461,7 @@ export function PropertiesPanel() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
-                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
               </div>

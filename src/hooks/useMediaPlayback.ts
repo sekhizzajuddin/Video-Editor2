@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 
 interface MediaElement {
   el: HTMLVideoElement | HTMLAudioElement;
@@ -78,6 +79,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       trackMuted: boolean;
       trackType: 'video' | 'audio';
       speed: number;
+      speedRamp?: any[];
     }[] = [];
 
     const addedClipIds = new Set<string>();
@@ -94,6 +96,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         trackMuted: track.muted,
         trackType: track.type,
         speed: clip.speed,
+        speedRamp: clip.speedRamp,
       });
     };
 
@@ -266,7 +269,14 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         // Calculate the media time corresponding to currentTime
         const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
         const maxDuration = mediaItem ? mediaItem.duration : 10000;
-        const mediaTime = Math.max(0, Math.min(maxDuration, (currentTime - clip.clipStart) * clip.speed + clip.trimStart));
+        const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+          id: clip.clipId,
+          startTime: clip.clipStart,
+          duration: clip.clipDuration,
+          trimStart: clip.trimStart,
+          speed: clip.speed,
+          speedRamp: clip.speedRamp
+        }, currentTime)));
 
         // Seek to the correct time if we just started, if the user seeked, or if we have high drift
         const currentMediaTime = entry.el.currentTime;
@@ -403,8 +413,13 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       }
 
       // Sync playback rate ONLY if changed
-      const targetSpeed = playbackSpeed * fullClip.speed;
-      if (entry.el.playbackRate !== targetSpeed) {
+      let effectiveSpeed = fullClip.speed;
+      if (fullClip.speedRamp && fullClip.speedRamp.length >= 2) {
+        const p = (currentTime - fullClip.startTime) / fullClip.duration;
+        effectiveSpeed = getSpeedAtPosition(fullClip.speedRamp, p);
+      }
+      const targetSpeed = playbackSpeed * effectiveSpeed;
+      if (Math.abs(entry.el.playbackRate - targetSpeed) > 0.001) {
         entry.el.playbackRate = targetSpeed;
       }
     }
@@ -424,7 +439,14 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       const el = entry.el as HTMLVideoElement;
       const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
       const maxDuration = mediaItem ? mediaItem.duration : 10000;
-      const mediaTime = Math.max(0, Math.min(maxDuration, (currentTime - clip.clipStart) * clip.speed + clip.trimStart));
+      const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+        id: clip.clipId,
+        startTime: clip.clipStart,
+        duration: clip.clipDuration,
+        trimStart: clip.trimStart,
+        speed: clip.speed,
+        speedRamp: clip.speedRamp
+      }, currentTime)));
 
       if (el.seeking) {
         // Coalesce seeks: store the latest target time to seek to once the current seek finishes
@@ -497,7 +519,7 @@ function initAudioGraph(entry: MediaElement) {
     (pitchNode as any).pitch = 0;
     (pitchNode as any).humanize = false;
 
-    const grainSize = 2048; // Grain length in samples
+    const grainSize = 1024; // Grain length in samples (reduced from 2048 for smooth vocal pitch)
     const overlap = grainSize / 2; // 50% overlap
     const bufferLen = 65536;
     const writeBufL = new Float32Array(bufferLen);
@@ -581,12 +603,16 @@ function initAudioGraph(entry: MediaElement) {
         if (grainCounterA >= grainSize) {
           grainCounterA = 0;
           // Snap grain A read head near the write head to stay in sync
-          readPosA = (writePos - grainSize + bufferLen) % bufferLen;
+          // Add a tiny random jitter (up to ±4ms / 180 samples) to break up periodic phase cancellation
+          const jitterSamples = Math.floor((Math.random() - 0.5) * 180);
+          readPosA = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
         }
         // Reset grain B when it completes a cycle
         if (grainCounterB >= grainSize) {
           grainCounterB = 0;
-          readPosB = (writePos - grainSize + bufferLen) % bufferLen;
+          // Add a tiny random jitter (up to ±4ms / 180 samples) to break up periodic phase cancellation
+          const jitterSamples = Math.floor((Math.random() - 0.5) * 180);
+          readPosB = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
         }
       }
     };

@@ -58,6 +58,11 @@ export interface ClipAudioSettings {
   humanize: boolean;    // one-click AI humanizer toggle (default false)
 }
 
+export interface SpeedRampKeyframe {
+  position: number; // 0 to 1 (normalized within clip duration)
+  speed: number;    // 0.1 to 4.0
+}
+
 // Timeline Clip
 export interface TimelineClip {
   id: string;
@@ -70,6 +75,7 @@ export interface TimelineClip {
   transform: ClipTransform;
   opacity: number;      // 0-1
   speed: number;        // playback speed multiplier
+  speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes (overrides flat speed)
   // Effects
   effects: string[];
   // For drag preview

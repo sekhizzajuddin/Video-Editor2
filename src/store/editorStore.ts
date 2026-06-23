@@ -10,6 +10,8 @@ import type {
   EditorSnapshot,
   Transition,
 } from '@/types';
+import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
+
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -587,13 +589,75 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         leftClipId = generateId();
         const rightClipId = generateId();
 
+        // Remap speed ramp keyframes for each half when a ramp exists
+        let leftSpeedRamp = clip.speedRamp;
+        let rightSpeedRamp = clip.speedRamp;
+        const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
+
+        if (hasRamp) {
+          const splitP = relativeSplitTime / clip.duration; // normalized split position
+
+          // Compute the interpolated speed at the split point for boundary keyframes
+          // Simple linear interpolation between the two surrounding keyframes
+          const sorted = [...clip.speedRamp!].sort((a, b) => a.position - b.position);
+          let splitSpeed = sorted[0].speed;
+          for (let si = 0; si < sorted.length - 1; si++) {
+            if (splitP >= sorted[si].position && splitP <= sorted[si + 1].position) {
+              const range = sorted[si + 1].position - sorted[si].position;
+              const t = range > 0.0001 ? (splitP - sorted[si].position) / range : 0;
+              splitSpeed = sorted[si].speed + t * (sorted[si + 1].speed - sorted[si].speed);
+              break;
+            }
+          }
+
+          // Left half: keyframes in [0, splitP] rescaled to [0, 1], plus a boundary at 1.0
+          const leftKeys = sorted
+            .filter((kf) => kf.position < splitP)
+            .map((kf) => ({
+              position: splitP > 0.0001 ? kf.position / splitP : 0,
+              speed: kf.speed,
+            }));
+          // Ensure position 0 exists
+          if (leftKeys.length === 0 || leftKeys[0].position > 0.001) {
+            leftKeys.unshift({ position: 0, speed: sorted[0].speed });
+          }
+          leftKeys.push({ position: 1.0, speed: splitSpeed });
+          leftSpeedRamp = leftKeys;
+
+          // Right half: keyframes in [splitP, 1] rescaled to [0, 1], plus a boundary at 0.0
+          const rightRange = 1.0 - splitP;
+          const rightKeys = sorted
+            .filter((kf) => kf.position > splitP)
+            .map((kf) => ({
+              position: rightRange > 0.0001 ? (kf.position - splitP) / rightRange : 1,
+              speed: kf.speed,
+            }));
+          rightKeys.unshift({ position: 0, speed: splitSpeed });
+          // Ensure position 1 exists
+          if (rightKeys.length < 2 || rightKeys[rightKeys.length - 1].position < 0.999) {
+            rightKeys.push({ position: 1.0, speed: sorted[sorted.length - 1].speed });
+          }
+          rightSpeedRamp = rightKeys;
+        }
+
+        const splitMediaTime = hasRamp
+          ? getMediaTimeForClip(clip, splitTime)
+          : clip.trimStart + relativeSplitTime * clip.speed;
+
+        const originalMediaDuration = hasRamp
+          ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
+          : clip.duration * clip.speed;
+
         const leftClip: TimelineClip = {
           ...clip,
           id: leftClipId,
           splitGroupId: groupId,
           duration: relativeSplitTime,
-          trimEnd: clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
+          trimEnd: hasRamp
+            ? clip.trimEnd + (originalMediaDuration - (splitMediaTime - clip.trimStart))
+            : clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
           effects: [...clip.effects],
+          speedRamp: leftSpeedRamp,
         };
 
         const rightClip: TimelineClip = {
@@ -602,9 +666,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           splitGroupId: groupId,
           startTime: splitTime,
           duration: clip.duration - relativeSplitTime,
-          trimStart: clip.trimStart + relativeSplitTime * clip.speed,
+          trimStart: splitMediaTime,
           effects: [...clip.effects],
           transitionIn: undefined, // Clear transition on the second half of the split
+          speedRamp: rightSpeedRamp,
         };
 
         const newClips = [...track.clips];
