@@ -286,10 +286,12 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         const clipForceSeek = forceSeek || justActivated;
 
         if (clipForceSeek || drift > 0.15) {
-          if (entry.el.seeking) {
-            pendingSeeksRef.current.set(clipId, mediaTime);
-          } else {
-            entry.el.currentTime = mediaTime;
+          if (drift > 0.02) {
+            if (entry.el.seeking) {
+              pendingSeeksRef.current.set(clipId, mediaTime);
+            } else {
+              entry.el.currentTime = mediaTime;
+            }
           }
         }
 
@@ -300,7 +302,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       }
     }
 
-    // Pause and pre-seek inactive elements to their start position (trimStart) so they play instantly and seamlessly
+    // Pause and pre-seek inactive elements to their start position (trimStart or transition start) so they play instantly and seamlessly
     for (const [clipId, entry] of pool) {
       const isActive = playingIds.has(clipId);
       if (!isActive) {
@@ -308,7 +310,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
           entry.el.pause();
         }
         
-        // Find the clip in tracks to get its trimStart
+        // Find the clip in tracks to get its trimStart or transition entry start time
         let fullClip = null;
         for (const track of tracks) {
           const found = track.clips.find((c) => c.id === clipId);
@@ -318,7 +320,31 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
           }
         }
         if (fullClip) {
-          const targetTime = fullClip.trimStart;
+          let targetTime = fullClip.trimStart;
+          if (fullClip.transitionIn) {
+            const transDur = fullClip.transitionIn.duration;
+            const alignment = fullClip.transitionIn.params?.alignment || 'center';
+            let offset = 0;
+            if (alignment === 'center') {
+              offset = transDur / 2;
+            } else if (alignment === 'right') {
+              offset = transDur;
+            }
+            
+            const startTimelineTime = fullClip.startTime - offset;
+            const mediaItem = mediaLibrary.find((m) => m.id === fullClip.mediaId);
+            const maxDuration = mediaItem ? mediaItem.duration : 10000;
+            
+            targetTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+              id: fullClip.id,
+              startTime: fullClip.startTime,
+              duration: fullClip.duration,
+              trimStart: fullClip.trimStart,
+              speed: fullClip.speed,
+              speedRamp: fullClip.speedRamp
+            }, startTimelineTime)));
+          }
+
           if (Math.abs(entry.el.currentTime - targetTime) > 0.1) {
             if (!entry.el.seeking) {
               entry.el.currentTime = targetTime;
@@ -423,8 +449,53 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         fadeOutMultiplier = Math.min(1, Math.max(0, timeLeft / audioSettings.fadeOut));
       }
 
+      // Calculate transition volume cross-fade multiplier
+      let transitionVolumeMultiplier = 1;
+      
+      // Check if this clip is the incoming clip in a transition
+      if (fullClip.transitionIn) {
+        const transDur = fullClip.transitionIn.duration;
+        const alignment = fullClip.transitionIn.params?.alignment || 'center';
+        let leftSec = fullClip.startTime - transDur / 2;
+        if (alignment === 'left') {
+          leftSec = fullClip.startTime;
+        } else if (alignment === 'right') {
+          leftSec = fullClip.startTime - transDur;
+        }
+        const rightSec = leftSec + transDur;
+        if (currentTime >= leftSec && currentTime < rightSec) {
+          const t = (currentTime - leftSec) / transDur;
+          // Incoming clip fades in
+          transitionVolumeMultiplier = t;
+        }
+      }
+      
+      // Check if this clip is the outgoing clip in a transition (by checking the next clip)
+      if (targetTrack) {
+        const clipIdx = targetTrack.clips.findIndex((c) => c.id === clipId);
+        if (clipIdx !== -1 && clipIdx < targetTrack.clips.length - 1) {
+          const nextClip = targetTrack.clips[clipIdx + 1];
+          if (nextClip.transitionIn) {
+            const transDur = nextClip.transitionIn.duration;
+            const alignment = nextClip.transitionIn.params?.alignment || 'center';
+            let leftSec = nextClip.startTime - transDur / 2;
+            if (alignment === 'left') {
+              leftSec = nextClip.startTime;
+            } else if (alignment === 'right') {
+              leftSec = nextClip.startTime - transDur;
+            }
+            const rightSec = leftSec + transDur;
+            if (currentTime >= leftSec && currentTime < rightSec) {
+              const t = (currentTime - leftSec) / transDur;
+              // Outgoing clip fades out
+              transitionVolumeMultiplier = 1 - t;
+            }
+          }
+        }
+      }
+
       const linearGain = Math.pow(10, audioSettings.volume / 20);
-      const finalVolume = globalMuted ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier;
+      const finalVolume = globalMuted ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
 
       if (entry.gainNode) {
         entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
