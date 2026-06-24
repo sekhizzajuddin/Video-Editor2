@@ -249,17 +249,6 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     const userSeeked = Math.abs(currentTime - expectedPlaybackTime) > 0.15;
     const forceSeek = playStarted || userSeeked;
 
-    // Detect if a transition has just ended (a previously active clip became inactive while we are still playing)
-    let transitionEnded = false;
-    if (isPlaying && wasPlayingRef.current) {
-      for (const oldId of lastActiveClipIdsRef.current) {
-        if (!playingIds.has(oldId)) {
-          transitionEnded = true;
-          break;
-        }
-      }
-    }
-
     lastTimeRef.current = currentTime;
     lastRealTimeRef.current = now;
     wasPlayingRef.current = isPlaying;
@@ -290,11 +279,11 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
           speedRamp: clip.speedRamp
         }, currentTime)));
 
-        // Seek to the correct time if we just started, if the user seeked, if the clip just activated, if the transition ended, or if we have high drift
+        // Seek to the correct time if we just started, if the user seeked, if the clip just activated, or if we have high drift
         const currentMediaTime = entry.el.currentTime;
         const drift = Math.abs(currentMediaTime - mediaTime);
         const justActivated = !lastActiveClipIdsRef.current.has(clipId);
-        const clipForceSeek = forceSeek || justActivated || transitionEnded;
+        const clipForceSeek = forceSeek || justActivated;
 
         // Relaxed drift limit (250ms) during normal playback to avoid stuttering/seeking loops.
         // During force-seeking (play start, user seek, first activation), we use a tighter limit (50ms).
@@ -580,12 +569,39 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         const p = (currentTime - fullClip.startTime) / fullClip.duration;
         effectiveSpeed = getSpeedAtPosition(fullClip.speedRamp, p);
       }
-      const targetSpeed = playbackSpeed * effectiveSpeed;
-      if (Math.abs(entry.el.playbackRate - targetSpeed) > 0.001) {
+
+      // Gentle sync catchup (PLL): if we are drifting but under the force-seek limit,
+      // adjust playback speed slightly to catch up to the timeline seamlessly.
+      const mediaItem = mediaLibrary.find((m) => m.id === fullClip.mediaId);
+      const maxDuration = mediaItem ? mediaItem.duration : 10000;
+      const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+        id: fullClip.id,
+        startTime: fullClip.startTime,
+        duration: fullClip.duration,
+        trimStart: fullClip.trimStart,
+        speed: fullClip.speed,
+        speedRamp: fullClip.speedRamp
+      }, currentTime)));
+
+      const currentMediaTime = entry.el.currentTime;
+      const rawDrift = currentMediaTime - mediaTime; // > 0 means video is ahead of timeline
+      
+      let syncCatchup = 0;
+      if (!entry.el.seeking && isPlaying) {
+        if (Math.abs(rawDrift) > 0.02 && Math.abs(rawDrift) < 0.25) {
+          // Speed up if behind (rawDrift < 0), slow down if ahead (rawDrift > 0)
+          // 2.0 is the proportional gain. E.g., 100ms drift = 20% speed change
+          syncCatchup = -rawDrift * 2.0; 
+          syncCatchup = Math.max(-0.15, Math.min(0.15, syncCatchup)); // max +/- 15% correction
+        }
+      }
+
+      const targetSpeed = Math.max(0.1, playbackSpeed * effectiveSpeed * (1 + syncCatchup));
+      if (Math.abs(entry.el.playbackRate - targetSpeed) > 0.005) {
         entry.el.playbackRate = targetSpeed;
       }
     }
-  }, [tracks, volume, isMuted, playbackSpeed, currentTime]);
+  }, [tracks, volume, isMuted, playbackSpeed, currentTime, isPlaying, mediaLibrary]);
 
   // On seek (when not playing), update video elements for frame display
   useEffect(() => {
