@@ -538,6 +538,8 @@ export function Timeline() {
     selectedTransitionClipId,
     setShowTransitionLayer,
     selectTransition,
+    selectedKeyframeLines,
+    toggleKeyframeLineSelection,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -1914,20 +1916,38 @@ export function Timeline() {
                         {/* ── Master Keyframes ────────────────────────── */}
                         {keyframeTimes.length > 0 && (
                           <div className="absolute top-0 left-0 right-0 h-0 z-40 pointer-events-none">
-                            {/* Connecting Line */}
-                            {keyframeTimes.length > 1 && (
-                              <div
-                                className="absolute h-[2px] bg-red-500/80 -top-[1px]"
-                                style={{
-                                  left: `${keyframeTimes[0] * zoomLevel}px`,
-                                  width: `${(keyframeTimes[keyframeTimes.length - 1] - keyframeTimes[0]) * zoomLevel}px`
-                                }}
-                              />
-                            )}
+                            {/* Connecting Lines */}
+                            {keyframeTimes.length > 1 && keyframeTimes.slice(0, -1).map((t, i) => {
+                              const kf = clipAnims.find(k => Math.abs(k.time - t) < 0.05);
+                              if (kf?.holdNext) return null;
+                              
+                              const nextT = keyframeTimes[i + 1];
+                              const width = (nextT - t) * zoomLevel;
+                              
+                              const isSelected = selectedKeyframeLines.some(l => l.clipId === clip.id && l.time === t);
+                              
+                              return (
+                                <div
+                                  key={`line-${t}`}
+                                  className={`absolute h-[2px] -top-[1px] pointer-events-auto cursor-pointer hover:h-[4px] hover:-top-[2px] transition-all ${isSelected ? 'bg-white h-[4px] -top-[2px] z-10 shadow-[0_0_8px_rgba(255,255,255,0.8)]' : 'bg-red-500/80 hover:bg-red-400'}`}
+                                  title="Click to select connection"
+                                  style={{
+                                    left: `${t * zoomLevel}px`,
+                                    width: `${width}px`
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleKeyframeLineSelection(clip.id, t, e.ctrlKey || e.metaKey);
+                                  }}
+                                />
+                              );
+                            })}
                             
                             {/* Keyframe Points */}
                             {keyframeTimes.map((t, i) => {
-                              const isStartEnd = i === 0 || i === keyframeTimes.length - 1;
+                              const kf = clipAnims.find(k => Math.abs(k.time - t) < 0.05);
+                              const prevKf = i > 0 ? clipAnims.find(k => Math.abs(k.time - keyframeTimes[i - 1]) < 0.05) : null;
+                              const isStartEnd = i === 0 || i === keyframeTimes.length - 1 || kf?.holdNext || prevKf?.holdNext;
                               return (
                                 <div
                                   key={t}

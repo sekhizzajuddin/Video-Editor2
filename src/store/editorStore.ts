@@ -127,7 +127,7 @@ interface EditorActions {
   resolveOverlaps: (clipIds: string[]) => void;
   tryMoveClip: (clipId: string, newStartTime: number, newTrackId?: string) => { canMove: boolean; newPosition: number };
   splitClip: (clipId: string, splitTime: number) => void;
-  selectClip: (clipId: string | null) => void;
+  selectClip: (clipId: string | null, multi?: boolean) => void;
   selectClips: (clipIds: string[]) => void;
   selectTrack: (trackId: string | null) => void;
 
@@ -182,6 +182,9 @@ interface EditorActions {
   addMasterKeyframe: (clipId: string, time: number, values: { transform: any, crop: any }) => void;
   deleteMasterKeyframe: (clipId: string, time: number) => void;
   moveMasterKeyframe: (clipId: string, oldTime: number, newTime: number) => void;
+  breakMasterKeyframeLink: (clipId: string, time: number) => void;
+  toggleKeyframeLineSelection: (clipId: string, time: number, multi: boolean) => void;
+  removeSelectedKeyframeLines: () => void;
 
   // Drag/Drop
   setDraggingClipId: (id: string | null) => void;
@@ -206,7 +209,8 @@ const initialState: EditorState = {
   tracks: defaultTracks,
   selectedClipId: null,
   selectedClipIds: [],
-  selectedTrackId: null,
+  selectedTransitionClipId: null,
+  selectedKeyframeLines: [],
   currentTime: 0,
   isPlaying: false,
   totalDuration: 0,
@@ -704,11 +708,27 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot();
   },
 
-  selectClip: (clipId) =>
-    set({
-      selectedClipId: clipId,
-      selectedClipIds: clipId ? [clipId] : [],
-      selectedTransitionClipId: null,
+  selectClip: (id, multi = false) =>
+    set((state) => {
+      if (!multi) {
+        return {
+          selectedClipId: id,
+          selectedClipIds: id ? [id] : [],
+          selectedTransitionClipId: null,
+          selectedKeyframeLines: [],
+        };
+      }
+
+      const isSelected = state.selectedClipIds.includes(id);
+      const newIds = isSelected
+        ? state.selectedClipIds.filter((cid) => cid !== id)
+        : [...state.selectedClipIds, id];
+
+      return {
+        selectedClipId: newIds.length > 0 ? newIds[0] : null,
+        selectedClipIds: newIds,
+        selectedTransitionClipId: null,
+      };
     }),
   selectClips: (clipIds) =>
     set({
@@ -963,6 +983,71 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks: newTracks };
     });
   },
+
+  breakMasterKeyframeLink: (clipId, time) => {
+    set((state) => {
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => {
+          if (c.id !== clipId || !c.animations) return c;
+          const anims: any = { ...c.animations };
+          Object.keys(anims).forEach(k => {
+            if (anims[k]) {
+              const newTrack = [...anims[k]];
+              const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - time) < 0.05);
+              if (idx >= 0) {
+                newTrack[idx] = { ...newTrack[idx], holdNext: true };
+                anims[k] = newTrack;
+              }
+            }
+          });
+          return { ...c, animations: anims };
+        })
+      }));
+      return { tracks: newTracks };
+    });
+  },
+
+  toggleKeyframeLineSelection: (clipId, time, multi) => set((state) => {
+    const isSelected = state.selectedKeyframeLines.some(l => l.clipId === clipId && l.time === time);
+    if (multi) {
+      if (isSelected) {
+        return { selectedKeyframeLines: state.selectedKeyframeLines.filter(l => !(l.clipId === clipId && l.time === time)) };
+      } else {
+        return { selectedKeyframeLines: [...state.selectedKeyframeLines, { clipId, time }] };
+      }
+    } else {
+      return { selectedKeyframeLines: [{ clipId, time }] };
+    }
+  }),
+
+  removeSelectedKeyframeLines: () => set((state) => {
+    if (state.selectedKeyframeLines.length === 0) return state;
+    const newTracks = state.tracks.map((t) => ({
+      ...t,
+      clips: t.clips.map((c) => {
+        const linesForClip = state.selectedKeyframeLines.filter(l => l.clipId === c.id);
+        if (linesForClip.length === 0 || !c.animations) return c;
+        const anims: any = { ...c.animations };
+        Object.keys(anims).forEach(k => {
+          if (anims[k]) {
+            const newTrack = [...anims[k]];
+            let changed = false;
+            linesForClip.forEach(line => {
+              const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - line.time) < 0.05);
+              if (idx >= 0) {
+                newTrack[idx] = { ...newTrack[idx], holdNext: true };
+                changed = true;
+              }
+            });
+            if (changed) anims[k] = newTrack;
+          }
+        });
+        return { ...c, animations: anims };
+      })
+    }));
+    return { tracks: newTracks, selectedKeyframeLines: [] };
+  }),
 
   // Clipboard
   copyClip: () => {

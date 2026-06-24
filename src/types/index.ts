@@ -72,8 +72,10 @@ export interface SpeedRampKeyframe {
 }
 
 export interface PropertyKeyframe {
-  time: number; // absolute seconds from start of clip
+  time: number;
   value: number;
+  easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+  holdNext?: boolean;
 }
 
 export interface ClipAnimations {

@@ -29,6 +29,9 @@ export function getAnimatedValue(
     const k1 = keyframes[i];
     const k2 = keyframes[i + 1];
     if (localTime >= k1.time && localTime < k2.time) {
+      if (k1.holdNext) {
+        return k1.value;
+      }
       const t = (localTime - k1.time) / (k2.time - k1.time);
       return k1.value + (k2.value - k1.value) * t;
     }

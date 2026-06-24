@@ -30,6 +30,7 @@ function App() {
     selectClips,
     selectedTransitionClipId,
     removeTransition,
+    removeSelectedKeyframeLines,
   } = useEditorStore();
 
   const [leftWidth, setLeftWidth] = useState(250);
@@ -86,7 +87,11 @@ function App() {
           break;
         case 'delete':
         case 'backspace':
-          if (selectedClipId) {
+          const storeState = useEditorStore.getState();
+          if (storeState.selectedKeyframeLines.length > 0) {
+            e.preventDefault();
+            removeSelectedKeyframeLines();
+          } else if (selectedClipId) {
             e.preventDefault();
             removeClip(selectedClipId);
           } else if (selectedTransitionClipId) {
