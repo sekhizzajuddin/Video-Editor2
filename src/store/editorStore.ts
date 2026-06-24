@@ -162,6 +162,7 @@ interface EditorActions {
   setActivePropertiesTab: (tab: PropertiesTab) => void;
   setShowExportModal: (show: boolean) => void;
   setShowSettingsModal: (show: boolean) => void;
+  setCanvasTransformMode: (mode: 'resize' | 'crop') => void;
 
   // Clipboard
   copyClip: () => void;
@@ -211,6 +212,7 @@ const initialState: EditorState = {
   showSettingsModal: false,
   activeMediaTab: 'project',
   activePropertiesTab: 'transform',
+  canvasTransformMode: 'resize',
   clipboardClip: null,
   history: [
     {
@@ -866,6 +868,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setActivePropertiesTab: (tab) => set({ activePropertiesTab: tab }),
   setShowExportModal: (show) => set({ showExportModal: show }),
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
+  setCanvasTransformMode: (mode) => set({ canvasTransformMode: mode }),
 
   // Clipboard
   copyClip: () => {

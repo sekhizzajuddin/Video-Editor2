@@ -9,6 +9,7 @@ import {
   Settings2,
   Film,
   RotateCcw,
+  Scissors,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
@@ -70,6 +71,9 @@ export function PreviewCanvas() {
     playbackSpeed,
     setPlaybackSpeed,
     mediaLibrary,
+    updateClip,
+    canvasTransformMode,
+    setCanvasTransformMode,
   } = useEditorStore();
 
   const hasClips = tracks.some((t) => t.clips.length > 0);
@@ -254,6 +258,11 @@ export function PreviewCanvas() {
       let dh = H;
       let hasRealMedia = false;
 
+      const cTop = (clip.crop?.top || 0) / 100;
+      const cBot = (clip.crop?.bottom || 0) / 100;
+      const cLeft = (clip.crop?.left || 0) / 100;
+      const cRight = (clip.crop?.right || 0) / 100;
+
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
         if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
@@ -261,12 +270,23 @@ export function PreviewCanvas() {
           const vw = videoEl.videoWidth || W;
           const vh = videoEl.videoHeight || H;
           const scale = Math.min(W / vw, H / vh);
-          dw = vw * scale;
-          dh = vh * scale;
+          
+          const baseDw = vw * scale;
+          const baseDh = vh * scale;
+
+          const sx = vw * cLeft;
+          const sy = vh * cTop;
+          const sw = vw * (1 - cLeft - cRight);
+          const sh = vh * (1 - cTop - cBot);
+
+          dw = baseDw * (1 - cLeft - cRight);
+          dh = baseDh * (1 - cTop - cBot);
+          const dx = -baseDw / 2 + baseDw * cLeft;
+          const dy = -baseDh / 2 + baseDh * cTop;
 
           // Apply standard filters
           ctx.filter = `brightness(${100 + filters.exposure}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) blur(${filters.blur}px)`;
-          ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
+          ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, dw, dh);
           ctx.filter = 'none';
           hasRealMedia = true;
           anyClipDrawn = true;
@@ -281,12 +301,23 @@ export function PreviewCanvas() {
           const iw = img.naturalWidth || W;
           const ih = img.naturalHeight || H;
           const scale = Math.min(W / iw, H / ih);
-          dw = iw * scale;
-          dh = ih * scale;
+          
+          const baseDw = iw * scale;
+          const baseDh = ih * scale;
+
+          const sx = iw * cLeft;
+          const sy = ih * cTop;
+          const sw = iw * (1 - cLeft - cRight);
+          const sh = ih * (1 - cTop - cBot);
+
+          dw = baseDw * (1 - cLeft - cRight);
+          dh = baseDh * (1 - cTop - cBot);
+          const dx = -baseDw / 2 + baseDw * cLeft;
+          const dy = -baseDh / 2 + baseDh * cTop;
 
           // Apply standard filters
           ctx.filter = `brightness(${100 + filters.exposure}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) blur(${filters.blur}px)`;
-          ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+          ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
           ctx.filter = 'none';
           hasRealMedia = true;
           anyClipDrawn = true;
@@ -537,6 +568,7 @@ export function PreviewCanvas() {
           className="max-w-full max-h-full border border-[#3e3e3e] cursor-pointer"
           style={{ aspectRatio: '16/9' }}
         />
+        <InteractiveCanvasOverlay />
 
         {/* Overlay: fullscreen + settings (top-left) */}
         <div className="absolute top-3 left-3 flex gap-2">
@@ -802,4 +834,254 @@ function applyColorOverlays(
     ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
     ctx.restore();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Interactive Canvas Overlay Component
+// ---------------------------------------------------------------------------
+function InteractiveCanvasOverlay() {
+  const {
+    tracks,
+    selectedClipId,
+    currentTime,
+    mediaLibrary,
+    updateClip,
+    canvasTransformMode,
+    setCanvasTransformMode,
+  } = useEditorStore();
+  const videoElements = useMediaPlayback();
+
+  const [dragState, setDragState] = useState<{
+    type: string;
+    startX: number;
+    startY: number;
+    initTransform: any;
+    initCrop: any;
+  } | null>(null);
+
+  let activeClip = null;
+  let mediaItem = null;
+
+  if (selectedClipId) {
+    for (const track of tracks) {
+      if (track.hidden || track.type !== 'video') continue;
+      const clip = track.clips.find((c) => c.id === selectedClipId);
+      if (clip && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+        activeClip = clip;
+        mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+        break;
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!dragState || !activeClip) return;
+    const handleMove = (e: MouseEvent) => {
+      const container = document.getElementById('preview-canvas-wrapper');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const scaleX = 854 / rect.width;
+      const scaleY = 480 / rect.height;
+
+      const dx = (e.clientX - dragState.startX) * scaleX;
+      const dy = (e.clientY - dragState.startY) * scaleY;
+
+      let { x, y, scale, rotation } = dragState.initTransform;
+      const crop = { ...dragState.initCrop };
+
+      const W = 854;
+      const H = 480;
+      let vw = W;
+      let vh = H;
+      if (mediaItem?.type === 'video') {
+        const v = videoElements.get(activeClip.id);
+        if (v && v.videoWidth > 0) {
+          vw = v.videoWidth;
+          vh = v.videoHeight;
+        }
+      } else if (mediaItem?.type === 'image') {
+        const img = getCachedImage(mediaItem.id, mediaItem.url, () => {});
+        if (img && img.naturalWidth > 0) {
+          vw = img.naturalWidth;
+          vh = img.naturalHeight;
+        }
+      }
+      const scaleToFit = Math.min(W / vw, H / vh);
+      const baseW = vw * scaleToFit;
+      const baseH = vh * scaleToFit;
+
+      if (dragState.type === 'move') {
+        x += dx;
+        y += dy;
+      } else if (dragState.type.startsWith('crop-')) {
+        const theta = (-rotation * Math.PI) / 180;
+        const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (scale / 100);
+        const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) / (scale / 100);
+
+        if (dragState.type === 'crop-l') {
+          crop.left = Math.max(0, Math.min(100 - crop.right - 1, crop.left + (localDx / baseW) * 100));
+        } else if (dragState.type === 'crop-r') {
+          crop.right = Math.max(0, Math.min(100 - crop.left - 1, crop.right - (localDx / baseW) * 100));
+        } else if (dragState.type === 'crop-t') {
+          crop.top = Math.max(0, Math.min(100 - crop.bottom - 1, crop.top + (localDy / baseH) * 100));
+        } else if (dragState.type === 'crop-b') {
+          crop.bottom = Math.max(0, Math.min(100 - crop.top - 1, crop.bottom - (localDy / baseH) * 100));
+        }
+      } else if (dragState.type === 'rot') {
+        const cx = 427 + x;
+        const cy = 240 + y;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+        let angle = Math.atan2(my - cy, mx - cx) * (180 / Math.PI);
+        angle += 90;
+        rotation = Math.round(angle);
+      } else {
+        const cx = 427 + x;
+        const cy = 240 + y;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+        const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
+        
+        const wSpan = baseW * (1 - (crop.left + crop.right) / 100) / 2;
+        const hSpan = baseH * (1 - (crop.top + crop.bottom) / 100) / 2;
+        
+        const origDist = Math.sqrt(wSpan ** 2 + hSpan ** 2) * (dragState.initTransform.scale / 100);
+        const scaleDelta = dist / origDist;
+        scale = dragState.initTransform.scale * scaleDelta;
+        scale = Math.max(10, Math.min(1000, Math.round(scale)));
+      }
+
+      updateClip(activeClip.id, { transform: { x, y, scale, rotation }, crop });
+    };
+
+    const handleUp = () => {
+      setDragState(null);
+      useEditorStore.getState().saveSnapshot();
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [dragState, activeClip, updateClip, mediaItem, videoElements]);
+
+  if (!activeClip || !mediaItem) return null;
+
+  const W = 854;
+  const H = 480;
+  let vw = W;
+  let vh = H;
+  if (mediaItem.type === 'video') {
+    const v = videoElements.get(activeClip.id);
+    if (v && v.videoWidth > 0) {
+      vw = v.videoWidth;
+      vh = v.videoHeight;
+    }
+  } else if (mediaItem.type === 'image') {
+    const img = getCachedImage(mediaItem.id, mediaItem.url, () => {});
+    if (img && img.naturalWidth > 0) {
+      vw = img.naturalWidth;
+      vh = img.naturalHeight;
+    }
+  }
+
+  const scaleToFit = Math.min(W / vw, H / vh);
+  const baseW = vw * scaleToFit;
+  const baseH = vh * scaleToFit;
+
+  const { x, y, scale, rotation } = activeClip.transform;
+  const crop = activeClip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+
+  const startDrag = (e: React.MouseEvent, type: string) => {
+    e.stopPropagation();
+    setDragState({
+      type,
+      startX: e.clientX,
+      startY: e.clientY,
+      initTransform: activeClip.transform,
+      initCrop: crop,
+    });
+  };
+
+  const scaleMult = scale / 100;
+  const cropLeftPix = baseW * (crop.left / 100);
+  const cropTopPix = baseH * (crop.top / 100);
+  const cropRightPix = baseW * (crop.right / 100);
+  const cropBottomPix = baseH * (crop.bottom / 100);
+  
+  const drawW = baseW - cropLeftPix - cropRightPix;
+  const drawH = baseH - cropTopPix - cropBottomPix;
+  const drawX = 427 - baseW / 2 + cropLeftPix;
+  const drawY = 240 - baseH / 2 + cropTopPix;
+
+  return (
+    <>
+      <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper">
+        <svg viewBox="0 0 854 480" className="w-full h-full overflow-visible">
+          <g
+            style={{
+              transformOrigin: '427px 240px',
+              transform: `translate(${x}px, ${y}px) scale(${scaleMult}) rotate(${rotation}deg)`,
+            }}
+          >
+            <rect
+              x={drawX}
+              y={drawY}
+              width={drawW}
+              height={drawH}
+              fill="transparent"
+              stroke="#f59e0b"
+              strokeWidth={1.5 / scaleMult}
+              className="pointer-events-auto cursor-move"
+              onMouseDown={(e) => startDrag(e, 'move')}
+            />
+
+            {canvasTransformMode === 'resize' && (
+              <>
+                <circle cx={drawX} cy={drawY} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nwse-resize" onMouseDown={(e) => startDrag(e, 'tl')} />
+                <circle cx={drawX + drawW} cy={drawY} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nesw-resize" onMouseDown={(e) => startDrag(e, 'tr')} />
+                <circle cx={drawX} cy={drawY + drawH} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nesw-resize" onMouseDown={(e) => startDrag(e, 'bl')} />
+                <circle cx={drawX + drawW} cy={drawY + drawH} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nwse-resize" onMouseDown={(e) => startDrag(e, 'br')} />
+                
+                <line x1={427} y1={drawY} x2={427} y2={drawY - 30 / scaleMult} stroke="#f59e0b" strokeWidth={1.5 / scaleMult} />
+                <circle cx={427} cy={drawY - 30 / scaleMult} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-crosshair" onMouseDown={(e) => startDrag(e, 'rot')} />
+              </>
+            )}
+
+            {canvasTransformMode === 'crop' && (
+              <>
+                <rect x={drawX - 5 / scaleMult} y={drawY + drawH/2 - 15/scaleMult} width={10 / scaleMult} height={30 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ew-resize" onMouseDown={(e) => startDrag(e, 'crop-l')} />
+                <rect x={drawX + drawW - 5 / scaleMult} y={drawY + drawH/2 - 15/scaleMult} width={10 / scaleMult} height={30 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ew-resize" onMouseDown={(e) => startDrag(e, 'crop-r')} />
+                <rect x={drawX + drawW/2 - 15/scaleMult} y={drawY - 5 / scaleMult} width={30 / scaleMult} height={10 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ns-resize" onMouseDown={(e) => startDrag(e, 'crop-t')} />
+                <rect x={drawX + drawW/2 - 15/scaleMult} y={drawY + drawH - 5 / scaleMult} width={30 / scaleMult} height={10 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ns-resize" onMouseDown={(e) => startDrag(e, 'crop-b')} />
+              </>
+            )}
+          </g>
+        </svg>
+      </div>
+
+      <div className="absolute top-4 right-4 bg-[#252525] border border-[#3e3e3e] rounded flex overflow-hidden shadow-lg pointer-events-auto z-10">
+        <button
+          className={`p-2 transition-colors ${
+            canvasTransformMode === 'resize' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+          }`}
+          onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('resize'); }}
+          title="Transform Mode"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
+        <button
+          className={`p-2 transition-colors ${
+            canvasTransformMode === 'crop' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+          }`}
+          onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('crop'); }}
+          title="Crop Mode"
+        >
+          <Scissors className="w-4 h-4" />
+        </button>
+      </div>
+    </>
+  );
 }

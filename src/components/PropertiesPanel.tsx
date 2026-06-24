@@ -832,6 +832,58 @@ export function PropertiesPanel() {
                 </div>
               )}
             </div>
+
+            {/* Crop */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('crop')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Crop</span>
+                {collapsedSections['crop'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['crop'] && (
+                <div className="px-2.5 pb-2.5 space-y-3 mt-1">
+                  {['left', 'right', 'top', 'bottom'].map((edge) => {
+                    const currentCrop = selectedClip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+                    const value = currentCrop[edge as keyof typeof currentCrop];
+                    return (
+                      <div key={edge} className="space-y-1">
+                        <div className="flex justify-between">
+                          <label className="text-[10px] text-[#a0a0a0] capitalize">{edge}</label>
+                          <span className="text-[10px] text-white">{value}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={0.1}
+                          value={value}
+                          title={`Double-click to reset ${edge} crop to 0%`}
+                          onChange={(e) =>
+                            updateClip(selectedClip.id, {
+                              crop: { ...currentCrop, [edge]: Number(e.target.value) },
+                            })
+                          }
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onDoubleClick={() => {
+                            updateClip(selectedClip.id, {
+                              crop: { ...currentCrop, [edge]: 0 },
+                            });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

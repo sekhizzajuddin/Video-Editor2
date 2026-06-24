@@ -27,6 +27,14 @@ export interface ClipTransform {
   rotation: number;
 }
 
+// Crop bounds for clips (percentages 0-100)
+export interface ClipCrop {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
 // Waveform data for timeline visualization
 export interface WaveformData {
   peaks: number[];
@@ -73,6 +81,7 @@ export interface TimelineClip {
   trimStart: number;    // seconds trimmed from beginning of source
   trimEnd: number;      // seconds trimmed from end of source
   transform: ClipTransform;
+  crop?: ClipCrop;      // crop bounding box in percentages (0-100)
   opacity: number;      // 0-1
   speed: number;        // playback speed multiplier
   speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes (overrides flat speed)
@@ -133,6 +142,9 @@ export interface EditorState {
   showSettingsModal: boolean;
   activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects';
   activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio';
+
+  // Canvas Mode
+  canvasTransformMode: 'resize' | 'crop';
 
   // Clipboard
   clipboardClip: TimelineClip | null;
