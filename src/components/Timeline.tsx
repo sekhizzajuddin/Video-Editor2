@@ -15,6 +15,7 @@ import {
   Sparkles,
   Plus,
   ArrowLeftRight,
+  Link,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -23,7 +24,26 @@ import { formatSimpleTime } from '@/utils/time';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TRACK_HEIGHT = 56;
+const DEFAULT_TRACK_HEIGHT = 56;
+const THIN_TRACK_HEIGHT = 32;
+
+export const getTrackHeight = (type: string) => (type === 'text' || type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT);
+
+export const getTrackTop = (tracks: TimelineTrack[], index: number) => {
+  let top = 0;
+  for (let i = 0; i < index; i++) top += getTrackHeight(tracks[i].type);
+  return top;
+};
+
+export const getTrackAtY = (tracks: TimelineTrack[], y: number) => {
+  let currentY = 0;
+  for (let i = 0; i < tracks.length; i++) {
+    const h = getTrackHeight(tracks[i].type);
+    if (y >= currentY && y < currentY + h) return i;
+    currentY += h;
+  }
+  return tracks.length - 1;
+};
 const MIN_CLIP_WIDTH = 16;
 const SNAP_THRESHOLD_PX = 8;
 const TRACK_HEADER_WIDTH = 128;
@@ -362,7 +382,8 @@ function TransitionTarget({
   isSelected,
   zoomLevel,
 }: TransitionTargetProps) {
-  const { selectTransition, updateTransition, removeTransition } = useEditorStore();
+  const { selectTransition, updateTransition, removeTrack,
+    reorderTrack, } = useEditorStore();
   const [isDragOver, setIsDragOver] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -540,6 +561,8 @@ export function Timeline() {
     selectTransition,
     selectedKeyframeLines,
     toggleKeyframeLineSelection,
+    addClip,
+    reorderTrack,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -593,8 +616,8 @@ export function Timeline() {
   const [snapLine, setSnapLine] = useState<number | null>(null);
   const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{
-    left: number;
-    width: number;
+    time: number;
+    duration: number;
     trackIdx: number;
   } | null>(null);
 
@@ -672,7 +695,7 @@ export function Timeline() {
       if (!container) return null;
       const rect = container.getBoundingClientRect();
       const relY = clientY - rect.top + container.scrollTop;
-      const idx = Math.floor(relY / TRACK_HEIGHT);
+      const idx = getTrackAtY(tracks, relY);
       return idx >= 0 && idx < tracks.length ? tracks[idx] : null;
     },
     [tracks],
@@ -1332,7 +1355,7 @@ export function Timeline() {
         }
         setDragState(null);
         setSnapLine(null);
-        setDragPreview(0, null);
+        setDropPreview(null);
         useEditorStore.getState().saveSnapshot();
       }
       if (resizeState) {
@@ -1361,7 +1384,8 @@ export function Timeline() {
     resolveOverlaps,
     updateClip,
     setDragPreview,
-    computeSnap,
+    addClip,
+    reorderTrack,
     getTrackFromMouseY,
     getMediaSafe,
     activeTool,
@@ -1415,8 +1439,8 @@ export function Timeline() {
       // Read media to determine width
       const mediaId = e.dataTransfer.types.includes('application/procut-media') ? 'pending' : null;
       if (mediaId && trackIdx >= 0) {
-        const approxWidth = 5 * zoomLevel; // estimate; real width computed on drop
-        setDropPreview({ left: x, width: approxWidth, trackIdx });
+        const approxDuration = 5;
+        setDropPreview({ time: x / zoomLevel, duration: approxDuration, trackIdx });
         setHoveredTrackId(trackId);
       }
     },
@@ -1645,15 +1669,39 @@ export function Timeline() {
             {tracks.map((track) => (
               <div
                 key={track.id}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/x-track-reorder', track.id);
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                onDragOver={(e) => {
+                  if (e.dataTransfer.types.includes('application/x-track-reorder')) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }
+                }}
+                onDrop={(e) => {
+                  const sourceId = e.dataTransfer.getData('application/x-track-reorder');
+                  if (sourceId && sourceId !== track.id) {
+                    const newIndex = tracks.findIndex(t => t.id === track.id);
+                    reorderTrack(sourceId, newIndex);
+                  }
+                }}
                 className={`flex items-center px-2 border-b border-[#3e3e3e] ${
                   selectedTrackId === track.id ? 'bg-[#3e3e3e]' : ''
                 }`}
-                style={{ height: TRACK_HEIGHT }}
+                style={{ height: getTrackHeight(track.type) }}
                 onClick={() => selectTrack(track.id)}
               >
                 <div className="flex items-center gap-1 flex-1 min-w-0">
                   <GripVertical className="w-3 h-3 text-[#a0a0a0] shrink-0 cursor-grab" />
                   <span className="text-[11px] text-white font-medium truncate">{track.name}</span>
+                  {track.type === 'fx' && track.linkedTrackId && (
+                    <div className="flex items-center gap-0.5 ml-1 text-amber-400 opacity-80" title={`Linked to ${tracks.find(t => t.id === track.linkedTrackId)?.name}`}>
+                      <Link className="w-3 h-3" />
+                      <span className="text-[9px]">{tracks.find(t => t.id === track.linkedTrackId)?.name}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
@@ -1792,7 +1840,7 @@ export function Timeline() {
                   className={`relative border-b border-[#3e3e3e] transition-colors ${
                     hoveredTrackId === track.id ? 'bg-[#3e3e3e]/30' : ''
                   }`}
-                  style={{ height: TRACK_HEIGHT }}
+                  style={{ height: getTrackHeight(track.type) }}
                   onDragOver={(e) => handleDragOver(e, track.id)}
                   onDrop={(e) => handleDrop(e, track.id)}
                   onDragEnter={() => setHoveredTrackId(track.id)}
@@ -1820,7 +1868,7 @@ export function Timeline() {
                     const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
                     const left = clip.startTime * zoomLevel;
                     const isDragging = draggingClipId === clip.id;
-                    const clipHeight = TRACK_HEIGHT - 8;
+                    const clipHeight = getTrackHeight(track.type) - 8;
                     const isVideoWithAudio =
                       media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
                     const mainVisualHeight = isVideoWithAudio ? clipHeight - 12 : clipHeight;
@@ -2041,7 +2089,7 @@ export function Timeline() {
                               e.stopPropagation();
                               handleSplit(clip.id);
                             }}
-                            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-1 bg-black/60 rounded opacity-0 group-hover:opacity-100 hover:bg-black/80 transition-opacity z-30 pointer-events-auto"
+                            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-1 bg-black/60 rounded transition-opacity z-30 pointer-events-auto"
                             title="Split at playhead"
                           >
                             <Scissors className="w-3 h-3 text-white" />
@@ -2113,10 +2161,10 @@ export function Timeline() {
                 <div
                   className="absolute border-2 border-amber-500/50 border-dashed rounded pointer-events-none z-40 bg-amber-500/5"
                   style={{
-                    top: `${dropPreview.trackIdx * TRACK_HEIGHT + 4}px`,
-                    left: `${dropPreview.left}px`,
-                    width: `${dropPreview.width}px`,
-                    height: TRACK_HEIGHT - 8,
+                    top: `${getTrackTop(tracks, dropPreview.trackIdx) + 4}px`,
+                    left: `${dropPreview.time * zoomLevel}px`,
+                    width: `${dropPreview.duration * zoomLevel}px`,
+                    height: getTrackHeight(tracks[dropPreview.trackIdx]?.type || 'video') - 8,
                   }}
                 />
               )}
@@ -2126,8 +2174,8 @@ export function Timeline() {
                 <div
                   className="absolute left-0 right-0 border-2 border-amber-500/30 border-dashed pointer-events-none z-40"
                   style={{
-                    top: `${tracks.findIndex((t) => t.id === hoveredTrackId) * TRACK_HEIGHT}px`,
-                    height: TRACK_HEIGHT,
+                    top: `${getTrackTop(tracks, tracks.findIndex((t) => t.id === hoveredTrackId))}px`,
+                    height: getTrackHeight(tracks.find((t) => t.id === hoveredTrackId)?.type || 'video'),
                   }}
                 />
               )}

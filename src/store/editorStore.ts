@@ -9,6 +9,7 @@ import type {
   PropertiesTab,
   EditorSnapshot,
   Transition,
+  ClipTextSettings,
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
 
@@ -120,6 +121,7 @@ interface EditorActions {
 
   // Timeline Operations
   addClip: (clip: TimelineClip) => void;
+  insertTextClip: (settings: Partial<ClipTextSettings>) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
@@ -154,8 +156,9 @@ interface EditorActions {
   toggleTrackLock: (trackId: string) => void;
   toggleTrackMute: (trackId: string) => void;
   toggleTrackHidden: (trackId: string) => void;
-  addTrack: (type: 'video' | 'audio') => void;
+  addTrack: (type: 'video' | 'audio' | 'text' | 'fx') => void;
   removeTrack: (trackId: string) => void;
+  reorderTrack: (trackId: string, newIndex: number) => void;
 
   // UI
   setActiveMediaTab: (tab: MediaTab) => void;
@@ -300,6 +303,65 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().recalcTotalDuration();
     get().resolveOverlaps([clip.id]);
     get().saveSnapshot();
+  },
+
+  insertTextClip: (settings) => {
+    let targetTrack = get().tracks.find((t) => t.type === 'text');
+    if (!targetTrack) {
+      get().addTrack('text');
+      targetTrack = get().tracks.find((t) => t.type === 'text');
+    }
+    if (!targetTrack) return;
+
+    const mediaId = generateId();
+    get().addMedia({
+      id: mediaId,
+      name: 'Text Layer',
+      type: 'text',
+      duration: 3,
+      url: '',
+      createdAt: Date.now(),
+      textContent: settings.text || 'New Text',
+    });
+
+    const { currentTime } = get();
+    const clipId = generateId();
+    
+    let startTime = currentTime;
+    while (targetTrack.clips.some((c) => Math.max(0, Math.min(startTime + 3, c.startTime + c.duration) - Math.max(startTime, c.startTime)) > 0)) {
+       startTime += 3.1;
+    }
+
+    const newClip: TimelineClip = {
+      id: clipId,
+      mediaId,
+      trackId: targetTrack.id,
+      startTime,
+      duration: 3,
+      trimStart: 0,
+      trimEnd: 0,
+      transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+      opacity: 1,
+      speed: 1,
+      effects: [],
+      textSettings: {
+        text: 'New Text',
+        fontFamily: 'Inter',
+        fontSize: 48,
+        color: '#ffffff',
+        backgroundColor: 'transparent',
+        bold: false,
+        italic: false,
+        underline: false,
+        shadow: false,
+        shadowColor: '#000000',
+        shadowBlur: 10,
+        threeD: false,
+        threeDDepth: 5,
+        ...settings,
+      }
+    };
+    get().addClip(newClip);
   },
 
   removeClip: (clipId) => {
@@ -883,28 +945,78 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       ),
     })),
   addTrack: (type) => {
-    const id = `${type === 'video' ? 'v' : 'a'}${get().tracks.filter((t) => t.type === type).length + 1}`;
-    set((state) => ({
-      tracks: [
-        ...state.tracks,
-        {
-          id,
-          name: id.toUpperCase(),
-          type,
-          clips: [],
-          locked: false,
-          muted: false,
-          hidden: false,
-        },
-      ],
-    }));
+    let prefix = 'v';
+    if (type === 'audio') prefix = 'a';
+    if (type === 'text') prefix = 't';
+    if (type === 'fx') prefix = 'fx';
+    
+    const id = `${prefix}${get().tracks.filter((t) => t.type === type).length + 1}`;
+    
+    let linkedTrackId: string | undefined = undefined;
+    if (type === 'fx') {
+      // Find the first video or text track that doesn't have an FX track linked to it
+      const currentTracks = get().tracks;
+      const linkedTrackIds = currentTracks.filter(t => t.type === 'fx' && t.linkedTrackId).map(t => t.linkedTrackId);
+      const hostTrack = currentTracks.find(t => (t.type === 'video' || t.type === 'text') && !linkedTrackIds.includes(t.id));
+      if (hostTrack) {
+        linkedTrackId = hostTrack.id;
+      }
+    }
+
+    set((state) => {
+      const newTrack = {
+        id,
+        name: id.toUpperCase(),
+        type,
+        linkedTrackId,
+        clips: [],
+        locked: false,
+        muted: false,
+        hidden: false,
+      };
+      
+      const tracks = type === 'text' || type === 'fx' || type === 'video' 
+        ? [newTrack, ...state.tracks] 
+        : [...state.tracks, newTrack];
+        
+      return { tracks };
+    });
     get().saveSnapshot();
   },
   removeTrack: (trackId) => {
-    set((state) => ({
-      tracks: state.tracks.filter((t) => t.id !== trackId),
-    }));
+    set((state) => {
+      let updatedTracks = state.tracks.filter((t) => t.id !== trackId);
+      // Unlink any fx tracks that were linked to this track
+      updatedTracks = updatedTracks.map(t => t.linkedTrackId === trackId ? { ...t, linkedTrackId: undefined } : t);
+      return { tracks: updatedTracks };
+    });
     get().recalcTotalDuration();
+    get().saveSnapshot();
+  },
+  reorderTrack: (trackId: string, newIndex: number) => {
+    set((state) => {
+      const tracks = [...state.tracks];
+      const oldIndex = tracks.findIndex(t => t.id === trackId);
+      if (oldIndex === -1) return state;
+      
+      const [track] = tracks.splice(oldIndex, 1);
+      tracks.splice(newIndex, 0, track);
+      
+      for (let i = 0; i < tracks.length; i++) {
+        if (tracks[i].type === 'fx') {
+          let newLink = undefined;
+          for (let j = i + 1; j < tracks.length; j++) {
+            if (tracks[j].type === 'video' || tracks[j].type === 'text') {
+              newLink = tracks[j].id;
+              break;
+            }
+          }
+          tracks[i] = { ...tracks[i], linkedTrackId: newLink };
+        }
+      }
+      
+      return { tracks };
+    });
     get().saveSnapshot();
   },
 

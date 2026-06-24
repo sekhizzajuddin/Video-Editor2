@@ -12,10 +12,11 @@ import {
   Sun,
   Droplets,
   Zap,
-  Play,
   Trash2,
   X,
   Loader2,
+  Type,
+  Play,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback } from 'react';
@@ -45,10 +46,18 @@ const EFFECTS = [
   { name: 'Vignette', icon: Sun, color: 'text-rose-400', value: 0 },
   { name: 'Color Grading', icon: Sparkles, color: 'text-emerald-400', value: 0 },
   { name: 'Chroma Key', icon: Waves, color: 'text-green-400', value: 0 },
+  { name: 'VFX Breakdown', icon: Sparkles, color: 'text-purple-400', type: 'vfx_breakdown' },
+  { name: 'B&W to Enhanced Color', icon: Sun, color: 'text-cyan-400', type: 'bw_to_color' },
+];
+
+const TEXT_TEMPLATES = [
+  { name: 'Heading', style: 'text-4xl font-bold', settings: { fontSize: 48, bold: true } },
+  { name: 'Subtitle', style: 'text-2xl font-medium', settings: { fontSize: 32, bold: false } },
+  { name: 'Fancy', style: 'text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600', settings: { fontSize: 64, bold: true, color: '#ec4899' } },
 ];
 
 export function MediaPanel() {
-  const { mediaLibrary, activeMediaTab, setActiveMediaTab, addMedia, removeMedia } = useEditorStore();
+  const { mediaLibrary, activeMediaTab, setActiveMediaTab, addMedia, removeMedia, insertTextClip } = useEditorStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -60,6 +69,7 @@ export function MediaPanel() {
 
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Project', icon: Folder },
+    { id: 'text', label: 'Text', icon: Type },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
     { id: 'effects', label: 'Effects', icon: Waves },
   ];
@@ -466,6 +476,25 @@ export function MediaPanel() {
               )}
             </div>
           </>
+        )}
+
+        {activeMediaTab === 'text' && (
+          <div className="flex-1 overflow-y-auto p-2">
+            <p className="text-xs text-[#a0a0a0] mb-3">Click to add text at playhead</p>
+            <div className="flex flex-col gap-2">
+              {TEXT_TEMPLATES.map((template) => (
+                <div
+                  key={template.name}
+                  onClick={() => insertTextClip({ text: template.name, ...template.settings })}
+                  className="p-4 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] hover:border-[#5e5e5e] rounded cursor-pointer transition-all flex items-center justify-center text-center group"
+                >
+                  <span className={`${template.style} transition-transform group-hover:scale-105`}>
+                    {template.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {activeMediaTab === 'transitions' && (

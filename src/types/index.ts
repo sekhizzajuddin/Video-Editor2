@@ -1,5 +1,5 @@
 // Media Types
-export type MediaType = 'video' | 'audio' | 'image';
+export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx';
 
 export interface MediaItem {
   id: string;
@@ -17,6 +17,9 @@ export interface MediaItem {
   height?: number;          // video/image height
   // Frame strip for timeline rendering
   frameStrip?: string[];    // array of data URLs for frame thumbnails
+  // Content
+  textContent?: string;     // default text content
+  fxType?: string;          // specific effect identifier
 }
 
 // Transform for clips
@@ -64,6 +67,28 @@ export interface ClipAudioSettings {
   pitch: number;        // -12 to 12 semitones (default 0)
   voiceFormant: number; // -100 to 100 (default 0)
   humanize: boolean;    // one-click AI humanizer toggle (default false)
+}
+
+export interface ClipTextSettings {
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  backgroundColor: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  shadow: boolean;
+  shadowColor: string;
+  shadowBlur: number;
+  threeD: boolean;
+  threeDDepth: number;
+}
+
+export interface ClipFxSettings {
+  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | string;
+  intensity: number;    // 0 to 100
+  wipeAngle?: number;   // 0 to 360 (for wipes)
 }
 
 export interface SpeedRampKeyframe {
@@ -118,13 +143,17 @@ export interface TimelineClip {
   colorFilters?: ClipColorFilters;
   // Premiere Pro-style advanced audio configurations
   audioSettings?: ClipAudioSettings;
+  // Text and FX
+  textSettings?: ClipTextSettings;
+  fxSettings?: ClipFxSettings;
 }
 
 // Timeline Track
 export interface TimelineTrack {
   id: string;
   name: string;
-  type: 'video' | 'audio';
+  type: 'video' | 'audio' | 'text' | 'fx';
+  linkedTrackId?: string; // used by FX tracks to link to a host track
   clips: TimelineClip[];
   locked: boolean;
   muted: boolean;
@@ -161,8 +190,8 @@ export interface EditorState {
   // UI State
   showExportModal: boolean;
   showSettingsModal: boolean;
-  activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects';
-  activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio';
+  activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text';
+  activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';
 
   // Canvas Mode
   canvasTransformMode: 'resize' | 'crop';
@@ -203,10 +232,10 @@ export interface EditorSnapshot {
 export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch';
 
 // Media Tab Types
-export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects';
+export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text';
 
 // Properties Tab Types
-export type PropertiesTab = 'transform' | 'color' | 'speed' | 'audio';
+export type PropertiesTab = 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';
 
 // Time formatting utility type
 export type TimeFormat = 'HH:MM:SS' | 'MM:SS' | 'frames';

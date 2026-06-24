@@ -14,6 +14,8 @@ import {
   Sparkles,
   Sliders,
   RotateCcw,
+  Type,
+  Wand2,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect } from 'react';
@@ -193,12 +195,24 @@ export function PropertiesPanel() {
     setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const tabs: { id: PropertiesTab; label: string; icon: typeof Move3D }[] = [
-    { id: 'transform', label: 'Transform', icon: Move3D },
-    { id: 'color', label: 'Color', icon: Palette },
-    { id: 'speed', label: 'Speed', icon: Gauge },
-    { id: 'audio', label: 'Audio', icon: Music },
-  ];
+  const baseTabs: { id: PropertiesTab; label: string; icon: any }[] = [];
+  
+  if (selectedTrack?.type === 'text') {
+    baseTabs.push({ id: 'text', label: 'Text', icon: Type });
+  } else if (selectedTrack?.type === 'fx') {
+    baseTabs.push({ id: 'effects', label: 'Effects', icon: Wand2 });
+  }
+
+  if (selectedTrack?.type !== 'text' && selectedTrack?.type !== 'fx') {
+    baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+    baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
+    baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
+    baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
+  } else if (selectedTrack?.type === 'text') {
+    baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+  }
+
+  const tabs = baseTabs;
 
   if (selectedTransition && selectedTransitionClip) {
     const alignment = selectedTransition.params?.alignment as string || 'center';
@@ -2057,6 +2071,205 @@ export function PropertiesPanel() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ── Text Tab ─────────────────────────────────────────────────── */}
+        {activePropertiesTab === 'text' && selectedClip.textSettings && (
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Text Properties</h3>
+            </div>
+            
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-[#a0a0a0]">Content</label>
+                <textarea
+                  value={selectedClip.textSettings.text}
+                  onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, text: e.target.value } })}
+                  className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-[#a0a0a0]">Font Size</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="12"
+                    max="150"
+                    value={selectedClip.textSettings.fontSize}
+                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontSize: Number(e.target.value) } })}
+                    className="flex-1 accent-amber-500"
+                  />
+                  <span className="text-xs text-white w-8 text-right">{selectedClip.textSettings.fontSize}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="flex flex-col gap-2 flex-1">
+                  <label className="text-xs text-[#a0a0a0]">Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={selectedClip.textSettings.color || '#ffffff'}
+                      onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, color: e.target.value } })}
+                      className="w-6 h-6 rounded bg-transparent cursor-pointer"
+                    />
+                    <span className="text-xs text-white uppercase">{selectedClip.textSettings.color}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 flex-1">
+                  <label className="text-xs text-[#a0a0a0]">Background</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={selectedClip.textSettings.backgroundColor === 'transparent' ? '#000000' : selectedClip.textSettings.backgroundColor}
+                      onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: e.target.value } })}
+                      className="w-6 h-6 rounded bg-transparent cursor-pointer"
+                    />
+                    <button 
+                      onClick={() => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: 'transparent' } })}
+                      className="text-[10px] bg-[#3e3e3e] hover:bg-[#5e5e5e] px-2 py-1 rounded text-white transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 border-t border-[#3e3e3e] pt-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedClip.textSettings.bold}
+                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, bold: e.target.checked } })}
+                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                  />
+                  <span className="text-xs text-white font-bold">Bold</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedClip.textSettings.italic}
+                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, italic: e.target.checked } })}
+                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                  />
+                  <span className="text-xs text-white italic">Italic</span>
+                </label>
+              </div>
+
+              <div className="border-t border-[#3e3e3e] pt-4 flex flex-col gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedClip.textSettings.shadow}
+                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadow: e.target.checked } })}
+                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                  />
+                  <span className="text-xs text-white">Drop Shadow</span>
+                </label>
+                {selectedClip.textSettings.shadow && (
+                  <div className="pl-6 flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={selectedClip.textSettings.shadowColor || '#000000'}
+                        onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadowColor: e.target.value } })}
+                        className="w-5 h-5 rounded bg-transparent cursor-pointer"
+                      />
+                      <input
+                        type="range"
+                        min="0"
+                        max="30"
+                        value={selectedClip.textSettings.shadowBlur}
+                        onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadowBlur: Number(e.target.value) } })}
+                        className="flex-1 accent-amber-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-[#3e3e3e] pt-4 flex flex-col gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedClip.textSettings.threeD}
+                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeD: e.target.checked } })}
+                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                  />
+                  <span className="text-xs text-white">3D Effect</span>
+                </label>
+                {selectedClip.textSettings.threeD && (
+                  <div className="pl-6 flex flex-col gap-2">
+                    <div className="flex items-center gap-3">
+                      <label className="text-[10px] text-[#a0a0a0] w-10">Depth</label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="20"
+                        value={selectedClip.textSettings.threeDDepth}
+                        onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeDDepth: Number(e.target.value) } })}
+                        className="flex-1 accent-amber-500"
+                      />
+                      <span className="text-[10px] text-white w-6">{selectedClip.textSettings.threeDDepth}px</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Effects Tab ─────────────────────────────────────────────────── */}
+        {activePropertiesTab === 'effects' && (
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Effect Settings</h3>
+            </div>
+            {selectedClip.fxSettings ? (
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-[#a0a0a0]">Effect Type</label>
+                  <select
+                    value={selectedClip.fxSettings.type}
+                    onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, type: e.target.value as any } })}
+                    className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="vfx_breakdown">VFX Breakdown</option>
+                    <option value="bw_to_color">B&W to Enhanced Color</option>
+                    <option value="glitch">Glitch / Distortion</option>
+                  </select>
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-[#a0a0a0]">Intensity</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={selectedClip.fxSettings.intensity ?? 100}
+                      onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, intensity: Number(e.target.value) } })}
+                      className="flex-1 accent-amber-500"
+                    />
+                    <span className="text-[10px] text-white w-6 text-right">{selectedClip.fxSettings.intensity ?? 100}%</span>
+                  </div>
+                </div>
+
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded p-3 text-xs text-amber-200 mt-2">
+                  <Sparkles className="w-4 h-4 mb-1" />
+                  This effect applies an animated horizontal wipe from left-to-right over the duration of this clip.
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-[#a0a0a0] flex flex-col items-center justify-center p-8 text-center border border-dashed border-[#3e3e3e] rounded">
+                <Wand2 className="w-8 h-8 mb-2 opacity-50" />
+                <p>Drag an effect from the Media Panel to add it to this track.</p>
+              </div>
+            )}
           </div>
         )}
       </div>

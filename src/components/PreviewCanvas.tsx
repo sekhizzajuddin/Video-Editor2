@@ -225,15 +225,10 @@ export function PreviewCanvas() {
 
     // 2. Checkerboard removed per user request
 
-    // 3. Collect video tracks sorted bottom-to-top (V1 draws first)
-    const videoTracks = tracks
-      .filter((t) => t.type === 'video' && !t.hidden)
-      .sort((a, b) => {
-        // v1, v2, v3 … – parse the numeric suffix for ordering
-        const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
-        const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
-        return numA - numB; // lower number drawn first (bottom layer)
-      });
+    // 3. Collect visual tracks (video and text) sorted by order
+    const visualTracks = [...tracks]
+      .filter((t) => (t.type === 'video' || t.type === 'text') && !t.hidden)
+      .reverse();
 
     let anyClipDrawn = false;
 
@@ -291,6 +286,20 @@ export function PreviewCanvas() {
         fadedFilm: 0,
         vignette: 0,
       };
+
+      // Check for active FX on this track
+      const fxTrack = tracks.find((t) => t.type === 'fx' && t.linkedTrackId === clip.trackId && !t.hidden);
+      let activeFxClip = null;
+      if (fxTrack) {
+        activeFxClip = fxTrack.clips.find((c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration);
+      }
+
+      // Pre-process VFX Breakdown clip effect
+      let vfxProgress = 0;
+      if (activeFxClip && activeFxClip.fxSettings?.type === 'vfx_breakdown') {
+         vfxProgress = (currentTime - activeFxClip.startTime) / activeFxClip.duration;
+         vfxProgress = Math.max(0, Math.min(1, vfxProgress));
+      }
 
       // ---------------------------------------------------------------
       // Draw the actual media content
@@ -367,17 +376,106 @@ export function PreviewCanvas() {
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'IMAGE', '#f59e0b');
           anyClipDrawn = true;
         }
+      } else if (mediaItem.type === 'text' && clip.textSettings) {
+        const { text, fontSize, fontFamily, color, backgroundColor, bold, italic, shadow, shadowColor, shadowBlur, threeD, threeDDepth } = clip.textSettings;
+        ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontSize}px ${fontFamily}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const metrics = ctx.measureText(text);
+        dw = metrics.width + 40;
+        dh = fontSize + 40;
+
+        if (backgroundColor !== 'transparent') {
+          ctx.fillStyle = backgroundColor;
+          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+        }
+
+        if (shadow) {
+          ctx.shadowColor = shadowColor || '#000000';
+          ctx.shadowBlur = shadowBlur || 10;
+        }
+
+        if (threeD) {
+          ctx.fillStyle = shadowColor || '#000000';
+          for (let d = 0; d < (threeDDepth || 5); d++) {
+            ctx.fillText(text, -d, d);
+          }
+          ctx.shadowBlur = 0;
+        }
+
+        ctx.fillStyle = color || '#ffffff';
+        ctx.fillText(text, 0, 0);
+        ctx.shadowBlur = 0;
+        
+        hasRealMedia = true;
+        anyClipDrawn = true;
       }
 
       // Apply temperature, tint, faded film, and vignette overlays on top of the drawn media
-      if (hasRealMedia) {
+      if (hasRealMedia && mediaItem.type !== 'text') {
         applyColorOverlays(ctx, dw, dh, filters);
+      }
+
+      // Apply FX layer if active
+      if (hasRealMedia && activeFxClip) {
+        const fx = activeFxClip.fxSettings;
+        if (fx?.type === 'vfx_breakdown') {
+          // Draw enhanced version over it, clipped by vfxProgress
+          ctx.save();
+          ctx.beginPath();
+          // Wipe from left to right
+          ctx.rect(-dw / 2, -dh / 2, dw * vfxProgress, dh);
+          ctx.clip();
+
+          // Enhance the base draw
+          if (mediaItem.type === 'video') {
+            const videoEl = videoElements.get(clip.id);
+            if (videoEl && videoEl.readyState >= 1) {
+              const vw = videoEl.videoWidth || W;
+              const vh = videoEl.videoHeight || H;
+              const scale = Math.min(W / vw, H / vh);
+              const baseDw = vw * scale;
+              const baseDh = vh * scale;
+              const sx = vw * cLeft, sy = vh * cTop, sw = vw * (1 - cLeft - cRight), sh = vh * (1 - cTop - cBot);
+              const drawW = baseDw * (1 - cLeft - cRight), drawH = baseDh * (1 - cTop - cBot);
+              const dx = -baseDw / 2 + baseDw * cLeft, dy = -baseDh / 2 + baseDh * cTop;
+              
+              ctx.filter = `brightness(${120 + filters.exposure}%) contrast(${150}%) saturate(${200}%)`;
+              ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, drawW, drawH);
+              ctx.filter = 'none';
+              applyColorOverlays(ctx, dw, dh, { ...filters, contrast: 150, saturation: 200 });
+            }
+          }
+          
+          // Draw neon line at the wiping edge
+          ctx.beginPath();
+          ctx.moveTo(-dw / 2 + dw * vfxProgress, -dh / 2);
+          ctx.lineTo(-dw / 2 + dw * vfxProgress, dh / 2);
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = '#3b82f6';
+          ctx.shadowColor = '#3b82f6';
+          ctx.shadowBlur = 15;
+          ctx.stroke();
+          
+          ctx.restore();
+        } else if (fx?.type === 'bw_to_color') {
+          const progress = (currentTime - activeFxClip.startTime) / activeFxClip.duration;
+          const p = Math.max(0, Math.min(1, progress));
+          // Start B&W (grayscale 100%), end Color (grayscale 0%, saturate 150%)
+          const gray = (1 - p) * 100;
+          const sat = 100 + p * 50;
+          ctx.globalCompositeOperation = 'color';
+          ctx.fillStyle = `hsl(0, 0%, ${gray}%)`;
+          ctx.fillRect(-dw/2, -dh/2, dw, dh);
+          ctx.globalCompositeOperation = 'source-over';
+        }
       }
 
       ctx.restore();
     };
 
-    for (const track of videoTracks) {
+    for (const track of visualTracks) {
       // Sort clips to find adjacent clips and active transition zones
       const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
       let transitionHandled = false;
