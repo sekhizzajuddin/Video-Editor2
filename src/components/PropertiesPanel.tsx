@@ -84,6 +84,8 @@ export function PropertiesPanel() {
     selectedTransitionClipId,
     updateTransition,
     removeTransition,
+    addMasterKeyframe,
+    deleteMasterKeyframe,
   } = useEditorStore();
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
@@ -652,39 +654,106 @@ export function PropertiesPanel() {
             return getAnimatedValue(base, currentTime, selectedClip.startTime, animations[propKey as keyof typeof animations]);
           };
 
-          const setPropVal = (propKey: string, value: number, baseUpdateObj: any) => {
-            if (animations[propKey as keyof typeof animations]) {
-              updateClip(selectedClip.id, {
-                animations: {
-                  ...animations,
-                  [propKey]: addOrUpdateKeyframe(animations[propKey as keyof typeof animations], localTime, value)
-                }
-              });
+          const getMasterKeyframes = () => {
+            if (!animations['transform.x']) return [];
+            const times = animations['transform.x'].map(k => k.time);
+            return times.sort((a,b) => a - b);
+          };
+          const keyframeTimes = getMasterKeyframes();
+          const hasMasterKeyframes = keyframeTimes.length > 0;
+          const isOnKeyframe = keyframeTimes.some(t => Math.abs(t - localTime) < 0.05);
+
+          const handleToggleMasterKeyframe = () => {
+            if (isOnKeyframe) {
+               const closest = keyframeTimes.find(t => Math.abs(t - localTime) < 0.05);
+               if (closest !== undefined) {
+                 deleteMasterKeyframe(selectedClip.id, closest);
+               }
             } else {
-              updateClip(selectedClip.id, baseUpdateObj);
+               const currentVals = {
+                 transform: {
+                   x: getPropVal(selectedClip.transform.x, 'transform.x'),
+                   y: getPropVal(selectedClip.transform.y, 'transform.y'),
+                   scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
+                   rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
+                 },
+                 crop: {
+                   top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
+                   bottom: getPropVal(selectedClip.crop?.bottom || 0, 'crop.bottom'),
+                   left: getPropVal(selectedClip.crop?.left || 0, 'crop.left'),
+                   right: getPropVal(selectedClip.crop?.right || 0, 'crop.right')
+                 }
+               };
+               addMasterKeyframe(selectedClip.id, localTime, currentVals);
             }
           };
 
-          const toggleKeyframe = (propKey: string, currentValue: number) => {
-            if (animations[propKey as keyof typeof animations]) {
-              // Turn off keyframing - remove it completely, but bake the current value into base
-              const newAnims = { ...animations };
-              delete newAnims[propKey as keyof typeof animations];
-              updateClip(selectedClip.id, { animations: newAnims });
-              // We also need to update the base value to what it was at this moment, but that requires knowing what baseUpdateObj maps to
-            } else {
-              // Turn on keyframing - add initial keyframe at current time
-              updateClip(selectedClip.id, {
-                animations: {
-                  ...animations,
-                  [propKey]: [{ time: localTime, value: currentValue }]
-                }
-              });
-            }
+          const setPropVal = (propKey: string, value: number, baseUpdateObj: any) => {
+             if (hasMasterKeyframes) {
+               const currentVals = {
+                 transform: {
+                   x: getPropVal(selectedClip.transform.x, 'transform.x'),
+                   y: getPropVal(selectedClip.transform.y, 'transform.y'),
+                   scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
+                   rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
+                 },
+                 crop: {
+                   top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
+                   bottom: getPropVal(selectedClip.crop?.bottom || 0, 'crop.bottom'),
+                   left: getPropVal(selectedClip.crop?.left || 0, 'crop.left'),
+                   right: getPropVal(selectedClip.crop?.right || 0, 'crop.right')
+                 }
+               };
+               const keys = propKey.split('.');
+               if (keys[0] === 'transform' || keys[0] === 'crop') {
+                 (currentVals as any)[keys[0]][keys[1]] = value;
+               }
+               // Wait, Opacity is not part of transform/crop but is it included in MasterKeyframes?
+               // The user only asked for Transform/Crop (position, rotation, scale). We will leave opacity separate or ignore it for now.
+               // Let's just handle transform/crop.
+               if (keys[0] === 'opacity') {
+                 updateClip(selectedClip.id, baseUpdateObj);
+                 return;
+               }
+               addMasterKeyframe(selectedClip.id, localTime, currentVals);
+             } else {
+               updateClip(selectedClip.id, baseUpdateObj);
+             }
           };
 
           return (
             <div className="space-y-3">
+              {/* Master Keyframes */}
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-white">Master Keyframes</span>
+                  <button
+                    onClick={handleToggleMasterKeyframe}
+                    className={`px-3 py-1 rounded text-[10px] font-medium transition-colors ${
+                      isOnKeyframe ? 'bg-amber-500/20 text-amber-500 hover:bg-amber-500/30' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
+                    }`}
+                  >
+                    {!hasMasterKeyframes ? 'Start' : isOnKeyframe ? 'End/Remove' : 'Add'}
+                  </button>
+                </div>
+                {keyframeTimes.length > 0 && (
+                  <div className="space-y-1">
+                    {keyframeTimes.map((t, idx) => (
+                      <div key={t} className="flex items-center justify-between text-[10px] bg-[#1e1e1e] p-1.5 rounded">
+                        <span className="text-[#a0a0a0]">
+                          {idx === 0 ? 'Start' : idx === keyframeTimes.length - 1 ? 'End' : 'Point'} - {t.toFixed(2)}s
+                        </span>
+                        <button
+                          onClick={() => deleteMasterKeyframe(selectedClip.id, t)}
+                          className="text-[#a0a0a0] hover:text-red-400"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {/* Position */}
               <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
                 <button
@@ -702,9 +771,8 @@ export function PropertiesPanel() {
                   <div className="px-2.5 pb-2.5 space-y-2">
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="mb-1">
                           <label className="text-[10px] text-[#a0a0a0] block">X Position</label>
-                          <KeyframeIcon active={!!animations['transform.x']} onClick={() => toggleKeyframe('transform.x', selectedClip.transform.x)} />
                         </div>
                         <input
                           type="number"
@@ -718,9 +786,8 @@ export function PropertiesPanel() {
                         />
                       </div>
                       <div>
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="mb-1">
                           <label className="text-[10px] text-[#a0a0a0] block">Y Position</label>
-                          <KeyframeIcon active={!!animations['transform.y']} onClick={() => toggleKeyframe('transform.y', selectedClip.transform.y)} />
                         </div>
                         <input
                           type="number"
@@ -746,7 +813,6 @@ export function PropertiesPanel() {
               >
                 <span className="font-medium">Scale</span>
                 <div className="flex items-center gap-2">
-                  <KeyframeIcon active={!!animations['transform.scale']} onClick={(e) => { e.stopPropagation(); toggleKeyframe('transform.scale', selectedClip.transform.scale); }} />
                   {collapsedSections['scale'] ? (
                     <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                   ) : (
@@ -787,7 +853,6 @@ export function PropertiesPanel() {
               >
                 <span className="font-medium">Rotation</span>
                 <div className="flex items-center gap-2">
-                  <KeyframeIcon active={!!animations['transform.rotation']} onClick={(e) => { e.stopPropagation(); toggleKeyframe('transform.rotation', selectedClip.transform.rotation); }} />
                   {collapsedSections['rotation'] ? (
                     <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                   ) : (
@@ -828,7 +893,6 @@ export function PropertiesPanel() {
               >
                 <span className="font-medium">Opacity</span>
                 <div className="flex items-center gap-2">
-                  <KeyframeIcon active={!!animations['opacity']} onClick={(e) => { e.stopPropagation(); toggleKeyframe('opacity', selectedClip.opacity); }} />
                   {collapsedSections['opacity'] ? (
                     <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                   ) : (
@@ -886,7 +950,6 @@ export function PropertiesPanel() {
                         <div className="flex justify-between items-center mb-1">
                           <label className="text-[10px] text-[#a0a0a0] capitalize">{edge}</label>
                           <div className="flex items-center gap-2">
-                            <KeyframeIcon active={!!animations[propKey]} onClick={() => toggleKeyframe(propKey, currentCrop[edge as keyof typeof currentCrop])} />
                             <span className="text-[10px] text-white w-8 text-right">{Math.round(value)}%</span>
                           </div>
                         </div>

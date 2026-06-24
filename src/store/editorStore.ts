@@ -178,6 +178,11 @@ interface EditorActions {
   redo: () => void;
   saveSnapshot: () => void;
 
+  // Master Keyframes
+  addMasterKeyframe: (clipId: string, time: number, values: { transform: any, crop: any }) => void;
+  deleteMasterKeyframe: (clipId: string, time: number) => void;
+  moveMasterKeyframe: (clipId: string, oldTime: number, newTime: number) => void;
+
   // Drag/Drop
   setDraggingClipId: (id: string | null) => void;
   setDragPreview: (time: number, trackId: string | null) => void;
@@ -877,6 +882,87 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   setPreviewCanvas: (canvas) => set({ previewCanvas: canvas }),
   setMasterAudioStream: (stream) => set({ masterAudioStream: stream }),
+
+  addMasterKeyframe: (clipId, time, values) => {
+    set((state) => {
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => {
+          if (c.id !== clipId) return c;
+          const anims: any = c.animations ? { ...c.animations } : {};
+          const props = [
+            { k: 'transform.x', v: values.transform.x },
+            { k: 'transform.y', v: values.transform.y },
+            { k: 'transform.scale', v: values.transform.scale },
+            { k: 'transform.rotation', v: values.transform.rotation },
+            { k: 'crop.top', v: values.crop.top },
+            { k: 'crop.bottom', v: values.crop.bottom },
+            { k: 'crop.left', v: values.crop.left },
+            { k: 'crop.right', v: values.crop.right },
+          ];
+          
+          props.forEach(p => {
+            if (p.v === undefined) return;
+            const track = anims[p.k] || [];
+            const existingIdx = track.findIndex((kf: any) => Math.abs(kf.time - time) < 0.05);
+            const newTrack = [...track];
+            if (existingIdx >= 0) newTrack[existingIdx] = { time, value: p.v };
+            else newTrack.push({ time, value: p.v });
+            newTrack.sort((a, b) => a.time - b.time);
+            anims[p.k] = newTrack;
+          });
+
+          return { ...c, animations: anims };
+        })
+      }));
+      return { tracks: newTracks };
+    });
+  },
+
+  deleteMasterKeyframe: (clipId, time) => {
+    set((state) => {
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => {
+          if (c.id !== clipId || !c.animations) return c;
+          const anims: any = { ...c.animations };
+          Object.keys(anims).forEach(k => {
+            if (anims[k]) {
+              anims[k] = anims[k].filter((kf: any) => Math.abs(kf.time - time) >= 0.05);
+              if (anims[k].length === 0) delete anims[k];
+            }
+          });
+          return { ...c, animations: anims };
+        })
+      }));
+      return { tracks: newTracks };
+    });
+  },
+
+  moveMasterKeyframe: (clipId, oldTime, newTime) => {
+    set((state) => {
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => {
+          if (c.id !== clipId || !c.animations) return c;
+          const anims: any = { ...c.animations };
+          Object.keys(anims).forEach(k => {
+            if (anims[k]) {
+              const newTrack = [...anims[k]];
+              const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - oldTime) < 0.05);
+              if (idx >= 0) {
+                newTrack[idx] = { ...newTrack[idx], time: newTime };
+                newTrack.sort((a, b) => a.time - b.time);
+                anims[k] = newTrack;
+              }
+            }
+          });
+          return { ...c, animations: anims };
+        })
+      }));
+      return { tracks: newTracks };
+    });
+  },
 
   // Clipboard
   copyClip: () => {

@@ -1823,20 +1823,23 @@ export function Timeline() {
                       media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
                     const mainVisualHeight = isVideoWithAudio ? clipHeight - 12 : clipHeight;
 
-                    return (
-                      <div
-                        key={clip.id}
-                        className={`absolute top-1 rounded overflow-hidden cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hover} transition-all duration-75 ${
-                          isSelected
-                            ? activeTool === 'rateStretch'
-                              ? 'ring-2 ring-purple-500 shadow-lg z-10 rate-stretch-active'
-                              : 'ring-2 ring-white shadow-lg z-10'
-                            : 'hover:brightness-110'
-                        } ${track.locked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
-                        style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
-                        onMouseDown={(e) => handleClipMouseDown(e, clip)}
-                        onMouseMove={(e) => {
-                          if (activeTool === 'split') {
+                      const clipAnims = clip.animations?.['transform.x'] || [];
+                      const keyframeTimes = clipAnims.map(k => k.time).sort((a,b) => a - b);
+
+                      return (
+                        <div
+                          key={clip.id}
+                          className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hover} transition-all duration-75 ${
+                            isSelected
+                              ? activeTool === 'rateStretch'
+                                ? 'ring-2 ring-purple-500 shadow-lg z-10 rate-stretch-active'
+                                : 'ring-2 ring-white shadow-lg z-10'
+                              : 'hover:brightness-110'
+                          } ${track.locked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
+                          style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
+                          onMouseDown={(e) => handleClipMouseDown(e, clip)}
+                          onMouseMove={(e) => {
+                            if (activeTool === 'split') {
                             const rect = e.currentTarget.getBoundingClientRect();
                             setHoverCutX(e.clientX - rect.left);
                             setHoverCutClipId(clip.id);
@@ -1855,16 +1858,17 @@ export function Timeline() {
                         }}
                       >
                         {/* ── Visual content layer ──────────────────── */}
-                        {media.type === 'video' && (
-                          <div style={{ height: mainVisualHeight }} className="relative overflow-hidden">
-                            <FrameStripOverlay
-                              media={media}
-                              clipId={clip.id}
-                              width={width}
-                              height={mainVisualHeight}
-                            />
-                          </div>
-                        )}
+                        <div className="absolute inset-0 overflow-hidden rounded pointer-events-none">
+                          {media.type === 'video' && (
+                            <div style={{ height: mainVisualHeight }} className="relative">
+                              <FrameStripOverlay
+                                media={media}
+                                clipId={clip.id}
+                                width={width}
+                                height={mainVisualHeight}
+                              />
+                            </div>
+                          )}
 
                         {media.type === 'image' && (
                           <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1890,19 +1894,75 @@ export function Timeline() {
                           />
                         )}
 
-                        {/* Audio waveform bar beneath video frame strip */}
-                        {isVideoWithAudio && (
-                          <div
-                            className="relative overflow-hidden border-t border-blue-400/20"
-                            style={{ height: 12 }}
-                          >
-                            <WaveformOverlay
-                              media={media}
-                              clipId={clip.id}
-                              width={width}
-                              height={12}
-                              small
-                            />
+                          {/* Audio waveform bar beneath video frame strip */}
+                          {isVideoWithAudio && (
+                            <div
+                              className="relative overflow-hidden border-t border-blue-400/20"
+                              style={{ height: 12 }}
+                            >
+                              <WaveformOverlay
+                                media={media}
+                                clipId={clip.id}
+                                width={width}
+                                height={12}
+                                small
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ── Master Keyframes ────────────────────────── */}
+                        {keyframeTimes.length > 0 && (
+                          <div className="absolute top-0 left-0 right-0 h-0 z-40 pointer-events-none">
+                            {/* Connecting Line */}
+                            {keyframeTimes.length > 1 && (
+                              <div
+                                className="absolute h-[2px] bg-red-500/80 -top-[1px]"
+                                style={{
+                                  left: `${keyframeTimes[0] * zoomLevel}px`,
+                                  width: `${(keyframeTimes[keyframeTimes.length - 1] - keyframeTimes[0]) * zoomLevel}px`
+                                }}
+                              />
+                            )}
+                            
+                            {/* Keyframe Points */}
+                            {keyframeTimes.map((t, i) => {
+                              const isStartEnd = i === 0 || i === keyframeTimes.length - 1;
+                              return (
+                                <div
+                                  key={t}
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    const startX = e.clientX;
+                                    let currentTimeMark = t;
+                                    const onMouseMove = (moveEvent: MouseEvent) => {
+                                      const deltaX = moveEvent.clientX - startX;
+                                      let newTime = t + deltaX / zoomLevel;
+                                      newTime = Math.max(0, Math.min(newTime, clip.duration));
+                                      if (Math.abs(newTime - currentTimeMark) > 0.01) {
+                                        useEditorStore.getState().moveMasterKeyframe(clip.id, currentTimeMark, newTime);
+                                        currentTimeMark = newTime;
+                                      }
+                                    };
+                                    const onMouseUp = () => {
+                                      window.removeEventListener('mousemove', onMouseMove);
+                                      window.removeEventListener('mouseup', onMouseUp);
+                                      useEditorStore.getState().saveSnapshot();
+                                    };
+                                    window.addEventListener('mousemove', onMouseMove);
+                                    window.addEventListener('mouseup', onMouseUp);
+                                  }}
+                                  className="absolute w-4 h-4 -top-2 -ml-2 pointer-events-auto cursor-ew-resize flex items-center justify-center group"
+                                  style={{ left: `${t * zoomLevel}px` }}
+                                >
+                                  {isStartEnd ? (
+                                    <div className="w-2.5 h-2.5 rotate-45 bg-amber-500 border border-white group-hover:bg-amber-400 group-hover:scale-125 transition-transform shadow" />
+                                  ) : (
+                                    <div className="w-[3px] h-3 bg-amber-500 border border-white group-hover:bg-amber-400 group-hover:scale-125 transition-transform shadow" />
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
 
