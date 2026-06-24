@@ -13,6 +13,7 @@ import {
   VolumeX,
   Sparkles,
   Sliders,
+  RotateCcw,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect } from 'react';
@@ -771,14 +772,28 @@ export function PropertiesPanel() {
               <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
                 <button
                   onClick={() => toggleSection('position')}
-                  className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
                 >
                   <span className="font-medium">Position</span>
-                  {collapsedSections['position'] ? (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  )}
+                  <div className="flex items-center gap-2">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPropVal('transform.x', 0, { transform: { ...selectedClip.transform, x: 0 } });
+                        setPropVal('transform.y', 0, { transform: { ...selectedClip.transform, y: 0 } });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                      title="Reset Position"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    </div>
+                    {collapsedSections['position'] ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    )}
+                  </div>
                 </button>
                 {!collapsedSections['position'] && (
                   <div className="px-2.5 pb-2.5 space-y-2">
@@ -822,10 +837,21 @@ export function PropertiesPanel() {
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
                 onClick={() => toggleSection('scale')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
               >
                 <span className="font-medium">Scale</span>
                 <div className="flex items-center gap-2">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                    title="Reset Scale"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                  </div>
                   {collapsedSections['scale'] ? (
                     <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                   ) : (
@@ -862,10 +888,21 @@ export function PropertiesPanel() {
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
                 onClick={() => toggleSection('rotation')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
               >
                 <span className="font-medium">Rotation</span>
                 <div className="flex items-center gap-2">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                    title="Reset Rotation"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                  </div>
                   {collapsedSections['rotation'] ? (
                     <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                   ) : (
@@ -902,10 +939,21 @@ export function PropertiesPanel() {
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
                 onClick={() => toggleSection('opacity')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
               >
                 <span className="font-medium">Opacity</span>
                 <div className="flex items-center gap-2">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPropVal('opacity', 1, { opacity: 1 });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                    title="Reset Opacity"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                  </div>
                   {collapsedSections['opacity'] ? (
                     <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                   ) : (
@@ -943,14 +991,30 @@ export function PropertiesPanel() {
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
                 onClick={() => toggleSection('crop')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
               >
                 <span className="font-medium">Crop</span>
-                {collapsedSections['crop'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                )}
+                <div className="flex items-center gap-2">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPropVal('crop.left', 0, { crop: { top: 0, bottom: 0, left: 0, right: 0 } });
+                      setPropVal('crop.right', 0, { crop: { top: 0, bottom: 0, left: 0, right: 0 } });
+                      setPropVal('crop.top', 0, { crop: { top: 0, bottom: 0, left: 0, right: 0 } });
+                      setPropVal('crop.bottom', 0, { crop: { top: 0, bottom: 0, left: 0, right: 0 } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                    title="Reset Crop"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                  </div>
+                  {collapsedSections['crop'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  )}
+                </div>
               </button>
               {!collapsedSections['crop'] && (
                 <div className="px-2.5 pb-2.5 space-y-3 mt-1">

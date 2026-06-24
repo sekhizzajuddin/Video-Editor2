@@ -184,6 +184,14 @@ export interface EditorState {
   // Transitions UI State
   showTransitionLayer: boolean;
   selectedTransitionClipId: string | null;
+
+  // New features
+  hasUnsavedChanges: boolean;
+  selectedKeyframeLines: {clipId: string, time: number}[];
+  settings: {
+    scrollSpeed: number;
+    gestureSensitivity: number;
+  };
 }
 
 export interface EditorSnapshot {

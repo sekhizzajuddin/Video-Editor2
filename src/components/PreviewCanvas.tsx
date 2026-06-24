@@ -95,9 +95,27 @@ export function PreviewCanvas() {
   const isPanning = useRef(false);
   const lastPanPos = useRef({ x: 0, y: 0 });
 
-  // A counter we bump to force re-render when an image finishes loading
   const [imageRevision, setImageRevision] = useState(0);
   const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
+  
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT') {
+        setIsSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setIsSpacePressed(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   // Listen to frame update events from useMediaPlayback (like seek complete)
   useEffect(() => {
@@ -205,16 +223,7 @@ export function PreviewCanvas() {
     ctx.translate(viewport.x, viewport.y);
     ctx.scale(viewport.zoom, viewport.zoom);
 
-    // 2. Checkerboard for transparent areas
-    ctx.fillStyle = '#141414';
-    const gridSize = 16;
-    for (let x = 0; x < W; x += gridSize) {
-      for (let y = 0; y < H; y += gridSize) {
-        if (((x / gridSize) + (y / gridSize)) % 2 === 0) {
-          ctx.fillRect(x, y, gridSize, gridSize);
-        }
-      }
-    }
+    // 2. Checkerboard removed per user request
 
     // 3. Collect video tracks sorted bottom-to-top (V1 draws first)
     const videoTracks = tracks
@@ -540,28 +549,63 @@ export function PreviewCanvas() {
       const scaleX = 854 / rect.width;
       const scaleY = 480 / rect.height;
       
-      if (e.ctrlKey || e.metaKey) {
-        // Pinch-to-zoom
+      const { updateClip, currentTime, settings } = useEditorStore.getState();
+      const sens = settings.gestureSensitivity;
+      
+      if (e.altKey) {
+        // Alt + Scroll -> Zoom Workspace
         setViewport(prev => {
-          const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;
+          const zoomDelta = e.deltaY > 0 ? -0.1 * sens : 0.1 * sens;
           const newZoom = Math.min(Math.max(prev.zoom + zoomDelta, 0.1), 5.0);
           
-          // Cursor position relative to the 854x480 coordinate space
           const mx = (e.clientX - rect.left) * scaleX;
           const my = (e.clientY - rect.top) * scaleY;
           
-          // Calculate new offsets to center zoom on mouse cursor
           const nx = mx - (mx - prev.x) * (newZoom / prev.zoom);
           const ny = my - (my - prev.y) * (newZoom / prev.zoom);
           
           return { x: nx, y: ny, zoom: newZoom };
         });
+      } else if (e.ctrlKey || e.metaKey) {
+        // Ctrl + Scroll (or pinch) -> Zoom Content (Clip Scale)
+        const state = useEditorStore.getState();
+        let currentClip = null;
+        if (state.selectedClipId) {
+          for (const t of state.tracks) {
+            if (t.type === 'video') {
+              const c = t.clips.find(c => c.id === state.selectedClipId);
+              if (c && state.currentTime >= c.startTime && state.currentTime < c.startTime + c.duration) {
+                currentClip = c;
+                break;
+              }
+            }
+          }
+        }
+        
+        if (currentClip) {
+          const currentScale = currentClip.transform.scale;
+          // pinch zooms often have small deltaY (e.g. 1-5), mouse wheel is often 100
+          const zoomDelta = e.deltaY > 0 ? -2 * sens : 2 * sens;
+          const newScale = Math.max(10, Math.min(1000, currentScale + zoomDelta));
+          
+          let animations = currentClip.animations || {};
+          const localTime = currentTime - currentClip.startTime;
+          if (animations['transform.scale']) {
+            animations = { ...animations, 'transform.scale': addOrUpdateKeyframe(animations['transform.scale'], localTime, newScale) };
+          }
+          
+          updateClip(currentClip.id, { 
+            transform: { ...currentClip.transform, scale: newScale },
+            animations 
+          });
+        }
       } else {
-        // Two-finger pan
+        // Two-finger pan -> Pan Workspace
+        const panSpeed = settings.scrollSpeed;
         setViewport(prev => ({
           ...prev,
-          x: prev.x - e.deltaX * scaleX,
-          y: prev.y - e.deltaY * scaleY
+          x: prev.x - e.deltaX * scaleX * panSpeed,
+          y: prev.y - e.deltaY * scaleY * panSpeed
         }));
       }
     };
@@ -571,7 +615,7 @@ export function PreviewCanvas() {
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (activeTool === 'hand') {
+    if (activeTool === 'hand' || isSpacePressed) {
       isPanning.current = true;
       lastPanPos.current = { x: e.clientX, y: e.clientY };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -593,7 +637,7 @@ export function PreviewCanvas() {
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (isPanning.current && activeTool === 'hand') {
+    if (isPanning.current && (activeTool === 'hand' || isSpacePressed)) {
       const rect = containerRef.current!.getBoundingClientRect();
       const scaleX = 854 / rect.width;
       const scaleY = 480 / rect.height;
@@ -961,6 +1005,8 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     initTransform: any;
     initCrop: any;
   } | null>(null);
+  
+  const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
 
   let activeClip = null;
   let mediaItem = null;
@@ -1025,10 +1071,28 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
       };
 
       if (dragState.type === 'move') {
-        x += dx;
-        y += dy;
-        getNewAnimations('transform.x', x);
-        getNewAnimations('transform.y', y);
+        let newX = x + dx;
+        let newY = y + dy;
+        
+        const newGuides: {axis: 'x'|'y', position: number}[] = [];
+        const snapThreshold = 15; // px (before scaling)
+        
+        // Center snapping
+        if (Math.abs(newX) < snapThreshold) {
+          newX = 0;
+          newGuides.push({ axis: 'x', position: 0 });
+        }
+        if (Math.abs(newY) < snapThreshold) {
+          newY = 0;
+          newGuides.push({ axis: 'y', position: 0 });
+        }
+        
+        setSnapGuides(newGuides);
+        
+        getNewAnimations('transform.x', newX);
+        getNewAnimations('transform.y', newY);
+        x = newX;
+        y = newY;
       } else if (dragState.type.startsWith('crop-')) {
         const theta = (-rotation * Math.PI) / 180;
         const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (scale / 100);
@@ -1078,6 +1142,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
 
     const handleUp = () => {
       setDragState(null);
+      setSnapGuides([]);
       useEditorStore.getState().saveSnapshot();
     };
 
@@ -1242,6 +1307,20 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                 </>
               )}
             </g>
+            
+            {/* Smart Guides */}
+            {snapGuides.map((g, i) => (
+              <line
+                key={`guide-${i}`}
+                x1={g.axis === 'x' ? W/2 + g.position : 0}
+                y1={g.axis === 'y' ? H/2 + g.position : 0}
+                x2={g.axis === 'x' ? W/2 + g.position : W}
+                y2={g.axis === 'y' ? H/2 + g.position : H}
+                stroke="#ff00ff"
+                strokeWidth={1/viewport.zoom}
+                strokeDasharray="4,4"
+              />
+            ))}
           </g>
         </svg>
       </div>

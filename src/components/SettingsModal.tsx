@@ -1,10 +1,10 @@
-import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen } from 'lucide-react';
+import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 
 export function SettingsModal() {
-  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia } = useEditorStore();
+  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings } = useEditorStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -21,7 +21,7 @@ export function SettingsModal() {
     setShowSettingsModal(false);
     e.target.value = '';
   }, [addMedia, setShowSettingsModal]);
-  const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls'>('general');
   const [autosave, setAutosave] = useState(true);
   const [showWaveforms, setShowWaveforms] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(true);
@@ -31,6 +31,7 @@ export function SettingsModal() {
 
   const tabs = [
     { id: 'general' as const, label: 'General', icon: Settings },
+    { id: 'controls' as const, label: 'Controls', icon: Sliders },
     { id: 'keyboard' as const, label: 'Shortcuts', icon: Keyboard },
     { id: 'performance' as const, label: 'Performance', icon: Monitor },
   ];
@@ -208,6 +209,52 @@ export function SettingsModal() {
                       <RotateCcw className="w-3.5 h-3.5" />
                       Reset Project
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'controls' && (
+              <div className="space-y-4">
+                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Canvas Controls</h3>
+                
+                <div className="space-y-4">
+                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                    <label className="flex items-center justify-between text-xs text-white font-medium mb-3">
+                      Scroll Speed
+                      <span className="text-amber-500">{settings.scrollSpeed.toFixed(1)}x</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={3}
+                      step={0.1}
+                      value={settings.scrollSpeed}
+                      onChange={(e) => updateSettings({ scrollSpeed: Number(e.target.value) })}
+                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                    <p className="text-[10px] text-[#a0a0a0] mt-2">
+                      Adjusts the timeline and track scrolling speed.
+                    </p>
+                  </div>
+
+                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                    <label className="flex items-center justify-between text-xs text-white font-medium mb-3">
+                      Gesture Zoom Sensitivity
+                      <span className="text-amber-500">{settings.gestureSensitivity.toFixed(1)}x</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={3}
+                      step={0.1}
+                      value={settings.gestureSensitivity}
+                      onChange={(e) => updateSettings({ gestureSensitivity: Number(e.target.value) })}
+                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                    <p className="text-[10px] text-[#a0a0a0] mt-2">
+                      Adjusts the zoom speed when using trackpad gestures or Ctrl+Scroll in the canvas.
+                    </p>
                   </div>
                 </div>
               </div>
