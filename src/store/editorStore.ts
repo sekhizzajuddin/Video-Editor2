@@ -164,6 +164,9 @@ interface EditorActions {
   setShowSettingsModal: (show: boolean) => void;
   setCanvasTransformMode: (mode: 'resize' | 'crop') => void;
 
+  setPreviewCanvas: (canvas: HTMLCanvasElement | null) => void;
+  setMasterAudioStream: (stream: MediaStream | null) => void;
+
   // Clipboard
   copyClip: () => void;
   pasteClip: () => void;
@@ -213,6 +216,8 @@ const initialState: EditorState = {
   activeMediaTab: 'project',
   activePropertiesTab: 'transform',
   canvasTransformMode: 'resize',
+  previewCanvas: null,
+  masterAudioStream: null,
   clipboardClip: null,
   history: [
     {
@@ -869,6 +874,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setShowExportModal: (show) => set({ showExportModal: show }),
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setCanvasTransformMode: (mode) => set({ canvasTransformMode: mode }),
+
+  setPreviewCanvas: (canvas) => set({ previewCanvas: canvas }),
+  setMasterAudioStream: (stream) => set({ masterAudioStream: stream }),
 
   // Clipboard
   copyClip: () => {

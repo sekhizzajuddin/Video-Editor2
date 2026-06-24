@@ -71,6 +71,23 @@ export interface SpeedRampKeyframe {
   speed: number;    // 0.1 to 4.0
 }
 
+export interface PropertyKeyframe {
+  time: number; // absolute seconds from start of clip
+  value: number;
+}
+
+export interface ClipAnimations {
+  opacity?: PropertyKeyframe[];
+  'transform.x'?: PropertyKeyframe[];
+  'transform.y'?: PropertyKeyframe[];
+  'transform.scale'?: PropertyKeyframe[];
+  'transform.rotation'?: PropertyKeyframe[];
+  'crop.top'?: PropertyKeyframe[];
+  'crop.bottom'?: PropertyKeyframe[];
+  'crop.left'?: PropertyKeyframe[];
+  'crop.right'?: PropertyKeyframe[];
+}
+
 // Timeline Clip
 export interface TimelineClip {
   id: string;
@@ -85,6 +102,7 @@ export interface TimelineClip {
   opacity: number;      // 0-1
   speed: number;        // playback speed multiplier
   speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes (overrides flat speed)
+  animations?: ClipAnimations; // timeline keyframes for properties
   // Effects
   effects: string[];
   // For drag preview

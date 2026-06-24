@@ -1,37 +1,102 @@
 import { X, Download } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { formatSimpleTime } from '@/utils/time';
 
 export function ExportModal() {
-  const { showExportModal, setShowExportModal, totalDuration, tracks } = useEditorStore();
+  const { 
+    showExportModal, setShowExportModal, totalDuration, tracks,
+    previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime
+  } = useEditorStore();
   const [format, setFormat] = useState('mp4');
   const [resolution, setResolution] = useState('1080p');
   const [fps, setFps] = useState('30');
   const [quality, setQuality] = useState('high');
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
 
   if (!showExportModal) return null;
 
+  // Watch currentTime to update progress and stop recording
+  useEffect(() => {
+    if (isExporting) {
+      const p = Math.min(100, (currentTime / totalDuration) * 100);
+      setProgress(p);
+
+      if (currentTime >= totalDuration) {
+        if (recorderRef.current && recorderRef.current.state === 'recording') {
+          recorderRef.current.stop();
+        }
+        if (isPlaying) {
+          togglePlayback(); // pause
+        }
+        setIsExporting(false);
+      }
+    }
+  }, [currentTime, totalDuration, isExporting, isPlaying, togglePlayback]);
+
   const handleExport = () => {
+    if (!previewCanvas || !masterAudioStream) {
+      alert("Canvas or Audio stream not initialized yet.");
+      return;
+    }
+
     setIsExporting(true);
     setProgress(0);
-    // Simulate export progress
-    const interval = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setIsExporting(false);
-            setShowExportModal(false);
-            setProgress(0);
-          }, 500);
-          return 100;
-        }
-        return p + Math.random() * 8 + 2;
-      });
-    }, 200);
+    chunksRef.current = [];
+
+    // Create combined stream
+    const videoStream = previewCanvas.captureStream(parseInt(fps));
+    const combinedStream = new MediaStream([
+      ...videoStream.getVideoTracks(),
+      ...masterAudioStream.getAudioTracks()
+    ]);
+
+    let mimeType = 'video/webm;codecs=vp9,opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm';
+    }
+
+    const recorder = new MediaRecorder(combinedStream, {
+      mimeType,
+      videoBitsPerSecond: quality === 'max' ? 8000000 : quality === 'high' ? 5000000 : 2500000,
+    });
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunksRef.current.push(e.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `procut-export-${Date.now()}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 100);
+      setShowExportModal(false);
+      setProgress(0);
+    };
+
+    recorderRef.current = recorder;
+    
+    // Seek to 0 and start playback to trigger recording frames
+    seek(0);
+    setTimeout(() => {
+      recorder.start();
+      if (!useEditorStore.getState().isPlaying) {
+        togglePlayback();
+      }
+    }, 100);
   };
 
   const totalClips = tracks.reduce((acc, t) => acc + t.clips.length, 0);
@@ -99,26 +164,17 @@ export function ExportModal() {
           {/* Resolution */}
           <div>
             <label className="text-xs text-[#a0a0a0] block mb-2">Resolution</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: '720p', label: 'HD 720p', res: '1280 x 720' },
-                { id: '1080p', label: 'Full HD', res: '1920 x 1080' },
-                { id: '4k', label: '4K UHD', res: '3840 x 2160' },
-              ].map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => setResolution(r.id)}
-                  className={`px-3 py-2 rounded text-xs border transition-colors ${
-                    resolution === r.id
-                      ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0]'
-                  }`}
-                >
-                  <div>{r.label}</div>
-                  <div className="text-[9px] opacity-60 mt-0.5">{r.res}</div>
-                </button>
-              ))}
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                className={`px-3 py-2 rounded text-xs border transition-colors bg-amber-600/20 border-amber-500 text-amber-400`}
+              >
+                <div>Preview Native</div>
+                <div className="text-[9px] opacity-60 mt-0.5">854 x 480</div>
+              </button>
             </div>
+            <p className="text-[10px] text-[#a0a0a0] mt-2">
+              Currently exporting at Preview Canvas native resolution. Advanced multi-res exporting is planned for a future update.
+            </p>
           </div>
 
           {/* FPS */}

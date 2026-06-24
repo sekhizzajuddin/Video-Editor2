@@ -18,6 +18,19 @@ import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect } from 'react';
 import type { PropertiesTab } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
+import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
+
+const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
+  <button
+    onClick={onClick}
+    className={`p-1 rounded transition-colors ${active ? 'text-amber-400 bg-amber-400/10 hover:bg-amber-400/20' : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'}`}
+    title={active ? "Disable Keyframes (Removes all)" : "Enable Keyframing"}
+  >
+    <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+      <polygon points="12 2 22 12 12 22 2 12 12 2" />
+    </svg>
+  </button>
+);
 
 const PRESETS = {
   slowMo: [
@@ -631,62 +644,99 @@ export function PropertiesPanel() {
 
       {/* Properties Content */}
       <div className="flex-1 overflow-y-auto p-3">
-        {activePropertiesTab === 'transform' && (
-          <div className="space-y-3">
-            {/* Position */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
-              <button
-                onClick={() => toggleSection('position')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
-              >
-                <span className="font-medium">Position</span>
-                {collapsedSections['position'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                )}
-              </button>
-              {!collapsedSections['position'] && (
-                <div className="px-2.5 pb-2.5 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-[#a0a0a0] block mb-1">X Position</label>
-                      <input
-                        type="number"
-                        value={selectedClip.transform.x}
-                        onChange={(e) =>
-                          updateClip(selectedClip.id, {
-                            transform: { ...selectedClip.transform, x: Number(e.target.value) },
-                          })
-                        }
-                        onBlur={() => useEditorStore.getState().saveSnapshot()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                        }}
-                        className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-[#a0a0a0] block mb-1">Y Position</label>
-                      <input
-                        type="number"
-                        value={selectedClip.transform.y}
-                        onChange={(e) =>
-                          updateClip(selectedClip.id, {
-                            transform: { ...selectedClip.transform, y: Number(e.target.value) },
-                          })
-                        }
-                        onBlur={() => useEditorStore.getState().saveSnapshot()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                        }}
-                        className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
-                      />
+        {activePropertiesTab === 'transform' && (() => {
+          const localTime = currentTime - selectedClip.startTime;
+          const animations = selectedClip.animations || {};
+
+          const getPropVal = (base: number, propKey: string) => {
+            return getAnimatedValue(base, currentTime, selectedClip.startTime, animations[propKey as keyof typeof animations]);
+          };
+
+          const setPropVal = (propKey: string, value: number, baseUpdateObj: any) => {
+            if (animations[propKey as keyof typeof animations]) {
+              updateClip(selectedClip.id, {
+                animations: {
+                  ...animations,
+                  [propKey]: addOrUpdateKeyframe(animations[propKey as keyof typeof animations], localTime, value)
+                }
+              });
+            } else {
+              updateClip(selectedClip.id, baseUpdateObj);
+            }
+          };
+
+          const toggleKeyframe = (propKey: string, currentValue: number) => {
+            if (animations[propKey as keyof typeof animations]) {
+              // Turn off keyframing - remove it completely, but bake the current value into base
+              const newAnims = { ...animations };
+              delete newAnims[propKey as keyof typeof animations];
+              updateClip(selectedClip.id, { animations: newAnims });
+              // We also need to update the base value to what it was at this moment, but that requires knowing what baseUpdateObj maps to
+            } else {
+              // Turn on keyframing - add initial keyframe at current time
+              updateClip(selectedClip.id, {
+                animations: {
+                  ...animations,
+                  [propKey]: [{ time: localTime, value: currentValue }]
+                }
+              });
+            }
+          };
+
+          return (
+            <div className="space-y-3">
+              {/* Position */}
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                <button
+                  onClick={() => toggleSection('position')}
+                  className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                >
+                  <span className="font-medium">Position</span>
+                  {collapsedSections['position'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  )}
+                </button>
+                {!collapsedSections['position'] && (
+                  <div className="px-2.5 pb-2.5 space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] text-[#a0a0a0] block">X Position</label>
+                          <KeyframeIcon active={!!animations['transform.x']} onClick={() => toggleKeyframe('transform.x', selectedClip.transform.x)} />
+                        </div>
+                        <input
+                          type="number"
+                          value={Math.round(getPropVal(selectedClip.transform.x, 'transform.x'))}
+                          onChange={(e) => setPropVal('transform.x', Number(e.target.value), { transform: { ...selectedClip.transform, x: Number(e.target.value) } })}
+                          onBlur={() => useEditorStore.getState().saveSnapshot()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                          }}
+                          className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] text-[#a0a0a0] block">Y Position</label>
+                          <KeyframeIcon active={!!animations['transform.y']} onClick={() => toggleKeyframe('transform.y', selectedClip.transform.y)} />
+                        </div>
+                        <input
+                          type="number"
+                          value={Math.round(getPropVal(selectedClip.transform.y, 'transform.y'))}
+                          onChange={(e) => setPropVal('transform.y', Number(e.target.value), { transform: { ...selectedClip.transform, y: Number(e.target.value) } })}
+                          onBlur={() => useEditorStore.getState().saveSnapshot()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                          }}
+                          className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
             {/* Scale */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
@@ -695,11 +745,14 @@ export function PropertiesPanel() {
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
               >
                 <span className="font-medium">Scale</span>
-                {collapsedSections['scale'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                )}
+                <div className="flex items-center gap-2">
+                  <KeyframeIcon active={!!animations['transform.scale']} onClick={(e) => { e.stopPropagation(); toggleKeyframe('transform.scale', selectedClip.transform.scale); }} />
+                  {collapsedSections['scale'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  )}
+                </div>
               </button>
               {!collapsedSections['scale'] && (
                 <div className="px-2.5 pb-2.5">
@@ -708,30 +761,18 @@ export function PropertiesPanel() {
                       type="range"
                       min={10}
                       max={200}
-                      value={selectedClip.transform.scale}
+                      value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
                       title="Double-click to reset to 100%"
-                      onChange={(e) =>
-                        updateClip(selectedClip.id, {
-                          transform: {
-                            ...selectedClip.transform,
-                            scale: Number(e.target.value),
-                          },
-                        })
-                      }
+                      onChange={(e) => setPropVal('transform.scale', Number(e.target.value), { transform: { ...selectedClip.transform, scale: Number(e.target.value) } })}
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                       onDoubleClick={() => {
-                        updateClip(selectedClip.id, {
-                          transform: {
-                            ...selectedClip.transform,
-                            scale: 100,
-                          },
-                        });
+                        setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
                         useEditorStore.getState().saveSnapshot();
                       }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
-                      {selectedClip.transform.scale}%
+                      {Math.round(getPropVal(selectedClip.transform.scale, 'transform.scale'))}%
                     </span>
                   </div>
                 </div>
@@ -745,11 +786,14 @@ export function PropertiesPanel() {
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
               >
                 <span className="font-medium">Rotation</span>
-                {collapsedSections['rotation'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                )}
+                <div className="flex items-center gap-2">
+                  <KeyframeIcon active={!!animations['transform.rotation']} onClick={(e) => { e.stopPropagation(); toggleKeyframe('transform.rotation', selectedClip.transform.rotation); }} />
+                  {collapsedSections['rotation'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  )}
+                </div>
               </button>
               {!collapsedSections['rotation'] && (
                 <div className="px-2.5 pb-2.5">
@@ -758,30 +802,18 @@ export function PropertiesPanel() {
                       type="range"
                       min={-180}
                       max={180}
-                      value={selectedClip.transform.rotation}
+                      value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
                       title="Double-click to reset to 0°"
-                      onChange={(e) =>
-                        updateClip(selectedClip.id, {
-                          transform: {
-                            ...selectedClip.transform,
-                            rotation: Number(e.target.value),
-                          },
-                        })
-                      }
+                      onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                       onDoubleClick={() => {
-                        updateClip(selectedClip.id, {
-                          transform: {
-                            ...selectedClip.transform,
-                            rotation: 0,
-                          },
-                        });
+                        setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
                         useEditorStore.getState().saveSnapshot();
                       }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
-                      {selectedClip.transform.rotation}°
+                      {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
                     </span>
                   </div>
                 </div>
@@ -795,11 +827,14 @@ export function PropertiesPanel() {
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
               >
                 <span className="font-medium">Opacity</span>
-                {collapsedSections['opacity'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                )}
+                <div className="flex items-center gap-2">
+                  <KeyframeIcon active={!!animations['opacity']} onClick={(e) => { e.stopPropagation(); toggleKeyframe('opacity', selectedClip.opacity); }} />
+                  {collapsedSections['opacity'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  )}
+                </div>
               </button>
               {!collapsedSections['opacity'] && (
                 <div className="px-2.5 pb-2.5">
@@ -809,24 +844,18 @@ export function PropertiesPanel() {
                       min={0}
                       max={1}
                       step={0.01}
-                      value={selectedClip.opacity}
+                      value={getPropVal(selectedClip.opacity, 'opacity')}
                       title="Double-click to reset to 100%"
-                      onChange={(e) =>
-                        updateClip(selectedClip.id, {
-                          opacity: Number(e.target.value),
-                        })
-                      }
+                      onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                       onDoubleClick={() => {
-                        updateClip(selectedClip.id, {
-                          opacity: 1,
-                        });
+                        setPropVal('opacity', 1, { opacity: 1 });
                         useEditorStore.getState().saveSnapshot();
                       }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                     <span className="text-[11px] text-white w-10 text-right">
-                      {Math.round(selectedClip.opacity * 100)}%
+                      {Math.round(getPropVal(selectedClip.opacity, 'opacity') * 100)}%
                     </span>
                   </div>
                 </div>
@@ -850,12 +879,16 @@ export function PropertiesPanel() {
                 <div className="px-2.5 pb-2.5 space-y-3 mt-1">
                   {['left', 'right', 'top', 'bottom'].map((edge) => {
                     const currentCrop = selectedClip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
-                    const value = currentCrop[edge as keyof typeof currentCrop];
+                    const propKey = `crop.${edge}`;
+                    const value = getPropVal(currentCrop[edge as keyof typeof currentCrop], propKey);
                     return (
                       <div key={edge} className="space-y-1">
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center mb-1">
                           <label className="text-[10px] text-[#a0a0a0] capitalize">{edge}</label>
-                          <span className="text-[10px] text-white">{value}%</span>
+                          <div className="flex items-center gap-2">
+                            <KeyframeIcon active={!!animations[propKey]} onClick={() => toggleKeyframe(propKey, currentCrop[edge as keyof typeof currentCrop])} />
+                            <span className="text-[10px] text-white w-8 text-right">{Math.round(value)}%</span>
+                          </div>
                         </div>
                         <input
                           type="range"
@@ -864,16 +897,10 @@ export function PropertiesPanel() {
                           step={0.1}
                           value={value}
                           title={`Double-click to reset ${edge} crop to 0%`}
-                          onChange={(e) =>
-                            updateClip(selectedClip.id, {
-                              crop: { ...currentCrop, [edge]: Number(e.target.value) },
-                            })
-                          }
+                          onChange={(e) => setPropVal(propKey, Number(e.target.value), { crop: { ...currentCrop, [edge]: Number(e.target.value) } })}
                           onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                           onDoubleClick={() => {
-                            updateClip(selectedClip.id, {
-                              crop: { ...currentCrop, [edge]: 0 },
-                            });
+                            setPropVal(propKey, 0, { crop: { ...currentCrop, [edge]: 0 } });
                             useEditorStore.getState().saveSnapshot();
                           }}
                           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -885,7 +912,7 @@ export function PropertiesPanel() {
               )}
             </div>
           </div>
-        )}
+        )()}
 
         {activePropertiesTab === 'color' && (
           <div className="space-y-3">

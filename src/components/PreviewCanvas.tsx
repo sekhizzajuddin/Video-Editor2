@@ -15,6 +15,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { formatTime } from '@/utils/time';
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 
 // ---------------------------------------------------------------------------
 // Image cache – shared across renders, keyed by mediaId.
@@ -74,6 +75,7 @@ export function PreviewCanvas() {
     updateClip,
     canvasTransformMode,
     setCanvasTransformMode,
+    setPreviewCanvas,
   } = useEditorStore();
 
   const hasClips = tracks.some((t) => t.clips.length > 0);
@@ -101,6 +103,13 @@ export function PreviewCanvas() {
     window.addEventListener('procut-frame-updated', handleFrameUpdate);
     return () => window.removeEventListener('procut-frame-updated', handleFrameUpdate);
   }, [requestRedraw]);
+
+  // Register canvas with store
+  useEffect(() => {
+    if (canvasRef.current) {
+      setPreviewCanvas(canvasRef.current);
+    }
+  }, [setPreviewCanvas]);
 
   // Keep a mutable ref of currentTime so the playback loop effect doesn't tear down/setup on every frame
   const currentTimeRef = useRef(currentTime);
@@ -217,9 +226,21 @@ export function PreviewCanvas() {
       const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
       if (!mediaItem) return;
 
+      // Get animated values
+      const aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.opacity);
+      const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
+      const aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
+      const aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
+      const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+
+      const aCropTop = getAnimatedValue(clip.crop?.top || 0, currentTime, clip.startTime, clip.animations?.['crop.top']);
+      const aCropBot = getAnimatedValue(clip.crop?.bottom || 0, currentTime, clip.startTime, clip.animations?.['crop.bottom']);
+      const aCropLeft = getAnimatedValue(clip.crop?.left || 0, currentTime, clip.startTime, clip.animations?.['crop.left']);
+      const aCropRight = getAnimatedValue(clip.crop?.right || 0, currentTime, clip.startTime, clip.animations?.['crop.right']);
+
       // Set up transform
       ctx.save();
-      ctx.globalAlpha = clip.opacity * opacityMultiplier;
+      ctx.globalAlpha = aOpacity * opacityMultiplier;
 
       const cx = W / 2;
       const cy = H / 2;
@@ -230,14 +251,14 @@ export function PreviewCanvas() {
       if (extraTransform?.translateY !== undefined) ty += extraTransform.translateY;
 
       ctx.translate(tx, ty);
-      ctx.translate(clip.transform.x, clip.transform.y);
+      ctx.translate(aX, aY);
 
-      let finalScale = clip.transform.scale / 100;
+      let finalScale = aScale / 100;
       if (extraTransform?.scale !== undefined) {
         finalScale *= extraTransform.scale;
       }
       ctx.scale(finalScale, finalScale);
-      ctx.rotate((clip.transform.rotation * Math.PI) / 180);
+      ctx.rotate((aRot * Math.PI) / 180);
 
       // Default filters fallback
       const filters = clip.colorFilters || {
@@ -258,10 +279,10 @@ export function PreviewCanvas() {
       let dh = H;
       let hasRealMedia = false;
 
-      const cTop = (clip.crop?.top || 0) / 100;
-      const cBot = (clip.crop?.bottom || 0) / 100;
-      const cLeft = (clip.crop?.left || 0) / 100;
-      const cRight = (clip.crop?.right || 0) / 100;
+      const cTop = aCropTop / 100;
+      const cBot = aCropBot / 100;
+      const cLeft = aCropLeft / 100;
+      const cRight = aCropRight / 100;
 
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
@@ -910,9 +931,21 @@ function InteractiveCanvasOverlay() {
       const baseW = vw * scaleToFit;
       const baseH = vh * scaleToFit;
 
+      let animations = activeClip.animations || {};
+      const localTime = currentTime - activeClip.startTime;
+
+      // Helper to update base or keyframe
+      const getNewAnimations = (prop: string, val: number) => {
+        if (animations[prop]) {
+          animations = { ...animations, [prop]: addOrUpdateKeyframe(animations[prop], localTime, val) };
+        }
+      };
+
       if (dragState.type === 'move') {
         x += dx;
         y += dy;
+        getNewAnimations('transform.x', x);
+        getNewAnimations('transform.y', y);
       } else if (dragState.type.startsWith('crop-')) {
         const theta = (-rotation * Math.PI) / 180;
         const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (scale / 100);
@@ -920,12 +953,16 @@ function InteractiveCanvasOverlay() {
 
         if (dragState.type === 'crop-l') {
           crop.left = Math.max(0, Math.min(100 - crop.right - 1, crop.left + (localDx / baseW) * 100));
+          getNewAnimations('crop.left', crop.left);
         } else if (dragState.type === 'crop-r') {
           crop.right = Math.max(0, Math.min(100 - crop.left - 1, crop.right - (localDx / baseW) * 100));
+          getNewAnimations('crop.right', crop.right);
         } else if (dragState.type === 'crop-t') {
           crop.top = Math.max(0, Math.min(100 - crop.bottom - 1, crop.top + (localDy / baseH) * 100));
+          getNewAnimations('crop.top', crop.top);
         } else if (dragState.type === 'crop-b') {
           crop.bottom = Math.max(0, Math.min(100 - crop.top - 1, crop.bottom - (localDy / baseH) * 100));
+          getNewAnimations('crop.bottom', crop.bottom);
         }
       } else if (dragState.type === 'rot') {
         const cx = 427 + x;
@@ -935,6 +972,7 @@ function InteractiveCanvasOverlay() {
         let angle = Math.atan2(my - cy, mx - cx) * (180 / Math.PI);
         angle += 90;
         rotation = Math.round(angle);
+        getNewAnimations('transform.rotation', rotation);
       } else {
         const cx = 427 + x;
         const cy = 240 + y;
@@ -949,9 +987,10 @@ function InteractiveCanvasOverlay() {
         const scaleDelta = dist / origDist;
         scale = dragState.initTransform.scale * scaleDelta;
         scale = Math.max(10, Math.min(1000, Math.round(scale)));
+        getNewAnimations('transform.scale', scale);
       }
 
-      updateClip(activeClip.id, { transform: { x, y, scale, rotation }, crop });
+      updateClip(activeClip.id, { transform: { x, y, scale, rotation }, crop, animations });
     };
 
     const handleUp = () => {
@@ -991,8 +1030,20 @@ function InteractiveCanvasOverlay() {
   const baseW = vw * scaleToFit;
   const baseH = vh * scaleToFit;
 
-  const { x, y, scale, rotation } = activeClip.transform;
-  const crop = activeClip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+  const { x: baseX, y: baseY, scale: baseScale, rotation: baseRotation } = activeClip.transform;
+  const baseCrop = activeClip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+
+  const x = getAnimatedValue(baseX, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']);
+  const y = getAnimatedValue(baseY, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']);
+  const scale = getAnimatedValue(baseScale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']);
+  const rotation = getAnimatedValue(baseRotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']);
+
+  const crop = {
+    top: getAnimatedValue(baseCrop.top, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']),
+    bottom: getAnimatedValue(baseCrop.bottom, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']),
+    left: getAnimatedValue(baseCrop.left, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']),
+    right: getAnimatedValue(baseCrop.right, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']),
+  };
 
   const startDrag = (e: React.MouseEvent, type: string) => {
     e.stopPropagation();
@@ -1000,7 +1051,7 @@ function InteractiveCanvasOverlay() {
       type,
       startX: e.clientX,
       startY: e.clientY,
-      initTransform: activeClip.transform,
+      initTransform: { x, y, scale, rotation },
       initCrop: crop,
     });
   };

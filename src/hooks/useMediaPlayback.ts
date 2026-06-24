@@ -15,6 +15,23 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 
+// Global master audio context for combining all tracks into a single MediaStream for Export
+let masterAudioCtx: AudioContext | null = null;
+let masterAudioDestination: MediaStreamAudioDestinationNode | null = null;
+
+function getMasterAudioCtx() {
+  if (!masterAudioCtx) {
+    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      masterAudioCtx = new AudioContextClass();
+      if (masterAudioCtx) {
+        masterAudioDestination = masterAudioCtx.createMediaStreamDestination();
+      }
+    }
+  }
+  return masterAudioCtx;
+}
+
 interface MediaElement {
   el: HTMLVideoElement | HTMLAudioElement;
   clipId: string;
@@ -67,6 +84,15 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
   // Trigger a custom event on window so PreviewCanvas can redraw immediately on async frame seek
   const triggerRedraw = useCallback(() => {
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
+  }, []);
+
+  // Sync master stream to store once
+  useEffect(() => {
+    // ensure it's created
+    getMasterAudioCtx();
+    if (masterAudioDestination) {
+      useEditorStore.getState().setMasterAudioStream(masterAudioDestination.stream);
+    }
   }, []);
 
   // Build set of active clips
@@ -682,11 +708,10 @@ function cubicInterp(y0: number, y1: number, y2: number, y3: number, t: number):
 // Helper: initialize Web Audio graph for real-time panning, pitch, humanizer, and EQ
 // ---------------------------------------------------------------------------
 function initAudioGraph(entry: MediaElement) {
-  const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-  if (!AudioContextClass) return;
+  const audioCtx = getMasterAudioCtx();
+  if (!audioCtx) return;
 
   try {
-    const audioCtx = new AudioContextClass() as AudioContext;
     const sourceNode = audioCtx.createMediaElementSource(entry.el);
 
     // 1. Overlap-Add Hann-windowed granular pitch shifter (Stereo)
@@ -855,6 +880,9 @@ function initAudioGraph(entry: MediaElement) {
     }
 
     gainNode.connect(audioCtx.destination);
+    if (masterAudioDestination) {
+      gainNode.connect(masterAudioDestination);
+    }
 
     // Attach to element pool entry
     entry.audioCtx = audioCtx;
