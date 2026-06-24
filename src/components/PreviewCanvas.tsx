@@ -76,7 +76,10 @@ export function PreviewCanvas() {
     canvasTransformMode,
     setCanvasTransformMode,
     setPreviewCanvas,
+    activeTool,
   } = useEditorStore();
+
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
 
   const hasClips = tracks.some((t) => t.clips.length > 0);
 
@@ -87,6 +90,10 @@ export function PreviewCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  
+  // Hand tool panning state
+  const isPanning = useRef(false);
+  const lastPanPos = useRef({ x: 0, y: 0 });
 
   // A counter we bump to force re-render when an image finishes loading
   const [imageRevision, setImageRevision] = useState(0);
@@ -190,9 +197,13 @@ export function PreviewCanvas() {
     const W = canvas.width; // 854
     const H = canvas.height; // 480
 
-    // 1. Clear to dark background
+    // 1. Clear to dark background (entire canvas, regardless of viewport)
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(viewport.x, viewport.y);
+    ctx.scale(viewport.zoom, viewport.zoom);
 
     // 2. Checkerboard for transparent areas
     ctx.fillStyle = '#141414';
@@ -473,6 +484,8 @@ export function PreviewCanvas() {
       ctx.fillStyle = 'rgba(255,255,255,0.2)';
       ctx.fillText('Add clips to the timeline to preview', W / 2, H / 2 + 12);
     }
+    
+    ctx.restore(); // Restore from viewport transform
 
     // 5. Timecode overlay – top-right
     ctx.globalAlpha = 1;
@@ -493,7 +506,7 @@ export function PreviewCanvas() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport]);
 
   // Kick off render whenever dependencies change
   useEffect(() => {
@@ -513,34 +526,92 @@ export function PreviewCanvas() {
   }, [isPlaying, renderCanvas]);
 
   // -------------------------------------------------------------------
-  // Interaction handlers
+  // Interaction handlers (Viewport Gestures & Tools)
   // -------------------------------------------------------------------
-  const handleCanvasClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Select the topmost clip at current time
-    for (let i = tracks.length - 1; i >= 0; i--) {
-      const track = tracks[i];
-      if (track.hidden || track.type !== 'video') continue;
-      for (const clip of track.clips) {
-        if (
-          currentTime >= clip.startTime &&
-          currentTime < clip.startTime + clip.duration
-        ) {
-          selectClip(clip.id);
-          return;
-        }
+  
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      
+      const rect = el.getBoundingClientRect();
+      const scaleX = 854 / rect.width;
+      const scaleY = 480 / rect.height;
+      
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch-to-zoom
+        setViewport(prev => {
+          const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;
+          const newZoom = Math.min(Math.max(prev.zoom + zoomDelta, 0.1), 5.0);
+          
+          // Cursor position relative to the 854x480 coordinate space
+          const mx = (e.clientX - rect.left) * scaleX;
+          const my = (e.clientY - rect.top) * scaleY;
+          
+          // Calculate new offsets to center zoom on mouse cursor
+          const nx = mx - (mx - prev.x) * (newZoom / prev.zoom);
+          const ny = my - (my - prev.y) * (newZoom / prev.zoom);
+          
+          return { x: nx, y: ny, zoom: newZoom };
+        });
+      } else {
+        // Two-finger pan
+        setViewport(prev => ({
+          ...prev,
+          x: prev.x - e.deltaX * scaleX,
+          y: prev.y - e.deltaY * scaleY
+        }));
       }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (activeTool === 'hand') {
+      isPanning.current = true;
+      lastPanPos.current = { x: e.clientX, y: e.clientY };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } else if (activeTool === 'zoom') {
+      const rect = containerRef.current!.getBoundingClientRect();
+      const scaleX = 854 / rect.width;
+      const scaleY = 480 / rect.height;
+      const mx = (e.clientX - rect.left) * scaleX;
+      const my = (e.clientY - rect.top) * scaleY;
+      
+      setViewport(prev => {
+        const zoomDelta = e.altKey ? -0.5 : 0.5;
+        const newZoom = Math.min(Math.max(prev.zoom + zoomDelta, 0.1), 5.0);
+        const nx = mx - (mx - prev.x) * (newZoom / prev.zoom);
+        const ny = my - (my - prev.y) * (newZoom / prev.zoom);
+        return { x: nx, y: ny, zoom: newZoom };
+      });
     }
   };
 
-  const handleTimelineSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    seek(Number(e.target.value));
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (isPanning.current && activeTool === 'hand') {
+      const rect = containerRef.current!.getBoundingClientRect();
+      const scaleX = 854 / rect.width;
+      const scaleY = 480 / rect.height;
+      
+      const dx = (e.clientX - lastPanPos.current.x) * scaleX;
+      const dy = (e.clientY - lastPanPos.current.y) * scaleY;
+      
+      setViewport(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+      lastPanPos.current = { x: e.clientX, y: e.clientY };
+    }
   };
 
-  const handleSkipBackward = () => seek(Math.max(0, currentTime - 10));
-  const handleSkipForward = () => seek(Math.min(totalDuration, currentTime + 10));
-  const handleRestart = () => seek(0);
+  const handlePointerUp = (e: React.PointerEvent) => {
+    isPanning.current = false;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
 
-  const handleToggleFullscreen = () => {
+  const toggleFullscreen = () => {
     const container = containerRef.current;
     if (!container) return;
     if (!document.fullscreenElement) {
@@ -571,30 +642,41 @@ export function PreviewCanvas() {
     return () => window.removeEventListener('click', close);
   }, [showSpeedMenu]);
 
+  const handleTimelineSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    seek(Number(e.target.value));
+  };
+  const handleSkipBackward = () => seek(Math.max(0, currentTime - 10));
+  const handleSkipForward = () => seek(Math.min(totalDuration, currentTime + 10));
+  const handleRestart = () => seek(0);
+
   // -------------------------------------------------------------------
   // JSX
   // -------------------------------------------------------------------
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e]">
       {/* Canvas Container */}
-      <div
-        ref={containerRef}
-        className="flex-1 flex items-center justify-center p-4 bg-black relative overflow-hidden"
+      <div 
+        ref={containerRef} 
+        id="preview-canvas-wrapper" 
+        className="relative w-full h-full overflow-hidden bg-[#0a0a0a] select-none touch-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        style={{ cursor: activeTool === 'hand' ? (isPanning.current ? 'grabbing' : 'grab') : (activeTool === 'zoom' ? 'zoom-in' : 'default') }}
       >
         <canvas
           ref={canvasRef}
           width={854}
           height={480}
-          onClick={handleCanvasClick}
-          className="max-w-full max-h-full border border-[#3e3e3e] cursor-pointer"
-          style={{ aspectRatio: '16/9' }}
+          className="w-full h-full object-contain pointer-events-none"
         />
-        <InteractiveCanvasOverlay />
+        <InteractiveCanvasOverlay viewport={viewport} />
 
         {/* Overlay: fullscreen + settings (top-left) */}
         <div className="absolute top-3 left-3 flex gap-2">
           <button
-            onClick={handleToggleFullscreen}
+            onClick={toggleFullscreen}
             className="p-1.5 bg-black/50 hover:bg-black/70 rounded text-white/70 hover:text-white transition-colors"
             title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           >
@@ -860,7 +942,7 @@ function applyColorOverlays(
 // ---------------------------------------------------------------------------
 // Interactive Canvas Overlay Component
 // ---------------------------------------------------------------------------
-function InteractiveCanvasOverlay() {
+function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: number, zoom: number } }) {
   const {
     tracks,
     selectedClipId,
@@ -904,8 +986,9 @@ function InteractiveCanvasOverlay() {
       const scaleX = 854 / rect.width;
       const scaleY = 480 / rect.height;
 
-      const dx = (e.clientX - dragState.startX) * scaleX;
-      const dy = (e.clientY - dragState.startY) * scaleY;
+      // Adjust delta by viewport zoom so dragging feels natural at any zoom level
+      const dx = ((e.clientX - dragState.startX) * scaleX) / viewport.zoom;
+      const dy = ((e.clientY - dragState.startY) * scaleY) / viewport.zoom;
 
       let { x, y, scale, rotation } = dragState.initTransform;
       const crop = { ...dragState.initCrop };
@@ -1004,21 +1087,21 @@ function InteractiveCanvasOverlay() {
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [dragState, activeClip, updateClip, mediaItem, videoElements]);
+  }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime]);
 
-  if (!activeClip || !mediaItem) return null;
+  if (!activeClip) return null;
 
   const W = 854;
   const H = 480;
   let vw = W;
   let vh = H;
-  if (mediaItem.type === 'video') {
+  if (mediaItem?.type === 'video') {
     const v = videoElements.get(activeClip.id);
     if (v && v.videoWidth > 0) {
       vw = v.videoWidth;
       vh = v.videoHeight;
     }
-  } else if (mediaItem.type === 'image') {
+  } else if (mediaItem?.type === 'image') {
     const img = getCachedImage(mediaItem.id, mediaItem.url, () => {});
     if (img && img.naturalWidth > 0) {
       vw = img.naturalWidth;
@@ -1030,85 +1113,135 @@ function InteractiveCanvasOverlay() {
   const baseW = vw * scaleToFit;
   const baseH = vh * scaleToFit;
 
-  const { x: baseX, y: baseY, scale: baseScale, rotation: baseRotation } = activeClip.transform;
-  const baseCrop = activeClip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+  const aX = getAnimatedValue(activeClip.transform.x, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']);
+  const aY = getAnimatedValue(activeClip.transform.y, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']);
+  const aScale = getAnimatedValue(activeClip.transform.scale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']);
+  const aRot = getAnimatedValue(activeClip.transform.rotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']);
 
-  const x = getAnimatedValue(baseX, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']);
-  const y = getAnimatedValue(baseY, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']);
-  const scale = getAnimatedValue(baseScale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']);
-  const rotation = getAnimatedValue(baseRotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']);
+  const aCropLeft = getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']);
+  const aCropTop = getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']);
+  const aCropRight = getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']);
+  const aCropBot = getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']);
 
-  const crop = {
-    top: getAnimatedValue(baseCrop.top, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']),
-    bottom: getAnimatedValue(baseCrop.bottom, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']),
-    left: getAnimatedValue(baseCrop.left, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']),
-    right: getAnimatedValue(baseCrop.right, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']),
-  };
-
-  const startDrag = (e: React.MouseEvent, type: string) => {
+  const handleMouseDown = (e: React.MouseEvent, type: string) => {
     e.stopPropagation();
     setDragState({
       type,
       startX: e.clientX,
       startY: e.clientY,
-      initTransform: { x, y, scale, rotation },
-      initCrop: crop,
+      initTransform: { x: aX, y: aY, scale: aScale, rotation: aRot },
+      initCrop: { left: aCropLeft, top: aCropTop, right: aCropRight, bottom: aCropBot },
     });
   };
 
-  const scaleMult = scale / 100;
-  const cropLeftPix = baseW * (crop.left / 100);
-  const cropTopPix = baseH * (crop.top / 100);
-  const cropRightPix = baseW * (crop.right / 100);
-  const cropBottomPix = baseH * (crop.bottom / 100);
-  
-  const drawW = baseW - cropLeftPix - cropRightPix;
-  const drawH = baseH - cropTopPix - cropBottomPix;
-  const drawX = 427 - baseW / 2 + cropLeftPix;
-  const drawY = 240 - baseH / 2 + cropTopPix;
-
   return (
     <>
-      <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper">
-        <svg viewBox="0 0 854 480" className="w-full h-full overflow-visible">
-          <g
-            style={{
-              transformOrigin: '427px 240px',
-              transform: `translate(${x}px, ${y}px) scale(${scaleMult}) rotate(${rotation}deg)`,
-            }}
-          >
-            <rect
-              x={drawX}
-              y={drawY}
-              width={drawW}
-              height={drawH}
-              fill="transparent"
-              stroke="#f59e0b"
-              strokeWidth={1.5 / scaleMult}
-              className="pointer-events-auto cursor-move"
-              onMouseDown={(e) => startDrag(e, 'move')}
-            />
+      <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
+        <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
+          <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
+            <g
+              transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
+            >
+              {/* Main selection border */}
+              <rect
+                x={-baseW / 2}
+                y={-baseH / 2}
+                width={baseW}
+                height={baseH}
+                fill="none"
+                stroke="#fbbf24"
+                strokeWidth={1.5 / viewport.zoom}
+                className="pointer-events-none"
+              />
 
-            {canvasTransformMode === 'resize' && (
-              <>
-                <circle cx={drawX} cy={drawY} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nwse-resize" onMouseDown={(e) => startDrag(e, 'tl')} />
-                <circle cx={drawX + drawW} cy={drawY} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nesw-resize" onMouseDown={(e) => startDrag(e, 'tr')} />
-                <circle cx={drawX} cy={drawY + drawH} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nesw-resize" onMouseDown={(e) => startDrag(e, 'bl')} />
-                <circle cx={drawX + drawW} cy={drawY + drawH} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-nwse-resize" onMouseDown={(e) => startDrag(e, 'br')} />
-                
-                <line x1={427} y1={drawY} x2={427} y2={drawY - 30 / scaleMult} stroke="#f59e0b" strokeWidth={1.5 / scaleMult} />
-                <circle cx={427} cy={drawY - 30 / scaleMult} r={5 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1.5 / scaleMult} className="pointer-events-auto cursor-crosshair" onMouseDown={(e) => startDrag(e, 'rot')} />
-              </>
-            )}
-
-            {canvasTransformMode === 'crop' && (
-              <>
-                <rect x={drawX - 5 / scaleMult} y={drawY + drawH/2 - 15/scaleMult} width={10 / scaleMult} height={30 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ew-resize" onMouseDown={(e) => startDrag(e, 'crop-l')} />
-                <rect x={drawX + drawW - 5 / scaleMult} y={drawY + drawH/2 - 15/scaleMult} width={10 / scaleMult} height={30 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ew-resize" onMouseDown={(e) => startDrag(e, 'crop-r')} />
-                <rect x={drawX + drawW/2 - 15/scaleMult} y={drawY - 5 / scaleMult} width={30 / scaleMult} height={10 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ns-resize" onMouseDown={(e) => startDrag(e, 'crop-t')} />
-                <rect x={drawX + drawW/2 - 15/scaleMult} y={drawY + drawH - 5 / scaleMult} width={30 / scaleMult} height={10 / scaleMult} fill="white" stroke="#f59e0b" strokeWidth={1 / scaleMult} className="pointer-events-auto cursor-ns-resize" onMouseDown={(e) => startDrag(e, 'crop-b')} />
-              </>
-            )}
+              {canvasTransformMode === 'resize' ? (
+                <>
+                  {/* Invisible drag area for moving */}
+                  <rect
+                    x={-baseW / 2}
+                    y={-baseH / 2}
+                    width={baseW}
+                    height={baseH}
+                    fill="transparent"
+                    className="pointer-events-auto cursor-move"
+                    onMouseDown={(e) => handleMouseDown(e, 'move')}
+                  />
+                  {/* Resize handles */}
+                  {[-1, 1].map((rx) =>
+                    [-1, 1].map((ry) => (
+                      <circle
+                        key={`${rx}-${ry}`}
+                        cx={(rx * baseW) / 2}
+                        cy={(ry * baseH) / 2}
+                        r={6 / viewport.zoom}
+                        fill="#fbbf24"
+                        stroke="#141414"
+                        strokeWidth={1.5 / viewport.zoom}
+                        className="pointer-events-auto"
+                        style={{
+                          cursor: rx === ry ? 'nwse-resize' : 'nesw-resize',
+                        }}
+                        onMouseDown={(e) =>
+                          handleMouseDown(e, `resize-${rx > 0 ? 'r' : 'l'}${ry > 0 ? 'b' : 't'}`)
+                        }
+                      />
+                    )),
+                  )}
+                </>
+              ) : (
+                // CROP MODE
+                <>
+                  <rect
+                    x={-baseW / 2 + (aCropLeft / 100) * baseW}
+                    y={-baseH / 2 + (aCropTop / 100) * baseH}
+                    width={baseW * (1 - (aCropLeft + aCropRight) / 100)}
+                    height={baseH * (1 - (aCropTop + aCropBot) / 100)}
+                    fill="none"
+                    stroke="#3b82f6"
+                    strokeWidth={2 / viewport.zoom}
+                    strokeDasharray="4 4"
+                    className="pointer-events-none"
+                  />
+                  {/* Crop drag handles */}
+                  <rect
+                    x={-baseW / 2 + (aCropLeft / 100) * baseW - 6/viewport.zoom}
+                    y={-baseH / 2 + (aCropTop / 100) * baseH + (baseH * (1 - (aCropTop + aCropBot) / 100)) / 2 - 10/viewport.zoom}
+                    width={12/viewport.zoom}
+                    height={20/viewport.zoom}
+                    fill="#3b82f6"
+                    className="pointer-events-auto cursor-ew-resize"
+                    onMouseDown={(e) => handleMouseDown(e, 'crop-left')}
+                  />
+                  <rect
+                    x={-baseW / 2 + baseW - (aCropRight / 100) * baseW - 6/viewport.zoom}
+                    y={-baseH / 2 + (aCropTop / 100) * baseH + (baseH * (1 - (aCropTop + aCropBot) / 100)) / 2 - 10/viewport.zoom}
+                    width={12/viewport.zoom}
+                    height={20/viewport.zoom}
+                    fill="#3b82f6"
+                    className="pointer-events-auto cursor-ew-resize"
+                    onMouseDown={(e) => handleMouseDown(e, 'crop-right')}
+                  />
+                  <rect
+                    x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
+                    y={-baseH / 2 + (aCropTop / 100) * baseH - 6/viewport.zoom}
+                    width={20/viewport.zoom}
+                    height={12/viewport.zoom}
+                    fill="#3b82f6"
+                    className="pointer-events-auto cursor-ns-resize"
+                    onMouseDown={(e) => handleMouseDown(e, 'crop-top')}
+                  />
+                  <rect
+                    x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
+                    y={-baseH / 2 + baseH - (aCropBot / 100) * baseH - 6/viewport.zoom}
+                    width={20/viewport.zoom}
+                    height={12/viewport.zoom}
+                    fill="#3b82f6"
+                    className="pointer-events-auto cursor-ns-resize"
+                    onMouseDown={(e) => handleMouseDown(e, 'crop-bottom')}
+                  />
+                </>
+              )}
+            </g>
           </g>
         </svg>
       </div>

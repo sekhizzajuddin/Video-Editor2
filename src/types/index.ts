@@ -77,6 +77,7 @@ export interface PropertyKeyframe {
 }
 
 export interface ClipAnimations {
+  [key: string]: PropertyKeyframe[] | undefined;
   opacity?: PropertyKeyframe[];
   'transform.x'?: PropertyKeyframe[];
   'transform.y'?: PropertyKeyframe[];
@@ -163,6 +164,8 @@ export interface EditorState {
 
   // Canvas Mode
   canvasTransformMode: 'resize' | 'crop';
+  previewCanvas: HTMLCanvasElement | null;
+  masterAudioStream: MediaStream | null;
 
   // Clipboard
   clipboardClip: TimelineClip | null;

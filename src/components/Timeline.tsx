@@ -1421,6 +1421,44 @@ export function Timeline() {
     [tracks, zoomLevel],
   );
 
+  // ── Native Wheel Events (Gestures) ──────────────────────────────────────
+
+  useEffect(() => {
+    const el = trackContainerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch-to-zoom
+        e.preventDefault();
+        const store = useEditorStore.getState();
+        const currentZoom = store.zoomLevel;
+        const zoomDelta = e.deltaY > 0 ? -10 : 10;
+        const newZoom = Math.min(Math.max(currentZoom + zoomDelta, 20), 400);
+
+        const rect = el.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        
+        // Calculate the exact time under the mouse cursor right now
+        const timeUnderCursor = (store.scrollLeft + mouseX) / currentZoom;
+        
+        // Calculate the new scrollLeft so that timeUnderCursor stays at mouseX
+        const newScrollLeft = Math.max(0, timeUnderCursor * newZoom - mouseX);
+
+        store.setZoomLevel(newZoom);
+        store.setScrollLeft(newScrollLeft);
+      } else {
+        // Two-finger pan / normal wheel scroll
+        // Native horizontal/vertical scroll works for most trackpads,
+        // but if holding shift or trackpad horizontal dragging occurs, it natively scrolls.
+        // We do not preventDefault here to allow native smooth scrolling horizontally.
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, []);
+
   // ── Ruler markers ───────────────────────────────────────────────────────
 
   const rulerData = useMemo(() => {
