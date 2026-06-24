@@ -912,7 +912,7 @@ export function PropertiesPanel() {
               )}
             </div>
           </div>
-        )()}
+        })()}
 
         {activePropertiesTab === 'color' && (
           <div className="space-y-3">
