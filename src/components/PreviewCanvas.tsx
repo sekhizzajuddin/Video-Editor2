@@ -225,10 +225,18 @@ export function PreviewCanvas() {
 
     // 2. Checkerboard removed per user request
 
-    // 3. Collect visual tracks (video and text) sorted by order
-    const visualTracks = [...tracks]
-      .filter((t) => (t.type === 'video' || t.type === 'text') && !t.hidden)
-      .reverse();
+    // 3. Collect visual tracks (video first, then text on top)
+    // Video tracks: lower index number = bottom layer
+    // Text tracks always render on top of all video
+    const videoTracks = tracks
+      .filter((t) => t.type === 'video' && !t.hidden)
+      .sort((a, b) => {
+        const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+        return numA - numB;
+      });
+    const textTracks = tracks.filter((t) => t.type === 'text' && !t.hidden);
+    const visualTracks = [...videoTracks, ...textTracks];
 
     let anyClipDrawn = false;
 
@@ -287,11 +295,11 @@ export function PreviewCanvas() {
         vignette: 0,
       };
 
-      // Check for active FX on this track
+      // Check for active FX on the track this clip belongs to
       const fxTrack = tracks.find((t) => t.type === 'fx' && t.linkedTrackId === clip.trackId && !t.hidden);
-      let activeFxClip = null;
+      let activeFxClip: any = null;
       if (fxTrack) {
-        activeFxClip = fxTrack.clips.find((c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration);
+        activeFxClip = fxTrack.clips.find((c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration) || null;
       }
 
       // Pre-process VFX Breakdown clip effect

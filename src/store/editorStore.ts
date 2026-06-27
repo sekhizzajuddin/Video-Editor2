@@ -340,7 +340,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       duration: 3,
       trimStart: 0,
       trimEnd: 0,
-      transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
       opacity: 1,
       speed: 1,
       effects: [],

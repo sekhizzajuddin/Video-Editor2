@@ -131,6 +131,8 @@ const CLIP_COLORS: Record<string, { bg: string; border: string; text: string; ho
   video: { bg: 'bg-blue-600/70', border: 'border-blue-500/50', text: 'text-blue-100', hover: 'hover:border-blue-400' },
   audio: { bg: 'bg-emerald-600/70', border: 'border-emerald-500/50', text: 'text-emerald-100', hover: 'hover:border-emerald-400' },
   image: { bg: 'bg-amber-600/70', border: 'border-amber-500/50', text: 'text-amber-100', hover: 'hover:border-amber-400' },
+  text:  { bg: 'bg-purple-600/70', border: 'border-purple-500/50', text: 'text-purple-100', hover: 'hover:border-purple-400' },
+  fx:    { bg: 'bg-rose-600/70',   border: 'border-rose-500/50',   text: 'text-rose-100',   hover: 'hover:border-rose-400' },
 };
 
 // ─── Sub‑components ──────────────────────────────────────────────────────────
@@ -1396,6 +1398,54 @@ export function Timeline() {
   const handleDrop = useCallback(
     (e: React.DragEvent, trackId: string) => {
       e.preventDefault();
+      const track = useEditorStore.getState().tracks.find((t) => t.id === trackId);
+
+      // Handle FX effect drops onto FX tracks
+      const effectName = e.dataTransfer.getData('application/procut-effect');
+      if (effectName && track?.type === 'fx') {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const startTime = Math.max(0, x / zoomLevel);
+        // Map display names to canonical fxType keys used by PreviewCanvas
+        const FX_TYPE_MAP: Record<string, string> = {
+          'VFX Breakdown': 'vfx_breakdown',
+          'B&W to Enhanced Color': 'bw_to_color',
+          'Glitch': 'glitch',
+        };
+        const fxType = FX_TYPE_MAP[effectName] || effectName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const fxMediaId = generateId();
+        useEditorStore.getState().addMedia({
+          id: fxMediaId,
+          name: effectName,
+          type: 'fx',
+          duration: 5,
+          url: '',
+          createdAt: Date.now(),
+          fxType,
+        });
+        const fxClip: TimelineClip = {
+          id: generateId(),
+          mediaId: fxMediaId,
+          trackId,
+          startTime,
+          duration: 5,
+          trimStart: 0,
+          trimEnd: 0,
+          transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+          opacity: 1,
+          speed: 1,
+          effects: [],
+          fxSettings: {
+            type: fxType as any,
+            intensity: 100,
+          },
+        };
+        useEditorStore.getState().addClip(fxClip);
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        return;
+      }
+
       const mediaId = e.dataTransfer.getData('application/procut-media');
       if (!mediaId) return;
 
@@ -1436,9 +1486,10 @@ export function Timeline() {
       const x = e.clientX - rect.left;
       const trackIdx = tracks.findIndex((t) => t.id === trackId);
 
-      // Read media to determine width
-      const mediaId = e.dataTransfer.types.includes('application/procut-media') ? 'pending' : null;
-      if (mediaId && trackIdx >= 0) {
+      // Accept both media and FX effect drops
+      const hasMedia = e.dataTransfer.types.includes('application/procut-media');
+      const hasEffect = e.dataTransfer.types.includes('application/procut-effect');
+      if ((hasMedia || hasEffect) && trackIdx >= 0) {
         const approxDuration = 5;
         setDropPreview({ time: x / zoomLevel, duration: approxDuration, trackIdx });
         setHoveredTrackId(trackId);
@@ -1621,6 +1672,19 @@ export function Timeline() {
             className="px-2 py-0.5 text-[10px] text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
           >
             <Music className="w-3 h-3" /> + Audio
+          </button>
+          <button
+            onClick={() => addTrack('text')}
+            className="px-2 py-0.5 text-[10px] text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+          >
+            <Plus className="w-3 h-3" /> + Text
+          </button>
+          <button
+            onClick={() => addTrack('fx')}
+            className="px-2 py-0.5 text-[10px] text-rose-400/80 hover:text-rose-300 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 rounded flex items-center gap-1 transition-colors"
+            title="Add FX Track — drag effects from the Effects panel onto it"
+          >
+            <Sparkles className="w-3 h-3" /> + FX
           </button>
         </div>
 
@@ -2057,10 +2121,14 @@ export function Timeline() {
                             {media.type === 'video' && <Film className="w-2.5 h-2.5 shrink-0 opacity-70" />}
                             {media.type === 'audio' && <Music className="w-2.5 h-2.5 shrink-0 opacity-70" />}
                             {media.type === 'image' && <Image className="w-2.5 h-2.5 shrink-0 opacity-70" />}
+                            {media.type === 'text' && <span className="text-[8px] shrink-0 opacity-70">T</span>}
+                            {media.type === 'fx' && <Sparkles className="w-2.5 h-2.5 shrink-0 opacity-70" />}
                             <span
                               className={`text-[9px] font-medium truncate drop-shadow-sm ${colors.text}`}
                             >
-                              {media.name}
+                              {media.type === 'text' && (clip as any).textSettings?.text
+                                ? (clip as any).textSettings.text
+                                : media.name}
                             </span>
                           </div>
 
