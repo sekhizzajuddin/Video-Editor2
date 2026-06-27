@@ -12,6 +12,7 @@ import type {
   ClipTextSettings,
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
+import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB } from '@/utils/projectPersistence';
 
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -115,7 +116,7 @@ function findNonOverlappingPosition(
 
 interface EditorActions {
   // Media Library
-  addMedia: (item: MediaItem) => void;
+  addMedia: (item: MediaItem, file?: File) => void;
   removeMedia: (id: string) => void;
   updateMediaMetadata: (id: string, updates: Partial<MediaItem>) => void;
 
@@ -196,6 +197,7 @@ interface EditorActions {
 
   // Project
   resetProject: () => void;
+  loadProject: () => Promise<boolean>;
 
   // Computed: recalculate total duration from all clips
   recalcTotalDuration: () => void;
@@ -255,10 +257,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   ...initialState,
 
   // Media Library
-  addMedia: (item) => {
+  addMedia: (item, file) => {
     set((state) => ({
       mediaLibrary: [...state.mediaLibrary, item],
     }));
+    if (file) {
+      saveFileToDB(item.id, file).catch(err => console.error('Failed to save file to DB:', err));
+    }
     get().saveSnapshot();
   },
   removeMedia: (id) => {
@@ -270,6 +275,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         clips: track.clips.filter((c) => c.mediaId !== id),
       })),
     }));
+    // Delete file from IndexedDB
+    deleteFileFromDB(id).catch(err => console.error('Failed to delete file from DB:', err));
     // Revoke the object URL to free memory
     const media = get().mediaLibrary.find((m) => m.id === id);
     if (media?.url) {
@@ -423,6 +430,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
       return { tracks: newTracks };
     });
+    get().recalcTotalDuration();
   },
 
   moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
@@ -974,11 +982,27 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         muted: false,
         hidden: false,
       };
-      
-      const tracks = type === 'text' || type === 'fx' || type === 'video' 
-        ? [newTrack, ...state.tracks] 
-        : [...state.tracks, newTrack];
-        
+
+      let tracks: typeof state.tracks;
+      if (type === 'fx' && linkedTrackId) {
+        // Insert the FX track directly above its linked host track
+        const hostIdx = state.tracks.findIndex(t => t.id === linkedTrackId);
+        if (hostIdx !== -1) {
+          tracks = [
+            ...state.tracks.slice(0, hostIdx),
+            newTrack,
+            ...state.tracks.slice(hostIdx),
+          ];
+        } else {
+          tracks = [newTrack, ...state.tracks];
+        }
+      } else if (type === 'text' || type === 'video') {
+        tracks = [newTrack, ...state.tracks];
+      } else {
+        // audio — append at end
+        tracks = [...state.tracks, newTrack];
+      }
+
       return { tracks };
     });
     get().saveSnapshot();
@@ -1005,10 +1029,20 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       for (let i = 0; i < tracks.length; i++) {
         if (tracks[i].type === 'fx') {
           let newLink = undefined;
+          // Search downwards first
           for (let j = i + 1; j < tracks.length; j++) {
             if (tracks[j].type === 'video' || tracks[j].type === 'text') {
               newLink = tracks[j].id;
               break;
+            }
+          }
+          // Fallback: search upwards
+          if (!newLink) {
+            for (let j = i - 1; j >= 0; j--) {
+              if (tracks[j].type === 'video' || tracks[j].type === 'text') {
+                newLink = tracks[j].id;
+                break;
+              }
             }
           }
           tracks[i] = { ...tracks[i], linkedTrackId: newLink };
@@ -1262,6 +1296,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: newHistory.length - 1,
       };
     });
+    // Auto-save to IndexedDB
+    const { tracks, mediaLibrary, currentTime } = get();
+    saveProjectToDB({ tracks, mediaLibrary, currentTime }).catch((err) =>
+      console.error('Failed to auto-save project:', err)
+    );
   },
   undo: () => {
     set((state) => {
@@ -1273,6 +1312,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex - 1,
       };
     });
+    const { tracks, mediaLibrary, currentTime } = get();
+    saveProjectToDB({ tracks, mediaLibrary, currentTime }).catch((err) =>
+      console.error('Failed to auto-save project:', err)
+    );
   },
   redo: () => {
     set((state) => {
@@ -1284,6 +1327,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex + 1,
       };
     });
+    const { tracks, mediaLibrary, currentTime } = get();
+    saveProjectToDB({ tracks, mediaLibrary, currentTime }).catch((err) =>
+      console.error('Failed to auto-save project:', err)
+    );
   },
 
   // Drag/Drop
@@ -1298,6 +1345,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (m.url) try { URL.revokeObjectURL(m.url); } catch { /* ignore */ }
       if (m.thumbnail) try { URL.revokeObjectURL(m.thumbnail); } catch { /* ignore */ }
     });
+    // Clear IndexedDB completely
+    clearProjectDB().catch(err => console.error('Failed to clear database:', err));
     const freshTracks = createEmptyTracks();
     set({
       ...initialState,
@@ -1310,6 +1359,31 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       ],
       historyIndex: 0,
     });
+  },
+
+  loadProject: async () => {
+    try {
+      const data = await loadProjectFromDB();
+      if (!data) return false;
+      
+      set({
+        tracks: data.tracks,
+        mediaLibrary: data.mediaLibrary,
+        currentTime: data.currentTime,
+        history: [
+          {
+            tracks: JSON.parse(JSON.stringify(data.tracks)),
+            currentTime: data.currentTime
+          }
+        ],
+        historyIndex: 0
+      });
+      get().recalcTotalDuration();
+      return true;
+    } catch (err) {
+      console.error('Failed to load project:', err);
+      return false;
+    }
   },
 
   // Recalculate total duration from all clips and clean up empty custom tracks

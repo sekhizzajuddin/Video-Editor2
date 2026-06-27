@@ -83,6 +83,7 @@ export interface ClipTextSettings {
   shadowBlur: number;
   threeD: boolean;
   threeDDepth: number;
+  textAlign?: 'left' | 'center' | 'right';
 }
 
 export interface ClipFxSettings {

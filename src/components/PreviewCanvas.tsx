@@ -102,12 +102,16 @@ export function PreviewCanvas() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT') {
+      if (e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
         setIsSpacePressed(true);
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') setIsSpacePressed(false);
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setIsSpacePressed(false);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -385,18 +389,31 @@ export function PreviewCanvas() {
           anyClipDrawn = true;
         }
       } else if (mediaItem.type === 'text' && clip.textSettings) {
-        const { text, fontSize, fontFamily, color, backgroundColor, bold, italic, shadow, shadowColor, shadowBlur, threeD, threeDDepth } = clip.textSettings;
-        ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontSize}px ${fontFamily}`;
-        ctx.textAlign = 'center';
+        const ts = clip.textSettings as any;
+        const { text, fontSize, fontFamily, color, backgroundColor, bold, italic, shadow, shadowColor, shadowBlur, threeD, threeDDepth } = ts;
+        const textAlign: CanvasTextAlign = ts.textAlign || 'center';
+        ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontSize}px "${fontFamily || 'Inter'}", sans-serif`;
+        ctx.textAlign = textAlign;
         ctx.textBaseline = 'middle';
         
         const metrics = ctx.measureText(text);
         dw = metrics.width + 40;
         dh = fontSize + 40;
 
+        // Alignment-aware x offset for bounding box
+        let textX = 0;
+        let bgX = -dw / 2;
+        if (textAlign === 'left') {
+          textX = -dw / 2 + 20;
+          bgX = -dw / 2;
+        } else if (textAlign === 'right') {
+          textX = dw / 2 - 20;
+          bgX = -dw / 2;
+        }
+
         if (backgroundColor !== 'transparent') {
           ctx.fillStyle = backgroundColor;
-          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          ctx.fillRect(bgX, -dh / 2, dw, dh);
         }
 
         if (shadow) {
@@ -407,13 +424,13 @@ export function PreviewCanvas() {
         if (threeD) {
           ctx.fillStyle = shadowColor || '#000000';
           for (let d = 0; d < (threeDDepth || 5); d++) {
-            ctx.fillText(text, -d, d);
+            ctx.fillText(text, textX - d, d);
           }
           ctx.shadowBlur = 0;
         }
 
         ctx.fillStyle = color || '#ffffff';
-        ctx.fillText(text, 0, 0);
+        ctx.fillText(text, textX, 0);
         ctx.shadowBlur = 0;
         
         hasRealMedia = true;
@@ -477,6 +494,50 @@ export function PreviewCanvas() {
           ctx.fillStyle = `hsl(0, 0%, ${gray}%)`;
           ctx.fillRect(-dw/2, -dh/2, dw, dh);
           ctx.globalCompositeOperation = 'source-over';
+        } else if (fx?.type === 'glitch') {
+          // Glitch effect: chromatic aberration + random scanlines + slice distortion
+          const intensity = (fx.intensity ?? 100) / 100;
+          const t = (currentTime - activeFxClip.startTime) / activeFxClip.duration;
+          // Seed-based pseudo-random from time (changes per frame to create flicker)
+          const seed = Math.floor(currentTime * 30);
+          const rand = (n: number) => ((Math.sin(seed * 9.7 + n * 127.3) * 43758.5453) % 1 + 1) % 1;
+
+          // 1. Chromatic aberration — draw R/G/B channels offset
+          const aberration = intensity * 8 * rand(1);
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.globalCompositeOperation = 'screen';
+          // Red channel offset
+          ctx.fillStyle = `rgba(255, 0, 0, 0.3)`;
+          ctx.fillRect(-dw/2 - aberration, -dh/2, dw, dh);
+          // Blue channel offset
+          ctx.fillStyle = `rgba(0, 0, 255, 0.3)`;
+          ctx.fillRect(-dw/2 + aberration, -dh/2, dw, dh);
+          ctx.restore();
+
+          // 2. Horizontal scan lines
+          ctx.save();
+          ctx.globalAlpha = 0.15 * intensity;
+          for (let row = 0; row < dh; row += 4) {
+            if (rand(row + 5) > 0.5) {
+              ctx.fillStyle = 'rgba(0,0,0,0.8)';
+              ctx.fillRect(-dw/2, -dh/2 + row, dw, 2);
+            }
+          }
+          ctx.restore();
+
+          // 3. Random horizontal slice distortion
+          const numSlices = Math.floor(3 + rand(2) * 6 * intensity);
+          ctx.save();
+          ctx.globalAlpha = 0.7 * intensity;
+          for (let i = 0; i < numSlices; i++) {
+            const sliceY = -dh/2 + rand(i * 3) * dh;
+            const sliceH = 2 + rand(i * 3 + 1) * 8;
+            const sliceShift = (rand(i * 3 + 2) - 0.5) * 40 * intensity;
+            ctx.fillStyle = `rgba(${Math.floor(rand(i*7)*255)}, ${Math.floor(rand(i*7+1)*100)}, ${Math.floor(rand(i*7+2)*255)}, 0.5)`;
+            ctx.fillRect(-dw/2 + sliceShift, sliceY, dw, sliceH);
+          }
+          ctx.restore();
         }
       }
 

@@ -5,6 +5,7 @@ import {
   Music,
   Trash2,
   Copy,
+  CopyPlus,
   Scissors,
   ChevronDown,
   ChevronRight,
@@ -640,7 +641,7 @@ export function PropertiesPanel() {
             title="Duplicate"
             className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
           >
-            <Copy className="w-3 h-3" />
+            <CopyPlus className="w-3 h-3" />
           </button>
           <button
             onClick={() => splitClip(selectedClip.id, currentTime)}
@@ -879,7 +880,7 @@ export function PropertiesPanel() {
                     <input
                       type="range"
                       min={10}
-                      max={200}
+                      max={400}
                       value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
                       title="Double-click to reset to 100%"
                       onChange={(e) => setPropVal('transform.scale', Number(e.target.value), { transform: { ...selectedClip.transform, scale: Number(e.target.value) } })}
@@ -2092,6 +2093,29 @@ export function PropertiesPanel() {
               </div>
 
               <div className="flex flex-col gap-2">
+                <label className="text-xs text-[#a0a0a0]">Font Family</label>
+                <select
+                  value={selectedClip.textSettings.fontFamily || 'Inter'}
+                  onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontFamily: e.target.value } })}
+                  className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer"
+                >
+                  <option value="Inter">Inter</option>
+                  <option value="Roboto">Roboto</option>
+                  <option value="Montserrat">Montserrat</option>
+                  <option value="Poppins">Poppins</option>
+                  <option value="Playfair Display">Playfair Display</option>
+                  <option value="Bebas Neue">Bebas Neue</option>
+                  <option value="Oswald">Oswald</option>
+                  <option value="Lato">Lato</option>
+                  <option value="Open Sans">Open Sans</option>
+                  <option value="Impact">Impact</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Courier New">Courier New</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-2">
                 <label className="text-xs text-[#a0a0a0]">Font Size</label>
                 <div className="flex items-center gap-3">
                   <input
@@ -2158,6 +2182,25 @@ export function PropertiesPanel() {
                   />
                   <span className="text-xs text-white italic">Italic</span>
                 </label>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-[#a0a0a0]">Alignment</label>
+                <div className="flex gap-1">
+                  {(['left','center','right'] as const).map((align) => (
+                    <button
+                      key={align}
+                      onClick={() => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, textAlign: align } })}
+                      className={`flex-1 py-1.5 text-xs rounded border transition-colors capitalize ${
+                        (selectedClip.textSettings as any).textAlign === align || (!((selectedClip.textSettings as any).textAlign) && align === 'center')
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-400'
+                          : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      {align}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="border-t border-[#3e3e3e] pt-4 flex flex-col gap-4">

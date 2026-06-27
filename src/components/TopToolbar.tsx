@@ -16,6 +16,8 @@ import {
   ArrowRightToLine,
   ArrowLeftToLine,
   Timer,
+  Save,
+  FileUp,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
@@ -65,7 +67,7 @@ export function TopToolbar() {
     for (const file of Array.from(files)) {
       try {
         const mediaItem = await probeFile(file);
-        addMedia(mediaItem);
+        addMedia(mediaItem, file);
       } catch (err) {
         console.error(`Failed to import ${file.name}:`, err);
       }
@@ -73,6 +75,87 @@ export function TopToolbar() {
     setShowFileMenu(false);
     e.target.value = '';
   }, [addMedia]);
+
+  const projectFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSaveProjectFile = () => {
+    const state = useEditorStore.getState();
+    
+    // Clean up urls since they are session-specific blob URLs
+    const cleanMediaLibrary = state.mediaLibrary.map(item => ({
+      ...item,
+      url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
+      thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
+    }));
+
+    const projectData = {
+      version: '1.0.0',
+      tracks: state.tracks,
+      mediaLibrary: cleanMediaLibrary,
+      currentTime: state.currentTime,
+    };
+
+    const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `project_${Date.now()}.procut`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setShowFileMenu(false);
+  };
+
+  const handleOpenProjectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (!data.tracks || !data.mediaLibrary) {
+          alert('Invalid project file format.');
+          return;
+        }
+
+        useEditorStore.setState({
+          tracks: data.tracks,
+          mediaLibrary: data.mediaLibrary,
+          currentTime: data.currentTime || 0,
+          history: [
+            {
+              tracks: JSON.parse(JSON.stringify(data.tracks)),
+              currentTime: data.currentTime || 0,
+            }
+          ],
+          historyIndex: 0
+        });
+
+        // Trigger recalc
+        useEditorStore.getState().recalcTotalDuration();
+        alert('Project loaded successfully! Please re-import local media files to link them.');
+      } catch (err) {
+        console.error('Error parsing project file:', err);
+        alert('Failed to parse project file.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+    setShowFileMenu(false);
+  };
+
+  const handleZoomToFit = () => {
+    const container = document.querySelector('.timeline-track-workspace');
+    const width = container ? container.clientWidth - 150 : 800; // Subtract headers width
+    const totalDuration = useEditorStore.getState().totalDuration;
+    if (totalDuration > 0) {
+      const targetZoom = Math.max(20, Math.min(400, width / totalDuration));
+      useEditorStore.getState().setZoomLevel(targetZoom);
+    }
+    setShowViewMenu(false);
+  };
 
   return (
     <div className="h-12 bg-[#1e1e1e] border-b border-[#3e3e3e] flex items-center px-3 select-none z-50">
@@ -98,6 +181,18 @@ export function TopToolbar() {
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
                 <FolderOpen className="w-3.5 h-3.5" /> Import Media
+              </button>
+              <button
+                onClick={handleSaveProjectFile}
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+              >
+                <Save className="w-3.5 h-3.5 text-amber-400" /> Save Project File
+              </button>
+              <button
+                onClick={() => projectFileInputRef.current?.click()}
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+              >
+                <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File
               </button>
               <button
                 onClick={() => { setShowExportModal(true); setShowFileMenu(false); }}
@@ -191,6 +286,13 @@ export function TopToolbar() {
               >
                 <ZoomIn className="w-3.5 h-3.5 rotate-180" /> Zoom Out
               </button>
+              <div className="border-t border-[#3e3e3e] my-1" />
+              <button
+                onClick={handleZoomToFit}
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+              >
+                <ZoomIn className="w-3.5 h-3.5 text-amber-400" /> Zoom to Fit
+              </button>
             </div>
           )}
         </div>
@@ -266,6 +368,13 @@ export function TopToolbar() {
         multiple
         accept="video/*,audio/*,image/*"
         onChange={handleFileImport}
+        className="hidden"
+      />
+      <input
+        ref={projectFileInputRef}
+        type="file"
+        accept=".procut"
+        onChange={handleOpenProjectFile}
         className="hidden"
       />
     </div>

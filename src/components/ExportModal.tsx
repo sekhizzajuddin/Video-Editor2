@@ -76,7 +76,7 @@ export function ExportModal() {
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `procut-export-${Date.now()}.webm`;
+      a.download = `procut-export-${Date.now()}.${format}`;
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {

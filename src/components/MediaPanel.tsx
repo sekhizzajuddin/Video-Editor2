@@ -75,6 +75,7 @@ export function MediaPanel() {
   ];
 
   const filteredMedia = mediaLibrary.filter((m) =>
+    m.type !== 'text' && m.type !== 'fx' &&
     m.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -94,7 +95,7 @@ export function MediaPanel() {
 
       try {
         const mediaItem = await probeFile(file);
-        addMedia(mediaItem);
+        addMedia(mediaItem, file);
       } catch (err) {
         console.error(`Failed to import ${file.name}:`, err);
       }
@@ -148,6 +149,9 @@ export function MediaPanel() {
       case 'video': return <Film className="w-5 h-5 text-blue-400" />;
       case 'audio': return <Music className="w-5 h-5 text-emerald-400" />;
       case 'image': return <Image className="w-5 h-5 text-amber-400" />;
+      case 'text': return <Type className="w-5 h-5 text-purple-400" />;
+      case 'fx': return <Sparkles className="w-5 h-5 text-rose-400" />;
+      default: return <Film className="w-5 h-5 text-[#a0a0a0]" />;
     }
   };
 
@@ -156,6 +160,9 @@ export function MediaPanel() {
       case 'video': return 'bg-blue-500/10 border-blue-500/20';
       case 'audio': return 'bg-emerald-500/10 border-emerald-500/20';
       case 'image': return 'bg-amber-500/10 border-amber-500/20';
+      case 'text': return 'bg-purple-500/10 border-purple-500/20';
+      case 'fx': return 'bg-rose-500/10 border-rose-500/20';
+      default: return 'bg-[#3e3e3e]/20 border-[#3e3e3e]';
     }
   };
 
@@ -508,37 +515,72 @@ export function MediaPanel() {
           </div>
         )}
 
-        {activeMediaTab === 'effects' && (
-          <div className="flex-1 overflow-y-auto p-2">
-            <p className="text-xs text-[#a0a0a0] mb-3">Video Effects</p>
-            {EFFECTS.map((effect) => {
-              const Icon = effect.icon;
-              return (
-                <div
-                  key={effect.name}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('application/procut-effect', effect.name);
-                    e.dataTransfer.effectAllowed = 'copy';
-                  }}
-                  onMouseEnter={() => setHoveredItem(effect.name)}
-                  onMouseLeave={() => setHoveredItem(null)}
-                  className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group relative"
-                >
-                  <div className="w-8 h-8 rounded bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
-                    <Icon className={`w-4 h-4 ${effect.color}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs text-white block">{effect.name}</span>
-                    <span className="text-[9px] text-[#a0a0a0]">
-                      {effect.value === 0 ? 'Click to apply' : `Default: ${effect.value}%`}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {activeMediaTab === 'effects' && (() => {
+          const colorEffects = EFFECTS.filter(e => !e.type);
+          const fxEffects = EFFECTS.filter(e => e.type);
+          return (
+            <div className="flex-1 overflow-y-auto p-2 space-y-4">
+              {/* Timeline FX section */}
+              <div>
+                <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider mb-2 px-1">Timeline FX <span className="text-[#a0a0a0] font-normal normal-case">— drag to FX Track</span></p>
+                {fxEffects.map((effect) => {
+                  const Icon = effect.icon;
+                  return (
+                    <div
+                      key={effect.name}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/procut-effect', effect.name);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      onMouseEnter={() => setHoveredItem(effect.name)}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group"
+                    >
+                      <div className="w-8 h-8 rounded bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                        <Icon className={`w-4 h-4 ${effect.color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-white block">{effect.name}</span>
+                        <span className="text-[9px] text-rose-400/70">Drag to FX Track</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Color Correction section */}
+              <div>
+                <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-2 px-1">Color Correction <span className="text-[#a0a0a0] font-normal normal-case">— drag to video clip</span></p>
+                {colorEffects.map((effect) => {
+                  const Icon = effect.icon;
+                  return (
+                    <div
+                      key={effect.name}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/procut-effect', effect.name);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      onMouseEnter={() => setHoveredItem(effect.name)}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group"
+                    >
+                      <div className="w-8 h-8 rounded bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                        <Icon className={`w-4 h-4 ${effect.color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-white block">{effect.name}</span>
+                        <span className="text-[9px] text-[#a0a0a0]">
+                          {(effect as any).value === 0 ? 'Drag to clip' : `Default: ${(effect as any).value}%`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       <input

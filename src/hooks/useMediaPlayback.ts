@@ -175,10 +175,10 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     for (const track of tracks) {
       for (const clip of track.clips) {
         const media = mediaLibrary.find((m) => m.id === clip.mediaId);
-        if (media && media.url) {
+        if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
           neededClips.set(clip.id, {
             mediaId: clip.mediaId,
-            type: media.type === 'video' ? 'video' : 'audio',
+            type: media.type,
           });
         }
       }
@@ -227,6 +227,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       } else if (info.type === 'audio') {
         const el = document.createElement('audio');
         el.preload = 'auto';
+        el.crossOrigin = 'anonymous';
         el.src = media.url;
         el.style.display = 'none';
         document.body.appendChild(el);

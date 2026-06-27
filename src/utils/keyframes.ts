@@ -32,7 +32,18 @@ export function getAnimatedValue(
       if (k1.holdNext) {
         return k1.value;
       }
-      const t = (localTime - k1.time) / (k2.time - k1.time);
+      let t = (localTime - k1.time) / (k2.time - k1.time);
+      
+      // Apply easing curves
+      const easing = k1.easing || 'linear';
+      if (easing === 'ease-in') {
+        t = t * t;
+      } else if (easing === 'ease-out') {
+        t = t * (2 - t);
+      } else if (easing === 'ease-in-out') {
+        t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      }
+      
       return k1.value + (k2.value - k1.value) * t;
     }
   }

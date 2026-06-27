@@ -903,6 +903,70 @@ export function Timeline() {
 
   // ── Clip drag / resize mousedown ────────────────────────────────────────
 
+  const startResize = useCallback(
+    (e: React.MouseEvent, clip: TimelineClip, edge: 'left' | 'right') => {
+      e.stopPropagation();
+      e.preventDefault();
+      const track = tracks.find((t) => t.id === clip.trackId);
+      if (track?.locked) return;
+
+      let rippleClips: { id: string; originalStartTime: number }[] = [];
+      if ((activeTool === 'ripple' || activeTool === 'rateStretch') && track) {
+        rippleClips = track.clips
+          .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
+          .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
+      }
+
+      let sibling: any = undefined;
+      if (clip.splitGroupId && track) {
+        const siblingClips = track.clips
+          .filter((c) => c.id !== clip.id && c.splitGroupId === clip.splitGroupId)
+          .sort((a, b) => a.trimStart - b.trimStart);
+        if (edge === 'left') {
+          const prev = siblingClips.reverse().find((c) => c.trimStart + c.duration <= clip.trimStart + 0.001);
+          if (prev) {
+            sibling = {
+              id: prev.id,
+              originalTrimStart: prev.trimStart,
+              originalTrimEnd: prev.trimEnd,
+              originalDuration: prev.duration,
+              originalStartTime: prev.startTime,
+              speed: prev.speed,
+            };
+          }
+        } else {
+          const next = siblingClips.find((c) => c.trimStart >= clip.trimStart + clip.duration - 0.001);
+          if (next) {
+            sibling = {
+              id: next.id,
+              originalTrimStart: next.trimStart,
+              originalTrimEnd: next.trimEnd,
+              originalDuration: next.duration,
+              originalStartTime: next.startTime,
+              speed: next.speed,
+            };
+          }
+        }
+      }
+
+      setResizeState({
+        clipId: clip.id,
+        edge,
+        startX: e.clientX,
+        originalDuration: clip.duration,
+        originalTrimStart: clip.trimStart,
+        originalTrimEnd: clip.trimEnd,
+        originalStartTime: clip.startTime,
+        originalSpeed: clip.speed,
+        siblingClip: sibling,
+        rippleClips,
+      });
+    },
+    [tracks, activeTool],
+  );
+
+  // ── Clip drag / resize mousedown ────────────────────────────────────────
+
   const handleClipMouseDown = useCallback(
     (e: React.MouseEvent, clip: TimelineClip) => {
       if (e.button !== 0) return;
@@ -912,88 +976,15 @@ export function Timeline() {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const relX = e.clientX - rect.left;
 
-      let rippleClips: { id: string; originalStartTime: number }[] = [];
-      if ((activeTool === 'ripple' || activeTool === 'rateStretch') && track) {
-        rippleClips = track.clips
-          .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
-          .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
-      }
-
       // Left resize handle
       if (relX < 6) {
-        let sibling: any = undefined;
-        if (clip.splitGroupId) {
-          const track = tracks.find((t) => t.id === clip.trackId);
-          if (track) {
-            const siblingClips = track.clips
-              .filter((c) => c.id !== clip.id && c.splitGroupId === clip.splitGroupId)
-              .sort((a, b) => a.trimStart - b.trimStart);
-            const prev = siblingClips.reverse().find((c) => c.trimStart + c.duration <= clip.trimStart + 0.001);
-            if (prev) {
-              sibling = {
-                id: prev.id,
-                originalTrimStart: prev.trimStart,
-                originalTrimEnd: prev.trimEnd,
-                originalDuration: prev.duration,
-                originalStartTime: prev.startTime,
-                speed: prev.speed,
-              };
-            }
-          }
-        }
-
-        setResizeState({
-          clipId: clip.id,
-          edge: 'left',
-          startX: e.clientX,
-          originalDuration: clip.duration,
-          originalTrimStart: clip.trimStart,
-          originalTrimEnd: clip.trimEnd,
-          originalStartTime: clip.startTime,
-          originalSpeed: clip.speed,
-          siblingClip: sibling,
-          rippleClips,
-        });
-        e.stopPropagation();
+        startResize(e, clip, 'left');
         return;
       }
 
       // Right resize handle
       if (relX > rect.width - 6) {
-        let sibling: any = undefined;
-        if (clip.splitGroupId) {
-          const track = tracks.find((t) => t.id === clip.trackId);
-          if (track) {
-            const siblingClips = track.clips
-              .filter((c) => c.id !== clip.id && c.splitGroupId === clip.splitGroupId)
-              .sort((a, b) => a.trimStart - b.trimStart);
-            const next = siblingClips.find((c) => c.trimStart >= clip.trimStart + clip.duration - 0.001);
-            if (next) {
-              sibling = {
-                id: next.id,
-                originalTrimStart: next.trimStart,
-                originalTrimEnd: next.trimEnd,
-                originalDuration: next.duration,
-                originalStartTime: next.startTime,
-                speed: next.speed,
-              };
-            }
-          }
-        }
-
-        setResizeState({
-          clipId: clip.id,
-          edge: 'right',
-          startX: e.clientX,
-          originalDuration: clip.duration,
-          originalTrimStart: clip.trimStart,
-          originalTrimEnd: clip.trimEnd,
-          originalStartTime: clip.startTime,
-          originalSpeed: clip.speed,
-          siblingClip: sibling,
-          rippleClips,
-        });
-        e.stopPropagation();
+        startResize(e, clip, 'right');
         return;
       }
 
@@ -1760,6 +1751,17 @@ export function Timeline() {
                 <div className="flex items-center gap-1 flex-1 min-w-0">
                   <GripVertical className="w-3 h-3 text-[#a0a0a0] shrink-0 cursor-grab" />
                   <span className="text-[11px] text-white font-medium truncate">{track.name}</span>
+                  {(() => {
+                    const linkedFxTrack = tracks.find(t => t.type === 'fx' && t.linkedTrackId === track.id);
+                    if (linkedFxTrack) {
+                      return (
+                        <span className="ml-1.5 px-1 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-[3px] text-[8px] font-semibold uppercase tracking-wider scale-90" title={`Affected by FX track ${linkedFxTrack.name}`}>
+                          FX Active
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
                   {track.type === 'fx' && track.linkedTrackId && (
                     <div className="flex items-center gap-0.5 ml-1 text-amber-400 opacity-80" title={`Linked to ${tracks.find(t => t.id === track.linkedTrackId)?.name}`}>
                       <Link className="w-3 h-3" />
@@ -1881,7 +1883,7 @@ export function Timeline() {
           {/* ── Tracks container ───────────────────────────────────── */}
           <div
             ref={trackContainerRef}
-            className="flex-1 overflow-auto relative"
+            className="flex-1 overflow-auto relative timeline-track-workspace"
             onClick={handleTimelineClick}
             onScroll={handleScroll}
           >
@@ -2102,14 +2104,14 @@ export function Timeline() {
                         {!track.locked && (
                           <>
                             <div
-                              className={`absolute left-0 top-0 bottom-0 w-1.5 cursor-w-resize z-20 transition-colors ${
-                                activeTool === 'ripple' ? 'hover:bg-amber-500' : 'hover:bg-white/40'
-                              }`}
+                              onMouseDown={(e) => startResize(e, clip, 'left')}
+                              className={`absolute left-0 top-0 bottom-0 w-2.5 cursor-w-resize z-20 transition-colors hover:bg-amber-500/80`}
+                              title="Drag to trim start"
                             />
                             <div
-                              className={`absolute right-0 top-0 bottom-0 w-1.5 cursor-e-resize z-20 transition-colors ${
-                                activeTool === 'ripple' ? 'hover:bg-amber-500' : 'hover:bg-white/40'
-                              }`}
+                              onMouseDown={(e) => startResize(e, clip, 'right')}
+                              className={`absolute right-0 top-0 bottom-0 w-2.5 cursor-e-resize z-20 transition-colors hover:bg-amber-500/80`}
+                              title="Drag to trim end"
                             />
                           </>
                         )}
@@ -2251,7 +2253,7 @@ export function Timeline() {
               {/* ── Snap line ──────────────────────────────────────────── */}
               {snapLine !== null && (
                 <div
-                  className="absolute top-0 bottom-0 w-px bg-white z-40 pointer-events-none"
+                  className="absolute top-0 bottom-0 w-[1.5px] bg-amber-400 z-50 pointer-events-none shadow-[0_0_8px_rgba(251,191,36,0.8)]"
                   style={{ left: `${snapLine}px` }}
                 />
               )}

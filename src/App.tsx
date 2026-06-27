@@ -51,7 +51,10 @@ function App() {
       switch (e.key.toLowerCase()) {
         case ' ':
           e.preventDefault();
-          togglePlayback();
+          // Don't toggle playback if 'hand' tool is active (Space is used for panning in canvas)
+          if (activeTool !== 'hand') {
+            togglePlayback();
+          }
           break;
         case 's':
           if (!e.ctrlKey && !e.metaKey) {
@@ -246,6 +249,13 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
+
+  // Load project on mount
+  useEffect(() => {
+    useEditorStore.getState().loadProject().then((loaded) => {
+      if (loaded) console.log('Successfully restored project from IndexedDB');
+    });
+  }, []);
 
   // Resize handlers
   useEffect(() => {
