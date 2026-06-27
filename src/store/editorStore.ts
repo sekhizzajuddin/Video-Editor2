@@ -183,7 +183,7 @@ interface EditorActions {
   saveSnapshot: () => void;
 
   // Master Keyframes
-  addMasterKeyframe: (clipId: string, time: number, values: { transform: any, crop: any }) => void;
+  addMasterKeyframe: (clipId: string, time: number, values: any) => void;
   deleteMasterKeyframe: (clipId: string, time: number) => void;
   moveMasterKeyframe: (clipId: string, oldTime: number, newTime: number) => void;
   breakMasterKeyframeLink: (clipId: string, time: number) => void;
@@ -1072,14 +1072,25 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           if (c.id !== clipId) return c;
           const anims: any = c.animations ? { ...c.animations } : {};
           const props = [
-            { k: 'transform.x', v: values.transform.x },
-            { k: 'transform.y', v: values.transform.y },
-            { k: 'transform.scale', v: values.transform.scale },
-            { k: 'transform.rotation', v: values.transform.rotation },
-            { k: 'crop.top', v: values.crop.top },
-            { k: 'crop.bottom', v: values.crop.bottom },
-            { k: 'crop.left', v: values.crop.left },
-            { k: 'crop.right', v: values.crop.right },
+            { k: 'transform.x', v: values.transform?.x },
+            { k: 'transform.y', v: values.transform?.y },
+            { k: 'transform.scale', v: values.transform?.scale },
+            { k: 'transform.rotation', v: values.transform?.rotation },
+            { k: 'crop.top', v: values.crop?.top },
+            { k: 'crop.bottom', v: values.crop?.bottom },
+            { k: 'crop.left', v: values.crop?.left },
+            { k: 'crop.right', v: values.crop?.right },
+            { k: 'opacity', v: values.opacity },
+            { k: 'audio.volume', v: values.audio?.volume },
+            { k: 'audio.pan', v: values.audio?.pan },
+            { k: 'color.temperature', v: values.color?.temperature },
+            { k: 'color.tint', v: values.color?.tint },
+            { k: 'color.exposure', v: values.color?.exposure },
+            { k: 'color.contrast', v: values.color?.contrast },
+            { k: 'color.saturation', v: values.color?.saturation },
+            { k: 'color.blur', v: values.color?.blur },
+            { k: 'color.fadedFilm', v: values.color?.fadedFilm },
+            { k: 'color.vignette', v: values.color?.vignette },
           ];
           
           props.forEach(p => {
@@ -1087,7 +1098,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             const track = anims[p.k] || [];
             const existingIdx = track.findIndex((kf: any) => Math.abs(kf.time - time) < 0.05);
             const newTrack = [...track];
-            if (existingIdx >= 0) newTrack[existingIdx] = { time, value: p.v };
+            if (existingIdx >= 0) newTrack[existingIdx] = { ...newTrack[existingIdx], time, value: p.v };
             else newTrack.push({ time, value: p.v });
             newTrack.sort((a, b) => a.time - b.time);
             anims[p.k] = newTrack;
@@ -1123,6 +1134,16 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
                   };
                 } else if (parts[0] === 'opacity') {
                   updatedClip.opacity = kfToDelete.value;
+                } else if (parts[0] === 'color') {
+                  updatedClip = {
+                    ...updatedClip,
+                    colorFilters: { ...(updatedClip.colorFilters || {}), [parts[1]]: kfToDelete.value } as any
+                  };
+                } else if (parts[0] === 'audio') {
+                  updatedClip = {
+                    ...updatedClip,
+                    audioSettings: { ...(updatedClip.audioSettings || {}), [parts[1]]: kfToDelete.value } as any
+                  };
                 }
               }
               anims[k] = anims[k].filter((kf: any) => Math.abs(kf.time - time) >= 0.05);

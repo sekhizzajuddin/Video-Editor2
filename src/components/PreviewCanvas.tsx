@@ -287,16 +287,16 @@ export function PreviewCanvas() {
       ctx.scale(finalScale, finalScale);
       ctx.rotate((aRot * Math.PI) / 180);
 
-      // Default filters fallback
-      const filters = clip.colorFilters || {
-        temperature: 0,
-        tint: 0,
-        exposure: 0,
-        contrast: 100,
-        saturation: 100,
-        blur: 0,
-        fadedFilm: 0,
-        vignette: 0,
+      // Dynamic filters using keyframe animations
+      const filters = {
+        temperature: getAnimatedValue(clip.colorFilters?.temperature ?? 0, currentTime, clip.startTime, clip.animations?.['color.temperature']),
+        tint: getAnimatedValue(clip.colorFilters?.tint ?? 0, currentTime, clip.startTime, clip.animations?.['color.tint']),
+        exposure: getAnimatedValue(clip.colorFilters?.exposure ?? 0, currentTime, clip.startTime, clip.animations?.['color.exposure']),
+        contrast: getAnimatedValue(clip.colorFilters?.contrast ?? 100, currentTime, clip.startTime, clip.animations?.['color.contrast']),
+        saturation: getAnimatedValue(clip.colorFilters?.saturation ?? 100, currentTime, clip.startTime, clip.animations?.['color.saturation']),
+        blur: getAnimatedValue(clip.colorFilters?.blur ?? 0, currentTime, clip.startTime, clip.animations?.['color.blur']),
+        fadedFilm: getAnimatedValue(clip.colorFilters?.fadedFilm ?? 0, currentTime, clip.startTime, clip.animations?.['color.fadedFilm']),
+        vignette: getAnimatedValue(clip.colorFilters?.vignette ?? 0, currentTime, clip.startTime, clip.animations?.['color.vignette']),
       };
 
       // Check for active FX on the track this clip belongs to

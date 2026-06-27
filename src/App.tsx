@@ -94,6 +94,9 @@ function App() {
           if (storeState.selectedKeyframeLines.length > 0) {
             e.preventDefault();
             removeSelectedKeyframeLines();
+          } else if (storeState.selectedClipIds.length > 0) {
+            e.preventDefault();
+            removeClip(storeState.selectedClipIds[0]);
           } else if (selectedClipId) {
             e.preventDefault();
             removeClip(selectedClipId);

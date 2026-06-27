@@ -17,11 +17,13 @@ import {
   Loader2,
   Type,
   Play,
+  AlertTriangle,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback } from 'react';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
+import { saveFileToDB } from '@/utils/projectPersistence';
 import demoA from '../assets/transition_demo_a.webp';
 import demoB from '../assets/transition_demo_b.webp';
 import { useEffect } from 'react';
@@ -112,6 +114,64 @@ export function MediaPanel() {
     // Reset input so the same file can be re-imported
     e.target.value = '';
   }, [importFiles]);
+
+  const relinkInputRef = useRef<HTMLInputElement>(null);
+
+  const handleRelinkFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setImporting(true);
+    setImportProgress('Re-linking project files...');
+
+    const fileArray = Array.from(files);
+    const missing = mediaLibrary.filter(
+      (m) => m.type !== 'text' && m.type !== 'fx' && (m.url === 'PENDING_RESTORE' || !m.url)
+    );
+
+    let linkedCount = 0;
+
+    for (const file of fileArray) {
+      const match = missing.find((m) => m.name === file.name);
+      if (match) {
+        setImportProgress(`Linking ${file.name}...`);
+        try {
+          const objectUrl = URL.createObjectURL(file);
+          
+          // Save file to IndexedDB
+          await saveFileToDB(match.id, file);
+
+          // Update the media library URL
+          useEditorStore.setState((state) => ({
+            mediaLibrary: state.mediaLibrary.map((m) =>
+              m.id === match.id
+                ? {
+                    ...m,
+                    url: objectUrl,
+                    thumbnail: m.type === 'image' ? objectUrl : m.thumbnail === 'PENDING_RESTORE' ? objectUrl : m.thumbnail,
+                  }
+                : m
+            ),
+          }));
+          linkedCount++;
+        } catch (err) {
+          console.error(`Failed to link ${file.name}:`, err);
+        }
+      }
+    }
+
+    // Refresh state in editor store
+    useEditorStore.getState().recalcTotalDuration();
+    useEditorStore.getState().saveSnapshot();
+    
+    // Dispatch event to notify PreviewCanvas to redraw
+    window.dispatchEvent(new CustomEvent('procut-frame-updated'));
+
+    setImporting(false);
+    setImportProgress('');
+    alert(`Successfully re-linked ${linkedCount} files!`);
+    e.target.value = '';
+  };
 
   // Drag-and-drop zone handlers
   const handleZoneDragOver = useCallback((e: React.DragEvent) => {
@@ -330,6 +390,37 @@ export function MediaPanel() {
                   {importing ? 'Importing...' : 'Import Media'}
                 </button>
               </div>
+
+              {/* Missing files warning banner */}
+              {(() => {
+                const missing = mediaLibrary.filter(
+                  (m) => m.type !== 'text' && m.type !== 'fx' && (m.url === 'PENDING_RESTORE' || !m.url)
+                );
+                if (missing.length > 0) {
+                  return (
+                    <div className="mx-2 mb-2 p-3 bg-red-950/40 border border-red-500/30 rounded flex flex-col gap-2">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-semibold text-red-200">
+                            {missing.length} Missing files in project
+                          </p>
+                          <p className="text-[10px] text-red-300/80 leading-normal mt-0.5">
+                            Some local media files are not linked to this browser session. Please re-link them.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => relinkInputRef.current?.click()}
+                        className="w-full py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-xs font-medium rounded transition-colors"
+                      >
+                        Re-link Files
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {filteredMedia.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-[#a0a0a0]">
@@ -589,6 +680,14 @@ export function MediaPanel() {
         multiple
         accept="video/*,audio/*,image/*"
         onChange={handleImport}
+        className="hidden"
+      />
+      <input
+        ref={relinkInputRef}
+        type="file"
+        multiple
+        accept="video/*,audio/*,image/*"
+        onChange={handleRelinkFiles}
         className="hidden"
       />
     </div>

@@ -9,7 +9,7 @@
 import { MediaItem, TimelineTrack } from '@/types';
 
 const DB_NAME = 'procut_editor_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Bumped to handle new schema with fileHash
 
 let dbInstance: IDBDatabase | null = null;
 
@@ -25,13 +25,16 @@ function getDB(): Promise<IDBDatabase> {
       resolve(request.result);
     };
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       if (!db.objectStoreNames.contains('files')) {
         db.createObjectStore('files'); // stores raw File objects, keyed by mediaId
       }
       if (!db.objectStoreNames.contains('project')) {
         db.createObjectStore('project'); // stores tracks, mediaLibrary metadata, settings
+      }
+      if (!db.objectStoreNames.contains('metadata')) {
+        db.createObjectStore('metadata'); // stores file hashes mapping for re-linking
       }
     };
   });
@@ -80,6 +83,21 @@ export async function deleteFileFromDB(mediaId: string): Promise<void> {
 }
 
 /**
+ * Generates a simple hash for a file (using name + size + lastModified)
+ * to help with re-linking when importing .procut files.
+ */
+export function generateFileHash(file: File): string {
+  const str = `${file.name}_${file.size}_${file.lastModified}`;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
  * Persists the entire project config (tracks metadata, media list, timeline) to IndexedDB.
  */
 export async function saveProjectToDB(data: {
@@ -97,6 +115,7 @@ export async function saveProjectToDB(data: {
       ...item,
       url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
       thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
+      frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
     }));
 
     const cleanTracks = data.tracks.map(track => ({
@@ -125,7 +144,7 @@ export async function loadProjectFromDB(): Promise<{
   currentTime: number;
 } | null> {
   const db = await getDB();
-  
+
   const getValue = (key: string): Promise<any> => {
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('project', 'readonly');
@@ -158,16 +177,36 @@ export async function loadProjectFromDB(): Promise<{
 
         // Regenerate thumbnail if present
         let newThumb = undefined;
-        if (item.thumbnail) {
-          newThumb = item.type === 'image' ? objectUrl : undefined;
+        if (item.thumbnail === 'PENDING_RESTORE') {
+          // For images, use the object URL directly; for video, we'll generate a frame thumbnail
+          if (item.type === 'image') {
+            newThumb = objectUrl;
+          } else if (item.type === 'video') {
+            // Try to generate a thumbnail from the video
+            newThumb = await generateVideoThumbnail(objectUrl, item.width, item.height);
+          }
+        }
+
+        // Handle frameStrip restoration
+        let restoredFrameStrip: string[] | undefined = undefined;
+        if (item.frameStrip && item.frameStrip.length > 0) {
+          if (item.type === 'video') {
+            // Regenerate frame strips for video
+            restoredFrameStrip = await generateFrameStrip(objectUrl, item.duration || 10, 10);
+          } else if (item.type === 'image' && item.thumbnail !== 'PENDING_RESTORE') {
+            // Images reuse the thumbnail or object URL
+            restoredFrameStrip = [objectUrl];
+          }
         }
 
         mediaLibrary.push({
           ...item,
           url: objectUrl,
-          thumbnail: newThumb || item.thumbnail
+          thumbnail: newThumb || undefined,
+          frameStrip: restoredFrameStrip || item.frameStrip,
         });
       } else {
+        // File missing from DB, but keep metadata
         mediaLibrary.push(item);
       }
     }
@@ -181,6 +220,85 @@ export async function loadProjectFromDB(): Promise<{
     console.error('Failed to load project from DB:', err);
     return null;
   }
+}
+
+/**
+ * Generates a thumbnail frame from a video URL by seeking to 0.5s.
+ */
+function generateVideoThumbnail(videoUrl: string, width?: number, height?: number): Promise<string> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.src = videoUrl;
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.playsInline = true;
+
+    video.onloadedmetadata = () => {
+      video.currentTime = 0.5;
+    };
+
+    video.onseeked = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = width || video.videoWidth || 160;
+        canvas.height = height || video.videoHeight || 90;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        } else {
+          resolve('');
+        }
+      } catch {
+        resolve('');
+      }
+    };
+
+    video.onerror = () => resolve('');
+  });
+}
+
+/**
+ * Generates a strip of frame thumbnails from a video URL.
+ */
+function generateFrameStrip(videoUrl: string, duration: number, count: number): Promise<string[]> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.src = videoUrl;
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.playsInline = true;
+
+    const frames: string[] = [];
+    const captureFrame = (index: number) => {
+      if (index >= count) {
+        resolve(frames);
+        return;
+      }
+      video.currentTime = (duration / count) * index;
+      video.onseeked = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 160;
+          canvas.height = 90;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            frames.push(canvas.toDataURL('image/jpeg', 0.5));
+          }
+        } catch {
+          // Skip frame
+        }
+        captureFrame(index + 1);
+      };
+    };
+
+    video.onloadedmetadata = () => {
+      captureFrame(0);
+    };
+
+    video.onerror = () => resolve(frames);
+  });
 }
 
 /**

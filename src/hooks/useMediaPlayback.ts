@@ -14,6 +14,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
+import { getAnimatedValue } from '@/utils/keyframes';
 
 // Global master audio context for combining all tracks into a single MediaStream for Export
 let masterAudioCtx: AudioContext | null = null;
@@ -425,6 +426,20 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         humanize: false,
       };
 
+      // Evaluate animated volume and pan from keyframes
+      const animatedVolume = getAnimatedValue(
+        audioSettings.volume,
+        currentTime,
+        fullClip.startTime,
+        fullClip.animations?.['audio.volume']
+      );
+      const animatedPan = getAnimatedValue(
+        audioSettings.pan,
+        currentTime,
+        fullClip.startTime,
+        fullClip.animations?.['audio.pan']
+      );
+
       // Apply Speed Preserves Pitch
       const targetPreserve = audioSettings.preservePitch;
       if (entry.el.preservesPitch !== targetPreserve) {
@@ -457,9 +472,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         entry.trebleFilter.gain.setTargetAtTime(Math.max(-15, Math.min(15, baseTreble)), ctxTime, rampTime);
       }
 
-      // Update Stereo Panning
+      // Update Stereo Panning using animatedPan
       if (entry.pannerNode) {
-        entry.pannerNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, audioSettings.pan / 100)), ctxTime, rampTime);
+        entry.pannerNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, animatedPan / 100)), ctxTime, rampTime);
       }
 
       // Update Room Ambience feedback wet volume
@@ -572,7 +587,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         }
       }
 
-      const linearGain = Math.pow(10, audioSettings.volume / 20);
+      const linearGain = Math.pow(10, animatedVolume / 20);
       const finalVolume = (globalMuted || isTransitionMuted) ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
 
       if (entry.gainNode) {

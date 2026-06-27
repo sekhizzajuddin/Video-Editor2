@@ -348,6 +348,111 @@ export function PropertiesPanel() {
     );
   }
 
+  const localTime = currentTime - selectedClip.startTime;
+  const animations = selectedClip.animations || {};
+  const getMasterKeyframes = () => {
+    if (!animations['transform.x']) return [];
+    return animations['transform.x'].map(k => k.time);
+  };
+  const keyframeTimes = getMasterKeyframes();
+  const hasMasterKeyframes = keyframeTimes.length > 0;
+  const isOnKeyframe = keyframeTimes.some(t => Math.abs(t - localTime) < 0.05);
+
+  const getPropVal = (base: number, propKey: string) => {
+    return getAnimatedValue(
+      base,
+      currentTime,
+      selectedClip.startTime,
+      animations[propKey]
+    );
+  };
+
+  const setPropVal = (propKey: string, value: number, baseUpdateObj: any) => {
+    if (hasMasterKeyframes) {
+      const currentVals: any = {
+        transform: {
+          x: getPropVal(selectedClip.transform.x, 'transform.x'),
+          y: getPropVal(selectedClip.transform.y, 'transform.y'),
+          scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
+          rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
+        },
+        crop: {
+          top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
+          bottom: getPropVal(selectedClip.crop?.bottom || 0, 'crop.bottom'),
+          left: getPropVal(selectedClip.crop?.left || 0, 'crop.left'),
+          right: getPropVal(selectedClip.crop?.right || 0, 'crop.right')
+        },
+        opacity: getPropVal(selectedClip.opacity, 'opacity'),
+        audio: {
+          volume: getPropVal(selectedClip.audioSettings?.volume ?? 0, 'audio.volume'),
+          pan: getPropVal(selectedClip.audioSettings?.pan ?? 0, 'audio.pan'),
+        },
+        color: {
+          temperature: getPropVal(selectedClip.colorFilters?.temperature ?? 0, 'color.temperature'),
+          tint: getPropVal(selectedClip.colorFilters?.tint ?? 0, 'color.tint'),
+          exposure: getPropVal(selectedClip.colorFilters?.exposure ?? 0, 'color.exposure'),
+          contrast: getPropVal(selectedClip.colorFilters?.contrast ?? 100, 'color.contrast'),
+          saturation: getPropVal(selectedClip.colorFilters?.saturation ?? 100, 'color.saturation'),
+          blur: getPropVal(selectedClip.colorFilters?.blur ?? 0, 'color.blur'),
+          fadedFilm: getPropVal(selectedClip.colorFilters?.fadedFilm ?? 0, 'color.fadedFilm'),
+          vignette: getPropVal(selectedClip.colorFilters?.vignette ?? 0, 'color.vignette'),
+        }
+      };
+
+      const keys = propKey.split('.');
+      if (keys.length === 1) {
+        currentVals[propKey] = value;
+      } else if (keys.length === 2) {
+        if (!currentVals[keys[0]]) currentVals[keys[0]] = {};
+        currentVals[keys[0]][keys[1]] = value;
+      }
+
+      addMasterKeyframe(selectedClip.id, localTime, currentVals);
+    } else {
+      updateClip(selectedClip.id, baseUpdateObj);
+    }
+  };
+
+  const handleToggleMasterKeyframe = () => {
+    if (isOnKeyframe) {
+       const closest = keyframeTimes.find(t => Math.abs(t - localTime) < 0.05);
+       if (closest !== undefined) {
+         deleteMasterKeyframe(selectedClip.id, closest);
+       }
+    } else {
+       const currentVals = {
+          transform: {
+            x: getPropVal(selectedClip.transform.x, 'transform.x'),
+            y: getPropVal(selectedClip.transform.y, 'transform.y'),
+            scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
+            rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
+          },
+          crop: {
+            top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
+            bottom: getPropVal(selectedClip.crop?.bottom || 0, 'crop.bottom'),
+            left: getPropVal(selectedClip.crop?.left || 0, 'crop.left'),
+            right: getPropVal(selectedClip.crop?.right || 0, 'crop.right')
+          },
+          opacity: getPropVal(selectedClip.opacity, 'opacity'),
+          audio: {
+            volume: getPropVal(selectedClip.audioSettings?.volume ?? 0, 'audio.volume'),
+            pan: getPropVal(selectedClip.audioSettings?.pan ?? 0, 'audio.pan'),
+          },
+          color: {
+            temperature: getPropVal(selectedClip.colorFilters?.temperature ?? 0, 'color.temperature'),
+            tint: getPropVal(selectedClip.colorFilters?.tint ?? 0, 'color.tint'),
+            exposure: getPropVal(selectedClip.colorFilters?.exposure ?? 0, 'color.exposure'),
+            contrast: getPropVal(selectedClip.colorFilters?.contrast ?? 100, 'color.contrast'),
+            saturation: getPropVal(selectedClip.colorFilters?.saturation ?? 100, 'color.saturation'),
+            blur: getPropVal(selectedClip.colorFilters?.blur ?? 0, 'color.blur'),
+            fadedFilm: getPropVal(selectedClip.colorFilters?.fadedFilm ?? 0, 'color.fadedFilm'),
+            vignette: getPropVal(selectedClip.colorFilters?.vignette ?? 0, 'color.vignette'),
+          }
+       };
+       addMasterKeyframe(selectedClip.id, localTime, currentVals);
+    }
+  };
+
   const defaultColorFilters = {
     temperature: 0,
     tint: 0,
@@ -364,7 +469,7 @@ export function PropertiesPanel() {
   const handleFilterChange = (key: keyof typeof defaultColorFilters, val: number) => {
     if (!selectedClip) return;
     const current = selectedClip.colorFilters || defaultColorFilters;
-    updateClip(selectedClip.id, {
+    setPropVal(`color.${key}`, val, {
       colorFilters: {
         ...current,
         [key]: val,
@@ -376,7 +481,7 @@ export function PropertiesPanel() {
     if (!selectedClip) return;
     const current = selectedClip.colorFilters || defaultColorFilters;
     const defaultVal = defaultColorFilters[key];
-    updateClip(selectedClip.id, {
+    setPropVal(`color.${key}`, defaultVal, {
       colorFilters: {
         ...current,
         [key]: defaultVal,
@@ -404,24 +509,42 @@ export function PropertiesPanel() {
   const handleAudioChange = (key: keyof typeof defaultAudioSettings, val: any) => {
     if (!selectedClip) return;
     const current = selectedClip.audioSettings || defaultAudioSettings;
-    updateClip(selectedClip.id, {
-      audioSettings: {
-        ...current,
-        [key]: val,
-      },
-    });
+    if (key === 'volume' || key === 'pan') {
+      setPropVal(`audio.${key}`, val, {
+        audioSettings: {
+          ...current,
+          [key]: val,
+        },
+      });
+    } else {
+      updateClip(selectedClip.id, {
+        audioSettings: {
+          ...current,
+          [key]: val,
+        },
+      });
+    }
   };
 
   const handleAudioReset = (key: keyof typeof defaultAudioSettings) => {
     if (!selectedClip) return;
     const current = selectedClip.audioSettings || defaultAudioSettings;
     const defaultVal = defaultAudioSettings[key];
-    updateClip(selectedClip.id, {
-      audioSettings: {
-        ...current,
-        [key]: defaultVal,
-      },
-    });
+    if (key === 'volume' || key === 'pan') {
+      setPropVal(`audio.${key}`, defaultVal as number, {
+        audioSettings: {
+          ...current,
+          [key]: defaultVal,
+        },
+      });
+    } else {
+      updateClip(selectedClip.id, {
+        audioSettings: {
+          ...current,
+          [key]: defaultVal,
+        },
+      });
+    }
     useEditorStore.getState().saveSnapshot();
   };
 
@@ -663,79 +786,10 @@ export function PropertiesPanel() {
       {/* Properties Content */}
       <div className="flex-1 overflow-y-auto p-3">
         {activePropertiesTab === 'transform' && (() => {
-          const localTime = currentTime - selectedClip.startTime;
-          const animations = selectedClip.animations || {};
-
-          const getPropVal = (base: number, propKey: string) => {
-            return getAnimatedValue(base, currentTime, selectedClip.startTime, animations[propKey as keyof typeof animations]);
-          };
-
-          const getMasterKeyframes = () => {
-            if (!animations['transform.x']) return [];
-            const times = animations['transform.x'].map(k => k.time);
-            return times.sort((a,b) => a - b);
-          };
+          // Reusing outer component scope helpers: localTime, animations, getPropVal, setPropVal, handleToggleMasterKeyframe
           const keyframeTimes = getMasterKeyframes();
           const hasMasterKeyframes = keyframeTimes.length > 0;
           const isOnKeyframe = keyframeTimes.some(t => Math.abs(t - localTime) < 0.05);
-
-          const handleToggleMasterKeyframe = () => {
-            if (isOnKeyframe) {
-               const closest = keyframeTimes.find(t => Math.abs(t - localTime) < 0.05);
-               if (closest !== undefined) {
-                 deleteMasterKeyframe(selectedClip.id, closest);
-               }
-            } else {
-               const currentVals = {
-                 transform: {
-                   x: getPropVal(selectedClip.transform.x, 'transform.x'),
-                   y: getPropVal(selectedClip.transform.y, 'transform.y'),
-                   scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
-                   rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
-                 },
-                 crop: {
-                   top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
-                   bottom: getPropVal(selectedClip.crop?.bottom || 0, 'crop.bottom'),
-                   left: getPropVal(selectedClip.crop?.left || 0, 'crop.left'),
-                   right: getPropVal(selectedClip.crop?.right || 0, 'crop.right')
-                 }
-               };
-               addMasterKeyframe(selectedClip.id, localTime, currentVals);
-            }
-          };
-
-          const setPropVal = (propKey: string, value: number, baseUpdateObj: any) => {
-             if (hasMasterKeyframes) {
-               const currentVals = {
-                 transform: {
-                   x: getPropVal(selectedClip.transform.x, 'transform.x'),
-                   y: getPropVal(selectedClip.transform.y, 'transform.y'),
-                   scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
-                   rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
-                 },
-                 crop: {
-                   top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
-                   bottom: getPropVal(selectedClip.crop?.bottom || 0, 'crop.bottom'),
-                   left: getPropVal(selectedClip.crop?.left || 0, 'crop.left'),
-                   right: getPropVal(selectedClip.crop?.right || 0, 'crop.right')
-                 }
-               };
-               const keys = propKey.split('.');
-               if (keys[0] === 'transform' || keys[0] === 'crop') {
-                 (currentVals as any)[keys[0]][keys[1]] = value;
-               }
-               // Wait, Opacity is not part of transform/crop but is it included in MasterKeyframes?
-               // The user only asked for Transform/Crop (position, rotation, scale). We will leave opacity separate or ignore it for now.
-               // Let's just handle transform/crop.
-               if (keys[0] === 'opacity') {
-                 updateClip(selectedClip.id, baseUpdateObj);
-                 return;
-               }
-               addMasterKeyframe(selectedClip.id, localTime, currentVals);
-             } else {
-               updateClip(selectedClip.id, baseUpdateObj);
-             }
-          };
 
           return (
             <div className="space-y-3">
@@ -1092,7 +1146,7 @@ export function PropertiesPanel() {
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Temperature</span>
                       <span className="font-mono text-[#a0a0a0]">
-                        {clipFilters.temperature > 0 ? `+${clipFilters.temperature}` : clipFilters.temperature}
+                        {getPropVal(clipFilters.temperature, 'color.temperature') > 0 ? `+${getPropVal(clipFilters.temperature, 'color.temperature')}` : getPropVal(clipFilters.temperature, 'color.temperature')}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1100,7 +1154,7 @@ export function PropertiesPanel() {
                         type="range"
                         min={-100}
                         max={100}
-                        value={clipFilters.temperature}
+                        value={getPropVal(clipFilters.temperature, 'color.temperature')}
                         onChange={(e) => handleFilterChange('temperature', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('temperature')}
@@ -1115,7 +1169,7 @@ export function PropertiesPanel() {
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Tint</span>
                       <span className="font-mono text-[#a0a0a0]">
-                        {clipFilters.tint > 0 ? `+${clipFilters.tint}` : clipFilters.tint}
+                        {getPropVal(clipFilters.tint, 'color.tint') > 0 ? `+${getPropVal(clipFilters.tint, 'color.tint')}` : getPropVal(clipFilters.tint, 'color.tint')}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1123,7 +1177,7 @@ export function PropertiesPanel() {
                         type="range"
                         min={-100}
                         max={100}
-                        value={clipFilters.tint}
+                        value={getPropVal(clipFilters.tint, 'color.tint')}
                         onChange={(e) => handleFilterChange('tint', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('tint')}
@@ -1138,7 +1192,7 @@ export function PropertiesPanel() {
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Exposure</span>
                       <span className="font-mono text-[#a0a0a0]">
-                        {clipFilters.exposure > 0 ? `+${clipFilters.exposure}` : clipFilters.exposure}
+                        {getPropVal(clipFilters.exposure, 'color.exposure') > 0 ? `+${getPropVal(clipFilters.exposure, 'color.exposure')}` : getPropVal(clipFilters.exposure, 'color.exposure')}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1146,7 +1200,7 @@ export function PropertiesPanel() {
                         type="range"
                         min={-100}
                         max={100}
-                        value={clipFilters.exposure}
+                        value={getPropVal(clipFilters.exposure, 'color.exposure')}
                         onChange={(e) => handleFilterChange('exposure', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('exposure')}
@@ -1160,14 +1214,14 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Contrast</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipFilters.contrast}%</span>
+                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.contrast, 'color.contrast')}%</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
                         min={0}
                         max={200}
-                        value={clipFilters.contrast}
+                        value={getPropVal(clipFilters.contrast, 'color.contrast')}
                         onChange={(e) => handleFilterChange('contrast', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('contrast')}
@@ -1181,14 +1235,14 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Saturation</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipFilters.saturation}%</span>
+                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.saturation, 'color.saturation')}%</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
                         min={0}
                         max={200}
-                        value={clipFilters.saturation}
+                        value={getPropVal(clipFilters.saturation, 'color.saturation')}
                         onChange={(e) => handleFilterChange('saturation', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('saturation')}
@@ -1202,14 +1256,14 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Blur</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipFilters.blur}px</span>
+                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.blur, 'color.blur')}px</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
                         min={0}
                         max={20}
-                        value={clipFilters.blur}
+                        value={getPropVal(clipFilters.blur, 'color.blur')}
                         onChange={(e) => handleFilterChange('blur', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('blur')}
@@ -1241,14 +1295,14 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Faded Film</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipFilters.fadedFilm}%</span>
+                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.fadedFilm, 'color.fadedFilm')}%</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
                         min={0}
                         max={100}
-                        value={clipFilters.fadedFilm}
+                        value={getPropVal(clipFilters.fadedFilm, 'color.fadedFilm')}
                         onChange={(e) => handleFilterChange('fadedFilm', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('fadedFilm')}
@@ -1263,7 +1317,7 @@ export function PropertiesPanel() {
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Vignette</span>
                       <span className="font-mono text-[#a0a0a0]">
-                        {clipFilters.vignette > 0 ? `+${clipFilters.vignette}` : clipFilters.vignette}
+                        {getPropVal(clipFilters.vignette, 'color.vignette') > 0 ? `+${getPropVal(clipFilters.vignette, 'color.vignette')}` : getPropVal(clipFilters.vignette, 'color.vignette')}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1271,7 +1325,7 @@ export function PropertiesPanel() {
                         type="range"
                         min={-100}
                         max={100}
-                        value={clipFilters.vignette}
+                        value={getPropVal(clipFilters.vignette, 'color.vignette')}
                         onChange={(e) => handleFilterChange('vignette', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleFilterReset('vignette')}
@@ -1779,7 +1833,7 @@ export function PropertiesPanel() {
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Volume Gain</span>
                       <span className="font-mono text-[#a0a0a0]">
-                        {clipAudio.volume > 0 ? `+${clipAudio.volume}` : clipAudio.volume} dB ({Math.round(Math.pow(10, clipAudio.volume / 20) * 100)}%)
+                        {getPropVal(clipAudio.volume, 'audio.volume') > 0 ? `+${getPropVal(clipAudio.volume, 'audio.volume')}` : getPropVal(clipAudio.volume, 'audio.volume')} dB ({Math.round(Math.pow(10, getPropVal(clipAudio.volume, 'audio.volume') / 20) * 100)}%)
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1787,7 +1841,7 @@ export function PropertiesPanel() {
                         type="range"
                         min={-40}
                         max={12}
-                        value={clipAudio.volume}
+                        value={getPropVal(clipAudio.volume, 'audio.volume')}
                         onChange={(e) => handleAudioChange('volume', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleAudioReset('volume')}
@@ -1802,7 +1856,7 @@ export function PropertiesPanel() {
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Pan / Balance</span>
                       <span className="font-mono text-[#a0a0a0]">
-                        {clipAudio.pan === 0 ? 'Center' : clipAudio.pan > 0 ? `R${clipAudio.pan}` : `L${Math.abs(clipAudio.pan)}`}
+                        {getPropVal(clipAudio.pan, 'audio.pan') === 0 ? 'Center' : getPropVal(clipAudio.pan, 'audio.pan') > 0 ? `R${getPropVal(clipAudio.pan, 'audio.pan')}` : `L${Math.abs(getPropVal(clipAudio.pan, 'audio.pan'))}`}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1810,7 +1864,7 @@ export function PropertiesPanel() {
                         type="range"
                         min={-100}
                         max={100}
-                        value={clipAudio.pan}
+                        value={getPropVal(clipAudio.pan, 'audio.pan')}
                         onChange={(e) => handleAudioChange('pan', Number(e.target.value))}
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleAudioReset('pan')}
