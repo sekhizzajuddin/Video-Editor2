@@ -188,12 +188,25 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     const pool = poolRef.current;
     const videoMap = videoMapRef.current;
 
-    // Create missing elements
+    // Create missing elements or update sources if they changed (e.g. after re-linking)
     for (const [clipId, info] of neededClips) {
-      if (pool.has(clipId)) continue;
-
       const media = mediaLibrary.find((m) => m.id === info.mediaId);
       if (!media || !media.url) continue;
+
+      const existing = pool.get(clipId);
+      if (existing) {
+        const currentSrc = existing.el.src;
+        const isPendingRestore = media.url === 'PENDING_RESTORE';
+        const isUrlDifferent = !isPendingRestore && !currentSrc.includes(media.url);
+        
+        if (isUrlDifferent || (isPendingRestore && !currentSrc.includes('PENDING_RESTORE'))) {
+          existing.el.src = media.url;
+          if (existing.type === 'video') {
+            existing.el.load();
+          }
+        }
+        continue;
+      }
 
       if (info.type === 'video') {
         const el = document.createElement('video');

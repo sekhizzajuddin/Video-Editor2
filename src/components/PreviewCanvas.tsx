@@ -320,10 +320,28 @@ export function PreviewCanvas() {
       let dh = H;
       let hasRealMedia = false;
 
-      const cTop = aCropTop / 100;
-      const cBot = aCropBot / 100;
-      const cLeft = aCropLeft / 100;
-      const cRight = aCropRight / 100;
+      // Ensure crops are sanitized and don't sum up to >= 100% (which would yield 0 or negative width/height)
+      let cTop = aCropTop / 100;
+      let cBot = aCropBot / 100;
+      let cLeft = aCropLeft / 100;
+      let cRight = aCropRight / 100;
+
+      if (cLeft + cRight >= 1.0) {
+        const sum = cLeft + cRight;
+        cLeft = (cLeft / sum) * 0.99;
+        cRight = (cRight / sum) * 0.99;
+      }
+      if (cTop + cBot >= 1.0) {
+        const sum = cTop + cBot;
+        cTop = (cTop / sum) * 0.99;
+        cBot = (cBot / sum) * 0.99;
+      }
+
+      // Sanitize filter properties to prevent NaN values from crashing canvas filter parser
+      const exposure = Number.isFinite(filters.exposure) ? filters.exposure : 0;
+      const contrast = Number.isFinite(filters.contrast) ? filters.contrast : 100;
+      const saturation = Number.isFinite(filters.saturation) ? filters.saturation : 100;
+      const blur = Number.isFinite(filters.blur) ? filters.blur : 0;
 
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
@@ -338,16 +356,16 @@ export function PreviewCanvas() {
 
           const sx = vw * cLeft;
           const sy = vh * cTop;
-          const sw = vw * (1 - cLeft - cRight);
-          const sh = vh * (1 - cTop - cBot);
+          const sw = Math.max(1, vw * (1 - cLeft - cRight));
+          const sh = Math.max(1, vh * (1 - cTop - cBot));
 
-          dw = baseDw * (1 - cLeft - cRight);
-          dh = baseDh * (1 - cTop - cBot);
+          dw = Math.max(1, baseDw * (1 - cLeft - cRight));
+          dh = Math.max(1, baseDh * (1 - cTop - cBot));
           const dx = -baseDw / 2 + baseDw * cLeft;
           const dy = -baseDh / 2 + baseDh * cTop;
 
           // Apply standard filters
-          ctx.filter = `brightness(${100 + filters.exposure}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) blur(${filters.blur}px)`;
+          ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, dw, dh);
           ctx.filter = 'none';
           hasRealMedia = true;
@@ -369,16 +387,16 @@ export function PreviewCanvas() {
 
           const sx = iw * cLeft;
           const sy = ih * cTop;
-          const sw = iw * (1 - cLeft - cRight);
-          const sh = ih * (1 - cTop - cBot);
+          const sw = Math.max(1, iw * (1 - cLeft - cRight));
+          const sh = Math.max(1, ih * (1 - cTop - cBot));
 
-          dw = baseDw * (1 - cLeft - cRight);
-          dh = baseDh * (1 - cTop - cBot);
+          dw = Math.max(1, baseDw * (1 - cLeft - cRight));
+          dh = Math.max(1, baseDh * (1 - cTop - cBot));
           const dx = -baseDw / 2 + baseDw * cLeft;
           const dy = -baseDh / 2 + baseDh * cTop;
 
           // Apply standard filters
-          ctx.filter = `brightness(${100 + filters.exposure}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) blur(${filters.blur}px)`;
+          ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
           ctx.filter = 'none';
           hasRealMedia = true;
@@ -462,11 +480,16 @@ export function PreviewCanvas() {
               const scale = Math.min(W / vw, H / vh);
               const baseDw = vw * scale;
               const baseDh = vh * scale;
-              const sx = vw * cLeft, sy = vh * cTop, sw = vw * (1 - cLeft - cRight), sh = vh * (1 - cTop - cBot);
-              const drawW = baseDw * (1 - cLeft - cRight), drawH = baseDh * (1 - cTop - cBot);
-              const dx = -baseDw / 2 + baseDw * cLeft, dy = -baseDh / 2 + baseDh * cTop;
+              const sx = vw * cLeft;
+              const sy = vh * cTop;
+              const sw = Math.max(1, vw * (1 - cLeft - cRight));
+              const sh = Math.max(1, vh * (1 - cTop - cBot));
+              const drawW = Math.max(1, baseDw * (1 - cLeft - cRight));
+              const drawH = Math.max(1, baseDh * (1 - cTop - cBot));
+              const dx = -baseDw / 2 + baseDw * cLeft;
+              const dy = -baseDh / 2 + baseDh * cTop;
               
-              ctx.filter = `brightness(${120 + filters.exposure}%) contrast(${150}%) saturate(${200}%)`;
+              ctx.filter = `brightness(${120 + exposure}%) contrast(${150}%) saturate(${200}%)`;
               ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, drawW, drawH);
               ctx.filter = 'none';
               applyColorOverlays(ctx, dw, dh, { ...filters, contrast: 150, saturation: 200 });
