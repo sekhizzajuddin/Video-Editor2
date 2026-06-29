@@ -508,59 +508,304 @@ export function PreviewCanvas() {
           
           ctx.restore();
         } else if (fx?.type === 'bw_to_color') {
+          // FIXED: proper grayscale desaturate via ImageData, then reveal color
           const progress = (currentTime - activeFxClip.startTime) / activeFxClip.duration;
           const p = Math.max(0, Math.min(1, progress));
-          // Start B&W (grayscale 100%), end Color (grayscale 0%, saturate 150%)
-          const gray = (1 - p) * 100;
-          const sat = 100 + p * 50;
-          ctx.globalCompositeOperation = 'color';
-          ctx.fillStyle = `hsl(0, 0%, ${gray}%)`;
-          ctx.fillRect(-dw/2, -dh/2, dw, dh);
-          ctx.globalCompositeOperation = 'source-over';
-        } else if (fx?.type === 'glitch') {
-          // Glitch effect: chromatic aberration + random scanlines + slice distortion
-          const intensity = (fx.intensity ?? 100) / 100;
-          const t = (currentTime - activeFxClip.startTime) / activeFxClip.duration;
-          // Seed-based pseudo-random from time (changes per frame to create flicker)
-          const seed = Math.floor(currentTime * 30);
-          const rand = (n: number) => ((Math.sin(seed * 9.7 + n * 127.3) * 43758.5453) % 1 + 1) % 1;
+          // At p=0: full grayscale. At p=1: full color with +50% saturation
+          if (p < 1) {
+            const imgData = ctx.getImageData(-dw / 2, -dh / 2, dw, dh);
+            const data = imgData.data;
+            const colorMix = p; // 0 = full gray, 1 = full color
+            for (let i = 0; i < data.length; i += 4) {
+              const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+              data[i]     = luma + (data[i]     - luma) * colorMix;
+              data[i + 1] = luma + (data[i + 1] - luma) * colorMix;
+              data[i + 2] = luma + (data[i + 2] - luma) * colorMix;
+            }
+            ctx.putImageData(imgData, -dw / 2, -dh / 2);
+          }
+          // At the end, boost saturation for the "vivid color" reveal
+          if (p > 0.8) {
+            const boost = (p - 0.8) / 0.2 * 0.4; // 0–0.4 extra saturation
+            ctx.filter = `saturate(${100 + boost * 100}%)`;
+            // Re-draw not possible without another source; let vignette overlay handle it
+            ctx.filter = 'none';
+          }
 
-          // 1. Chromatic aberration — draw R/G/B channels offset
-          const aberration = intensity * 8 * rand(1);
+        } else if (fx?.type === 'old_film') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const seed = Math.floor(currentTime * 24); // 24fps film grain
+          const rand = (n: number) => ((Math.sin(seed * 7.3 + n * 113.7) * 43758.5) % 1 + 1) % 1;
+
+          // 1. Sepia tint overlay
           ctx.save();
-          ctx.globalAlpha = 0.5;
-          ctx.globalCompositeOperation = 'screen';
-          // Red channel offset
-          ctx.fillStyle = `rgba(255, 0, 0, 0.3)`;
-          ctx.fillRect(-dw/2 - aberration, -dh/2, dw, dh);
-          // Blue channel offset
-          ctx.fillStyle = `rgba(0, 0, 255, 0.3)`;
-          ctx.fillRect(-dw/2 + aberration, -dh/2, dw, dh);
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.globalAlpha = 0.35 * intensity;
+          ctx.fillStyle = 'rgb(200, 160, 110)';
+          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
           ctx.restore();
 
-          // 2. Horizontal scan lines
+          // 2. Film grain via ImageData
           ctx.save();
-          ctx.globalAlpha = 0.15 * intensity;
-          for (let row = 0; row < dh; row += 4) {
-            if (rand(row + 5) > 0.5) {
-              ctx.fillStyle = 'rgba(0,0,0,0.8)';
-              ctx.fillRect(-dw/2, -dh/2 + row, dw, 2);
+          ctx.globalAlpha = 0.18 * intensity;
+          const grainSize = 2;
+          for (let gy = -dh / 2; gy < dh / 2; gy += grainSize) {
+            for (let gx = -dw / 2; gx < dw / 2; gx += grainSize) {
+              const v = rand(gx * 0.3 + gy * 0.7 + seed) > 0.5 ? 255 : 0;
+              ctx.fillStyle = `rgba(${v},${v},${v},0.6)`;
+              ctx.fillRect(gx, gy, grainSize, grainSize);
             }
           }
           ctx.restore();
 
-          // 3. Random horizontal slice distortion
-          const numSlices = Math.floor(3 + rand(2) * 6 * intensity);
+          // 3. Vertical scratch line (occasional)
+          if (rand(99) > 0.85) {
+            ctx.save();
+            ctx.globalAlpha = 0.5 * intensity;
+            ctx.strokeStyle = 'rgba(255,240,180,0.7)';
+            ctx.lineWidth = 1;
+            const scratchX = -dw / 2 + rand(55) * dw;
+            ctx.beginPath();
+            ctx.moveTo(scratchX, -dh / 2);
+            ctx.lineTo(scratchX + (rand(77) - 0.5) * 10, dh / 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // 4. Vignette
           ctx.save();
-          ctx.globalAlpha = 0.7 * intensity;
-          for (let i = 0; i < numSlices; i++) {
-            const sliceY = -dh/2 + rand(i * 3) * dh;
-            const sliceH = 2 + rand(i * 3 + 1) * 8;
-            const sliceShift = (rand(i * 3 + 2) - 0.5) * 40 * intensity;
-            ctx.fillStyle = `rgba(${Math.floor(rand(i*7)*255)}, ${Math.floor(rand(i*7+1)*100)}, ${Math.floor(rand(i*7+2)*255)}, 0.5)`;
-            ctx.fillRect(-dw/2 + sliceShift, sliceY, dw, sliceH);
+          const vig = ctx.createRadialGradient(0, 0, dw * 0.3, 0, 0, dw * 0.7);
+          vig.addColorStop(0, 'rgba(0,0,0,0)');
+          vig.addColorStop(1, `rgba(0,0,0,${0.55 * intensity})`);
+          ctx.fillStyle = vig;
+          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          ctx.restore();
+
+        } else if (fx?.type === 'vhs') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const seed = Math.floor(currentTime * 30);
+          const rand = (n: number) => ((Math.sin(seed * 11.3 + n * 97.4) * 43758.5) % 1 + 1) % 1;
+
+          // 1. Color bleed (RGB separation)
+          ctx.save();
+          ctx.globalAlpha = 0.25 * intensity;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillStyle = 'rgba(255,0,0,0.15)';
+          ctx.fillRect(-dw / 2 + 6 * intensity, -dh / 2, dw, dh);
+          ctx.fillStyle = 'rgba(0,255,0,0.1)';
+          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          ctx.fillStyle = 'rgba(0,0,255,0.15)';
+          ctx.fillRect(-dw / 2 - 6 * intensity, -dh / 2, dw, dh);
+          ctx.restore();
+
+          // 2. Scan lines
+          ctx.save();
+          ctx.globalAlpha = 0.2 * intensity;
+          for (let row = -dh / 2; row < dh / 2; row += 3) {
+            ctx.fillStyle = 'rgba(0,0,0,0.9)';
+            ctx.fillRect(-dw / 2, row, dw, 1);
           }
           ctx.restore();
+
+          // 3. Horizontal tracking noise band
+          if (rand(1) > 0.7) {
+            ctx.save();
+            ctx.globalAlpha = 0.3 * intensity;
+            const bandY = -dh / 2 + rand(2) * dh;
+            const bandH = 4 + rand(3) * 20;
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.fillRect(-dw / 2, bandY, dw, bandH);
+            ctx.restore();
+          }
+
+          // 4. Color saturation drop + greenish tint
+          ctx.save();
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.globalAlpha = 0.15 * intensity;
+          ctx.fillStyle = 'rgb(170,255,170)';
+          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          ctx.restore();
+
+        } else if (fx?.type === 'cinematic_bars') {
+          // 2.39:1 aspect ratio letterbox black bars
+          const barH = dh * 0.105; // ~10.5% top + bottom = 2.39:1 on 16:9
+          ctx.save();
+          ctx.fillStyle = 'rgb(0,0,0)';
+          ctx.fillRect(-dw / 2, -dh / 2, dw, barH);
+          ctx.fillRect(-dw / 2, dh / 2 - barH, dw, barH);
+          ctx.restore();
+
+        } else if (fx?.type === 'neon_glow') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          // Bloom: draw the image again at larger scale with screen blend
+          ctx.save();
+          ctx.globalAlpha = 0.5 * intensity;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.filter = `blur(${8 * intensity}px) brightness(2)`;
+          // Re-draw video/image under screen blend for bloom
+          if (mediaItem.type === 'video') {
+            const videoEl = videoElements.get(clip.id);
+            if (videoEl && videoEl.readyState >= 1) {
+              ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
+            }
+          }
+          ctx.restore();
+          // Color cast: magenta/cyan neon
+          ctx.save();
+          ctx.globalAlpha = 0.15 * intensity;
+          ctx.globalCompositeOperation = 'screen';
+          const neonGrad = ctx.createLinearGradient(-dw / 2, 0, dw / 2, 0);
+          neonGrad.addColorStop(0, 'rgba(255,0,200,0.8)');
+          neonGrad.addColorStop(1, 'rgba(0,200,255,0.8)');
+          ctx.fillStyle = neonGrad;
+          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          ctx.restore();
+
+        } else if (fx?.type === 'rgb_split') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const shift = intensity * 14;
+          ctx.save();
+          ctx.globalAlpha = 0.6;
+          ctx.globalCompositeOperation = 'screen';
+          if (mediaItem.type === 'video') {
+            const videoEl = videoElements.get(clip.id);
+            if (videoEl && videoEl.readyState >= 1) {
+              // Red channel shifted left
+              const offR = document.createElement('canvas');
+              offR.width = Math.round(dw); offR.height = Math.round(dh);
+              const ctxR = offR.getContext('2d')!;
+              ctxR.drawImage(videoEl, 0, 0, dw, dh);
+              const dR = ctxR.getImageData(0, 0, dw, dh);
+              for (let i = 0; i < dR.data.length; i += 4) { dR.data[i+1] = 0; dR.data[i+2] = 0; }
+              ctxR.putImageData(dR, 0, 0);
+              ctx.drawImage(offR, -dw / 2 - shift, -dh / 2, dw, dh);
+
+              // Blue channel shifted right
+              const offB = document.createElement('canvas');
+              offB.width = Math.round(dw); offB.height = Math.round(dh);
+              const ctxB = offB.getContext('2d')!;
+              ctxB.drawImage(videoEl, 0, 0, dw, dh);
+              const dB = ctxB.getImageData(0, 0, dw, dh);
+              for (let i = 0; i < dB.data.length; i += 4) { dB.data[i] = 0; dB.data[i+1] = 0; }
+              ctxB.putImageData(dB, 0, 0);
+              ctx.drawImage(offB, -dw / 2 + shift, -dh / 2, dw, dh);
+            }
+          }
+          ctx.restore();
+
+        } else if (fx?.type === 'pixelate') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const blockSize = Math.max(2, Math.round(intensity * 24));
+          // Sample canvas at low res then redraw at full size
+          const tmpW = Math.max(1, Math.round(dw / blockSize));
+          const tmpH = Math.max(1, Math.round(dh / blockSize));
+          const tmp = document.createElement('canvas');
+          tmp.width = tmpW; tmp.height = tmpH;
+          const tCtx = tmp.getContext('2d')!;
+          tCtx.drawImage(ctx.canvas, (-dw / 2 + ctx.canvas.width / 2), (-dh / 2 + ctx.canvas.height / 2), dw, dh, 0, 0, tmpW, tmpH);
+          (tCtx as any).imageSmoothingEnabled = false;
+          ctx.save();
+          (ctx as any).imageSmoothingEnabled = false;
+          ctx.drawImage(tmp, 0, 0, tmpW, tmpH, -dw / 2, -dh / 2, dw, dh);
+          ctx.restore();
+
+        } else if (fx?.type === 'mirror') {
+          // Flip the left half and draw it mirrored on the right
+          ctx.save();
+          ctx.scale(-1, 1);
+          const half = dw / 2;
+          const src = ctx.getImageData(Math.round(ctx.canvas.width / 2 - half), Math.round(ctx.canvas.height / 2 - dh / 2), Math.round(half), Math.round(dh));
+          ctx.putImageData(src, Math.round(-ctx.canvas.width / 2), Math.round(-dh / 2));
+          ctx.restore();
+
+        } else if (fx?.type === 'zoom_blur') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const steps = Math.round(6 + intensity * 8);
+          ctx.save();
+          ctx.globalAlpha = 0.25 / steps;
+          for (let i = 1; i <= steps; i++) {
+            const s = 1 + (i / steps) * 0.12 * intensity;
+            ctx.save();
+            ctx.scale(s, s);
+            if (mediaItem.type === 'video') {
+              const videoEl = videoElements.get(clip.id);
+              if (videoEl && videoEl.readyState >= 1) {
+                ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
+              }
+            }
+            ctx.restore();
+          }
+          ctx.restore();
+
+        } else if (fx?.type === 'lens_flare') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          // Main burst
+          const cx = dw * 0.2, cy = -dh * 0.2;
+          ctx.save();
+          const flareGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 80 * intensity);
+          flareGrad.addColorStop(0, `rgba(255,255,220,${0.9 * intensity})`);
+          flareGrad.addColorStop(0.15, `rgba(255,200,100,${0.5 * intensity})`);
+          flareGrad.addColorStop(0.5, `rgba(200,180,255,${0.15 * intensity})`);
+          flareGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillStyle = flareGrad;
+          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+
+          // Anamorphic streak
+          ctx.globalAlpha = 0.4 * intensity;
+          const streakGrad = ctx.createLinearGradient(-dw / 2, cy, dw / 2, cy);
+          streakGrad.addColorStop(0, 'rgba(100,150,255,0)');
+          streakGrad.addColorStop(0.5, `rgba(150,200,255,${0.8 * intensity})`);
+          streakGrad.addColorStop(1, 'rgba(100,150,255,0)');
+          ctx.fillStyle = streakGrad;
+          ctx.fillRect(-dw / 2, cy - 2, dw, 4);
+          ctx.restore();
+
+        } else if (fx?.type === 'night_vision') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          // Convert to grayscale then tint green
+          const imgData = ctx.getImageData(-dw / 2, -dh / 2, Math.round(dw), Math.round(dh));
+          const data = imgData.data;
+          const seed = Math.floor(currentTime * 30);
+          const rand = (n: number) => ((Math.sin(seed * 3.1 + n * 91.7) * 43758.5) % 1 + 1) % 1;
+          for (let i = 0; i < data.length; i += 4) {
+            const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            // Boost and add noise
+            const noise = (rand(i * 0.001) - 0.5) * 30 * intensity;
+            const v = Math.min(255, luma * 1.4 + noise);
+            data[i]     = 0;
+            data[i + 1] = Math.round(v);
+            data[i + 2] = 0;
+          }
+          ctx.putImageData(imgData, -dw / 2, -dh / 2);
+          // Scan lines
+          ctx.save();
+          ctx.globalAlpha = 0.1 * intensity;
+          for (let row = -dh / 2; row < dh / 2; row += 2) {
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(-dw / 2, row, dw, 1);
+          }
+          ctx.restore();
+
+        } else if (fx?.type === 'thermal') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const imgData = ctx.getImageData(-dw / 2, -dh / 2, Math.round(dw), Math.round(dh));
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const luma = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+            // Map luma → thermal palette: black→purple→blue→cyan→green→yellow→red→white
+            const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+            let r = 0, g = 0, b2 = 0;
+            if (luma < 0.25)      { const t = luma / 0.25;      r = mix(0,0,t);   g = mix(0,0,t);   b2 = mix(128,255,t); }
+            else if (luma < 0.5)  { const t = (luma-0.25)/0.25; r = mix(0,0,t);   g = mix(0,255,t); b2 = mix(255,255,t); }
+            else if (luma < 0.75) { const t = (luma-0.5)/0.25;  r = mix(0,255,t); g = mix(255,255,t);b2 = mix(255,0,t); }
+            else                  { const t = (luma-0.75)/0.25; r = mix(255,255,t);g = mix(255,0,t); b2 = mix(0,0,t); }
+            // Blend with original based on intensity
+            data[i]     = Math.round(mix(data[i],     r,  intensity));
+            data[i + 1] = Math.round(mix(data[i + 1], g,  intensity));
+            data[i + 2] = Math.round(mix(data[i + 2], b2, intensity));
+          }
+          ctx.putImageData(imgData, -dw / 2, -dh / 2);
         }
       }
 

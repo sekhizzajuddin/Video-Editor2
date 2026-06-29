@@ -17,6 +17,10 @@ import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, cle
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
+// Track whether we are inside a transaction (e.g. during drag / resize).
+// When true, saveSnapshot() does not push to history.
+let _inTransaction = false;
+
 // Create empty tracks
 const createEmptyTracks = (): TimelineTrack[] => [
   {
@@ -181,6 +185,8 @@ interface EditorActions {
   undo: () => void;
   redo: () => void;
   saveSnapshot: () => void;
+  startTransaction: () => void;
+  endTransaction: () => void;
 
   // Master Keyframes
   addMasterKeyframe: (clipId: string, time: number, values: any) => void;
@@ -207,6 +213,9 @@ interface EditorActions {
   selectTransition: (clipId: string | null) => void;
   updateTransition: (clipId: string, updates: Partial<Transition>) => void;
   removeTransition: (clipId: string) => void;
+
+  // Audio/Video Unlink
+  unlinkAudio: (clipId: string) => void;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -872,6 +881,83 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot();
   },
 
+  // Audio/Video Unlink — splits the audio component of a video clip into its own
+  // audio clip on the first available (or new) audio track, at the same position.
+  unlinkAudio: (clipId) => {
+    const { tracks, mediaLibrary } = get();
+    const videoClip = tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+    if (!videoClip) return;
+
+    const media = mediaLibrary.find((m) => m.id === videoClip.mediaId);
+    // Only video clips with audio can be unlinked
+    if (!media || media.type !== 'video') return;
+
+    // If already unlinked, do nothing
+    if (videoClip.linkedClipId) return;
+
+    // Find an existing audio track to place the new audio clip
+    let audioTrackId = tracks.find((t) => t.type === 'audio')?.id ?? null;
+
+    const newAudioClipId = generateId();
+
+    // Build new audio clip mirroring the video clip position/duration
+    const audioClip = {
+      id: newAudioClipId,
+      mediaId: videoClip.mediaId,
+      trackId: audioTrackId ?? 'a1',
+      startTime: videoClip.startTime,
+      duration: videoClip.duration,
+      trimStart: videoClip.trimStart,
+      trimEnd: videoClip.trimEnd,
+      transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+      opacity: 1,
+      speed: videoClip.speed,
+      effects: [],
+      linkedClipId: clipId,
+      audioSettings: videoClip.audioSettings
+        ? { ...videoClip.audioSettings }
+        : undefined,
+    } as import('@/types').TimelineClip;
+
+    set((state) => {
+      const updatedTracks = state.tracks.map((track) => {
+        // Tag the original video clip with linkedClipId
+        if (track.clips.some((c) => c.id === clipId)) {
+          return {
+            ...track,
+            clips: track.clips.map((c) =>
+              c.id === clipId ? { ...c, linkedClipId: newAudioClipId } : c
+            ),
+          };
+        }
+        // Add the new audio clip to the audio track
+        if (audioTrackId && track.id === audioTrackId) {
+          return { ...track, clips: [...track.clips, audioClip] };
+        }
+        return track;
+      });
+
+      // If no audio track existed, we cannot place it — fall back to creating one
+      const hasAudioTrack = updatedTracks.some((t) => t.type === 'audio');
+      if (!hasAudioTrack) {
+        updatedTracks.push({
+          id: `a_${generateId()}`,
+          name: 'A1',
+          type: 'audio',
+          clips: [{ ...audioClip, trackId: `a_${generateId()}` }],
+          locked: false,
+          muted: false,
+          hidden: false,
+        });
+      }
+
+      return { tracks: updatedTracks };
+    });
+    get().saveSnapshot();
+  },
+
+
+
   // Playback
   play: () => {
     const { tracks, selectedClipIds, currentTime } = get();
@@ -1303,9 +1389,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
   },
 
-  // History
+  // History with transaction support
   saveSnapshot: () => {
     set((state) => {
+      if (_inTransaction) return {}; // Skip if inside a transaction
       const snapshot: EditorSnapshot = {
         tracks: JSON.parse(JSON.stringify(state.tracks)),
         currentTime: state.currentTime,
@@ -1322,6 +1409,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     saveProjectToDB({ tracks, mediaLibrary, currentTime }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
+  },
+  startTransaction: () => {
+    _inTransaction = true;
+  },
+  endTransaction: () => {
+    _inTransaction = false;
+    get().saveSnapshot(); // Save one snapshot after the transaction completes
   },
   undo: () => {
     set((state) => {

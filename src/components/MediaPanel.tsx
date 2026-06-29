@@ -18,6 +18,18 @@ import {
   Type,
   Play,
   AlertTriangle,
+  Tv2,
+  Clapperboard,
+  Radio,
+  ScanLine,
+  Aperture,
+  Hexagon,
+  FlipHorizontal,
+  ZoomIn,
+  Focus,
+  Eye,
+  Flame,
+  Monitor,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback } from 'react';
@@ -39,18 +51,36 @@ const TRANSITIONS = [
   { name: 'Slide Down', color: 'from-emerald-500/20 to-transparent', preview: 'Slide down transition' },
 ];
 
-const EFFECTS = [
-  { name: 'Brightness', icon: Sun, color: 'text-amber-400', value: 100 },
-  { name: 'Contrast', icon: Droplets, color: 'text-cyan-400', value: 100 },
-  { name: 'Saturation', icon: Waves, color: 'text-purple-400', value: 100 },
-  { name: 'Blur', icon: Droplets, color: 'text-blue-400', value: 0 },
-  { name: 'Sharpen', icon: Zap, color: 'text-yellow-400', value: 0 },
-  { name: 'Vignette', icon: Sun, color: 'text-rose-400', value: 0 },
-  { name: 'Color Grading', icon: Sparkles, color: 'text-emerald-400', value: 0 },
-  { name: 'Chroma Key', icon: Waves, color: 'text-green-400', value: 0 },
-  { name: 'VFX Breakdown', icon: Sparkles, color: 'text-purple-400', type: 'vfx_breakdown' },
-  { name: 'B&W to Enhanced Color', icon: Sun, color: 'text-cyan-400', type: 'bw_to_color' },
+// Timeline FX — dragged to FX tracks. type field maps to PreviewCanvas fxType.
+const FX_EFFECTS = [
+  { name: 'VFX Breakdown',       icon: Clapperboard, color: 'text-purple-400',  type: 'vfx_breakdown',    desc: 'Cinematic before→after color wipe' },
+  { name: 'B&W to Color',        icon: Sun,          color: 'text-cyan-400',    type: 'bw_to_color',      desc: 'Desaturate to vivid color reveal' },
+  { name: 'Glitch',              icon: Tv2,          color: 'text-rose-400',    type: 'glitch',           desc: 'Digital corruption distortion' },
+  { name: 'Old Film',            icon: Film,         color: 'text-amber-400',   type: 'old_film',         desc: 'Grain, flicker, sepia tone' },
+  { name: 'VHS',                 icon: Radio,        color: 'text-green-400',   type: 'vhs',              desc: 'Retro VHS tape artifact' },
+  { name: 'Cinematic Bars',      icon: Monitor,      color: 'text-[#a0a0a0]',   type: 'cinematic_bars',   desc: 'Black letterbox bars 2.39:1' },
+  { name: 'Neon Glow',           icon: Flame,        color: 'text-pink-400',    type: 'neon_glow',        desc: 'Electric bloom / glow effect' },
+  { name: 'RGB Split',           icon: ScanLine,     color: 'text-red-400',     type: 'rgb_split',        desc: 'Chromatic aberration prism' },
+  { name: 'Pixelate',            icon: Hexagon,      color: 'text-indigo-400',  type: 'pixelate',         desc: 'Mosaic / pixel block effect' },
+  { name: 'Mirror',              icon: FlipHorizontal, color: 'text-teal-400',  type: 'mirror',           desc: 'Horizontal mirror reflection' },
+  { name: 'Zoom Blur',           icon: ZoomIn,       color: 'text-orange-400',  type: 'zoom_blur',        desc: 'Radial motion zoom blur' },
+  { name: 'Lens Flare',          icon: Aperture,     color: 'text-yellow-400',  type: 'lens_flare',       desc: 'Cinematic lens flare burst' },
+  { name: 'Night Vision',        icon: Eye,          color: 'text-lime-400',    type: 'night_vision',     desc: 'Green phosphor night-vision' },
+  { name: 'Thermal',             icon: Focus,        color: 'text-orange-500',  type: 'thermal',          desc: 'Infrared thermal cam look' },
 ];
+
+// Color Correction — dragged to a video/image clip to apply that preset
+const COLOR_CORRECTION_EFFECTS = [
+  { name: 'Brightness',    icon: Sun,      color: 'text-amber-400',  preset: { exposure: 30 },                          desc: 'Boost clip brightness' },
+  { name: 'Contrast',      icon: Droplets, color: 'text-cyan-400',   preset: { contrast: 150 },                         desc: 'Increase contrast' },
+  { name: 'Saturation',    icon: Waves,    color: 'text-purple-400', preset: { saturation: 160 },                       desc: 'Boost color saturation' },
+  { name: 'Blur',          icon: Droplets, color: 'text-blue-400',   preset: { blur: 8 },                               desc: 'Soft focus / background blur' },
+  { name: 'Vignette',      icon: Sun,      color: 'text-rose-400',   preset: { vignette: 60 },                          desc: 'Dark edge vignette' },
+  { name: 'Warm Tone',     icon: Flame,    color: 'text-orange-400', preset: { temperature: 60, saturation: 120 },       desc: 'Warm golden look' },
+  { name: 'Cool Tone',     icon: Zap,      color: 'text-blue-300',   preset: { temperature: -60, saturation: 110 },      desc: 'Cool blue look' },
+  { name: 'Faded Film',    icon: Clapperboard, color: 'text-stone-400', preset: { fadedFilm: 60, saturation: 80 },     desc: 'Faded vintage film' },
+];
+
 
 const TEXT_TEMPLATES = [
   { name: 'Heading', style: 'text-4xl font-bold', settings: { fontSize: 48, bold: true } },
@@ -606,15 +636,17 @@ export function MediaPanel() {
           </div>
         )}
 
-        {activeMediaTab === 'effects' && (() => {
-          const colorEffects = EFFECTS.filter(e => !e.type);
-          const fxEffects = EFFECTS.filter(e => e.type);
-          return (
-            <div className="flex-1 overflow-y-auto p-2 space-y-4">
-              {/* Timeline FX section */}
-              <div>
-                <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider mb-2 px-1">Timeline FX <span className="text-[#a0a0a0] font-normal normal-case">— drag to FX Track</span></p>
-                {fxEffects.map((effect) => {
+        {activeMediaTab === 'effects' && (
+          <div className="flex-1 overflow-y-auto p-2 space-y-4">
+            {/* Timeline FX section */}
+            <div>
+              <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider mb-1 px-1">
+                Timeline FX
+                <span className="text-[#6a6a6a] font-normal normal-case ml-1">— drag onto an FX track</span>
+              </p>
+              <p className="text-[9px] text-[#6a6a6a] px-1 mb-2">Add an FX Track first (+ FX button in timeline toolbar), then drag here</p>
+              <div className="grid grid-cols-1 gap-0.5">
+                {FX_EFFECTS.map((effect) => {
                   const Icon = effect.icon;
                   return (
                     <div
@@ -626,52 +658,62 @@ export function MediaPanel() {
                       }}
                       onMouseEnter={() => setHoveredItem(effect.name)}
                       onMouseLeave={() => setHoveredItem(null)}
-                      className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group"
+                      className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
                     >
-                      <div className="w-8 h-8 rounded bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
-                        <Icon className={`w-4 h-4 ${effect.color}`} />
+                      <div className="w-7 h-7 rounded bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
+                        <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <span className="text-xs text-white block">{effect.name}</span>
-                        <span className="text-[9px] text-rose-400/70">Drag to FX Track</span>
+                        <span className="text-xs text-white block leading-tight">{effect.name}</span>
+                        <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {/* Color Correction section */}
-              <div>
-                <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-2 px-1">Color Correction <span className="text-[#a0a0a0] font-normal normal-case">— drag to video clip</span></p>
-                {colorEffects.map((effect) => {
-                  const Icon = effect.icon;
-                  return (
-                    <div
-                      key={effect.name}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('application/procut-effect', effect.name);
-                        e.dataTransfer.effectAllowed = 'copy';
-                      }}
-                      onMouseEnter={() => setHoveredItem(effect.name)}
-                      onMouseLeave={() => setHoveredItem(null)}
-                      className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] rounded cursor-grab border-b border-[#3e3e3e] transition-colors group"
-                    >
-                      <div className="w-8 h-8 rounded bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                        <Icon className={`w-4 h-4 ${effect.color}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs text-white block">{effect.name}</span>
-                        <span className="text-[9px] text-[#a0a0a0]">
-                          {(effect as any).value === 0 ? 'Drag to clip' : `Default: ${(effect as any).value}%`}
-                        </span>
-                      </div>
+                      <span className="text-[8px] text-rose-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">FX</span>
                     </div>
                   );
                 })}
               </div>
             </div>
-          );
-        })()}
+
+            {/* Divider */}
+            <div className="h-px bg-[#3e3e3e]" />
+
+            {/* Color Correction Presets section */}
+            <div>
+              <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1 px-1">
+                Color Presets
+                <span className="text-[#6a6a6a] font-normal normal-case ml-1">— drag onto a video / image clip</span>
+              </p>
+              <div className="grid grid-cols-1 gap-0.5">
+                {COLOR_CORRECTION_EFFECTS.map((effect) => {
+                  const Icon = effect.icon;
+                  return (
+                    <div
+                      key={effect.name}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/procut-color-preset', JSON.stringify(effect.preset));
+                        e.dataTransfer.setData('application/procut-effect', effect.name);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      onMouseEnter={() => setHoveredItem(effect.name)}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                        <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-white block leading-tight">{effect.name}</span>
+                        <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
+                      </div>
+                      <span className="text-[8px] text-amber-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">CC</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <input

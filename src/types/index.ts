@@ -117,7 +117,7 @@ export interface ClipAnimations {
   'crop.right'?: PropertyKeyframe[];
 }
 
-// Timeline Clip
+  // Timeline Clip
 export interface TimelineClip {
   id: string;
   mediaId: string;
@@ -138,6 +138,9 @@ export interface TimelineClip {
   isPreview?: boolean;
   // Kinship tracking for split clips
   splitGroupId?: string;
+  // Audio/Video unlink: when a video clip’s audio is extracted to a separate
+  // audio clip, both clips get linkedClipId pointing at each other.
+  linkedClipId?: string;
   // Transition at the beginning of the clip (blending previous clip into this one)
   transitionIn?: Transition;
   // Premiere Pro-style color grading filters

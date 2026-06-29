@@ -16,6 +16,7 @@ import {
   Plus,
   ArrowLeftRight,
   Link,
+  Unlink2,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -565,6 +566,7 @@ export function Timeline() {
     toggleKeyframeLineSelection,
     addClip,
     reorderTrack,
+    unlinkAudio,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -630,18 +632,42 @@ export function Timeline() {
   const [hoverCutClipId, setHoverCutClipId] = useState<string | null>(null);
   const [hoverCutX, setHoverCutX] = useState<number | null>(null);
 
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    x: number; y: number; clipId: string; trackType: string; mediaType: string;
+  } | null>(null);
+
+  // Close context menu on click-away
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('mousedown', close, { once: true });
+    return () => window.removeEventListener('mousedown', close);
+  }, [contextMenu]);
+
+  // Throttle ref — setScrollLeft in the store is expensive; only push at ~30fps max
+  const scrollStoreThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setScrollLeftThrottled = useCallback((value: number) => {
+    if (scrollStoreThrottleRef.current) return;
+    scrollStoreThrottleRef.current = setTimeout(() => {
+      useEditorStore.getState().setScrollLeft(value);
+      scrollStoreThrottleRef.current = null;
+    }, 33); // ~30fps
+  }, []);
+
   // ── Scroll sync ─────────────────────────────────────────────────────────
 
   const handleScroll = useCallback(() => {
     if (trackContainerRef.current) {
       const target = trackContainerRef.current;
-      useEditorStore.getState().setScrollLeft(target.scrollLeft);
+      // Throttle store updates; DOM position updates immediately
+      setScrollLeftThrottled(target.scrollLeft);
       // Sync vertical scroll to headers
       if (trackHeadersRef.current && trackHeadersRef.current.scrollTop !== target.scrollTop) {
         trackHeadersRef.current.scrollTop = target.scrollTop;
       }
     }
-  }, []);
+  }, [setScrollLeftThrottled]);
 
   const handleHeadersScroll = useCallback(() => {
     if (trackHeadersRef.current && trackContainerRef.current) {
@@ -668,11 +694,11 @@ export function Timeline() {
     if (playheadX > thresholdX) {
       const targetScroll = playheadX - visibleWidth * 0.6;
       container.scrollLeft = targetScroll;
-      useEditorStore.getState().setScrollLeft(targetScroll);
+      setScrollLeftThrottled(targetScroll);
     } else if (playheadX < container.scrollLeft) {
       const targetScroll = Math.max(0, playheadX - visibleWidth * 0.1);
       container.scrollLeft = targetScroll;
-      useEditorStore.getState().setScrollLeft(targetScroll);
+      setScrollLeftThrottled(targetScroll);
     }
   }, [currentTime, isPlaying, zoomLevel, totalDuration]);
 
@@ -978,12 +1004,14 @@ export function Timeline() {
 
       // Left resize handle
       if (relX < 6) {
+        useEditorStore.getState().startTransaction();
         startResize(e, clip, 'left');
         return;
       }
 
       // Right resize handle
       if (relX > rect.width - 6) {
+        useEditorStore.getState().startTransaction();
         startResize(e, clip, 'right');
         return;
       }
@@ -1349,11 +1377,11 @@ export function Timeline() {
         setDragState(null);
         setSnapLine(null);
         setDropPreview(null);
-        useEditorStore.getState().saveSnapshot();
+        useEditorStore.getState().endTransaction(); // commit final snapshot
       }
       if (resizeState) {
         setResizeState(null);
-        useEditorStore.getState().saveSnapshot();
+        useEditorStore.getState().endTransaction(); // commit final snapshot
       }
     };
 
@@ -1391,19 +1419,59 @@ export function Timeline() {
       e.preventDefault();
       const track = useEditorStore.getState().tracks.find((t) => t.id === trackId);
 
-      // Handle FX effect drops onto FX tracks
+      // ── Color Correction Preset drop → apply to video/image clip at drop position ──
+      const colorPresetRaw = e.dataTransfer.getData('application/procut-color-preset');
+      if (colorPresetRaw && track && (track.type === 'video' || track.type === 'audio')) {
+        try {
+          const preset = JSON.parse(colorPresetRaw) as Record<string, number>;
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const dropTime = x / zoomLevel;
+          // Find the clip at the drop position
+          const hitClip = track.clips.find(
+            (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
+          );
+          if (hitClip) {
+            const existing = hitClip.colorFilters ?? {
+              temperature: 0, tint: 0, exposure: 0, contrast: 100,
+              saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
+            };
+            useEditorStore.getState().updateClip(hitClip.id, {
+              colorFilters: { ...existing, ...preset },
+            });
+            useEditorStore.getState().saveSnapshot();
+          }
+        } catch { /* ignore parse errors */ }
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        return;
+      }
+
+      // ── FX effect drop → only onto FX tracks ──
       const effectName = e.dataTransfer.getData('application/procut-effect');
       if (effectName && track?.type === 'fx') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
         const startTime = Math.max(0, x / zoomLevel);
-        // Map display names to canonical fxType keys used by PreviewCanvas
+
+        // Map display names → canonical fxType keys used by PreviewCanvas
         const FX_TYPE_MAP: Record<string, string> = {
-          'VFX Breakdown': 'vfx_breakdown',
-          'B&W to Enhanced Color': 'bw_to_color',
-          'Glitch': 'glitch',
+          'VFX Breakdown':     'vfx_breakdown',
+          'B&W to Color':      'bw_to_color',
+          'Glitch':            'glitch',
+          'Old Film':          'old_film',
+          'VHS':               'vhs',
+          'Cinematic Bars':    'cinematic_bars',
+          'Neon Glow':         'neon_glow',
+          'RGB Split':         'rgb_split',
+          'Pixelate':          'pixelate',
+          'Mirror':            'mirror',
+          'Zoom Blur':         'zoom_blur',
+          'Lens Flare':        'lens_flare',
+          'Night Vision':      'night_vision',
+          'Thermal':           'thermal',
         };
-        const fxType = FX_TYPE_MAP[effectName] || effectName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const fxType = FX_TYPE_MAP[effectName] ?? effectName.toLowerCase().replace(/[^a-z0-9]/g, '_');
         const fxMediaId = generateId();
         useEditorStore.getState().addMedia({
           id: fxMediaId,
@@ -1477,11 +1545,12 @@ export function Timeline() {
       const x = e.clientX - rect.left;
       const trackIdx = tracks.findIndex((t) => t.id === trackId);
 
-      // Accept both media and FX effect drops
+      // Accept media, FX effect, and color preset drops
       const hasMedia = e.dataTransfer.types.includes('application/procut-media');
       const hasEffect = e.dataTransfer.types.includes('application/procut-effect');
-      if ((hasMedia || hasEffect) && trackIdx >= 0) {
-        const approxDuration = 5;
+      const hasColorPreset = e.dataTransfer.types.includes('application/procut-color-preset');
+      if ((hasMedia || hasEffect || hasColorPreset) && trackIdx >= 0) {
+        const approxDuration = hasColorPreset ? 0 : 5; // color presets don't create a clip
         setDropPreview({ time: x / zoomLevel, duration: approxDuration, trackIdx });
         setHoveredTrackId(trackId);
       }
@@ -1608,6 +1677,7 @@ export function Timeline() {
   // ════════════════════════════════════════════════════════════════════════
 
   return (
+    <>
     <div className="h-full flex flex-col bg-[#1e1e1e] border-t border-[#3e3e3e]" ref={timelineRef}>
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes rateStretchPulse {
@@ -1972,7 +2042,20 @@ export function Timeline() {
                           if (e.ctrlKey || e.metaKey) return;
                           selectClip(clip.id);
                         }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          selectClip(clip.id);
+                          setContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            clipId: clip.id,
+                            trackType: track.type,
+                            mediaType: media.type,
+                          });
+                        }}
                       >
+
                         {/* ── Visual content layer ──────────────────── */}
                         <div className="absolute inset-0 overflow-hidden rounded pointer-events-none">
                           {media.type === 'video' && (
@@ -2271,5 +2354,50 @@ export function Timeline() {
         </div>
       </div>
     </div>
+
+    {/* ── Right-click Context Menu ──────────────────────────────────── */}
+    {contextMenu && (
+      <div
+        className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-1 min-w-[180px]"
+        style={{ left: contextMenu.x, top: contextMenu.y }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* Unlink Audio — only for video clips */}
+        {contextMenu.mediaType === 'video' && (
+          <button
+            className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+            onClick={() => {
+              unlinkAudio(contextMenu.clipId);
+              setContextMenu(null);
+            }}
+          >
+            <Unlink2 className="w-3.5 h-3.5 text-emerald-400" />
+            Unlink Audio
+          </button>
+        )}
+        <button
+          className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+          onClick={() => {
+            splitClip(contextMenu.clipId, currentTime);
+            setContextMenu(null);
+          }}
+        >
+          <Scissors className="w-3.5 h-3.5 text-amber-400" />
+          Split at Playhead
+        </button>
+        <div className="h-px bg-[#3e3e3e] my-1" />
+        <button
+          className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+          onClick={() => {
+            useEditorStore.getState().removeClip(contextMenu.clipId);
+            setContextMenu(null);
+          }}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Delete Clip
+        </button>
+      </div>
+    )}
+    </>
   );
 }

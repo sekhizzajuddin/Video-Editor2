@@ -8,8 +8,6 @@ export function ExportModal() {
     showExportModal, setShowExportModal, totalDuration, tracks,
     previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime
   } = useEditorStore();
-  const [format, setFormat] = useState('mp4');
-  const [resolution, setResolution] = useState('1080p');
   const [fps, setFps] = useState('30');
   const [quality, setQuality] = useState('high');
   const [isExporting, setIsExporting] = useState(false);
@@ -56,6 +54,9 @@ export function ExportModal() {
 
     let mimeType = 'video/webm;codecs=vp9,opus';
     if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm;codecs=vp8,opus';
+    }
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
       mimeType = 'video/webm';
     }
 
@@ -76,7 +77,7 @@ export function ExportModal() {
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `procut-export-${Date.now()}.${format}`;
+      a.download = `procut-export-${Date.now()}.webm`;
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
@@ -136,29 +137,16 @@ export function ExportModal() {
               </div>
               <div>
                 <span className="text-[#a0a0a0]">Format: </span>
-                <span className="text-white">{format.toUpperCase()}</span>
+                <span className="text-white">WebM (VP9 + Opus)</span>
               </div>
             </div>
           </div>
 
-          {/* Format */}
-          <div>
-            <label className="text-xs text-[#a0a0a0] block mb-2">Format</label>
-            <div className="grid grid-cols-3 gap-2">
-              {['mp4', 'mov', 'webm', 'avi', 'mkv', 'gif'].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFormat(f)}
-                  className={`px-3 py-2 rounded text-xs border transition-colors ${
-                    format === f
-                      ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0]'
-                  }`}
-                >
-                  {f.toUpperCase()}
-                </button>
-              ))}
-            </div>
+          {/* Browser export info banner */}
+          <div className="bg-blue-950/40 border border-blue-500/30 rounded p-3">
+            <p className="text-[10px] text-blue-300 leading-relaxed">
+              <strong className="text-blue-200">Browser Export:</strong> The web platform exports video as <strong>.webm</strong> (VP9 codec) — the only format natively supported by the browser&apos;s MediaRecorder API. To convert to MP4 or other formats, open the downloaded file in HandBrake, FFmpeg, or any video converter.
+            </p>
           </div>
 
           {/* Resolution */}
