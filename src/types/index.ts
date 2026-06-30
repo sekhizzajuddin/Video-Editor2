@@ -87,10 +87,45 @@ export interface ClipTextSettings {
 }
 
 export interface ClipFxSettings {
-  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | string;
+  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | string;
   intensity: number;    // 0 to 100
   wipeAngle?: number;   // 0 to 360 (for wipes)
 }
+
+export type ParticleEffectType =
+  | 'snow'
+  | 'rain'
+  | 'fire'
+  | 'sparkles'
+  | 'confetti'
+  | 'smoke'
+  | 'bubbles'
+  | 'leaves'
+  | 'hearts'
+  | 'matrix';
+
+export interface ClipParticleSettings {
+  type: ParticleEffectType;
+  // Emitter position as % of canvas (0-100)
+  emitterX: number;
+  emitterY: number;
+  // Core controls
+  amount: number;       // 1–500  (max simultaneous particles)
+  speed: number;        // 0–200  (% of base speed)
+  intensity: number;    // 0–100  (opacity / density)
+  size: number;         // 0–200  (% of base size)
+  // Physics
+  gravity: number;      // -100–100 (negative = upward)
+  wind: number;         // -100–100 (left/right drift)
+  spread: number;       // 0–180  (cone angle in degrees)
+  lifetime: number;     // 0–200  (% of base lifetime)
+  // Visual
+  color: string;        // hex or 'auto' (effect-defined)
+  colorVariance: number;// 0–100
+  glow: boolean;
+  turbulence: number;   // 0–100
+}
+
 
 export interface SpeedRampKeyframe {
   position: number; // 0 to 1 (normalized within clip duration)
@@ -150,6 +185,8 @@ export interface TimelineClip {
   // Text and FX
   textSettings?: ClipTextSettings;
   fxSettings?: ClipFxSettings;
+  particleSettings?: ClipParticleSettings;
+
 }
 
 // Timeline Track

@@ -52,11 +52,320 @@ function getCachedImage(
 }
 
 // ---------------------------------------------------------------------------
+// Particle system
+// ---------------------------------------------------------------------------
+type ParticleEffectType =
+  | 'snow' | 'rain' | 'fire' | 'sparkles' | 'confetti'
+  | 'smoke' | 'bubbles' | 'leaves' | 'hearts' | 'matrix';
+
+interface Particle {
+  x: number; y: number;    // current position (canvas px)
+  vx: number; vy: number;  // velocity (px/frame at 60fps)
+  life: number;            // 0..1 (1=newborn, 0=dead)
+  maxLife: number;         // frames until dead
+  size: number;            // base radius
+  color: string;
+  rotation: number;        // for leaves/confetti
+  rotSpeed: number;
+  char?: string;           // for matrix
+  type: ParticleEffectType;
+}
+
+interface ParticlePool {
+  particles: Particle[];
+  lastEmit: number;        // timestamp of last emission
+}
+
+// Module-level particle pools keyed by clipId
+const particlePools = new Map<string, ParticlePool>();
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function randomHue() {
+  const hues = [0, 30, 60, 120, 180, 240, 270, 300];
+  return hues[Math.floor(Math.random() * hues.length)];
+}
+
+function spawnParticle(
+  ps: import('@/types').ClipParticleSettings,
+  canvasW: number,
+  canvasH: number,
+): Particle {
+  const ex = (ps.emitterX / 100) * canvasW;
+  const ey = (ps.emitterY / 100) * canvasH;
+  const spreadRad = (ps.spread / 2) * (Math.PI / 180);
+  const baseSpeed = (ps.speed / 100) * 3; // px per frame at 60fps
+  const baseSize  = (ps.size  / 100) * 5;
+  const baseLife  = Math.round((ps.lifetime / 100) * 90); // frames
+  const turbulence = (ps.turbulence / 100) * 2;
+
+  // Direction based on gravity (down) + spread cone
+  const gravDir = ps.gravity > 0 ? Math.PI / 2 : -Math.PI / 2;  // down or up
+  const angle = gravDir + (Math.random() - 0.5) * 2 * spreadRad;
+  const speed = baseSpeed * (0.5 + Math.random());
+  let vx = Math.cos(angle) * speed + (ps.wind / 100) * 1.5;
+  let vy = Math.sin(angle) * speed;
+
+  // Position variance (spawn at emitter with small jitter)
+  const jitter = baseSize * 2;
+  const px = ex + (Math.random() - 0.5) * jitter * 4;
+  const py = ey + (Math.random() - 0.5) * jitter;
+
+  // Color
+  let color: string;
+  if (ps.color === 'auto') {
+    color = `hsl(${randomHue()},90%,60%)`;
+  } else if (ps.colorVariance > 0) {
+    const [r,g,b] = hexToRgb(ps.color);
+    const v = Math.round((Math.random() - 0.5) * ps.colorVariance * 1.5);
+    color = `rgb(${Math.min(255,Math.max(0,r+v))},${Math.min(255,Math.max(0,g+v))},${Math.min(255,Math.max(0,b+v))})`;
+  } else {
+    color = ps.color;
+  }
+
+  // Type-specific overrides
+  if (ps.type === 'rain') {
+    // Rain always falls straight down from top
+    vx = (ps.wind / 100) * 1.5 + (Math.random() - 0.5) * 0.3;
+    vy = baseSpeed * (0.8 + Math.random() * 0.4);
+    return { x: Math.random() * canvasW, y: -10, vx, vy, life: 1, maxLife: baseLife, size: 0.8 + Math.random(), color, rotation: 0, rotSpeed: 0, type: ps.type };
+  }
+  if (ps.type === 'snow') {
+    vx = (ps.wind / 100) + (Math.random() - 0.5) * turbulence;
+    vy = baseSpeed * (0.3 + Math.random() * 0.7);
+    return { x: Math.random() * canvasW, y: -10, vx, vy, life: 1, maxLife: baseLife, size: (1 + Math.random() * 2) * (ps.size / 100), color, rotation: 0, rotSpeed: 0, type: ps.type };
+  }
+  if (ps.type === 'matrix') {
+    const chars = '0123456789ABCDEF日月火水木金土';
+    return { x: ex, y: 0, vx: 0, vy: baseSpeed, life: 1, maxLife: baseLife, size: 10 * (ps.size / 100), color, rotation: 0, rotSpeed: 0, char: chars[Math.floor(Math.random()*chars.length)], type: ps.type };
+  }
+
+  vx += (Math.random() - 0.5) * turbulence;
+  vy += (Math.random() - 0.5) * turbulence * 0.5;
+
+  return { x: px, y: py, vx, vy, life: 1, maxLife: baseLife, size: baseSize * (0.5 + Math.random() * 1.5), color, rotation: Math.random() * Math.PI * 2, rotSpeed: (Math.random() - 0.5) * 0.2, type: ps.type };
+}
+
+function drawParticleShape(ctx: CanvasRenderingContext2D, p: Particle, alpha: number) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(p.x, p.y);
+
+  switch (p.type) {
+    case 'snow': {
+      ctx.beginPath();
+      ctx.arc(0, 0, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.fill();
+      // optional snowflake arms at larger sizes
+      if (p.size > 2) {
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 0.8;
+        for (let arm = 0; arm < 6; arm++) {
+          ctx.rotate(Math.PI / 3);
+          ctx.beginPath();
+          ctx.moveTo(0, 0); ctx.lineTo(0, p.size * 1.8);
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+    case 'rain': {
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = p.size;
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(p.vx * 2, p.vy * 2);
+      ctx.stroke();
+      break;
+    }
+    case 'fire': {
+      const r = p.size;
+      const lifeN = p.life;
+      ctx.beginPath();
+      // Teardrop shape
+      ctx.moveTo(0, -r * 2);
+      ctx.bezierCurveTo(r * 0.6, -r, r, r * 0.5, 0, r);
+      ctx.bezierCurveTo(-r, r * 0.5, -r * 0.6, -r, 0, -r * 2);
+      const fireHue = 10 + (1 - lifeN) * 40; // orange→yellow as it ages
+      ctx.fillStyle = `hsl(${fireHue},100%,${50 + (1-lifeN)*20}%)`;
+      ctx.fill();
+      break;
+    }
+    case 'sparkles': {
+      const r = p.size;
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      // 4-point star
+      ctx.beginPath();
+      for (let pt = 0; pt < 8; pt++) {
+        const a = (pt * Math.PI) / 4;
+        const dist = pt % 2 === 0 ? r : r * 0.4;
+        pt === 0 ? ctx.moveTo(Math.cos(a)*dist, Math.sin(a)*dist) : ctx.lineTo(Math.cos(a)*dist, Math.sin(a)*dist);
+      }
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 'confetti': {
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size * 0.8, -p.size * 0.4, p.size * 1.6, p.size * 0.8);
+      break;
+    }
+    case 'smoke': {
+      const r = p.size * (1 + (1 - p.life) * 2); // grows as it ages
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      const smokeAlpha = alpha * p.life * 0.5;
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = smokeAlpha;
+      ctx.fill();
+      break;
+    }
+    case 'bubbles': {
+      const r = p.size;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Shine
+      ctx.beginPath();
+      ctx.arc(-r * 0.3, -r * 0.3, r * 0.25, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.fill();
+      break;
+    }
+    case 'leaves': {
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      const lw = p.size * 1.2;
+      ctx.ellipse(0, 0, lw * 0.5, lw, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Stem
+      ctx.strokeStyle = '#5a3a10';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, lw * 0.5); ctx.lineTo(0, lw * 1.2);
+      ctx.stroke();
+      break;
+    }
+    case 'hearts': {
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      const s = p.size;
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.5);
+      ctx.bezierCurveTo(s, -s * 1.5, s * 2, s * 0.5, 0, s * 1.5);
+      ctx.bezierCurveTo(-s * 2, s * 0.5, -s, -s * 1.5, 0, -s * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 'matrix': {
+      ctx.fillStyle = p.color;
+      ctx.font = `bold ${Math.round(p.size)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.char ?? '0', 0, 0);
+      // Trail effect - lighter char above
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(p.char ?? '0', 0, -p.size);
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+function renderParticles(
+  ctx: CanvasRenderingContext2D,
+  clipId: string,
+  ps: import('@/types').ClipParticleSettings,
+  W: number,
+  H: number,
+  deltaMs: number,
+): void {
+  let pool = particlePools.get(clipId);
+  if (!pool) {
+    pool = { particles: [], lastEmit: 0 };
+    particlePools.set(clipId, pool);
+  }
+
+  const now = performance.now();
+  const maxCount = ps.amount;
+  const emitInterval = Math.max(16, 1000 / (maxCount / ((ps.lifetime / 100) * 1.5)));
+
+  // Emit new particles
+  if (pool.particles.length < maxCount && (now - pool.lastEmit) > emitInterval) {
+    const batchSize = Math.min(3, maxCount - pool.particles.length);
+    for (let i = 0; i < batchSize; i++) {
+      pool.particles.push(spawnParticle(ps, W, H));
+    }
+    pool.lastEmit = now;
+  }
+
+  const dtScale = deltaMs / (1000 / 60); // normalize to 60fps
+  const gravityAcc = (ps.gravity / 100) * 0.12 * dtScale;
+  const windAcc    = (ps.wind    / 100) * 0.03 * dtScale;
+  const turbStr    = (ps.turbulence / 100) * 0.08;
+  const opacity    = (ps.intensity / 100);
+
+  // Apply glow if needed
+  if (ps.glow) {
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = ps.color === 'auto' ? '#ffffff' : ps.color;
+  }
+
+  // Update & draw
+  pool.particles = pool.particles.filter((p) => {
+    // Update physics
+    p.vy += gravityAcc;
+    p.vx += windAcc + (Math.random() - 0.5) * turbStr;
+    p.x  += p.vx * dtScale;
+    p.y  += p.vy * dtScale;
+    p.rotation += p.rotSpeed * dtScale;
+    p.life -= 1 / p.maxLife;
+    p.life = Math.max(0, p.life);
+
+    // Matrix: randomize char occasionally
+    if (p.type === 'matrix' && Math.random() < 0.05) {
+      const chars = '0123456789ABCDEF';
+      p.char = chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    if (p.life <= 0) return false;
+
+    // Clip to canvas bounds (remove if fully off-screen for non-cyclical types)
+    if (p.x < -50 || p.x > W + 50 || p.y > H + 50) return false;
+
+    // Draw
+    const fadeIn  = p.life > 0.9 ? (1 - p.life) / 0.1 : 1;
+    const fadeOut = p.life < 0.2 ? p.life / 0.2 : 1;
+    const alpha = opacity * Math.min(fadeIn, fadeOut);
+    drawParticleShape(ctx, p, alpha);
+    return true;
+  });
+
+  // Reset glow
+  if (ps.glow) {
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+  }
+}
+
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 export function PreviewCanvas() {
   const {
     currentTime,
+
     isPlaying,
     totalDuration,
     isMuted,
@@ -463,15 +772,21 @@ export function PreviewCanvas() {
       // Apply FX layer if active
       if (hasRealMedia && activeFxClip) {
         const fx = activeFxClip.fxSettings;
+
+        // ── Pixel-space origin: getImageData/putImageData use RAW canvas coords, NOT transform-space ──
+        // ctx is currently translated to (W/2 + aX + ...), so the clip center in pixel-space is:
+        const pxL = Math.round(W / 2 - dw / 2);  // left edge in canvas pixel coords
+        const pxT = Math.round(H / 2 - dh / 2);  // top edge in canvas pixel coords
+        const pxW = Math.max(1, Math.round(dw));
+        const pxH = Math.max(1, Math.round(dh));
+
         if (fx?.type === 'vfx_breakdown') {
-          // Draw enhanced version over it, clipped by vfxProgress
+          // Draw enhanced version over it, clipped by vfxProgress (transform-space is fine for drawImage/clip)
           ctx.save();
           ctx.beginPath();
-          // Wipe from left to right
           ctx.rect(-dw / 2, -dh / 2, dw * vfxProgress, dh);
           ctx.clip();
 
-          // Enhance the base draw
           if (mediaItem.type === 'video') {
             const videoEl = videoElements.get(clip.id);
             if (videoEl && videoEl.readyState >= 1) {
@@ -488,64 +803,54 @@ export function PreviewCanvas() {
               const drawH = Math.max(1, baseDh * (1 - cTop - cBot));
               const dx = -baseDw / 2 + baseDw * cLeft;
               const dy = -baseDh / 2 + baseDh * cTop;
-              
-              ctx.filter = `brightness(${120 + exposure}%) contrast(${150}%) saturate(${200}%)`;
+              ctx.filter = `brightness(${120 + exposure}%) contrast(150%) saturate(200%)`;
               ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, drawW, drawH);
               ctx.filter = 'none';
               applyColorOverlays(ctx, dw, dh, { ...filters, contrast: 150, saturation: 200 });
             }
           }
-          
-          // Draw neon line at the wiping edge
+
+          // Neon wipe line
           ctx.beginPath();
           ctx.moveTo(-dw / 2 + dw * vfxProgress, -dh / 2);
-          ctx.lineTo(-dw / 2 + dw * vfxProgress, dh / 2);
+          ctx.lineTo(-dw / 2 + dw * vfxProgress,  dh / 2);
           ctx.lineWidth = 4;
           ctx.strokeStyle = '#3b82f6';
           ctx.shadowColor = '#3b82f6';
           ctx.shadowBlur = 15;
           ctx.stroke();
-          
           ctx.restore();
+
         } else if (fx?.type === 'bw_to_color') {
-          // FIXED: proper grayscale desaturate via ImageData, then reveal color
           const progress = (currentTime - activeFxClip.startTime) / activeFxClip.duration;
           const p = Math.max(0, Math.min(1, progress));
-          // At p=0: full grayscale. At p=1: full color with +50% saturation
           if (p < 1) {
-            const imgData = ctx.getImageData(-dw / 2, -dh / 2, dw, dh);
+            // FIXED: use absolute pixel coords for getImageData
+            const imgData = ctx.getImageData(pxL, pxT, pxW, pxH);
             const data = imgData.data;
-            const colorMix = p; // 0 = full gray, 1 = full color
             for (let i = 0; i < data.length; i += 4) {
               const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-              data[i]     = luma + (data[i]     - luma) * colorMix;
-              data[i + 1] = luma + (data[i + 1] - luma) * colorMix;
-              data[i + 2] = luma + (data[i + 2] - luma) * colorMix;
+              data[i]     = Math.round(luma + (data[i]     - luma) * p);
+              data[i + 1] = Math.round(luma + (data[i + 1] - luma) * p);
+              data[i + 2] = Math.round(luma + (data[i + 2] - luma) * p);
             }
-            ctx.putImageData(imgData, -dw / 2, -dh / 2);
-          }
-          // At the end, boost saturation for the "vivid color" reveal
-          if (p > 0.8) {
-            const boost = (p - 0.8) / 0.2 * 0.4; // 0–0.4 extra saturation
-            ctx.filter = `saturate(${100 + boost * 100}%)`;
-            // Re-draw not possible without another source; let vignette overlay handle it
-            ctx.filter = 'none';
+            ctx.putImageData(imgData, pxL, pxT);
           }
 
         } else if (fx?.type === 'old_film') {
           const intensity = (fx.intensity ?? 100) / 100;
-          const seed = Math.floor(currentTime * 24); // 24fps film grain
+          const seed = Math.floor(currentTime * 24);
           const rand = (n: number) => ((Math.sin(seed * 7.3 + n * 113.7) * 43758.5) % 1 + 1) % 1;
 
-          // 1. Sepia tint overlay
+          // Sepia overlay (transform-space fillRect is fine)
           ctx.save();
           ctx.globalCompositeOperation = 'multiply';
           ctx.globalAlpha = 0.35 * intensity;
-          ctx.fillStyle = 'rgb(200, 160, 110)';
+          ctx.fillStyle = 'rgb(200,160,110)';
           ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
           ctx.restore();
 
-          // 2. Film grain via ImageData
+          // Grain (transform-space fillRect)
           ctx.save();
           ctx.globalAlpha = 0.18 * intensity;
           const grainSize = 2;
@@ -558,7 +863,7 @@ export function PreviewCanvas() {
           }
           ctx.restore();
 
-          // 3. Vertical scratch line (occasional)
+          // Occasional scratch line
           if (rand(99) > 0.85) {
             ctx.save();
             ctx.globalAlpha = 0.5 * intensity;
@@ -572,7 +877,7 @@ export function PreviewCanvas() {
             ctx.restore();
           }
 
-          // 4. Vignette
+          // Vignette
           ctx.save();
           const vig = ctx.createRadialGradient(0, 0, dw * 0.3, 0, 0, dw * 0.7);
           vig.addColorStop(0, 'rgba(0,0,0,0)');
@@ -586,19 +891,15 @@ export function PreviewCanvas() {
           const seed = Math.floor(currentTime * 30);
           const rand = (n: number) => ((Math.sin(seed * 11.3 + n * 97.4) * 43758.5) % 1 + 1) % 1;
 
-          // 1. Color bleed (RGB separation)
           ctx.save();
           ctx.globalAlpha = 0.25 * intensity;
           ctx.globalCompositeOperation = 'screen';
           ctx.fillStyle = 'rgba(255,0,0,0.15)';
           ctx.fillRect(-dw / 2 + 6 * intensity, -dh / 2, dw, dh);
-          ctx.fillStyle = 'rgba(0,255,0,0.1)';
-          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
           ctx.fillStyle = 'rgba(0,0,255,0.15)';
           ctx.fillRect(-dw / 2 - 6 * intensity, -dh / 2, dw, dh);
           ctx.restore();
 
-          // 2. Scan lines
           ctx.save();
           ctx.globalAlpha = 0.2 * intensity;
           for (let row = -dh / 2; row < dh / 2; row += 3) {
@@ -607,42 +908,36 @@ export function PreviewCanvas() {
           }
           ctx.restore();
 
-          // 3. Horizontal tracking noise band
           if (rand(1) > 0.7) {
             ctx.save();
             ctx.globalAlpha = 0.3 * intensity;
             const bandY = -dh / 2 + rand(2) * dh;
-            const bandH = 4 + rand(3) * 20;
             ctx.fillStyle = 'rgba(255,255,255,0.15)';
-            ctx.fillRect(-dw / 2, bandY, dw, bandH);
+            ctx.fillRect(-dw / 2, bandY, dw, 4 + rand(3) * 20);
             ctx.restore();
           }
 
-          // 4. Color saturation drop + greenish tint
           ctx.save();
           ctx.globalCompositeOperation = 'multiply';
-          ctx.globalAlpha = 0.15 * intensity;
-          ctx.fillStyle = 'rgb(170,255,170)';
+          ctx.globalAlpha = 0.12 * intensity;
+          ctx.fillStyle = 'rgb(180,255,180)';
           ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
           ctx.restore();
 
         } else if (fx?.type === 'cinematic_bars') {
-          // 2.39:1 aspect ratio letterbox black bars
-          const barH = dh * 0.105; // ~10.5% top + bottom = 2.39:1 on 16:9
+          const barH = dh * 0.105;
           ctx.save();
           ctx.fillStyle = 'rgb(0,0,0)';
-          ctx.fillRect(-dw / 2, -dh / 2, dw, barH);
-          ctx.fillRect(-dw / 2, dh / 2 - barH, dw, barH);
+          ctx.fillRect(-dw / 2, -dh / 2,       dw, barH);
+          ctx.fillRect(-dw / 2,  dh / 2 - barH, dw, barH);
           ctx.restore();
 
         } else if (fx?.type === 'neon_glow') {
           const intensity = (fx.intensity ?? 100) / 100;
-          // Bloom: draw the image again at larger scale with screen blend
           ctx.save();
-          ctx.globalAlpha = 0.5 * intensity;
+          ctx.globalAlpha = 0.45 * intensity;
           ctx.globalCompositeOperation = 'screen';
-          ctx.filter = `blur(${8 * intensity}px) brightness(2)`;
-          // Re-draw video/image under screen blend for bloom
+          ctx.filter = `blur(${6 * intensity}px) brightness(1.8)`;
           if (mediaItem.type === 'video') {
             const videoEl = videoElements.get(clip.id);
             if (videoEl && videoEl.readyState >= 1) {
@@ -650,7 +945,7 @@ export function PreviewCanvas() {
             }
           }
           ctx.restore();
-          // Color cast: magenta/cyan neon
+
           ctx.save();
           ctx.globalAlpha = 0.15 * intensity;
           ctx.globalCompositeOperation = 'screen';
@@ -664,58 +959,65 @@ export function PreviewCanvas() {
         } else if (fx?.type === 'rgb_split') {
           const intensity = (fx.intensity ?? 100) / 100;
           const shift = intensity * 14;
-          ctx.save();
-          ctx.globalAlpha = 0.6;
-          ctx.globalCompositeOperation = 'screen';
+          // Use offscreen canvas to isolate channels — avoids ImageData coord issues
           if (mediaItem.type === 'video') {
             const videoEl = videoElements.get(clip.id);
             if (videoEl && videoEl.readyState >= 1) {
-              // Red channel shifted left
+              ctx.save();
+              ctx.globalAlpha = 0.55;
+              ctx.globalCompositeOperation = 'screen';
+
               const offR = document.createElement('canvas');
-              offR.width = Math.round(dw); offR.height = Math.round(dh);
+              offR.width = pxW; offR.height = pxH;
               const ctxR = offR.getContext('2d')!;
-              ctxR.drawImage(videoEl, 0, 0, dw, dh);
-              const dR = ctxR.getImageData(0, 0, dw, dh);
+              ctxR.drawImage(videoEl, 0, 0, pxW, pxH);
+              const dR = ctxR.getImageData(0, 0, pxW, pxH);
               for (let i = 0; i < dR.data.length; i += 4) { dR.data[i+1] = 0; dR.data[i+2] = 0; }
               ctxR.putImageData(dR, 0, 0);
               ctx.drawImage(offR, -dw / 2 - shift, -dh / 2, dw, dh);
 
-              // Blue channel shifted right
               const offB = document.createElement('canvas');
-              offB.width = Math.round(dw); offB.height = Math.round(dh);
+              offB.width = pxW; offB.height = pxH;
               const ctxB = offB.getContext('2d')!;
-              ctxB.drawImage(videoEl, 0, 0, dw, dh);
-              const dB = ctxB.getImageData(0, 0, dw, dh);
+              ctxB.drawImage(videoEl, 0, 0, pxW, pxH);
+              const dB = ctxB.getImageData(0, 0, pxW, pxH);
               for (let i = 0; i < dB.data.length; i += 4) { dB.data[i] = 0; dB.data[i+1] = 0; }
               ctxB.putImageData(dB, 0, 0);
               ctx.drawImage(offB, -dw / 2 + shift, -dh / 2, dw, dh);
+              ctx.restore();
             }
           }
-          ctx.restore();
 
         } else if (fx?.type === 'pixelate') {
           const intensity = (fx.intensity ?? 100) / 100;
           const blockSize = Math.max(2, Math.round(intensity * 24));
-          // Sample canvas at low res then redraw at full size
-          const tmpW = Math.max(1, Math.round(dw / blockSize));
-          const tmpH = Math.max(1, Math.round(dh / blockSize));
+          const tmpW = Math.max(1, Math.round(pxW / blockSize));
+          const tmpH = Math.max(1, Math.round(pxH / blockSize));
           const tmp = document.createElement('canvas');
           tmp.width = tmpW; tmp.height = tmpH;
           const tCtx = tmp.getContext('2d')!;
-          tCtx.drawImage(ctx.canvas, (-dw / 2 + ctx.canvas.width / 2), (-dh / 2 + ctx.canvas.height / 2), dw, dh, 0, 0, tmpW, tmpH);
-          (tCtx as any).imageSmoothingEnabled = false;
+          // FIXED: use pxL, pxT (absolute pixel coords) as the source rect from the main canvas
+          tCtx.drawImage(ctx.canvas, pxL, pxT, pxW, pxH, 0, 0, tmpW, tmpH);
+          tCtx.imageSmoothingEnabled = false;
           ctx.save();
           (ctx as any).imageSmoothingEnabled = false;
+          // Draw back in transform-space
           ctx.drawImage(tmp, 0, 0, tmpW, tmpH, -dw / 2, -dh / 2, dw, dh);
           ctx.restore();
 
         } else if (fx?.type === 'mirror') {
-          // Flip the left half and draw it mirrored on the right
+          // FIXED: read left half in pixel-space, flip onto right half in pixel-space
+          const halfW = Math.max(1, Math.round(pxW / 2));
+          const leftData = ctx.getImageData(pxL, pxT, halfW, pxH);
+          // Flip horizontally into a temp canvas
+          const flip = document.createElement('canvas');
+          flip.width = halfW; flip.height = pxH;
+          const fCtx = flip.getContext('2d')!;
+          fCtx.putImageData(leftData, 0, 0);
+          // Draw flipped onto right half in transform-space
           ctx.save();
           ctx.scale(-1, 1);
-          const half = dw / 2;
-          const src = ctx.getImageData(Math.round(ctx.canvas.width / 2 - half), Math.round(ctx.canvas.height / 2 - dh / 2), Math.round(half), Math.round(dh));
-          ctx.putImageData(src, Math.round(-ctx.canvas.width / 2), Math.round(-dh / 2));
+          ctx.drawImage(flip, 0, 0, halfW, pxH, -dw / 2, -dh / 2, dw / 2, dh);
           ctx.restore();
 
         } else if (fx?.type === 'zoom_blur') {
@@ -724,7 +1026,7 @@ export function PreviewCanvas() {
           ctx.save();
           ctx.globalAlpha = 0.25 / steps;
           for (let i = 1; i <= steps; i++) {
-            const s = 1 + (i / steps) * 0.12 * intensity;
+            const s = 1 + (i / steps) * 0.1 * intensity;
             ctx.save();
             ctx.scale(s, s);
             if (mediaItem.type === 'video') {
@@ -739,78 +1041,116 @@ export function PreviewCanvas() {
 
         } else if (fx?.type === 'lens_flare') {
           const intensity = (fx.intensity ?? 100) / 100;
-          // Main burst
-          const cx = dw * 0.2, cy = -dh * 0.2;
+          const fcx = dw * 0.2, fcy = -dh * 0.25;
           ctx.save();
-          const flareGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 80 * intensity);
-          flareGrad.addColorStop(0, `rgba(255,255,220,${0.9 * intensity})`);
-          flareGrad.addColorStop(0.15, `rgba(255,200,100,${0.5 * intensity})`);
-          flareGrad.addColorStop(0.5, `rgba(200,180,255,${0.15 * intensity})`);
-          flareGrad.addColorStop(1, 'rgba(0,0,0,0)');
           ctx.globalCompositeOperation = 'screen';
+          const flareGrad = ctx.createRadialGradient(fcx, fcy, 0, fcx, fcy, 90 * intensity);
+          flareGrad.addColorStop(0,    `rgba(255,255,220,${0.9  * intensity})`);
+          flareGrad.addColorStop(0.15, `rgba(255,200,100,${0.5  * intensity})`);
+          flareGrad.addColorStop(0.5,  `rgba(200,180,255,${0.15 * intensity})`);
+          flareGrad.addColorStop(1,    'rgba(0,0,0,0)');
           ctx.fillStyle = flareGrad;
           ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-
-          // Anamorphic streak
-          ctx.globalAlpha = 0.4 * intensity;
-          const streakGrad = ctx.createLinearGradient(-dw / 2, cy, dw / 2, cy);
-          streakGrad.addColorStop(0, 'rgba(100,150,255,0)');
-          streakGrad.addColorStop(0.5, `rgba(150,200,255,${0.8 * intensity})`);
-          streakGrad.addColorStop(1, 'rgba(100,150,255,0)');
+          // Anamorphic horizontal streak
+          ctx.globalAlpha = 0.35 * intensity;
+          const streakGrad = ctx.createLinearGradient(-dw / 2, fcy, dw / 2, fcy);
+          streakGrad.addColorStop(0,   'rgba(100,150,255,0)');
+          streakGrad.addColorStop(0.5, `rgba(150,210,255,${0.85 * intensity})`);
+          streakGrad.addColorStop(1,   'rgba(100,150,255,0)');
           ctx.fillStyle = streakGrad;
-          ctx.fillRect(-dw / 2, cy - 2, dw, 4);
+          ctx.fillRect(-dw / 2, fcy - 2, dw, 4);
           ctx.restore();
 
         } else if (fx?.type === 'night_vision') {
           const intensity = (fx.intensity ?? 100) / 100;
-          // Convert to grayscale then tint green
-          const imgData = ctx.getImageData(-dw / 2, -dh / 2, Math.round(dw), Math.round(dh));
+          // FIXED: absolute pixel coords
+          const imgData = ctx.getImageData(pxL, pxT, pxW, pxH);
           const data = imgData.data;
           const seed = Math.floor(currentTime * 30);
           const rand = (n: number) => ((Math.sin(seed * 3.1 + n * 91.7) * 43758.5) % 1 + 1) % 1;
           for (let i = 0; i < data.length; i += 4) {
             const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            // Boost and add noise
             const noise = (rand(i * 0.001) - 0.5) * 30 * intensity;
-            const v = Math.min(255, luma * 1.4 + noise);
+            const v = Math.min(255, Math.max(0, luma * 1.4 + noise));
             data[i]     = 0;
             data[i + 1] = Math.round(v);
             data[i + 2] = 0;
           }
-          ctx.putImageData(imgData, -dw / 2, -dh / 2);
-          // Scan lines
+          ctx.putImageData(imgData, pxL, pxT);
+
+          // Scan lines (transform-space)
           ctx.save();
-          ctx.globalAlpha = 0.1 * intensity;
+          ctx.globalAlpha = 0.12 * intensity;
           for (let row = -dh / 2; row < dh / 2; row += 2) {
-            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillStyle = 'rgba(0,0,0,0.9)';
             ctx.fillRect(-dw / 2, row, dw, 1);
           }
           ctx.restore();
 
         } else if (fx?.type === 'thermal') {
           const intensity = (fx.intensity ?? 100) / 100;
-          const imgData = ctx.getImageData(-dw / 2, -dh / 2, Math.round(dw), Math.round(dh));
+          // FIXED: absolute pixel coords
+          const imgData = ctx.getImageData(pxL, pxT, pxW, pxH);
           const data = imgData.data;
+          const mix = (a: number, b: number, t: number) => a + (b - a) * t;
           for (let i = 0; i < data.length; i += 4) {
             const luma = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
-            // Map luma → thermal palette: black→purple→blue→cyan→green→yellow→red→white
-            const mix = (a: number, b: number, t: number) => a + (b - a) * t;
             let r = 0, g = 0, b2 = 0;
-            if (luma < 0.25)      { const t = luma / 0.25;      r = mix(0,0,t);   g = mix(0,0,t);   b2 = mix(128,255,t); }
-            else if (luma < 0.5)  { const t = (luma-0.25)/0.25; r = mix(0,0,t);   g = mix(0,255,t); b2 = mix(255,255,t); }
-            else if (luma < 0.75) { const t = (luma-0.5)/0.25;  r = mix(0,255,t); g = mix(255,255,t);b2 = mix(255,0,t); }
-            else                  { const t = (luma-0.75)/0.25; r = mix(255,255,t);g = mix(255,0,t); b2 = mix(0,0,t); }
-            // Blend with original based on intensity
+            if      (luma < 0.25) { const t = luma / 0.25;        r = 0;          g = 0;          b2 = mix(128, 255, t); }
+            else if (luma < 0.5)  { const t = (luma-0.25)/0.25;   r = 0;          g = mix(0,255,t);  b2 = mix(255,255,t); }
+            else if (luma < 0.75) { const t = (luma-0.5)/0.25;    r = mix(0,255,t); g = mix(255,255,t); b2 = mix(255,0,t); }
+            else                  { const t = (luma-0.75)/0.25;   r = mix(255,255,t); g = mix(255,0,t); b2 = 0; }
             data[i]     = Math.round(mix(data[i],     r,  intensity));
             data[i + 1] = Math.round(mix(data[i + 1], g,  intensity));
             data[i + 2] = Math.round(mix(data[i + 2], b2, intensity));
           }
-          ctx.putImageData(imgData, -dw / 2, -dh / 2);
+          ctx.putImageData(imgData, pxL, pxT);
+
+        } else if (fx?.type === 'glitch') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const seed = Math.floor(currentTime * 30);
+          const rand = (n: number) => ((Math.sin(seed * 9.7 + n * 127.3) * 43758.5453) % 1 + 1) % 1;
+
+          // Chromatic aberration
+          const aberration = intensity * 8 * rand(1);
+          ctx.save();
+          ctx.globalAlpha = 0.45;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillStyle = `rgba(255, 0, 0, 0.3)`;
+          ctx.fillRect(-dw / 2 - aberration, -dh / 2, dw, dh);
+          ctx.fillStyle = `rgba(0, 0, 255, 0.3)`;
+          ctx.fillRect(-dw / 2 + aberration, -dh / 2, dw, dh);
+          ctx.restore();
+
+          // Scan lines
+          ctx.save();
+          ctx.globalAlpha = 0.15 * intensity;
+          for (let row = -dh / 2; row < dh / 2; row += 4) {
+            if (rand(row + 5) > 0.5) {
+              ctx.fillStyle = 'rgba(0,0,0,0.8)';
+              ctx.fillRect(-dw / 2, row, dw, 2);
+            }
+          }
+          ctx.restore();
+
+          // Slice distortion
+          const numSlices = Math.floor(3 + rand(2) * 6 * intensity);
+          ctx.save();
+          ctx.globalAlpha = 0.65 * intensity;
+          for (let i = 0; i < numSlices; i++) {
+            const sliceY    = -dh / 2 + rand(i * 3) * dh;
+            const sliceH    = 2 + rand(i * 3 + 1) * 8;
+            const sliceShift = (rand(i * 3 + 2) - 0.5) * 40 * intensity;
+            ctx.fillStyle = `rgba(${Math.floor(rand(i*7)*255)},${Math.floor(rand(i*7+1)*100)},${Math.floor(rand(i*7+2)*255)},0.5)`;
+            ctx.fillRect(-dw / 2 + sliceShift, sliceY, dw, sliceH);
+          }
+          ctx.restore();
         }
       }
 
       ctx.restore();
     };
+
 
     for (const track of visualTracks) {
       // Sort clips to find adjacent clips and active transition zones
@@ -929,6 +1269,16 @@ export function PreviewCanvas() {
       ctx.fillText('Add clips to the timeline to preview', W / 2, H / 2 + 12);
     }
     
+    // 3b. Render particles for any clip that has particleSettings
+    const particleFrameMs = 1000 / 60; // assume 60fps for physics step
+    for (const track of visualTracks) {
+      for (const clip of track.clips) {
+        if (clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+          renderParticles(ctx, clip.id, clip.particleSettings, W, H, particleFrameMs);
+        }
+      }
+    }
+
     ctx.restore(); // Restore from viewport transform
 
     // 5. Timecode overlay – top-right
@@ -1142,7 +1492,19 @@ export function PreviewCanvas() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        style={{ cursor: activeTool === 'hand' ? (isPanning.current ? 'grabbing' : 'grab') : (activeTool === 'zoom' ? 'zoom-in' : 'default') }}
+        onClick={(e) => {
+          // Ctrl+click or Alt+click → set particle emitter position
+          const selClip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+          if (selClip?.particleSettings && (e.ctrlKey || e.altKey)) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            // Clear old pool so particles restart from new position
+            particlePools.delete(selClip.id);
+            updateClip(selClip.id, { particleSettings: { ...selClip.particleSettings, emitterX: Math.round(x), emitterY: Math.round(y) } });
+          }
+        }}
+        style={{ cursor: activeTool === 'hand' ? (isPanning.current ? 'grabbing' : 'grab') : (activeTool === 'zoom' ? 'zoom-in' : (() => { const sc = tracks.flatMap(t=>t.clips).find(c=>c.id===selectedClipId); return sc?.particleSettings ? 'crosshair' : 'default'; })()) }}
       >
         <canvas
           ref={canvasRef}
@@ -1174,6 +1536,24 @@ export function PreviewCanvas() {
           <Film className="w-3 h-3 text-[#a0a0a0]" />
           <span className="text-[10px] text-[#a0a0a0]">854 × 480</span>
         </div>
+
+        {/* Particle emitter position indicator */}
+        {(() => {
+          const sc = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+          if (!sc?.particleSettings) return null;
+          const ps = sc.particleSettings;
+          return (
+            <div
+              className="absolute pointer-events-none z-10"
+              style={{ left: `${ps.emitterX}%`, top: `${ps.emitterY}%`, transform: 'translate(-50%,-50%)' }}
+            >
+              <div className="w-5 h-5 rounded-full border-2 border-violet-400 bg-violet-400/20 animate-pulse" />
+              <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] text-violet-300 bg-black/80 px-1.5 py-0.5 rounded pointer-events-none">
+                ✦ Ctrl+Click to move
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Playback Controls */}

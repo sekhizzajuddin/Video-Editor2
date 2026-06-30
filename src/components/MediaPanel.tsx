@@ -1,4 +1,4 @@
-import {
+﻿import {
   Film,
   Music,
   Image,
@@ -30,7 +30,19 @@ import {
   Eye,
   Flame,
   Monitor,
+  CloudSnow,
+  CloudRain,
+  Star,
+  Wind,
+  Leaf,
+  Heart,
+  Code2,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
+import React from 'react';
+
+
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback } from 'react';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
@@ -80,6 +92,69 @@ const COLOR_CORRECTION_EFFECTS = [
   { name: 'Cool Tone',     icon: Zap,      color: 'text-blue-300',   preset: { temperature: -60, saturation: 110 },      desc: 'Cool blue look' },
   { name: 'Faded Film',    icon: Clapperboard, color: 'text-stone-400', preset: { fadedFilm: 60, saturation: 80 },     desc: 'Faded vintage film' },
 ];
+
+// Particle Effects — dragged to a video/image/FX clip
+export const PARTICLE_EFFECTS: Array<{
+  name: string;
+  type: string;
+  icon: React.ComponentType<{ className?: string }>;
+  color: string;
+  bgColor: string;
+  desc: string;
+  defaultSettings: Omit<import('@/types').ClipParticleSettings, 'type' | 'emitterX' | 'emitterY'>;
+}> = [
+  {
+    name: 'Snow',       type: 'snow',      icon: CloudSnow,  color: 'text-sky-300',    bgColor: 'bg-sky-500/10 border-sky-500/20',
+    desc: 'Gentle falling snowflakes',
+    defaultSettings: { amount: 120, speed: 40,  intensity: 80, size: 100, gravity: 20,   wind: 5,   spread: 180, lifetime: 150, color: '#ffffff', colorVariance: 15, glow: false, turbulence: 20 },
+  },
+  {
+    name: 'Rain',       type: 'rain',      icon: CloudRain,  color: 'text-blue-400',   bgColor: 'bg-blue-500/10 border-blue-500/20',
+    desc: 'Heavy rainfall streaks',
+    defaultSettings: { amount: 200, speed: 160, intensity: 70, size: 100, gravity: 100, wind: 15,  spread: 10,  lifetime: 60,  color: '#a0c8ff', colorVariance: 10, glow: false, turbulence: 5  },
+  },
+  {
+    name: 'Fire',       type: 'fire',      icon: Flame,      color: 'text-orange-400', bgColor: 'bg-orange-500/10 border-orange-500/20',
+    desc: 'Rising fire embers',
+    defaultSettings: { amount: 80,  speed: 80,  intensity: 90, size: 130, gravity: -60, wind: 0,   spread: 60,  lifetime: 80,  color: '#ff6a00', colorVariance: 60, glow: true,  turbulence: 60 },
+  },
+  {
+    name: 'Sparkles',   type: 'sparkles',  icon: Star,       color: 'text-yellow-300', bgColor: 'bg-yellow-500/10 border-yellow-500/20',
+    desc: 'Glittering golden sparkles',
+    defaultSettings: { amount: 60,  speed: 50,  intensity: 85, size: 80,  gravity: -10, wind: 0,   spread: 360, lifetime: 100, color: '#ffd700', colorVariance: 30, glow: true,  turbulence: 30 },
+  },
+  {
+    name: 'Confetti',   type: 'confetti',  icon: Sparkles,   color: 'text-pink-400',   bgColor: 'bg-pink-500/10 border-pink-500/20',
+    desc: 'Colorful party confetti',
+    defaultSettings: { amount: 100, speed: 60,  intensity: 90, size: 100, gravity: 40,  wind: 10,  spread: 90,  lifetime: 200, color: 'auto',    colorVariance: 100, glow: false, turbulence: 40 },
+  },
+  {
+    name: 'Smoke',      type: 'smoke',     icon: Wind,       color: 'text-gray-400',   bgColor: 'bg-gray-500/10 border-gray-500/20',
+    desc: 'Wispy rising smoke',
+    defaultSettings: { amount: 30,  speed: 25,  intensity: 60, size: 200, gravity: -30, wind: 8,   spread: 30,  lifetime: 200, color: '#888888', colorVariance: 20, glow: false, turbulence: 70 },
+  },
+  {
+    name: 'Bubbles',    type: 'bubbles',   icon: Droplets,   color: 'text-cyan-400',   bgColor: 'bg-cyan-500/10 border-cyan-500/20',
+    desc: 'Rising transparent bubbles',
+    defaultSettings: { amount: 40,  speed: 30,  intensity: 70, size: 120, gravity: -40, wind: 5,   spread: 60,  lifetime: 180, color: '#80ffff', colorVariance: 20, glow: true,  turbulence: 15 },
+  },
+  {
+    name: 'Leaves',     type: 'leaves',    icon: Leaf,       color: 'text-green-400',  bgColor: 'bg-green-500/10 border-green-500/20',
+    desc: 'Autumn leaves falling',
+    defaultSettings: { amount: 50,  speed: 35,  intensity: 80, size: 110, gravity: 30,  wind: 20,  spread: 45,  lifetime: 180, color: '#ff7b00', colorVariance: 70, glow: false, turbulence: 50 },
+  },
+  {
+    name: 'Hearts',     type: 'hearts',    icon: Heart,      color: 'text-rose-400',   bgColor: 'bg-rose-500/10 border-rose-500/20',
+    desc: 'Floating pink hearts',
+    defaultSettings: { amount: 30,  speed: 25,  intensity: 85, size: 100, gravity: -20, wind: 5,   spread: 40,  lifetime: 200, color: '#ff4d88', colorVariance: 25, glow: true,  turbulence: 20 },
+  },
+  {
+    name: 'Matrix',     type: 'matrix',    icon: Code2,      color: 'text-lime-400',   bgColor: 'bg-lime-500/10 border-lime-500/20',
+    desc: 'Digital rain code columns',
+    defaultSettings: { amount: 40,  speed: 80,  intensity: 90, size: 100, gravity: 80,  wind: 0,   spread: 0,   lifetime: 120, color: '#00ff41', colorVariance: 10, glow: true,  turbulence: 0  },
+  },
+];
+
 
 
 const TEXT_TEMPLATES = [
@@ -636,84 +711,133 @@ export function MediaPanel() {
           </div>
         )}
 
-        {activeMediaTab === 'effects' && (
-          <div className="flex-1 overflow-y-auto p-2 space-y-4">
-            {/* Timeline FX section */}
-            <div>
-              <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider mb-1 px-1">
-                Timeline FX
-                <span className="text-[#6a6a6a] font-normal normal-case ml-1">— drag onto an FX track</span>
-              </p>
-              <p className="text-[9px] text-[#6a6a6a] px-1 mb-2">Add an FX Track first (+ FX button in timeline toolbar), then drag here</p>
-              <div className="grid grid-cols-1 gap-0.5">
-                {FX_EFFECTS.map((effect) => {
-                  const Icon = effect.icon;
-                  return (
-                    <div
-                      key={effect.name}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('application/procut-effect', effect.name);
-                        e.dataTransfer.effectAllowed = 'copy';
-                      }}
-                      onMouseEnter={() => setHoveredItem(effect.name)}
-                      onMouseLeave={() => setHoveredItem(null)}
-                      className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
-                    >
-                      <div className="w-7 h-7 rounded bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
-                        <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs text-white block leading-tight">{effect.name}</span>
-                        <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
-                      </div>
-                      <span className="text-[8px] text-rose-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">FX</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+        {activeMediaTab === 'effects' && (() => {
+          const [openSection, setOpenSection] = (
+            // eslint-disable-next-line react-hooks/rules-of-hooks
+            useState<'fx' | 'color' | 'particles'>('fx')
+          );
 
-            {/* Divider */}
-            <div className="h-px bg-[#3e3e3e]" />
-
-            {/* Color Correction Presets section */}
+          const Section = ({ id, label, color, children }: { id: 'fx'|'color'|'particles'; label: string; color: string; children: React.ReactNode }) => (
             <div>
-              <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1 px-1">
-                Color Presets
-                <span className="text-[#6a6a6a] font-normal normal-case ml-1">— drag onto a video / image clip</span>
-              </p>
-              <div className="grid grid-cols-1 gap-0.5">
-                {COLOR_CORRECTION_EFFECTS.map((effect) => {
-                  const Icon = effect.icon;
-                  return (
-                    <div
-                      key={effect.name}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('application/procut-color-preset', JSON.stringify(effect.preset));
-                        e.dataTransfer.setData('application/procut-effect', effect.name);
-                        e.dataTransfer.effectAllowed = 'copy';
-                      }}
-                      onMouseEnter={() => setHoveredItem(effect.name)}
-                      onMouseLeave={() => setHoveredItem(null)}
-                      className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
-                    >
-                      <div className="w-7 h-7 rounded bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-                        <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs text-white block leading-tight">{effect.name}</span>
-                        <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
-                      </div>
-                      <span className="text-[8px] text-amber-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">CC</span>
-                    </div>
-                  );
-                })}
-              </div>
+              <button
+                onClick={() => setOpenSection(prev => prev === id ? 'fx' : id)}
+                className={`w-full flex items-center justify-between px-2 py-1.5 rounded hover:bg-[#3a3a3a] transition-colors mb-1`}
+              >
+                <span className={`text-[10px] font-semibold uppercase tracking-wider ${color}`}>{label}</span>
+                {openSection === id
+                  ? <ChevronDown className="w-3 h-3 text-[#6a6a6a]" />
+                  : <ChevronRight className="w-3 h-3 text-[#6a6a6a]" />}
+              </button>
+              {openSection === id && <div className="mb-3">{children}</div>}
             </div>
-          </div>
-        )}
+          );
+
+          return (
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {/* ── Timeline FX ── */}
+              <Section id="fx" label="Timeline FX" color="text-rose-400">
+                <p className="text-[9px] text-[#6a6a6a] px-1 mb-1.5">Add FX Track first, then drag here</p>
+                <div className="grid grid-cols-1 gap-0.5">
+                  {FX_EFFECTS.map((effect) => {
+                    const Icon = effect.icon;
+                    return (
+                      <div
+                        key={effect.name}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/procut-effect', effect.name);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onMouseEnter={() => setHoveredItem(effect.name)}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
+                      >
+                        <div className="w-7 h-7 rounded bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
+                          <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs text-white block leading-tight">{effect.name}</span>
+                          <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
+                        </div>
+                        <span className="text-[8px] text-rose-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">FX</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+
+              <div className="h-px bg-[#3e3e3e]" />
+
+              {/* ── Color Presets ── */}
+              <Section id="color" label="Color Presets" color="text-amber-400">
+                <p className="text-[9px] text-[#6a6a6a] px-1 mb-1.5">Drag onto a video / image clip</p>
+                <div className="grid grid-cols-1 gap-0.5">
+                  {COLOR_CORRECTION_EFFECTS.map((effect) => {
+                    const Icon = effect.icon;
+                    return (
+                      <div
+                        key={effect.name}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/procut-color-preset', JSON.stringify(effect.preset));
+                          e.dataTransfer.setData('application/procut-effect', effect.name);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onMouseEnter={() => setHoveredItem(effect.name)}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
+                      >
+                        <div className="w-7 h-7 rounded bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                          <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs text-white block leading-tight">{effect.name}</span>
+                          <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
+                        </div>
+                        <span className="text-[8px] text-amber-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">CC</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+
+              <div className="h-px bg-[#3e3e3e]" />
+
+              {/* ── Particle Effects ── */}
+              <Section id="particles" label="✦ Particle Effects" color="text-violet-400">
+                <p className="text-[9px] text-[#6a6a6a] px-1 mb-1.5">Drag onto any video/image clip — click emitter on preview to reposition</p>
+                <div className="grid grid-cols-1 gap-0.5">
+                  {PARTICLE_EFFECTS.map((effect) => {
+                    const Icon = effect.icon;
+                    return (
+                      <div
+                        key={effect.name}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/procut-particle', effect.type);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onMouseEnter={() => setHoveredItem(effect.name)}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
+                      >
+                        <div className={`w-7 h-7 rounded ${effect.bgColor} border flex items-center justify-center shrink-0`}>
+                          <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs text-white block leading-tight">{effect.name}</span>
+                          <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
+                        </div>
+                        <span className="text-[8px] text-violet-400/60 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">✦</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+            </div>
+          );
+        })()}
+
       </div>
 
       <input

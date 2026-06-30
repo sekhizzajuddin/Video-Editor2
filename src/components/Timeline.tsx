@@ -1447,7 +1447,46 @@ export function Timeline() {
         return;
       }
 
-      // ── FX effect drop → only onto FX tracks ──
+      // ── Particle effect drop → apply to video/image clip at drop position ──
+      const particleType = e.dataTransfer.getData('application/procut-particle');
+      if (particleType && track && (track.type === 'video')) {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const dropTime = x / zoomLevel;
+        const hitClip = track.clips.find(
+          (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
+        );
+        if (hitClip) {
+          // Default settings per particle type
+          const PARTICLE_DEFAULTS: Record<string, Omit<import('@/types').ClipParticleSettings, 'type'|'emitterX'|'emitterY'>> = {
+            snow:      { amount: 120, speed: 40,  intensity: 80, size: 100, gravity: 20,  wind: 5,  spread: 180, lifetime: 150, color: '#ffffff', colorVariance: 15, glow: false, turbulence: 20 },
+            rain:      { amount: 200, speed: 160, intensity: 70, size: 100, gravity: 100, wind: 15, spread: 10,  lifetime: 60,  color: '#a0c8ff', colorVariance: 10, glow: false, turbulence: 5  },
+            fire:      { amount: 80,  speed: 80,  intensity: 90, size: 130, gravity: -60, wind: 0,  spread: 60,  lifetime: 80,  color: '#ff6a00', colorVariance: 60, glow: true,  turbulence: 60 },
+            sparkles:  { amount: 60,  speed: 50,  intensity: 85, size: 80,  gravity: -10, wind: 0,  spread: 360, lifetime: 100, color: '#ffd700', colorVariance: 30, glow: true,  turbulence: 30 },
+            confetti:  { amount: 100, speed: 60,  intensity: 90, size: 100, gravity: 40,  wind: 10, spread: 90,  lifetime: 200, color: 'auto',    colorVariance: 100, glow: false, turbulence: 40 },
+            smoke:     { amount: 30,  speed: 25,  intensity: 60, size: 200, gravity: -30, wind: 8,  spread: 30,  lifetime: 200, color: '#888888', colorVariance: 20, glow: false, turbulence: 70 },
+            bubbles:   { amount: 40,  speed: 30,  intensity: 70, size: 120, gravity: -40, wind: 5,  spread: 60,  lifetime: 180, color: '#80ffff', colorVariance: 20, glow: true,  turbulence: 15 },
+            leaves:    { amount: 50,  speed: 35,  intensity: 80, size: 110, gravity: 30,  wind: 20, spread: 45,  lifetime: 180, color: '#ff7b00', colorVariance: 70, glow: false, turbulence: 50 },
+            hearts:    { amount: 30,  speed: 25,  intensity: 85, size: 100, gravity: -20, wind: 5,  spread: 40,  lifetime: 200, color: '#ff4d88', colorVariance: 25, glow: true,  turbulence: 20 },
+            matrix:    { amount: 40,  speed: 80,  intensity: 90, size: 100, gravity: 80,  wind: 0,  spread: 0,   lifetime: 120, color: '#00ff41', colorVariance: 10, glow: true,  turbulence: 0  },
+          };
+          const defaults = PARTICLE_DEFAULTS[particleType] ?? PARTICLE_DEFAULTS.sparkles;
+          useEditorStore.getState().updateClip(hitClip.id, {
+            particleSettings: {
+              type: particleType as import('@/types').ParticleEffectType,
+              emitterX: 50,
+              emitterY: 100,
+              ...defaults,
+            },
+          });
+          useEditorStore.getState().selectClip(hitClip.id);
+          useEditorStore.getState().saveSnapshot();
+        }
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        return;
+      }
+
       const effectName = e.dataTransfer.getData('application/procut-effect');
       if (effectName && track?.type === 'fx') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1549,8 +1588,9 @@ export function Timeline() {
       const hasMedia = e.dataTransfer.types.includes('application/procut-media');
       const hasEffect = e.dataTransfer.types.includes('application/procut-effect');
       const hasColorPreset = e.dataTransfer.types.includes('application/procut-color-preset');
-      if ((hasMedia || hasEffect || hasColorPreset) && trackIdx >= 0) {
-        const approxDuration = hasColorPreset ? 0 : 5; // color presets don't create a clip
+      const hasParticle = e.dataTransfer.types.includes('application/procut-particle');
+      if ((hasMedia || hasEffect || hasColorPreset || hasParticle) && trackIdx >= 0) {
+        const approxDuration = (hasColorPreset || hasParticle) ? 0 : 5;
         setDropPreview({ time: x / zoomLevel, duration: approxDuration, trackIdx });
         setHoveredTrackId(trackId);
       }
