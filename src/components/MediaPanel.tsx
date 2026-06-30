@@ -1,4 +1,4 @@
-﻿import {
+import {
   Film,
   Music,
   Image,
@@ -172,6 +172,7 @@ export function MediaPanel() {
   const [importProgress, setImportProgress] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [openSection, setOpenSection] = useState<'fx' | 'color' | 'particles'>('fx');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
@@ -712,11 +713,6 @@ export function MediaPanel() {
         )}
 
         {activeMediaTab === 'effects' && (() => {
-          const [openSection, setOpenSection] = (
-            // eslint-disable-next-line react-hooks/rules-of-hooks
-            useState<'fx' | 'color' | 'particles'>('fx')
-          );
-
           const Section = ({ id, label, color, children }: { id: 'fx'|'color'|'particles'; label: string; color: string; children: React.ReactNode }) => (
             <div>
               <button

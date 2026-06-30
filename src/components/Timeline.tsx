@@ -816,7 +816,15 @@ export function Timeline() {
         };
       });
 
-      moveClips(updates);
+      // Filter out duplicate clip updates to prevent ghost clips
+      const seen = new Set<string>();
+      const uniqueUpdates = updates.filter((u) => {
+        if (seen.has(u.clipId)) return false;
+        seen.add(u.clipId);
+        return true;
+      });
+
+      moveClips(uniqueUpdates);
     } else if (dragState.draggedClips.length === 1) {
       setDragPreview(newTime, targetTrackId);
       moveClip(dragState.clipId, newTime, targetTrackId);
@@ -890,13 +898,18 @@ export function Timeline() {
   const handleTimelineClick = useCallback(
     (e: React.MouseEvent) => {
       if (activeTool === 'split') return;
+      // Clicked timeline background -> deselect everything
+      selectClip(null);
+      selectTransition(null);
+      selectTrack(null);
+
       const rect = trackContainerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const scroll = trackContainerRef.current?.scrollLeft || 0;
       const x = e.clientX - rect.left + scroll;
       seek(Math.max(0, x / zoomLevel));
     },
-    [activeTool, zoomLevel, seek],
+    [activeTool, zoomLevel, seek, selectClip, selectTransition, selectTrack],
   );
 
   const handleRulerMouseDown = useCallback(
@@ -1126,6 +1139,7 @@ export function Timeline() {
         });
       }
 
+      useEditorStore.getState().startTransaction();
       setDragState({
         clipId: clip.id,
         startX: e.clientX,

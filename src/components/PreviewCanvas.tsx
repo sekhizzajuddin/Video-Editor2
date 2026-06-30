@@ -1146,16 +1146,9 @@ export function PreviewCanvas() {
           }
           ctx.restore();
         }
-      }
-
-      ctx.restore();
-    };
-
-
-    for (const track of visualTracks) {
-      // Sort clips to find adjacent clips and active transition zones
+      }    for (const track of visualTracks) {
       const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
-      let transitionHandled = false;
+      let activeTransition: { clipA: any; clipB: any; trans: any; t: number } | null = null;
 
       // Check if currentTime falls into any active transition zone
       for (let idx = 1; idx < sortedClips.length; idx++) {
@@ -1165,7 +1158,7 @@ export function PreviewCanvas() {
 
         if (Math.abs(gap) < 0.1 && clipB.transitionIn) {
           const trans = clipB.transitionIn;
-          const duration = trans.duration;
+          const duration = Math.max(0.01, trans.duration);
           const alignment = trans.params?.alignment || 'center';
 
           let leftSec = clipB.startTime - duration / 2;
@@ -1178,77 +1171,68 @@ export function PreviewCanvas() {
 
           if (currentTime >= leftSec && currentTime < rightSec) {
             const t = (currentTime - leftSec) / duration;
-            const type = trans.type;
-            const nameLower = trans.name.toLowerCase();
-
-            if (nameLower.includes('dissolve')) {
-              // Cross Dissolve
-              drawSingleClip(clipA, 1 - t);
-              drawSingleClip(clipB, t);
-            } else if (nameLower.includes('fade')) {
-              // Dip to Black / Fade
-              if (t < 0.5) {
-                drawSingleClip(clipA, 1 - t * 2);
-              } else {
-                drawSingleClip(clipB, (t - 0.5) * 2);
-              }
-            } else if (type === 'wipe') {
-              if (nameLower.includes('left')) {
-                // Wipe Right to Left
-                drawSingleClip(clipA, 1);
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(W * (1 - t), 0, W * t, H);
-                ctx.clip();
-                drawSingleClip(clipB, 1);
-                ctx.restore();
-              } else {
-                // Wipe Left to Right (Default/Right)
-                drawSingleClip(clipA, 1);
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(0, 0, W * t, H);
-                ctx.clip();
-                drawSingleClip(clipB, 1);
-                ctx.restore();
-              }
-            } else if (type === 'slide') {
-              if (nameLower.includes('up')) {
-                drawSingleClip(clipA, 1, { translateY: -H * t });
-                drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
-              } else if (nameLower.includes('down')) {
-                drawSingleClip(clipA, 1, { translateY: H * t });
-                drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
-              } else {
-                // Default Slide (Left to Right)
-                drawSingleClip(clipA, 1, { translateX: -W * t });
-                drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
-              }
-            } else if (type === 'zoom') {
-              if (nameLower.includes('out')) {
-                // Zoom Out
-                drawSingleClip(clipB, 1);
-                drawSingleClip(clipA, 1 - t, { scale: 1 - t });
-              } else {
-                // Zoom In
-                drawSingleClip(clipA, 1 - t);
-                drawSingleClip(clipB, t, { scale: t });
-              }
-            } else {
-              // Fallback
-              drawSingleClip(clipA, 1 - t);
-              drawSingleClip(clipB, t);
-            }
-
-            transitionHandled = true;
+            activeTransition = { clipA, clipB, trans, t };
             break;
           }
         }
       }
 
-      if (transitionHandled) continue;
+      if (activeTransition) {
+        const { clipA, clipB, trans, t } = activeTransition;
+        const type = trans.type;
+        const nameLower = trans.name.toLowerCase();
 
-      // Find the clip active at currentTime on this track normally
+        if (nameLower.includes('dissolve')) {
+          drawSingleClip(clipA, 1 - t);
+          drawSingleClip(clipB, t);
+        } else if (nameLower.includes('fade')) {
+          if (t < 0.5) {
+            drawSingleClip(clipA, 1 - t * 2);
+          } else {
+            drawSingleClip(clipB, (t - 0.5) * 2);
+          }
+        } else if (type === 'wipe') {
+          if (nameLower.includes('left')) {
+            drawSingleClip(clipA, 1);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(W * (1 - t), 0, W * t, H);
+            ctx.clip();
+            drawSingleClip(clipB, 1);
+            ctx.restore();
+          } else {
+            drawSingleClip(clipA, 1);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, W * t, H);
+            ctx.clip();
+            drawSingleClip(clipB, 1);
+            ctx.restore();
+          }
+        } else if (type === 'slide') {
+          if (nameLower.includes('up')) {
+            drawSingleClip(clipA, 1, { translateY: -H * t });
+            drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
+          } else if (nameLower.includes('down')) {
+            drawSingleClip(clipA, 1, { translateY: H * t });
+            drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
+          } else {
+            drawSingleClip(clipA, 1, { translateX: -W * t });
+            drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
+          }
+        } else if (type === 'zoom') {
+          if (nameLower.includes('out')) {
+            drawSingleClip(clipB, 1);
+            drawSingleClip(clipA, 1 - t, { scale: 1 - t });
+            drawSingleClip(clipB, t, { scale: t });
+          }
+        } else {
+          drawSingleClip(clipA, 1 - t);
+          drawSingleClip(clipB, t);
+        }
+        continue;
+      }
+
       const clip = sortedClips.find(
         (c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration,
       );
@@ -1257,7 +1241,6 @@ export function PreviewCanvas() {
       drawSingleClip(clip, 1);
     }
 
-    // 4. Empty state
     if (!anyClipDrawn) {
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.font = '14px system-ui, sans-serif';

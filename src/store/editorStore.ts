@@ -344,8 +344,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const clipId = generateId();
     
     let startTime = currentTime;
-    while (targetTrack.clips.some((c) => Math.max(0, Math.min(startTime + 3, c.startTime + c.duration) - Math.max(startTime, c.startTime)) > 0)) {
+    let attempts = 0;
+    const maxAttempts = 100;
+    while (attempts < maxAttempts && targetTrack.clips.some((c) => Math.max(0, Math.min(startTime + 3, c.startTime + c.duration) - Math.max(startTime, c.startTime)) > 0)) {
        startTime += 3.1;
+       attempts++;
     }
 
     const newClip: TimelineClip = {
@@ -443,57 +446,53 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
-    const state = get();
-    let foundClip: TimelineClip | undefined;
-
-    for (const track of state.tracks) {
-      const clip = track.clips.find((c) => c.id === clipId);
-      if (clip) {
-        foundClip = { ...clip, startTime: newStartTime };
-        if (newTrackId) foundClip.trackId = newTrackId;
-        break;
-      }
-    }
-
-    if (!foundClip) return false;
-
-    const targetTrackId = newTrackId || foundClip.trackId;
-    const targetTrack = state.tracks.find((t) => t.id === targetTrackId);
-    if (targetTrack) {
-      if (resolveOverlap) {
-        const otherClips = targetTrack.clips.filter((c) => c.id !== clipId);
-        const adjustedStart = findNonOverlappingPosition(
-          otherClips,
-          newStartTime,
-          foundClip.duration,
-          clipId
-        );
-        foundClip.startTime = adjustedStart;
-      } else {
-        foundClip.startTime = Math.max(0, newStartTime);
-      }
-    }
-
+    let success = false;
     set((state) => {
-      const sourceTracks = state.tracks.map((track) => {
-        if (track.clips.some((c) => c.id === clipId)) {
-          return { ...track, clips: track.clips.filter((c) => c.id !== clipId) };
-        }
-        return track;
-      });
+      const newTracks = state.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
+      }));
 
-      const finalTracks = sourceTracks.map((track) => {
-        if (track.id === targetTrackId) {
-          return { ...track, clips: [...track.clips, foundClip as TimelineClip] };
+      // Find and remove the clip
+      let foundClip: TimelineClip | undefined;
+      for (const track of newTracks) {
+        const idx = track.clips.findIndex((c) => c.id === clipId);
+        if (idx !== -1) {
+          const [clip] = track.clips.splice(idx, 1);
+          foundClip = clip;
+          break;
         }
-        return track;
-      });
+      }
 
-      return { tracks: finalTracks };
+      if (!foundClip) return {};
+
+      const targetTrackId = newTrackId || foundClip.trackId;
+      const targetTrack = newTracks.find((t) => t.id === targetTrackId);
+
+      if (targetTrack) {
+        if (resolveOverlap) {
+          const adjustedStart = findNonOverlappingPosition(
+            targetTrack.clips,
+            newStartTime,
+            foundClip.duration,
+            clipId
+          );
+          foundClip.startTime = adjustedStart;
+        } else {
+          foundClip.startTime = Math.max(0, newStartTime);
+        }
+        foundClip.trackId = targetTrackId;
+        targetTrack.clips.push(foundClip);
+        success = true;
+      }
+
+      return { tracks: newTracks };
     });
 
-    get().recalcTotalDuration();
-    return true;
+    if (success) {
+      get().recalcTotalDuration();
+    }
+    return success;
   },
 
   moveClips: (updates, resolveOverlap = false) => {

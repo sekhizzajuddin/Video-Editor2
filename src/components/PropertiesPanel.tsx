@@ -123,6 +123,18 @@ export function PropertiesPanel() {
     }
   }
 
+  // Auto-switch properties panel tabs based on selected clip type
+  useEffect(() => {
+    if (!selectedClip) return;
+    if (selectedTrack?.type === 'fx' || selectedClip.fxSettings || selectedClip.particleSettings) {
+      setActivePropertiesTab('effects');
+    } else if (selectedTrack?.type === 'audio') {
+      setActivePropertiesTab('audio');
+    } else if (selectedClip.textSettings) {
+      setActivePropertiesTab('text');
+    }
+  }, [primarySelectedId, selectedTrack?.type, selectedClip?.fxSettings, selectedClip?.particleSettings, selectedClip?.textSettings, setActivePropertiesTab]);
+
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const isRamped = selectedClip ? !!(selectedClip.speedRamp && selectedClip.speedRamp.length >= 2) : false;
