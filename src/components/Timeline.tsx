@@ -2024,7 +2024,9 @@ export function Timeline() {
                 ))}
 
               {/* ── Tracks ─────────────────────────────────────────── */}
-              {tracks.map((track) => (
+              {tracks.map((track) => {
+                if (track.hidden) return null;
+                return (
                 <div
                   key={track.id}
                   className={`relative border-b border-[#3e3e3e] transition-colors ${
@@ -2361,7 +2363,8 @@ export function Timeline() {
                     });
                   })()}
                 </div>
-              ))}
+              );});
+
 
               {/* ── Drop preview ──────────────────────────────────────── */}
               {dropPreview && hoveredTrackId && (

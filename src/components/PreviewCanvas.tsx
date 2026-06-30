@@ -1276,8 +1276,7 @@ export function PreviewCanvas() {
     const tcX = W - tcW - 8;
     const tcY = 8;
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.beginPath();
-    ctx.roundRect(tcX, tcY, tcW, tcH, 4);
+    (ctx as any).roundRect(tcX, tcY, tcW, tcH, 4);
     ctx.fill();
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'right';
