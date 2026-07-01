@@ -2363,8 +2363,7 @@ export function Timeline() {
                     });
                   })()}
                 </div>
-              );});
-
+              })}
 
               {/* ── Drop preview ──────────────────────────────────────── */}
               {dropPreview && hoveredTrackId && (
