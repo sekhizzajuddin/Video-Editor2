@@ -76,6 +76,12 @@ interface MediaElement {
   delayNode?: DelayNode;
   delayGain?: GainNode;
   feedbackNode?: GainNode;
+  // Vocal / BGM Separation state cached on the node
+  separationSettings?: {
+    enabled: boolean;
+    mode: string;
+    strength: number;
+  };
 }
 
 /**
@@ -193,6 +199,13 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
           }
         }
       }
+
+      // 3. Check active over layers
+      for (const ol of track.overLayers || []) {
+        if (ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
+          addIfNew(ol, track);
+        }
+      }
     }
     return result;
   }, [tracks, currentTime]);
@@ -208,6 +221,17 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
             mediaId: clip.mediaId,
             type: media.type,
           });
+        }
+      }
+      for (const ol of track.overLayers || []) {
+        if (ol.mediaId) {
+          const media = mediaLibrary.find((m) => m.id === ol.mediaId);
+          if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
+            neededClips.set(ol.id, {
+              mediaId: ol.mediaId,
+              type: media.type,
+            });
+          }
         }
       }
     }
@@ -392,7 +416,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         // Find the clip in tracks to get its trimStart or transition entry start time
         let fullClip = null;
         for (const track of tracks) {
-          const found = track.clips.find((c) => c.id === clipId);
+          const found = track.clips.find((c) => c.id === clipId) || (track.overLayers || []).find((c) => c.id === clipId);
           if (found) {
             fullClip = found;
             break;
@@ -400,9 +424,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         }
         if (fullClip) {
           let targetTime = fullClip.trimStart;
-          if (fullClip.transitionIn) {
-            const transDur = fullClip.transitionIn.duration;
-            const alignment = fullClip.transitionIn.params?.alignment || 'center';
+          if ('transitionIn' in fullClip && (fullClip as any).transitionIn) {
+            const transDur = (fullClip as any).transitionIn.duration;
+            const alignment = (fullClip as any).transitionIn.params?.alignment || 'center';
             let offset = 0;
             if (alignment === 'center') {
               offset = transDur / 2;
@@ -447,7 +471,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       let fullClip = null;
       let targetTrack = null;
       for (const track of tracks) {
-        const found = track.clips.find((c) => c.id === clipId);
+        const found = track.clips.find((c) => c.id === clipId) || (track.overLayers || []).find((c) => c.id === clipId);
         if (found) {
           fullClip = found;
           targetTrack = track;
@@ -491,10 +515,19 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         entry.el.preservesPitch = targetPreserve;
       }
 
-      // Update Pitch Shifter parameters
+      // Update Pitch Shifter parameters (includes vocal separation via mid/side processing)
       if (entry.pitchNode) {
         (entry.pitchNode as any).pitch = audioSettings.pitch;
         (entry.pitchNode as any).humanize = audioSettings.humanize;
+        // Cache vocal separation settings on the node for the onaudioprocess callback
+        const sep = audioSettings.vocalSeparation;
+        if (sep) {
+          entry.separationSettings = {
+            enabled: sep.enabled,
+            mode: sep.mode,
+            strength: sep.strength,
+          };
+        }
       }
 
       // Smooth ramp time constant (seconds) — prevents pops/clicks on parameter changes
@@ -551,9 +584,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       let isTransitionMuted = false;
       
       // Check if this clip is the incoming clip in a transition
-      if (fullClip.transitionIn) {
-        const transDur = fullClip.transitionIn.duration;
-        const alignment = fullClip.transitionIn.params?.alignment || 'center';
+      if ('transitionIn' in fullClip && (fullClip as any).transitionIn) {
+        const transDur = (fullClip as any).transitionIn.duration;
+        const alignment = (fullClip as any).transitionIn.params?.alignment || 'center';
         let leftSec = fullClip.startTime - transDur / 2;
         if (alignment === 'left') {
           leftSec = fullClip.startTime;
@@ -803,7 +836,7 @@ function initAudioGraph(entry: MediaElement) {
     const sourceNode = audioCtx.createMediaElementSource(entry.el);
 
     // Look up the parent track of this clip
-    const track = useEditorStore.getState().tracks.find(t => t.clips.some(c => c.id === entry.clipId));
+    const track = useEditorStore.getState().tracks.find(t => t.clips.some(c => c.id === entry.clipId) || (t.overLayers || []).some(c => c.id === entry.clipId));
     const trackAnalyser = track ? getOrCreateTrackAnalyser(track.id, audioCtx) : null;
 
     // 1. Overlap-Add Hann-windowed granular pitch shifter (Stereo)
@@ -840,6 +873,20 @@ function initAudioGraph(entry: MediaElement) {
       const pitch = (pitchNode as any).pitch || 0;
       const isHumanize = (pitchNode as any).humanize || false;
 
+      // Check if vocal separation is enabled for this clip
+      // We access it from the pool entry via a reference set when the graph is built
+      // Since we're inside the closure, we look it up from the entry cache
+      let sepEnabled = false;
+      let sepMode = 'removeVocals';
+      let sepStrength = 80;
+      // Try to read cached separation settings from the MediaElement entry
+      // This is set in the reactive sync effect when audioSettings change
+      if (entry.separationSettings) {
+        sepEnabled = entry.separationSettings.enabled;
+        sepMode = entry.separationSettings.mode;
+        sepStrength = entry.separationSettings.strength;
+      }
+
       let jitter = 0;
       if (isHumanize) {
         // Subtle 5.5 Hz micro-vibrato simulating human throat variation
@@ -849,8 +896,32 @@ function initAudioGraph(entry: MediaElement) {
 
       const semitones = pitch + jitter;
       if (Math.abs(semitones) < 0.01) {
-        outputL.set(inputL);
-        outputR.set(inputR);
+        // Pitch is neutral; just pass through (after separation if needed)
+        if (!sepEnabled) {
+          outputL.set(inputL);
+          outputR.set(inputR);
+          return;
+        }
+        // If separation enabled with no pitch shift, process only separation
+        for (let i = 0; i < inputL.length; i++) {
+          let l = inputL[i], r = inputR[i];
+          const mid = (l + r) * 0.5;
+          const side = (l - r) * 0.5;
+          const strength = sepStrength / 100;
+          if (sepMode === 'removeVocals') {
+            const midAtten = 1.0 - strength;
+            outputL[i] = side * 2.0 + mid * midAtten;
+            outputR[i] = -side * 2.0 + mid * midAtten;
+          } else if (sepMode === 'removeBgm') {
+            const sideAtten = 1.0 - strength;
+            outputL[i] = mid + side * sideAtten;
+            outputR[i] = mid - side * sideAtten;
+          } else {
+            const mix = 1.0 - strength * 0.5;
+            outputL[i] = mid * strength + side * mix;
+            outputR[i] = mid * strength - side * mix;
+          }
+        }
         return;
       }
 
@@ -885,8 +956,31 @@ function initAudioGraph(entry: MediaElement) {
         const cubicR_B = cubicInterp(writeBufR[iB0], writeBufR[iB1], writeBufR[iB2], writeBufR[iB3], fB);
 
         // Overlap-add the two windowed grains
-        outputL[i] = cubicL_A * winA + cubicL_B * winB;
-        outputR[i] = cubicR_A * winA + cubicR_B * winB;
+        let grainL = cubicL_A * winA + cubicL_B * winB;
+        let grainR = cubicR_A * winA + cubicR_B * winB;
+
+        // Apply vocal separation after pitch shifting
+        if (sepEnabled) {
+          const mid = (grainL + grainR) * 0.5;
+          const side = (grainL - grainR) * 0.5;
+          const strength = sepStrength / 100;
+          if (sepMode === 'removeVocals') {
+            const midAtten = 1.0 - strength;
+            grainL = side * 2.0 + mid * midAtten;
+            grainR = -side * 2.0 + mid * midAtten;
+          } else if (sepMode === 'removeBgm') {
+            const sideAtten = 1.0 - strength;
+            grainL = mid + side * sideAtten;
+            grainR = mid - side * sideAtten;
+          } else {
+            const mix = 1.0 - strength * 0.5;
+            grainL = mid * strength + side * mix;
+            grainR = mid * strength - side * mix;
+          }
+        }
+
+        outputL[i] = grainL;
+        outputR[i] = grainR;
 
         writePos = (writePos + 1) % bufferLen;
         readPosA = (readPosA + ratio + bufferLen) % bufferLen;
@@ -912,7 +1006,57 @@ function initAudioGraph(entry: MediaElement) {
       }
     };
 
-    // 2. Vocal peak notch filter (attenuate AI nasal peak around 1.5 kHz)
+    // 0.5. Vocal / BGM Separation node (Mid/Side phase cancellation)
+    const separationNode = audioCtx.createScriptProcessor(4096, 2, 2);
+    separationNode.onaudioprocess = (e) => {
+      const inputL = e.inputBuffer.getChannelData(0);
+      const inputR = e.inputBuffer.getChannelData(1);
+      const outputL = e.outputBuffer.getChannelData(0);
+      const outputR = e.outputBuffer.getChannelData(1);
+
+      // Read live separation settings cached on the entry object
+      const settings = entry.separationSettings;
+      const enabled = settings?.enabled ?? false;
+      const mode = settings?.mode ?? 'removeVocals';
+      const strengthVal = (settings?.strength ?? 80) / 100;
+
+      if (!enabled) {
+        outputL.set(inputL);
+        outputR.set(inputR);
+        return;
+      }
+
+      for (let i = 0; i < inputL.length; i++) {
+        const l = inputL[i];
+        const r = inputR[i];
+
+        // Mid/Side decomposition
+        const mid = (l + r) * 0.5;   // Center-panned content (typically vocals)
+        const side = (l - r) * 0.5;  // Side-panned content (typically instruments)
+
+        let outL, outR;
+
+        if (mode === 'removeVocals') {
+          // Keep side (instruments), attenuate mid (vocals)
+          const midAtten = 1.0 - strengthVal;
+          outL = side * 2.0 + mid * midAtten;
+          outR = -side * 2.0 + mid * midAtten;
+        } else if (mode === 'removeBgm') {
+          // Keep mid (vocals), attenuate side (instruments)
+          const sideAtten = 1.0 - strengthVal;
+          outL = mid + side * sideAtten;
+          outR = mid - side * sideAtten;
+        } else {
+          // Creative blend
+          const mix = 1.0 - strengthVal * 0.5;
+          outL = mid * strengthVal + side * mix;
+          outR = mid * strengthVal - side * mix;
+        }
+
+        outputL[i] = outL;
+        outputR[i] = outR;
+      }
+    };
     const vocalFilter = audioCtx.createBiquadFilter();
     vocalFilter.type = 'peaking';
     vocalFilter.frequency.value = 1500;
@@ -947,9 +1091,10 @@ function initAudioGraph(entry: MediaElement) {
     // 7. Volume Gain node
     const gainNode = audioCtx.createGain();
 
-    // Node connections
+    // Node connections (with separation node inserted after pitch shifter)
     sourceNode.connect(pitchNode);
-    pitchNode.connect(vocalFilter);
+    pitchNode.connect(separationNode);
+    separationNode.connect(vocalFilter);
     vocalFilter.connect(bassFilter);
     bassFilter.connect(trebleFilter);
 

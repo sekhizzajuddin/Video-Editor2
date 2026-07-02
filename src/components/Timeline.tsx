@@ -18,10 +18,11 @@ import {
   Link,
   Unlink2,
   Edit,
+  Layers,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
+import type { TimelineClip, TimelineTrack, MediaItem, EditorState } from '@/types';
 import { formatSimpleTime } from '@/utils/time';
 import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
 
@@ -29,19 +30,41 @@ import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
 
 const DEFAULT_TRACK_HEIGHT = 56;
 const THIN_TRACK_HEIGHT = 32;
+const OVER_LAYER_ROW_HEIGHT = 36;
 
-export const getTrackHeight = (type: string) => (type === 'text' || type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT);
+export const getTrackHeight = (
+  track: TimelineTrack,
+  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null
+) => {
+  const base = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
+  if (!hoveredRegion || hoveredRegion.trackId !== track.id) return base;
+  
+  // Find active over-layers overlapping the hovered region
+  const activeCount = (track.overLayers || []).filter((ol) => {
+    return ol.startTime < hoveredRegion.endTime && ol.startTime + ol.duration > hoveredRegion.startTime;
+  }).length;
+  
+  return base + activeCount * OVER_LAYER_ROW_HEIGHT;
+};
 
-export const getTrackTop = (tracks: TimelineTrack[], index: number) => {
+export const getTrackTop = (
+  tracks: TimelineTrack[],
+  index: number,
+  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null
+) => {
   let top = 0;
-  for (let i = 0; i < index; i++) top += getTrackHeight(tracks[i].type);
+  for (let i = 0; i < index; i++) top += getTrackHeight(tracks[i], hoveredRegion);
   return top;
 };
 
-export const getTrackAtY = (tracks: TimelineTrack[], y: number) => {
+export const getTrackAtY = (
+  tracks: TimelineTrack[],
+  y: number,
+  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null
+) => {
   let currentY = 0;
   for (let i = 0; i < tracks.length; i++) {
-    const h = getTrackHeight(tracks[i].type);
+    const h = getTrackHeight(tracks[i], hoveredRegion);
     if (y >= currentY && y < currentY + h) return i;
     currentY += h;
   }
@@ -540,6 +563,9 @@ export function Timeline() {
     scrollLeft,
     selectedClipId,
     selectedClipIds,
+    selectedOverLayerId,
+    mediaLibrary,
+    hoveredOverLayerRegion,
     activeTool,
     selectedTrackId,
     draggingClipId,
@@ -577,6 +603,12 @@ export function Timeline() {
     updateMarker,
     removeMarker,
     beatMarkers,
+    addOverLayer,
+    removeOverLayer,
+    updateOverLayer,
+    moveOverLayer,
+    selectOverLayer,
+    setHoveredOverLayerRegion,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -627,6 +659,22 @@ export function Timeline() {
     }[];
   } | null>(null);
 
+  const [dragOverLayerState, setDragOverLayerState] = useState<{
+    overLayerId: string;
+    startX: number;
+    startY: number;
+    originalStartTime: number;
+    trackId: string;
+  } | null>(null);
+
+  const [resizeOverLayerState, setResizeOverLayerState] = useState<{
+    overLayerId: string;
+    edge: 'left' | 'right';
+    startX: number;
+    originalDuration: number;
+    originalStartTime: number;
+  } | null>(null);
+
   const [snapLine, setSnapLine] = useState<number | null>(null);
   const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{
@@ -644,7 +692,7 @@ export function Timeline() {
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
-    x: number; y: number; clipId: string; trackType: string; mediaType: string;
+    x: number; y: number; clipId: string; trackType: string; mediaType: string; isOverLayer?: boolean; trackId?: string;
   } | null>(null);
 
   const [markerContextMenu, setMarkerContextMenu] = useState<{
@@ -744,10 +792,10 @@ export function Timeline() {
       if (!container) return null;
       const rect = container.getBoundingClientRect();
       const relY = clientY - rect.top + container.scrollTop;
-      const idx = getTrackAtY(tracks, relY);
+      const idx = getTrackAtY(tracks, relY, hoveredOverLayerRegion);
       return idx >= 0 && idx < tracks.length ? tracks[idx] : null;
     },
-    [tracks],
+    [tracks, hoveredOverLayerRegion],
   );
 
   // ── Snap helper (clip edges + playhead) ─────────────────────────────────
@@ -1200,6 +1248,70 @@ export function Timeline() {
         updateDragPosition(e.clientX, e.clientY, scrollLeft);
       }
 
+      // ─ Over Layer drag ──────────────────────────────────────────────
+      if (dragOverLayerState) {
+        const dx = e.clientX - dragOverLayerState.startX;
+        const dt = dx / zoomLevel;
+        const newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
+        moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
+
+        // Vertical row swapping reordering
+        const track = tracks.find((t) => t.id === dragOverLayerState.trackId);
+        const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
+        if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
+          const trackRect = trackEl.getBoundingClientRect();
+          const relY = e.clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
+          const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
+          
+          const activeOverLayers = (track.overLayers || []).filter((ol) => {
+            return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+          });
+
+          const currentIdxInActive = activeOverLayers.findIndex((ol) => ol.id === dragOverLayerState.overLayerId);
+          if (currentIdxInActive !== -1 && targetRowIdx !== currentIdxInActive && targetRowIdx < activeOverLayers.length) {
+            const reordered = [...track.overLayers];
+            const itemToMove = activeOverLayers[currentIdxInActive];
+            const targetItem = activeOverLayers[targetRowIdx];
+
+            const originalIdx = reordered.findIndex((ol) => ol.id === itemToMove.id);
+            const targetOriginalIdx = reordered.findIndex((ol) => ol.id === targetItem.id);
+
+            if (originalIdx !== -1 && targetOriginalIdx !== -1) {
+              reordered.splice(originalIdx, 1);
+              reordered.splice(targetOriginalIdx, 0, itemToMove);
+
+              useEditorStore.setState((state) => ({
+                tracks: state.tracks.map((t) =>
+                  t.id === track.id ? { ...t, overLayers: reordered } : t
+                ),
+              }));
+            }
+          }
+        }
+      }
+
+      // ─ Over Layer resize ────────────────────────────────────────────
+      if (resizeOverLayerState) {
+        const dx = e.clientX - resizeOverLayerState.startX;
+        const dt = dx / zoomLevel;
+        
+        const track = tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
+        const ol = track?.overLayers.find((ol) => ol.id === resizeOverLayerState.overLayerId);
+        if (ol) {
+          if (resizeOverLayerState.edge === 'right') {
+            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration + dt);
+            updateOverLayer(ol.id, { duration: newDuration });
+          } else {
+            const newStartTime = Math.max(0, resizeOverLayerState.originalStartTime + dt);
+            const delta = newStartTime - resizeOverLayerState.originalStartTime;
+            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration - delta);
+            if (newDuration > 0.1) {
+              updateOverLayer(ol.id, { startTime: newStartTime, duration: newDuration });
+            }
+          }
+        }
+      }
+
       // ─ Clip resize ──────────────────────────────────────────────────
       if (resizeState) {
         const dx = e.clientX - resizeState.startX;
@@ -1418,6 +1530,14 @@ export function Timeline() {
         setResizeState(null);
         useEditorStore.getState().endTransaction(); // commit final snapshot
       }
+      if (dragOverLayerState) {
+        setDragOverLayerState(null);
+        useEditorStore.getState().endTransaction(); // commit final snapshot
+      }
+      if (resizeOverLayerState) {
+        setResizeOverLayerState(null);
+        useEditorStore.getState().endTransaction(); // commit final snapshot
+      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -1445,6 +1565,11 @@ export function Timeline() {
     getTrackFromMouseY,
     getMediaSafe,
     activeTool,
+    dragOverLayerState,
+    resizeOverLayerState,
+    moveOverLayer,
+    updateOverLayer,
+    hoveredOverLayerRegion,
   ]);
 
   // ── Drop from media panel ───────────────────────────────────────────────
@@ -1453,6 +1578,7 @@ export function Timeline() {
     (e: React.DragEvent, trackId: string) => {
       e.preventDefault();
       const track = useEditorStore.getState().tracks.find((t) => t.id === trackId);
+      if (!track) return;
 
       // ── Transition drop → apply to video/image clip at drop position ──
       const transitionName = e.dataTransfer.getData('application/procut-transition');
@@ -1671,7 +1797,40 @@ export function Timeline() {
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const startTime = Math.max(0, x / zoomLevel);
+      const y = e.clientY - rect.top;
+      const startTime = Math.max(0, (x + scrollLeft) / zoomLevel);
+
+      const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
+      const isOverLayerArea = y > baseHeight;
+
+      if (isOverLayerArea && hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+        const activeOverLayers = (track.overLayers || []).filter((ol) => {
+          return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+        });
+        
+        const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
+        const targetOl = activeOverLayers[rowIdx];
+        
+        if (targetOl) {
+          // Verify media type compatibility
+          let compatible = false;
+          if (track.type === 'video' && (media.type === 'video' || media.type === 'image')) compatible = true;
+          if (track.type === 'audio' && media.type === 'audio') compatible = true;
+          if (track.type === 'text' && media.type === 'text') compatible = true;
+          if (track.type === 'fx' && media.type === 'fx') compatible = true;
+          
+          if (compatible) {
+            useEditorStore.getState().updateOverLayer(targetOl.id, {
+              mediaId,
+              duration: media.type === 'image' ? 5 : Math.min(10, media.duration),
+            });
+            useEditorStore.getState().saveSnapshot();
+          }
+          setHoveredTrackId(null);
+          setDropPreview(null);
+          return;
+        }
+      }
 
       const newClip: TimelineClip = {
         id: generateId(),
@@ -1691,7 +1850,7 @@ export function Timeline() {
       setHoveredTrackId(null);
       setDropPreview(null);
     },
-    [zoomLevel],
+    [zoomLevel, scrollLeft, hoveredOverLayerRegion],
   );
 
   const handleDragOver = useCallback(
@@ -1976,7 +2135,7 @@ export function Timeline() {
                 className={`flex items-center px-2 border-b border-[#3e3e3e] ${
                   selectedTrackId === track.id ? 'bg-[#3e3e3e]' : ''
                 }`}
-                style={{ height: getTrackHeight(track.type) }}
+                style={{ height: getTrackHeight(track, hoveredOverLayerRegion) }}
                 onClick={() => selectTrack(track.id)}
               >
                 <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -2245,22 +2404,68 @@ export function Timeline() {
                 return (
                 <div
                   key={track.id}
+                  data-track-id={track.id}
                   className={`relative border-b border-[#3e3e3e] transition-colors ${
                     hoveredTrackId === track.id ? 'bg-[#3e3e3e]/30' : ''
                   }`}
-                  style={{ height: getTrackHeight(track.type) }}
+                  style={{ height: getTrackHeight(track, hoveredOverLayerRegion) }}
                   onDragOver={(e) => handleDragOver(e, track.id)}
                   onDrop={(e) => handleDrop(e, track.id)}
                   onDragEnter={() => setHoveredTrackId(track.id)}
                   onDragLeave={() => {
                     setHoveredTrackId(null);
                     setDropPreview(null);
+                    setHoveredOverLayerRegion(null);
+                  }}
+                  onMouseMove={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const hoverTime = (scrollLeft + mouseX) / zoomLevel;
+                    
+                    const hoveredOl = (track.overLayers || []).find(
+                      (ol) => hoverTime >= ol.startTime && hoverTime < ol.startTime + ol.duration
+                    );
+                    
+                    if (hoveredOl) {
+                      setHoveredOverLayerRegion({
+                        trackId: track.id,
+                        startTime: hoveredOl.startTime,
+                        endTime: hoveredOl.startTime + hoveredOl.duration,
+                      });
+                    } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id) {
+                      const inTimeRange = hoverTime >= hoveredOverLayerRegion.startTime && hoverTime < hoveredOverLayerRegion.endTime;
+                      if (!inTimeRange) {
+                        setHoveredOverLayerRegion(null);
+                      }
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredTrackId(null);
+                    setDropPreview(null);
+                    setHoveredOverLayerRegion(null);
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
                     selectTrack(track.id);
                     selectClip(null);
                     selectTransition(null);
+                    selectOverLayer(null);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selectTrack(track.id);
+                    selectClip(null);
+                    selectTransition(null);
+                    selectOverLayer(null);
+                    setContextMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      clipId: '',
+                      trackType: track.type,
+                      mediaType: track.type === 'video' ? 'video' : track.type === 'audio' ? 'audio' : 'text',
+                      trackId: track.id,
+                    });
                   }}
                 >
                   {/* Faint track type label */}
@@ -2276,22 +2481,29 @@ export function Timeline() {
                     const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
                     const left = clip.startTime * zoomLevel;
                     const isDragging = draggingClipId === clip.id;
-                    const clipHeight = getTrackHeight(track.type) - 8;
+                    const clipHeight = (track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8;
                     const isVideoWithAudio =
                       media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
                     const mainVisualHeight = isVideoWithAudio ? clipHeight - 12 : clipHeight;
 
                       const clipAnims = clip.animations?.['transform.x'] || [];
-                      const keyframeTimes = clipAnims.map(k => k.time).sort((a,b) => a - b);
+                      const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
+                      const hasOverLayerOverlap = (track.overLayers || []).some((ol) => {
+                        const olEnd = ol.startTime + ol.duration;
+                        const clipEnd = clip.startTime + clip.duration;
+                        return ol.startTime < clipEnd && olEnd > clip.startTime;
+                      });
 
                       return (
                         <div
                           key={clip.id}
-                          className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hover} transition-all duration-75 ${
+                          className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${
+                            hasOverLayerOverlap ? 'border-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.6)] z-10' : colors.border
+                          } ${colors.hover} transition-all duration-75 ${
                             isSelected
                               ? activeTool === 'rateStretch'
-                                ? 'ring-2 ring-purple-500 shadow-lg z-10 rate-stretch-active'
-                                : 'ring-2 ring-white shadow-lg z-10'
+                                ? 'ring-2 ring-purple-500 shadow-lg z-20 rate-stretch-active'
+                                : 'ring-2 ring-white shadow-lg z-20'
                               : 'hover:brightness-110'
                           } ${track.locked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
                           style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
@@ -2324,6 +2536,7 @@ export function Timeline() {
                             clipId: clip.id,
                             trackType: track.type,
                             mediaType: track.type === 'audio' ? 'audio' : media.type,
+                            trackId: track.id,
                           });
                         }}
                       >
@@ -2412,14 +2625,14 @@ export function Timeline() {
                         {keyframeTimes.length > 0 && (
                           <div className="absolute top-0 left-0 right-0 h-0 z-40 pointer-events-none">
                             {/* Connecting Lines */}
-                            {keyframeTimes.length > 1 && keyframeTimes.slice(0, -1).map((t, i) => {
-                              const kf = clipAnims.find(k => Math.abs(k.time - t) < 0.05);
+                            {keyframeTimes.length > 1 && keyframeTimes.slice(0, -1).map((t: any, i: number) => {
+                              const kf = clipAnims.find((k: any) => Math.abs(k.time - t) < 0.05);
                               if (kf?.holdNext) return null;
                               
                               const nextT = keyframeTimes[i + 1];
                               const width = (nextT - t) * zoomLevel;
                               
-                              const isSelected = selectedKeyframeLines.some(l => l.clipId === clip.id && l.time === t);
+                              const isSelected = selectedKeyframeLines.some((l: any) => l.clipId === clip.id && l.time === t);
                               
                               return (
                                 <div
@@ -2439,9 +2652,9 @@ export function Timeline() {
                             })}
                             
                             {/* Keyframe Points */}
-                            {keyframeTimes.map((t, i) => {
-                              const kf = clipAnims.find(k => Math.abs(k.time - t) < 0.05);
-                              const prevKf = i > 0 ? clipAnims.find(k => Math.abs(k.time - keyframeTimes[i - 1]) < 0.05) : null;
+                            {keyframeTimes.map((t: any, i: number) => {
+                              const kf = clipAnims.find((k: any) => Math.abs(k.time - t) < 0.05);
+                              const prevKf = i > 0 ? clipAnims.find((k: any) => Math.abs(k.time - keyframeTimes[i - 1]) < 0.05) : null;
                               const isStartEnd = i === 0 || i === keyframeTimes.length - 1 || kf?.holdNext || prevKf?.holdNext;
                               return (
                                 <div
@@ -2558,6 +2771,138 @@ export function Timeline() {
                     );
                   })}
 
+                  {/* ── Over Layers ─────────────────────────────────── */}
+                  {hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id && (() => {
+                    const activeOverLayers = (track.overLayers || []).filter((ol) => {
+                      return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+                    });
+                    
+                    return activeOverLayers.map((ol, index) => {
+                      const width = Math.max(ol.duration * zoomLevel, MIN_CLIP_WIDTH);
+                      const left = ol.startTime * zoomLevel;
+                      const isSelected = selectedOverLayerId === ol.id;
+                      const isDragging = dragOverLayerState?.overLayerId === ol.id;
+                      
+                      // Row offset (starts below base track height)
+                      const topOffset = (track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) + index * OVER_LAYER_ROW_HEIGHT + 2;
+                      
+                      // Media lookup
+                      const media = mediaLibrary.find((m) => m.id === ol.mediaId);
+                      const bgClass = track.type === 'audio' 
+                        ? 'bg-emerald-600/70 border-emerald-500/80 hover:bg-emerald-500/80' 
+                        : (media?.type === 'image' 
+                          ? 'bg-amber-600/70 border-amber-500/80 hover:bg-amber-400/80' 
+                          : 'bg-blue-600/70 border-blue-500/80 hover:bg-blue-400/80');
+                      
+                      return (
+                        <div
+                          key={ol.id}
+                          className={`absolute rounded cursor-pointer group select-none ${bgClass} border transition-all duration-75 flex items-center justify-between px-2 ${
+                            isSelected ? 'ring-2 ring-white shadow-lg z-20' : ''
+                          } ${isDragging ? 'opacity-80 brightness-125' : ''}`}
+                          style={{
+                            left: `${left}px`,
+                            width: `${width}px`,
+                            top: `${topOffset}px`,
+                            height: `${OVER_LAYER_ROW_HEIGHT - 4}px`,
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            if (e.button !== 0) return;
+                            
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const relX = e.clientX - rect.left;
+                            
+                            // Left resize handle
+                            if (relX < 6) {
+                              useEditorStore.getState().startTransaction();
+                              setResizeOverLayerState({
+                                overLayerId: ol.id,
+                                edge: 'left',
+                                startX: e.clientX,
+                                originalDuration: ol.duration,
+                                originalStartTime: ol.startTime,
+                              });
+                              return;
+                            }
+                            
+                            // Right resize handle
+                            if (relX > rect.width - 6) {
+                              useEditorStore.getState().startTransaction();
+                              setResizeOverLayerState({
+                                overLayerId: ol.id,
+                                edge: 'right',
+                                startX: e.clientX,
+                                originalDuration: ol.duration,
+                                originalStartTime: ol.startTime,
+                              });
+                              return;
+                            }
+                            
+                            // Select
+                            selectOverLayer(ol.id);
+                            selectClip(null);
+                            
+                            // Drag
+                            useEditorStore.getState().startTransaction();
+                            setDragOverLayerState({
+                              overLayerId: ol.id,
+                              startX: e.clientX,
+                              startY: e.clientY,
+                              originalStartTime: ol.startTime,
+                              trackId: track.id,
+                            });
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            selectOverLayer(ol.id);
+                            selectClip(null);
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            selectOverLayer(ol.id);
+                            selectClip(null);
+                            setContextMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              clipId: ol.id,
+                              trackType: track.type,
+                              mediaType: media?.type || (track.type === 'audio' ? 'audio' : 'video'),
+                              isOverLayer: true,
+                              trackId: track.id,
+                            });
+                          }}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
+                            {track.type === 'audio' ? (
+                              <Music className="w-3 h-3 text-emerald-300" />
+                            ) : media?.type === 'image' ? (
+                              <Image className="w-3 h-3 text-amber-300" />
+                            ) : (
+                              <Film className="w-3 h-3 text-blue-300" />
+                            )}
+                            <span className="text-[10px] text-white font-medium truncate">
+                              {media ? media.name : '(Empty Over Layer — Drop Media Here)'}
+                            </span>
+                          </div>
+                          
+                          <span className="text-[9px] text-white/50 select-none pointer-events-none">
+                            {ol.duration.toFixed(1)}s
+                          </span>
+
+                          {/* Resize handles visual */}
+                          {!track.locked && (
+                            <>
+                              <div className="absolute left-0 top-0 bottom-0 w-1 cursor-w-resize group-hover:bg-amber-400/40" />
+                              <div className="absolute right-0 top-0 bottom-0 w-1 cursor-e-resize group-hover:bg-amber-400/40" />
+                            </>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+
                   {/* ── Transitions Layer ───────────────────────────── */}
                   {showTransitionLayer && !track.locked && (() => {
                     const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
@@ -2613,10 +2958,10 @@ export function Timeline() {
                 <div
                   className="absolute border-2 border-amber-500/50 border-dashed rounded pointer-events-none z-40 bg-amber-500/5"
                   style={{
-                    top: `${getTrackTop(tracks, dropPreview.trackIdx) + 4}px`,
+                    top: `${getTrackTop(tracks, dropPreview.trackIdx, hoveredOverLayerRegion) + 4}px`,
                     left: `${dropPreview.time * zoomLevel}px`,
                     width: `${dropPreview.duration * zoomLevel}px`,
-                    height: getTrackHeight(tracks[dropPreview.trackIdx]?.type || 'video') - 8,
+                    height: (tracks[dropPreview.trackIdx]?.type === 'text' || tracks[dropPreview.trackIdx]?.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8,
                   }}
                 />
               )}
@@ -2626,8 +2971,8 @@ export function Timeline() {
                 <div
                   className="absolute left-0 right-0 border-2 border-amber-500/30 border-dashed pointer-events-none z-40"
                   style={{
-                    top: `${getTrackTop(tracks, tracks.findIndex((t) => t.id === hoveredTrackId))}px`,
-                    height: getTrackHeight(tracks.find((t) => t.id === hoveredTrackId)?.type || 'video'),
+                    top: `${getTrackTop(tracks, tracks.findIndex((t) => t.id === hoveredTrackId), hoveredOverLayerRegion)}px`,
+                    height: getTrackHeight(tracks.find((t) => t.id === hoveredTrackId)!, hoveredOverLayerRegion),
                   }}
                 />
               )}
@@ -2661,53 +3006,87 @@ export function Timeline() {
         style={{ left: contextMenu.x, top: contextMenu.y }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Unlink Audio — only for video clips that are not already unlinked */}
-        {contextMenu.mediaType === 'video' && !tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
+        {contextMenu.isOverLayer ? (
           <button
-            className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+            className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
             onClick={() => {
-              unlinkAudio(contextMenu.clipId);
+              removeOverLayer(contextMenu.clipId);
+              selectOverLayer(null);
               setContextMenu(null);
             }}
           >
-            <Unlink2 className="w-3.5 h-3.5 text-emerald-400" />
-            Extract Audio
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete Over Layer
           </button>
+        ) : (
+          <>
+            {/* Add Over Layer — always available for any track when right clicking background or clip */}
+            {contextMenu.trackId && (
+              <button
+                className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
+                onClick={() => {
+                  addOverLayer(contextMenu.trackId!);
+                  setContextMenu(null);
+                }}
+              >
+                <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                Add Over Layer
+              </button>
+            )}
+
+            {contextMenu.clipId && (
+              <>
+                {/* Unlink Audio — only for video clips that are not already unlinked */}
+                {contextMenu.mediaType === 'video' && !tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
+                  <button
+                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      unlinkAudio(contextMenu.clipId);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Unlink2 className="w-3.5 h-3.5 text-emerald-400" />
+                    Extract Audio
+                  </button>
+                )}
+                {/* Break Link Connection */}
+                {tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
+                  <button
+                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      breakLinkConnection(contextMenu.clipId);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Unlink2 className="w-3.5 h-3.5 text-red-400" />
+                    Break Link Connection
+                  </button>
+                )}
+                <button
+                  className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                  onClick={() => {
+                    splitClip(contextMenu.clipId, currentTime);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Scissors className="w-3.5 h-3.5 text-amber-400" />
+                  Split at Playhead
+                </button>
+                <div className="h-px bg-[#3e3e3e] my-1" />
+                <button
+                  className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                  onClick={() => {
+                    useEditorStore.getState().removeClip(contextMenu.clipId);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete Clip
+                </button>
+              </>
+            )}
+          </>
         )}
-        {/* Break Link Connection */}
-        {tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
-          <button
-            className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-            onClick={() => {
-              breakLinkConnection(contextMenu.clipId);
-              setContextMenu(null);
-            }}
-          >
-            <Unlink2 className="w-3.5 h-3.5 text-red-400" />
-            Break Link Connection
-          </button>
-        )}
-        <button
-          className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-          onClick={() => {
-            splitClip(contextMenu.clipId, currentTime);
-            setContextMenu(null);
-          }}
-        >
-          <Scissors className="w-3.5 h-3.5 text-amber-400" />
-          Split at Playhead
-        </button>
-        <div className="h-px bg-[#3e3e3e] my-1" />
-        <button
-          className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-          onClick={() => {
-            useEditorStore.getState().removeClip(contextMenu.clipId);
-            setContextMenu(null);
-          }}
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          Delete Clip
-        </button>
       </div>
     )}
 

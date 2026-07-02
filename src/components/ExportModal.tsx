@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { useState, useEffect, useRef } from 'react';
 import { formatSimpleTime } from '@/utils/time';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { getFFmpegSeparationArgs } from '@/utils/audioSeparation';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 const ffmpeg = new FFmpeg();
@@ -128,17 +129,31 @@ export function ExportModal() {
         const inputData = await fetchFile(webmBlob);
         await ffmpeg.writeFile('input.webm', inputData);
 
-        // 4. Run transcode
+        // 4. Build FFmpeg arguments
+        // Collect audio separation settings from clips that have them enabled
+        const separationArgs: string[] = [];
+        for (const track of tracks) {
+          for (const clip of track.clips) {
+            if (clip.audioSettings?.vocalSeparation?.enabled) {
+              const sepArgs = getFFmpegSeparationArgs(clip.audioSettings.vocalSeparation);
+              separationArgs.push(...sepArgs);
+            }
+          }
+        }
+
+        // Run transcode
         // Using ultrafast preset and standard x264/aac parameters for rapid client-side conversion
-        await ffmpeg.exec([
+        const ffmpegArgs = [
           '-i', 'input.webm',
           '-c:v', 'libx264',
           '-preset', 'ultrafast',
           '-pix_fmt', 'yuv420p',
+          ...separationArgs,
           '-c:a', 'aac',
           '-b:a', '128k',
           'output.mp4'
-        ]);
+        ];
+        await ffmpeg.exec(ffmpegArgs);
 
         // 5. Read output MP4 file
         const outputData = await ffmpeg.readFile('output.mp4');

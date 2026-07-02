@@ -93,6 +93,18 @@ export interface ClipAudioSettings {
   pitch: number;        // -12 to 12 semitones (default 0)
   voiceFormant: number; // -100 to 100 (default 0)
   humanize: boolean;    // one-click AI humanizer toggle (default false)
+  // Vocal / BGM Separation
+  vocalSeparation?: {
+    enabled: boolean;     // Enable vocal/BGM separation (default false)
+    mode: 'removeVocals' | 'removeBgm' | 'separateBoth'; // What to isolate/remove
+    strength: number;       // 0 to 100 — separation strength (default 80)
+    // Advanced: per-frequency band control for fine-tuning
+    frequencyBands?: {      // Optional per-band attenuation for manual fine-tuning
+      low: number;          // 0-100, 0 = full remove, 100 = full keep (default 100)
+      mid: number;          // 0-100 (default 100)
+      high: number;         // 0-100 (default 100)
+    };
+  };
 }
 
 export type TextAnimationPreset = 
@@ -257,6 +269,33 @@ export interface TimelineClip {
   lut?: ClipLutSettings;
 }
 
+// NEW: Over Layer Clip — lightweight sub-clip living inside a track
+export interface OverLayerClip {
+  id: string;
+  mediaId: string | null;    // null = empty placeholder (awaiting media drop)
+  trackId: string;           // parent track ID
+  startTime: number;         // absolute timeline position (seconds)
+  duration: number;          // visible duration (seconds)
+  trimStart: number;         // seconds trimmed from beginning of source
+  trimEnd: number;           // seconds trimmed from end of source
+  transform: ClipTransform;  // PIP position, scale, rotation
+  crop?: ClipCrop;           // crop bounding box in percentages (0-100)
+  opacity: number;           // 0-1
+  speed: number;             // playback speed multiplier
+  speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes
+  animations?: ClipAnimations; // timeline keyframes for properties
+  effects: string[];
+  isPreview?: boolean;
+  colorFilters?: ClipColorFilters;
+  audioSettings?: ClipAudioSettings;
+  textSettings?: ClipTextSettings;
+  fxSettings?: ClipFxSettings;
+  particleSettings?: ClipParticleSettings;
+  chromaKey?: ClipChromaKeySettings;
+  kenBurns?: ClipKenBurnsSettings;
+  lut?: ClipLutSettings;
+}
+
 // Timeline Track
 export interface TimelineTrack {
   id: string;
@@ -264,6 +303,7 @@ export interface TimelineTrack {
   type: 'video' | 'audio' | 'text' | 'fx';
   linkedTrackId?: string; // used by FX tracks to link to a host track
   clips: TimelineClip[];
+  overLayers: OverLayerClip[]; // PIP sub-layers
   locked: boolean;
   muted: boolean;
   hidden: boolean;
@@ -289,6 +329,12 @@ export interface EditorState {
   tracks: TimelineTrack[];
   selectedClipId: string | null;
   selectedClipIds: string[];
+  selectedOverLayerId: string | null;      // currently selected over layer
+  hoveredOverLayerRegion: {                // which track region is hovered
+    trackId: string;
+    startTime: number;
+    endTime: number;
+  } | null;
   selectedTrackId: string | null;
   markers: TimelineMarker[];
 

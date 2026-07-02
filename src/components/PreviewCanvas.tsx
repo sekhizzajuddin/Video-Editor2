@@ -1485,13 +1485,27 @@ export function PreviewCanvas() {
       const clip = sortedClips.find(
         (c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration,
       );
-      if (!clip) continue;
+      if (clip) {
+        try {
+          drawSingleClip(clip, 1);
+        } catch (err) {
+          console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
+          try { ctx.restore(); } catch (_) {}
+        }
+      }
 
-      try {
-        drawSingleClip(clip, 1);
-      } catch (err) {
-        console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
-        try { ctx.restore(); } catch (_) {}
+      // Draw over layers for this track on top of the parent clip
+      const activeOverLayers = (track.overLayers || []).filter(
+        (ol) => ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration
+      );
+
+      for (const ol of activeOverLayers) {
+        try {
+          drawSingleClip(ol as any, 1);
+        } catch (err) {
+          console.error('[CanvasRenderError] Failed to draw over layer:', ol.id, err);
+          try { ctx.restore(); } catch (_) {}
+        }
       }
     }
 
@@ -1514,6 +1528,11 @@ export function PreviewCanvas() {
           renderParticles(ctx, clip.id, clip.particleSettings, W, H, particleFrameMs);
         }
       }
+      for (const ol of track.overLayers || []) {
+        if (ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
+          renderParticles(ctx, ol.id, ol.particleSettings, W, H, particleFrameMs);
+        }
+      }
     }
 
     // ── Apply LUT per active clip ──────────────────────────────────────────
@@ -1529,6 +1548,18 @@ export function PreviewCanvas() {
           const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
           if (lutMedia?.lutData) {
             applyLutToCanvas(ctx, W, H, lutMedia.lutData, clip.lut!.intensity ?? 100);
+          }
+        }
+      }
+      for (const ol of track.overLayers || []) {
+        if (
+          ol.lut?.mediaId &&
+          currentTime >= ol.startTime &&
+          currentTime < ol.startTime + ol.duration
+        ) {
+          const lutMedia = mediaLibrary.find((m) => m.id === ol.lut!.mediaId);
+          if (lutMedia?.lutData) {
+            applyLutToCanvas(ctx, W, H, lutMedia.lutData, ol.lut!.intensity ?? 100);
           }
         }
       }

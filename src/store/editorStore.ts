@@ -10,6 +10,7 @@ import type {
   EditorSnapshot,
   Transition,
   ClipTextSettings,
+  OverLayerClip,
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB } from '@/utils/projectPersistence';
@@ -28,6 +29,7 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'V1',
     type: 'video',
     clips: [],
+    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -40,6 +42,7 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'V2',
     type: 'video',
     clips: [],
+    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -52,6 +55,7 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'A1',
     type: 'audio',
     clips: [],
+    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -64,6 +68,7 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'A2',
     type: 'audio',
     clips: [],
+    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -149,6 +154,14 @@ interface EditorActions {
   selectClip: (clipId: string | null, multi?: boolean) => void;
   selectClips: (clipIds: string[]) => void;
   selectTrack: (trackId: string | null) => void;
+
+  // Over Layer Operations
+  addOverLayer: (trackId: string) => void;
+  removeOverLayer: (overLayerId: string) => void;
+  updateOverLayer: (overLayerId: string, updates: Partial<OverLayerClip>) => void;
+  moveOverLayer: (overLayerId: string, newStartTime: number) => void;
+  selectOverLayer: (overLayerId: string | null) => void;
+  setHoveredOverLayerRegion: (region: EditorState['hoveredOverLayerRegion']) => void;
 
   // Playback
   play: () => void;
@@ -252,6 +265,8 @@ const initialState: EditorState = {
   tracks: defaultTracks,
   selectedClipId: null,
   selectedClipIds: [],
+  selectedOverLayerId: null,
+  hoveredOverLayerRegion: null,
   selectedTransitionClipId: null,
   selectedKeyframeLines: [],
   selectedTrackId: null,
@@ -690,6 +705,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
               name: newTrackName,
               type: currentTrack.type,
               clips: [],
+              overLayers: [],
               locked: false,
               muted: false,
               hidden: false,
@@ -1054,6 +1070,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           locked: false,
           muted: false,
           hidden: false,
+          overLayers: [],
         });
       }
 
@@ -1245,6 +1262,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         type,
         linkedTrackId,
         clips: [],
+        overLayers: [],
         locked: false,
         muted: false,
         hidden: false,
@@ -1336,46 +1354,49 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   addMasterKeyframe: (clipId, time, values) => {
     set((state) => {
+      const updateClipKeyframes = (c: any) => {
+        if (c.id !== clipId) return c;
+        const anims: any = c.animations ? { ...c.animations } : {};
+        const props = [
+          { k: 'transform.x', v: values.transform?.x },
+          { k: 'transform.y', v: values.transform?.y },
+          { k: 'transform.scale', v: values.transform?.scale },
+          { k: 'transform.rotation', v: values.transform?.rotation },
+          { k: 'crop.top', v: values.crop?.top },
+          { k: 'crop.bottom', v: values.crop?.bottom },
+          { k: 'crop.left', v: values.crop?.left },
+          { k: 'crop.right', v: values.crop?.right },
+          { k: 'opacity', v: values.opacity },
+          { k: 'audio.volume', v: values.audio?.volume },
+          { k: 'audio.pan', v: values.audio?.pan },
+          { k: 'color.temperature', v: values.color?.temperature },
+          { k: 'color.tint', v: values.color?.tint },
+          { k: 'color.exposure', v: values.color?.exposure },
+          { k: 'color.contrast', v: values.color?.contrast },
+          { k: 'color.saturation', v: values.color?.saturation },
+          { k: 'color.blur', v: values.color?.blur },
+          { k: 'color.fadedFilm', v: values.color?.fadedFilm },
+          { k: 'color.vignette', v: values.color?.vignette },
+        ];
+        
+        props.forEach(p => {
+          if (p.v === undefined) return;
+          const track = anims[p.k] || [];
+          const existingIdx = track.findIndex((kf: any) => Math.abs(kf.time - time) < 0.05);
+          const newTrack = [...track];
+          if (existingIdx >= 0) newTrack[existingIdx] = { ...newTrack[existingIdx], time, value: p.v };
+          else newTrack.push({ time, value: p.v });
+          newTrack.sort((a, b) => a.time - b.time);
+          anims[p.k] = newTrack;
+        });
+
+        return { ...c, animations: anims };
+      };
+
       const newTracks = state.tracks.map((t) => ({
         ...t,
-        clips: t.clips.map((c) => {
-          if (c.id !== clipId) return c;
-          const anims: any = c.animations ? { ...c.animations } : {};
-          const props = [
-            { k: 'transform.x', v: values.transform?.x },
-            { k: 'transform.y', v: values.transform?.y },
-            { k: 'transform.scale', v: values.transform?.scale },
-            { k: 'transform.rotation', v: values.transform?.rotation },
-            { k: 'crop.top', v: values.crop?.top },
-            { k: 'crop.bottom', v: values.crop?.bottom },
-            { k: 'crop.left', v: values.crop?.left },
-            { k: 'crop.right', v: values.crop?.right },
-            { k: 'opacity', v: values.opacity },
-            { k: 'audio.volume', v: values.audio?.volume },
-            { k: 'audio.pan', v: values.audio?.pan },
-            { k: 'color.temperature', v: values.color?.temperature },
-            { k: 'color.tint', v: values.color?.tint },
-            { k: 'color.exposure', v: values.color?.exposure },
-            { k: 'color.contrast', v: values.color?.contrast },
-            { k: 'color.saturation', v: values.color?.saturation },
-            { k: 'color.blur', v: values.color?.blur },
-            { k: 'color.fadedFilm', v: values.color?.fadedFilm },
-            { k: 'color.vignette', v: values.color?.vignette },
-          ];
-          
-          props.forEach(p => {
-            if (p.v === undefined) return;
-            const track = anims[p.k] || [];
-            const existingIdx = track.findIndex((kf: any) => Math.abs(kf.time - time) < 0.05);
-            const newTrack = [...track];
-            if (existingIdx >= 0) newTrack[existingIdx] = { ...newTrack[existingIdx], time, value: p.v };
-            else newTrack.push({ time, value: p.v });
-            newTrack.sort((a, b) => a.time - b.time);
-            anims[p.k] = newTrack;
-          });
-
-          return { ...c, animations: anims };
-        })
+        clips: t.clips.map(updateClipKeyframes),
+        overLayers: (t.overLayers || []).map(updateClipKeyframes),
       }));
       return { tracks: newTracks };
     });
@@ -1383,47 +1404,50 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   deleteMasterKeyframe: (clipId, time) => {
     set((state) => {
+      const deleteClipKeyframe = (c: any) => {
+        if (c.id !== clipId || !c.animations) return c;
+        
+        let updatedClip = { ...c };
+        const anims: any = { ...c.animations };
+        
+        Object.keys(anims).forEach(k => {
+          if (anims[k]) {
+            const kfToDelete = anims[k].find((kf: any) => Math.abs(kf.time - time) < 0.05);
+            if (kfToDelete) {
+              // Update base value to prevent snapping when all keyframes are deleted
+              const parts = k.split('.');
+              if (parts[0] === 'transform' || parts[0] === 'crop') {
+                updatedClip = {
+                  ...updatedClip,
+                  [parts[0]]: { ...(updatedClip as any)[parts[0]], [parts[1]]: kfToDelete.value }
+                };
+              } else if (parts[0] === 'opacity') {
+                updatedClip.opacity = kfToDelete.value;
+              } else if (parts[0] === 'color') {
+                updatedClip = {
+                  ...updatedClip,
+                  colorFilters: { ...(updatedClip.colorFilters || {}), [parts[1]]: kfToDelete.value } as any
+                };
+              } else if (parts[0] === 'audio') {
+                updatedClip = {
+                  ...updatedClip,
+                  audioSettings: { ...(updatedClip.audioSettings || {}), [parts[1]]: kfToDelete.value } as any
+                };
+              }
+            }
+            anims[k] = anims[k].filter((kf: any) => Math.abs(kf.time - time) >= 0.05);
+            if (anims[k].length === 0) delete anims[k];
+          }
+        });
+        
+        updatedClip.animations = anims;
+        return updatedClip;
+      };
+
       const newTracks = state.tracks.map((t) => ({
         ...t,
-        clips: t.clips.map((c) => {
-          if (c.id !== clipId || !c.animations) return c;
-          
-          let updatedClip = { ...c };
-          const anims: any = { ...c.animations };
-          
-          Object.keys(anims).forEach(k => {
-            if (anims[k]) {
-              const kfToDelete = anims[k].find((kf: any) => Math.abs(kf.time - time) < 0.05);
-              if (kfToDelete) {
-                // Update base value to prevent snapping when all keyframes are deleted
-                const parts = k.split('.');
-                if (parts[0] === 'transform' || parts[0] === 'crop') {
-                  updatedClip = {
-                    ...updatedClip,
-                    [parts[0]]: { ...(updatedClip as any)[parts[0]], [parts[1]]: kfToDelete.value }
-                  };
-                } else if (parts[0] === 'opacity') {
-                  updatedClip.opacity = kfToDelete.value;
-                } else if (parts[0] === 'color') {
-                  updatedClip = {
-                    ...updatedClip,
-                    colorFilters: { ...(updatedClip.colorFilters || {}), [parts[1]]: kfToDelete.value } as any
-                  };
-                } else if (parts[0] === 'audio') {
-                  updatedClip = {
-                    ...updatedClip,
-                    audioSettings: { ...(updatedClip.audioSettings || {}), [parts[1]]: kfToDelete.value } as any
-                  };
-                }
-              }
-              anims[k] = anims[k].filter((kf: any) => Math.abs(kf.time - time) >= 0.05);
-              if (anims[k].length === 0) delete anims[k];
-            }
-          });
-          
-          updatedClip.animations = anims;
-          return updatedClip;
-        })
+        clips: t.clips.map(deleteClipKeyframe),
+        overLayers: (t.overLayers || []).map(deleteClipKeyframe),
       }));
       return { tracks: newTracks };
     });
@@ -1431,24 +1455,27 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   moveMasterKeyframe: (clipId, oldTime, newTime) => {
     set((state) => {
+      const moveClipKeyframe = (c: any) => {
+        if (c.id !== clipId || !c.animations) return c;
+        const anims: any = { ...c.animations };
+        Object.keys(anims).forEach(k => {
+          if (anims[k]) {
+            const newTrack = [...anims[k]];
+            const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - oldTime) < 0.05);
+            if (idx >= 0) {
+              newTrack[idx] = { ...newTrack[idx], time: newTime };
+              newTrack.sort((a, b) => a.time - b.time);
+              anims[k] = newTrack;
+            }
+          }
+        });
+        return { ...c, animations: anims };
+      };
+
       const newTracks = state.tracks.map((t) => ({
         ...t,
-        clips: t.clips.map((c) => {
-          if (c.id !== clipId || !c.animations) return c;
-          const anims: any = { ...c.animations };
-          Object.keys(anims).forEach(k => {
-            if (anims[k]) {
-              const newTrack = [...anims[k]];
-              const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - oldTime) < 0.05);
-              if (idx >= 0) {
-                newTrack[idx] = { ...newTrack[idx], time: newTime };
-                newTrack.sort((a, b) => a.time - b.time);
-                anims[k] = newTrack;
-              }
-            }
-          });
-          return { ...c, animations: anims };
-        })
+        clips: t.clips.map(moveClipKeyframe),
+        overLayers: (t.overLayers || []).map(moveClipKeyframe),
       }));
       return { tracks: newTracks };
     });
@@ -1456,23 +1483,26 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   breakMasterKeyframeLink: (clipId, time) => {
     set((state) => {
+      const breakClipKeyframe = (c: any) => {
+        if (c.id !== clipId || !c.animations) return c;
+        const anims: any = { ...c.animations };
+        Object.keys(anims).forEach(k => {
+          if (anims[k]) {
+            const newTrack = [...anims[k]];
+            const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - time) < 0.05);
+            if (idx >= 0) {
+              newTrack[idx] = { ...newTrack[idx], holdNext: true };
+              anims[k] = newTrack;
+            }
+          }
+        });
+        return { ...c, animations: anims };
+      };
+
       const newTracks = state.tracks.map((t) => ({
         ...t,
-        clips: t.clips.map((c) => {
-          if (c.id !== clipId || !c.animations) return c;
-          const anims: any = { ...c.animations };
-          Object.keys(anims).forEach(k => {
-            if (anims[k]) {
-              const newTrack = [...anims[k]];
-              const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - time) < 0.05);
-              if (idx >= 0) {
-                newTrack[idx] = { ...newTrack[idx], holdNext: true };
-                anims[k] = newTrack;
-              }
-            }
-          });
-          return { ...c, animations: anims };
-        })
+        clips: t.clips.map(breakClipKeyframe),
+        overLayers: (t.overLayers || []).map(breakClipKeyframe),
       }));
       return { tracks: newTracks };
     });
@@ -1665,13 +1695,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const data = await loadProjectFromDB();
       if (!data) return false;
       
+      const loadedTracks = data.tracks.map((t: any) => ({
+        ...t,
+        overLayers: t.overLayers || [],
+      }));
+
       set({
-        tracks: data.tracks,
+        tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
         currentTime: data.currentTime,
         history: [
           {
-            tracks: JSON.parse(JSON.stringify(data.tracks)),
+            tracks: JSON.parse(JSON.stringify(loadedTracks)),
             currentTime: data.currentTime
           }
         ],
@@ -1700,13 +1735,118 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const end = clip.startTime + clip.duration;
         if (end > maxEnd) maxEnd = end;
       }
+      for (const ol of track.overLayers || []) {
+        const end = ol.startTime + ol.duration;
+        if (end > maxEnd) maxEnd = end;
+      }
     }
-    // Set totalDuration exactly to maxEnd
+    // Set totalDuration with a minimum floor of 0.1 to avoid unusable slider empty state
     set({
       tracks: cleanedTracks,
-      totalDuration: maxEnd,
+      totalDuration: maxEnd || 0.1,
     });
   },
+
+  // Over Layer Operations
+  addOverLayer: (trackId) => {
+    const { currentTime } = get();
+    const id = generateId();
+    const newOverLayer: OverLayerClip = {
+      id,
+      mediaId: null,
+      trackId,
+      startTime: currentTime,
+      duration: 3,
+      trimStart: 0,
+      trimEnd: 0,
+      transform: {
+        x: 0,
+        y: 0,
+        scale: 50, // default PIP scale 50%
+        rotation: 0,
+      },
+      opacity: 1,
+      speed: 1,
+      effects: [],
+    };
+    set((state) => {
+      const newTracks = state.tracks.map((t) => {
+        if (t.id === trackId) {
+          return {
+            ...t,
+            overLayers: [...(t.overLayers || []), newOverLayer],
+          };
+        }
+        return t;
+      });
+      return {
+        tracks: newTracks,
+        selectedOverLayerId: id,
+        selectedClipId: null,
+        selectedClipIds: [],
+        selectedTrackId: null,
+      };
+    });
+    get().recalcTotalDuration();
+    get().saveSnapshot();
+  },
+
+  removeOverLayer: (overLayerId) => {
+    set((state) => {
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        overLayers: (t.overLayers || []).filter((ol) => ol.id !== overLayerId),
+      }));
+      const newSelectedId = state.selectedOverLayerId === overLayerId ? null : state.selectedOverLayerId;
+      return {
+        tracks: newTracks,
+        selectedOverLayerId: newSelectedId,
+      };
+    });
+    get().recalcTotalDuration();
+    get().saveSnapshot();
+  },
+
+  updateOverLayer: (overLayerId, updates) => {
+    set((state) => {
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        overLayers: (t.overLayers || []).map((ol) =>
+          ol.id === overLayerId ? { ...ol, ...updates } : ol
+        ),
+      }));
+      return { tracks: newTracks };
+    });
+    get().recalcTotalDuration();
+  },
+
+  moveOverLayer: (overLayerId, newStartTime) => {
+    const startTime = Math.max(0, newStartTime);
+    set((state) => {
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        overLayers: (t.overLayers || []).map((ol) =>
+          ol.id === overLayerId ? { ...ol, startTime } : ol
+        ),
+      }));
+      return { tracks: newTracks };
+    });
+    get().recalcTotalDuration();
+  },
+
+  selectOverLayer: (overLayerId) => {
+    set({
+      selectedOverLayerId: overLayerId,
+      selectedClipId: null,
+      selectedClipIds: [],
+      selectedTrackId: null,
+    });
+  },
+
+  setHoveredOverLayerRegion: (region) => {
+    set({ hoveredOverLayerRegion: region });
+  },
+
   // Beat Markers
   addBeatMarkers: (clipId, times) => {
     set((state) => ({

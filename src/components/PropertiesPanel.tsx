@@ -21,7 +21,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { PropertiesTab, ClipKenBurnsSettings } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
@@ -195,10 +195,13 @@ export function PropertiesPanel() {
     tracks,
     selectedClipId,
     selectedClipIds,
+    selectedOverLayerId,
     activePropertiesTab,
     setActivePropertiesTab,
-    updateClip,
-    removeClip,
+    updateClip: storeUpdateClip,
+    updateOverLayer,
+    removeClip: storeRemoveClip,
+    removeOverLayer,
     copyClip,
     duplicateClip,
     splitClip,
@@ -231,15 +234,47 @@ export function PropertiesPanel() {
   // Find the selected clip (or the first selected clip in multi-selection)
   let selectedClip = null;
   let selectedTrack = null;
-  const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
-  for (const track of tracks) {
-    const clip = track.clips.find((c) => c.id === primarySelectedId);
-    if (clip) {
-      selectedClip = clip;
-      selectedTrack = track;
-      break;
+  let isOverLayer = false;
+
+  if (selectedOverLayerId) {
+    for (const track of tracks) {
+      const ol = (track.overLayers || []).find((c) => c.id === selectedOverLayerId);
+      if (ol) {
+        selectedClip = ol as any;
+        selectedTrack = track;
+        isOverLayer = true;
+        break;
+      }
+    }
+  } else {
+    const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
+    for (const track of tracks) {
+      const clip = track.clips.find((c) => c.id === primarySelectedId);
+      if (clip) {
+        selectedClip = clip;
+        selectedTrack = track;
+        break;
+      }
     }
   }
+
+  const primarySelectedId = selectedOverLayerId || selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
+
+  const updateClip = useCallback((clipId: string, updates: any) => {
+    if (isOverLayer) {
+      updateOverLayer(clipId, updates);
+    } else {
+      storeUpdateClip(clipId, updates);
+    }
+  }, [isOverLayer, storeUpdateClip, updateOverLayer]);
+
+  const removeClip = useCallback((clipId: string) => {
+    if (isOverLayer) {
+      removeOverLayer(clipId);
+    } else {
+      storeRemoveClip(clipId);
+    }
+  }, [isOverLayer, storeRemoveClip, removeOverLayer]);
 
   // Auto-switch properties panel tabs only when the clip selection CHANGES (not on property updates)
   const lastAutoSwitchedClip = useRef<string | null>(null);
@@ -497,11 +532,11 @@ export function PropertiesPanel() {
   const animations = selectedClip.animations || {};
   const getMasterKeyframes = () => {
     if (!animations['transform.x']) return [];
-    return animations['transform.x'].map(k => k.time);
+    return animations['transform.x'].map((k: any) => k.time);
   };
   const keyframeTimes = getMasterKeyframes();
   const hasMasterKeyframes = keyframeTimes.length > 0;
-  const isOnKeyframe = keyframeTimes.some(t => Math.abs(t - localTime) < 0.05);
+  const isOnKeyframe = keyframeTimes.some((t: any) => Math.abs(t - localTime) < 0.05);
 
   const getPropVal = (base: number, propKey: string) => {
     return getAnimatedValue(
@@ -560,7 +595,7 @@ export function PropertiesPanel() {
 
   const handleToggleMasterKeyframe = () => {
     if (isOnKeyframe) {
-       const closest = keyframeTimes.find(t => Math.abs(t - localTime) < 0.05);
+        const closest = keyframeTimes.find((t: any) => Math.abs(t - localTime) < 0.05);
        if (closest !== undefined) {
          deleteMasterKeyframe(selectedClip.id, closest);
        }
@@ -934,7 +969,7 @@ export function PropertiesPanel() {
           // Reusing outer component scope helpers: localTime, animations, getPropVal, setPropVal, handleToggleMasterKeyframe
           const keyframeTimes = getMasterKeyframes();
           const hasMasterKeyframes = keyframeTimes.length > 0;
-          const isOnKeyframe = keyframeTimes.some(t => Math.abs(t - localTime) < 0.05);
+          const isOnKeyframe = keyframeTimes.some((t: any) => Math.abs(t - localTime) < 0.05);
 
           return (
             <div className="space-y-3">
@@ -953,9 +988,9 @@ export function PropertiesPanel() {
                 </div>
                 {keyframeTimes.length > 0 && (
                   <div className="space-y-1">
-                    {keyframeTimes.map((t, idx) => {
-                      const kf = animations['transform.x']?.find(k => Math.abs(k.time - t) < 0.05);
-                      const prevKf = idx > 0 ? animations['transform.x']?.find(k => Math.abs(k.time - keyframeTimes[idx - 1]) < 0.05) : null;
+                    {keyframeTimes.map((t: any, idx: number) => {
+                      const kf = animations['transform.x']?.find((k: any) => Math.abs(k.time - t) < 0.05);
+                      const prevKf = idx > 0 ? animations['transform.x']?.find((k: any) => Math.abs(k.time - keyframeTimes[idx - 1]) < 0.05) : null;
                       
                       const isStart = idx === 0 || prevKf?.holdNext;
                       const isEnd = idx === keyframeTimes.length - 1 || kf?.holdNext;
@@ -2147,7 +2182,7 @@ export function PropertiesPanel() {
                       })()}
 
                       {/* Keyframe Draggable Handles */}
-                      {(selectedClip.speedRamp || []).map((kf, idx) => {
+                      {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
                         const x = kf.position * 240;
                         const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
                         const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
@@ -2232,7 +2267,7 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <label className="text-[10px] text-[#a0a0a0] block font-medium">Keyframes</label>
                     <div className="space-y-1 max-h-28 overflow-y-auto pr-1 custom-scrollbar">
-                      {(selectedClip.speedRamp || []).map((kf, idx) => {
+                      {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
                         const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
                         return (
                           <div
@@ -2713,6 +2748,124 @@ export function PropertiesPanel() {
                       />
                     </div>
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* Vocal / BGM Separation */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('vocalSeparation')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Vocal / BGM Separation</span>
+                  {clipAudio.vocalSeparation?.enabled && (
+                    <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded-full font-semibold">ON</span>
+                  )}
+                </div>
+                {collapsedSections['vocalSeparation'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['vocalSeparation'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Enable / Disable Toggle */}
+                  <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
+                    <div>
+                      <span className="text-[#d0d0d0] font-medium block">Enable Separation</span>
+                      <span className="text-[9px] text-[#a0a0a0] block">
+                        {clipAudio.vocalSeparation?.enabled
+                          ? 'Active — processing in real-time'
+                          : 'Toggle to enable vocal/BGM separation'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const current = clipAudio.vocalSeparation;
+                        const newSettings = current
+                          ? { ...current, enabled: !current.enabled }
+                          : { enabled: true, mode: 'removeVocals' as const, strength: 80 };
+                        handleAudioChange('vocalSeparation', newSettings);
+                      }}
+                      className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                        clipAudio.vocalSeparation?.enabled
+                          ? 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      {clipAudio.vocalSeparation?.enabled ? 'Active' : 'Enable'}
+                    </button>
+                  </div>
+
+                  {clipAudio.vocalSeparation?.enabled && (
+                    <>
+                      {/* Mode Selector */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-[#a0a0a0] block font-medium">Separation Mode</label>
+                        <div className="grid grid-cols-1 gap-1.5">
+                          {[
+                            { mode: 'removeVocals' as const, label: 'Remove Vocals (Keep BGM)', desc: 'Background music stays, vocals reduced' },
+                            { mode: 'removeBgm' as const, label: 'Remove BGM (Keep Vocals)', desc: 'Vocals stay, background music reduced' },
+                            { mode: 'separateBoth' as const, label: 'Creative Separation', desc: 'Blend of both channels' },
+                          ].map((item) => (
+                            <button
+                              key={item.mode}
+                              onClick={() => {
+                                const current = clipAudio.vocalSeparation || { enabled: true, mode: 'removeVocals' as const, strength: 80 };
+                                handleAudioChange('vocalSeparation', { ...current, mode: item.mode });
+                              }}
+                              className={`text-left px-3 py-2 rounded border text-xs transition-colors ${
+                                clipAudio.vocalSeparation.mode === item.mode
+                                  ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-300'
+                                  : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#5e5e5e]'
+                              }`}
+                            >
+                              <span className="font-medium block">{item.label}</span>
+                              <span className="text-[9px] opacity-70">{item.desc}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Strength Slider */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-[#d0d0d0]">Separation Strength</span>
+                          <span className="font-mono text-[#a0a0a0]">{clipAudio.vocalSeparation.strength}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={clipAudio.vocalSeparation.strength}
+                          onChange={(e) => {
+                            const current = clipAudio.vocalSeparation || { enabled: true, mode: 'removeVocals' as const, strength: 80 };
+                            handleAudioChange('vocalSeparation', { ...current, strength: Number(e.target.value) });
+                          }}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-webkit-slider-thumb]:rounded-full w-full"
+                        />
+                        <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+                          <span>Subtle</span>
+                          <span>Extreme</span>
+                        </div>
+                      </div>
+
+                      {/* Info Note */}
+                      <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-1">
+                        <p className="text-[10px] text-[#a0a0a0]">
+                          <span className="text-cyan-400 font-medium">How it works:</span> Uses mid/side stereo phase cancellation. Vocals are typically center-panned and cancel when channels are subtracted.
+                        </p>
+                        <p className="text-[9px] text-[#6a6a6a]">
+                          Results vary by mix. Works best on stereo tracks with centered vocals. Mono tracks will not respond to this effect.
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
