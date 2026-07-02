@@ -569,6 +569,7 @@ export function Timeline() {
     addClip,
     reorderTrack,
     unlinkAudio,
+    breakLinkConnection,
     inPoint,
     outPoint,
     markers,
@@ -2270,7 +2271,7 @@ export function Timeline() {
                   {/* ── Clips ──────────────────────────────────────── */}
                   {track.clips.map((clip) => {
                     const media = getMediaSafe(clip);
-                    const colors = CLIP_COLORS[media.type] || CLIP_COLORS.video;
+                    const colors = track.type === 'audio' ? CLIP_COLORS.audio : (CLIP_COLORS[media.type] || CLIP_COLORS.video);
                     const isSelected = selectedClipIds.includes(clip.id);
                     const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
                     const left = clip.startTime * zoomLevel;
@@ -2322,7 +2323,7 @@ export function Timeline() {
                             y: e.clientY,
                             clipId: clip.id,
                             trackType: track.type,
-                            mediaType: media.type,
+                            mediaType: track.type === 'audio' ? 'audio' : media.type,
                           });
                         }}
                       >
@@ -2353,55 +2354,57 @@ export function Timeline() {
 
                         {/* ── Visual content layer ──────────────────── */}
                         <div className="absolute inset-0 overflow-hidden rounded pointer-events-none">
-                          {media.type === 'video' && (
-                            <div style={{ height: mainVisualHeight }} className="relative">
-                              <FrameStripOverlay
-                                media={media}
-                                clipId={clip.id}
-                                width={width}
-                                height={mainVisualHeight}
-                              />
-                            </div>
-                          )}
+                          {(track.type === 'audio' || media.type === 'audio') ? (
+                            <WaveformOverlay
+                              media={media}
+                              clipId={clip.id}
+                              width={width}
+                              height={clipHeight}
+                            />
+                          ) : (
+                            <>
+                              {media.type === 'video' && (
+                                <div style={{ height: mainVisualHeight }} className="relative">
+                                  <FrameStripOverlay
+                                    media={media}
+                                    clipId={clip.id}
+                                    width={width}
+                                    height={mainVisualHeight}
+                                  />
+                                </div>
+                              )}
 
-                        {media.type === 'image' && (
-                          <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                            {media.thumbnail ? (
-                              <img
-                                src={media.thumbnail}
-                                alt=""
-                                draggable={false}
-                                className="w-full h-full object-cover opacity-60"
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-amber-700/30" />
-                            )}
-                          </div>
-                        )}
+                              {media.type === 'image' && (
+                                <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                                  {media.thumbnail ? (
+                                    <img
+                                      src={media.thumbnail}
+                                      alt=""
+                                      draggable={false}
+                                      className="w-full h-full object-cover opacity-60"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full bg-amber-700/30" />
+                                  )}
+                                </div>
+                              )}
 
-                        {media.type === 'audio' && (
-                          <WaveformOverlay
-                            media={media}
-                            clipId={clip.id}
-                            width={width}
-                            height={clipHeight}
-                          />
-                        )}
-
-                          {/* Audio waveform bar beneath video frame strip */}
-                          {isVideoWithAudio && (
-                            <div
-                              className="relative overflow-hidden border-t border-blue-400/20"
-                              style={{ height: 12 }}
-                            >
-                              <WaveformOverlay
-                                media={media}
-                                clipId={clip.id}
-                                width={width}
-                                height={12}
-                                small
-                              />
-                            </div>
+                              {/* Audio waveform bar beneath video frame strip */}
+                              {isVideoWithAudio && (
+                                <div
+                                  className="relative overflow-hidden border-t border-blue-400/20"
+                                  style={{ height: 12 }}
+                                >
+                                  <WaveformOverlay
+                                    media={media}
+                                    clipId={clip.id}
+                                    width={width}
+                                    height={12}
+                                    small
+                                  />
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
 
@@ -2658,8 +2661,8 @@ export function Timeline() {
         style={{ left: contextMenu.x, top: contextMenu.y }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Unlink Audio — only for video clips */}
-        {contextMenu.mediaType === 'video' && (
+        {/* Unlink Audio — only for video clips that are not already unlinked */}
+        {contextMenu.mediaType === 'video' && !tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
           <button
             className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
             onClick={() => {
@@ -2668,7 +2671,20 @@ export function Timeline() {
             }}
           >
             <Unlink2 className="w-3.5 h-3.5 text-emerald-400" />
-            Unlink Audio
+            Extract Audio
+          </button>
+        )}
+        {/* Break Link Connection */}
+        {tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
+          <button
+            className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+            onClick={() => {
+              breakLinkConnection(contextMenu.clipId);
+              setContextMenu(null);
+            }}
+          >
+            <Unlink2 className="w-3.5 h-3.5 text-red-400" />
+            Break Link Connection
           </button>
         )}
         <button

@@ -234,6 +234,7 @@ interface EditorActions {
 
   // Audio/Video Unlink
   unlinkAudio: (clipId: string) => void;
+  breakLinkConnection: (clipId: string) => void;
 
   // Timeline Markers
   addMarker: (time: number, name?: string, color?: string) => void;
@@ -973,24 +974,57 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       duration: videoClip.duration,
       trimStart: videoClip.trimStart,
       trimEnd: videoClip.trimEnd,
-      transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
       opacity: 1,
       speed: videoClip.speed,
       effects: [],
       linkedClipId: clipId,
       audioSettings: videoClip.audioSettings
-        ? { ...videoClip.audioSettings }
-        : undefined,
+        ? { ...videoClip.audioSettings, muted: false }
+        : {
+            volume: 0,
+            pan: 0,
+            fadeIn: 0,
+            fadeOut: 0,
+            bass: 0,
+            treble: 0,
+            muted: false,
+            preservePitch: true,
+            pitch: 0,
+            voiceFormant: 0,
+            humanize: false,
+          },
     } as import('@/types').TimelineClip;
 
     set((state) => {
       const updatedTracks = state.tracks.map((track) => {
-        // Tag the original video clip with linkedClipId
+        // Tag the original video clip with linkedClipId AND mute its audio
         if (track.clips.some((c) => c.id === clipId)) {
           return {
             ...track,
             clips: track.clips.map((c) =>
-              c.id === clipId ? { ...c, linkedClipId: newAudioClipId } : c
+              c.id === clipId
+                ? {
+                    ...c,
+                    linkedClipId: newAudioClipId,
+                    audioSettings: {
+                      ...(c.audioSettings || {
+                        volume: 0,
+                        pan: 0,
+                        fadeIn: 0,
+                        fadeOut: 0,
+                        bass: 0,
+                        treble: 0,
+                        muted: false,
+                        preservePitch: true,
+                        pitch: 0,
+                        voiceFormant: 0,
+                        humanize: false,
+                      }),
+                      muted: true,
+                    },
+                  }
+                : c
             ),
           };
         }
@@ -1004,11 +1038,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       // If no audio track existed, we cannot place it — fall back to creating one
       const hasAudioTrack = updatedTracks.some((t) => t.type === 'audio');
       if (!hasAudioTrack) {
+        const newTrackId = `a_${generateId()}`;
         updatedTracks.push({
-          id: `a_${generateId()}`,
+          id: newTrackId,
           name: 'A1',
           type: 'audio',
-          clips: [{ ...audioClip, trackId: `a_${generateId()}` }],
+          clips: [{ ...audioClip, trackId: newTrackId }],
           locked: false,
           muted: false,
           hidden: false,
@@ -1019,6 +1054,29 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
     get().saveSnapshot();
   },
+
+  breakLinkConnection: (clipId) => {
+    set((state) => {
+      const clip = state.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+      if (!clip) return {};
+      const linkedClipId = clip.linkedClipId;
+
+      const newTracks = state.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((c) => {
+          if (c.id === clipId || (linkedClipId && c.id === linkedClipId)) {
+            // Remove the link reference from both
+            const { linkedClipId: _, ...rest } = c;
+            return rest as TimelineClip;
+          }
+          return c;
+        }),
+      }));
+      return { tracks: newTracks };
+    });
+    get().saveSnapshot();
+  },
+
 
   addMarker: (time, name, color = '#fbbf24') => {
     const marker = {

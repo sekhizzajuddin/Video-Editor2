@@ -554,13 +554,8 @@ export function PreviewCanvas() {
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, W, H);
 
-    const cx = W / 2;
-    const cy = H / 2;
-    const totalX = cx + viewport.x - cx * viewport.zoom;
-    const totalY = cy + viewport.y - cy * viewport.zoom;
-
     ctx.save();
-    ctx.translate(totalX, totalY);
+    ctx.translate(viewport.x, viewport.y);
     ctx.scale(viewport.zoom, viewport.zoom);
 
     // 2. Checkerboard removed per user request
@@ -685,7 +680,7 @@ export function PreviewCanvas() {
 
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
-        if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
+        if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
           // Fit the video into the canvas while preserving aspect ratio
           const vw = videoEl.videoWidth || W;
           const vh = videoEl.videoHeight || H;
@@ -981,7 +976,7 @@ export function PreviewCanvas() {
 
           if (mediaItem.type === 'video') {
             const videoEl = videoElements.get(clip.id);
-            if (videoEl && videoEl.readyState >= 1) {
+            if (videoEl && videoEl.readyState >= 2) {
               const vw = videoEl.videoWidth || W;
               const vh = videoEl.videoHeight || H;
               const scale = Math.min(W / vw, H / vh);
@@ -1132,7 +1127,7 @@ export function PreviewCanvas() {
           ctx.filter = `blur(${6 * intensity}px) brightness(1.8)`;
           if (mediaItem.type === 'video') {
             const videoEl = videoElements.get(clip.id);
-            if (videoEl && videoEl.readyState >= 1) {
+            if (videoEl && videoEl.readyState >= 2) {
               ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
             }
           }
@@ -1154,7 +1149,7 @@ export function PreviewCanvas() {
           // Use offscreen canvas to isolate channels — avoids ImageData coord issues
           if (mediaItem.type === 'video') {
             const videoEl = videoElements.get(clip.id);
-            if (videoEl && videoEl.readyState >= 1) {
+            if (videoEl && videoEl.readyState >= 2) {
               ctx.save();
               ctx.globalAlpha = 0.55;
               ctx.globalCompositeOperation = 'screen';
@@ -1223,7 +1218,7 @@ export function PreviewCanvas() {
             ctx.scale(s, s);
             if (mediaItem.type === 'video') {
               const videoEl = videoElements.get(clip.id);
-              if (videoEl && videoEl.readyState >= 1) {
+              if (videoEl && videoEl.readyState >= 2) {
                 ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
               }
             }
@@ -1885,7 +1880,16 @@ export function PreviewCanvas() {
                   <input
                     type="range" min={10} max={400} step={5}
                     value={Math.round(viewport.zoom * 100)}
-                    onChange={(e) => setViewport((v) => ({ ...v, zoom: Number(e.target.value) / 100 }))}
+                    onChange={(e) => {
+                      const newZoom = Number(e.target.value) / 100;
+                      setViewport(prev => {
+                        const cx = 854 / 2;
+                        const cy = 480 / 2;
+                        const nx = cx - (cx - prev.x) * (newZoom / prev.zoom);
+                        const ny = cy - (cy - prev.y) * (newZoom / prev.zoom);
+                        return { x: nx, y: ny, zoom: newZoom };
+                      });
+                    }}
                     className="w-full h-1 bg-[#3e3e3e] rounded appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-400 [&::-webkit-slider-thumb]:rounded-full"
                   />
                 </div>
@@ -2545,16 +2549,11 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     });
   };
 
-  const cx = W / 2;
-  const cy = H / 2;
-  const totalX = cx + viewport.x - cx * viewport.zoom;
-  const totalY = cy + viewport.y - cy * viewport.zoom;
-
   return (
     <>
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
-          <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom})`}>
+          <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
             <g
               transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
             >
