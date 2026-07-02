@@ -6,10 +6,12 @@ import {
   Volume2,
   VolumeX,
   Maximize2,
+  Minimize2,
   Settings2,
   Film,
   RotateCcw,
   Scissors,
+  Grid,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
@@ -380,6 +382,7 @@ export function PreviewCanvas() {
     selectClip,
     playbackSpeed,
     setPlaybackSpeed,
+    playbackDirection,
     mediaLibrary,
     updateClip,
     canvasTransformMode,
@@ -399,6 +402,9 @@ export function PreviewCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [showSafeZones, setShowSafeZones] = useState(false);
+  const showSafeZonesRef = useRef(false);
+  showSafeZonesRef.current = showSafeZones;
   
   // Hand tool panning state
   const isPanning = useRef(false);
@@ -466,9 +472,11 @@ export function PreviewCanvas() {
     const loop = (now: number) => {
       const dt = (now - lastTime) / 1000;
       lastTime = now;
-      const newTime = currentTimeRef.current + dt * playbackSpeed;
-
+      
       const state = useEditorStore.getState();
+      const dir = state.playbackDirection ?? 1;
+      const newTime = currentTimeRef.current + dt * playbackSpeed * dir;
+
       const allClips = state.tracks.flatMap((t) => t.clips);
 
       if (selectedClipIds.length > 0) {
@@ -484,8 +492,9 @@ export function PreviewCanvas() {
           }
 
           if (newTime >= maxEnd || newTime < minStart) {
-            seek(minStart);
-            currentTimeRef.current = minStart;
+            const startPos = dir >= 0 ? minStart : maxEnd;
+            seek(startPos);
+            currentTimeRef.current = startPos;
           } else {
             seek(newTime);
           }
@@ -501,7 +510,14 @@ export function PreviewCanvas() {
         if (end > maxEndSequence) maxEndSequence = end;
       }
 
-      if (newTime >= maxEndSequence) {
+      if (dir < 0 && newTime <= 0) {
+        seek(0);
+        currentTimeRef.current = 0;
+        state.pause();
+        return;
+      }
+
+      if (dir >= 0 && newTime >= maxEndSequence) {
         seek(0);
         currentTimeRef.current = 0;
         state.pause();
@@ -514,7 +530,7 @@ export function PreviewCanvas() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, playbackSpeed, seek, selectedClipIds]);
+  }, [isPlaying, playbackSpeed, seek, selectedClipIds, playbackDirection]);
 
   // -------------------------------------------------------------------
   // Canvas rendering – called whenever time, tracks, or images change
@@ -577,6 +593,7 @@ export function PreviewCanvas() {
       // Set up transform
       ctx.save();
       ctx.globalAlpha = aOpacity * opacityMultiplier;
+      ctx.globalCompositeOperation = clip.transform.blendMode || 'source-over';
 
       const cx = W / 2;
       const cy = H / 2;
@@ -606,6 +623,9 @@ export function PreviewCanvas() {
         blur: getAnimatedValue(clip.colorFilters?.blur ?? 0, currentTime, clip.startTime, clip.animations?.['color.blur']),
         fadedFilm: getAnimatedValue(clip.colorFilters?.fadedFilm ?? 0, currentTime, clip.startTime, clip.animations?.['color.fadedFilm']),
         vignette: getAnimatedValue(clip.colorFilters?.vignette ?? 0, currentTime, clip.startTime, clip.animations?.['color.vignette']),
+        shadows: clip.colorFilters?.shadows,
+        midtones: clip.colorFilters?.midtones,
+        highlights: clip.colorFilters?.highlights,
       };
 
       // Check for active FX on the track this clip belongs to
@@ -673,9 +693,30 @@ export function PreviewCanvas() {
           const dx = -baseDw / 2 + baseDw * cLeft;
           const dy = -baseDh / 2 + baseDh * cTop;
 
-          // Apply standard filters
+          // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
-          ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, dw, dh);
+          const hasWheels = filters.shadows || filters.midtones || filters.highlights;
+          const hasChroma = clip.chromaKey?.enabled;
+          if (hasWheels || hasChroma) {
+            const offscreen = document.createElement('canvas');
+            offscreen.width = Math.max(1, Math.round(dw));
+            offscreen.height = Math.max(1, Math.round(dh));
+            const oCtx = offscreen.getContext('2d');
+            if (oCtx) {
+              oCtx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
+              if (hasChroma && clip.chromaKey) {
+                applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+              }
+              if (hasWheels) {
+                applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
+              }
+              ctx.drawImage(offscreen, dx, dy, dw, dh);
+            } else {
+              ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, dw, dh);
+            }
+          } else {
+            ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, dw, dh);
+          }
           ctx.filter = 'none';
           hasRealMedia = true;
           anyClipDrawn = true;
@@ -704,9 +745,30 @@ export function PreviewCanvas() {
           const dx = -baseDw / 2 + baseDw * cLeft;
           const dy = -baseDh / 2 + baseDh * cTop;
 
-          // Apply standard filters
+          // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
-          ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+          const hasWheels = filters.shadows || filters.midtones || filters.highlights;
+          const hasChroma = clip.chromaKey?.enabled;
+          if (hasWheels || hasChroma) {
+            const offscreen = document.createElement('canvas');
+            offscreen.width = Math.max(1, Math.round(dw));
+            offscreen.height = Math.max(1, Math.round(dh));
+            const oCtx = offscreen.getContext('2d');
+            if (oCtx) {
+              oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
+              if (hasChroma && clip.chromaKey) {
+                applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+              }
+              if (hasWheels) {
+                applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
+              }
+              ctx.drawImage(offscreen, dx, dy, dw, dh);
+            } else {
+              ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+            }
+          } else {
+            ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+          }
           ctx.filter = 'none';
           hasRealMedia = true;
           anyClipDrawn = true;
@@ -719,11 +781,89 @@ export function PreviewCanvas() {
         const ts = clip.textSettings as any;
         const { text, fontSize, fontFamily, color, backgroundColor, bold, italic, shadow, shadowColor, shadowBlur, threeD, threeDDepth } = ts;
         const textAlign: CanvasTextAlign = ts.textAlign || 'center';
+
+        // Calculate text animations
+        const localTime = currentTime - clip.startTime;
+        const clipDur = clip.duration;
+        const inDur = ts.animation?.inDuration ?? 0.5;
+        const outDur = ts.animation?.outDuration ?? 0.5;
+        const inProgress = Math.min(1, Math.max(0, localTime / inDur));
+        const outProgress = Math.min(1, Math.max(0, (clipDur - localTime) / outDur));
+
+        let textAlpha = 1.0;
+        let textScale = 1.0;
+        let textXOffset = 0;
+        let textYOffset = 0;
+        let animatedText = text;
+
+        if (ts.animation?.in && ts.animation.in !== 'none') {
+          switch (ts.animation.in) {
+            case 'fadeIn':
+              textAlpha *= inProgress;
+              break;
+            case 'zoom':
+              textScale *= (0.2 + 0.8 * inProgress);
+              break;
+            case 'slideUp':
+              textYOffset += (1 - inProgress) * 60;
+              break;
+            case 'slideDown':
+              textYOffset -= (1 - inProgress) * 60;
+              break;
+            case 'slideLeft':
+              textXOffset += (1 - inProgress) * 120;
+              break;
+            case 'slideRight':
+              textXOffset -= (1 - inProgress) * 120;
+              break;
+            case 'bounce': {
+              const t = inProgress;
+              const bounceFactor = t < 0.6 ? 0.3 * Math.sin(t * Math.PI / 0.6) : (t < 0.9 ? -0.1 * Math.sin((t - 0.6) * Math.PI / 0.3) : 0);
+              textScale *= (1 + bounceFactor);
+              break;
+            }
+            case 'typewriter': {
+              const totalChars = text.length;
+              const charsShown = Math.floor(inProgress * totalChars);
+              animatedText = text.slice(0, charsShown);
+              break;
+            }
+          }
+        }
+
+        if (ts.animation?.out && ts.animation.out !== 'none') {
+          switch (ts.animation.out) {
+            case 'fadeOut':
+              textAlpha *= outProgress;
+              break;
+            case 'zoom':
+              textScale *= (0.2 + 0.8 * outProgress);
+              break;
+            case 'slideUp':
+              textYOffset -= (1 - outProgress) * 60;
+              break;
+            case 'slideDown':
+              textYOffset += (1 - outProgress) * 60;
+              break;
+            case 'slideLeft':
+              textXOffset -= (1 - outProgress) * 120;
+              break;
+            case 'slideRight':
+              textXOffset += (1 - outProgress) * 120;
+              break;
+          }
+        }
+
+        ctx.save();
+        ctx.translate(textXOffset, textYOffset);
+        ctx.scale(textScale, textScale);
+        ctx.globalAlpha *= textAlpha;
+
         ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontSize}px "${fontFamily || 'Inter'}", sans-serif`;
         ctx.textAlign = textAlign;
         ctx.textBaseline = 'middle';
         
-        const metrics = ctx.measureText(text);
+        const metrics = ctx.measureText(animatedText);
         dw = metrics.width + 40;
         dh = fontSize + 40;
 
@@ -751,15 +891,30 @@ export function PreviewCanvas() {
         if (threeD) {
           ctx.fillStyle = shadowColor || '#000000';
           for (let d = 0; d < (threeDDepth || 5); d++) {
-            ctx.fillText(text, textX - d, d);
+            if (ts.strokeWidth && ts.strokeWidth > 0) {
+              ctx.strokeStyle = ts.strokeColor || '#000000';
+              ctx.lineWidth = ts.strokeWidth;
+              ctx.lineJoin = 'round';
+              ctx.strokeText(animatedText, textX - d, d);
+            }
+            ctx.fillText(animatedText, textX - d, d);
           }
           ctx.shadowBlur = 0;
         }
 
+        if (ts.strokeWidth && ts.strokeWidth > 0) {
+          ctx.strokeStyle = ts.strokeColor || '#000000';
+          ctx.lineWidth = ts.strokeWidth;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(animatedText, textX, 0);
+        }
+
         ctx.fillStyle = color || '#ffffff';
-        ctx.fillText(text, textX, 0);
+        ctx.fillText(animatedText, textX, 0);
         ctx.shadowBlur = 0;
         
+        ctx.restore();
+
         hasRealMedia = true;
         anyClipDrawn = true;
       }
@@ -1146,7 +1301,10 @@ export function PreviewCanvas() {
           }
           ctx.restore();
         }
-      }    for (const track of visualTracks) {
+      }
+    };
+
+    for (const track of visualTracks) {
       const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
       let activeTransition: { clipA: any; clipB: any; trans: any; t: number } | null = null;
 
@@ -1264,6 +1422,38 @@ export function PreviewCanvas() {
 
     ctx.restore(); // Restore from viewport transform
 
+    // Safe Zones Overlay
+    if (showSafeZonesRef.current) {
+      const actionSafe = 0.9; // 90%
+      const titleSafe = 0.8;  // 80%
+
+      ctx.save();
+      ctx.globalAlpha = 1;
+      
+      const drawSafeRect = (pct: number, color: string, label: string) => {
+        const rw = W * pct;
+        const rh = H * pct;
+        const rx = (W - rw) / 2;
+        const ry = (H - rh) / 2;
+        
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(rx, ry, rw, rh);
+        
+        ctx.fillStyle = color;
+        ctx.font = '9px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(label, rx + 4, ry + 4);
+      };
+
+      drawSafeRect(actionSafe, 'rgba(234, 179, 8, 0.6)', 'Action Safe 90%');
+      drawSafeRect(titleSafe, 'rgba(14, 165, 233, 0.6)', 'Title Safe 80%');
+      
+      ctx.restore();
+    }
+
     // 5. Timecode overlay – top-right
     ctx.globalAlpha = 1;
     const tcText = formatTime(currentTime);
@@ -1282,7 +1472,7 @@ export function PreviewCanvas() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones]);
 
   // Kick off render whenever dependencies change
   useEffect(() => {
@@ -1492,7 +1682,11 @@ export function PreviewCanvas() {
           ref={canvasRef}
           width={854}
           height={480}
-          className="w-full h-full object-contain pointer-events-none"
+          className={`pointer-events-none ${
+            isFullscreen
+              ? 'absolute inset-0 w-full h-full object-contain bg-black'
+              : 'w-full h-full object-contain'
+          }`}
         />
         <InteractiveCanvasOverlay viewport={viewport} />
 
@@ -1503,7 +1697,22 @@ export function PreviewCanvas() {
             className="p-1.5 bg-black/50 hover:bg-black/70 rounded text-white/70 hover:text-white transition-colors"
             title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           >
-            <Maximize2 className="w-3.5 h-3.5" />
+            {isFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5" />
+            )}
+          </button>
+          <button
+            onClick={() => setShowSafeZones(!showSafeZones)}
+            className={`p-1.5 rounded transition-colors ${
+              showSafeZones
+                ? 'bg-amber-600/40 text-amber-300 border border-amber-500/30'
+                : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white'
+            }`}
+            title="Safe Zones (Guides)"
+          >
+            <Grid className="w-3.5 h-3.5" />
           </button>
           <button
             className="p-1.5 bg-black/50 hover:bg-black/70 rounded text-white/70 hover:text-white transition-colors"
@@ -1777,6 +1986,135 @@ function applyColorOverlays(
     ctx.fillStyle = grad;
     ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
     ctx.restore();
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Helper: apply Chroma Key / Green Screen background removal
+// ---------------------------------------------------------------------------
+function applyChromaKeyOnData(
+  oCtx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  keyColorHex: string,
+  threshold: number, // 0 to 100
+  softness: number   // 0 to 100
+) {
+  try {
+    const imgData = oCtx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    // Convert hex color to RGB
+    const hex = keyColorHex.replace('#', '');
+    const kr = parseInt(hex.substring(0, 2), 16) || 0;
+    const kg = parseInt(hex.substring(2, 4), 16) || 255; // default to green
+    const kb = parseInt(hex.substring(4, 6), 16) || 0;
+
+    // Convert keyColor to YUV for cleaner chroma separation
+    const ku = -0.1687 * kr - 0.3313 * kg + 0.5 * kb + 128;
+    const kv = 0.5 * kr - 0.4187 * kg - 0.0813 * kb + 128;
+
+    const th = threshold * 2.4; 
+    const soft = softness * 2.4;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const u = -0.1687 * r - 0.3313 * g + 0.5 * b + 128;
+      const v = 0.5 * r - 0.4187 * g - 0.0813 * b + 128;
+
+      // Distance in UV chrominance space (ignores luminance differences)
+      const dist = Math.sqrt((u - ku) ** 2 + (v - kv) ** 2);
+
+      if (dist < th) {
+        data[i + 3] = 0; 
+      } else if (dist < th + soft && soft > 0) {
+        const factor = (dist - th) / soft;
+        data[i + 3] = Math.round(data[i + 3] * factor);
+      }
+    }
+
+    oCtx.putImageData(imgData, 0, 0);
+  } catch (e) {
+    console.warn('Chroma key calculation error:', e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: apply 3-Way Color Wheels (Lift, Gamma, Gain / Shadows, Midtones, Highlights)
+// ---------------------------------------------------------------------------
+function applyColorGradingWheelsOnData(
+  oCtx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  shadows?: any,
+  midtones?: any,
+  highlights?: any
+) {
+  const getWheelOffsets = (wh?: any) => {
+    if (!wh) return { r: 0, g: 0, b: 0 };
+    const hue = wh.hue || 0;
+    const sat = wh.saturation || 0;
+    const lift = wh.lift || 0;
+
+    const rad = (hue * Math.PI) / 180;
+    const factor = (sat / 100) * 0.15; // Max 15% color offset
+    const brightness = (lift / 100) * 0.15; // Max 15% brightness offset
+
+    return {
+      r: Math.cos(rad) * factor + brightness,
+      g: Math.cos(rad - (2 * Math.PI) / 3) * factor + brightness,
+      b: Math.cos(rad + (2 * Math.PI) / 3) * factor + brightness,
+    };
+  };
+
+  const sOff = getWheelOffsets(shadows);
+  const mOff = getWheelOffsets(midtones);
+  const hOff = getWheelOffsets(highlights);
+
+  // If all offsets are zero, skip processing
+  if (
+    sOff.r === 0 && sOff.g === 0 && sOff.b === 0 &&
+    mOff.r === 0 && mOff.g === 0 && mOff.b === 0 &&
+    hOff.r === 0 && hOff.g === 0 && hOff.b === 0
+  ) {
+    return;
+  }
+
+  try {
+    const imgData = oCtx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // Luminance (0.0 to 1.0)
+      const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+
+      // Weights
+      const w_s = Math.pow(1 - lum, 2);
+      const w_h = Math.pow(lum, 2);
+      const w_m = Math.max(0, 1 - w_s - w_h);
+
+      // Interpolate offsets
+      const dr = sOff.r * w_s + mOff.r * w_m + hOff.r * w_h;
+      const dg = sOff.g * w_s + mOff.g * w_m + hOff.g * w_h;
+      const db = sOff.b * w_s + mOff.b * w_m + hOff.b * w_h;
+
+      // Apply
+      data[i] = Math.min(255, Math.max(0, (r / 255 + dr) * 255));
+      data[i + 1] = Math.min(255, Math.max(0, (g / 255 + dg) * 255));
+      data[i + 2] = Math.min(255, Math.max(0, (b / 255 + db) * 255));
+    }
+
+    oCtx.putImageData(imgData, 0, 0);
+  } catch (e) {
+    console.warn('Color grading wheels calculation error:', e);
   }
 }
 

@@ -144,9 +144,12 @@ interface EditorActions {
   togglePlayback: () => void;
   seek: (time: number) => void;
   setPlaybackSpeed: (speed: number) => void;
+  setPlaybackDirection: (dir: -1 | 0 | 1, speed?: number) => void;
   setVolume: (volume: number) => void;
   toggleMute: () => void;
   setTotalDuration: (duration: number) => void;
+  setInPoint: (time: number | null) => void;
+  setOutPoint: (time: number | null) => void;
 
   // Tools
   setActiveTool: (tool: EditorTool) => void;
@@ -216,6 +219,11 @@ interface EditorActions {
 
   // Audio/Video Unlink
   unlinkAudio: (clipId: string) => void;
+
+  // Timeline Markers
+  addMarker: (time: number, name?: string, color?: string) => void;
+  updateMarker: (id: string, updates: Partial<import('@/types').TimelineMarker>) => void;
+  removeMarker: (id: string) => void;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -236,8 +244,12 @@ const initialState: EditorState = {
   isPlaying: false,
   totalDuration: 0,
   playbackSpeed: 1,
+  playbackDirection: 1,
   isMuted: false,
   volume: 1,
+  inPoint: null,
+  outPoint: null,
+  markers: [],
   zoomLevel: 80,
   scrollLeft: 0,
   activeTool: 'select',
@@ -466,6 +478,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       if (!foundClip) return {};
 
+      const oldStartTime = foundClip.startTime;
+      const deltaTime = newStartTime - oldStartTime;
+
       const targetTrackId = newTrackId || foundClip.trackId;
       const targetTrack = newTracks.find((t) => t.id === targetTrackId);
 
@@ -484,6 +499,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         foundClip.trackId = targetTrackId;
         targetTrack.clips.push(foundClip);
         success = true;
+
+        // Also move linked clip if it exists
+        if (foundClip.linkedClipId) {
+          let linkedClip: TimelineClip | undefined;
+          for (const track of newTracks) {
+            linkedClip = track.clips.find((c) => c.id === foundClip!.linkedClipId);
+            if (linkedClip) break;
+          }
+          if (linkedClip) {
+            linkedClip.startTime = Math.max(0, linkedClip.startTime + deltaTime);
+          }
+        }
       }
 
       return { tracks: newTracks };
@@ -503,6 +530,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
 
       const movingClipsMap = new Map<string, TimelineClip>();
+      const updatedClipIds = new Set(updates.map(u => u.clipId));
+
       for (const update of updates) {
         for (const track of newTracks) {
           const idx = track.clips.findIndex((c) => c.id === update.clipId);
@@ -519,6 +548,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       for (const update of sortedUpdates) {
         const clip = movingClipsMap.get(update.clipId);
         if (!clip) continue;
+
+        const oldStartTime = clip.startTime;
+        const deltaTime = update.newStartTime - oldStartTime;
 
         const targetTrackId = update.newTrackId || clip.trackId;
         const targetTrack = newTracks.find((t) => t.id === targetTrackId);
@@ -537,6 +569,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           }
           clip.trackId = targetTrackId;
           targetTrack.clips.push(clip);
+
+          // If this clip has a linked clip and the linked clip is NOT also in the moving set,
+          // move the linked clip by the same delta
+          if (clip.linkedClipId && !updatedClipIds.has(clip.linkedClipId)) {
+            let linkedClip: TimelineClip | undefined;
+            for (const track of newTracks) {
+              linkedClip = track.clips.find((c) => c.id === clip.linkedClipId);
+              if (linkedClip) break;
+            }
+            if (linkedClip) {
+              linkedClip.startTime = Math.max(0, linkedClip.startTime + deltaTime);
+            }
+          }
         }
       }
 
@@ -955,6 +1000,28 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot();
   },
 
+  addMarker: (time, name, color = '#fbbf24') => {
+    const marker = {
+      id: generateId(),
+      time,
+      name: name || `Marker ${get().markers.length + 1}`,
+      color,
+    };
+    set((state) => ({
+      markers: [...state.markers, marker],
+    }));
+  },
+  updateMarker: (id, updates) => {
+    set((state) => ({
+      markers: state.markers.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+    }));
+  },
+  removeMarker: (id) => {
+    set((state) => ({
+      markers: state.markers.filter((m) => m.id !== id),
+    }));
+  },
+
 
 
   // Playback
@@ -978,9 +1045,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
     }
-    set({ isPlaying: true });
+    set({ isPlaying: true, playbackDirection: 1 });
   },
-  pause: () => set({ isPlaying: false }),
+  pause: () => set({ isPlaying: false, playbackDirection: 0 }),
   togglePlayback: () => {
     const { tracks, isPlaying, selectedClipIds, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips);
@@ -1001,13 +1068,25 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
     }
-    set((state) => ({ isPlaying: !state.isPlaying }));
+    set((state) => ({ 
+      isPlaying: !state.isPlaying, 
+      playbackDirection: !state.isPlaying ? 1 : 0 
+    }));
   },
   seek: (time) => set({ currentTime: Math.max(0, time) }),
   setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
+  setPlaybackDirection: (dir, speed = 1) => {
+    if (dir === 0) {
+      set({ isPlaying: false, playbackDirection: 0, playbackSpeed: 1 });
+    } else {
+      set({ isPlaying: true, playbackDirection: dir, playbackSpeed: speed });
+    }
+  },
   setVolume: (volume) => set({ volume, isMuted: volume === 0 }),
   toggleMute: () => set((state) => ({ isMuted: !state.isMuted })),
   setTotalDuration: (duration) => set({ totalDuration: duration }),
+  setInPoint: (time) => set({ inPoint: time }),
+  setOutPoint: (time) => set({ outPoint: time }),
 
   // Tools
   setActiveTool: (tool) => set({ activeTool: tool }),

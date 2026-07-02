@@ -1,17 +1,27 @@
-import { X, Download } from 'lucide-react';
+import { X, Download, Film, Sparkles } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useEffect, useRef } from 'react';
 import { formatSimpleTime } from '@/utils/time';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
+
+const ffmpeg = new FFmpeg();
 
 export function ExportModal() {
   const { 
     showExportModal, setShowExportModal, totalDuration, tracks,
-    previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime
+    previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime,
+    inPoint, outPoint
   } = useEditorStore();
   const [fps, setFps] = useState('30');
   const [quality, setQuality] = useState('high');
+  const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('mp4');
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
+  
+  const [isConverting, setIsConverting] = useState(false);
+  const [conversionProgress, setConversionProgress] = useState(0);
+  
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
 
@@ -20,10 +30,14 @@ export function ExportModal() {
   // Watch currentTime to update progress and stop recording
   useEffect(() => {
     if (isExporting) {
-      const p = Math.min(100, (currentTime / totalDuration) * 100);
+      const startAt = inPoint !== null ? inPoint : 0;
+      const endAt = outPoint !== null ? outPoint : totalDuration;
+      const duration = Math.max(0.1, endAt - startAt);
+      const elapsed = Math.max(0, currentTime - startAt);
+      const p = Math.min(100, (elapsed / duration) * 100);
       setProgress(p);
 
-      if (currentTime >= totalDuration) {
+      if (currentTime >= endAt) {
         if (recorderRef.current && recorderRef.current.state === 'recording') {
           recorderRef.current.stop();
         }
@@ -33,7 +47,7 @@ export function ExportModal() {
         setIsExporting(false);
       }
     }
-  }, [currentTime, totalDuration, isExporting, isPlaying, togglePlayback]);
+  }, [currentTime, totalDuration, isExporting, isPlaying, togglePlayback, inPoint, outPoint]);
 
   const handleExport = () => {
     if (!previewCanvas || !masterAudioStream) {
@@ -71,27 +85,109 @@ export function ExportModal() {
       }
     };
 
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `procut-export-${Date.now()}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-      }, 100);
-      setShowExportModal(false);
-      setProgress(0);
+    recorder.onstop = async () => {
+      const webmBlob = new Blob(chunksRef.current, { type: mimeType });
+      
+      if (exportFormat === 'webm') {
+        const url = URL.createObjectURL(webmBlob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `procut-export-${Date.now()}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }, 100);
+        setShowExportModal(false);
+        setProgress(0);
+        return;
+      }
+
+      // Convert to MP4 using FFmpeg WASM
+      setIsConverting(true);
+      setConversionProgress(0);
+      
+      try {
+        // 1. Load FFmpeg
+        if (!ffmpeg.loaded) {
+          const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+          await ffmpeg.load({
+            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+          });
+        }
+
+        // 2. Setup progress callback
+        ffmpeg.on('progress', ({ progress: p }) => {
+          setConversionProgress(Math.round(p * 100));
+        });
+
+        // 3. Write input WebM to virtual file system
+        const inputData = await fetchFile(webmBlob);
+        await ffmpeg.writeFile('input.webm', inputData);
+
+        // 4. Run transcode
+        // Using ultrafast preset and standard x264/aac parameters for rapid client-side conversion
+        await ffmpeg.exec([
+          '-i', 'input.webm',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          'output.mp4'
+        ]);
+
+        // 5. Read output MP4 file
+        const outputData = await ffmpeg.readFile('output.mp4');
+        const mp4Blob = new Blob([outputData as any], { type: 'video/mp4' });
+        
+        // 6. Trigger download
+        const url = URL.createObjectURL(mp4Blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `procut-export-${Date.now()}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }, 100);
+
+        // Clean up files in virtual FS
+        await ffmpeg.deleteFile('input.webm');
+        await ffmpeg.deleteFile('output.mp4');
+      } catch (err) {
+        console.error('FFmpeg WASM MP4 export failed, downloading WebM fallback:', err);
+        alert('FFmpeg MP4 conversion failed (CORS or SharedArrayBuffer headers required). Downloading direct WebM instead.');
+        
+        // Fallback to WebM
+        const url = URL.createObjectURL(webmBlob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `procut-export-${Date.now()}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }, 100);
+      } finally {
+        setIsConverting(false);
+        setShowExportModal(false);
+        setProgress(0);
+      }
     };
 
     recorderRef.current = recorder;
     
-    // Seek to 0 and start playback to trigger recording frames
-    seek(0);
+    // Seek to In point (or 0) and start playback to trigger recording frames
+    const startAt = inPoint !== null ? inPoint : 0;
+    seek(startAt);
     setTimeout(() => {
       recorder.start();
       if (!useEditorStore.getState().isPlaying) {
@@ -113,7 +209,8 @@ export function ExportModal() {
           </div>
           <button
             onClick={() => setShowExportModal(false)}
-            className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors"
+            disabled={isExporting || isConverting}
+            className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <X className="w-4 h-4" />
           </button>
@@ -136,47 +233,50 @@ export function ExportModal() {
                 <span className="text-white">{tracks.length}</span>
               </div>
               <div>
-                <span className="text-[#a0a0a0]">Format: </span>
-                <span className="text-white">WebM (VP9 + Opus)</span>
+                <span className="text-[#a0a0a0]">Render Resolution: </span>
+                <span className="text-white">854 x 480 (16:9)</span>
               </div>
             </div>
           </div>
 
-          {/* Browser export info banner */}
-          <div className="bg-blue-950/40 border border-blue-500/30 rounded p-3">
-            <p className="text-[10px] text-blue-300 leading-relaxed">
-              <strong className="text-blue-200">Browser Export:</strong> The web platform exports video as <strong>.webm</strong> (VP9 codec) — the only format natively supported by the browser&apos;s MediaRecorder API. To convert to MP4 or other formats, open the downloaded file in HandBrake, FFmpeg, or any video converter.
-            </p>
-          </div>
-
-          {/* Resolution */}
+          {/* Export Format Selector */}
           <div>
-            <label className="text-xs text-[#a0a0a0] block mb-2">Resolution</label>
-            <div className="grid grid-cols-1 gap-2">
-              <button
-                className={`px-3 py-2 rounded text-xs border transition-colors bg-amber-600/20 border-amber-500 text-amber-400`}
-              >
-                <div>Preview Native</div>
-                <div className="text-[9px] opacity-60 mt-0.5">854 x 480</div>
-              </button>
+            <label className="text-xs text-[#a0a0a0] block mb-2">Export Format</label>
+            <div className="flex gap-2">
+              {[
+                { id: 'mp4', label: 'MP4 (H.264 + AAC)', desc: 'Max Compatibility' },
+                { id: 'webm', label: 'WebM (VP9 + Opus)', desc: 'Direct / Raw' },
+              ].map((fmt) => (
+                <button
+                  key={fmt.id}
+                  disabled={isExporting || isConverting}
+                  onClick={() => setExportFormat(fmt.id as any)}
+                  className={`flex-1 px-3 py-2 rounded text-xs border transition-colors text-left ${
+                    exportFormat === fmt.id
+                      ? 'bg-amber-600/20 border-amber-500 text-amber-400'
+                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0] disabled:opacity-40 disabled:cursor-not-allowed'
+                  }`}
+                >
+                  <div className="font-semibold">{fmt.label}</div>
+                  <div className="text-[9px] opacity-60 mt-0.5">{fmt.desc}</div>
+                </button>
+              ))}
             </div>
-            <p className="text-[10px] text-[#a0a0a0] mt-2">
-              Currently exporting at Preview Canvas native resolution. Advanced multi-res exporting is planned for a future update.
-            </p>
           </div>
 
-          {/* FPS */}
+          {/* Frame Rate */}
           <div>
             <label className="text-xs text-[#a0a0a0] block mb-2">Frame Rate</label>
             <div className="flex gap-2">
               {['24', '30', '60'].map((f) => (
                 <button
                   key={f}
+                  disabled={isExporting || isConverting}
                   onClick={() => setFps(f)}
                   className={`px-4 py-2 rounded text-xs border transition-colors ${
                     fps === f
                       ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0]'
+                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0] disabled:opacity-40 disabled:cursor-not-allowed'
                   }`}
                 >
                   {f} fps
@@ -187,34 +287,35 @@ export function ExportModal() {
 
           {/* Quality */}
           <div>
-            <label className="text-xs text-[#a0a0a0] block mb-2">Quality</label>
+            <label className="text-xs text-[#a0a0a0] block mb-2">Quality Preset</label>
             <div className="flex gap-2">
               {[
-                { id: 'draft', label: 'Draft', desc: 'Fast' },
-                { id: 'high', label: 'High', desc: 'Balanced' },
-                { id: 'max', label: 'Maximum', desc: 'Slow' },
+                { id: 'draft', label: 'Draft', desc: 'Fast render' },
+                { id: 'high', label: 'High', desc: 'Balanced quality' },
+                { id: 'max', label: 'Maximum', desc: 'Slow / High bitrate' },
               ].map((q) => (
                 <button
                   key={q.id}
+                  disabled={isExporting || isConverting}
                   onClick={() => setQuality(q.id)}
-                  className={`flex-1 px-3 py-2 rounded text-xs border transition-colors ${
+                  className={`flex-1 px-3 py-2 rounded text-xs border transition-colors text-left ${
                     quality === q.id
                       ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0]'
+                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0] disabled:opacity-40 disabled:cursor-not-allowed'
                   }`}
                 >
-                  <div>{q.label}</div>
-                  <div className="text-[9px] opacity-60">{q.desc}</div>
+                  <div className="font-semibold">{q.label}</div>
+                  <div className="text-[9px] opacity-60 mt-0.5">{q.desc}</div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Progress */}
+          {/* Recording Progress */}
           {isExporting && (
             <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-white">Exporting...</span>
+                <span className="text-xs text-white">Rendering Timeline...</span>
                 <span className="text-xs text-amber-400">{Math.round(progress)}%</span>
               </div>
               <div className="h-2 bg-[#3e3e3e] rounded-full overflow-hidden">
@@ -225,23 +326,46 @@ export function ExportModal() {
               </div>
             </div>
           )}
+
+          {/* FFmpeg Conversion Progress */}
+          {isConverting && (
+            <div className="bg-[#252525] rounded p-3 border border-amber-500/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                  <span className="text-xs text-white font-medium">Assembling H.264 MP4 Container...</span>
+                </div>
+                <span className="text-xs text-amber-400">{conversionProgress}%</span>
+              </div>
+              <div className="h-2 bg-[#3e3e3e] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-500 rounded-full transition-all duration-200"
+                  style={{ width: `${conversionProgress}%` }}
+                />
+              </div>
+              <p className="text-[9px] text-[#a0a0a0] leading-relaxed">
+                FFmpeg WASM is encoding raw frames. Please keep this tab active to allow hardware acceleration.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 p-4 border-t border-[#3e3e3e]">
           <button
             onClick={() => setShowExportModal(false)}
-            className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors"
+            disabled={isExporting || isConverting}
+            className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             onClick={handleExport}
-            disabled={isExporting}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-[#3e3e3e] text-white text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
+            disabled={isExporting || isConverting}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-[#3e3e3e] disabled:cursor-not-allowed text-white text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
           >
             <Download className="w-3.5 h-3.5" />
-            {isExporting ? 'Exporting...' : 'Export'}
+            {isExporting ? 'Rendering...' : isConverting ? 'Encoding MP4...' : 'Start Export'}
           </button>
         </div>
       </div>

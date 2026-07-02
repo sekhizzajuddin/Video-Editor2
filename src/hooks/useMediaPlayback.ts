@@ -18,6 +18,7 @@ import { getAnimatedValue } from '@/utils/keyframes';
 
 // Global master audio context for combining all tracks into a single MediaStream for Export
 let masterAudioCtx: AudioContext | null = null;
+let masterCompressor: DynamicsCompressorNode | null = null;
 let masterAudioDestination: MediaStreamAudioDestinationNode | null = null;
 
 function getMasterAudioCtx() {
@@ -27,6 +28,18 @@ function getMasterAudioCtx() {
       masterAudioCtx = new AudioContextClass();
       if (masterAudioCtx) {
         masterAudioDestination = masterAudioCtx.createMediaStreamDestination();
+        
+        // Master Dynamics Compressor/Limiter to prevent clipping and balance track volume levels
+        masterCompressor = masterAudioCtx.createDynamicsCompressor();
+        masterCompressor.threshold.value = -12; // dBFS
+        masterCompressor.knee.value = 6;
+        masterCompressor.ratio.value = 4;
+        masterCompressor.attack.value = 0.003;
+        masterCompressor.release.value = 0.25;
+        
+        // Route master compressor output to speakers and to export stream destination
+        masterCompressor.connect(masterAudioCtx.destination);
+        masterCompressor.connect(masterAudioDestination);
       }
     }
   }
@@ -326,12 +339,15 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         const justActivated = !lastActiveClipIdsRef.current.has(clipId);
         const clipForceSeek = forceSeek || justActivated;
 
+        const direction = useEditorStore.getState().playbackDirection ?? 1;
+        const isReversing = direction < 0;
+
         // Relaxed drift limit (250ms) during normal playback to avoid stuttering/seeking loops.
-        // During force-seeking (play start, user seek, first activation), we use a tighter limit (50ms).
-        const driftLimit = 0.25;
+        // During force-seeking (play start, user seek, first activation) or reverse playback, we use a tighter limit.
+        const driftLimit = isReversing ? 0.02 : 0.25;
 
         if (clipForceSeek || drift > driftLimit) {
-          const forceSeekThreshold = 0.05; // 50ms
+          const forceSeekThreshold = isReversing ? 0.02 : 0.05; // 50ms
           const threshold = clipForceSeek ? forceSeekThreshold : driftLimit;
           if (drift > threshold) {
             if (entry.el.seeking) {
@@ -342,9 +358,11 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
           }
         }
 
-        // Play if paused
-        if (entry.el.paused && isPlaying) {
+        // Play if paused (only when playing forward)
+        if (entry.el.paused && isPlaying && !isReversing) {
           entry.el.play().catch(() => { /* user interaction required — ignore */ });
+        } else if (!entry.el.paused && (!isPlaying || isReversing)) {
+          entry.el.pause();
         }
       }
     }
@@ -908,9 +926,13 @@ function initAudioGraph(entry: MediaElement) {
       delayGain.connect(gainNode);
     }
 
-    gainNode.connect(audioCtx.destination);
-    if (masterAudioDestination) {
-      gainNode.connect(masterAudioDestination);
+    if (masterCompressor) {
+      gainNode.connect(masterCompressor);
+    } else {
+      gainNode.connect(audioCtx.destination);
+      if (masterAudioDestination) {
+        gainNode.connect(masterAudioDestination);
+      }
     }
 
     // Attach to element pool entry

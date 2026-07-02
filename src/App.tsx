@@ -137,6 +137,36 @@ function App() {
             setActiveTool('split');
           }
           break;
+        case 'i':
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            useEditorStore.getState().setInPoint(currentTime);
+          }
+          break;
+        case 'o':
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            useEditorStore.getState().setOutPoint(currentTime);
+          }
+          break;
+        case 'm':
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            useEditorStore.getState().addMarker(currentTime);
+          }
+          break;
+        case 'j': {
+          e.preventDefault();
+          const state = useEditorStore.getState();
+          const curDir = state.playbackDirection ?? 0;
+          const curSpeed = state.playbackSpeed ?? 1;
+          if (curDir >= 0) {
+            state.setPlaybackDirection(-1, 1);
+          } else {
+            state.setPlaybackDirection(-1, Math.min(curSpeed * 2, 8));
+          }
+          break;
+        }
         case 'k':
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
@@ -151,8 +181,23 @@ function App() {
                 });
               });
             }
+          } else {
+            e.preventDefault();
+            useEditorStore.getState().setPlaybackDirection(0);
           }
           break;
+        case 'l': {
+          e.preventDefault();
+          const state = useEditorStore.getState();
+          const curDir = state.playbackDirection ?? 0;
+          const curSpeed = state.playbackSpeed ?? 1;
+          if (curDir <= 0) {
+            state.setPlaybackDirection(1, 1);
+          } else {
+            state.setPlaybackDirection(1, Math.min(curSpeed * 2, 8));
+          }
+          break;
+        }
         case 'arrowleft':
           e.preventDefault();
           if (e.altKey) {

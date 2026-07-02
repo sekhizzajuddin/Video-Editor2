@@ -36,6 +36,122 @@ const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React
   </button>
 );
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper component: 3-Way Color Wheel (Shadows, Midtones, Highlights)
+// ─────────────────────────────────────────────────────────────────────────────
+interface ColorWheelProps {
+  label: string;
+  value?: { hue: number; saturation: number; lift: number };
+  onChange: (updates: { hue: number; saturation: number; lift: number }) => void;
+  accentColor: string;
+}
+
+function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
+  const wheelRef = useRef<HTMLDivElement>(null);
+  const hue = value?.hue ?? 0;
+  const sat = value?.saturation ?? 0;
+  const lift = value?.lift ?? 0;
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    (e.target as HTMLDivElement).setPointerCapture(e.pointerId);
+    updateFromPointer(e);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.buttons > 0) {
+      updateFromPointer(e);
+    }
+  };
+
+  const updateFromPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!wheelRef.current) return;
+    const rect = wheelRef.current.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+
+    const dx = px - cx;
+    const dy = py - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Saturation is percentage of radius
+    const maxR = rect.width / 2;
+    const newSat = Math.min(100, Math.round((dist / maxR) * 100));
+
+    // Hue angle in degrees (-180 to 180)
+    let newHue = Math.round((Math.atan2(dy, dx) * 180) / Math.PI);
+
+    onChange({ hue: newHue, saturation: newSat, lift });
+  };
+
+  // Convert hue and saturation back to (X, Y) percentages for puck position
+  const angleRad = (hue * Math.PI) / 180;
+  const radiusPct = sat / 100;
+  const puckX = 50 + Math.cos(angleRad) * radiusPct * 50;
+  const puckY = 50 + Math.sin(angleRad) * radiusPct * 50;
+
+  return (
+    <div className="flex flex-col items-center gap-1.5 p-2 bg-[#1e1e1e] rounded border border-[#3e3e3e] flex-1">
+      <span className="text-[9px] font-bold tracking-wider uppercase text-white">{label}</span>
+
+      {/* Circle Container */}
+      <div
+        ref={wheelRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        className="w-16 h-16 rounded-full relative cursor-crosshair border border-[#3e3e3e] shadow-[inset_0_0_6px_rgba(0,0,0,0.6)] select-none touch-none"
+        style={{
+          background: 'conic-gradient(from 0deg, red, yellow, lime, cyan, blue, magenta, red)',
+        }}
+      >
+        {/* Soft center overlay to make colors fade to white at center */}
+        <div className="absolute inset-0 rounded-full bg-white opacity-40 mix-blend-overlay" />
+        {/* Subtle radial shadow to simulate hardware wheels */}
+        <div className="absolute inset-0 rounded-full shadow-[inset_0_0_8px_rgba(0,0,0,0.8)]" />
+
+        {/* Center crosshair */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 border border-white/40 rounded-full pointer-events-none" />
+
+        {/* Selected puck */}
+        <div
+          className="absolute w-2 h-2 bg-white border border-black rounded-full shadow -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-all duration-75"
+          style={{
+            left: `${puckX}%`,
+            top: `${puckY}%`,
+          }}
+        />
+      </div>
+
+      {/* Info labels */}
+      <div className="flex justify-between w-full text-[8px] text-[#a0a0a0] px-0.5 font-mono">
+        <span>H: {hue}°</span>
+        <span>S: {sat}%</span>
+      </div>
+
+      {/* Brightness/Lift Slider */}
+      <div className="w-full space-y-1 mt-1 border-t border-[#3e3e3e]/30 pt-1">
+        <div className="flex justify-between text-[8px] text-[#a0a0a0] font-mono px-0.5">
+          <span>Lift</span>
+          <span>{lift > 0 ? `+${lift}` : lift}</span>
+        </div>
+        <input
+          type="range"
+          min={-100}
+          max={100}
+          value={lift}
+          onChange={(e) => onChange({ hue, saturation: sat, lift: Number(e.target.value) })}
+          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+          onDoubleClick={() => onChange({ hue, saturation: sat, lift: 0 })}
+          title="Double-click to reset lift to 0"
+          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+        />
+      </div>
+    </div>
+  );
+}
+
 const PRESETS = {
   slowMo: [
     { position: 0.0, speed: 1.0 },
@@ -1068,6 +1184,69 @@ export function PropertiesPanel() {
               )}
             </div>
 
+            {/* Blend Mode */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('blendMode')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+              >
+                <span className="font-medium">Blend Mode</span>
+                <div className="flex items-center gap-2">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateClip(selectedClip.id, { transform: { ...selectedClip.transform, blendMode: 'source-over' } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                    title="Reset Blend Mode"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                  </div>
+                  {collapsedSections['blendMode'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  )}
+                </div>
+              </button>
+              {!collapsedSections['blendMode'] && (
+                <div className="px-2.5 pb-2.5">
+                  <select
+                    value={selectedClip.transform.blendMode || 'source-over'}
+                    onChange={(e) => {
+                      updateClip(selectedClip.id, { transform: { ...selectedClip.transform, blendMode: e.target.value as GlobalCompositeOperation } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
+                    className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 capitalize cursor-pointer"
+                  >
+                    {[
+                      'source-over',
+                      'multiply',
+                      'screen',
+                      'overlay',
+                      'darken',
+                      'lighten',
+                      'color-dodge',
+                      'color-burn',
+                      'hard-light',
+                      'soft-light',
+                      'difference',
+                      'exclusion',
+                      'hue',
+                      'saturation',
+                      'color',
+                      'luminosity'
+                    ].map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode.replace('-', ' ')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
             {/* Crop */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
@@ -1345,6 +1524,176 @@ export function PropertiesPanel() {
                         className="flex-1 h-1 bg-gradient-to-r from-white via-[#3e3e3e] to-black rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
                       />
                     </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3-Way Color Wheels */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] group">
+              <button
+                onClick={() => toggleSection('colorWheels')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">3-Way Color Wheels</span>
+                <div className="flex items-center gap-2">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateClip(selectedClip.id, {
+                        colorFilters: {
+                          ...selectedClip.colorFilters,
+                          shadows: { hue: 0, saturation: 0, lift: 0 },
+                          midtones: { hue: 0, saturation: 0, lift: 0 },
+                          highlights: { hue: 0, saturation: 0, lift: 0 },
+                        } as any
+                      });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                    title="Reset All Wheels"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                  </div>
+                  {collapsedSections['colorWheels'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  )}
+                </div>
+              </button>
+              {!collapsedSections['colorWheels'] && (
+                <div className="px-2 pb-3 flex gap-2 border-t border-[#3e3e3e]/30 pt-2.5">
+                  <ColorWheel
+                    label="Shadows"
+                    value={selectedClip.colorFilters?.shadows}
+                    onChange={(val) => {
+                      updateClip(selectedClip.id, {
+                        colorFilters: { ...selectedClip.colorFilters, shadows: val } as any
+                      });
+                    }}
+                    accentColor="#fbbf24"
+                  />
+                  <ColorWheel
+                    label="Midtones"
+                    value={selectedClip.colorFilters?.midtones}
+                    onChange={(val) => {
+                      updateClip(selectedClip.id, {
+                        colorFilters: { ...selectedClip.colorFilters, midtones: val } as any
+                      });
+                    }}
+                    accentColor="#3b82f6"
+                  />
+                  <ColorWheel
+                    label="Highlights"
+                    value={selectedClip.colorFilters?.highlights}
+                    onChange={(val) => {
+                      updateClip(selectedClip.id, {
+                        colorFilters: { ...selectedClip.colorFilters, highlights: val } as any
+                      });
+                    }}
+                    accentColor="#ef4444"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Chroma Key / Green Screen */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('chromaKey')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Chroma Key / Green Screen</span>
+                {collapsedSections['chromaKey'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['chromaKey'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Enable Chroma Key */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedClip.chromaKey?.enabled || false}
+                      onChange={(e) => {
+                        const existing = selectedClip.chromaKey ?? { color: '#00ff00', threshold: 30, softness: 10 };
+                        updateClip(selectedClip.id, {
+                          chromaKey: { ...existing, enabled: e.target.checked }
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-amber-500 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span className="text-[11px] text-[#d0d0d0]">Enable Chroma Key</span>
+                  </label>
+
+                  {/* Key Color Picker */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#a0a0a0]">Key Color</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-[#a0a0a0] uppercase">{selectedClip.chromaKey?.color || '#00FF00'}</span>
+                        <input
+                          type="color"
+                          value={selectedClip.chromaKey?.color || '#00ff00'}
+                          onChange={(e) => {
+                            const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                            updateClip(selectedClip.id, {
+                              chromaKey: { ...existing, color: e.target.value }
+                            });
+                          }}
+                          onBlur={() => useEditorStore.getState().saveSnapshot()}
+                          className="w-5 h-5 bg-transparent border-0 rounded cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border [&::-webkit-color-swatch]:border-[#3e3e3e] [&::-webkit-color-swatch]:rounded"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Threshold Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Threshold</span>
+                      <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.threshold ?? 30}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={100}
+                      value={selectedClip.chromaKey?.threshold ?? 30}
+                      onChange={(e) => {
+                        const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                        updateClip(selectedClip.id, {
+                          chromaKey: { ...existing, threshold: Number(e.target.value) }
+                        });
+                      }}
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                  </div>
+
+                  {/* Softness Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Softness / Spill</span>
+                      <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.softness ?? 10}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={selectedClip.chromaKey?.softness ?? 10}
+                      onChange={(e) => {
+                        const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                        updateClip(selectedClip.id, {
+                          chromaKey: { ...existing, softness: Number(e.target.value) }
+                        });
+                      }}
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    />
                   </div>
                 </div>
               )}
@@ -2229,6 +2578,36 @@ export function PropertiesPanel() {
                 </div>
               </div>
 
+              <div className="flex gap-4 border-t border-[#3e3e3e] pt-4">
+                <div className="flex flex-col gap-2 flex-1">
+                  <label className="text-xs text-[#a0a0a0]">Stroke Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={selectedClip.textSettings.strokeColor || '#000000'}
+                      onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, strokeColor: e.target.value } })}
+                      className="w-6 h-6 rounded bg-transparent cursor-pointer"
+                    />
+                    <span className="text-xs text-white uppercase">{selectedClip.textSettings.strokeColor || '#000000'}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 flex-1">
+                  <label className="text-xs text-[#a0a0a0]">Stroke Width</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="20"
+                      value={selectedClip.textSettings.strokeWidth || 0}
+                      onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, strokeWidth: Number(e.target.value) } })}
+                      className="flex-1 accent-amber-500"
+                    />
+                    <span className="text-xs text-white w-5 text-right">{selectedClip.textSettings.strokeWidth || 0}</span>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center gap-4 border-t border-[#3e3e3e] pt-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -2327,6 +2706,119 @@ export function PropertiesPanel() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Text Animation Presets */}
+              <div className="border-t border-[#3e3e3e] pt-4 flex flex-col gap-4">
+                <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Text Animations</p>
+                
+                {/* Intro Animation (IN) */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-[#a0a0a0]">Intro (IN)</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedClip.textSettings.animation?.in || 'none'}
+                      onChange={(e) => {
+                        const anim = selectedClip.textSettings!.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                        updateClip(selectedClip.id, {
+                          textSettings: {
+                            ...selectedClip.textSettings!,
+                            animation: { ...anim, in: e.target.value as any }
+                          }
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
+                    >
+                      <option value="none">None</option>
+                      <option value="fadeIn">Fade In</option>
+                      <option value="zoom">Zoom</option>
+                      <option value="slideUp">Slide Up</option>
+                      <option value="slideDown">Slide Down</option>
+                      <option value="slideLeft">Slide Left</option>
+                      <option value="slideRight">Slide Right</option>
+                      <option value="bounce">Bounce</option>
+                      <option value="typewriter">Typewriter</option>
+                    </select>
+                    
+                    {selectedClip.textSettings.animation?.in && selectedClip.textSettings.animation.in !== 'none' && (
+                      <div className="flex items-center gap-1.5 w-24 shrink-0">
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          max="5.0"
+                          value={selectedClip.textSettings.animation?.inDuration ?? 0.5}
+                          onChange={(e) => {
+                            const anim = selectedClip.textSettings!.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                            updateClip(selectedClip.id, {
+                              textSettings: {
+                                ...selectedClip.textSettings!,
+                                animation: { ...anim, inDuration: Number(e.target.value) }
+                              }
+                            });
+                          }}
+                          onBlur={() => useEditorStore.getState().saveSnapshot()}
+                          className="w-12 px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-[10px] text-[#a0a0a0]">sec</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Outro Animation (OUT) */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-[#a0a0a0]">Outro (OUT)</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedClip.textSettings.animation?.out || 'none'}
+                      onChange={(e) => {
+                        const anim = selectedClip.textSettings!.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                        updateClip(selectedClip.id, {
+                          textSettings: {
+                            ...selectedClip.textSettings!,
+                            animation: { ...anim, out: e.target.value as any }
+                          }
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
+                    >
+                      <option value="none">None</option>
+                      <option value="fadeOut">Fade Out</option>
+                      <option value="zoom">Zoom</option>
+                      <option value="slideUp">Slide Up</option>
+                      <option value="slideDown">Slide Down</option>
+                      <option value="slideLeft">Slide Left</option>
+                      <option value="slideRight">Slide Right</option>
+                    </select>
+                    
+                    {selectedClip.textSettings.animation?.out && selectedClip.textSettings.animation.out !== 'none' && (
+                      <div className="flex items-center gap-1.5 w-24 shrink-0">
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          max="5.0"
+                          value={selectedClip.textSettings.animation?.outDuration ?? 0.5}
+                          onChange={(e) => {
+                            const anim = selectedClip.textSettings!.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                            updateClip(selectedClip.id, {
+                              textSettings: {
+                                ...selectedClip.textSettings!,
+                                animation: { ...anim, outDuration: Number(e.target.value) }
+                              }
+                            });
+                          }}
+                          onBlur={() => useEditorStore.getState().saveSnapshot()}
+                          className="w-12 px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-[10px] text-[#a0a0a0]">sec</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

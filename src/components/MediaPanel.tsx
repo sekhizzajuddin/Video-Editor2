@@ -48,6 +48,7 @@ import { useState, useRef, useCallback } from 'react';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
+import { parseSRT } from '@/utils/srtParser';
 import demoA from '../assets/transition_demo_a.webp';
 import demoB from '../assets/transition_demo_b.webp';
 import { useEffect } from 'react';
@@ -173,7 +174,9 @@ export function MediaPanel() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openSection, setOpenSection] = useState<'fx' | 'color' | 'particles'>('fx');
+  const [previewItem, setPreviewItem] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const srtInputRef = useRef<HTMLInputElement>(null);
 
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Project', icon: Folder },
@@ -220,6 +223,101 @@ export function MediaPanel() {
     // Reset input so the same file can be re-imported
     e.target.value = '';
   }, [importFiles]);
+
+  const handleSrtImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (!text) return;
+
+      const parsed = parseSRT(text);
+      if (parsed.length === 0) {
+        alert("Failed to parse SRT or file is empty.");
+        return;
+      }
+
+      const store = useEditorStore.getState();
+      
+      // 1. Create a new text track
+      store.addTrack('text');
+      
+      // 2. Retrieve the track
+      const textTracks = store.tracks.filter(t => t.type === 'text');
+      const targetTrack = textTracks[textTracks.length - 1];
+      if (!targetTrack) return;
+
+      // 3. Generate text clips in one batch
+      const newClips = parsed.map((sub, idx) => {
+        const mediaId = `sub_media_${idx}_${Math.random().toString(36).substr(2, 9)}`;
+        store.addMedia({
+          id: mediaId,
+          name: `Subtitle ${idx + 1}`,
+          type: 'text',
+          duration: sub.duration,
+          url: '',
+          createdAt: Date.now(),
+          textContent: sub.text,
+        });
+
+        const clipId = `sub_clip_${idx}_${Math.random().toString(36).substr(2, 9)}`;
+
+        return {
+          id: clipId,
+          mediaId,
+          trackId: targetTrack.id,
+          startTime: sub.startTime,
+          duration: sub.duration,
+          trimStart: 0,
+          trimEnd: 0,
+          transform: { x: 0, y: 160, scale: 100, rotation: 0 }, 
+          opacity: 1,
+          speed: 1,
+          effects: [],
+          textSettings: {
+            text: sub.text,
+            fontFamily: 'Inter',
+            fontSize: 22,
+            color: '#ffffff',
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            bold: false,
+            italic: false,
+            underline: false,
+            shadow: true,
+            shadowColor: '#000000',
+            shadowBlur: 3,
+            threeD: false,
+            threeDDepth: 0,
+            textAlign: 'center',
+          }
+        } as import('@/types').TimelineClip;
+      });
+
+      // 4. Update the tracks state and save to snapshot
+      useEditorStore.setState(state => {
+        const finalTracks = state.tracks.map(t => {
+          if (t.id === targetTrack.id) {
+            return {
+              ...t,
+              name: 'Subtitles',
+              clips: newClips,
+            };
+          }
+          return t;
+        });
+        return { tracks: finalTracks };
+      });
+
+      store.recalcTotalDuration();
+      store.saveSnapshot();
+      alert(`Imported ${parsed.length} subtitles onto a new 'Subtitles' track!`);
+    };
+
+    reader.readAsText(file);
+    e.target.value = '';
+  }, []);
 
   const relinkInputRef = useRef<HTMLInputElement>(null);
 
@@ -481,19 +579,29 @@ export function MediaPanel() {
 
             {/* Media List */}
             <div className="flex-1 overflow-y-auto">
-              {/* Import Button */}
-              <div className="p-2">
+              {/* Import Buttons */}
+              <div className="p-2 flex gap-1.5">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={importing}
-                  className="w-full py-2.5 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-amber-500 text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-amber-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  title="Import Video, Audio, or Image files"
                 >
                   {importing ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-3 h-3 animate-spin" />
                   ) : (
-                    <Upload className="w-3.5 h-3.5" />
+                    <Upload className="w-3 h-3" />
                   )}
                   {importing ? 'Importing...' : 'Import Media'}
+                </button>
+                <button
+                  onClick={() => srtInputRef.current?.click()}
+                  disabled={importing}
+                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-purple-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  title="Import Subtitles (.srt file)"
+                >
+                  <Type className="w-3 h-3 text-purple-400" />
+                  Import Subtitles
                 </button>
               </div>
 
@@ -528,6 +636,42 @@ export function MediaPanel() {
                 return null;
               })()}
 
+              {previewItem && (
+                <div className="mx-2 mb-2 p-2 bg-[#252525] border border-[#3e3e3e] rounded flex flex-col gap-2 relative">
+                  <div className="relative aspect-video bg-black flex items-center justify-center rounded overflow-hidden">
+                    {previewItem.type === 'video' && (
+                      <video
+                        key={previewItem.id}
+                        src={previewItem.url}
+                        controls
+                        className="w-full h-full object-contain"
+                        autoPlay={false}
+                      />
+                    )}
+                    {previewItem.type === 'audio' && (
+                      <div className="p-3 w-full flex flex-col items-center justify-center">
+                        <Music className="w-8 h-8 text-emerald-400 mb-2" />
+                        <audio src={previewItem.url} controls className="w-full h-8" />
+                      </div>
+                    )}
+                    {previewItem.type === 'image' && (
+                      <img src={previewItem.url} className="w-full h-full object-contain" alt="" />
+                    )}
+                    <button
+                      onClick={() => setPreviewItem(null)}
+                      className="absolute top-1.5 right-1.5 p-1 bg-black/60 hover:bg-black/80 rounded-full text-white/70 hover:text-white transition-colors"
+                      title="Close Preview"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="px-1 py-0.5 text-[10px] text-[#a0a0a0] truncate font-medium flex justify-between items-center">
+                    <span className="truncate flex-1 pr-2">{previewItem.name}</span>
+                    <span className="shrink-0">{formatDuration(previewItem.duration)}</span>
+                  </div>
+                </div>
+              )}
+
               {filteredMedia.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-[#a0a0a0]">
                   <Film className="w-10 h-10 mb-3 opacity-20" />
@@ -546,6 +690,7 @@ export function MediaPanel() {
                       onDragStart={(e) => handleDragStart(e, media.id)}
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
+                      onClick={() => setPreviewItem(media)}
                       className={`${getMediaColor(media.type)} border rounded overflow-hidden cursor-grab hover:brightness-110 transition-all group relative`}
                     >
                       {/* Thumbnail */}
@@ -624,6 +769,7 @@ export function MediaPanel() {
                       onDragStart={(e) => handleDragStart(e, media.id)}
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
+                      onClick={() => setPreviewItem(media)}
                       className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] cursor-grab border-b border-[#3e3e3e] transition-colors group"
                     >
                       {/* Thumbnail in list view */}
@@ -850,6 +996,13 @@ export function MediaPanel() {
         multiple
         accept="video/*,audio/*,image/*"
         onChange={handleRelinkFiles}
+        className="hidden"
+      />
+      <input
+        ref={srtInputRef}
+        type="file"
+        accept=".srt"
+        onChange={handleSrtImport}
         className="hidden"
       />
     </div>

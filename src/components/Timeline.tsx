@@ -17,6 +17,7 @@ import {
   ArrowLeftRight,
   Link,
   Unlink2,
+  Edit,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -567,6 +568,12 @@ export function Timeline() {
     addClip,
     reorderTrack,
     unlinkAudio,
+    inPoint,
+    outPoint,
+    markers,
+    addMarker,
+    updateMarker,
+    removeMarker,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -637,6 +644,10 @@ export function Timeline() {
     x: number; y: number; clipId: string; trackType: string; mediaType: string;
   } | null>(null);
 
+  const [markerContextMenu, setMarkerContextMenu] = useState<{
+    x: number; y: number; markerId: string;
+  } | null>(null);
+
   // Close context menu on click-away
   useEffect(() => {
     if (!contextMenu) return;
@@ -644,6 +655,13 @@ export function Timeline() {
     window.addEventListener('mousedown', close, { once: true });
     return () => window.removeEventListener('mousedown', close);
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!markerContextMenu) return;
+    const close = () => setMarkerContextMenu(null);
+    window.addEventListener('mousedown', close, { once: true });
+    return () => window.removeEventListener('mousedown', close);
+  }, [markerContextMenu]);
 
   // Throttle ref — setScrollLeft in the store is expensive; only push at ~30fps max
   const scrollStoreThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1433,6 +1451,38 @@ export function Timeline() {
       e.preventDefault();
       const track = useEditorStore.getState().tracks.find((t) => t.id === trackId);
 
+      // ── Transition drop → apply to video/image clip at drop position ──
+      const transitionName = e.dataTransfer.getData('application/procut-transition');
+      if (transitionName && track && track.type === 'video') {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const dropTime = x / zoomLevel;
+        // Find the clip at the drop position
+        const hitClip = track.clips.find(
+          (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
+        );
+        if (hitClip) {
+          const type = transitionName.toLowerCase().includes('dissolve') ? 'dissolve'
+                     : transitionName.toLowerCase().includes('wipe') ? 'wipe'
+                     : transitionName.toLowerCase().includes('zoom') ? 'zoom'
+                     : transitionName.toLowerCase().includes('slide') ? 'slide'
+                     : 'dissolve';
+          useEditorStore.getState().updateClip(hitClip.id, {
+            transitionIn: {
+              id: Math.random().toString(36).substr(2, 9),
+              name: transitionName,
+              type: type as any,
+              duration: 1.0,
+              params: {},
+            },
+          });
+          useEditorStore.getState().saveSnapshot();
+        }
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        return;
+      }
+
       // ── Color Correction Preset drop → apply to video/image clip at drop position ──
       const colorPresetRaw = e.dataTransfer.getData('application/procut-color-preset');
       if (colorPresetRaw && track && (track.type === 'video' || track.type === 'audio')) {
@@ -1603,8 +1653,9 @@ export function Timeline() {
       const hasEffect = e.dataTransfer.types.includes('application/procut-effect');
       const hasColorPreset = e.dataTransfer.types.includes('application/procut-color-preset');
       const hasParticle = e.dataTransfer.types.includes('application/procut-particle');
-      if ((hasMedia || hasEffect || hasColorPreset || hasParticle) && trackIdx >= 0) {
-        const approxDuration = (hasColorPreset || hasParticle) ? 0 : 5;
+      const hasTransition = e.dataTransfer.types.includes('application/procut-transition');
+      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition) && trackIdx >= 0) {
+        const approxDuration = (hasColorPreset || hasParticle || hasTransition) ? 0 : 5;
         setDropPreview({ time: x / zoomLevel, duration: approxDuration, trackIdx });
         setHoveredTrackId(trackId);
       }
@@ -1964,6 +2015,62 @@ export function Timeline() {
               className="absolute top-0 left-0 h-full"
               style={{ width: `${timelineWidth}px`, transform: `translateX(-${scrollLeft}px)` }}
             >
+              {/* In-point flag (green triangle) */}
+              {inPoint !== null && (
+                <div
+                  className="absolute top-0 w-3 h-4 pointer-events-none z-20"
+                  style={{ left: `${inPoint * zoomLevel}px`, transform: 'translateX(-50%)' }}
+                >
+                  <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-emerald-500" />
+                </div>
+              )}
+
+              {/* Out-point flag (red triangle) */}
+              {outPoint !== null && (
+                <div
+                  className="absolute top-0 w-3 h-4 pointer-events-none z-20"
+                  style={{ left: `${outPoint * zoomLevel}px`, transform: 'translateX(-50%)' }}
+                >
+                  <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-red-500" />
+                </div>
+              )}
+
+              {/* Timeline Markers */}
+              {markers.map((marker) => {
+                const markerX = marker.time * zoomLevel;
+                return (
+                  <div
+                    key={marker.id}
+                    className="absolute top-0 w-3 h-4 cursor-pointer z-30 group"
+                    style={{ left: `${markerX}px`, transform: 'translateX(-50%)' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seek(marker.time);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMarkerContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        markerId: marker.id,
+                      });
+                    }}
+                    title={marker.name}
+                  >
+                    {/* Diamond shape */}
+                    <div 
+                      className="w-2.5 h-2.5 rotate-45 border border-white/40 shadow-sm mt-0.5 mx-auto transition-transform group-hover:scale-110"
+                      style={{ backgroundColor: marker.color }}
+                    />
+                    {/* Tooltip on hover */}
+                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1 bg-[#141414] border border-[#3e3e3e] px-1.5 py-0.5 rounded text-[8px] text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-md">
+                      {marker.name}
+                    </div>
+                  </div>
+                );
+              })}
+
               {rulerData.map((m, i) => {
                 let tickHeight = '14px';
                 let tickColor = 'bg-[#a0a0a0]';
@@ -2022,6 +2129,45 @@ export function Timeline() {
                     style={{ left: `${m.time * zoomLevel}px` }}
                   />
                 ))}
+
+              {/* In-point vertical dashed line */}
+              {inPoint !== null && (
+                <div
+                  className="absolute top-0 bottom-0 w-px border-l border-dashed border-emerald-500/50 pointer-events-none z-20"
+                  style={{ left: `${inPoint * zoomLevel}px` }}
+                />
+              )}
+
+              {/* Out-point vertical dashed line */}
+              {outPoint !== null && (
+                <div
+                  className="absolute top-0 bottom-0 w-px border-l border-dashed border-red-500/50 pointer-events-none z-20"
+                  style={{ left: `${outPoint * zoomLevel}px` }}
+                />
+              )}
+
+              {/* Work area shading between In and Out points */}
+              {inPoint !== null && outPoint !== null && (
+                <div
+                  className="absolute top-0 bottom-0 pointer-events-none bg-indigo-500/5 border-l border-r border-indigo-500/20"
+                  style={{
+                    left: `${inPoint * zoomLevel}px`,
+                    width: `${(outPoint - inPoint) * zoomLevel}px`
+                  }}
+                />
+              )}
+
+              {/* Marker vertical guide lines */}
+              {markers.map((marker) => (
+                <div
+                  key={`ml-${marker.id}`}
+                  className="absolute top-0 bottom-0 w-px pointer-events-none z-10 opacity-35 border-l border-dashed"
+                  style={{
+                    left: `${marker.time * zoomLevel}px`,
+                    borderColor: marker.color
+                  }}
+                />
+              ))}
 
               {/* ── Tracks ─────────────────────────────────────────── */}
               {tracks.map((track) => {
@@ -2111,6 +2257,30 @@ export function Timeline() {
                           });
                         }}
                       >
+
+                        {/* ── Transition In Badge ────────────────────── */}
+                        {clip.transitionIn && (
+                          <div
+                            className={`absolute left-0 top-0 bottom-0 bg-purple-600/70 border-r border-purple-400/80 hover:bg-purple-500 hover:border-purple-300 transition-colors z-30 cursor-pointer flex items-center justify-center overflow-hidden ${
+                              selectedTransitionClipId === clip.id ? 'ring-2 ring-white bg-purple-500' : ''
+                            }`}
+                            style={{
+                              width: `${Math.min(width, clip.transitionIn.duration * zoomLevel)}px`,
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              selectTransition(clip.id);
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                            title={`${clip.transitionIn.name} Transition (Click to edit)`}
+                          >
+                            <span className="text-[8px] text-white font-semibold rotate-90 whitespace-nowrap opacity-80 pointer-events-none">
+                              {clip.transitionIn.name}
+                            </span>
+                          </div>
+                        )}
 
                         {/* ── Visual content layer ──────────────────── */}
                         <div className="absolute inset-0 overflow-hidden rounded pointer-events-none">
@@ -2363,7 +2533,8 @@ export function Timeline() {
                     });
                   })()}
                 </div>
-              })}
+              );
+            })}
 
               {/* ── Drop preview ──────────────────────────────────────── */}
               {dropPreview && hoveredTrackId && (
@@ -2454,6 +2625,67 @@ export function Timeline() {
         </button>
       </div>
     )}
+
+    {/* ── Marker Context Menu ────────────────────────────────────────── */}
+    {markerContextMenu && (() => {
+      const marker = markers.find(m => m.id === markerContextMenu.markerId);
+      if (!marker) return null;
+      return (
+        <div
+          className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-2 min-w-[200px] text-white"
+          style={{ left: markerContextMenu.x, top: markerContextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 pb-2 text-[10px] text-[#a0a0a0] font-semibold border-b border-[#3e3e3e] mb-1.5 uppercase tracking-wider">
+            Edit Marker
+          </div>
+          {/* Rename Option */}
+          <button
+            className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+            onClick={() => {
+              const newName = prompt('Rename marker:', marker.name);
+              if (newName !== null) {
+                updateMarker(marker.id, { name: newName });
+              }
+              setMarkerContextMenu(null);
+            }}
+          >
+            <Edit className="w-3.5 h-3.5 text-amber-400" />
+            Rename Marker
+          </button>
+          
+          {/* Color Selection */}
+          <div className="px-3 py-1 text-[10px] text-[#a0a0a0] mt-1.5">Color</div>
+          <div className="grid grid-cols-6 gap-1 px-3 py-1.5">
+            {['#fbbf24', '#3b82f6', '#22c55e', '#ef4444', '#8b5cf6', '#ffffff'].map((color) => (
+              <button
+                key={color}
+                onClick={() => {
+                  updateMarker(marker.id, { color });
+                  setMarkerContextMenu(null);
+                }}
+                className={`w-5 h-5 rounded-full border transition-all ${
+                  marker.color === color ? 'border-white scale-110 shadow-md' : 'border-transparent hover:border-white/50'
+                }`}
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </div>
+
+          <div className="h-px bg-[#3e3e3e] my-1.5" />
+          <button
+            className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+            onClick={() => {
+              removeMarker(marker.id);
+              setMarkerContextMenu(null);
+            }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete Marker
+          </button>
+        </div>
+      );
+    })()}
     </>
   );
 }

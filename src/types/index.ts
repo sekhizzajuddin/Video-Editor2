@@ -28,6 +28,7 @@ export interface ClipTransform {
   y: number;
   scale: number;
   rotation: number;
+  blendMode?: GlobalCompositeOperation; // compositor blend modes
 }
 
 // Crop bounds for clips (percentages 0-100)
@@ -44,6 +45,12 @@ export interface WaveformData {
   length: number;
 }
 
+export interface ColorWheelAdjustment {
+  hue: number;        // -180 to 180
+  saturation: number; // 0 to 100
+  lift: number;       // -100 to 100 (brightness offset)
+}
+
 export interface ClipColorFilters {
   temperature: number;   // -100 to 100 (Cool to Warm)
   tint: number;          // -100 to 100 (Green to Magenta)
@@ -53,6 +60,9 @@ export interface ClipColorFilters {
   blur: number;          // 0 to 20 (Default 0)
   fadedFilm: number;     // 0 to 100 (Default 0)
   vignette: number;      // -100 to 100 (White to Black border)
+  shadows?: ColorWheelAdjustment;
+  midtones?: ColorWheelAdjustment;
+  highlights?: ColorWheelAdjustment;
 }
 
 export interface ClipAudioSettings {
@@ -67,6 +77,25 @@ export interface ClipAudioSettings {
   pitch: number;        // -12 to 12 semitones (default 0)
   voiceFormant: number; // -100 to 100 (default 0)
   humanize: boolean;    // one-click AI humanizer toggle (default false)
+}
+
+export type TextAnimationPreset = 
+  | 'none' 
+  | 'fadeIn' 
+  | 'fadeOut' 
+  | 'typewriter' 
+  | 'slideUp' 
+  | 'slideDown' 
+  | 'slideLeft' 
+  | 'slideRight' 
+  | 'bounce' 
+  | 'zoom';
+
+export interface ClipTextAnimation {
+  in: TextAnimationPreset;
+  out: TextAnimationPreset;
+  inDuration: number;  // in seconds (default 0.5)
+  outDuration: number; // in seconds (default 0.5)
 }
 
 export interface ClipTextSettings {
@@ -84,6 +113,9 @@ export interface ClipTextSettings {
   threeD: boolean;
   threeDDepth: number;
   textAlign?: 'left' | 'center' | 'right';
+  strokeColor?: string;
+  strokeWidth?: number;
+  animation?: ClipTextAnimation;
 }
 
 export interface ClipFxSettings {
@@ -152,7 +184,14 @@ export interface ClipAnimations {
   'crop.right'?: PropertyKeyframe[];
 }
 
-  // Timeline Clip
+export interface ClipChromaKeySettings {
+  enabled: boolean;
+  color: string;      // Hex color, e.g. '#00ff00'
+  threshold: number;  // 0 to 100
+  softness: number;   // 0 to 100
+}
+
+// Timeline Clip
 export interface TimelineClip {
   id: string;
   mediaId: string;
@@ -186,7 +225,7 @@ export interface TimelineClip {
   textSettings?: ClipTextSettings;
   fxSettings?: ClipFxSettings;
   particleSettings?: ClipParticleSettings;
-
+  chromaKey?: ClipChromaKeySettings;
 }
 
 // Timeline Track
@@ -202,6 +241,13 @@ export interface TimelineTrack {
   isDynamic?: boolean;
 }
 
+export interface TimelineMarker {
+  id: string;
+  time: number;
+  name: string;
+  color: string; // Hex color code
+}
+
 // Editor State
 export interface EditorState {
   // Media Library
@@ -212,14 +258,18 @@ export interface EditorState {
   selectedClipId: string | null;
   selectedClipIds: string[];
   selectedTrackId: string | null;
+  markers: TimelineMarker[];
 
   // Playback
   currentTime: number;
   isPlaying: boolean;
   totalDuration: number;
   playbackSpeed: number;
+  playbackDirection?: number; // -1, 0, +1
   isMuted: boolean;
   volume: number;
+  inPoint: number | null;
+  outPoint: number | null;
 
   // Timeline Zoom & Scroll
   zoomLevel: number;     // pixels per second
