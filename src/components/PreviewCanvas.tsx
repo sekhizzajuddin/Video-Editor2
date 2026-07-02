@@ -730,10 +730,10 @@ export function PreviewCanvas() {
         if (img) {
           const iw = img.naturalWidth || W;
           const ih = img.naturalHeight || H;
-          const scale = Math.min(W / iw, H / ih);
-          
-          const baseDw = iw * scale;
-          const baseDh = ih * scale;
+          const fitScale = Math.min(W / iw, H / ih);
+
+          const baseDw = iw * fitScale;
+          const baseDh = ih * fitScale;
 
           const sx = iw * cLeft;
           const sy = ih * cTop;
@@ -744,6 +744,28 @@ export function PreviewCanvas() {
           dh = Math.max(1, baseDh * (1 - cTop - cBot));
           const dx = -baseDw / 2 + baseDw * cLeft;
           const dy = -baseDh / 2 + baseDh * cTop;
+
+          // ── Ken Burns zoom + pan ──────────────────────────────
+          const kb = clip.kenBurns;
+          if (kb?.enabled) {
+            const rawP = clip.duration > 0
+              ? Math.max(0, Math.min(1, (currentTime - clip.startTime) / clip.duration))
+              : 0;
+            // Apply easing
+            let t = rawP;
+            if (kb.easing === 'easeIn')    t = rawP * rawP;
+            else if (kb.easing === 'easeOut')  t = rawP * (2 - rawP);
+            else if (kb.easing === 'easeInOut') {
+              t = rawP < 0.5 ? 2 * rawP * rawP : 1 - Math.pow(-2 * rawP + 2, 2) / 2;
+            }
+            const kbScale = (kb.startScale + (kb.endScale - kb.startScale) * t) / 100;
+            const kbPanX  = (kb.startPanX  + (kb.endPanX  - kb.startPanX)  * t) / 100 * baseDw;
+            const kbPanY  = (kb.startPanY  + (kb.endPanY  - kb.startPanY)  * t) / 100 * baseDh;
+            ctx.save();
+            ctx.translate(kbPanX, kbPanY);
+            ctx.scale(kbScale, kbScale);
+          }
+          // ─────────────────────────────────────────────────────
 
           // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
@@ -770,6 +792,10 @@ export function PreviewCanvas() {
             ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
           }
           ctx.filter = 'none';
+
+          // Restore Ken Burns sub-transform
+          if (kb?.enabled) ctx.restore();
+
           hasRealMedia = true;
           anyClipDrawn = true;
         } else {

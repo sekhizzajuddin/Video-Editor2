@@ -191,6 +191,17 @@ export interface ClipChromaKeySettings {
   softness: number;   // 0 to 100
 }
 
+export interface ClipKenBurnsSettings {
+  enabled: boolean;
+  startScale: number;
+  startPanX: number;
+  startPanY: number;
+  endScale: number;
+  endPanX: number;
+  endPanY: number;
+  easing: 'linear' | 'easeInOut' | 'easeIn' | 'easeOut';
+}
+
 // Timeline Clip
 export interface TimelineClip {
   id: string;
@@ -226,6 +237,7 @@ export interface TimelineClip {
   fxSettings?: ClipFxSettings;
   particleSettings?: ClipParticleSettings;
   chromaKey?: ClipChromaKeySettings;
+  kenBurns?: ClipKenBurnsSettings;
 }
 
 // Timeline Track
@@ -239,6 +251,9 @@ export interface TimelineTrack {
   muted: boolean;
   hidden: boolean;
   isDynamic?: boolean;
+  volume?: number; // 0.0 to 1.0
+  pan?: number;    // -1.0 to 1.0 (left to right)
+  solo?: boolean;
 }
 
 export interface TimelineMarker {

@@ -31,6 +31,9 @@ const createEmptyTracks = (): TimelineTrack[] => [
     locked: false,
     muted: false,
     hidden: false,
+    volume: 1,
+    pan: 0,
+    solo: false,
   },
   {
     id: 'v2',
@@ -40,6 +43,9 @@ const createEmptyTracks = (): TimelineTrack[] => [
     locked: false,
     muted: false,
     hidden: false,
+    volume: 1,
+    pan: 0,
+    solo: false,
   },
   {
     id: 'a1',
@@ -49,6 +55,9 @@ const createEmptyTracks = (): TimelineTrack[] => [
     locked: false,
     muted: false,
     hidden: false,
+    volume: 1,
+    pan: 0,
+    solo: false,
   },
   {
     id: 'a2',
@@ -58,6 +67,9 @@ const createEmptyTracks = (): TimelineTrack[] => [
     locked: false,
     muted: false,
     hidden: false,
+    volume: 1,
+    pan: 0,
+    solo: false,
   },
 ];
 
@@ -164,6 +176,9 @@ interface EditorActions {
   toggleTrackLock: (trackId: string) => void;
   toggleTrackMute: (trackId: string) => void;
   toggleTrackHidden: (trackId: string) => void;
+  setTrackVolume: (trackId: string, volume: number) => void;
+  setTrackPan: (trackId: string, pan: number) => void;
+  toggleTrackSolo: (trackId: string) => void;
   addTrack: (type: 'video' | 'audio' | 'text' | 'fx') => void;
   removeTrack: (trackId: string) => void;
   reorderTrack: (trackId: string, newIndex: number) => void;
@@ -1116,6 +1131,24 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         t.id === trackId ? { ...t, hidden: !t.hidden } : t
       ),
     })),
+  setTrackVolume: (trackId, volume) =>
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === trackId ? { ...t, volume } : t
+      ),
+    })),
+  setTrackPan: (trackId, pan) =>
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === trackId ? { ...t, pan } : t
+      ),
+    })),
+  toggleTrackSolo: (trackId) =>
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === trackId ? { ...t, solo: !t.solo } : t
+      ),
+    })),
   addTrack: (type) => {
     let prefix = 'v';
     if (type === 'audio') prefix = 'a';
@@ -1134,7 +1167,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         linkedTrackId = hostTrack.id;
       }
     }
-
+ 
     set((state) => {
       const newTrack = {
         id,
@@ -1145,6 +1178,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         locked: false,
         muted: false,
         hidden: false,
+        volume: 1,
+        pan: 0,
+        solo: false,
       };
 
       let tracks: typeof state.tracks;

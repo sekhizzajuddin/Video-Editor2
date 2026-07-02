@@ -1,9 +1,11 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
+import { Music } from 'lucide-react';
 import { TopToolbar } from '@/components/TopToolbar';
 import { MediaPanel } from '@/components/MediaPanel';
 import { PreviewCanvas } from '@/components/PreviewCanvas';
 import { PropertiesPanel } from '@/components/PropertiesPanel';
 import { Timeline } from '@/components/Timeline';
+import { AudioMixer } from '@/components/AudioMixer';
 import { ExportModal } from '@/components/ExportModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { useEditorStore } from '@/store/editorStore';
@@ -36,6 +38,7 @@ function App() {
   const [leftWidth, setLeftWidth] = useState(250);
   const [rightWidth, setRightWidth] = useState(280);
   const [timelineHeight, setTimelineHeight] = useState(320);
+  const [bottomTab, setBottomTab] = useState<'timeline' | 'mixer'>('timeline');
   const isDraggingLeft = useRef(false);
   const isDraggingRight = useRef(false);
   const isDraggingTimeline = useRef(false);
@@ -369,9 +372,41 @@ function App() {
             onMouseDown={() => { isDraggingTimeline.current = true; }}
           />
 
-          {/* Timeline */}
-          <div style={{ height: timelineHeight }}>
-            <Timeline />
+          {/* Timeline / Audio Mixer Container */}
+          <div style={{ height: timelineHeight }} className="flex flex-col bg-[#252525] overflow-hidden shrink-0">
+            {/* Header Tabs */}
+            <div className="h-8 flex items-center justify-between px-3 bg-[#1e1e1e] border-b border-[#3e3e3e] shrink-0 select-none">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setBottomTab('timeline')}
+                  className={`px-3 py-1 text-[11px] rounded transition-all uppercase tracking-wider font-semibold ${
+                    bottomTab === 'timeline'
+                      ? 'bg-[#2d2d2d] text-amber-500 border border-[#3e3e3e]'
+                      : 'text-[#8a8a8a] hover:text-white'
+                  }`}
+                >
+                  Timeline
+                </button>
+                <button
+                  onClick={() => setBottomTab('mixer')}
+                  className={`px-3 py-1 text-[11px] rounded transition-all uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                    bottomTab === 'mixer'
+                      ? 'bg-[#2d2d2d] text-amber-500 border border-[#3e3e3e]'
+                      : 'text-[#8a8a8a] hover:text-white'
+                  }`}
+                >
+                  <Music className="w-3 h-3 text-purple-400" /> Audio Mixer
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-hidden relative">
+              {bottomTab === 'timeline' ? (
+                <Timeline />
+              ) : (
+                <AudioMixer />
+              )}
+            </div>
           </div>
         </div>
 

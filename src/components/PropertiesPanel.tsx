@@ -17,10 +17,12 @@ import {
   RotateCcw,
   Type,
   Wand2,
+  ArrowLeftRight,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect } from 'react';
-import type { PropertiesTab } from '@/types';
+import type { PropertiesTab, ClipKenBurnsSettings } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 
@@ -1311,6 +1313,156 @@ export function PropertiesPanel() {
                 </div>
               )}
             </div>
+
+            {/* Ken Burns Effect — only for image clips */}
+            {selectedTrack?.type !== 'audio' && selectedTrack?.type !== 'text' && selectedTrack?.type !== 'fx' && (() => {
+              const mediaItem = useEditorStore.getState().mediaLibrary.find(m => m.id === selectedClip.id || m.id === selectedClip.mediaId);
+              if (mediaItem?.type !== 'image') return null;
+              const kb = selectedClip.kenBurns;
+              const isKbEnabled = kb?.enabled ?? false;
+              const defaultKb: ClipKenBurnsSettings = {
+                enabled: false,
+                startScale: 100, startPanX: 0, startPanY: 0,
+                endScale: 120,   endPanX: 0,   endPanY: 0,
+                easing: 'easeInOut',
+              };
+              const kbVal = kb || defaultKb;
+
+              const updateKb = (patch: Partial<ClipKenBurnsSettings>) => {
+                updateClip(selectedClip.id, { kenBurns: { ...kbVal, ...patch } });
+              };
+
+              const KbSlider = ({ label, value, min, max, step, onChange }: {
+                label: string; value: number; min: number; max: number; step: number;
+                onChange: (v: number) => void;
+              }) => (
+                <div className="space-y-0.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-[#a0a0a0]">{label}</span>
+                    <span className="text-[10px] text-white font-mono w-10 text-right">{value > 0 && label !== 'Scale' ? `+${value}` : value}{label === 'Scale' ? '%' : '%'}</span>
+                  </div>
+                  <input
+                    type="range" min={min} max={max} step={step} value={value}
+                    onChange={e => onChange(Number(e.target.value))}
+                    onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                    onDoubleClick={() => { onChange(label === 'Scale' ? 100 : 0); useEditorStore.getState().saveSnapshot(); }}
+                    title={`Double-click to reset`}
+                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-500"
+                  />
+                </div>
+              );
+
+              return (
+                <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                  <button
+                    onClick={() => toggleSection('kenBurns')}
+                    className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="font-medium">Ken Burns Effect</span>
+                      {isKbEnabled && <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-semibold">ON</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div
+                        onClick={e => { e.stopPropagation(); updateKb({ enabled: !isKbEnabled }); useEditorStore.getState().saveSnapshot(); }}
+                        className="flex items-center gap-1 px-2 py-0.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] transition-colors"
+                        title={isKbEnabled ? 'Disable Ken Burns' : 'Enable Ken Burns'}
+                      >
+                        <span className={isKbEnabled ? 'text-emerald-400' : 'text-[#a0a0a0]'}>{isKbEnabled ? 'Enabled' : 'Enable'}</span>
+                      </div>
+                      {collapsedSections['kenBurns'] ? (
+                        <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      )}
+                    </div>
+                  </button>
+
+                  {!collapsedSections['kenBurns'] && (
+                    <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                      {/* Start Frame */}
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">Start Frame</p>
+                        <KbSlider label="Scale" value={kbVal.startScale} min={100} max={300} step={1}
+                          onChange={v => updateKb({ startScale: v })} />
+                        <KbSlider label="Pan X" value={kbVal.startPanX} min={-100} max={100} step={1}
+                          onChange={v => updateKb({ startPanX: v })} />
+                        <KbSlider label="Pan Y" value={kbVal.startPanY} min={-100} max={100} step={1}
+                          onChange={v => updateKb({ startPanY: v })} />
+                      </div>
+
+                      {/* Swap Button */}
+                      <button
+                        onClick={() => {
+                          updateKb({
+                            startScale: kbVal.endScale, startPanX: kbVal.endPanX, startPanY: kbVal.endPanY,
+                            endScale: kbVal.startScale, endPanX: kbVal.startPanX, endPanY: kbVal.startPanY,
+                          });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] hover:text-white transition-colors"
+                        title="Swap Start and End states"
+                      >
+                        <ArrowLeftRight className="w-3 h-3" /> Reverse Direction
+                      </button>
+
+                      {/* End Frame */}
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">End Frame</p>
+                        <KbSlider label="Scale" value={kbVal.endScale} min={100} max={300} step={1}
+                          onChange={v => updateKb({ endScale: v })} />
+                        <KbSlider label="Pan X" value={kbVal.endPanX} min={-100} max={100} step={1}
+                          onChange={v => updateKb({ endPanX: v })} />
+                        <KbSlider label="Pan Y" value={kbVal.endPanY} min={-100} max={100} step={1}
+                          onChange={v => updateKb({ endPanY: v })} />
+                      </div>
+
+                      {/* Easing Curve */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-[#a0a0a0] block">Easing Curve</label>
+                        <div className="relative">
+                          <select
+                            value={kbVal.easing}
+                            onChange={e => { updateKb({ easing: e.target.value as ClipKenBurnsSettings['easing'] }); useEditorStore.getState().saveSnapshot(); }}
+                            className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-[11px] text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer"
+                          >
+                            <option value="linear">Linear</option>
+                            <option value="easeIn">Ease In</option>
+                            <option value="easeOut">Ease Out</option>
+                            <option value="easeInOut">Ease In-Out (Smooth)</option>
+                          </select>
+                          <ChevronDown className="w-3 h-3 text-[#a0a0a0] absolute right-2 top-2 pointer-events-none" />
+                        </div>
+                      </div>
+
+                      {/* Quick Presets */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-[#a0a0a0] block">Quick Presets</label>
+                        <div className="grid grid-cols-2 gap-1">
+                          {[
+                            { label: 'Zoom In',    patch: { startScale: 100, startPanX: 0, startPanY: 0, endScale: 140, endPanX: 0,   endPanY: 0,   easing: 'easeInOut' as const } },
+                            { label: 'Zoom Out',   patch: { startScale: 140, startPanX: 0, startPanY: 0, endScale: 100, endPanX: 0,   endPanY: 0,   easing: 'easeInOut' as const } },
+                            { label: 'Pan Right',  patch: { startScale: 120, startPanX: -15, startPanY: 0, endScale: 120, endPanX: 15,  endPanY: 0,   easing: 'linear' as const } },
+                            { label: 'Pan Left',   patch: { startScale: 120, startPanX: 15,  startPanY: 0, endScale: 120, endPanX: -15, endPanY: 0,   easing: 'linear' as const } },
+                            { label: 'Zoom & Pan', patch: { startScale: 100, startPanX: -10, startPanY: -5, endScale: 140, endPanX: 10, endPanY: 5,   easing: 'easeInOut' as const } },
+                            { label: 'Reset',      patch: { startScale: 100, startPanX: 0,   startPanY: 0,  endScale: 100, endPanX: 0,  endPanY: 0,   easing: 'easeInOut' as const } },
+                          ].map(preset => (
+                            <button
+                              key={preset.label}
+                              onClick={() => { updateKb({ enabled: true, ...preset.patch }); useEditorStore.getState().saveSnapshot(); }}
+                              className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#2a2a2a] border border-[#3e3e3e] hover:border-emerald-500/40 rounded text-[10px] text-white transition-colors text-center truncate"
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             </div>
           );
         })()}

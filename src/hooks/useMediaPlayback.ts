@@ -20,6 +20,12 @@ import { getAnimatedValue } from '@/utils/keyframes';
 let masterAudioCtx: AudioContext | null = null;
 let masterCompressor: DynamicsCompressorNode | null = null;
 let masterAudioDestination: MediaStreamAudioDestinationNode | null = null;
+const trackAnalysers = new Map<string, AnalyserNode>();
+let masterAnalyser: AnalyserNode | null = null;
+
+if (typeof window !== 'undefined') {
+  (window as any).procutTrackAnalysers = trackAnalysers;
+}
 
 function getMasterAudioCtx() {
   if (!masterAudioCtx) {
@@ -37,9 +43,17 @@ function getMasterAudioCtx() {
         masterCompressor.attack.value = 0.003;
         masterCompressor.release.value = 0.25;
         
-        // Route master compressor output to speakers and to export stream destination
-        masterCompressor.connect(masterAudioCtx.destination);
-        masterCompressor.connect(masterAudioDestination);
+        // Master analyser for VU metering
+        masterAnalyser = masterAudioCtx.createAnalyser();
+        masterAnalyser.fftSize = 64;
+        if (typeof window !== 'undefined') {
+          (window as any).procutMasterAnalyser = masterAnalyser;
+        }
+        
+        // Route master compressor output to master analyser, then to speakers and export
+        masterCompressor.connect(masterAnalyser);
+        masterAnalyser.connect(masterAudioCtx.destination);
+        masterAnalyser.connect(masterAudioDestination);
       }
     }
   }
@@ -503,9 +517,11 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         entry.trebleFilter.gain.setTargetAtTime(Math.max(-15, Math.min(15, baseTreble)), ctxTime, rampTime);
       }
 
-      // Update Stereo Panning using animatedPan
+      // Update Stereo Panning combining clip panning and track-level panning
       if (entry.pannerNode) {
-        entry.pannerNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, animatedPan / 100)), ctxTime, rampTime);
+        const trackPan = targetTrack?.pan ?? 0;
+        const combinedPan = (animatedPan / 100) + trackPan;
+        entry.pannerNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, combinedPan)), ctxTime, rampTime);
       }
 
       // Update Room Ambience feedback wet volume
@@ -513,9 +529,11 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
         entry.delayGain.gain.setTargetAtTime(audioSettings.humanize ? 0.20 : 0.0, ctxTime, rampTime);
       }
 
-      // Update volume & mute state
-      const isMutedTrack = targetTrack?.muted || isMuted;
-      const globalMuted = isMutedTrack || audioSettings.muted;
+      // Update volume & mute state supporting track Solo / Mute logic
+      const anyTrackSoloed = tracks.some(t => t.solo);
+      const isMutedTrack = targetTrack ? (anyTrackSoloed ? !targetTrack.solo : targetTrack.muted) : false;
+      const isMutedGlobally = isMutedTrack || isMuted;
+      const globalMuted = isMutedGlobally || audioSettings.muted;
 
       const clipElapsed = currentTime - fullClip.startTime;
       let fadeInMultiplier = 1;
@@ -619,7 +637,8 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
       }
 
       const linearGain = Math.pow(10, animatedVolume / 20);
-      const finalVolume = (globalMuted || isTransitionMuted) ? 0 : linearGain * volume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
+      const trackVolume = targetTrack?.volume ?? 1;
+      const finalVolume = (globalMuted || isTransitionMuted) ? 0 : linearGain * volume * trackVolume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
 
       if (entry.gainNode) {
         entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
@@ -751,6 +770,28 @@ function cubicInterp(y0: number, y1: number, y2: number, y3: number, t: number):
   return ((a * t + b) * t + c) * t + d;
 }
 
+function getOrCreateTrackAnalyser(trackId: string, audioCtx: AudioContext): AnalyserNode {
+  let analyser = trackAnalysers.get(trackId);
+  if (!analyser) {
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 64;
+    
+    // Connect track analyser to master output chain
+    if (masterAnalyser) {
+      analyser.connect(masterAnalyser);
+    } else if (masterCompressor) {
+      analyser.connect(masterCompressor);
+    } else {
+      analyser.connect(audioCtx.destination);
+      if (masterAudioDestination) {
+        analyser.connect(masterAudioDestination);
+      }
+    }
+    trackAnalysers.set(trackId, analyser);
+  }
+  return analyser;
+}
+
 // ---------------------------------------------------------------------------
 // Helper: initialize Web Audio graph for real-time panning, pitch, humanizer, and EQ
 // ---------------------------------------------------------------------------
@@ -760,6 +801,10 @@ function initAudioGraph(entry: MediaElement) {
 
   try {
     const sourceNode = audioCtx.createMediaElementSource(entry.el);
+
+    // Look up the parent track of this clip
+    const track = useEditorStore.getState().tracks.find(t => t.clips.some(c => c.id === entry.clipId));
+    const trackAnalyser = track ? getOrCreateTrackAnalyser(track.id, audioCtx) : null;
 
     // 1. Overlap-Add Hann-windowed granular pitch shifter (Stereo)
     //    Uses two overlapping grains with 50% overlap and Hann windows
@@ -926,7 +971,11 @@ function initAudioGraph(entry: MediaElement) {
       delayGain.connect(gainNode);
     }
 
-    if (masterCompressor) {
+    if (trackAnalyser) {
+      gainNode.connect(trackAnalyser);
+    } else if (masterAnalyser) {
+      gainNode.connect(masterAnalyser);
+    } else if (masterCompressor) {
       gainNode.connect(masterCompressor);
     } else {
       gainNode.connect(audioCtx.destination);
