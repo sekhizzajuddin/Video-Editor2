@@ -52,6 +52,10 @@ import { parseSRT } from '@/utils/srtParser';
 import demoA from '../assets/transition_demo_a.webp';
 import demoB from '../assets/transition_demo_b.webp';
 import { useEffect } from 'react';
+import { parseCubeLut } from '@/utils/lutParser';
+import { detectBeats } from '@/utils/beatDetection';
+import { TITLE_TEMPLATES, TEMPLATE_CATEGORIES } from '@/utils/titleTemplates';
+import type { TemplateCategory } from '@/utils/titleTemplates';
 
 const TRANSITIONS = [
   { name: 'Fade', color: 'from-amber-500/20 to-transparent', preview: 'Fade in/out between clips' },
@@ -165,7 +169,7 @@ const TEXT_TEMPLATES = [
 ];
 
 export function MediaPanel() {
-  const { mediaLibrary, activeMediaTab, setActiveMediaTab, addMedia, removeMedia, insertTextClip } = useEditorStore();
+  const { mediaLibrary, activeMediaTab, setActiveMediaTab, addMedia, removeMedia, insertTextClip, addBeatMarkers, clearBeatMarkers } = useEditorStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -175,12 +179,16 @@ export function MediaPanel() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openSection, setOpenSection] = useState<'fx' | 'color' | 'particles'>('fx');
   const [previewItem, setPreviewItem] = useState<any | null>(null);
+  const [templateCategory, setTemplateCategory] = useState<TemplateCategory>('all');
+  const [detectingBeatId, setDetectingBeatId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
 
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Project', icon: Folder },
     { id: 'text', label: 'Text', icon: Type },
+    { id: 'templates', label: 'Templates', icon: Clapperboard },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
     { id: 'effects', label: 'Effects', icon: Waves },
   ];
@@ -205,8 +213,25 @@ export function MediaPanel() {
       setImportProgress(`Importing ${file.name} (${i + 1}/${fileArray.length})...`);
 
       try {
-        const mediaItem = await probeFile(file);
-        addMedia(mediaItem, file);
+        // Handle .cube LUT files specially
+        if (file.name.toLowerCase().endsWith('.cube')) {
+          const text = await file.text();
+          const lutData = parseCubeLut(text);
+          const lutId = Math.random().toString(36).substr(2, 9);
+          addMedia({
+            id: lutId,
+            name: file.name.replace(/\.cube$/i, ''),
+            type: 'lut',
+            duration: 0,
+            url: '',
+            size: file.size,
+            createdAt: Date.now(),
+            lutData,
+          });
+        } else {
+          const mediaItem = await probeFile(file);
+          addMedia(mediaItem, file);
+        }
       } catch (err) {
         console.error(`Failed to import ${file.name}:`, err);
       }
@@ -215,6 +240,30 @@ export function MediaPanel() {
     setImporting(false);
     setImportProgress('');
   }, [addMedia]);
+
+  // Beat detection handler
+  const handleDetectBeats = useCallback(async (media: MediaItem) => {
+    if (!media.url || detectingBeatId) return;
+    setDetectingBeatId(media.id);
+    try {
+      const result = await detectBeats(media.url);
+      addBeatMarkers(media.id, result.beats);
+      alert(`✅ Found ${result.beats.length} beats — ~${result.bpm} BPM (confidence: ${Math.round(result.confidence * 100)}%)\n\nBeat markers added to the timeline ruler.`);
+    } catch (err) {
+      console.error('Beat detection failed:', err);
+      alert('Beat detection failed. Make sure the clip has valid audio.');
+    } finally {
+      setDetectingBeatId(null);
+    }
+  }, [addBeatMarkers, detectingBeatId]);
+
+  // LUT file import handler
+  const handleLutImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    importFiles(files);
+    e.target.value = '';
+  }, [importFiles]);
 
   const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -792,6 +841,19 @@ export function MediaPanel() {
                       {/* Actions */}
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         {media.type === 'video' && <Play className="w-3 h-3 text-[#a0a0a0]" />}
+                        {(media.type === 'audio' || media.type === 'video') && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDetectBeats(media); }}
+                            title="Detect Beats"
+                            disabled={detectingBeatId === media.id}
+                            className="p-0.5 text-[#a0a0a0] hover:text-yellow-400 rounded transition-colors disabled:opacity-50"
+                          >
+                            {detectingBeatId === media.id
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <Waves className="w-3 h-3" />
+                            }
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -802,6 +864,7 @@ export function MediaPanel() {
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
+
 
                       {/* Delete confirmation overlay for list */}
                       {confirmDeleteId === media.id && (
@@ -846,6 +909,63 @@ export function MediaPanel() {
             </div>
           </div>
         )}
+
+        {/* ── Templates Tab ── */}
+        {activeMediaTab === 'templates' && (() => {
+          const filtered = templateCategory === 'all'
+            ? TITLE_TEMPLATES
+            : TITLE_TEMPLATES.filter((t) => t.category === templateCategory);
+          return (
+            <div className="flex-1 overflow-y-auto flex flex-col">
+              {/* Category filter pills */}
+              <div className="flex gap-1 p-2 flex-wrap border-b border-[#3e3e3e]">
+                {TEMPLATE_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setTemplateCategory(cat.id)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                      templateCategory === cat.id
+                        ? 'bg-amber-500 text-black'
+                        : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-[#6a6a6a] px-3 py-1.5">Drag onto a Text track to apply</p>
+              <div className="flex flex-col gap-1 p-2">
+                {filtered.map((tmpl) => (
+                  <div
+                    key={tmpl.id}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/procut-template', tmpl.id);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-grab transition-all group"
+                  >
+                    {/* Color accent dot */}
+                    <div
+                      className="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center"
+                      style={{ background: `${tmpl.accentColor}22`, border: `1px solid ${tmpl.accentColor}44` }}
+                    >
+                      <div className="w-3 h-3 rounded-full" style={{ background: tmpl.accentColor }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-white font-medium truncate">{tmpl.name}</p>
+                      <p className="text-[9px] text-[#6a6a6a] truncate">{tmpl.description}</p>
+                      <p className="text-[8px] mt-0.5" style={{ color: tmpl.accentColor + 'cc' }}>
+                        {tmpl.defaultDuration}s · {tmpl.category}
+                      </p>
+                    </div>
+                    <span className="text-[8px] text-amber-400/40 group-hover:text-amber-400/80 transition-colors shrink-0">DRAG</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {activeMediaTab === 'transitions' && (
           <div className="flex-1 overflow-y-auto p-2">
@@ -986,8 +1106,16 @@ export function MediaPanel() {
         ref={fileInputRef}
         type="file"
         multiple
-        accept="video/*,audio/*,image/*"
+        accept="video/*,audio/*,image/*,.cube"
         onChange={handleImport}
+        className="hidden"
+      />
+      <input
+        ref={lutInputRef}
+        type="file"
+        multiple
+        accept=".cube"
+        onChange={handleLutImport}
         className="hidden"
       />
       <input

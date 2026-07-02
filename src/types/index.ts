@@ -1,5 +1,19 @@
 // Media Types
-export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx';
+export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx' | 'lut';
+
+// LUT (Color Look-Up Table) data parsed from .cube files
+export interface LutData {
+  size: number;           // LUT grid size (e.g. 33 for 33x33x33)
+  table: Float32Array;    // Flattened RGB table: [r0,g0,b0, r1,g1,b1, ...]
+  domainMin: [number, number, number];
+  domainMax: [number, number, number];
+  title?: string;
+}
+
+export interface ClipLutSettings {
+  mediaId: string;        // references the LUT MediaItem
+  intensity: number;      // 0-100%, blend between original and LUT-graded
+}
 
 export interface MediaItem {
   id: string;
@@ -20,6 +34,8 @@ export interface MediaItem {
   // Content
   textContent?: string;     // default text content
   fxType?: string;          // specific effect identifier
+  // LUT data (only set for type === 'lut')
+  lutData?: LutData;
 }
 
 // Transform for clips
@@ -238,6 +254,7 @@ export interface TimelineClip {
   particleSettings?: ClipParticleSettings;
   chromaKey?: ClipChromaKeySettings;
   kenBurns?: ClipKenBurnsSettings;
+  lut?: ClipLutSettings;
 }
 
 // Timeline Track
@@ -296,7 +313,7 @@ export interface EditorState {
   // UI State
   showExportModal: boolean;
   showSettingsModal: boolean;
-  activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text';
+  activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
   activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';
 
   // Canvas Mode
@@ -327,6 +344,8 @@ export interface EditorState {
     scrollSpeed: number;
     gestureSensitivity: number;
   };
+  // Beat detection markers (per audio clip)
+  beatMarkers: { time: number; clipId: string }[];
 }
 
 export interface EditorSnapshot {
@@ -338,7 +357,7 @@ export interface EditorSnapshot {
 export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch';
 
 // Media Tab Types
-export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text';
+export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
 
 // Properties Tab Types
 export type PropertiesTab = 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';

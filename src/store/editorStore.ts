@@ -239,6 +239,10 @@ interface EditorActions {
   addMarker: (time: number, name?: string, color?: string) => void;
   updateMarker: (id: string, updates: Partial<import('@/types').TimelineMarker>) => void;
   removeMarker: (id: string) => void;
+
+  // Beat Markers
+  addBeatMarkers: (clipId: string, times: number[]) => void;
+  clearBeatMarkers: (clipId: string) => void;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -265,6 +269,7 @@ const initialState: EditorState = {
   inPoint: null,
   outPoint: null,
   markers: [],
+  beatMarkers: [],
   zoomLevel: 80,
   scrollLeft: 0,
   activeTool: 'select',
@@ -1636,5 +1641,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       tracks: cleanedTracks,
       totalDuration: maxEnd,
     });
+  },
+  // Beat Markers
+  addBeatMarkers: (clipId, times) => {
+    set((state) => ({
+      beatMarkers: [
+        ...state.beatMarkers.filter((b) => b.clipId !== clipId),
+        ...times.map((time) => ({ time, clipId })),
+      ].sort((a, b) => a.time - b.time),
+    }));
+  },
+  clearBeatMarkers: (clipId) => {
+    set((state) => ({
+      beatMarkers: state.beatMarkers.filter((b) => b.clipId !== clipId),
+    }));
   },
 }));

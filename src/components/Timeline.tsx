@@ -23,6 +23,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { formatSimpleTime } from '@/utils/time';
+import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -574,6 +575,7 @@ export function Timeline() {
     addMarker,
     updateMarker,
     removeMarker,
+    beatMarkers,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -1551,6 +1553,47 @@ export function Timeline() {
         return;
       }
 
+      // ── Animated Title Template drop → create text clip on text track ──
+      const templateId = e.dataTransfer.getData('application/procut-template');
+      if (templateId) {
+        const tmpl = TITLE_TEMPLATES.find((t) => t.id === templateId);
+        if (tmpl && track && track.type === 'text') {
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const startTime = Math.max(0, (x + scrollLeft) / zoomLevel);
+          const mediaId = `tmpl_media_${Math.random().toString(36).substr(2, 9)}`;
+          const clipId  = `tmpl_clip_${Math.random().toString(36).substr(2, 9)}`;
+          useEditorStore.getState().addMedia({
+            id: mediaId,
+            name: tmpl.name,
+            type: 'text',
+            duration: tmpl.defaultDuration,
+            url: '',
+            createdAt: Date.now(),
+          });
+          useEditorStore.getState().addClip({
+            id: clipId,
+            mediaId,
+            trackId,
+            startTime,
+            duration: tmpl.defaultDuration,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            textSettings: { ...tmpl.textSettings },
+            animations: tmpl.animations ? { ...tmpl.animations } : undefined,
+          } as any);
+          useEditorStore.getState().selectClip(clipId);
+          useEditorStore.getState().saveSnapshot();
+        }
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        return;
+      }
+
       const effectName = e.dataTransfer.getData('application/procut-effect');
       if (effectName && track?.type === 'fx') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2067,6 +2110,20 @@ export function Timeline() {
                     <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1 bg-[#141414] border border-[#3e3e3e] px-1.5 py-0.5 rounded text-[8px] text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-md">
                       {marker.name}
                     </div>
+                  </div>
+                );
+              })}
+
+              {/* Beat Markers — yellow diamonds on ruler */}
+              {beatMarkers.map((bm, i) => {
+                const bx = bm.time * zoomLevel;
+                return (
+                  <div
+                    key={`beat-${bm.clipId}-${i}`}
+                    className="absolute top-0 w-2 h-2 z-20 pointer-events-none"
+                    style={{ left: `${bx}px`, transform: 'translateX(-50%) rotate(45deg) translateY(3px)' }}
+                  >
+                    <div className="w-full h-full bg-yellow-400/80 border border-yellow-300/60" />
                   </div>
                 );
               })}

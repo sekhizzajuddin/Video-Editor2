@@ -1750,6 +1750,103 @@ export function PropertiesPanel() {
               )}
             </div>
 
+            {/* LUT Color Grade */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('lutGrade')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                  LUT Color Grade
+                  {selectedClip.lut && (
+                    <span className="text-[9px] text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">ACTIVE</span>
+                  )}
+                </span>
+                {collapsedSections['lutGrade'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['lutGrade'] && (() => {
+                const mediaLibrary = useEditorStore.getState().mediaLibrary;
+                const lutMedia = selectedClip.lut
+                  ? mediaLibrary.find((m) => m.id === selectedClip.lut!.mediaId)
+                  : null;
+                const lutItems = mediaLibrary.filter((m) => m.type === 'lut');
+
+                return (
+                  <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                    {/* Current LUT */}
+                    {selectedClip.lut && lutMedia ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-emerald-400 font-medium truncate flex-1 mr-2">
+                            📁 {lutMedia.name}
+                          </span>
+                          <button
+                            onClick={() => {
+                              updateClip(selectedClip.id, { lut: undefined });
+                              useEditorStore.getState().saveSnapshot();
+                            }}
+                            className="text-[9px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded bg-red-400/10 hover:bg-red-400/20 transition-colors shrink-0"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        {/* Intensity slider */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-[#a0a0a0]">Intensity</span>
+                            <span className="font-mono text-[#a0a0a0]">{selectedClip.lut.intensity}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={selectedClip.lut.intensity}
+                            onChange={(e) => updateClip(selectedClip.id, {
+                              lut: { ...selectedClip.lut!, intensity: Number(e.target.value) }
+                            })}
+                            onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                            className="w-full h-1 bg-gradient-to-r from-[#3e3e3e] to-emerald-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-[#6a6a6a]">No LUT applied. Import a .cube file, then drag it onto this clip.</p>
+                    )}
+                    {/* Apply from library */}
+                    {lutItems.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-[#a0a0a0]">Apply from library:</p>
+                        <select
+                          value={selectedClip.lut?.mediaId ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) {
+                              updateClip(selectedClip.id, { lut: undefined });
+                            } else {
+                              updateClip(selectedClip.id, { lut: { mediaId: v, intensity: selectedClip.lut?.intensity ?? 100 } });
+                            }
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="w-full bg-[#1e1e1e] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">— None —</option>
+                          {lutItems.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <p className="text-[9px] text-[#6a6a6a]">Tip: drag a LUT from Effects tab directly onto a timeline clip.</p>
+                  </div>
+                );
+              })()}
+            </div>
+
             {/* Chroma Key / Green Screen */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button

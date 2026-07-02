@@ -18,6 +18,7 @@ import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { formatTime } from '@/utils/time';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
+import { applyLutToCanvas } from '@/utils/lutParser';
 
 // ---------------------------------------------------------------------------
 // Image cache – shared across renders, keyed by mediaId.
@@ -1442,6 +1443,24 @@ export function PreviewCanvas() {
       for (const clip of track.clips) {
         if (clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
           renderParticles(ctx, clip.id, clip.particleSettings, W, H, particleFrameMs);
+        }
+      }
+    }
+
+    // ── Apply LUT per active clip ──────────────────────────────────────────
+    // After compositing all clips, apply LUT grading per clip that has one.
+    // We apply the last active clip's LUT to the full canvas for simplicity.
+    for (const track of visualTracks) {
+      for (const clip of track.clips) {
+        if (
+          clip.lut?.mediaId &&
+          currentTime >= clip.startTime &&
+          currentTime < clip.startTime + clip.duration
+        ) {
+          const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
+          if (lutMedia?.lutData) {
+            applyLutToCanvas(ctx, W, H, lutMedia.lutData, clip.lut!.intensity ?? 100);
+          }
         }
       }
     }
