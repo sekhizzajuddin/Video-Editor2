@@ -2,6 +2,7 @@ import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Slide
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
+import { clearPreviewCaches } from './PreviewCanvas';
 
 export function SettingsModal() {
   const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings } = useEditorStore();
@@ -22,10 +23,6 @@ export function SettingsModal() {
     e.target.value = '';
   }, [addMedia, setShowSettingsModal]);
   const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls'>('general');
-  const [autosave, setAutosave] = useState(true);
-  const [showWaveforms, setShowWaveforms] = useState(true);
-  const [snapEnabled, setSnapEnabled] = useState(true);
-  const [defaultDuration, setDefaultDuration] = useState(5);
 
   if (!showSettingsModal) return null;
 
@@ -115,16 +112,16 @@ export function SettingsModal() {
                       <p className="text-[10px] text-[#a0a0a0]">Save project automatically</p>
                     </div>
                     <button
-                      onClick={() => setAutosave(!autosave)}
+                      onClick={() => updateSettings({ autosave: !settings.autosave })}
                       className={`w-9 h-5 rounded-full transition-colors relative ${
-                        autosave ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                        settings.autosave ? 'bg-amber-500' : 'bg-[#3e3e3e]'
                       }`}
                     >
                       <div
                         className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all ${
-                          autosave ? 'left-4.5' : 'left-0.5'
+                          settings.autosave ? 'left-4.5' : 'left-0.5'
                         }`}
-                        style={{ left: autosave ? '18px' : '2px' }}
+                        style={{ left: settings.autosave ? '18px' : '2px' }}
                       />
                     </button>
                   </div>
@@ -135,14 +132,14 @@ export function SettingsModal() {
                       <p className="text-[10px] text-[#a0a0a0]">Auto-snap clips when dragging</p>
                     </div>
                     <button
-                      onClick={() => setSnapEnabled(!snapEnabled)}
+                      onClick={() => updateSettings({ snapEnabled: !settings.snapEnabled })}
                       className={`w-9 h-5 rounded-full transition-colors relative ${
-                        snapEnabled ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                        settings.snapEnabled ? 'bg-amber-500' : 'bg-[#3e3e3e]'
                       }`}
                     >
                       <div
                         className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
-                        style={{ left: snapEnabled ? '18px' : '2px' }}
+                        style={{ left: settings.snapEnabled ? '18px' : '2px' }}
                       />
                     </button>
                   </div>
@@ -153,14 +150,14 @@ export function SettingsModal() {
                       <p className="text-[10px] text-[#a0a0a0]">Display audio waveforms on clips</p>
                     </div>
                     <button
-                      onClick={() => setShowWaveforms(!showWaveforms)}
+                      onClick={() => updateSettings({ showWaveform: !settings.showWaveform })}
                       className={`w-9 h-5 rounded-full transition-colors relative ${
-                        showWaveforms ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                        settings.showWaveform ? 'bg-amber-500' : 'bg-[#3e3e3e]'
                       }`}
                     >
                       <div
                         className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
-                        style={{ left: showWaveforms ? '18px' : '2px' }}
+                        style={{ left: settings.showWaveform ? '18px' : '2px' }}
                       />
                     </button>
                   </div>
@@ -174,8 +171,8 @@ export function SettingsModal() {
                       <label className="text-[10px] text-[#a0a0a0] block mb-1">Default Image Duration (seconds)</label>
                       <input
                         type="number"
-                        value={defaultDuration}
-                        onChange={(e) => setDefaultDuration(Number(e.target.value))}
+                        value={settings.defaultDuration}
+                        onChange={(e) => updateSettings({ defaultDuration: Number(e.target.value) })}
                         min={1}
                         max={60}
                         className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
@@ -289,10 +286,14 @@ export function SettingsModal() {
                       <Monitor className="w-4 h-4 text-blue-400" />
                       <span className="text-xs text-white font-medium">Preview Quality</span>
                     </div>
-                    <select className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500">
-                      <option>Full (Best Quality)</option>
-                      <option>Half (Balanced)</option>
-                      <option>Quarter (Best Performance)</option>
+                    <select
+                      value={settings.previewQuality}
+                      onChange={(e) => updateSettings({ previewQuality: e.target.value as any })}
+                      className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="full">Full (Best Quality)</option>
+                      <option value="half">Half (Balanced)</option>
+                      <option value="quarter">Quarter (Best Performance)</option>
                     </select>
                   </div>
 
@@ -304,7 +305,13 @@ export function SettingsModal() {
                     <p className="text-[10px] text-[#a0a0a0] mb-2">
                       Clear cached preview files to free up disk space
                     </p>
-                    <button className="px-3 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors">
+                    <button 
+                      onClick={() => {
+                        clearPreviewCaches();
+                        alert('Preview image cache cleared successfully!');
+                      }}
+                      className="px-3 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors"
+                    >
                       Clear Cache
                     </button>
                   </div>
@@ -314,14 +321,30 @@ export function SettingsModal() {
                     <div className="mt-2 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] text-[#a0a0a0]">Show thumbnails</span>
-                        <button className="w-9 h-5 rounded-full bg-amber-500 relative">
-                          <div className="w-4 h-4 rounded-full bg-white absolute top-0.5" style={{ left: '18px' }} />
+                        <button
+                          onClick={() => updateSettings({ showThumbnails: !settings.showThumbnails })}
+                          className={`w-9 h-5 rounded-full transition-colors relative ${
+                            settings.showThumbnails ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                          }`}
+                        >
+                          <div
+                            className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
+                            style={{ left: settings.showThumbnails ? '18px' : '2px' }}
+                          />
                         </button>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] text-[#a0a0a0]">Hardware acceleration</span>
-                        <button className="w-9 h-5 rounded-full bg-amber-500 relative">
-                          <div className="w-4 h-4 rounded-full bg-white absolute top-0.5" style={{ left: '18px' }} />
+                        <button
+                          onClick={() => updateSettings({ hardwareAcceleration: !settings.hardwareAcceleration })}
+                          className={`w-9 h-5 rounded-full transition-colors relative ${
+                            settings.hardwareAcceleration ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                          }`}
+                        >
+                          <div
+                            className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
+                            style={{ left: settings.hardwareAcceleration ? '18px' : '2px' }}
+                          />
                         </button>
                       </div>
                     </div>

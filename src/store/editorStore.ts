@@ -258,6 +258,13 @@ const initialState: EditorState = {
   settings: {
     scrollSpeed: 1,
     gestureSensitivity: 1,
+    autosave: true,
+    showWaveform: true,
+    snapEnabled: true,
+    defaultDuration: 5,
+    previewQuality: 'full',
+    showThumbnails: true,
+    hardwareAcceleration: true,
   },
   hasUnsavedChanges: false,
   currentTime: 0,

@@ -343,6 +343,13 @@ export interface EditorState {
   settings: {
     scrollSpeed: number;
     gestureSensitivity: number;
+    autosave: boolean;
+    showWaveform: boolean;
+    snapEnabled: boolean;
+    defaultDuration: number;
+    previewQuality: 'full' | 'half' | 'quarter';
+    showThumbnails: boolean;
+    hardwareAcceleration: boolean;
   };
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];

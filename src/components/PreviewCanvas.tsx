@@ -16,17 +16,22 @@ import {
 import { useEditorStore } from '@/store/editorStore';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { formatTime } from '@/utils/time';
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { applyLutToCanvas } from '@/utils/lutParser';
 
 // ---------------------------------------------------------------------------
 // Image cache – shared across renders, keyed by mediaId.
 // Each entry holds the HTMLImageElement (or a loading promise so we don't
-// kick off duplicate loads).
-// ---------------------------------------------------------------------------
+// Cache size limit (LRU strategy)
+const MAX_CACHE_SIZE = 50;
 const imageCache = new Map<string, HTMLImageElement>();
 const imageLoading = new Set<string>();
+
+export function clearPreviewCaches() {
+  imageCache.clear();
+  imageLoading.clear();
+}
 
 function getCachedImage(
   mediaId: string,
@@ -34,7 +39,12 @@ function getCachedImage(
   onLoad: () => void,
 ): HTMLImageElement | null {
   const cached = imageCache.get(mediaId);
-  if (cached && cached.complete && cached.naturalWidth > 0) return cached;
+  if (cached && cached.complete && cached.naturalWidth > 0) {
+    // Move to end to mark as most recently used
+    imageCache.delete(mediaId);
+    imageCache.set(mediaId, cached);
+    return cached;
+  }
 
   // Already loading – wait for the existing load to resolve
   if (imageLoading.has(mediaId)) return null;
@@ -43,6 +53,13 @@ function getCachedImage(
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = () => {
+    // Evict oldest if limit reached
+    if (imageCache.size >= MAX_CACHE_SIZE) {
+      const firstKey = imageCache.keys().next().value;
+      if (firstKey !== undefined) {
+        imageCache.delete(firstKey);
+      }
+    }
     imageCache.set(mediaId, img);
     imageLoading.delete(mediaId);
     onLoad(); // trigger a re-render / re-draw
@@ -368,7 +385,6 @@ function renderParticles(
 export function PreviewCanvas() {
   const {
     currentTime,
-
     isPlaying,
     totalDuration,
     isMuted,
@@ -390,6 +406,7 @@ export function PreviewCanvas() {
     setCanvasTransformMode,
     setPreviewCanvas,
     activeTool,
+    settings,
   } = useEditorStore();
 
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
@@ -407,10 +424,23 @@ export function PreviewCanvas() {
   const [showGrid, setShowGrid] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
-  const showSafeZonesRef = useRef(false);
-  const showGridRef = useRef(false);
-  showSafeZonesRef.current = showSafeZones;
-  showGridRef.current = showGrid;
+
+  // Memoized allClips to avoid flatMap inside the 60fps loop
+  const allClips = useMemo(() => tracks.flatMap((t) => t.clips), [tracks]);
+  const allClipsRef = useRef(allClips);
+  useEffect(() => {
+    allClipsRef.current = allClips;
+  }, [allClips]);
+
+  // Clean up unused particle pools to prevent memory leaks
+  useEffect(() => {
+    const allClipIds = new Set(allClips.map((c) => c.id));
+    for (const clipId of particlePools.keys()) {
+      if (!allClipIds.has(clipId)) {
+        particlePools.delete(clipId);
+      }
+    }
+  }, [allClips]);
   
   // Hand tool panning state
   const isPanning = useRef(false);
@@ -481,13 +511,17 @@ export function PreviewCanvas() {
       
       const state = useEditorStore.getState();
       const dir = state.playbackDirection ?? 1;
-      const newTime = currentTimeRef.current + dt * playbackSpeed * dir;
+      const speed = state.playbackSpeed;
+      const currentSeek = state.seek;
+      const currentPause = state.pause;
+      const selectedIds = state.selectedClipIds;
+      const allClips = allClipsRef.current;
 
-      const allClips = state.tracks.flatMap((t) => t.clips);
+      const newTime = currentTimeRef.current + dt * speed * dir;
 
-      if (selectedClipIds.length > 0) {
+      if (selectedIds.length > 0) {
         // Selection Loop Playback Mode
-        const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
+        const selectedClips = allClips.filter((c) => selectedIds.includes(c.id));
         if (selectedClips.length > 0) {
           let minStart = Infinity;
           let maxEnd = -Infinity;
@@ -499,10 +533,10 @@ export function PreviewCanvas() {
 
           if (newTime >= maxEnd || newTime < minStart) {
             const startPos = dir >= 0 ? minStart : maxEnd;
-            seek(startPos);
+            currentSeek(startPos);
             currentTimeRef.current = startPos;
           } else {
-            seek(newTime);
+            currentSeek(newTime);
           }
           animId = requestAnimationFrame(loop);
           return;
@@ -517,26 +551,26 @@ export function PreviewCanvas() {
       }
 
       if (dir < 0 && newTime <= 0) {
-        seek(0);
+        currentSeek(0);
         currentTimeRef.current = 0;
-        state.pause();
+        currentPause();
         return;
       }
 
       if (dir >= 0 && newTime >= maxEndSequence) {
-        seek(0);
+        currentSeek(0);
         currentTimeRef.current = 0;
-        state.pause();
+        currentPause();
         return;
       }
 
-      seek(newTime);
+      currentSeek(newTime);
       animId = requestAnimationFrame(loop);
     };
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, playbackSpeed, seek, selectedClipIds, playbackDirection]);
+  }, [isPlaying]);
 
   // -------------------------------------------------------------------
   // Canvas rendering – called whenever time, tracks, or images change
@@ -544,15 +578,22 @@ export function PreviewCanvas() {
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: !settings.hardwareAcceleration });
     if (!ctx) return;
 
-    const W = canvas.width; // 854
-    const H = canvas.height; // 480
+    const W_target = 854;
+    const H_target = 480;
+    const canvas_scale = canvas.width / W_target;
 
     // 1. Clear to background color (entire canvas, regardless of viewport)
     ctx.fillStyle = canvasBgColor;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.scale(canvas_scale, canvas_scale);
+
+    const W = W_target;
+    const H = H_target;
 
     const cx = W / 2;
     const cy = H / 2;
@@ -1496,7 +1537,7 @@ export function PreviewCanvas() {
     ctx.restore(); // Restore from viewport transform
 
     // ── Grid Overlay ────────────────────────────────────────────────────
-    if (showGridRef.current) {
+    if (showGrid) {
       ctx.save();
       ctx.globalAlpha = 1;
 
@@ -1545,7 +1586,7 @@ export function PreviewCanvas() {
     }
 
     // Safe Zones Overlay
-    if (showSafeZonesRef.current) {
+    if (showSafeZones) {
       const actionSafe = 0.9; // 90%
       const titleSafe = 0.8;  // 80%
 
@@ -1588,17 +1629,34 @@ export function PreviewCanvas() {
     const tcX = W - tcW - 8;
     const tcY = 8;
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    (ctx as any).roundRect(tcX, tcY, tcW, tcH, 4);
+    ctx.beginPath();
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(tcX, tcY, tcW, tcH, 4);
+    } else {
+      ctx.rect(tcX, tcY, tcW, tcH);
+    }
     ctx.fill();
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor]);
 
-  // Kick off render whenever dependencies change
+    ctx.restore(); // Restore from global canvas resolution scale
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration]);
+
+  const renderCanvasRef = useRef(renderCanvas);
   useEffect(() => {
-    renderCanvas();
+    renderCanvasRef.current = renderCanvas;
+  });
+
+  // Kick off render whenever dependencies change, throttled by requestAnimationFrame
+  useEffect(() => {
+    let rId: number;
+    const draw = () => {
+      renderCanvasRef.current();
+    };
+    rId = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rId);
   }, [renderCanvas]);
 
   // During playback, also schedule continuous redraws so video frames update
@@ -1606,12 +1664,12 @@ export function PreviewCanvas() {
     if (!isPlaying) return;
     let id: number;
     const draw = () => {
-      renderCanvas();
+      renderCanvasRef.current();
       id = requestAnimationFrame(draw);
     };
     id = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(id);
-  }, [isPlaying, renderCanvas]);
+  }, [isPlaying]);
 
   // -------------------------------------------------------------------
   // Interaction handlers (Viewport Gestures & Tools)
@@ -1765,16 +1823,22 @@ export function PreviewCanvas() {
   useEffect(() => {
     if (!showSpeedMenu) return;
     const close = () => setShowSpeedMenu(false);
-    window.addEventListener('click', close, { once: true });
-    return () => window.removeEventListener('click', close);
+    const timer = setTimeout(() => window.addEventListener('click', close), 0);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('click', close);
+    };
   }, [showSpeedMenu]);
 
   // Close canvas settings panel when clicking elsewhere
   useEffect(() => {
     if (!showSettingsPanel) return;
     const close = () => setShowSettingsPanel(false);
-    window.addEventListener('click', close, { once: true });
-    return () => window.removeEventListener('click', close);
+    const timer = setTimeout(() => window.addEventListener('click', close), 0);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('click', close);
+    };
   }, [showSettingsPanel]);
 
   const handleTimelineSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1787,6 +1851,9 @@ export function PreviewCanvas() {
   // -------------------------------------------------------------------
   // JSX
   // -------------------------------------------------------------------
+  const previewWidth = settings.previewQuality === 'quarter' ? 213 : settings.previewQuality === 'half' ? 427 : 854;
+  const previewHeight = settings.previewQuality === 'quarter' ? 120 : settings.previewQuality === 'half' ? 240 : 480;
+
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e]">
       {/* Canvas Container */}
@@ -1814,8 +1881,8 @@ export function PreviewCanvas() {
       >
         <canvas
           ref={canvasRef}
-          width={854}
-          height={480}
+          width={previewWidth}
+          height={previewHeight}
           className={`pointer-events-none ${
             isFullscreen
               ? 'absolute inset-0 w-full h-full object-contain bg-black'
