@@ -241,17 +241,23 @@ export function PropertiesPanel() {
     }
   }
 
-  // Auto-switch properties panel tabs based on selected clip type
+  // Auto-switch properties panel tabs only when the clip selection CHANGES (not on property updates)
+  const lastAutoSwitchedClip = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedClip) return;
+    if (lastAutoSwitchedClip.current === primarySelectedId) return; // don't override manual tab changes
+    lastAutoSwitchedClip.current = primarySelectedId;
     if (selectedTrack?.type === 'fx' || selectedClip.fxSettings || selectedClip.particleSettings) {
       setActivePropertiesTab('effects');
     } else if (selectedTrack?.type === 'audio') {
       setActivePropertiesTab('audio');
-    } else if (selectedClip.textSettings) {
+    } else if (selectedTrack?.type === 'text' || selectedClip.textSettings) {
       setActivePropertiesTab('text');
+    } else {
+      setActivePropertiesTab('transform');
     }
-  }, [primarySelectedId, selectedTrack?.type, selectedClip?.fxSettings, selectedClip?.particleSettings, selectedClip?.textSettings, setActivePropertiesTab]);
+  }, [primarySelectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -327,20 +333,23 @@ export function PropertiesPanel() {
   };
 
   const baseTabs: { id: PropertiesTab; label: string; icon: any }[] = [];
-  
+
   if (selectedTrack?.type === 'text') {
+    // Text clips: Text is primary, but also expose Transform + Color + Effects
     baseTabs.push({ id: 'text', label: 'Text', icon: Type });
+    baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+    baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
+    baseTabs.push({ id: 'effects', label: 'FX', icon: Wand2 });
   } else if (selectedTrack?.type === 'fx') {
     baseTabs.push({ id: 'effects', label: 'Effects', icon: Wand2 });
-  }
-
-  if (selectedTrack?.type !== 'text' && selectedTrack?.type !== 'fx') {
+    baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+  } else {
+    // Video / Audio / Image clips: full set of tabs
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
     baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
-  } else if (selectedTrack?.type === 'text') {
-    baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+    baseTabs.push({ id: 'effects', label: 'FX', icon: Wand2 });
   }
 
   const tabs = baseTabs;

@@ -404,8 +404,12 @@ export function PreviewCanvas() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showSafeZones, setShowSafeZones] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const showSafeZonesRef = useRef(false);
+  const showGridRef = useRef(false);
   showSafeZonesRef.current = showSafeZones;
+  showGridRef.current = showGrid;
   
   // Hand tool panning state
   const isPanning = useRef(false);
@@ -804,55 +808,60 @@ export function PreviewCanvas() {
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'IMAGE', '#f59e0b');
           anyClipDrawn = true;
         }
-      } else if (mediaItem.type === 'text' && clip.textSettings) {
-        const ts = clip.textSettings as any;
-        const { text, fontSize, fontFamily, color, backgroundColor, bold, italic, shadow, shadowColor, shadowBlur, threeD, threeDDepth } = ts;
-        const textAlign: CanvasTextAlign = ts.textAlign || 'center';
+      } else if (mediaItem.type === 'text') {
+        // Use clip textSettings or fall back to sensible defaults so text is always visible
+        const rawTs = clip.textSettings as any;
+        const ts = {
+          text: rawTs?.text ?? 'Sample Text',
+          fontSize: rawTs?.fontSize ?? 48,
+          fontFamily: rawTs?.fontFamily ?? 'Inter',
+          color: rawTs?.color ?? '#ffffff',
+          backgroundColor: rawTs?.backgroundColor ?? 'transparent',
+          bold: rawTs?.bold ?? false,
+          italic: rawTs?.italic ?? false,
+          shadow: rawTs?.shadow ?? false,
+          shadowColor: rawTs?.shadowColor ?? '#000000',
+          shadowBlur: rawTs?.shadowBlur ?? 10,
+          threeD: rawTs?.threeD ?? false,
+          threeDDepth: rawTs?.threeDDepth ?? 4,
+          strokeWidth: rawTs?.strokeWidth ?? 0,
+          strokeColor: rawTs?.strokeColor ?? '#000000',
+          textAlign: (rawTs?.textAlign ?? 'center') as CanvasTextAlign,
+          animation: rawTs?.animation,
+        };
 
-        // Calculate text animations
-        const localTime = currentTime - clip.startTime;
+        // ── Animation progress ────────────────────────────────────────────
+        const localTime = Math.max(0, currentTime - clip.startTime);
         const clipDur = clip.duration;
-        const inDur = ts.animation?.inDuration ?? 0.5;
+        const inDur  = ts.animation?.inDuration ?? 0.5;
         const outDur = ts.animation?.outDuration ?? 0.5;
-        const inProgress = Math.min(1, Math.max(0, localTime / inDur));
-        const outProgress = Math.min(1, Math.max(0, (clipDur - localTime) / outDur));
+        const inProgress  = inDur  > 0 ? Math.min(1, localTime / inDur)              : 1;
+        const outProgress = outDur > 0 ? Math.min(1, (clipDur - localTime) / outDur) : 1;
 
-        let textAlpha = 1.0;
-        let textScale = 1.0;
+        let textAlpha   = 1.0;
+        let textScale   = 1.0;
         let textXOffset = 0;
         let textYOffset = 0;
-        let animatedText = text;
+        // Split text into lines (support \n)
+        let displayText = ts.text;
 
         if (ts.animation?.in && ts.animation.in !== 'none') {
           switch (ts.animation.in) {
-            case 'fadeIn':
-              textAlpha *= inProgress;
-              break;
-            case 'zoom':
-              textScale *= (0.2 + 0.8 * inProgress);
-              break;
-            case 'slideUp':
-              textYOffset += (1 - inProgress) * 60;
-              break;
-            case 'slideDown':
-              textYOffset -= (1 - inProgress) * 60;
-              break;
-            case 'slideLeft':
-              textXOffset += (1 - inProgress) * 120;
-              break;
-            case 'slideRight':
-              textXOffset -= (1 - inProgress) * 120;
-              break;
+            case 'fadeIn':    textAlpha *= inProgress; break;
+            case 'zoom':      textScale *= (0.2 + 0.8 * inProgress); break;
+            case 'slideUp':   textYOffset += (1 - inProgress) * 80; break;
+            case 'slideDown': textYOffset -= (1 - inProgress) * 80; break;
+            case 'slideLeft': textXOffset += (1 - inProgress) * 160; break;
+            case 'slideRight':textXOffset -= (1 - inProgress) * 160; break;
             case 'bounce': {
-              const t = inProgress;
-              const bounceFactor = t < 0.6 ? 0.3 * Math.sin(t * Math.PI / 0.6) : (t < 0.9 ? -0.1 * Math.sin((t - 0.6) * Math.PI / 0.3) : 0);
+              const bounceFactor = inProgress < 0.6 ? 0.3 * Math.sin(inProgress * Math.PI / 0.6)
+                                 : inProgress < 0.9 ? -0.1 * Math.sin((inProgress - 0.6) * Math.PI / 0.3) : 0;
               textScale *= (1 + bounceFactor);
               break;
             }
             case 'typewriter': {
-              const totalChars = text.length;
-              const charsShown = Math.floor(inProgress * totalChars);
-              animatedText = text.slice(0, charsShown);
+              const totalChars = ts.text.length;
+              displayText = ts.text.slice(0, Math.floor(inProgress * totalChars));
               break;
             }
           }
@@ -860,90 +869,85 @@ export function PreviewCanvas() {
 
         if (ts.animation?.out && ts.animation.out !== 'none') {
           switch (ts.animation.out) {
-            case 'fadeOut':
-              textAlpha *= outProgress;
-              break;
-            case 'zoom':
-              textScale *= (0.2 + 0.8 * outProgress);
-              break;
-            case 'slideUp':
-              textYOffset -= (1 - outProgress) * 60;
-              break;
-            case 'slideDown':
-              textYOffset += (1 - outProgress) * 60;
-              break;
-            case 'slideLeft':
-              textXOffset -= (1 - outProgress) * 120;
-              break;
-            case 'slideRight':
-              textXOffset += (1 - outProgress) * 120;
-              break;
+            case 'fadeOut':   textAlpha *= outProgress; break;
+            case 'zoom':      textScale *= (0.2 + 0.8 * outProgress); break;
+            case 'slideUp':   textYOffset -= (1 - outProgress) * 80; break;
+            case 'slideDown': textYOffset += (1 - outProgress) * 80; break;
+            case 'slideLeft': textXOffset -= (1 - outProgress) * 160; break;
+            case 'slideRight':textXOffset += (1 - outProgress) * 160; break;
           }
         }
 
+        // ── Multiline split ───────────────────────────────────────────────
+        const lines = displayText.split('\n');
+        const lineHeight = ts.fontSize * 1.35;
+
+        // Set up font BEFORE measuring
+        ctx.font = `${ts.italic ? 'italic ' : ''}${ts.bold ? 'bold ' : ''}${ts.fontSize}px "${ts.fontFamily}", sans-serif`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = ts.textAlign;
+
+        // Measure widest line for background rect
+        const maxLineWidth = lines.reduce((max: number, l: string) => Math.max(max, ctx.measureText(l).width), 0);
+        dw = maxLineWidth + 40;
+        dh = lines.length * lineHeight + 20;
+
+        // ── Sub-transform for animation (applied on top of clip transform) ─
         ctx.save();
         ctx.translate(textXOffset, textYOffset);
         ctx.scale(textScale, textScale);
         ctx.globalAlpha *= textAlpha;
 
-        ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontSize}px "${fontFamily || 'Inter'}", sans-serif`;
-        ctx.textAlign = textAlign;
-        ctx.textBaseline = 'middle';
-        
-        const metrics = ctx.measureText(animatedText);
-        dw = metrics.width + 40;
-        dh = fontSize + 40;
-
-        // Alignment-aware x offset for bounding box
-        let textX = 0;
-        let bgX = -dw / 2;
-        if (textAlign === 'left') {
-          textX = -dw / 2 + 20;
-          bgX = -dw / 2;
-        } else if (textAlign === 'right') {
-          textX = dw / 2 - 20;
-          bgX = -dw / 2;
-        }
-
-        if (backgroundColor !== 'transparent') {
-          ctx.fillStyle = backgroundColor;
+        // Background rect (centered at 0,0 which is already at clip's aX,aY center)
+        if (ts.backgroundColor !== 'transparent') {
+          ctx.fillStyle = ts.backgroundColor;
+          const bgX = ts.textAlign === 'left'  ? -20 :
+                      ts.textAlign === 'right' ? -(dw - 20) : -dw / 2;
           ctx.fillRect(bgX, -dh / 2, dw, dh);
         }
 
-        if (shadow) {
-          ctx.shadowColor = shadowColor || '#000000';
-          ctx.shadowBlur = shadowBlur || 10;
-        }
+        // X position for text based on alignment (0 = clip center)
+        const textX = ts.textAlign === 'left'  ? -(maxLineWidth / 2) :
+                      ts.textAlign === 'right' ? (maxLineWidth / 2) : 0;
 
-        if (threeD) {
-          ctx.fillStyle = shadowColor || '#000000';
-          for (let d = 0; d < (threeDDepth || 5); d++) {
-            if (ts.strokeWidth && ts.strokeWidth > 0) {
-              ctx.strokeStyle = ts.strokeColor || '#000000';
-              ctx.lineWidth = ts.strokeWidth;
-              ctx.lineJoin = 'round';
-              ctx.strokeText(animatedText, textX - d, d);
-            }
-            ctx.fillText(animatedText, textX - d, d);
+        // Draw each line
+        const totalTextH = lines.length * lineHeight;
+        lines.forEach((line: string, lineIdx: number) => {
+          const lineY = -totalTextH / 2 + lineIdx * lineHeight + lineHeight / 2;
+
+          if (ts.shadow) {
+            ctx.shadowColor = ts.shadowColor;
+            ctx.shadowBlur  = ts.shadowBlur;
           }
+
+          // 3D depth layers
+          if (ts.threeD) {
+            ctx.fillStyle = ts.shadowColor;
+            for (let d = 1; d <= (ts.threeDDepth || 4); d++) {
+              ctx.fillText(line, textX + d, lineY + d);
+            }
+          }
+
           ctx.shadowBlur = 0;
-        }
 
-        if (ts.strokeWidth && ts.strokeWidth > 0) {
-          ctx.strokeStyle = ts.strokeColor || '#000000';
-          ctx.lineWidth = ts.strokeWidth;
-          ctx.lineJoin = 'round';
-          ctx.strokeText(animatedText, textX, 0);
-        }
+          // Stroke
+          if (ts.strokeWidth > 0) {
+            ctx.strokeStyle = ts.strokeColor;
+            ctx.lineWidth   = ts.strokeWidth;
+            ctx.lineJoin    = 'round';
+            ctx.strokeText(line, textX, lineY);
+          }
 
-        ctx.fillStyle = color || '#ffffff';
-        ctx.fillText(animatedText, textX, 0);
+          // Fill
+          ctx.fillStyle = ts.color;
+          ctx.fillText(line, textX, lineY);
+        });
+
         ctx.shadowBlur = 0;
-        
-        ctx.restore();
+        ctx.restore(); // restore animation sub-transform
 
-        hasRealMedia = true;
-        anyClipDrawn = true;
+        hasRealMedia  = true;
+        anyClipDrawn  = true;
       }
 
       // Apply temperature, tint, faded film, and vignette overlays on top of the drawn media
@@ -1467,6 +1471,55 @@ export function PreviewCanvas() {
 
     ctx.restore(); // Restore from viewport transform
 
+    // ── Grid Overlay ────────────────────────────────────────────────────
+    if (showGridRef.current) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+
+      const COLS = 4;
+      const ROWS = 3;
+      const cellW = W / COLS;
+      const cellH = H / ROWS;
+
+      // Thin grid lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+
+      for (let c = 1; c < COLS; c++) {
+        ctx.beginPath();
+        ctx.moveTo(c * cellW, 0);
+        ctx.lineTo(c * cellW, H);
+        ctx.stroke();
+      }
+      for (let r = 1; r < ROWS; r++) {
+        ctx.beginPath();
+        ctx.moveTo(0, r * cellH);
+        ctx.lineTo(W, r * cellH);
+        ctx.stroke();
+      }
+
+      // Center crosshair
+      ctx.strokeStyle = 'rgba(251,191,36,0.5)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Rule-of-thirds intersection dots
+      ctx.fillStyle = 'rgba(251,191,36,0.7)';
+      for (let c = 1; c < COLS; c++) {
+        for (let r = 1; r < ROWS; r++) {
+          ctx.beginPath();
+          ctx.arc(c * cellW, r * cellH, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
+
     // Safe Zones Overlay
     if (showSafeZonesRef.current) {
       const actionSafe = 0.9; // 90%
@@ -1517,7 +1570,7 @@ export function PreviewCanvas() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid]);
 
   // Kick off render whenever dependencies change
   useEffect(() => {
@@ -1688,6 +1741,14 @@ export function PreviewCanvas() {
     return () => window.removeEventListener('click', close);
   }, [showSpeedMenu]);
 
+  // Close canvas settings panel when clicking elsewhere
+  useEffect(() => {
+    if (!showSettingsPanel) return;
+    const close = () => setShowSettingsPanel(false);
+    window.addEventListener('click', close, { once: true });
+    return () => window.removeEventListener('click', close);
+  }, [showSettingsPanel]);
+
   const handleTimelineSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     seek(Number(e.target.value));
   };
@@ -1735,42 +1796,150 @@ export function PreviewCanvas() {
         />
         <InteractiveCanvasOverlay viewport={viewport} />
 
-        {/* Overlay: fullscreen + settings (top-left) */}
-        <div className="absolute top-3 left-3 flex gap-2">
+        {/* Overlay: canvas controls (top-left) */}
+        <div className="absolute top-3 left-3 flex gap-1.5">
+          {/* Fullscreen */}
           <button
             onClick={toggleFullscreen}
             className="p-1.5 bg-black/50 hover:bg-black/70 rounded text-white/70 hover:text-white transition-colors"
-            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen (F)'}
           >
-            {isFullscreen ? (
-              <Minimize2 className="w-3.5 h-3.5" />
-            ) : (
-              <Maximize2 className="w-3.5 h-3.5" />
-            )}
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
+
+          {/* Grid (Rule of Thirds) */}
           <button
-            onClick={() => setShowSafeZones(!showSafeZones)}
+            onClick={() => { setShowGrid((g) => !g); setShowSettingsPanel(false); }}
             className={`p-1.5 rounded transition-colors ${
-              showSafeZones
-                ? 'bg-amber-600/40 text-amber-300 border border-amber-500/30'
+              showGrid
+                ? 'bg-yellow-500/30 text-yellow-300 border border-yellow-500/40'
                 : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white'
             }`}
-            title="Safe Zones (Guides)"
+            title="Grid / Rule of Thirds"
           >
             <Grid className="w-3.5 h-3.5" />
           </button>
+
+          {/* Safe Zones */}
           <button
-            className="p-1.5 bg-black/50 hover:bg-black/70 rounded text-white/70 hover:text-white transition-colors"
-            title="Canvas Settings"
+            onClick={() => { setShowSafeZones((s) => !s); setShowSettingsPanel(false); }}
+            className={`p-1.5 rounded transition-colors ${
+              showSafeZones
+                ? 'bg-sky-500/30 text-sky-300 border border-sky-500/40'
+                : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white'
+            }`}
+            title="Safe Zones (Action 90% / Title 80%)"
           >
-            <Settings2 className="w-3.5 h-3.5" />
+            <Film className="w-3.5 h-3.5" />
           </button>
+
+          {/* Canvas Settings Dropdown */}
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowSettingsPanel((p) => !p); }}
+              className={`p-1.5 rounded transition-colors ${
+                showSettingsPanel
+                  ? 'bg-[#3e3e3e] text-white border border-[#5e5e5e]'
+                  : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white'
+              }`}
+              title="Canvas Settings"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+            </button>
+
+            {showSettingsPanel && (
+              <div
+                className="absolute top-full left-0 mt-1.5 w-52 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-2xl z-50 p-3 space-y-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="text-[10px] font-semibold text-[#a0a0a0] uppercase tracking-wider">Canvas Settings</p>
+
+                {/* Background Color */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-[#a0a0a0]">Background Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      defaultValue="#0a0a0a"
+                      id="canvas-bg-color"
+                      onChange={(e) => {
+                        if (canvasRef.current) {
+                          const ctx = canvasRef.current.getContext('2d');
+                          if (ctx) {
+                            const W = canvasRef.current.width;
+                            const H = canvasRef.current.height;
+                            ctx.fillStyle = e.target.value;
+                            ctx.fillRect(0, 0, W, H);
+                          }
+                        }
+                      }}
+                      className="w-7 h-7 rounded border border-[#3e3e3e] cursor-pointer bg-transparent p-0.5"
+                    />
+                    <span className="text-[10px] text-white font-mono" id="canvas-bg-label">#0a0a0a</span>
+                  </div>
+                </div>
+
+                {/* Viewport Zoom */}
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] text-[#a0a0a0]">Viewport Zoom</label>
+                    <span className="text-[10px] text-white font-mono">{Math.round(viewport.zoom * 100)}%</span>
+                  </div>
+                  <input
+                    type="range" min={10} max={400} step={5}
+                    value={Math.round(viewport.zoom * 100)}
+                    onChange={(e) => setViewport((v) => ({ ...v, zoom: Number(e.target.value) / 100 }))}
+                    className="w-full h-1 bg-[#3e3e3e] rounded appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-400 [&::-webkit-slider-thumb]:rounded-full"
+                  />
+                </div>
+
+                {/* Reset Viewport */}
+                <button
+                  onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })}
+                  className="w-full py-1.5 text-[11px] text-[#a0a0a0] hover:text-white bg-[#2d2d2d] hover:bg-[#3e3e3e] rounded border border-[#3e3e3e] transition-colors"
+                >
+                  Reset Viewport (100%)
+                </button>
+
+                <div className="pt-1 border-t border-[#3e3e3e] space-y-1.5">
+                  <div className="flex items-center gap-2 justify-between">
+                    <label className="text-[10px] text-[#a0a0a0]">Grid</label>
+                    <button
+                      onClick={() => setShowGrid((g) => !g)}
+                      className={`w-8 h-4 rounded-full transition-colors relative ${showGrid ? 'bg-yellow-500' : 'bg-[#3e3e3e]'}`}
+                    >
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${showGrid ? 'left-4' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 justify-between">
+                    <label className="text-[10px] text-[#a0a0a0]">Safe Zones</label>
+                    <button
+                      onClick={() => setShowSafeZones((s) => !s)}
+                      className={`w-8 h-4 rounded-full transition-colors relative ${showSafeZones ? 'bg-sky-500' : 'bg-[#3e3e3e]'}`}
+                    >
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${showSafeZones ? 'left-4' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Overlay: resolution info (bottom-right) */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-2 bg-black/50 rounded px-2 py-1">
-          <Film className="w-3 h-3 text-[#a0a0a0]" />
-          <span className="text-[10px] text-[#a0a0a0]">854 × 480</span>
+        {/* Overlay: viewport zoom badge + resolution (bottom-right) */}
+        <div className="absolute bottom-3 right-3 flex items-center gap-2">
+          {viewport.zoom !== 1 && (
+            <button
+              onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })}
+              className="text-[9px] text-amber-300 bg-amber-500/20 border border-amber-500/30 rounded px-1.5 py-0.5 hover:bg-amber-500/30 transition-colors"
+            >
+              {Math.round(viewport.zoom * 100)}% — Reset
+            </button>
+          )}
+          <div className="flex items-center gap-1.5 bg-black/50 rounded px-2 py-1">
+            <Film className="w-3 h-3 text-[#a0a0a0]" />
+            <span className="text-[10px] text-[#a0a0a0]">854 × 480 • 16:9</span>
+          </div>
         </div>
 
         {/* Particle emitter position indicator */}
