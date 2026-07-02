@@ -406,6 +406,7 @@ export function PreviewCanvas() {
   const [showSafeZones, setShowSafeZones] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
   const showSafeZonesRef = useRef(false);
   const showGridRef = useRef(false);
   showSafeZonesRef.current = showSafeZones;
@@ -549,12 +550,17 @@ export function PreviewCanvas() {
     const W = canvas.width; // 854
     const H = canvas.height; // 480
 
-    // 1. Clear to dark background (entire canvas, regardless of viewport)
-    ctx.fillStyle = '#0a0a0a';
+    // 1. Clear to background color (entire canvas, regardless of viewport)
+    ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, W, H);
 
+    const cx = W / 2;
+    const cy = H / 2;
+    const totalX = cx + viewport.x - cx * viewport.zoom;
+    const totalY = cy + viewport.y - cy * viewport.zoom;
+
     ctx.save();
-    ctx.translate(viewport.x, viewport.y);
+    ctx.translate(totalX, totalY);
     ctx.scale(viewport.zoom, viewport.zoom);
 
     // 2. Checkerboard removed per user request
@@ -1570,7 +1576,7 @@ export function PreviewCanvas() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor]);
 
   // Kick off render whenever dependencies change
   useEffect(() => {
@@ -1797,7 +1803,7 @@ export function PreviewCanvas() {
         <InteractiveCanvasOverlay viewport={viewport} />
 
         {/* Overlay: canvas controls (top-left) */}
-        <div className="absolute top-3 left-3 flex gap-1.5">
+        <div className="absolute top-3 left-3 flex gap-1.5" onPointerDown={(e) => e.stopPropagation()}>
           {/* Fullscreen */}
           <button
             onClick={toggleFullscreen}
@@ -1851,6 +1857,7 @@ export function PreviewCanvas() {
               <div
                 className="absolute top-full left-0 mt-1.5 w-52 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-2xl z-50 p-3 space-y-3"
                 onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
               >
                 <p className="text-[10px] font-semibold text-[#a0a0a0] uppercase tracking-wider">Canvas Settings</p>
 
@@ -1860,22 +1867,12 @@ export function PreviewCanvas() {
                   <div className="flex items-center gap-2">
                     <input
                       type="color"
-                      defaultValue="#0a0a0a"
+                      value={canvasBgColor}
                       id="canvas-bg-color"
-                      onChange={(e) => {
-                        if (canvasRef.current) {
-                          const ctx = canvasRef.current.getContext('2d');
-                          if (ctx) {
-                            const W = canvasRef.current.width;
-                            const H = canvasRef.current.height;
-                            ctx.fillStyle = e.target.value;
-                            ctx.fillRect(0, 0, W, H);
-                          }
-                        }
-                      }}
+                      onChange={(e) => setCanvasBgColor(e.target.value)}
                       className="w-7 h-7 rounded border border-[#3e3e3e] cursor-pointer bg-transparent p-0.5"
                     />
-                    <span className="text-[10px] text-white font-mono" id="canvas-bg-label">#0a0a0a</span>
+                    <span className="text-[10px] text-white font-mono" id="canvas-bg-label">{canvasBgColor}</span>
                   </div>
                 </div>
 
@@ -1927,7 +1924,7 @@ export function PreviewCanvas() {
         </div>
 
         {/* Overlay: viewport zoom badge + resolution (bottom-right) */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-2">
+        <div className="absolute bottom-3 right-3 flex items-center gap-2" onPointerDown={(e) => e.stopPropagation()}>
           {viewport.zoom !== 1 && (
             <button
               onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })}
@@ -2548,11 +2545,16 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     });
   };
 
+  const cx = W / 2;
+  const cy = H / 2;
+  const totalX = cx + viewport.x - cx * viewport.zoom;
+  const totalY = cy + viewport.y - cy * viewport.zoom;
+
   return (
     <>
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
-          <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
+          <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom})`}>
             <g
               transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
             >

@@ -1557,7 +1557,18 @@ export function Timeline() {
       const templateId = e.dataTransfer.getData('application/procut-template');
       if (templateId) {
         const tmpl = TITLE_TEMPLATES.find((t) => t.id === templateId);
-        if (tmpl && track && track.type === 'text') {
+        if (tmpl && track) {
+          // If the dropped track is not text, find or create a text track
+          let targetTrack = track;
+          if (track.type !== 'text') {
+            const existingTextTrack = useEditorStore.getState().tracks.find((t) => t.type === 'text');
+            if (existingTextTrack) {
+              targetTrack = existingTextTrack;
+            } else {
+              useEditorStore.getState().addTrack('text');
+              targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'text') || track;
+            }
+          }
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
           const x = e.clientX - rect.left;
           const startTime = Math.max(0, (x + scrollLeft) / zoomLevel);
@@ -1574,7 +1585,7 @@ export function Timeline() {
           useEditorStore.getState().addClip({
             id: clipId,
             mediaId,
-            trackId,
+            trackId: targetTrack.id,
             startTime,
             duration: tmpl.defaultDuration,
             trimStart: 0,
@@ -1691,13 +1702,14 @@ export function Timeline() {
       const x = e.clientX - rect.left;
       const trackIdx = tracks.findIndex((t) => t.id === trackId);
 
-      // Accept media, FX effect, and color preset drops
+      // Accept media, FX effect, color preset, and template drops
       const hasMedia = e.dataTransfer.types.includes('application/procut-media');
       const hasEffect = e.dataTransfer.types.includes('application/procut-effect');
       const hasColorPreset = e.dataTransfer.types.includes('application/procut-color-preset');
       const hasParticle = e.dataTransfer.types.includes('application/procut-particle');
       const hasTransition = e.dataTransfer.types.includes('application/procut-transition');
-      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition) && trackIdx >= 0) {
+      const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
+      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate) && trackIdx >= 0) {
         const approxDuration = (hasColorPreset || hasParticle || hasTransition) ? 0 : 5;
         setDropPreview({ time: x / zoomLevel, duration: approxDuration, trackIdx });
         setHoveredTrackId(trackId);

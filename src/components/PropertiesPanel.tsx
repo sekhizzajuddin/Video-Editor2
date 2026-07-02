@@ -334,9 +334,15 @@ export function PropertiesPanel() {
 
   const baseTabs: { id: PropertiesTab; label: string; icon: any }[] = [];
 
-  if (selectedTrack?.type === 'text') {
-    // Text clips: Text is primary, but also expose Transform + Color + Effects
+  // Always show Text tab first if the clip has textSettings
+  if (selectedClip?.textSettings) {
     baseTabs.push({ id: 'text', label: 'Text', icon: Type });
+  }
+
+  if (selectedTrack?.type === 'text') {
+    if (!baseTabs.some(t => t.id === 'text')) {
+      baseTabs.push({ id: 'text', label: 'Text', icon: Type });
+    }
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'effects', label: 'FX', icon: Wand2 });
@@ -344,7 +350,7 @@ export function PropertiesPanel() {
     baseTabs.push({ id: 'effects', label: 'Effects', icon: Wand2 });
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
   } else {
-    // Video / Audio / Image clips: full set of tabs
+    // Video / Audio / Image/Text clips on other tracks: full set of tabs
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
