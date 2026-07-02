@@ -554,8 +554,13 @@ export function PreviewCanvas() {
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, W, H);
 
+    const cx = W / 2;
+    const cy = H / 2;
+    const totalX = cx + viewport.x - cx * viewport.zoom;
+    const totalY = cy + viewport.y - cy * viewport.zoom;
+
     ctx.save();
-    ctx.translate(viewport.x, viewport.y);
+    ctx.translate(totalX, totalY);
     ctx.scale(viewport.zoom, viewport.zoom);
 
     // 2. Checkerboard removed per user request
@@ -813,20 +818,20 @@ export function PreviewCanvas() {
         // Use clip textSettings or fall back to sensible defaults so text is always visible
         const rawTs = clip.textSettings as any;
         const ts = {
-          text: rawTs?.text ?? 'Sample Text',
-          fontSize: rawTs?.fontSize ?? 48,
-          fontFamily: rawTs?.fontFamily ?? 'Inter',
-          color: rawTs?.color ?? '#ffffff',
-          backgroundColor: rawTs?.backgroundColor ?? 'transparent',
-          bold: rawTs?.bold ?? false,
-          italic: rawTs?.italic ?? false,
-          shadow: rawTs?.shadow ?? false,
-          shadowColor: rawTs?.shadowColor ?? '#000000',
-          shadowBlur: rawTs?.shadowBlur ?? 10,
-          threeD: rawTs?.threeD ?? false,
-          threeDDepth: rawTs?.threeDDepth ?? 4,
-          strokeWidth: rawTs?.strokeWidth ?? 0,
-          strokeColor: rawTs?.strokeColor ?? '#000000',
+          text: String(rawTs?.text ?? 'Sample Text'),
+          fontSize: Math.max(8, Number(rawTs?.fontSize) || 48),
+          fontFamily: String(rawTs?.fontFamily ?? 'Inter'),
+          color: String(rawTs?.color ?? '#ffffff'),
+          backgroundColor: String(rawTs?.backgroundColor ?? 'transparent'),
+          bold: !!rawTs?.bold,
+          italic: !!rawTs?.italic,
+          shadow: !!rawTs?.shadow,
+          shadowColor: String(rawTs?.shadowColor ?? '#000000'),
+          shadowBlur: Number(rawTs?.shadowBlur) || 10,
+          threeD: !!rawTs?.threeD,
+          threeDDepth: Number(rawTs?.threeDDepth) || 4,
+          strokeWidth: Number(rawTs?.strokeWidth) || 0,
+          strokeColor: String(rawTs?.strokeColor ?? '#000000'),
           textAlign: (rawTs?.textAlign ?? 'center') as CanvasTextAlign,
           animation: rawTs?.animation,
         };
@@ -884,9 +889,17 @@ export function PreviewCanvas() {
         const lineHeight = ts.fontSize * 1.35;
 
         // Set up font BEFORE measuring
-        ctx.font = `${ts.italic ? 'italic ' : ''}${ts.bold ? 'bold ' : ''}${ts.fontSize}px "${ts.fontFamily}", sans-serif`;
+        try {
+          ctx.font = `${ts.italic ? 'italic ' : ''}${ts.bold ? 'bold ' : ''}${ts.fontSize}px "${ts.fontFamily}", sans-serif`;
+        } catch (_) {
+          ctx.font = `${ts.fontSize}px sans-serif`;
+        }
         ctx.textBaseline = 'middle';
-        ctx.textAlign = ts.textAlign;
+        try {
+          ctx.textAlign = ts.textAlign || 'center';
+        } catch (_) {
+          ctx.textAlign = 'center';
+        }
 
         // Measure widest line for background rect
         const maxLineWidth = lines.reduce((max: number, l: string) => Math.max(max, ctx.measureText(l).width), 0);
@@ -1368,57 +1381,62 @@ export function PreviewCanvas() {
       }
 
       if (activeTransition) {
-        const { clipA, clipB, trans, t } = activeTransition;
-        const type = trans.type;
-        const nameLower = trans.name.toLowerCase();
+        try {
+          const { clipA, clipB, trans, t } = activeTransition;
+          const type = trans.type;
+          const nameLower = trans.name.toLowerCase();
 
-        if (nameLower.includes('dissolve')) {
-          drawSingleClip(clipA, 1 - t);
-          drawSingleClip(clipB, t);
-        } else if (nameLower.includes('fade')) {
-          if (t < 0.5) {
-            drawSingleClip(clipA, 1 - t * 2);
+          if (nameLower.includes('dissolve')) {
+            drawSingleClip(clipA, 1 - t);
+            drawSingleClip(clipB, t);
+          } else if (nameLower.includes('fade')) {
+            if (t < 0.5) {
+              drawSingleClip(clipA, 1 - t * 2);
+            } else {
+              drawSingleClip(clipB, (t - 0.5) * 2);
+            }
+          } else if (type === 'wipe') {
+            if (nameLower.includes('left')) {
+              drawSingleClip(clipA, 1);
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(W * (1 - t), 0, W * t, H);
+              ctx.clip();
+              drawSingleClip(clipB, 1);
+              ctx.restore();
+            } else {
+              drawSingleClip(clipA, 1);
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(0, 0, W * t, H);
+              ctx.clip();
+              drawSingleClip(clipB, 1);
+              ctx.restore();
+            }
+          } else if (type === 'slide') {
+            if (nameLower.includes('up')) {
+              drawSingleClip(clipA, 1, { translateY: -H * t });
+              drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
+            } else if (nameLower.includes('down')) {
+              drawSingleClip(clipA, 1, { translateY: H * t });
+              drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
+            } else {
+              drawSingleClip(clipA, 1, { translateX: -W * t });
+              drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
+            }
+          } else if (type === 'zoom') {
+            if (nameLower.includes('out')) {
+              drawSingleClip(clipB, 1);
+              drawSingleClip(clipA, 1 - t, { scale: 1 - t });
+              drawSingleClip(clipB, t, { scale: t });
+            }
           } else {
-            drawSingleClip(clipB, (t - 0.5) * 2);
+            drawSingleClip(clipA, 1 - t);
+            drawSingleClip(clipB, t);
           }
-        } else if (type === 'wipe') {
-          if (nameLower.includes('left')) {
-            drawSingleClip(clipA, 1);
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(W * (1 - t), 0, W * t, H);
-            ctx.clip();
-            drawSingleClip(clipB, 1);
-            ctx.restore();
-          } else {
-            drawSingleClip(clipA, 1);
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(0, 0, W * t, H);
-            ctx.clip();
-            drawSingleClip(clipB, 1);
-            ctx.restore();
-          }
-        } else if (type === 'slide') {
-          if (nameLower.includes('up')) {
-            drawSingleClip(clipA, 1, { translateY: -H * t });
-            drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
-          } else if (nameLower.includes('down')) {
-            drawSingleClip(clipA, 1, { translateY: H * t });
-            drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
-          } else {
-            drawSingleClip(clipA, 1, { translateX: -W * t });
-            drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
-          }
-        } else if (type === 'zoom') {
-          if (nameLower.includes('out')) {
-            drawSingleClip(clipB, 1);
-            drawSingleClip(clipA, 1 - t, { scale: 1 - t });
-            drawSingleClip(clipB, t, { scale: t });
-          }
-        } else {
-          drawSingleClip(clipA, 1 - t);
-          drawSingleClip(clipB, t);
+        } catch (err) {
+          console.error('[CanvasRenderError] Failed to draw transition:', err);
+          try { ctx.restore(); } catch (_) {}
         }
         continue;
       }
@@ -1428,7 +1446,12 @@ export function PreviewCanvas() {
       );
       if (!clip) continue;
 
-      drawSingleClip(clip, 1);
+      try {
+        drawSingleClip(clip, 1);
+      } catch (err) {
+        console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
+        try { ctx.restore(); } catch (_) {}
+      }
     }
 
     if (!anyClipDrawn) {
@@ -1616,9 +1639,11 @@ export function PreviewCanvas() {
           
           const mx = (e.clientX - rect.left) * scaleX;
           const my = (e.clientY - rect.top) * scaleY;
+          const cx = 854 / 2;
+          const cy = 480 / 2;
           
-          const nx = mx - (mx - prev.x) * (newZoom / prev.zoom);
-          const ny = my - (my - prev.y) * (newZoom / prev.zoom);
+          const nx = (mx - cx) * (1 - newZoom / prev.zoom) + prev.x * (newZoom / prev.zoom);
+          const ny = (my - cy) * (1 - newZoom / prev.zoom) + prev.y * (newZoom / prev.zoom);
           
           return { x: nx, y: ny, zoom: newZoom };
         });
@@ -1685,8 +1710,10 @@ export function PreviewCanvas() {
       setViewport(prev => {
         const zoomDelta = e.altKey ? -0.5 : 0.5;
         const newZoom = Math.min(Math.max(prev.zoom + zoomDelta, 0.1), 5.0);
-        const nx = mx - (mx - prev.x) * (newZoom / prev.zoom);
-        const ny = my - (my - prev.y) * (newZoom / prev.zoom);
+        const cx = 854 / 2;
+        const cy = 480 / 2;
+        const nx = (mx - cx) * (1 - newZoom / prev.zoom) + prev.x * (newZoom / prev.zoom);
+        const ny = (my - cy) * (1 - newZoom / prev.zoom) + prev.y * (newZoom / prev.zoom);
         return { x: nx, y: ny, zoom: newZoom };
       });
     }
@@ -1883,10 +1910,8 @@ export function PreviewCanvas() {
                     onChange={(e) => {
                       const newZoom = Number(e.target.value) / 100;
                       setViewport(prev => {
-                        const cx = 854 / 2;
-                        const cy = 480 / 2;
-                        const nx = cx - (cx - prev.x) * (newZoom / prev.zoom);
-                        const ny = cy - (cy - prev.y) * (newZoom / prev.zoom);
+                        const nx = prev.x * (newZoom / prev.zoom);
+                        const ny = prev.y * (newZoom / prev.zoom);
                         return { x: nx, y: ny, zoom: newZoom };
                       });
                     }}
@@ -2549,11 +2574,16 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     });
   };
 
+  const cx = W / 2;
+  const cy = H / 2;
+  const totalX = cx + viewport.x - cx * viewport.zoom;
+  const totalY = cy + viewport.y - cy * viewport.zoom;
+
   return (
     <>
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
-          <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
+          <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom})`}>
             <g
               transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
             >
