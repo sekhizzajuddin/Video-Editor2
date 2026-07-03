@@ -1390,6 +1390,7 @@ export function PreviewCanvas() {
       }
     };
 
+    // Pass 1: Render main clips and transitions for all visual tracks
     for (const track of visualTracks) {
       const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
       let activeTransition: { clipA: any; clipB: any; trans: any; t: number } | null = null;
@@ -1493,8 +1494,10 @@ export function PreviewCanvas() {
           try { ctx.restore(); } catch (_) {}
         }
       }
+    }
 
-      // Draw over layers for this track on top of the parent clip
+    // Pass 2: Draw active over-layers on top of all main track clips for all visual tracks
+    for (const track of visualTracks) {
       const activeOverLayers = (track.overLayers || []).filter(
         (ol) => ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration
       );
