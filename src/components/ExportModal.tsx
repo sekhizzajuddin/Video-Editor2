@@ -20,19 +20,15 @@ async function ensureFFmpegLoaded(): Promise<void> {
 
   ffmpegLoadPromise = (async () => {
     const coreBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-    const ffmpegBaseURL = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm';
 
-    const loadPromise = ffmpeg.load({
+    ffmpeg.on('log', ({ message }) => {
+      console.log('[FFmpeg]', message);
+    });
+
+    await ffmpeg.load({
       coreURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.js`, 'text/javascript'),
       wasmURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      classWorkerURL: await toBlobURL(`${ffmpegBaseURL}/worker.js`, 'text/javascript'),
     });
-
-    const timeoutPromise = new Promise<void>((_, reject) => {
-      setTimeout(() => reject(new Error('FFmpeg load timed out')), 30000);
-    });
-
-    await Promise.race([loadPromise, timeoutPromise]);
   })();
 
   await ffmpegLoadPromise;
