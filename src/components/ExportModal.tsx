@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { formatSimpleTime } from '@/utils/time';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { getFFmpegSeparationArgs } from '@/utils/audioSeparation';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
 
 const ffmpeg = new FFmpeg();
 
@@ -19,11 +19,13 @@ async function ensureFFmpegLoaded(): Promise<void> {
   }
 
   ffmpegLoadPromise = (async () => {
-    const coreBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    // Serve FFmpeg core from same origin (/public/ffmpeg/) to avoid COEP cross-origin blocks
+    // Files are copied from node_modules/@ffmpeg/core/dist/esm/ at build time
+    const coreBaseURL = '/ffmpeg';
 
     await ffmpeg.load({
-      coreURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      coreURL: `${coreBaseURL}/ffmpeg-core.js`,
+      wasmURL: `${coreBaseURL}/ffmpeg-core.wasm`,
     });
   })();
 
