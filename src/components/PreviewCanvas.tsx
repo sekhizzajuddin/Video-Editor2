@@ -1388,6 +1388,7 @@ export function PreviewCanvas() {
           ctx.restore();
         }
       }
+      ctx.restore();
     };
 
     // Pass 1: Render main clips and transitions for all visual tracks
