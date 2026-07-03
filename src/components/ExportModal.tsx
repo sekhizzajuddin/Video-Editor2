@@ -18,6 +18,7 @@ export function ExportModal() {
   const [quality, setQuality] = useState('high');
   const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('mp4');
   const [isExporting, setIsExporting] = useState(false);
+  const [isRecordingStarted, setIsRecordingStarted] = useState(false);
   const [progress, setProgress] = useState(0);
   
   const [isConverting, setIsConverting] = useState(false);
@@ -28,7 +29,7 @@ export function ExportModal() {
 
   // Watch currentTime to update progress and stop recording
   useEffect(() => {
-    if (isExporting) {
+    if (isExporting && isRecordingStarted) {
       const startAt = inPoint !== null ? inPoint : 0;
       const endAt = outPoint !== null ? outPoint : totalDuration;
       const duration = Math.max(0.1, endAt - startAt);
@@ -44,9 +45,10 @@ export function ExportModal() {
           togglePlayback(); // pause
         }
         setIsExporting(false);
+        setIsRecordingStarted(false);
       }
     }
-  }, [currentTime, totalDuration, isExporting, isPlaying, togglePlayback, inPoint, outPoint]);
+  }, [currentTime, totalDuration, isExporting, isRecordingStarted, isPlaying, togglePlayback, inPoint, outPoint]);
 
   if (!showExportModal) return null;
 
@@ -57,6 +59,7 @@ export function ExportModal() {
     }
 
     setIsExporting(true);
+    setIsRecordingStarted(false);
     setProgress(0);
     chunksRef.current = [];
 
@@ -204,11 +207,19 @@ export function ExportModal() {
     const startAt = inPoint !== null ? inPoint : 0;
     seek(startAt);
     setTimeout(() => {
-      recorder.start();
-      if (!useEditorStore.getState().isPlaying) {
-        togglePlayback();
+      try {
+        recorder.start();
+        setIsRecordingStarted(true);
+        if (!useEditorStore.getState().isPlaying) {
+          togglePlayback();
+        }
+      } catch (err) {
+        console.error("Failed to start MediaRecorder:", err);
+        setIsExporting(false);
+        setIsRecordingStarted(false);
+        alert("Failed to start recording. Please try again.");
       }
-    }, 100);
+    }, 250);
   };
 
   const totalClips = tracks.reduce((acc, t) => acc + t.clips.length, 0);
