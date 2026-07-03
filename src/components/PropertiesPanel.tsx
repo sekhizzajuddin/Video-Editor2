@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import type { PropertiesTab, ClipKenBurnsSettings } from '@/types';
+import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 
@@ -670,7 +670,7 @@ export function PropertiesPanel() {
     useEditorStore.getState().saveSnapshot();
   };
 
-  const defaultAudioSettings = {
+  const defaultAudioSettings: ClipAudioSettings = {
     volume: 0,
     pan: 0,
     fadeIn: 0,
