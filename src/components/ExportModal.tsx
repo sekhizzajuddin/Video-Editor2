@@ -110,6 +110,28 @@ export function ExportModal() {
       }
 
       // Convert to MP4 using FFmpeg WASM
+      const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+      if (!hasSharedArrayBuffer) {
+        console.warn('SharedArrayBuffer is not supported. Downloading WebM fallback directly.');
+        alert('MP4 encoding requires SharedArrayBuffer (CORS headers). Downloading WebM fallback instead.');
+        
+        const url = URL.createObjectURL(webmBlob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `procut-export-${Date.now()}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }, 100);
+        
+        setShowExportModal(false);
+        setProgress(0);
+        return;
+      }
+
       setIsConverting(true);
       setConversionProgress(0);
       
