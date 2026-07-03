@@ -507,10 +507,6 @@ export function PreviewCanvas() {
 
     const loop = (now: number) => {
       const state = useEditorStore.getState();
-      // During export, use fixed timestep for perfectly even frame pacing
-      const dt = state.isExporting ? (1 / 60) : ((now - lastTime) / 1000);
-      lastTime = now;
-      
       const dir = state.playbackDirection ?? 1;
       const speed = state.playbackSpeed;
       const currentSeek = state.seek;
@@ -518,55 +514,100 @@ export function PreviewCanvas() {
       const selectedIds = state.selectedClipIds;
       const allClips = allClipsRef.current;
 
-      const newTime = currentTimeRef.current + dt * speed * dir;
+      if (state.isExporting) {
+        // Export Mode: Fixed timestep throttled to target export FPS
+        const targetFps = state.exportFps || 30;
+        const frameDuration = 1000 / targetFps; // ms per frame
+        const elapsed = now - lastTime;
 
-      if (selectedIds.length > 0) {
-        // Selection Loop Playback Mode
-        const selectedClips = allClips.filter((c) => selectedIds.includes(c.id));
-        if (selectedClips.length > 0) {
-          let minStart = Infinity;
-          let maxEnd = -Infinity;
-          for (const c of selectedClips) {
-            if (c.startTime < minStart) minStart = c.startTime;
+        if (elapsed >= frameDuration) {
+          // Adjust lastTime by frameDuration to maintain precision
+          lastTime = now - (elapsed % frameDuration);
+          
+          const dt = 1 / targetFps;
+          const newTime = currentTimeRef.current + dt * speed * dir;
+
+          // Capping at sequence end
+          let maxEndSequence = 0;
+          for (const c of allClips) {
             const end = c.startTime + c.duration;
-            if (end > maxEnd) maxEnd = end;
+            if (end > maxEndSequence) maxEndSequence = end;
           }
 
-          if (newTime >= maxEnd || newTime < minStart) {
-            const startPos = dir >= 0 ? minStart : maxEnd;
-            currentSeek(startPos);
-            currentTimeRef.current = startPos;
-          } else {
-            currentSeek(newTime);
+          if (dir >= 0 && newTime >= maxEndSequence) {
+            currentSeek(maxEndSequence);
+            currentTimeRef.current = maxEndSequence;
+            currentPause();
+            return;
           }
-          animId = requestAnimationFrame(loop);
+
+          if (dir < 0 && newTime <= 0) {
+            currentSeek(0);
+            currentTimeRef.current = 0;
+            currentPause();
+            return;
+          }
+
+          currentSeek(newTime);
+          currentTimeRef.current = newTime;
+        }
+        animId = requestAnimationFrame(loop);
+      } else {
+        // Normal Playback Mode: Real-time clock delta
+        const dt = (now - lastTime) / 1000;
+        lastTime = now;
+        const newTime = currentTimeRef.current + dt * speed * dir;
+
+        if (selectedIds.length > 0) {
+          // Selection Loop Playback Mode
+          const selectedClips = allClips.filter((c) => selectedIds.includes(c.id));
+          if (selectedClips.length > 0) {
+            let minStart = Infinity;
+            let maxEnd = -Infinity;
+            for (const c of selectedClips) {
+              if (c.startTime < minStart) minStart = c.startTime;
+              const end = c.startTime + c.duration;
+              if (end > maxEnd) maxEnd = end;
+            }
+
+            if (newTime >= maxEnd || newTime < minStart) {
+              const startPos = dir >= 0 ? minStart : maxEnd;
+              currentSeek(startPos);
+              currentTimeRef.current = startPos;
+            } else {
+              currentSeek(newTime);
+              currentTimeRef.current = newTime;
+            }
+            animId = requestAnimationFrame(loop);
+            return;
+          }
+        }
+
+        // Default Playback Mode (Cap at sequence end)
+        let maxEndSequence = 0;
+        for (const c of allClips) {
+          const end = c.startTime + c.duration;
+          if (end > maxEndSequence) maxEndSequence = end;
+        }
+
+        if (dir < 0 && newTime <= 0) {
+          currentSeek(0);
+          currentTimeRef.current = 0;
+          currentPause();
           return;
         }
-      }
 
-      // Default Playback Mode (Cap at sequence end)
-      let maxEndSequence = 0;
-      for (const c of allClips) {
-        const end = c.startTime + c.duration;
-        if (end > maxEndSequence) maxEndSequence = end;
-      }
+        if (dir >= 0 && newTime >= maxEndSequence) {
+          currentSeek(0);
+          currentTimeRef.current = 0;
+          currentPause();
+          return;
+        }
 
-      if (dir < 0 && newTime <= 0) {
-        currentSeek(0);
-        currentTimeRef.current = 0;
-        currentPause();
-        return;
+        currentSeek(newTime);
+        currentTimeRef.current = newTime;
+        animId = requestAnimationFrame(loop);
       }
-
-      if (dir >= 0 && newTime >= maxEndSequence) {
-        currentSeek(0);
-        currentTimeRef.current = 0;
-        currentPause();
-        return;
-      }
-
-      currentSeek(newTime);
-      animId = requestAnimationFrame(loop);
     };
 
     animId = requestAnimationFrame(loop);

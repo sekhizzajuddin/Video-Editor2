@@ -48,7 +48,7 @@ export function ExportModal() {
   const {
     showExportModal, setShowExportModal, totalDuration, tracks,
     previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime,
-    inPoint, outPoint, setIsExporting
+    inPoint, outPoint, setIsExporting, setExportFps
   } = useEditorStore();
 
   const [fps, setFps] = useState('30');
@@ -108,7 +108,8 @@ export function ExportModal() {
     abortControllerRef.current = null;
     chunksRef.current = [];
     playbackStartedRef.current = false;
-  }, []);
+    setIsExporting(false);
+  }, [setIsExporting]);
 
   // Watch currentTime to update progress and stop recording at end
   useEffect(() => {
@@ -287,6 +288,7 @@ export function ExportModal() {
     cleanup();
     chunksRef.current = [];
     setIsExporting(true);
+    setExportFps(parseInt(fps));
     updateStatus('recording');
     setProgress(0);
     setConversionProgress(0);

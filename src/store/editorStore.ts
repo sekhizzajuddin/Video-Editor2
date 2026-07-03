@@ -203,6 +203,7 @@ interface EditorActions {
   setActivePropertiesTab: (tab: PropertiesTab) => void;
   setShowExportModal: (show: boolean) => void;
   setIsExporting: (isExporting: boolean) => void;
+  setExportFps: (fps: number) => void;
   setShowSettingsModal: (show: boolean) => void;
   setCanvasTransformMode: (mode: 'resize' | 'crop') => void;
 
@@ -301,6 +302,7 @@ const initialState: EditorState = {
   scrollLeft: 0,
   activeTool: 'select',
   isExporting: false,
+  exportFps: 30,
   showExportModal: false,
   showSettingsModal: false,
   activeMediaTab: 'project',
@@ -1398,6 +1400,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setActivePropertiesTab: (tab) => set({ activePropertiesTab: tab }),
   setShowExportModal: (show) => set({ showExportModal: show }),
   setIsExporting: (isExporting) => set({ isExporting }),
+  setExportFps: (exportFps) => set({ exportFps }),
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setCanvasTransformMode: (mode) => set({ canvasTransformMode: mode }),
 
