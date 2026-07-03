@@ -19,10 +19,11 @@ import {
   Unlink2,
   Edit,
   Layers,
+  Pin,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import type { TimelineClip, TimelineTrack, MediaItem, EditorState } from '@/types';
+import type { TimelineClip, TimelineTrack, MediaItem, EditorState, OverLayerClip } from '@/types';
 import { formatSimpleTime } from '@/utils/time';
 import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
 
@@ -34,37 +35,42 @@ const OVER_LAYER_ROW_HEIGHT = 36;
 
 export const getTrackHeight = (
   track: TimelineTrack,
-  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null
+  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null,
+  pinnedTrackId: string | null = null
 ) => {
   const base = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-  if (!hoveredRegion || hoveredRegion.trackId !== track.id) return base;
-  
+  const isOpen = pinnedTrackId === track.id || (hoveredRegion && hoveredRegion.trackId === track.id);
+  if (!isOpen) return base;
+
   // Find active over-layers overlapping the hovered region
+  const region = hoveredRegion || { trackId: track.id, startTime: 0, endTime: Infinity };
   const activeCount = (track.overLayers || []).filter((ol) => {
-    return ol.startTime < hoveredRegion.endTime && ol.startTime + ol.duration > hoveredRegion.startTime;
+    return ol.startTime < region.endTime && ol.startTime + ol.duration > region.startTime;
   }).length;
-  
+
   return base + activeCount * OVER_LAYER_ROW_HEIGHT;
 };
 
 export const getTrackTop = (
   tracks: TimelineTrack[],
   index: number,
-  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null
+  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null,
+  pinnedTrackId: string | null = null
 ) => {
   let top = 0;
-  for (let i = 0; i < index; i++) top += getTrackHeight(tracks[i], hoveredRegion);
+  for (let i = 0; i < index; i++) top += getTrackHeight(tracks[i], hoveredRegion, pinnedTrackId);
   return top;
 };
 
 export const getTrackAtY = (
   tracks: TimelineTrack[],
   y: number,
-  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null
+  hoveredRegion: EditorState['hoveredOverLayerRegion'] | null,
+  pinnedTrackId: string | null = null
 ) => {
   let currentY = 0;
   for (let i = 0; i < tracks.length; i++) {
-    const h = getTrackHeight(tracks[i], hoveredRegion);
+    const h = getTrackHeight(tracks[i], hoveredRegion, pinnedTrackId);
     if (y >= currentY && y < currentY + h) return i;
     currentY += h;
   }
@@ -607,8 +613,11 @@ export function Timeline() {
     removeOverLayer,
     updateOverLayer,
     moveOverLayer,
+    reorderOverLayer,
     selectOverLayer,
     setHoveredOverLayerRegion,
+    pinnedOverLayerTrackId,
+    setPinnedOverLayerTrackId,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -786,16 +795,16 @@ export function Timeline() {
 
   // ── Track from mouse Y ─────────────────────────────────────────────────
 
-  const getTrackFromMouseY = useCallback(
+    const getTrackFromMouseY = useCallback(
     (clientY: number): TimelineTrack | null => {
       const container = trackContainerRef.current;
       if (!container) return null;
       const rect = container.getBoundingClientRect();
       const relY = clientY - rect.top + container.scrollTop;
-      const idx = getTrackAtY(tracks, relY, hoveredOverLayerRegion);
+      const idx = getTrackAtY(tracks, relY, hoveredOverLayerRegion, pinnedOverLayerTrackId);
       return idx >= 0 && idx < tracks.length ? tracks[idx] : null;
     },
-    [tracks, hoveredOverLayerRegion],
+    [tracks, hoveredOverLayerRegion, pinnedOverLayerTrackId],
   );
 
   // ── Snap helper (clip edges + playhead) ─────────────────────────────────
@@ -1263,30 +1272,7 @@ export function Timeline() {
           const relY = e.clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
           const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
           
-          const activeOverLayers = (track.overLayers || []).filter((ol) => {
-            return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
-          });
-
-          const currentIdxInActive = activeOverLayers.findIndex((ol) => ol.id === dragOverLayerState.overLayerId);
-          if (currentIdxInActive !== -1 && targetRowIdx !== currentIdxInActive && targetRowIdx < activeOverLayers.length) {
-            const reordered = [...track.overLayers];
-            const itemToMove = activeOverLayers[currentIdxInActive];
-            const targetItem = activeOverLayers[targetRowIdx];
-
-            const originalIdx = reordered.findIndex((ol) => ol.id === itemToMove.id);
-            const targetOriginalIdx = reordered.findIndex((ol) => ol.id === targetItem.id);
-
-            if (originalIdx !== -1 && targetOriginalIdx !== -1) {
-              reordered.splice(originalIdx, 1);
-              reordered.splice(targetOriginalIdx, 0, itemToMove);
-
-              useEditorStore.setState((state) => ({
-                tracks: state.tracks.map((t) =>
-                  t.id === track.id ? { ...t, overLayers: reordered } : t
-                ),
-              }));
-            }
-          }
+          reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
         }
       }
 
@@ -1612,27 +1598,50 @@ export function Timeline() {
         return;
       }
 
-      // ── Color Correction Preset drop → apply to video/image clip at drop position ──
+      // ── Color Correction Preset drop → apply to video/image clip/overlayer at drop position ──
       const colorPresetRaw = e.dataTransfer.getData('application/procut-color-preset');
       if (colorPresetRaw && track && (track.type === 'video' || track.type === 'audio')) {
         try {
           const preset = JSON.parse(colorPresetRaw) as Record<string, number>;
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
           const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
           const dropTime = x / zoomLevel;
-          // Find the clip at the drop position
-          const hitClip = track.clips.find(
-            (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
-          );
-          if (hitClip) {
-            const existing = hitClip.colorFilters ?? {
+          
+          const baseHeight = DEFAULT_TRACK_HEIGHT;
+          const isOverLayerArea = y > baseHeight;
+          let targetOl: OverLayerClip | null = null;
+          if (isOverLayerArea && hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+            const activeOverLayers = (track.overLayers || []).filter((ol) => {
+              return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+            });
+            const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
+            targetOl = activeOverLayers[rowIdx] || null;
+          }
+
+          if (targetOl) {
+            const existing = targetOl.colorFilters ?? {
               temperature: 0, tint: 0, exposure: 0, contrast: 100,
               saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
             };
-            useEditorStore.getState().updateClip(hitClip.id, {
+            useEditorStore.getState().updateOverLayer(targetOl.id, {
               colorFilters: { ...existing, ...preset },
             });
             useEditorStore.getState().saveSnapshot();
+          } else {
+            const hitClip = track.clips.find(
+              (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
+            );
+            if (hitClip) {
+              const existing = hitClip.colorFilters ?? {
+                temperature: 0, tint: 0, exposure: 0, contrast: 100,
+                saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
+              };
+              useEditorStore.getState().updateClip(hitClip.id, {
+                colorFilters: { ...existing, ...preset },
+              });
+              useEditorStore.getState().saveSnapshot();
+            }
           }
         } catch { /* ignore parse errors */ }
         setHoveredTrackId(null);
@@ -1640,31 +1649,41 @@ export function Timeline() {
         return;
       }
 
-      // ── Particle effect drop → apply to video/image clip at drop position ──
+      // ── Particle effect drop → apply to video/image clip/overlayer at drop position ──
       const particleType = e.dataTransfer.getData('application/procut-particle');
       if (particleType && track && (track.type === 'video')) {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
         const dropTime = x / zoomLevel;
-        const hitClip = track.clips.find(
-          (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
-        );
-        if (hitClip) {
-          // Default settings per particle type
-          const PARTICLE_DEFAULTS: Record<string, Omit<import('@/types').ClipParticleSettings, 'type'|'emitterX'|'emitterY'>> = {
-            snow:      { amount: 120, speed: 40,  intensity: 80, size: 100, gravity: 20,  wind: 5,  spread: 180, lifetime: 150, color: '#ffffff', colorVariance: 15, glow: false, turbulence: 20 },
-            rain:      { amount: 200, speed: 160, intensity: 70, size: 100, gravity: 100, wind: 15, spread: 10,  lifetime: 60,  color: '#a0c8ff', colorVariance: 10, glow: false, turbulence: 5  },
-            fire:      { amount: 80,  speed: 80,  intensity: 90, size: 130, gravity: -60, wind: 0,  spread: 60,  lifetime: 80,  color: '#ff6a00', colorVariance: 60, glow: true,  turbulence: 60 },
-            sparkles:  { amount: 60,  speed: 50,  intensity: 85, size: 80,  gravity: -10, wind: 0,  spread: 360, lifetime: 100, color: '#ffd700', colorVariance: 30, glow: true,  turbulence: 30 },
-            confetti:  { amount: 100, speed: 60,  intensity: 90, size: 100, gravity: 40,  wind: 10, spread: 90,  lifetime: 200, color: 'auto',    colorVariance: 100, glow: false, turbulence: 40 },
-            smoke:     { amount: 30,  speed: 25,  intensity: 60, size: 200, gravity: -30, wind: 8,  spread: 30,  lifetime: 200, color: '#888888', colorVariance: 20, glow: false, turbulence: 70 },
-            bubbles:   { amount: 40,  speed: 30,  intensity: 70, size: 120, gravity: -40, wind: 5,  spread: 60,  lifetime: 180, color: '#80ffff', colorVariance: 20, glow: true,  turbulence: 15 },
-            leaves:    { amount: 50,  speed: 35,  intensity: 80, size: 110, gravity: 30,  wind: 20, spread: 45,  lifetime: 180, color: '#ff7b00', colorVariance: 70, glow: false, turbulence: 50 },
-            hearts:    { amount: 30,  speed: 25,  intensity: 85, size: 100, gravity: -20, wind: 5,  spread: 40,  lifetime: 200, color: '#ff4d88', colorVariance: 25, glow: true,  turbulence: 20 },
-            matrix:    { amount: 40,  speed: 80,  intensity: 90, size: 100, gravity: 80,  wind: 0,  spread: 0,   lifetime: 120, color: '#00ff41', colorVariance: 10, glow: true,  turbulence: 0  },
-          };
-          const defaults = PARTICLE_DEFAULTS[particleType] ?? PARTICLE_DEFAULTS.sparkles;
-          useEditorStore.getState().updateClip(hitClip.id, {
+
+        const baseHeight = DEFAULT_TRACK_HEIGHT;
+        const isOverLayerArea = y > baseHeight;
+        let targetOl: OverLayerClip | null = null;
+        if (isOverLayerArea && hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+          const activeOverLayers = (track.overLayers || []).filter((ol) => {
+            return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+          });
+          const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
+          targetOl = activeOverLayers[rowIdx] || null;
+        }
+
+        const PARTICLE_DEFAULTS: Record<string, Omit<import('@/types').ClipParticleSettings, 'type'|'emitterX'|'emitterY'>> = {
+          snow:      { amount: 120, speed: 40,  intensity: 80, size: 100, gravity: 20,  wind: 5,  spread: 180, lifetime: 150, color: '#ffffff', colorVariance: 15, glow: false, turbulence: 20 },
+          rain:      { amount: 200, speed: 160, intensity: 70, size: 100, gravity: 100, wind: 15, spread: 10,  lifetime: 60,  color: '#a0c8ff', colorVariance: 10, glow: false, turbulence: 5  },
+          fire:      { amount: 80,  speed: 80,  intensity: 90, size: 130, gravity: -60, wind: 0,  spread: 60,  lifetime: 80,  color: '#ff6a00', colorVariance: 60, glow: true,  turbulence: 60 },
+          sparkles:  { amount: 60,  speed: 50,  intensity: 85, size: 80,  gravity: -10, wind: 0,  spread: 360, lifetime: 100, color: '#ffd700', colorVariance: 30, glow: true,  turbulence: 30 },
+          confetti:  { amount: 100, speed: 60,  intensity: 90, size: 100, gravity: 40,  wind: 10, spread: 90,  lifetime: 200, color: 'auto',    colorVariance: 100, glow: false, turbulence: 40 },
+          smoke:     { amount: 30,  speed: 25,  intensity: 60, size: 200, gravity: -30, wind: 8,  spread: 30,  lifetime: 200, color: '#888888', colorVariance: 20, glow: false, turbulence: 70 },
+          bubbles:   { amount: 40,  speed: 30,  intensity: 70, size: 120, gravity: -40, wind: 5,  spread: 60,  lifetime: 180, color: '#80ffff', colorVariance: 20, glow: true,  turbulence: 15 },
+          leaves:    { amount: 50,  speed: 35,  intensity: 80, size: 110, gravity: 30,  wind: 20, spread: 45,  lifetime: 180, color: '#ff7b00', colorVariance: 70, glow: false, turbulence: 50 },
+          hearts:    { amount: 30,  speed: 25,  intensity: 85, size: 100, gravity: -20, wind: 5,  spread: 40,  lifetime: 200, color: '#ff4d88', colorVariance: 25, glow: true,  turbulence: 20 },
+          matrix:    { amount: 40,  speed: 80,  intensity: 90, size: 100, gravity: 80,  wind: 0,  spread: 0,   lifetime: 120, color: '#00ff41', colorVariance: 10, glow: true,  turbulence: 0  },
+        };
+        const defaults = PARTICLE_DEFAULTS[particleType] ?? PARTICLE_DEFAULTS.sparkles;
+
+        if (targetOl) {
+          useEditorStore.getState().updateOverLayer(targetOl.id, {
             particleSettings: {
               type: particleType as import('@/types').ParticleEffectType,
               emitterX: 50,
@@ -1672,8 +1691,24 @@ export function Timeline() {
               ...defaults,
             },
           });
-          useEditorStore.getState().selectClip(hitClip.id);
+          useEditorStore.getState().selectOverLayer(targetOl.id);
           useEditorStore.getState().saveSnapshot();
+        } else {
+          const hitClip = track.clips.find(
+            (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
+          );
+          if (hitClip) {
+            useEditorStore.getState().updateClip(hitClip.id, {
+              particleSettings: {
+                type: particleType as import('@/types').ParticleEffectType,
+                emitterX: 50,
+                emitterY: 100,
+                ...defaults,
+              },
+            });
+            useEditorStore.getState().selectClip(hitClip.id);
+            useEditorStore.getState().saveSnapshot();
+          }
         }
         setHoveredTrackId(null);
         setDropPreview(null);
@@ -1823,6 +1858,19 @@ export function Timeline() {
             useEditorStore.getState().updateOverLayer(targetOl.id, {
               mediaId,
               duration: media.type === 'image' ? 5 : Math.min(10, media.duration),
+              audioSettings: media.type === 'audio' || media.type === 'video' ? {
+                volume: 0,
+                pan: 0,
+                fadeIn: 0,
+                fadeOut: 0,
+                bass: 0,
+                treble: 0,
+                muted: false,
+                preservePitch: true,
+                pitch: 0,
+                voiceFormant: 0,
+                humanize: false,
+              } : undefined,
             });
             useEditorStore.getState().saveSnapshot();
           }
@@ -1873,9 +1921,27 @@ export function Timeline() {
         const approxDuration = (hasColorPreset || hasParticle || hasTransition) ? 0 : 5;
         setDropPreview({ time: x / zoomLevel, duration: approxDuration, trackIdx });
         setHoveredTrackId(trackId);
+
+        // Auto-expand over-layer region during drag-over if matching
+        const track = tracks[trackIdx];
+        if (track && (track.overLayers || []).length > 0) {
+          const time = (x + scrollLeft) / zoomLevel;
+          const matchingOl = track.overLayers.find((ol) => {
+            return time >= ol.startTime && time < ol.startTime + ol.duration;
+          });
+          if (matchingOl) {
+            setHoveredOverLayerRegion({
+              trackId,
+              startTime: matchingOl.startTime,
+              endTime: matchingOl.startTime + matchingOl.duration,
+            });
+          } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+            setHoveredOverLayerRegion(null);
+          }
+        }
       }
     },
-    [tracks, zoomLevel],
+    [tracks, zoomLevel, scrollLeft],
   );
 
   // ── Native Wheel Events (Gestures) ──────────────────────────────────────
@@ -2135,7 +2201,7 @@ export function Timeline() {
                 className={`flex items-center px-2 border-b border-[#3e3e3e] ${
                   selectedTrackId === track.id ? 'bg-[#3e3e3e]' : ''
                 }`}
-                style={{ height: getTrackHeight(track, hoveredOverLayerRegion) }}
+                style={{ height: getTrackHeight(track, hoveredOverLayerRegion, pinnedOverLayerTrackId) }}
                 onClick={() => selectTrack(track.id)}
               >
                 <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -2160,6 +2226,24 @@ export function Timeline() {
                   )}
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">
+                  {(track.overLayers || []).length > 0 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (pinnedOverLayerTrackId === track.id) {
+                          setPinnedOverLayerTrackId(null);
+                        } else {
+                          setPinnedOverLayerTrackId(track.id);
+                        }
+                      }}
+                      title={pinnedOverLayerTrackId === track.id ? 'Unpin Over Layers' : 'Pin Over Layers Open'}
+                      className={`p-0.5 rounded transition-colors ${
+                        pinnedOverLayerTrackId === track.id ? 'text-cyan-400' : 'text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      <Pin className="w-3 h-3" style={{ transform: pinnedOverLayerTrackId === track.id ? 'none' : 'rotate(45deg)' }} />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -2408,7 +2492,7 @@ export function Timeline() {
                   className={`relative border-b border-[#3e3e3e] transition-colors ${
                     hoveredTrackId === track.id ? 'bg-[#3e3e3e]/30' : ''
                   }`}
-                  style={{ height: getTrackHeight(track, hoveredOverLayerRegion) }}
+              style={{ height: getTrackHeight(track, hoveredOverLayerRegion, pinnedOverLayerTrackId) }}
                   onDragOver={(e) => handleDragOver(e, track.id)}
                   onDrop={(e) => handleDrop(e, track.id)}
                   onDragEnter={() => setHoveredTrackId(track.id)}
@@ -2449,6 +2533,8 @@ export function Timeline() {
                     selectTrack(track.id);
                     selectClip(null);
                     selectTransition(null);
+                    // Clicking main track unpins over-layers
+                    setPinnedOverLayerTrackId(null);
                     selectOverLayer(null);
                   }}
                   onContextMenu={(e) => {
@@ -2488,17 +2574,18 @@ export function Timeline() {
 
                       const clipAnims = clip.animations?.['transform.x'] || [];
                       const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
-                      const hasOverLayerOverlap = (track.overLayers || []).some((ol) => {
+                      const overlappingOls = (track.overLayers || []).filter((ol) => {
                         const olEnd = ol.startTime + ol.duration;
                         const clipEnd = clip.startTime + clip.duration;
                         return ol.startTime < clipEnd && olEnd > clip.startTime;
                       });
+                      const hasOverLayerOverlap = overlappingOls.length > 0;
 
                       return (
                         <div
                           key={clip.id}
                           className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${
-                            hasOverLayerOverlap ? 'border-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.6)] z-10' : colors.border
+                            hasOverLayerOverlap ? 'border-cyan-400 border-b-2 border-dashed shadow-[0_0_6px_rgba(34,211,238,0.6)] z-10' : colors.border
                           } ${colors.hover} transition-all duration-75 ${
                             isSelected
                               ? activeTool === 'rateStretch'
@@ -2771,10 +2858,30 @@ export function Timeline() {
                     );
                   })}
 
+                  {/* Dotted border indicators at the bottom of the parent track when collapsed */}
+                  {!(pinnedOverLayerTrackId === track.id || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id)) && (track.overLayers || []).map((ol) => {
+                    const left = ol.startTime * zoomLevel;
+                    const width = ol.duration * zoomLevel;
+                    const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
+                    return (
+                      <div
+                        key={`dotted-${ol.id}`}
+                        className="absolute h-[2px] border-b-2 border-dotted border-cyan-400/80 pointer-events-none"
+                        style={{
+                          top: `${baseHeight - 2}px`,
+                          left: `${left}px`,
+                          width: `${width}px`,
+                          zIndex: 45,
+                        }}
+                      />
+                    );
+                  })}
+
                   {/* ── Over Layers ─────────────────────────────────── */}
-                  {hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id && (() => {
+                  {(pinnedOverLayerTrackId === track.id || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id)) && (() => {
+                    const region = hoveredOverLayerRegion || { trackId: track.id, startTime: 0, endTime: Infinity };
                     const activeOverLayers = (track.overLayers || []).filter((ol) => {
-                      return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+                      return ol.startTime < region.endTime && ol.startTime + ol.duration > region.startTime;
                     });
                     
                     return activeOverLayers.map((ol, index) => {
@@ -2857,6 +2964,8 @@ export function Timeline() {
                             e.stopPropagation();
                             selectOverLayer(ol.id);
                             selectClip(null);
+                            // Pin this track's over-layers open so they don't collapse
+                            setPinnedOverLayerTrackId(track.id);
                           }}
                           onContextMenu={(e) => {
                             e.preventDefault();
@@ -2958,7 +3067,7 @@ export function Timeline() {
                 <div
                   className="absolute border-2 border-amber-500/50 border-dashed rounded pointer-events-none z-40 bg-amber-500/5"
                   style={{
-                    top: `${getTrackTop(tracks, dropPreview.trackIdx, hoveredOverLayerRegion) + 4}px`,
+                    top: `${getTrackTop(tracks, dropPreview.trackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
                     left: `${dropPreview.time * zoomLevel}px`,
                     width: `${dropPreview.duration * zoomLevel}px`,
                     height: (tracks[dropPreview.trackIdx]?.type === 'text' || tracks[dropPreview.trackIdx]?.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8,
@@ -2971,8 +3080,8 @@ export function Timeline() {
                 <div
                   className="absolute left-0 right-0 border-2 border-amber-500/30 border-dashed pointer-events-none z-40"
                   style={{
-                    top: `${getTrackTop(tracks, tracks.findIndex((t) => t.id === hoveredTrackId), hoveredOverLayerRegion)}px`,
-                    height: getTrackHeight(tracks.find((t) => t.id === hoveredTrackId)!, hoveredOverLayerRegion),
+                    top: `${getTrackTop(tracks, tracks.findIndex((t) => t.id === hoveredTrackId), hoveredOverLayerRegion, pinnedOverLayerTrackId)}px`,
+                    height: getTrackHeight(tracks.find((t) => t.id === hoveredTrackId)!, hoveredOverLayerRegion, pinnedOverLayerTrackId),
                   }}
                 />
               )}
@@ -3007,17 +3116,29 @@ export function Timeline() {
         onMouseDown={(e) => e.stopPropagation()}
       >
         {contextMenu.isOverLayer ? (
-          <button
-            className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-            onClick={() => {
-              removeOverLayer(contextMenu.clipId);
-              selectOverLayer(null);
-              setContextMenu(null);
-            }}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Delete Over Layer
-          </button>
+          <>
+            <button
+              className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
+              onClick={() => {
+                splitClip(contextMenu.clipId, currentTime);
+                setContextMenu(null);
+              }}
+            >
+              <Scissors className="w-3.5 h-3.5 text-amber-500" />
+              Split at Playhead
+            </button>
+            <button
+              className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+              onClick={() => {
+                removeOverLayer(contextMenu.clipId);
+                selectOverLayer(null);
+                setContextMenu(null);
+              }}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete Over Layer
+            </button>
+          </>
         ) : (
           <>
             {/* Add Over Layer — always available for any track when right clicking background or clip */}

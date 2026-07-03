@@ -335,6 +335,7 @@ export interface EditorState {
     startTime: number;
     endTime: number;
   } | null;
+  pinnedOverLayerTrackId: string | null;    // track with over-layers pinned open
   selectedTrackId: string | null;
   markers: TimelineMarker[];
 

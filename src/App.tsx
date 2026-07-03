@@ -33,6 +33,8 @@ function App() {
     selectedTransitionClipId,
     removeTransition,
     removeSelectedKeyframeLines,
+    removeOverLayer,
+    selectOverLayer,
   } = useEditorStore();
 
   const [leftWidth, setLeftWidth] = useState(250);
@@ -97,6 +99,10 @@ function App() {
           if (storeState.selectedKeyframeLines.length > 0) {
             e.preventDefault();
             removeSelectedKeyframeLines();
+          } else if (storeState.selectedOverLayerId) {
+            e.preventDefault();
+            removeOverLayer(storeState.selectedOverLayerId);
+            selectOverLayer(null);
           } else if (storeState.selectedClipIds.length > 0) {
             e.preventDefault();
             removeClip(storeState.selectedClipIds[0]);

@@ -160,8 +160,10 @@ interface EditorActions {
   removeOverLayer: (overLayerId: string) => void;
   updateOverLayer: (overLayerId: string, updates: Partial<OverLayerClip>) => void;
   moveOverLayer: (overLayerId: string, newStartTime: number) => void;
+  reorderOverLayer: (overLayerId: string, targetRowIdx: number) => void;
   selectOverLayer: (overLayerId: string | null) => void;
   setHoveredOverLayerRegion: (region: EditorState['hoveredOverLayerRegion']) => void;
+  setPinnedOverLayerTrackId: (trackId: string | null) => void;
 
   // Playback
   play: () => void;
@@ -267,6 +269,7 @@ const initialState: EditorState = {
   selectedClipIds: [],
   selectedOverLayerId: null,
   hoveredOverLayerRegion: null,
+  pinnedOverLayerTrackId: null,
   selectedTransitionClipId: null,
   selectedKeyframeLines: [],
   selectedTrackId: null,
@@ -762,6 +765,52 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   splitClip: (clipId, splitTime) => {
     set((state) => {
+      // Check if it's an over-layer
+      const isOl = state.tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
+      if (isOl) {
+        let leftClipId = '';
+        const newTracks = state.tracks.map((track) => {
+          const olIndex = (track.overLayers || []).findIndex((ol) => ol.id === clipId);
+          if (olIndex === -1) return track;
+
+          const ol = track.overLayers[olIndex];
+          const relativeSplitTime = splitTime - ol.startTime;
+
+          if (relativeSplitTime <= 0 || relativeSplitTime >= ol.duration) return track;
+
+          leftClipId = generateId();
+          const rightClipId = generateId();
+
+          const leftOl: OverLayerClip = {
+            ...ol,
+            id: leftClipId,
+            duration: relativeSplitTime,
+            trimEnd: ol.trimEnd + (ol.duration - relativeSplitTime) * ol.speed,
+            effects: [...ol.effects],
+          };
+
+          const rightOl: OverLayerClip = {
+            ...ol,
+            id: rightClipId,
+            startTime: splitTime,
+            duration: ol.duration - relativeSplitTime,
+            trimStart: ol.trimStart + relativeSplitTime * ol.speed,
+            effects: [...ol.effects],
+          };
+
+          const newOls = [...track.overLayers];
+          newOls.splice(olIndex, 1, leftOl, rightOl);
+
+          return { ...track, overLayers: newOls };
+        });
+
+        const isSelected = state.selectedOverLayerId === clipId;
+        return {
+          tracks: newTracks,
+          selectedOverLayerId: isSelected ? leftClipId : state.selectedOverLayerId,
+        };
+      }
+
       const isSelected = state.selectedClipIds.includes(clipId);
       let leftClipId = '';
 
@@ -1797,10 +1846,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ...t,
         overLayers: (t.overLayers || []).filter((ol) => ol.id !== overLayerId),
       }));
-      const newSelectedId = state.selectedOverLayerId === overLayerId ? null : state.selectedOverLayerId;
+      const wasSelected = state.selectedOverLayerId === overLayerId;
       return {
         tracks: newTracks,
-        selectedOverLayerId: newSelectedId,
+        selectedOverLayerId: wasSelected ? null : state.selectedOverLayerId,
+        pinnedOverLayerTrackId: wasSelected ? null : state.pinnedOverLayerTrackId,
       };
     });
     get().recalcTotalDuration();
@@ -1834,17 +1884,81 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().recalcTotalDuration();
   },
 
+  reorderOverLayer: (overLayerId, targetRowIdx) => {
+    set((state) => {
+      const track = state.tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === overLayerId));
+      if (!track) return {};
+      
+      const hoveredOverLayerRegion = state.hoveredOverLayerRegion;
+      if (!hoveredOverLayerRegion) return {};
+      
+      const activeOverLayers = (track.overLayers || []).filter((ol) => {
+        return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+      });
+      
+      const currentIdxInActive = activeOverLayers.findIndex((ol) => ol.id === overLayerId);
+      if (currentIdxInActive === -1 || targetRowIdx === currentIdxInActive || targetRowIdx >= activeOverLayers.length) return {};
+      
+      const reordered = [...track.overLayers];
+      const itemToMove = activeOverLayers[currentIdxInActive];
+      const targetItem = activeOverLayers[targetRowIdx];
+      
+      const originalIdx = reordered.findIndex((ol) => ol.id === itemToMove.id);
+      const targetOriginalIdx = reordered.findIndex((ol) => ol.id === targetItem.id);
+      
+      if (originalIdx !== -1 && targetOriginalIdx !== -1) {
+        reordered.splice(originalIdx, 1);
+        reordered.splice(targetOriginalIdx, 0, itemToMove);
+        
+        return {
+          tracks: state.tracks.map((t) =>
+            t.id === track.id ? { ...t, overLayers: reordered } : t
+          ),
+        };
+      }
+      return {};
+    });
+  },
+
   selectOverLayer: (overLayerId) => {
+    // Find which track owns this over-layer so it stays pinned
+    let owningTrackId: string | null = null;
+    if (overLayerId) {
+      const state = get();
+      for (const t of state.tracks) {
+        if ((t.overLayers || []).some((ol) => ol.id === overLayerId)) {
+          owningTrackId = t.id;
+          break;
+        }
+      }
+    }
     set({
       selectedOverLayerId: overLayerId,
       selectedClipId: null,
       selectedClipIds: [],
       selectedTrackId: null,
+      pinnedOverLayerTrackId: owningTrackId,
     });
   },
 
   setHoveredOverLayerRegion: (region) => {
     set({ hoveredOverLayerRegion: region });
+  },
+
+  setPinnedOverLayerTrackId: (trackId) => {
+    set({ pinnedOverLayerTrackId: trackId });
+  },
+
+  // Keyboard Delete — remove selected over-layer or clip
+  removeSelected: () => {
+    const state = get();
+    if (state.selectedOverLayerId) {
+      state.removeOverLayer(state.selectedOverLayerId);
+    } else if (state.selectedClipId) {
+      state.removeClip(state.selectedClipId);
+    } else if (state.selectedClipIds.length > 1) {
+      state.selectedClipIds.forEach((id) => state.removeClip(id));
+    }
   },
 
   // Beat Markers

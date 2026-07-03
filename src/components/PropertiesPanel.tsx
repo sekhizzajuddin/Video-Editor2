@@ -261,20 +261,22 @@ export function PropertiesPanel() {
   const primarySelectedId = selectedOverLayerId || selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
 
   const updateClip = useCallback((clipId: string, updates: any) => {
-    if (isOverLayer) {
+    const isOl = tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
+    if (isOl) {
       updateOverLayer(clipId, updates);
     } else {
       storeUpdateClip(clipId, updates);
     }
-  }, [isOverLayer, storeUpdateClip, updateOverLayer]);
+  }, [tracks, storeUpdateClip, updateOverLayer]);
 
   const removeClip = useCallback((clipId: string) => {
-    if (isOverLayer) {
+    const isOl = tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
+    if (isOl) {
       removeOverLayer(clipId);
     } else {
       storeRemoveClip(clipId);
     }
-  }, [isOverLayer, storeRemoveClip, removeOverLayer]);
+  }, [tracks, storeRemoveClip, removeOverLayer]);
 
   // Auto-switch properties panel tabs only when the clip selection CHANGES (not on property updates)
   const lastAutoSwitchedClip = useRef<string | null>(null);

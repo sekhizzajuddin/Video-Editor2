@@ -2463,12 +2463,24 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
   const {
     tracks,
     selectedClipId,
+    selectedOverLayerId,
     currentTime,
     mediaLibrary,
-    updateClip,
+    updateClip: storeUpdateClip,
+    updateOverLayer,
     canvasTransformMode,
     setCanvasTransformMode,
   } = useEditorStore();
+
+  const updateClip = useCallback((clipId: string, updates: any) => {
+    const isOl = tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
+    if (isOl) {
+      updateOverLayer(clipId, updates);
+    } else {
+      storeUpdateClip(clipId, updates);
+    }
+  }, [tracks, storeUpdateClip, updateOverLayer]);
+
   const videoElements = useMediaPlayback();
 
   const [dragState, setDragState] = useState<{
@@ -2484,7 +2496,17 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
   let activeClip = null;
   let mediaItem = null;
 
-  if (selectedClipId) {
+  if (selectedOverLayerId) {
+    for (const track of tracks) {
+      if (track.hidden || track.type !== 'video') continue;
+      const ol = (track.overLayers || []).find((c) => c.id === selectedOverLayerId);
+      if (ol && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
+        activeClip = ol;
+        mediaItem = mediaLibrary.find((m) => m.id === ol.mediaId);
+        break;
+      }
+    }
+  } else if (selectedClipId) {
     for (const track of tracks) {
       if (track.hidden || track.type !== 'video') continue;
       const clip = track.clips.find((c) => c.id === selectedClipId);
