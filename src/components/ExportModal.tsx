@@ -26,8 +26,6 @@ export function ExportModal() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
 
-  if (!showExportModal) return null;
-
   // Watch currentTime to update progress and stop recording
   useEffect(() => {
     if (isExporting) {
@@ -49,6 +47,8 @@ export function ExportModal() {
       }
     }
   }, [currentTime, totalDuration, isExporting, isPlaying, togglePlayback, inPoint, outPoint]);
+
+  if (!showExportModal) return null;
 
   const handleExport = () => {
     if (!previewCanvas || !masterAudioStream) {
