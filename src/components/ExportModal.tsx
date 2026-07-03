@@ -173,6 +173,10 @@ export function ExportModal() {
     // Abort check
     if (abortControllerRef.current?.signal.aborted) throw new Error('Aborted');
 
+    // Pre-clean virtual FS — stale files from a previous failed run cause ErrnoError
+    try { await ffmpeg.deleteFile('input.webm'); } catch { /* not present, ignore */ }
+    try { await ffmpeg.deleteFile('output.mp4'); } catch { /* not present, ignore */ }
+
     setStatusMsg('Writing input file...');
     const inputData = await fetchFile(webmBlob);
     await ffmpeg.writeFile('input.webm', inputData);
@@ -188,16 +192,20 @@ export function ExportModal() {
       }
     }
 
+    // Use -vf scale to ensure even dimensions (required by yuv420p/libx264)
+    // Also use -map 0 to take all streams, and fallback audio copy if aac fails
     const ffmpegArgs = [
       '-i', 'input.webm',
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', quality === 'max' ? '18' : quality === 'high' ? '22' : '28',
       '-pix_fmt', 'yuv420p',
+      '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',  // ensure even width/height for yuv420p
       '-movflags', '+faststart',
       ...separationArgs,
       '-c:a', 'aac',
       '-b:a', '128k',
+      '-shortest',
       '-y',
       'output.mp4'
     ];
@@ -211,8 +219,9 @@ export function ExportModal() {
 
     setStatusMsg('Encoding video...');
 
+    let execRet = -1;
     try {
-      await ffmpeg.exec(ffmpegArgs);
+      execRet = await ffmpeg.exec(ffmpegArgs);
     } finally {
       ffmpeg.off('progress', progressHandler);
     }
@@ -220,10 +229,27 @@ export function ExportModal() {
     // Abort check after exec
     if (abortControllerRef.current?.signal.aborted) throw new Error('Aborted');
 
+    // Non-zero return code means FFmpeg encoding failed
+    if (execRet !== 0) {
+      // Clean up and reset singleton so next retry starts fresh
+      try { await ffmpeg.deleteFile('input.webm'); } catch { /* ignore */ }
+      try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
+      ffmpegLoadPromise = null; // force reload on next attempt
+      throw new Error(`FFmpeg exited with code ${execRet}`);
+    }
+
     setStatusMsg('Reading output...');
     setConversionProgress(99);
 
-    const outputData = await ffmpeg.readFile('output.mp4');
+    let outputData: Uint8Array | string;
+    try {
+      outputData = await ffmpeg.readFile('output.mp4');
+    } catch (readErr) {
+      // output.mp4 missing means exec silently failed
+      ffmpegLoadPromise = null;
+      throw new Error('Output file not produced (encoding failed silently)');
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mp4Blob = new Blob([outputData as any], { type: 'video/mp4' });
 
