@@ -48,7 +48,7 @@ export function ExportModal() {
   const {
     showExportModal, setShowExportModal, totalDuration, tracks,
     previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime,
-    inPoint, outPoint
+    inPoint, outPoint, setIsExporting
   } = useEditorStore();
 
   const [fps, setFps] = useState('30');
@@ -158,11 +158,12 @@ export function ExportModal() {
     cleanup();
     if (isPlaying) togglePlayback();
     isExportingRef.current = false;
+    setIsExporting(false);
     updateStatus('idle');
     setProgress(0);
     setConversionProgress(0);
     setStatusMsg('');
-  }, [cleanup, isPlaying, togglePlayback, updateStatus]);
+  }, [cleanup, isPlaying, togglePlayback, updateStatus, setIsExporting]);
 
   const triggerDownload = (blob: Blob, ext: string) => {
     const url = URL.createObjectURL(blob);
@@ -285,6 +286,7 @@ export function ExportModal() {
     // Reset state
     cleanup();
     chunksRef.current = [];
+    setIsExporting(true);
     updateStatus('recording');
     setProgress(0);
     setConversionProgress(0);
@@ -354,6 +356,7 @@ export function ExportModal() {
       chunksRef.current = [];
 
       if (chunks.length === 0) {
+        setIsExporting(false);
         setErrorMsg('Recording produced no data. Play the timeline once before exporting.');
         updateStatus('error');
         isExportingRef.current = false;
@@ -366,6 +369,7 @@ export function ExportModal() {
       setProgress(100);
 
       if (webmBlob.size < 1000) {
+        setIsExporting(false);
         setErrorMsg('Recording is too small — the canvas may not have rendered any frames. Try playing the timeline first.');
         updateStatus('error');
         isExportingRef.current = false;
@@ -380,9 +384,11 @@ export function ExportModal() {
         updateStatus('done');
         setStatusMsg('Download started!');
         isExportingRef.current = false;
+        setIsExporting(false);
         setTimeout(() => {
           if (exportStatusRef.current === 'done') {
             setShowExportModal(false);
+            setIsExporting(false);
             updateStatus('idle');
           }
         }, 2000);
@@ -398,15 +404,18 @@ export function ExportModal() {
         updateStatus('done');
         setStatusMsg('MP4 export complete!');
         isExportingRef.current = false;
+        setIsExporting(false);
         setTimeout(() => {
           if (exportStatusRef.current === 'done') {
             setShowExportModal(false);
+            setIsExporting(false);
             updateStatus('idle');
           }
         }, 2000);
       } catch (err: any) {
         console.error('FFmpeg MP4 export failed:', err);
         isExportingRef.current = false;
+        setIsExporting(false);
 
         if (err?.message === 'Aborted') {
           updateStatus('idle');

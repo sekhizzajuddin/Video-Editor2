@@ -359,6 +359,7 @@ export interface EditorState {
 
   // UI State
   showExportModal: boolean;
+  isExporting: boolean;
   showSettingsModal: boolean;
   activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
   activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';

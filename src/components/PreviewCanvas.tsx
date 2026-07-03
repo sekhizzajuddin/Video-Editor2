@@ -506,10 +506,11 @@ export function PreviewCanvas() {
     let lastTime = performance.now();
 
     const loop = (now: number) => {
-      const dt = (now - lastTime) / 1000;
+      const state = useEditorStore.getState();
+      // During export, use fixed timestep for perfectly even frame pacing
+      const dt = state.isExporting ? (1 / 60) : ((now - lastTime) / 1000);
       lastTime = now;
       
-      const state = useEditorStore.getState();
       const dir = state.playbackDirection ?? 1;
       const speed = state.playbackSpeed;
       const currentSeek = state.seek;
