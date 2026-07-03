@@ -21,10 +21,6 @@ async function ensureFFmpegLoaded(): Promise<void> {
   ffmpegLoadPromise = (async () => {
     const coreBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
 
-    ffmpeg.on('log', ({ message }) => {
-      console.log('[FFmpeg]', message);
-    });
-
     await ffmpeg.load({
       coreURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.js`, 'text/javascript'),
       wasmURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.wasm`, 'application/wasm'),
@@ -50,26 +46,28 @@ export function ExportModal() {
   const [progress, setProgress] = useState(0);
   const [conversionProgress, setConversionProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string>('');
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rafRef = useRef<number | null>(null);
 
+  // CRITICAL: exportStatus ref so callbacks always see the latest value
+  const exportStatusRef = useRef<ExportStatus>('idle');
   const isExporting = exportStatus === 'recording' || exportStatus === 'converting';
+
+  const updateStatus = useCallback((s: ExportStatus) => {
+    exportStatusRef.current = s;
+    setExportStatus(s);
+  }, []);
 
   // Cleanup function: stop recorder, revoke streams, clear timers
   const cleanup = useCallback(() => {
-    if (recorderRef.current && recorderRef.current.state === 'recording') {
-      try {
-        recorderRef.current.stop();
-      } catch {
-        // ignore
-      }
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      try { recorderRef.current.stop(); } catch { /* ignore */ }
     }
     recorderRef.current = null;
 
@@ -82,17 +80,9 @@ export function ExportModal() {
       videoStreamRef.current = null;
     }
 
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
-    }
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
     }
 
     abortControllerRef.current?.abort();
@@ -101,9 +91,9 @@ export function ExportModal() {
     chunksRef.current = [];
   }, []);
 
-  // Watch currentTime to update progress and stop recording at out point
+  // Watch currentTime to update progress and stop recording at end point
   useEffect(() => {
-    if (exportStatus !== 'recording') return;
+    if (exportStatusRef.current !== 'recording') return;
 
     const startAt = inPoint !== null ? inPoint : 0;
     const endAt = outPoint !== null ? outPoint : totalDuration;
@@ -112,7 +102,7 @@ export function ExportModal() {
     const p = Math.min(100, (elapsed / duration) * 100);
     setProgress(p);
 
-    // Hard stop at out point
+    // Hard stop at out point — only stop the recorder; onstop handles status transition
     if (currentTime >= endAt) {
       if (recorderRef.current && recorderRef.current.state === 'recording') {
         recorderRef.current.stop();
@@ -120,27 +110,28 @@ export function ExportModal() {
       if (isPlaying) {
         togglePlayback();
       }
-      setExportStatus('idle');
     }
   }, [currentTime, totalDuration, exportStatus, isPlaying, togglePlayback, inPoint, outPoint]);
 
-  // Cleanup on unmount or when modal closes
+  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      cleanup();
-    };
+    return () => { cleanup(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // When modal is closed externally, cleanup
   useEffect(() => {
     if (!showExportModal) {
-      cleanup();
-      setExportStatus('idle');
-      setProgress(0);
-      setConversionProgress(0);
-      setErrorMsg(null);
+      // Only reset if not actively exporting to avoid wiping mid-export state
+      if (exportStatusRef.current === 'idle' || exportStatusRef.current === 'done' || exportStatusRef.current === 'error') {
+        cleanup();
+        updateStatus('idle');
+        setProgress(0);
+        setConversionProgress(0);
+        setErrorMsg(null);
+      }
     }
-  }, [showExportModal, cleanup]);
+  }, [showExportModal, cleanup, updateStatus]);
 
   // Guard against double-click and concurrent exports using ref
   const isExportingRef = useRef(false);
@@ -149,210 +140,11 @@ export function ExportModal() {
     cleanup();
     if (isPlaying) togglePlayback();
     isExportingRef.current = false;
-    setExportStatus('idle');
+    updateStatus('idle');
     setProgress(0);
     setConversionProgress(0);
-  }, [cleanup, isPlaying, togglePlayback]);
-
-  const handleExport = async () => {
-    if (isExportingRef.current) return;
-    isExportingRef.current = true;
-    if (!previewCanvas || !masterAudioStream) {
-      setErrorMsg('Canvas or Audio stream not initialized yet.');
-      isExportingRef.current = false;
-      return;
-    }
-
-    const startAt = inPoint !== null ? inPoint : 0;
-    const endAt = outPoint !== null ? outPoint : totalDuration;
-    if (endAt <= startAt) {
-      setErrorMsg('Invalid in/out points. Please set a valid range.');
-      isExportingRef.current = false;
-      return;
-    }
-
-    // Reset state
-    cleanup();
-    chunksRef.current = [];
-    setExportStatus('recording');
-    setProgress(0);
-    setConversionProgress(0);
-    setErrorMsg(null);
-
-    // Create video stream from canvas
-    const videoStream = previewCanvas.captureStream(parseInt(fps));
-    videoStreamRef.current = videoStream;
-
-    const combinedStream = new MediaStream([
-      ...videoStream.getVideoTracks(),
-      ...masterAudioStream.getAudioTracks()
-    ]);
-    streamRef.current = combinedStream;
-
-    // Select optimal mimeType
-    const mimeTypeCandidates = [
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-    ];
-    let mimeType = mimeTypeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || 'video/webm';
-
-    const bitsPerSecond =
-      quality === 'max' ? 12_000_000 : quality === 'high' ? 6_000_000 : 3_000_000;
-
-    const recorder = new MediaRecorder(combinedStream, {
-      mimeType,
-      videoBitsPerSecond: bitsPerSecond,
-    });
-
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) {
-        chunksRef.current.push(e.data);
-      }
-    };
-
-    recorder.onstop = async () => {
-      isExportingRef.current = false;
-      // Stop tracks to free resources
-      videoStream.getTracks().forEach((t) => t.stop());
-      combinedStream.getTracks().forEach((t) => t.stop());
-      videoStreamRef.current = null;
-      streamRef.current = null;
-
-      if (chunksRef.current.length === 0) {
-        setErrorMsg('Recording produced no data. Please try again.');
-        setExportStatus('error');
-        return;
-      }
-
-      const webmBlob = new Blob(chunksRef.current, { type: mimeType });
-      chunksRef.current = []; // free memory
-
-      if (exportFormat === 'webm') {
-        triggerDownload(webmBlob, 'webm');
-        setExportStatus('done');
-        setTimeout(() => {
-          setShowExportModal(false);
-          setExportStatus('idle');
-        }, 500);
-        return;
-      }
-
-      // MP4 conversion via FFmpeg WASM
-      setExportStatus('converting');
-      try {
-        await convertToMp4(webmBlob);
-        setExportStatus('done');
-        setTimeout(() => {
-          setShowExportModal(false);
-          setExportStatus('idle');
-        }, 500);
-      } catch (err: any) {
-        console.error('FFmpeg WASM MP4 export failed, downloading WebM fallback:', err);
-        if (err?.message === 'Aborted') {
-          setErrorMsg('Export was cancelled.');
-          setExportStatus('error');
-        } else {
-          setErrorMsg('MP4 conversion failed. Downloading WebM fallback.');
-          triggerDownload(webmBlob, 'webm');
-          setExportStatus('error');
-        }
-      }
-    };
-
-    recorder.onerror = (e) => {
-      console.error('MediaRecorder error:', e);
-      setErrorMsg('Recording error occurred. Please try again.');
-      setExportStatus('error');
-      cleanup();
-    };
-
-    recorderRef.current = recorder;
-
-    // Seek to start and begin
-    seek(startAt);
-
-    // Start recorder with timeslice to stream in chunks (prevents memory bloat)
-    timeoutRef.current = setTimeout(() => {
-      if (!recorderRef.current) return;
-      try {
-        recorder.start(1000); // timeslice 1s to periodically flush data
-        // Manually drive playback if not already playing
-        if (!useEditorStore.getState().isPlaying) {
-          togglePlayback();
-        }
-      } catch (err) {
-        console.error('Failed to start MediaRecorder:', err);
-        setErrorMsg('Failed to start recording. Please try again.');
-        setExportStatus('error');
-        cleanup();
-      }
-    }, 300);
-  };
-
-  const convertToMp4 = async (webmBlob: Blob) => {
-    abortControllerRef.current = new AbortController();
-    setConversionProgress(0);
-
-    // Load FFmpeg (cached if already loaded)
-    await ensureFFmpegLoaded();
-
-    // Setup progress
-    ffmpeg.on('progress', ({ progress: p }) => {
-      setConversionProgress(Math.min(100, Math.round(p * 100)));
-    });
-
-    // Write input
-    const inputData = await fetchFile(webmBlob);
-    await ffmpeg.writeFile('input.webm', inputData);
-
-    // Build args with optimized settings
-    const separationArgs: string[] = [];
-    for (const track of tracks) {
-      for (const clip of track.clips) {
-        if (clip.audioSettings?.vocalSeparation?.enabled) {
-          const sepArgs = getFFmpegSeparationArgs(clip.audioSettings.vocalSeparation);
-          separationArgs.push(...sepArgs);
-        }
-      }
-    }
-
-    // optimized: faster preset gives better speed/size balance than ultrafast
-    const ffmpegArgs = [
-      '-i', 'input.webm',
-      '-c:v', 'libx264',
-      '-preset', 'faster',
-      '-crf', quality === 'max' ? '18' : quality === 'high' ? '22' : '28',
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-      ...separationArgs,
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      'output.mp4'
-    ];
-
-    // Exec with timeout guard
-    const execPromise = ffmpeg.exec(ffmpegArgs);
-    const timeoutPromise = new Promise<void>((_, reject) => {
-      const timer = setTimeout(() => reject(new Error('FFmpeg conversion timed out')), 10 * 60 * 1000); // 10 min max
-      abortControllerRef.current?.signal.addEventListener('abort', () => {
-        clearTimeout(timer);
-        reject(new Error('Aborted'));
-      });
-    });
-
-    await Promise.race([execPromise, timeoutPromise]);
-
-    // Read output
-    const outputData = await ffmpeg.readFile('output.mp4');
-    const mp4Blob = new Blob([outputData as any], { type: 'video/mp4' });
-
-    triggerDownload(mp4Blob, 'mp4');
-
-    // Cleanup virtual files
-    try { await ffmpeg.deleteFile('input.webm'); } catch { /* ignore */ }
-    try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
-  };
+    setStatusMsg('');
+  }, [cleanup, isPlaying, togglePlayback, updateStatus]);
 
   const triggerDownload = (blob: Blob, ext: string) => {
     const url = URL.createObjectURL(blob);
@@ -366,6 +158,258 @@ export function ExportModal() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     }, 100);
+  };
+
+  const convertToMp4 = async (webmBlob: Blob): Promise<void> => {
+    abortControllerRef.current = new AbortController();
+    setConversionProgress(0);
+    setStatusMsg('Loading FFmpeg engine...');
+
+    // Load FFmpeg (cached if already loaded)
+    await ensureFFmpegLoaded();
+
+    // Abort check
+    if (abortControllerRef.current?.signal.aborted) throw new Error('Aborted');
+
+    setStatusMsg('Writing input file...');
+    const inputData = await fetchFile(webmBlob);
+    await ffmpeg.writeFile('input.webm', inputData);
+
+    // Build args
+    const separationArgs: string[] = [];
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        if (clip.audioSettings?.vocalSeparation?.enabled) {
+          const sepArgs = getFFmpegSeparationArgs(clip.audioSettings.vocalSeparation);
+          separationArgs.push(...sepArgs);
+        }
+      }
+    }
+
+    const ffmpegArgs = [
+      '-i', 'input.webm',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', quality === 'max' ? '18' : quality === 'high' ? '22' : '28',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      ...separationArgs,
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-y',
+      'output.mp4'
+    ];
+
+    // Setup progress listener
+    const progressHandler = ({ progress: p }: { progress: number }) => {
+      setConversionProgress(Math.min(99, Math.round(p * 100)));
+      setStatusMsg(`Encoding H.264... ${Math.min(99, Math.round(p * 100))}%`);
+    };
+    ffmpeg.on('progress', progressHandler);
+
+    setStatusMsg('Encoding video...');
+
+    try {
+      await ffmpeg.exec(ffmpegArgs);
+    } finally {
+      ffmpeg.off('progress', progressHandler);
+    }
+
+    // Abort check after exec
+    if (abortControllerRef.current?.signal.aborted) throw new Error('Aborted');
+
+    setStatusMsg('Reading output...');
+    setConversionProgress(99);
+
+    const outputData = await ffmpeg.readFile('output.mp4');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mp4Blob = new Blob([outputData as any], { type: 'video/mp4' });
+
+    triggerDownload(mp4Blob, 'mp4');
+    setConversionProgress(100);
+
+    // Cleanup virtual files
+    try { await ffmpeg.deleteFile('input.webm'); } catch { /* ignore */ }
+    try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
+  };
+
+  const handleExport = async () => {
+    if (isExportingRef.current) return;
+    isExportingRef.current = true;
+
+    if (!previewCanvas) {
+      setErrorMsg('Canvas not initialized. Please wait for the preview to load.');
+      isExportingRef.current = false;
+      return;
+    }
+
+    const startAt = inPoint !== null ? inPoint : 0;
+    const endAt = outPoint !== null ? outPoint : totalDuration;
+
+    if (endAt <= startAt || totalDuration <= 0) {
+      setErrorMsg('No content to export. Please add clips to the timeline.');
+      isExportingRef.current = false;
+      return;
+    }
+
+    // Reset state
+    cleanup();
+    chunksRef.current = [];
+    updateStatus('recording');
+    setProgress(0);
+    setConversionProgress(0);
+    setErrorMsg(null);
+    setStatusMsg('Starting recording...');
+
+    // Create video stream from canvas
+    const videoStream = previewCanvas.captureStream(parseInt(fps));
+    videoStreamRef.current = videoStream;
+
+    // Build combined stream — audio is optional
+    let combinedStream: MediaStream;
+    if (masterAudioStream && masterAudioStream.getAudioTracks().length > 0) {
+      combinedStream = new MediaStream([
+        ...videoStream.getVideoTracks(),
+        ...masterAudioStream.getAudioTracks()
+      ]);
+    } else {
+      combinedStream = new MediaStream([...videoStream.getVideoTracks()]);
+    }
+    streamRef.current = combinedStream;
+
+    // Select optimal mimeType
+    const mimeTypeCandidates = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=h264,opus',
+      'video/webm',
+    ];
+    const mimeType = mimeTypeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+
+    const bitsPerSecond =
+      quality === 'max' ? 12_000_000 : quality === 'high' ? 6_000_000 : 3_000_000;
+
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(combinedStream, {
+        mimeType,
+        videoBitsPerSecond: bitsPerSecond,
+      });
+    } catch (err) {
+      console.error('MediaRecorder creation failed:', err);
+      setErrorMsg('Recording not supported in this browser. Try Chrome or Edge.');
+      updateStatus('error');
+      cleanup();
+      isExportingRef.current = false;
+      return;
+    }
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunksRef.current.push(e.data);
+      }
+    };
+
+    recorder.onstop = async () => {
+      // Stop tracks immediately to free GPU resources
+      videoStream.getTracks().forEach((t) => t.stop());
+      combinedStream.getTracks().forEach((t) => t.stop());
+      videoStreamRef.current = null;
+      streamRef.current = null;
+
+      if (chunksRef.current.length === 0) {
+        setErrorMsg('Recording produced no data. Try clicking Play first to load media, then export.');
+        updateStatus('error');
+        isExportingRef.current = false;
+        return;
+      }
+
+      const webmBlob = new Blob(chunksRef.current, { type: mimeType });
+      chunksRef.current = []; // free memory
+      setProgress(100);
+
+      if (exportFormat === 'webm') {
+        triggerDownload(webmBlob, 'webm');
+        updateStatus('done');
+        isExportingRef.current = false;
+        setTimeout(() => {
+          if (exportStatusRef.current === 'done') {
+            setShowExportModal(false);
+            updateStatus('idle');
+          }
+        }, 1500);
+        return;
+      }
+
+      // MP4 conversion via FFmpeg WASM
+      updateStatus('converting');
+      setStatusMsg('Preparing FFmpeg...');
+
+      try {
+        await convertToMp4(webmBlob);
+        updateStatus('done');
+        setStatusMsg('Export complete!');
+        isExportingRef.current = false;
+        setTimeout(() => {
+          if (exportStatusRef.current === 'done') {
+            setShowExportModal(false);
+            updateStatus('idle');
+          }
+        }, 1500);
+      } catch (err: any) {
+        console.error('FFmpeg MP4 export failed:', err);
+        isExportingRef.current = false;
+
+        if (err?.message === 'Aborted') {
+          updateStatus('idle');
+          setStatusMsg('');
+          return;
+        }
+
+        // FFmpeg failed — download webm fallback immediately
+        setErrorMsg(`MP4 encoding failed (${err?.message ?? 'unknown error'}). Downloading WebM instead — open in VLC or convert with Handbrake.`);
+        updateStatus('error');
+        triggerDownload(webmBlob, 'webm');
+      }
+    };
+
+    recorder.onerror = (e) => {
+      console.error('MediaRecorder error:', e);
+      setErrorMsg('Recording error occurred. Please try again.');
+      updateStatus('error');
+      isExportingRef.current = false;
+      cleanup();
+    };
+
+    recorderRef.current = recorder;
+
+    // Seek to start and begin recording after a short delay
+    seek(startAt);
+
+    timeoutRef.current = setTimeout(() => {
+      if (!recorderRef.current) return;
+      try {
+        // Make sure we're at the right position
+        const state = useEditorStore.getState();
+        if (Math.abs(state.currentTime - startAt) > 0.5) {
+          state.seek(startAt);
+        }
+
+        recorder.start(500); // Flush chunks every 500ms
+        setStatusMsg('Recording timeline...');
+
+        // Start playback
+        if (!useEditorStore.getState().isPlaying) {
+          togglePlayback();
+        }
+      } catch (err) {
+        console.error('Failed to start MediaRecorder:', err);
+        setErrorMsg('Failed to start recording. Please try again.');
+        updateStatus('error');
+        isExportingRef.current = false;
+        cleanup();
+      }
+    }, 400);
   };
 
   const totalClips = tracks.reduce((acc, t) => acc + t.clips.length, 0);
@@ -393,7 +437,6 @@ export function ExportModal() {
           </div>
           <button
             onClick={() => isExporting ? handleCancel() : setShowExportModal(false)}
-            disabled={false}
             className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors"
           >
             <X className="w-4 h-4" />
@@ -425,12 +468,18 @@ export function ExportModal() {
                 <span className="text-white">{tracks.length}</span>
               </div>
               <div>
-                <span className="text-[#a0a0a0]">Render Resolution: </span>
-                <span className="text-white">854 x 480 (16:9)</span>
+                <span className="text-[#a0a0a0]">Resolution: </span>
+                <span className="text-white">854 × 480</span>
               </div>
               <div>
-                <span className="text-[#a0a0a0]">Est. File Size: </span>
+                <span className="text-[#a0a0a0]">Est. Size: </span>
                 <span className="text-white">{getEstimatedSize()}</span>
+              </div>
+              <div>
+                <span className="text-[#a0a0a0]">Audio: </span>
+                <span className={masterAudioStream && masterAudioStream.getAudioTracks().length > 0 ? 'text-green-400' : 'text-yellow-400'}>
+                  {masterAudioStream && masterAudioStream.getAudioTracks().length > 0 ? 'Ready' : 'No audio stream'}
+                </span>
               </div>
             </div>
           </div>
@@ -441,7 +490,7 @@ export function ExportModal() {
             <div className="flex gap-2">
               {[
                 { id: 'mp4', label: 'MP4 (H.264 + AAC)', desc: 'Max Compatibility' },
-                { id: 'webm', label: 'WebM (VP9 + Opus)', desc: 'Direct / Raw' },
+                { id: 'webm', label: 'WebM (VP9 + Opus)', desc: 'Direct / Fastest' },
               ].map((fmt) => (
                 <button
                   key={fmt.id}
@@ -507,11 +556,25 @@ export function ExportModal() {
             </div>
           </div>
 
+          {/* Instructions */}
+          {exportStatus === 'idle' && (
+            <div className="bg-blue-900/20 border border-blue-500/30 rounded p-3">
+              <p className="text-[10px] text-blue-200 leading-relaxed">
+                <strong>How export works:</strong> The editor will play your timeline in real time and record the canvas. 
+                Keep this tab active during export. For a 1-minute video, recording takes ~1 minute.
+                MP4 requires additional encoding time after recording.
+              </p>
+            </div>
+          )}
+
           {/* Recording Progress */}
           {exportStatus === 'recording' && (
-            <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-white">Rendering Timeline...</span>
+            <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e] space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-xs text-white">Recording Timeline...</span>
+                </div>
                 <span className="text-xs text-amber-400">{Math.round(progress)}%</span>
               </div>
               <div className="h-2 bg-[#3e3e3e] rounded-full overflow-hidden">
@@ -520,6 +583,7 @@ export function ExportModal() {
                   style={{ width: `${progress}%` }}
                 />
               </div>
+              {statusMsg && <p className="text-[9px] text-[#a0a0a0]">{statusMsg}</p>}
             </div>
           )}
 
@@ -529,7 +593,7 @@ export function ExportModal() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                  <span className="text-xs text-white font-medium">Assembling H.264 MP4 Container...</span>
+                  <span className="text-xs text-white font-medium">Assembling MP4...</span>
                 </div>
                 <span className="text-xs text-amber-400">{conversionProgress}%</span>
               </div>
@@ -539,9 +603,16 @@ export function ExportModal() {
                   style={{ width: `${conversionProgress}%` }}
                 />
               </div>
-              <p className="text-[9px] text-[#a0a0a0] leading-relaxed">
-                FFmpeg WASM is encoding raw frames. Please keep this tab active to allow hardware acceleration.
+              {statusMsg && <p className="text-[9px] text-[#a0a0a0]">{statusMsg}</p>}
+              <p className="text-[9px] text-[#a0a0a0]">
+                Do not close this tab. FFmpeg is encoding your video in the browser.
               </p>
+            </div>
+          )}
+
+          {exportStatus === 'done' && (
+            <div className="bg-green-900/20 border border-green-500/30 rounded p-3">
+              <p className="text-xs text-green-300 font-medium">✓ Export complete! Your file has been downloaded.</p>
             </div>
           )}
         </div>
@@ -553,7 +624,7 @@ export function ExportModal() {
               onClick={handleCancel}
               className="px-4 py-2 text-xs text-red-400 hover:text-red-300 transition-colors border border-red-400/30 rounded"
             >
-              Cancel Export
+              Cancel
             </button>
           ) : (
             <button
@@ -565,18 +636,18 @@ export function ExportModal() {
           )}
           <button
             onClick={isExporting ? handleCancel : handleExport}
-            disabled={isExporting && exportStatus !== 'recording'}
+            disabled={isExporting && exportStatus === 'converting'}
             className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-[#3e3e3e] disabled:cursor-not-allowed text-white text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
           >
             <Download className="w-3.5 h-3.5" />
             {exportStatus === 'recording'
               ? 'Recording...'
               : exportStatus === 'converting'
-              ? 'Encoding MP4...'
+              ? 'Encoding...'
               : exportStatus === 'error'
               ? 'Retry Export'
               : exportStatus === 'done'
-              ? 'Done'
+              ? 'Done ✓'
               : 'Start Export'}
           </button>
         </div>
