@@ -72,6 +72,7 @@ export function ExportModal() {
   const mimeTypeRef = useRef('video/webm');
   const exportStatusRef = useRef<ExportStatus>('idle');
   const isExportingRef = useRef(false);
+  const playbackStartedRef = useRef(false);
 
   useEffect(() => { exportFormatRef.current = exportFormat; }, [exportFormat]);
 
@@ -106,11 +107,19 @@ export function ExportModal() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     chunksRef.current = [];
+    playbackStartedRef.current = false;
   }, []);
 
   // Watch currentTime to update progress and stop recording at end
   useEffect(() => {
-    if (exportStatusRef.current !== 'recording') return;
+    if (exportStatusRef.current !== 'recording') {
+      playbackStartedRef.current = false;
+      return;
+    }
+
+    if (isPlaying) {
+      playbackStartedRef.current = true;
+    }
 
     const startAt = inPoint !== null ? inPoint : 0;
     const endAt = outPoint !== null ? outPoint : totalDuration;
@@ -119,8 +128,13 @@ export function ExportModal() {
     const p = Math.min(100, (elapsed / duration) * 100);
     setProgress(p);
 
+    const shouldStop = 
+      (currentTime >= endAt) || 
+      (playbackStartedRef.current && !isPlaying);
+
     // Stop at out point — ONLY stop the recorder; onstop handles the rest
-    if (currentTime >= endAt && recorderRef.current && recorderRef.current.state === 'recording') {
+    if (shouldStop && recorderRef.current && recorderRef.current.state === 'recording') {
+      console.log('[Export] Stopping recorder. currentTime:', currentTime, 'endAt:', endAt, 'isPlaying:', isPlaying);
       recorderRef.current.stop();
       if (isPlaying) togglePlayback();
     }
