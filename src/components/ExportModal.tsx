@@ -110,39 +110,27 @@ export function ExportModal() {
       }
 
       // Convert to MP4 using FFmpeg WASM
-      const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
-      if (!hasSharedArrayBuffer) {
-        console.warn('SharedArrayBuffer is not supported. Downloading WebM fallback directly.');
-        alert('MP4 encoding requires SharedArrayBuffer (CORS headers). Downloading WebM fallback instead.');
-        
-        const url = URL.createObjectURL(webmBlob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = `procut-export-${Date.now()}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          document.body.removeChild(a);
-          window.URL.revokeObjectURL(url);
-        }, 100);
-        
-        setShowExportModal(false);
-        setProgress(0);
-        return;
-      }
-
       setIsConverting(true);
       setConversionProgress(0);
       
       try {
-        // 1. Load FFmpeg
+        // 1. Load FFmpeg with explicit worker URL and timeout
         if (!ffmpeg.loaded) {
-          const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-          await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+          const coreBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+          const ffmpegBaseURL = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm';
+          
+          const loadPromise = ffmpeg.load({
+            coreURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.js`, 'text/javascript'),
+            wasmURL: await toBlobURL(`${coreBaseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+            classWorkerURL: await toBlobURL(`${ffmpegBaseURL}/worker.js`, 'text/javascript'),
           });
+
+          // Add a 15-second timeout in case worker fails to initialize silently (e.g. CORS/CDN block)
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('FFmpeg load timed out')), 15000);
+          });
+
+          await Promise.race([loadPromise, timeoutPromise]);
         }
 
         // 2. Setup progress callback
