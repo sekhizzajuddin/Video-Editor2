@@ -25,6 +25,7 @@ import {
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Client } from '@gradio/client';
+import { getFileFromDB } from '@/utils/projectPersistence';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
@@ -286,19 +287,33 @@ export function PropertiesPanel() {
     try {
       setIsSeparating(true);
       
-      // 1. Fetch the clip's local audio/video file as binary
-      let audioBlob: Blob;
+      // 1. Retrieve the file binary from IndexedDB (first priority, bypasses sandbox/CORS)
+      let audioBlob: Blob | null = null;
       try {
-        console.log('[AI Separation] Fetching audio source from URL:', clipUrl);
-        const fileResponse = await fetch(clipUrl);
-        if (!fileResponse.ok) throw new Error(`HTTP error! status: ${fileResponse.status}`);
-        audioBlob = await fileResponse.blob();
-      } catch (fetchErr: any) {
-        console.error('[AI Separation] Failed to fetch media clip binary data from URL:', clipUrl, fetchErr);
-        if (clipUrl.startsWith('blob:')) {
-          throw new Error('This project was restored from IndexedDB, but the browser has expired the local file connection. Please re-import/drag this file into the project to activate it.');
-        } else {
-          throw new Error(`Unable to fetch source file: ${fetchErr.message || 'CORS / offline restriction'}`);
+        console.log('[AI Separation] Retrieving file from IndexedDB for ID:', selectedClip.mediaId);
+        const dbFile = await getFileFromDB(selectedClip.mediaId);
+        if (dbFile) {
+          audioBlob = dbFile;
+          console.log('[AI Separation] Successfully retrieved file binary from IndexedDB:', dbFile.name, dbFile.size);
+        }
+      } catch (dbErr) {
+        console.warn('[AI Separation] Failed to load from IndexedDB, falling back to fetch...', dbErr);
+      }
+
+      if (!audioBlob) {
+        // Fallback: Fetch the clip's local audio/video file as binary if not in DB
+        try {
+          console.log('[AI Separation] Fetching audio source from URL:', clipUrl);
+          const fileResponse = await fetch(clipUrl);
+          if (!fileResponse.ok) throw new Error(`HTTP error! status: ${fileResponse.status}`);
+          audioBlob = await fileResponse.blob();
+        } catch (fetchErr: any) {
+          console.error('[AI Separation] Failed to fetch media clip binary data from URL:', clipUrl, fetchErr);
+          if (clipUrl.startsWith('blob:')) {
+            throw new Error('The local file connection has expired. Please re-import/drag this file into the project to refresh its connection.');
+          } else {
+            throw new Error(`Unable to fetch source file: ${fetchErr.message || 'CORS / offline restriction'}`);
+          }
         }
       }
 
