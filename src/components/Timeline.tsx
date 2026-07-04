@@ -21,12 +21,478 @@ import {
   Layers,
   Pin,
   Mic,
+  Zap,
+  Loader2,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { TimelineClip, TimelineTrack, MediaItem, EditorState, OverLayerClip } from '@/types';
 import { formatSimpleTime } from '@/utils/time';
 import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
+
+// ─── Web Audio SFX Helper Functions ───────────────────────────────────────────
+
+function audioBufferToWav(buffer: AudioBuffer): Blob {
+  const numOfChan = buffer.numberOfChannels;
+  const length = buffer.length * numOfChan * 2 + 44;
+  const bufferWav = new ArrayBuffer(length);
+  const view = new DataView(bufferWav);
+  const channels = [];
+  let sample = 0;
+  let offset = 0;
+  let pos = 0;
+
+  function setUint16(data: number) {
+    view.setUint16(pos, data, true);
+    pos += 2;
+  }
+
+  function setUint32(data: number) {
+    view.setUint32(pos, data, true);
+    pos += 4;
+  }
+
+  // RIFF
+  setUint32(0x46464952);
+  // file length - 8
+  setUint32(length - 8);
+  // WAVE
+  setUint32(0x45564157);
+  // fmt chunk
+  setUint32(0x20746d66);
+  // chunk length
+  setUint32(16);
+  // sample format
+  setUint16(1);
+  // channel count
+  setUint16(numOfChan);
+  // sample rate
+  setUint32(buffer.sampleRate);
+  // byte rate
+  setUint32(buffer.sampleRate * numOfChan * 2);
+  // block align
+  setUint16(numOfChan * 2);
+  // bits per sample
+  setUint16(16);
+  // data chunk
+  setUint32(0x61746164);
+  // chunk length
+  setUint32(length - pos - 4);
+
+  for (let i = 0; i < buffer.numberOfChannels; i++) {
+    channels.push(buffer.getChannelData(i));
+  }
+
+  while (pos < length) {
+    for (let i = 0; i < numOfChan; i++) {
+      sample = Math.max(-1, Math.min(1, channels[i][offset]));
+      sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(pos, sample, true);
+      pos += 2;
+    }
+    offset++;
+  }
+
+  return new Blob([bufferWav], { type: 'audio/wav' });
+}
+
+function synthesizeProceduralSFX(category: string, duration: number): Promise<Blob> {
+  return new Promise(async (resolve) => {
+    const sampleRate = 44100;
+    const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
+
+    if (category === 'explosion') {
+      const bufferSize = sampleRate * duration;
+      const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = offlineCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const filter = offlineCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(800, 0);
+      filter.frequency.exponentialRampToValueAtTime(10, duration);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(1.0, 0);
+      gain.gain.exponentialRampToValueAtTime(0.01, duration);
+
+      noiseSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(offlineCtx.destination);
+      noiseSource.start(0);
+    } else if (category === 'laser') {
+      const osc = offlineCtx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1800, 0);
+      osc.frequency.exponentialRampToValueAtTime(80, duration);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.8, 0);
+      gain.gain.exponentialRampToValueAtTime(0.01, duration);
+
+      osc.connect(gain);
+      gain.connect(offlineCtx.destination);
+      osc.start(0);
+    } else if (category === 'swoosh') {
+      const bufferSize = sampleRate * duration;
+      const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = offlineCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const filter = offlineCtx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.setValueAtTime(5, 0);
+      filter.frequency.setValueAtTime(100, 0);
+      filter.frequency.exponentialRampToValueAtTime(1200, duration * 0.4);
+      filter.frequency.exponentialRampToValueAtTime(100, duration);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.01, 0);
+      gain.gain.linearRampToValueAtTime(0.8, duration * 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.01, duration);
+
+      noiseSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(offlineCtx.destination);
+      noiseSource.start(0);
+    } else if (category === 'jump') {
+      const osc = offlineCtx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(150, 0);
+      osc.frequency.exponentialRampToValueAtTime(800, duration);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.6, 0);
+      gain.gain.exponentialRampToValueAtTime(0.01, duration);
+
+      osc.connect(gain);
+      gain.connect(offlineCtx.destination);
+      osc.start(0);
+    } else if (category === 'bubble') {
+      const osc = offlineCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(100, 0);
+      osc.frequency.exponentialRampToValueAtTime(1200, duration * 0.7);
+      osc.frequency.exponentialRampToValueAtTime(80, duration);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.01, 0);
+      gain.gain.linearRampToValueAtTime(0.7, duration * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.01, duration);
+
+      osc.connect(gain);
+      gain.connect(offlineCtx.destination);
+      osc.start(0);
+    } else if (category === 'alarm') {
+      const osc = offlineCtx.createOscillator();
+      osc.type = 'square';
+      const pulseCount = Math.max(1, Math.floor(duration * 4));
+      for (let i = 0; i < pulseCount; i++) {
+        const time = (duration / pulseCount) * i;
+        osc.frequency.setValueAtTime(900, time);
+        osc.frequency.setValueAtTime(700, time + (duration / pulseCount) * 0.5);
+      }
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.5, 0);
+      for (let i = 0; i < pulseCount; i++) {
+        const time = (duration / pulseCount) * i;
+        const interval = duration / pulseCount;
+        gain.gain.setValueAtTime(0.5, time);
+        gain.gain.setValueAtTime(0.5, time + interval * 0.7);
+        gain.gain.linearRampToValueAtTime(0.01, time + interval * 0.95);
+      }
+
+      osc.connect(gain);
+      gain.connect(offlineCtx.destination);
+      osc.start(0);
+    } else if (category === 'click') {
+      const osc = offlineCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(3000, 0);
+      osc.frequency.exponentialRampToValueAtTime(400, duration);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.8, 0);
+      gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+      osc.connect(gain);
+      gain.connect(offlineCtx.destination);
+      osc.start(0);
+    } else if (category === 'ambient') {
+      const bufferSize = sampleRate * duration;
+      const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = offlineCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const filter = offlineCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.setValueAtTime(1, 0);
+      filter.frequency.setValueAtTime(300, 0);
+
+      const modCount = 10;
+      for (let i = 0; i < modCount; i++) {
+        const time = (duration / modCount) * i;
+        const targetFreq = 150 + Math.random() * 250;
+        filter.frequency.linearRampToValueAtTime(targetFreq, time + (duration / modCount) * 0.5);
+      }
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.3, 0);
+
+      noiseSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(offlineCtx.destination);
+      noiseSource.start(0);
+    } else if (category === 'waves') {
+      const bufferSize = sampleRate * duration;
+      const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = offlineCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const filter = offlineCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.setValueAtTime(1, 0);
+
+      const wavePeriod = 4.0;
+      for (let time = 0; time < duration; time += 0.05) {
+        const cycle = (time / wavePeriod) * 2 * Math.PI;
+        const mod = Math.sin(cycle);
+        const targetFreq = 200 + (mod + 1) * 300;
+        filter.frequency.linearRampToValueAtTime(targetFreq, time);
+      }
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.05, 0);
+      for (let time = 0; time < duration; time += 0.05) {
+        const cycle = (time / wavePeriod) * 2 * Math.PI;
+        const mod = Math.sin(cycle);
+        const targetGain = 0.05 + (mod + 1) * 0.25;
+        gain.gain.linearRampToValueAtTime(targetGain, time);
+      }
+      gain.gain.setValueAtTime(gain.gain.value, duration - 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+      noiseSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(offlineCtx.destination);
+      noiseSource.start(0);
+    } else if (category === 'flying') {
+      const osc1 = offlineCtx.createOscillator();
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(80, 0);
+
+      const osc2 = offlineCtx.createOscillator();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(120, 0);
+
+      const bufferSize = sampleRate * duration;
+      const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = offlineCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const filter = offlineCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(150, 0);
+
+      const noiseGain = offlineCtx.createGain();
+      noiseGain.gain.setValueAtTime(0.1, 0);
+
+      const lfo = offlineCtx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.setValueAtTime(6, 0);
+
+      const lfoGain = offlineCtx.createGain();
+      lfoGain.gain.setValueAtTime(5, 0);
+
+      lfo.connect(lfoGain);
+      lfoGain.connect(osc1.frequency);
+      lfoGain.connect(osc2.frequency);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(0.4, 0);
+      gain.gain.setValueAtTime(0.4, duration - 0.1);
+      gain.gain.linearRampToValueAtTime(0.001, duration);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+
+      noiseSource.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(offlineCtx.destination);
+
+      gain.connect(offlineCtx.destination);
+
+      osc1.start(0);
+      osc2.start(0);
+      lfo.start(0);
+      noiseSource.start(0);
+    } else if (category === 'magic') {
+      const chimeCount = Math.max(3, Math.floor(duration * 6));
+      for (let i = 0; i < chimeCount; i++) {
+        const noteTime = (duration / chimeCount) * i;
+        const osc = offlineCtx.createOscillator();
+        osc.type = 'sine';
+
+        const baseFreq = 800 + i * 150;
+        osc.frequency.setValueAtTime(baseFreq, noteTime);
+        osc.frequency.linearRampToValueAtTime(baseFreq * 1.5, noteTime + 0.15);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, noteTime);
+        gain.gain.linearRampToValueAtTime(0.2, noteTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, noteTime + 0.25);
+
+        osc.connect(gain);
+        gain.connect(offlineCtx.destination);
+        osc.start(noteTime);
+        osc.stop(noteTime + 0.26);
+      }
+    } else if (category === 'punch') {
+      const osc = offlineCtx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, 0);
+      osc.frequency.exponentialRampToValueAtTime(40, 0.08);
+
+      const popOsc = offlineCtx.createOscillator();
+      popOsc.type = 'sine';
+      popOsc.frequency.setValueAtTime(800, 0);
+      popOsc.frequency.exponentialRampToValueAtTime(100, 0.02);
+
+      const thudGain = offlineCtx.createGain();
+      thudGain.gain.setValueAtTime(0.8, 0);
+      thudGain.gain.exponentialRampToValueAtTime(0.01, 0.15);
+
+      const popGain = offlineCtx.createGain();
+      popGain.gain.setValueAtTime(0.6, 0);
+      popGain.gain.exponentialRampToValueAtTime(0.01, 0.03);
+
+      const noiseBuffer = offlineCtx.createBuffer(1, sampleRate * 0.1, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < noiseBuffer.length; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = offlineCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const filter = offlineCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(120, 0);
+
+      const noiseGain = offlineCtx.createGain();
+      noiseGain.gain.setValueAtTime(0.6, 0);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, 0.12);
+
+      osc.connect(thudGain);
+      thudGain.connect(offlineCtx.destination);
+
+      popOsc.connect(popGain);
+      popGain.connect(offlineCtx.destination);
+
+      noiseSource.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(offlineCtx.destination);
+
+      osc.start(0);
+      popOsc.start(0);
+      noiseSource.start(0);
+    } else if (category === 'footsteps') {
+      const stepCount = Math.max(1, Math.floor(duration * 2));
+      for (let i = 0; i < stepCount; i++) {
+        const stepTime = (duration / stepCount) * i;
+
+        const noiseBuffer = offlineCtx.createBuffer(1, sampleRate * 0.15, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let j = 0; j < noiseBuffer.length; j++) {
+          output[j] = Math.random() * 2 - 1;
+        }
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(300, stepTime);
+        filter.Q.setValueAtTime(3, stepTime);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, stepTime);
+        gain.gain.linearRampToValueAtTime(0.4, stepTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, stepTime + 0.12);
+
+        noiseSource.connect(filter);
+        filter.connect(gain);
+        gain.connect(offlineCtx.destination);
+
+        noiseSource.start(stepTime);
+      }
+    } else if (category === 'gunshot') {
+      const bufferSize = sampleRate * duration;
+      const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = offlineCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const filter = offlineCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2000, 0);
+      filter.frequency.exponentialRampToValueAtTime(100, 0.1);
+
+      const gain = offlineCtx.createGain();
+      gain.gain.setValueAtTime(1.0, 0);
+      gain.gain.exponentialRampToValueAtTime(0.001, duration * 0.8);
+
+      noiseSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(offlineCtx.destination);
+      noiseSource.start(0);
+    } else if (category === 'spark') {
+      const crackleCount = Math.max(10, Math.floor(duration * 40));
+      for (let i = 0; i < crackleCount; i++) {
+        const crackleTime = Math.random() * duration;
+        const osc = offlineCtx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(5000 + Math.random() * 4000, crackleTime);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, crackleTime);
+        gain.gain.linearRampToValueAtTime(0.3, crackleTime + 0.002);
+        gain.gain.exponentialRampToValueAtTime(0.001, crackleTime + 0.015);
+
+        osc.connect(gain);
+        gain.connect(offlineCtx.destination);
+        osc.start(crackleTime);
+        osc.stop(crackleTime + 0.02);
+      }
+    }
+
+    const renderedBuffer = await offlineCtx.startRendering();
+    const wavBlob = audioBufferToWav(renderedBuffer);
+    resolve(wavBlob);
+  });
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -778,6 +1244,589 @@ export function Timeline() {
       }
     };
   }, []);
+
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  // AI SFX Generator States
+  const [sfxModalClipId, setSfxModalClipId] = useState<string | null>(null);
+  const [sfxCategory, setSfxCategory] = useState<string>('explosion');
+  const [sfxDuration, setSfxDuration] = useState<number>(1.0);
+  const [sfxName, setSfxName] = useState<string>('Sound Effect');
+  const [isAnalyzingSfx, setIsAnalyzingSfx] = useState<boolean>(false);
+  const [isSynthesizingSfx, setIsSynthesizingSfx] = useState<boolean>(false);
+
+  // AI SFX Auto-Cue / Scene Alignment States
+  const [sfxAutoCueClipId, setSfxAutoCueClipId] = useState<string | null>(null);
+  const [sfxUserDescription, setSfxUserDescription] = useState<string>('');
+  const [sfxAutoCueMode, setSfxAutoCueMode] = useState<'visual' | 'ai_script'>('visual');
+  const [isAnalyzingAutoCue, setIsAnalyzingAutoCue] = useState<boolean>(false);
+  const [autoCueProgress, setAutoCueProgress] = useState<number>(0);
+
+  const handleOpenSfxGenerator = useCallback(async (clipId: string) => {
+    let targetClip: TimelineClip | null = null;
+    for (const track of tracks) {
+      const found = track.clips.find(c => c.id === clipId);
+      if (found) {
+        targetClip = found;
+        break;
+      }
+    }
+    if (!targetClip) return;
+
+    const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);
+    const clipName = mediaItem ? mediaItem.name : 'Unknown Clip';
+    const clipType = mediaItem ? mediaItem.type : 'video';
+
+    setSfxModalClipId(clipId);
+    setSfxCategory('explosion');
+    setSfxName(`SFX: ${clipName.slice(0, 20)}`);
+    setSfxDuration(1.0);
+    setIsAnalyzingSfx(true);
+
+    try {
+      const puter = (window as any).puter;
+      if (puter) {
+        const responseText = await puter.ai.chat(
+          `Analyze this video/audio clip:
+Name: "${clipName}"
+Type: "${clipType}"
+Duration: ${targetClip.duration} seconds
+
+We need to generate a sound effect (SFX) that matches this clip. Select the best match from these synthesized categories:
+- 'explosion' (for blasts, crashes, booms, heavy hits)
+- 'laser' (for zaps, laser shots, futuristic beams)
+- 'swoosh' (for passes, fast movements, transitions, wind sweeps)
+- 'jump' (for retro jumps, pops, upward sweeps, power-ups)
+- 'bubble' (for water pops, liquid sounds, cute clicks)
+- 'alarm' (for beeps, warning sirens, electronic alerts)
+- 'click' (for UI buttons, ticks, small impacts)
+- 'ambient' (for background wind, hums, static noise, room tone)
+- 'waves' (for sea/ocean waves, flowing water, wind rustle)
+- 'flying' (for flying drones, engine hums, fast flight swooshes)
+- 'magic' (for sparkles, chimes, magical spells, fairy dust)
+- 'punch' (for punches, slap hits, thuds, body blows)
+- 'footsteps' (for walking steps, running, movement sounds)
+- 'gunshot' (for gun blast, crack, explosion sound)
+- 'spark' (for electrical sparks, lightning crackles, short circuits)
+
+Also suggest a descriptive name for the sound effect (e.g. "Space Laser Zap", "Distant Explosion", "Fast Whoosh").
+NOTE: If the clip name contains only numbers or random characters (e.g., "12345.mp4", "VID_2026.mp4", "unnamed.png") or is not descriptive, please choose 'swoosh' as the category and suggest "Transition Swoosh" as the name.
+
+Return your response ONLY as a JSON object with these two fields:
+{
+  "category": "category_name",
+  "name": "Sound Name"
+}`
+        );
+
+        const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.category) setSfxCategory(parsed.category);
+          if (parsed.name) setSfxName(parsed.name);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to analyze clip for SFX:', err);
+    } finally {
+      setIsAnalyzingSfx(false);
+    }
+  }, [tracks, mediaLibrary]);
+
+  const handleGenerateSFX = useCallback(async () => {
+    if (!sfxModalClipId) return;
+
+    let targetClip: TimelineClip | null = null;
+    for (const track of tracks) {
+      const found = track.clips.find(c => c.id === sfxModalClipId);
+      if (found) {
+        targetClip = found;
+        break;
+      }
+    }
+    if (!targetClip) return;
+
+    setIsSynthesizingSfx(true);
+    try {
+      const blob = await synthesizeProceduralSFX(sfxCategory, sfxDuration);
+      const audioUrl = URL.createObjectURL(blob);
+
+      const mediaId = `sfx_${Date.now()}`;
+      const newMediaItem = {
+        id: mediaId,
+        name: sfxName,
+        type: 'audio' as const,
+        duration: sfxDuration,
+        url: audioUrl,
+        createdAt: Date.now()
+      };
+
+      const peaks: number[] = [];
+      for (let i = 0; i < 100; i++) {
+        peaks.push(0.1 + Math.random() * 0.7);
+      }
+
+      const finalMediaItem = {
+        ...newMediaItem,
+        waveformPeaks: peaks
+      };
+
+      try {
+        await useEditorStore.getState().addMedia(finalMediaItem, new File([blob], `${mediaId}.wav`, { type: 'audio/wav' }));
+      } catch (err) {
+        console.error('Failed to save SFX to IndexedDB:', err);
+        useEditorStore.getState().addMedia(finalMediaItem);
+      }
+
+      let audioTrack = tracks.find(t => t.type === 'audio');
+      if (!audioTrack) {
+        useEditorStore.getState().addTrack('audio');
+        const updatedTracks = useEditorStore.getState().tracks;
+        audioTrack = updatedTracks.find(t => t.type === 'audio') || updatedTracks[updatedTracks.length - 1];
+      }
+
+      const newAudioClip = {
+        id: `clip_sfx_${Math.random().toString(36).substr(2, 9)}`,
+        mediaId: mediaId,
+        trackId: audioTrack.id,
+        startTime: targetClip.startTime,
+        duration: sfxDuration,
+        trimStart: 0,
+        trimEnd: 0,
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        opacity: 1,
+        speed: 1,
+        effects: []
+      };
+
+      useEditorStore.getState().startTransaction();
+      addClip(newAudioClip as any);
+      useEditorStore.getState().endTransaction();
+      useEditorStore.getState().saveSnapshot('AI Sound Effect Generation');
+
+      setSfxModalClipId(null);
+    } catch (err) {
+      console.error('SFX synthesis failed:', err);
+      alert('Failed to synthesize SFX. Please try again.');
+    } finally {
+      setIsSynthesizingSfx(false);
+    }
+  }, [sfxModalClipId, sfxCategory, sfxDuration, sfxName, tracks, addClip]);
+
+  const handleAuditionSFX = useCallback(async () => {
+    try {
+      const blob = await synthesizeProceduralSFX(sfxCategory, sfxDuration);
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      audio.play();
+    } catch (err) {
+      console.error('Failed to audition SFX:', err);
+    }
+  }, [sfxCategory, sfxDuration]);
+
+  const handleAutoCueSFX = useCallback(async () => {
+    if (!sfxAutoCueClipId) return;
+
+    let targetClip: TimelineClip | null = null;
+    for (const track of tracks) {
+      const found = track.clips.find(c => c.id === sfxAutoCueClipId);
+      if (found) {
+        targetClip = found;
+        break;
+      }
+    }
+    if (!targetClip) return;
+
+    const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);
+    if (!mediaItem || !mediaItem.url) {
+      alert('Media source file not found.');
+      return;
+    }
+
+    setIsAnalyzingAutoCue(true);
+    setAutoCueProgress(0);
+
+    try {
+      let cuePoints: { time: number; duration: number; category: string; name: string }[] = [];
+
+      if (sfxAutoCueMode === 'visual') {
+        const video = document.createElement('video');
+        video.src = mediaItem.url;
+        video.crossOrigin = 'anonymous';
+        video.muted = true;
+        video.playsInline = true;
+
+        await new Promise((resolve, reject) => {
+          video.onloadedmetadata = resolve;
+          video.onerror = () => reject(new Error('Failed to load video metadata for visual analysis.'));
+        });
+
+        const clipDur = targetClip.duration;
+        const scanFps = 4;
+        const step = 1 / scanFps;
+        const canvas = document.createElement('canvas');
+        canvas.width = 32;
+        canvas.height = 18;
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) throw new Error('Failed to create offscreen canvas context.');
+
+        let prevFrameData: Uint8ClampedArray | null = null;
+        const motionDiffs: { time: number; diff: number }[] = [];
+
+        for (let time = 0; time < clipDur; time += step) {
+          video.currentTime = time;
+          await new Promise((resolve) => {
+            video.onseeked = resolve;
+          });
+
+          ctx.drawImage(video, 0, 0, 32, 18);
+          const frameData = ctx.getImageData(0, 0, 32, 18).data;
+
+          if (prevFrameData) {
+            let sumDiff = 0;
+            for (let i = 0; i < frameData.length; i += 4) {
+              sumDiff += Math.abs(frameData[i] - prevFrameData[i]) +
+                         Math.abs(frameData[i+1] - prevFrameData[i+1]) +
+                         Math.abs(frameData[i+2] - prevFrameData[i+2]);
+            }
+            const avgDiff = sumDiff / (32 * 18 * 3);
+            motionDiffs.push({ time, diff: avgDiff });
+          }
+
+          prevFrameData = frameData;
+          setAutoCueProgress(Math.floor((time / clipDur) * 90));
+        }
+
+        if (motionDiffs.length > 0) {
+          const diffValues = motionDiffs.map(m => m.diff);
+          const mean = diffValues.reduce((a, b) => a + b, 0) / diffValues.length;
+          const stdDev = Math.sqrt(diffValues.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b, 0) / diffValues.length);
+          const threshold = mean + 2.0 * stdDev;
+
+          for (let i = 1; i < motionDiffs.length - 1; i++) {
+            const current = motionDiffs[i];
+            const prev = motionDiffs[i - 1];
+            const next = motionDiffs[i + 1];
+
+            if (current.diff > threshold && current.diff > prev.diff && current.diff > next.diff) {
+              const isHugeSpike = current.diff > (mean + 3.5 * stdDev);
+              const category = isHugeSpike ? 'explosion' : 'swoosh';
+              const sfxName = isHugeSpike ? 'Action Peak Hit' : 'Motion Swoosh';
+
+              cuePoints.push({
+                time: current.time,
+                duration: isHugeSpike ? 1.5 : 0.6,
+                category,
+                name: sfxName
+              });
+
+              i += Math.floor(0.75 * scanFps);
+            }
+          }
+        }
+      } else {
+        const puter = (window as any).puter;
+        if (!puter) {
+          throw new Error('Puter AI engine is not loaded. Please connect to the internet.');
+        }
+
+        setAutoCueProgress(40);
+        const responseText = await puter.ai.chat(
+          `We have a video clip named "${mediaItem.name}" of duration ${targetClip.duration} seconds.
+The user describes the action: "${sfxUserDescription}".
+
+We need to generate matching sound effects (SFX) that fit the video timeline.
+Choose ONLY from these categories: 'explosion', 'laser', 'swoosh', 'jump', 'bubble', 'alarm', 'click', 'ambient', 'waves', 'flying', 'magic', 'punch', 'footsteps', 'gunshot', 'spark'.
+
+Return a list of sound effects to place, with their start time (relative to the video start, between 0 and ${targetClip.duration} seconds) and duration.
+Return your response ONLY as a JSON array of objects:
+[
+  {
+    "time": 1.2,
+    "duration": 0.8,
+    "category": "category_name",
+    "name": "Sound Name"
+  }
+]`
+        );
+        setAutoCueProgress(80);
+
+        const jsonMatch = responseText.match(/\[[\s\S]*?\]/);
+        if (jsonMatch) {
+          cuePoints = JSON.parse(jsonMatch[0]);
+        }
+      }
+
+      if (cuePoints.length === 0) {
+        throw new Error('No action points or cues detected. Try describing the action more explicitly.');
+      }
+
+      let audioTrack = tracks.find(t => t.type === 'audio');
+      if (!audioTrack) {
+        useEditorStore.getState().addTrack('audio');
+        const updatedTracks = useEditorStore.getState().tracks;
+        audioTrack = updatedTracks.find(t => t.type === 'audio') || updatedTracks[updatedTracks.length - 1];
+      }
+
+      useEditorStore.getState().startTransaction();
+
+      for (let i = 0; i < cuePoints.length; i++) {
+        const cue = cuePoints[i];
+        const category = cue.category || 'swoosh';
+        const duration = Math.max(0.1, Number(cue.duration) || 1.0);
+        const timeOffset = Number(cue.time) || 0;
+        const name = cue.name || 'AI SFX';
+
+        const blob = await synthesizeProceduralSFX(category, duration);
+        const audioUrl = URL.createObjectURL(blob);
+
+        const mediaId = `sfx_autocue_${Date.now()}_${i}`;
+        const newMediaItem = {
+          id: mediaId,
+          name: name,
+          type: 'audio' as const,
+          duration: duration,
+          url: audioUrl,
+          createdAt: Date.now()
+        };
+
+        const peaks: number[] = [];
+        for (let p = 0; p < 100; p++) {
+          peaks.push(0.1 + Math.random() * 0.7);
+        }
+
+        const finalMediaItem = {
+          ...newMediaItem,
+          waveformPeaks: peaks
+        };
+
+        try {
+          await useEditorStore.getState().addMedia(finalMediaItem, new File([blob], `${mediaId}.wav`, { type: 'audio/wav' }));
+        } catch (err) {
+          useEditorStore.getState().addMedia(finalMediaItem);
+        }
+
+        const newAudioClip = {
+          id: `clip_sfx_cue_${Math.random().toString(36).substr(2, 9)}`,
+          mediaId: mediaId,
+          trackId: audioTrack.id,
+          startTime: targetClip.startTime + timeOffset,
+          duration: duration,
+          trimStart: 0,
+          trimEnd: 0,
+          transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+          opacity: 1,
+          speed: 1,
+          effects: []
+        };
+
+        addClip(newAudioClip as any);
+      }
+
+      useEditorStore.getState().endTransaction();
+      useEditorStore.getState().saveSnapshot('AI Sound Effects Auto-Cue');
+
+      setSfxAutoCueClipId(null);
+      setSfxUserDescription('');
+      alert(`Successfully generated and auto-placed ${cuePoints.length} sound effects!`);
+    } catch (err: any) {
+      console.error('Auto-Cue SFX failed:', err);
+      alert(`Auto-Cue Sound Effects failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsAnalyzingAutoCue(false);
+      setAutoCueProgress(0);
+    }
+  }, [sfxAutoCueClipId, sfxAutoCueMode, sfxUserDescription, tracks, mediaLibrary, addClip]);
+
+  const handleGenerateSubtitles = useCallback(async (clipId: string, mode: 'standard' | 'dynamic') => {
+    let targetClip: TimelineClip | null = null;
+    let targetTrack: TimelineTrack | null = null;
+    for (const track of tracks) {
+      const found = track.clips.find(c => c.id === clipId);
+      if (found) {
+        targetClip = found;
+        targetTrack = track;
+        break;
+      }
+    }
+
+    if (!targetClip) return;
+
+    const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);
+    if (!mediaItem || !mediaItem.url) {
+      alert('Media source file not found.');
+      return;
+    }
+
+    setIsTranscribing(true);
+
+    try {
+      const response = await fetch(mediaItem.url);
+      if (!response.ok) throw new Error('Failed to retrieve clip media blob.');
+      const blob = await response.blob();
+
+      const file = new File([blob], 'audio.mp3', { type: blob.type || 'audio/mp3' });
+
+      const puter = (window as any).puter;
+      if (!puter) {
+        throw new Error('Puter AI engine is not loaded. Make sure you are connected to the internet.');
+      }
+
+      const result = await puter.ai.speech2txt({
+        audio: file,
+        provider: 'openai',
+        model: 'whisper-1',
+        response_format: 'verbose_json',
+        timestamp_granularities: ['word']
+      });
+
+      if (!result || !result.words || result.words.length === 0) {
+        throw new Error('No words detected in this clip. Ensure the clip has clear audible speech.');
+      }
+
+      let textTrack = tracks.find(t => t.type === 'text');
+      if (!textTrack) {
+        useEditorStore.getState().addTrack('text');
+        const updatedTracks = useEditorStore.getState().tracks;
+        textTrack = updatedTracks.find(t => t.type === 'text') || updatedTracks[updatedTracks.length - 1];
+      }
+
+      useEditorStore.getState().startTransaction();
+
+      const clipStart = targetClip.startTime;
+
+      if (mode === 'standard') {
+        const maxCharLimit = 36;
+        const maxTimeLimit = 2.5;
+        const maxWordsLimit = 5;
+
+        let currentGroup: any[] = [];
+        const subtitleGroups: any[] = [];
+
+        for (const w of result.words) {
+          const groupText = currentGroup.map(item => item.word).join(' ');
+          const currentGroupDuration = currentGroup.length > 0 ? (w.end - currentGroup[0].start) : 0;
+
+          const exceedsChars = (groupText.length + w.word.length) > maxCharLimit;
+          const exceedsTime = currentGroupDuration > maxTimeLimit;
+          const exceedsWords = currentGroup.length >= maxWordsLimit;
+          const hasBigGap = currentGroup.length > 0 && (w.start - currentGroup[currentGroup.length - 1].end) > 1.2;
+
+          if (currentGroup.length > 0 && (exceedsChars || exceedsTime || exceedsWords || hasBigGap)) {
+            subtitleGroups.push([...currentGroup]);
+            currentGroup = [];
+          }
+          currentGroup.push(w);
+        }
+        if (currentGroup.length > 0) {
+          subtitleGroups.push(currentGroup);
+        }
+
+        for (const group of subtitleGroups) {
+          const firstWord = group[0];
+          const lastWord = group[group.length - 1];
+          const phraseText = group.map((w: any) => w.word).join(' ');
+
+          const phraseStart = clipStart + firstWord.start;
+          const phraseDur = Math.max(0.4, lastWord.end - firstWord.start);
+
+          const newSubClip = {
+            id: `clip_subtitle_${Math.random().toString(36).substr(2, 9)}`,
+            mediaId: 'text-placeholder',
+            trackId: textTrack.id,
+            startTime: phraseStart,
+            duration: phraseDur,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: 0, y: 140, scale: 100, rotation: 0 },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            textSettings: {
+              text: phraseText,
+              fontSize: 26,
+              fontFamily: 'Inter',
+              color: '#ffffff',
+              strokeWidth: 4,
+              strokeColor: '#000000',
+              bold: true,
+              shadow: true,
+              textAlign: 'center' as CanvasTextAlign,
+              animation: {
+                in: 'fadeIn',
+                out: 'fadeOut',
+                inDuration: 0.15,
+                outDuration: 0.15
+              }
+            }
+          };
+
+          addClip(newSubClip as any);
+        }
+      } else {
+        const colors = ['#ffffff', '#fbbf24', '#22c55e', '#22d3ee', '#f43f5e', '#a855f7'];
+        const animations = ['zoom', 'bounce', 'slideUp'];
+
+        for (let i = 0; i < result.words.length; i++) {
+          const w = result.words[i];
+          const wordText = w.word.trim();
+          if (!wordText) continue;
+
+          const wordStart = clipStart + w.start;
+          const wordDur = Math.max(0.24, w.end - w.start + 0.04);
+
+          const color = colors[i % colors.length];
+          const animIn = animations[i % animations.length];
+
+          const staggerX = Math.floor(Math.random() * 30) - 15;
+          const staggerY = 120 + Math.floor(Math.random() * 20) - 10;
+          const rotation = Math.floor(Math.random() * 10) - 5;
+
+          const newTypoClip = {
+            id: `clip_typo_${Math.random().toString(36).substr(2, 9)}`,
+            mediaId: 'text-placeholder',
+            trackId: textTrack.id,
+            startTime: wordStart,
+            duration: wordDur,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: staggerX, y: staggerY, scale: 100, rotation },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            textSettings: {
+              text: wordText.toUpperCase(),
+              fontSize: 42,
+              fontFamily: 'Impact',
+              color: color,
+              strokeWidth: 5,
+              strokeColor: '#000000',
+              bold: true,
+              shadow: true,
+              textAlign: 'center' as CanvasTextAlign,
+              animation: {
+                in: animIn,
+                out: 'fadeOut',
+                inDuration: 0.08,
+                outDuration: 0.08
+              }
+            }
+          };
+
+          addClip(newTypoClip as any);
+        }
+      }
+
+      useEditorStore.getState().endTransaction();
+      useEditorStore.getState().saveSnapshot(mode === 'standard' ? 'Auto-Generate Captions' : 'Generate Dynamic Typography');
+    } catch (err: any) {
+      console.error('Transcription error:', err);
+      alert(`AI Auto-Captioning failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsTranscribing(false);
+    }
+  }, [tracks, mediaLibrary, addClip]);
 
   const [dragState, setDragState] = useState<{
     clipId: string;
@@ -3364,6 +4413,54 @@ export function Timeline() {
 
             {contextMenu.clipId && (
               <>
+                {/* AI Transcription Options */}
+                {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'audio') && (
+                  <>
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                      onClick={() => {
+                        handleGenerateSubtitles(contextMenu.clipId, 'standard');
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      Generate Subtitles / Captions
+                    </button>
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e] pb-2"
+                      onClick={() => {
+                        handleGenerateSubtitles(contextMenu.clipId, 'dynamic');
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Zap className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+                      Generate Dynamic Typography
+                    </button>
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                      onClick={() => {
+                        handleOpenSfxGenerator(contextMenu.clipId);
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Music className="w-3.5 h-3.5 text-cyan-400" />
+                      AI Generate Sound Effect (SFX)
+                    </button>
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e] pb-2"
+                      onClick={() => {
+                        setSfxAutoCueClipId(contextMenu.clipId);
+                        setSfxUserDescription('');
+                        setSfxAutoCueMode('visual');
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+                      AI Auto-Cue Sound Effects
+                    </button>
+                  </>
+                )}
+
                 {/* Unlink Audio — only for video clips that are not already unlinked */}
                 {contextMenu.mediaType === 'video' && !tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
                   <button
@@ -3499,6 +4596,267 @@ export function Timeline() {
         >
           Done
         </button>
+      </div>
+    )}
+
+    {/* Floating AI Transcribing Loader Toast */}
+    {isTranscribing && (
+      <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[300] bg-[#1e1e1e]/95 border border-amber-500/30 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-3">
+        <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-amber-200">
+          AI Transcribing Clip Audio...
+        </span>
+        <span className="text-[10px] text-[#8a8a8a] bg-[#141414] border border-[#3e3e3e] px-2 py-0.5 rounded-full">
+          This may take a few seconds
+        </span>
+      </div>
+    )}
+
+    {/* AI Sound Effects Generator Modal */}
+    {sfxModalClipId && (
+      <div className="fixed inset-0 bg-black/80 z-[500] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md bg-[#1e1e1e] border border-[#3e3e3e] rounded-xl shadow-2xl overflow-hidden flex flex-col">
+          {/* Header */}
+          <div className="p-4 bg-[#252525] border-b border-[#3e3e3e] flex justify-between items-center">
+            <h3 className="text-sm font-semibold text-cyan-400 flex items-center gap-2">
+              <Music className="w-4 h-4" />
+              AI Sound Effects (SFX) Generator
+            </h3>
+            <button
+              onClick={() => setSfxModalClipId(null)}
+              className="text-[#a0a0a0] hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {/* AI Suggestion Banner */}
+            <div className="p-3 bg-[#141414] border border-[#3e3e3e] rounded-lg">
+              {isAnalyzingSfx ? (
+                <div className="flex items-center gap-2 text-xs text-[#a0a0a0]">
+                  <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+                  <span>AI is analyzing clip tags and choosing a matching sound...</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-cyan-300">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>AI recommends category: <strong className="text-white uppercase">{sfxCategory}</strong></span>
+                </div>
+              )}
+            </div>
+
+            {/* Sound Name */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-semibold">Sound Name</label>
+              <input
+                type="text"
+                value={sfxName}
+                onChange={(e) => setSfxName(e.target.value)}
+                placeholder="Name of the sound effect"
+                className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+
+            {/* Category Dropdown */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-semibold">SFX Category / Profile</label>
+              <select
+                value={sfxCategory}
+                onChange={(e) => setSfxCategory(e.target.value)}
+                className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 cursor-pointer"
+              >
+                <option value="explosion">💥 Explosion (Crash, Boom, Hit)</option>
+                <option value="laser">⚡ Laser (Zap, Ray Gun, Shot)</option>
+                <option value="swoosh">💨 Swoosh (Wind Sweep, Whoosh, Pass)</option>
+                <option value="jump">🦘 Retro Jump (Upward Sweep, Pop)</option>
+                <option value="bubble">🫧 Bubble Pop (Liquid, Cute Click)</option>
+                <option value="alarm">🚨 Alarm (Siren, Siren Alert, Beep)</option>
+                <option value="click">🖱️ Click (UI Tick, Small Snap)</option>
+                <option value="ambient">🌬️ Ambient (Wind Hum, Static, Room Tone)</option>
+                <option value="waves">🌊 Ocean Waves (Water Flow, Deep Hum)</option>
+                <option value="flying">✈️ Flying Drone (Engine Buzz, Flight Whoosh)</option>
+                <option value="magic">✨ Magic Chimes (Sparkles, Fairy Dust)</option>
+                <option value="punch">🤛 Punch / Hit (Impact Thud, Slap)</option>
+                <option value="footsteps">👣 Footsteps (Walking, Gravel Steps)</option>
+                <option value="gunshot">🔫 Gunshot Blast (Pistol Crack, Rifle Shot)</option>
+                <option value="spark">⚡ Electrical Spark (Lightning Crackle)</option>
+              </select>
+            </div>
+
+            {/* Duration Slider */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider font-semibold">
+                <span>Sound Duration</span>
+                <span className="font-mono text-cyan-400">{sfxDuration.toFixed(1)}s</span>
+              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="5.0"
+                step="0.1"
+                value={sfxDuration}
+                onChange={(e) => setSfxDuration(Number(e.target.value))}
+                className="w-full accent-cyan-400"
+              />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="p-4 bg-[#252525] border-t border-[#3e3e3e] flex gap-2 justify-end">
+            <button
+              onClick={() => setSfxModalClipId(null)}
+              className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+
+            <button
+              onClick={handleAuditionSFX}
+              className="px-4 py-2 text-xs border border-[#4e4e4e] hover:border-cyan-500/50 hover:bg-cyan-500/10 text-cyan-400 font-medium rounded-lg transition-all"
+            >
+              🔊 Audition Sound
+            </button>
+
+            <button
+              onClick={handleGenerateSFX}
+              disabled={isSynthesizingSfx || isAnalyzingSfx}
+              className="px-4 py-2 text-xs bg-cyan-500 hover:bg-cyan-600 text-black font-semibold rounded-lg flex items-center gap-1.5 disabled:opacity-45 disabled:pointer-events-none transition-all shadow-lg hover:shadow-cyan-500/10"
+            >
+              {isSynthesizingSfx ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Synthesizing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Generate & Add
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* AI Sound Effects Auto-Cue Modal */}
+    {sfxAutoCueClipId && (
+      <div className="fixed inset-0 bg-black/80 z-[500] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md bg-[#1e1e1e] border border-[#3e3e3e] rounded-xl shadow-2xl overflow-hidden flex flex-col">
+          {/* Header */}
+          <div className="p-4 bg-[#252525] border-b border-[#3e3e3e] flex justify-between items-center">
+            <h3 className="text-sm font-semibold text-pink-400 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-pink-400 font-semibold" />
+              AI Sound Effects Auto-Cue Panel
+            </h3>
+            <button
+              onClick={() => {
+                if (!isAnalyzingAutoCue) setSfxAutoCueClipId(null);
+              }}
+              className="text-[#a0a0a0] hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Selector Tabs */}
+          <div className="flex bg-[#141414] border-b border-[#3e3e3e] p-1">
+            <button
+              type="button"
+              disabled={isAnalyzingAutoCue}
+              onClick={() => setSfxAutoCueMode('visual')}
+              className={`flex-1 py-2 text-xs rounded transition-all font-medium flex items-center justify-center gap-1.5 ${
+                sfxAutoCueMode === 'visual'
+                  ? 'bg-[#252525] text-white font-semibold shadow-inner border border-[#3e3e3e]'
+                  : 'text-[#a0a0a0] hover:text-white disabled:opacity-50'
+              }`}
+            >
+              👁️ Visual Motion Scan
+            </button>
+            <button
+              type="button"
+              disabled={isAnalyzingAutoCue}
+              onClick={() => setSfxAutoCueMode('ai_script')}
+              className={`flex-1 py-2 text-xs rounded transition-all font-medium flex items-center justify-center gap-1.5 ${
+                sfxAutoCueMode === 'ai_script'
+                  ? 'bg-[#252525] text-white font-semibold shadow-inner border border-[#3e3e3e]'
+                  : 'text-[#a0a0a0] hover:text-white disabled:opacity-50'
+              }`}
+            >
+              📝 AI Script Planner
+            </button>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {isAnalyzingAutoCue ? (
+              <div className="py-8 flex flex-col items-center justify-center space-y-4">
+                <Loader2 className="w-8 h-8 text-pink-400 animate-spin" />
+                <div className="text-center">
+                  <p className="text-xs font-semibold text-white">
+                    {sfxAutoCueMode === 'visual' ? 'Scanning Video Pixels...' : 'AI Planning Sound Cue Points...'}
+                  </p>
+                  <p className="text-[10px] text-[#8a8a8a] mt-1">This will automatically synthesize and place sounds.</p>
+                </div>
+                <div className="w-full max-w-xs bg-[#141414] h-2 rounded-full overflow-hidden border border-[#3e3e3e] mt-2">
+                  <div
+                    className="bg-pink-500 h-full rounded-full transition-all duration-300"
+                    style={{ width: `${autoCueProgress}%` }}
+                  />
+                </div>
+                <span className="text-[10px] font-mono text-pink-400 font-semibold">{autoCueProgress}% done</span>
+              </div>
+            ) : (
+              <>
+                {sfxAutoCueMode === 'visual' ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-[#a0a0a0] leading-relaxed">
+                      This option scans the actual video track frames locally (in the browser). It detects **visual motion peaks, cuts, flashes, and transitions** and automatically generates and places swooshes and hits.
+                    </p>
+                    <div className="p-3 bg-pink-950/20 border border-pink-500/20 rounded-lg text-[10px] text-pink-300/90 leading-relaxed">
+                      💡 <strong>Note:</strong> Perfect for fast-paced videos, gaming montages, transition-heavy shorts, or action edits! Runs completely offline in seconds.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-[#a0a0a0] leading-relaxed">
+                      Write a brief description of the action cue sequence happening in this video clip, and the AI will formulate precise timestamped sound cues for the timeline.
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-semibold">Video Action Script</label>
+                      <textarea
+                        value={sfxUserDescription}
+                        onChange={(e) => setSfxUserDescription(e.target.value)}
+                        placeholder="e.g., A player runs on grass, jumps, shoots a futuristic gun, and hits a target which explodes..."
+                        className="w-full h-24 bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg p-2.5 resize-none focus:outline-none focus:border-pink-500 placeholder-[#5a5a5a] scrollbar-thin"
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="p-4 bg-[#252525] border-t border-[#3e3e3e] flex gap-2 justify-end">
+            <button
+              disabled={isAnalyzingAutoCue}
+              onClick={() => setSfxAutoCueClipId(null)}
+              className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+
+            <button
+              onClick={handleAutoCueSFX}
+              disabled={isAnalyzingAutoCue || (sfxAutoCueMode === 'ai_script' && !sfxUserDescription.trim())}
+              className="px-5 py-2 text-xs bg-pink-500 hover:bg-pink-600 text-white font-semibold rounded-lg flex items-center gap-1.5 disabled:opacity-45 disabled:pointer-events-none transition-all shadow-lg hover:shadow-pink-500/10"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Run AI Auto-Cue
+            </button>
+          </div>
+        </div>
       </div>
     )}
     </>
