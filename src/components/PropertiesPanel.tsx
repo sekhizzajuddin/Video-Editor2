@@ -354,7 +354,7 @@ export function PropertiesPanel() {
         id: `media_vocals_${Date.now()}`,
         name: vocalsName,
         type: 'audio',
-        duration: selectedClip.duration,
+        duration: mediaItem?.duration || selectedClip.duration,
         url: vocalsUrl,
         createdAt: Date.now(),
         waveformPeaks: Array.from({ length: 100 }, () => Math.random() * 0.4 + 0.1)
@@ -364,7 +364,7 @@ export function PropertiesPanel() {
         id: `media_inst_${Date.now()}`,
         name: instrumentsName,
         type: 'audio',
-        duration: selectedClip.duration,
+        duration: mediaItem?.duration || selectedClip.duration,
         url: instrumentsUrl,
         createdAt: Date.now(),
         waveformPeaks: Array.from({ length: 100 }, () => Math.random() * 0.4 + 0.1)
