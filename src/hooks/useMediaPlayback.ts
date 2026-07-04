@@ -94,9 +94,22 @@ interface MediaElement {
  * Returns a Map of clipId → HTMLVideoElement for the preview canvas
  * to draw video frames from.
  */
-export function useMediaPlayback(): Map<string, HTMLVideoElement> {
+export interface FrameCacheEntry {
+  time: number;
+  bitmap: ImageBitmap;
+}
+
+export interface MediaPlaybackResult {
+  videoElements: Map<string, HTMLVideoElement>;
+  frameCache: Map<string, FrameCacheEntry[]>;
+}
+
+export function useMediaPlayback(): MediaPlaybackResult {
   const poolRef = useRef<Map<string, MediaElement>>(new Map());
   const videoMapRef = useRef<Map<string, HTMLVideoElement>>(new Map());
+  // Frame cache: clipId → sorted array of {time, bitmap} for instant scrubbing
+  const frameCacheRef = useRef<Map<string, FrameCacheEntry[]>>(new Map());
+  const resultRef = useRef<MediaPlaybackResult>({ videoElements: new Map(), frameCache: new Map() });
 
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
@@ -270,6 +283,31 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
 
         // Seeked handler that checks for subsequent pending seeks before triggering redraw
         const handleSeeked = () => {
+          // Cache this decoded frame as ImageBitmap for instant scrubbing
+          if (el.videoWidth > 0 && el.readyState >= 2) {
+            createImageBitmap(el).then(bitmap => {
+              let clipCache = frameCacheRef.current.get(clipId);
+              if (!clipCache) {
+                clipCache = [];
+                frameCacheRef.current.set(clipId, clipCache);
+              }
+              const roundedTime = Math.round(el.currentTime * 30) / 30;
+              const existing = clipCache.findIndex(f => Math.abs(f.time - roundedTime) < 0.015);
+              if (existing >= 0) {
+                clipCache[existing].bitmap.close();
+                clipCache[existing] = { time: roundedTime, bitmap };
+              } else {
+                clipCache.push({ time: roundedTime, bitmap });
+                clipCache.sort((a, b) => a.time - b.time);
+              }
+              // Evict oldest frames if cache too large (keep 120 frames per clip)
+              while (clipCache.length > 120) {
+                const removed = clipCache.shift();
+                removed?.bitmap.close();
+              }
+            }).catch(() => {});
+          }
+
           triggerRedraw();
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
@@ -799,7 +837,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
     };
   }, [triggerRedraw]);
 
-  return videoMapRef.current;
+  resultRef.current.videoElements = videoMapRef.current;
+  resultRef.current.frameCache = frameCacheRef.current;
+  return resultRef.current;
 }
 
 // ---------------------------------------------------------------------------

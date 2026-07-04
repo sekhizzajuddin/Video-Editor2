@@ -14,7 +14,8 @@ import {
   Grid,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useMediaPlayback } from '@/hooks/useMediaPlayback';
+import { useMediaPlayback, FrameCacheEntry } from '@/hooks/useMediaPlayback';
+import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatTime } from '@/utils/time';
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
@@ -417,12 +418,13 @@ export function PreviewCanvas() {
 
   const hasClips = tracks.some((t) => t.clips.length > 0);
 
-  // Real video elements for drawing frames
-  const videoElements = useMediaPlayback();
+  // Real video elements and frame cache for drawing frames
+  const { videoElements, frameCache } = useMediaPlayback();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null); // Double-buffer canvas
   const glitchRedCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const glitchBlueCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pixelateCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -646,7 +648,10 @@ export function PreviewCanvas() {
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { willReadFrequently: !settings.hardwareAcceleration });
+
+    // ── Double buffering: render to offscreen composite canvas, then blit ──
+    const composite = getOrCreateCanvas(compositeCanvasRef, canvas.width, canvas.height);
+    const ctx = composite.getContext('2d', { willReadFrequently: !settings.hardwareAcceleration });
     if (!ctx) return;
 
     // Measure frame time delta for particles
@@ -667,40 +672,51 @@ export function PreviewCanvas() {
     const H_target = 480;
     const canvas_scale = canvas.width / W_target;
 
-    // ── Frame gate: during scrubbing, skip redraw if any active video is still seeking ──
-    // This prevents the flash (clear → placeholder → real frame) cycle.
+    // ── Frame gate: during scrubbing, check if videos are ready or have cached frames ──
+    // If a video is seeking AND we have no cached frame for it, retain the last frame.
     if (!isPlaying) {
       const allVideoTracks = tracks.filter((t) => t.type === 'video' && !t.hidden);
-      let anyVideoSeeking = false;
+      let needsWait = false;
       for (const track of allVideoTracks) {
         for (const clip of track.clips) {
           if (currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
-            const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
-            if (mediaItem && mediaItem.type === 'video') {
+            const mi = mediaLibrary.find((m) => m.id === clip.mediaId);
+            if (mi && mi.type === 'video') {
               const videoEl = videoElements.get(clip.id);
               if (videoEl && (videoEl.seeking || videoEl.readyState < 2)) {
-                anyVideoSeeking = true;
-                break;
+                // Check if we have a cached frame close enough to use
+                const clipCache = frameCache.get(clip.id);
+                const mediaTime = getMediaTimeForClip({
+                  id: clip.id, startTime: clip.startTime,
+                  duration: clip.duration, trimStart: clip.trimStart,
+                  speed: clip.speed, speedRamp: (clip as any).speedRamp
+                }, currentTime);
+                const roundedTime = Math.round(mediaTime * 30) / 30;
+                const hasCached = clipCache?.some(f => Math.abs(f.time - roundedTime) < 0.05);
+                if (!hasCached) {
+                  needsWait = true;
+                  break;
+                }
               }
             }
           }
         }
-        if (anyVideoSeeking) break;
+        if (needsWait) break;
       }
 
-      if (anyVideoSeeking) {
-        // Video elements are still decoding — show the last good frame instead of flashing
-        if (lastFrameCanvasRef.current && lastFrameCanvasRef.current.width > 0) {
-          ctx.drawImage(lastFrameCanvasRef.current, 0, 0);
+      if (needsWait) {
+        // No cached frame available — show the last good frame instead of flashing
+        const mainCtx = canvas.getContext('2d');
+        if (mainCtx && lastFrameCanvasRef.current && lastFrameCanvasRef.current.width > 0) {
+          mainCtx.drawImage(lastFrameCanvasRef.current, 0, 0);
         }
-        // Don't clear or redraw — the seeked event will trigger a proper redraw
         return;
       }
     }
 
-    // 1. Clear to background color (entire canvas, regardless of viewport)
+    // 1. Clear to background color (entire composite canvas)
     ctx.fillStyle = canvasBgColor;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, composite.width, composite.height);
 
     ctx.save();
     ctx.scale(canvas_scale, canvas_scale);
@@ -839,10 +855,49 @@ export function PreviewCanvas() {
 
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
-        if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+        const videoReady = videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0;
+
+        // Determine frame source: live video element or cached ImageBitmap
+        let frameSource: CanvasImageSource | null = null;
+        let sourceW = W;
+        let sourceH = H;
+
+        if (videoReady && videoEl) {
+          frameSource = videoEl;
+          sourceW = videoEl.videoWidth || W;
+          sourceH = videoEl.videoHeight || H;
+        } else if (!isPlaying) {
+          // Try frame cache for smooth scrubbing
+          const clipCache = frameCache.get(clip.id);
+          if (clipCache && clipCache.length > 0) {
+            const mediaTime = getMediaTimeForClip({
+              id: clip.id, startTime: clip.startTime,
+              duration: clip.duration, trimStart: clip.trimStart,
+              speed: clip.speed, speedRamp: (clip as any).speedRamp
+            }, currentTime);
+            const roundedTime = Math.round(mediaTime * 30) / 30;
+            // Find nearest cached frame (binary search for efficiency)
+            let bestIdx = 0;
+            let bestDist = Infinity;
+            for (let i = 0; i < clipCache.length; i++) {
+              const dist = Math.abs(clipCache[i].time - roundedTime);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
+              }
+            }
+            if (bestDist < 0.2) { // Accept frames within ~6 frames distance
+              frameSource = clipCache[bestIdx].bitmap;
+              sourceW = clipCache[bestIdx].bitmap.width;
+              sourceH = clipCache[bestIdx].bitmap.height;
+            }
+          }
+        }
+
+        if (frameSource) {
           // Fit the video into the canvas while preserving aspect ratio
-          const vw = videoEl.videoWidth || W;
-          const vh = videoEl.videoHeight || H;
+          const vw = sourceW;
+          const vh = sourceH;
           const scale = Math.min(W / vw, H / vh);
           
           const baseDw = vw * scale;
@@ -868,7 +923,7 @@ export function PreviewCanvas() {
             const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
             const oCtx = offscreen.getContext('2d');
             if (oCtx) {
-              oCtx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
+              oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
               if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
               }
@@ -877,10 +932,10 @@ export function PreviewCanvas() {
               }
               ctx.drawImage(offscreen, dx, dy, dw, dh);
             } else {
-              ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, dw, dh);
+              ctx.drawImage(frameSource, sx, sy, sw, sh, dx, dy, dw, dh);
             }
           } else {
-            ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, dw, dh);
+            ctx.drawImage(frameSource, sx, sy, sw, sh, dx, dy, dw, dh);
           }
           ctx.filter = 'none';
           hasRealMedia = true;
@@ -890,7 +945,7 @@ export function PreviewCanvas() {
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'VIDEO', '#3b82f6');
           anyClipDrawn = true;
         } else {
-          // During scrubbing, skip placeholder to avoid flash — last frame is retained above
+          // During scrubbing with no cached frame, skip placeholder
           anyClipDrawn = true;
         }
       } else if (mediaItem.type === 'image') {
@@ -1789,6 +1844,13 @@ export function PreviewCanvas() {
 
     ctx.restore(); // Restore from global canvas resolution scale
 
+    // ── Double buffer blit: copy finished composite to visible canvas in one atomic draw ──
+    const mainCtx = canvas.getContext('2d');
+    if (mainCtx) {
+      mainCtx.clearRect(0, 0, canvas.width, canvas.height);
+      mainCtx.drawImage(composite, 0, 0);
+    }
+
     // Snapshot this successfully rendered frame for use during seeking gaps
     if (!lastFrameCanvasRef.current) {
       lastFrameCanvasRef.current = document.createElement('canvas');
@@ -1801,9 +1863,9 @@ export function PreviewCanvas() {
     const snapCtx = snapCanvas.getContext('2d');
     if (snapCtx) {
       snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
-      snapCtx.drawImage(canvas, 0, 0);
+      snapCtx.drawImage(composite, 0, 0);
     }
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying]);
 
   // ── Unified render loop to prevent flickering during scrubbing ──
   // Use a frame-pending flag + single rAF loop instead of canceling/rescheduling.
@@ -2617,7 +2679,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     }
   }, [tracks, storeUpdateClip, updateOverLayer]);
 
-  const videoElements = useMediaPlayback();
+  const { videoElements } = useMediaPlayback();
 
   const [dragState, setDragState] = useState<{
     type: string;
