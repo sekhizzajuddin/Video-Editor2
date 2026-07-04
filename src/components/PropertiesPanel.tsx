@@ -2937,10 +2937,10 @@ export function PropertiesPanel() {
                       {/* Info Note */}
                       <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-1">
                         <p className="text-[10px] text-[#a0a0a0]">
-                          <span className="text-cyan-400 font-medium">How it works:</span> Uses mid/side stereo phase cancellation. Vocals are typically center-panned and cancel when channels are subtracted.
+                          <span className="text-cyan-400 font-medium">How it works:</span> Uses a native **Multi-band Crossover Mid/Side Matrix**. Bass (< 180Hz) and treble (> 6000Hz) are preserved untouched to keep instrument punch and clarity, while phase cancellation is applied selectively to the vocal frequency band.
                         </p>
                         <p className="text-[9px] text-[#6a6a6a]">
-                          Results vary by mix. Works best on stereo tracks with centered vocals. Mono tracks will not respond to this effect.
+                          Requires stereo audio files. High-performance native processing with zero main thread overhead.
                         </p>
                       </div>
                     </>

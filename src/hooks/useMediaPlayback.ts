@@ -76,14 +76,8 @@ interface MediaElement {
   delayNode?: DelayNode;
   delayGain?: GainNode;
   feedbackNode?: GainNode;
-  separationNode?: ScriptProcessorNode;
+  separationGraph?: SeparationGraph;
   _fxConnected?: boolean;
-  // Vocal / BGM Separation state cached on the node
-  separationSettings?: {
-    enabled: boolean;
-    mode: string;
-    strength: number;
-  };
 }
 
 /**
@@ -565,39 +559,63 @@ export function useMediaPlayback(): MediaPlaybackResult {
         entry.el.preservesPitch = targetPreserve;
       }
 
-      // Update Pitch Shifter parameters (includes vocal separation via mid/side processing)
+      const ctxTime = entry.audioCtx?.currentTime || 0;
+      const rampTime = 0.08;
+
+      // Update Pitch Shifter parameters
       if (entry.pitchNode) {
         (entry.pitchNode as any).pitch = audioSettings.pitch;
         (entry.pitchNode as any).humanize = audioSettings.humanize;
-        // Cache vocal separation settings on the node for the onaudioprocess callback
-        const sep = audioSettings.vocalSeparation;
-        if (sep) {
-          entry.separationSettings = {
-            enabled: sep.enabled,
-            mode: sep.mode,
-            strength: sep.strength,
-          };
+      }
+
+      // Update Separation Graph
+      if (entry.separationGraph) {
+        const sep = audioSettings.vocalSeparation || { enabled: false, mode: 'removeVocals' as const, strength: 80 };
+        const graph = entry.separationGraph;
+        const S = sep.strength / 100;
+
+        if (sep.enabled) {
+          graph.bypassGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
+          if (sep.mode === 'removeVocals') {
+            graph.lowGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+            graph.highGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+            graph.sideGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+            graph.midOutputGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
+          } else if (sep.mode === 'removeBgm') {
+            graph.lowGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
+            graph.highGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
+            graph.sideGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
+            graph.midOutputGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+          } else {
+            // Creative blend
+            const mix = 1.0 - S * 0.5;
+            graph.lowGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+            graph.highGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+            graph.sideGain.gain.setTargetAtTime(mix, ctxTime, rampTime);
+            graph.midOutputGain.gain.setTargetAtTime(S, ctxTime, rampTime);
+          }
+        } else {
+          graph.bypassGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+          graph.lowGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
+          graph.highGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
+          graph.sideGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
+          graph.midOutputGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
         }
       }
 
-      // Reactive FX Routing to bypass ScriptProcessorNodes when not in use
-      const needsFx = Math.abs(audioSettings.pitch) > 0.01 || audioSettings.humanize || (audioSettings.vocalSeparation && audioSettings.vocalSeparation.enabled);
-      if (needsFx && !entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationNode && entry.vocalFilter) {
+      // Reactive FX Routing to bypass ScriptProcessorNodes (pitch) when not in use
+      const needsFx = Math.abs(audioSettings.pitch) > 0.01 || audioSettings.humanize;
+      if (needsFx && !entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationGraph) {
         entry.sourceNode.disconnect();
         entry.sourceNode.connect(entry.pitchNode);
-        entry.pitchNode.connect(entry.separationNode);
-        entry.separationNode.connect(entry.vocalFilter);
+        entry.pitchNode.connect(entry.separationGraph.input);
         entry._fxConnected = true;
-      } else if (!needsFx && entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationNode && entry.vocalFilter) {
+      } else if (!needsFx && entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationGraph) {
         entry.sourceNode.disconnect();
         entry.pitchNode.disconnect();
-        entry.separationNode.disconnect();
-        entry.sourceNode.connect(entry.vocalFilter);
+        entry.sourceNode.connect(entry.separationGraph.input);
         entry._fxConnected = false;
       }
-
-      // Smooth ramp time constant (seconds) — prevents pops/clicks on parameter changes
-      const rampTime = 0.08;
       const ctxTime = entry.audioCtx?.currentTime || 0;
 
       // Update Vocal Filter (notch metallic resonance or manual formant)
@@ -1105,66 +1123,14 @@ function initAudioGraph(entry: MediaElement) {
           readPosB = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
         }
       }
-    };
-
-    // 0.5. Vocal / BGM Separation node (Mid/Side phase cancellation)
-    const separationNode = audioCtx.createScriptProcessor(4096, 2, 2);
-    separationNode.onaudioprocess = (e) => {
-      const inputL = e.inputBuffer.getChannelData(0);
-      const inputR = e.inputBuffer.getChannelData(1);
-      const outputL = e.outputBuffer.getChannelData(0);
-      const outputR = e.outputBuffer.getChannelData(1);
-
-      // Read live separation settings cached on the entry object
-      const settings = entry.separationSettings;
-      const enabled = settings?.enabled ?? false;
-      const mode = settings?.mode ?? 'removeVocals';
-      const strengthVal = (settings?.strength ?? 80) / 100;
-
-      if (!enabled) {
-        outputL.set(inputL);
-        outputR.set(inputR);
-        return;
-      }
-
-      for (let i = 0; i < inputL.length; i++) {
-        const l = inputL[i];
-        const r = inputR[i];
-
-        // Mid/Side decomposition
-        const mid = (l + r) * 0.5;   // Center-panned content (typically vocals)
-        const side = (l - r) * 0.5;  // Side-panned content (typically instruments)
-
-        let outL, outR;
-
-        if (mode === 'removeVocals') {
-          // Keep side (instruments), attenuate mid (vocals)
-          const midAtten = 1.0 - strengthVal;
-          outL = side * 2.0 + mid * midAtten;
-          outR = -side * 2.0 + mid * midAtten;
-        } else if (mode === 'removeBgm') {
-          // Keep mid (vocals), attenuate side (instruments)
-          const sideAtten = 1.0 - strengthVal;
-          outL = mid + side * sideAtten;
-          outR = mid - side * sideAtten;
-        } else {
-          // Creative blend
-          const mix = 1.0 - strengthVal * 0.5;
-          outL = mid * strengthVal + side * mix;
-          outR = mid * strengthVal - side * mix;
-        }
-
-        outputL[i] = outL;
-        outputR[i] = outR;
-      }
-    };
+    // 0.5. Vocal Filter
     const vocalFilter = audioCtx.createBiquadFilter();
     vocalFilter.type = 'peaking';
     vocalFilter.frequency.value = 1500;
     vocalFilter.Q.value = 1.0;
     vocalFilter.gain.value = 0;
 
-    // 3. Bass equalizer filter (lowshelf at 200 Hz)
+    // 1. Bass equalizer filter (lowshelf at 200 Hz)
     const bassFilter = audioCtx.createBiquadFilter();
     bassFilter.type = 'lowshelf';
     bassFilter.frequency.value = 200;
@@ -1193,7 +1159,8 @@ function initAudioGraph(entry: MediaElement) {
     const gainNode = audioCtx.createGain();
 
     // Node connections (Default routing bypasses heavy FX)
-    sourceNode.connect(vocalFilter);
+    sourceNode.connect(separationGraph.input);
+    separationGraph.output.connect(vocalFilter);
     vocalFilter.connect(bassFilter);
     bassFilter.connect(trebleFilter);
 
@@ -1230,9 +1197,124 @@ function initAudioGraph(entry: MediaElement) {
     entry.feedbackNode = feedbackNode;
     entry.pannerNode = pannerNode;
     entry.gainNode = gainNode;
-    entry.separationNode = separationNode;
+    entry.separationGraph = separationGraph;
     entry._fxConnected = false;
   } catch (err) {
     console.warn('Unable to initialize Web Audio routing (user gesture required):', err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: Native Multi-band Crossover Vocal / BGM Separator Graph
+// ---------------------------------------------------------------------------
+interface SeparationGraph {
+  input: GainNode;
+  output: GainNode;
+  lowGain: GainNode;
+  highGain: GainNode;
+  midOutputGain: GainNode;
+  sideGain: GainNode;
+  bypassGain: GainNode;
+}
+
+function createSeparationGraph(audioCtx: AudioContext): SeparationGraph {
+  const input = audioCtx.createGain();
+  const output = audioCtx.createGain();
+  const bypassGain = audioCtx.createGain();
+
+  // Dry/Bypass Path (direct connect from input to output)
+  input.connect(bypassGain);
+  bypassGain.connect(output);
+
+  // 1. Low band path (< 180 Hz) - preserves sub bass/drums
+  const lowpass = audioCtx.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.value = 180;
+  const lowGain = audioCtx.createGain();
+  input.connect(lowpass);
+  lowpass.connect(lowGain);
+  lowGain.connect(output);
+
+  // 2. High band path (> 6000 Hz) - preserves cymbals/air
+  const highpass = audioCtx.createBiquadFilter();
+  highpass.type = 'highpass';
+  highpass.frequency.value = 6000;
+  const highGain = audioCtx.createGain();
+  input.connect(highpass);
+  highpass.connect(highGain);
+  highGain.connect(output);
+
+  // 3. Mid band path (180 Hz - 6000 Hz) - where vocals reside
+  const midHP = audioCtx.createBiquadFilter();
+  midHP.type = 'highpass';
+  midHP.frequency.value = 180;
+  const midLP = audioCtx.createBiquadFilter();
+  midLP.type = 'lowpass';
+  midLP.frequency.value = 6000;
+  input.connect(midHP);
+  midHP.connect(midLP);
+
+  // 4. Mid/Side Splitter on Mid band
+  const splitter = audioCtx.createChannelSplitter(2);
+  midLP.connect(splitter);
+
+  // Mid sum: (L + R) * 0.5 (mono vocals extraction)
+  const midSum = audioCtx.createGain();
+  midSum.gain.value = 0.5;
+  splitter.connect(midSum, 0); // L
+  splitter.connect(midSum, 1); // R
+
+  const midOutputGain = audioCtx.createGain();
+  const midMerger = audioCtx.createChannelMerger(2);
+  midSum.connect(midMerger, 0, 0);
+  midSum.connect(midMerger, 0, 1);
+  midMerger.connect(midOutputGain);
+  midOutputGain.connect(output);
+
+  // Side Left: 0.5 * L - 0.5 * R (extract out-of-phase left instruments)
+  const sideL_direct = audioCtx.createGain();
+  sideL_direct.gain.value = 0.5;
+  const sideL_inv = audioCtx.createGain();
+  sideL_inv.gain.value = -0.5;
+  const sideL_sum = audioCtx.createGain();
+  splitter.connect(sideL_direct, 0); // L
+  splitter.connect(sideL_inv, 1);    // R
+  sideL_direct.connect(sideL_sum);
+  sideL_inv.connect(sideL_sum);
+
+  // Side Right: 0.5 * R - 0.5 * L (extract out-of-phase right instruments)
+  const sideR_direct = audioCtx.createGain();
+  sideR_direct.gain.value = 0.5;
+  const sideR_inv = audioCtx.createGain();
+  sideR_inv.gain.value = -0.5;
+  const sideR_sum = audioCtx.createGain();
+  splitter.connect(sideR_direct, 1); // R
+  splitter.connect(sideR_inv, 0);    // L
+  sideR_direct.connect(sideR_sum);
+  sideR_inv.connect(sideR_sum);
+
+  const sideMerger = audioCtx.createChannelMerger(2);
+  sideL_sum.connect(sideMerger, 0, 0);
+  sideR_sum.connect(sideMerger, 0, 1);
+
+  const sideGain = audioCtx.createGain();
+  sideMerger.connect(sideGain);
+  sideGain.connect(output);
+
+  // Initialize with bypass enabled (filters muted by default)
+  bypassGain.gain.value = 1.0;
+  lowGain.gain.value = 0.0;
+  highGain.gain.value = 0.0;
+  midOutputGain.gain.value = 0.0;
+  sideGain.gain.value = 0.0;
+
+  return {
+    input,
+    output,
+    lowGain,
+    highGain,
+    midOutputGain,
+    sideGain,
+    bypassGain
+  };
 }
