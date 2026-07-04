@@ -76,6 +76,8 @@ interface MediaElement {
   delayNode?: DelayNode;
   delayGain?: GainNode;
   feedbackNode?: GainNode;
+  separationNode?: ScriptProcessorNode;
+  _fxConnected?: boolean;
   // Vocal / BGM Separation state cached on the node
   separationSettings?: {
     enabled: boolean;
@@ -578,6 +580,22 @@ export function useMediaPlayback(): MediaPlaybackResult {
         }
       }
 
+      // Reactive FX Routing to bypass ScriptProcessorNodes when not in use
+      const needsFx = Math.abs(audioSettings.pitch) > 0.01 || audioSettings.humanize || (audioSettings.vocalSeparation && audioSettings.vocalSeparation.enabled);
+      if (needsFx && !entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationNode && entry.vocalFilter) {
+        entry.sourceNode.disconnect();
+        entry.sourceNode.connect(entry.pitchNode);
+        entry.pitchNode.connect(entry.separationNode);
+        entry.separationNode.connect(entry.vocalFilter);
+        entry._fxConnected = true;
+      } else if (!needsFx && entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationNode && entry.vocalFilter) {
+        entry.sourceNode.disconnect();
+        entry.pitchNode.disconnect();
+        entry.separationNode.disconnect();
+        entry.sourceNode.connect(entry.vocalFilter);
+        entry._fxConnected = false;
+      }
+
       // Smooth ramp time constant (seconds) — prevents pops/clicks on parameter changes
       const rampTime = 0.08;
       const ctxTime = entry.audioCtx?.currentTime || 0;
@@ -759,17 +777,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
       const currentMediaTime = entry.el.currentTime;
       const rawDrift = currentMediaTime - mediaTime; // > 0 means video is ahead of timeline
       
-      let syncCatchup = 0;
-      if (!entry.el.seeking && isPlaying) {
-        if (Math.abs(rawDrift) > 0.02 && Math.abs(rawDrift) < 0.25) {
-          // Speed up if behind (rawDrift < 0), slow down if ahead (rawDrift > 0)
-          // 2.0 is the proportional gain. E.g., 100ms drift = 20% speed change
-          syncCatchup = -rawDrift * 2.0; 
-          syncCatchup = Math.max(-0.15, Math.min(0.15, syncCatchup)); // max +/- 15% correction
-        }
-      }
-
-      const targetSpeed = Math.max(0.1, playbackSpeed * effectiveSpeed * (1 + syncCatchup));
+      // Gentle sync catchup (PLL) logic removed to prevent video playback stuttering 
+      // from constantly shifting HTML5 playbackRate.
+      const targetSpeed = Math.max(0.1, playbackSpeed * effectiveSpeed);
       if (Math.abs(entry.el.playbackRate - targetSpeed) > 0.005) {
         entry.el.playbackRate = targetSpeed;
       }
@@ -1182,10 +1192,8 @@ function initAudioGraph(entry: MediaElement) {
     // 7. Volume Gain node
     const gainNode = audioCtx.createGain();
 
-    // Node connections (with separation node inserted after pitch shifter)
-    sourceNode.connect(pitchNode);
-    pitchNode.connect(separationNode);
-    separationNode.connect(vocalFilter);
+    // Node connections (Default routing bypasses heavy FX)
+    sourceNode.connect(vocalFilter);
     vocalFilter.connect(bassFilter);
     bassFilter.connect(trebleFilter);
 
@@ -1222,6 +1230,8 @@ function initAudioGraph(entry: MediaElement) {
     entry.feedbackNode = feedbackNode;
     entry.pannerNode = pannerNode;
     entry.gainNode = gainNode;
+    entry.separationNode = separationNode;
+    entry._fxConnected = false;
   } catch (err) {
     console.warn('Unable to initialize Web Audio routing (user gesture required):', err);
   }
