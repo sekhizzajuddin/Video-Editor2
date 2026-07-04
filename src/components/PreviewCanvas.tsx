@@ -2822,8 +2822,25 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
           vw = img.naturalWidth;
           vh = img.naturalHeight;
         }
+      } else if (mediaItem?.type === 'text' || (activeClip as any).textSettings || (activeClip as any).mediaId === 'text-placeholder') {
+        const ts = (activeClip as any).textSettings;
+        if (ts) {
+          const fontSize = Number(ts.fontSize) || 48;
+          const text = String(ts.text || '');
+          const lines = text.split('\n');
+          const estCharWidth = fontSize * 0.6;
+          const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
+          vw = Math.max(80, longestLine * estCharWidth + 40);
+          vh = lines.length * (fontSize * 1.35) + 20;
+        } else {
+          vw = 300;
+          vh = 80;
+        }
       }
-      const scaleToFit = Math.min(W / vw, H / vh);
+      let scaleToFit = 1;
+      if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+        scaleToFit = Math.min(W / vw, H / vh);
+      }
       const baseW = vw * scaleToFit;
       const baseH = vh * scaleToFit;
 
@@ -2971,7 +2988,10 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     }
   }
 
-  const scaleToFit = Math.min(W / vw, H / vh);
+  let scaleToFit = 1;
+  if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+    scaleToFit = Math.min(W / vw, H / vh);
+  }
   const baseW = vw * scaleToFit;
   const baseH = vh * scaleToFit;
 
