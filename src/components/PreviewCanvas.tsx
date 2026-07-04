@@ -435,16 +435,22 @@ export function PreviewCanvas() {
   const pixelateCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mirrorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastParticleTimeRef = useRef<number | null>(null);
+  // Cache the 2D contexts so we don't call getContext() every frame
+  const compositeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const mainCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   // Snapshot of last successfully rendered frame to prevent flash during scrubbing
   const lastFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastFrameCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  // Frame counter for throttling expensive operations
+  const frameCounterRef = useRef(0);
 
   const getOrCreateCanvas = (ref: React.MutableRefObject<HTMLCanvasElement | null>, w: number, h: number) => {
     if (!ref.current) {
       ref.current = document.createElement('canvas');
     }
-    // Setting width and height resets the canvas state and resizes its backing store.
-    if (ref.current.width !== w) ref.current.width = w;
-    if (ref.current.height !== h) ref.current.height = h;
+    // Only set dimensions when they actually change to avoid buffer reallocation
+    if (Math.abs(ref.current.width - w) > 0.5) ref.current.width = Math.max(1, Math.round(w));
+    if (Math.abs(ref.current.height - h) > 0.5) ref.current.height = Math.max(1, Math.round(h));
     return ref.current;
   };
 
@@ -656,8 +662,20 @@ export function PreviewCanvas() {
 
     // ── Double buffering: render to offscreen composite canvas, then blit ──
     const composite = getOrCreateCanvas(compositeCanvasRef, canvas.width, canvas.height);
-    const ctx = composite.getContext('2d', { willReadFrequently: !settings.hardwareAcceleration });
-    if (!ctx) return;
+    // Use cached 2D context to avoid expensive getContext() call every frame
+    if (!compositeCtxRef.current) {
+      compositeCtxRef.current = composite.getContext('2d', { willReadFrequently: !settings.hardwareAcceleration }) || null;
+    }
+    if (!compositeCtxRef.current) return;
+    const ctx = compositeCtxRef.current;
+    // Only clear when canvas size changed or on explicit reset (rare)
+    if (composite.width !== canvas.width || composite.height !== canvas.height) {
+      composite.width = canvas.width;
+      composite.height = canvas.height;
+    }
+
+    // Throttle expensive operations during scrubbing (env variable set)
+    const skipExpensiveFX = !isPlaying;
 
     // Measure frame time delta for particles
     const now = performance.now();
