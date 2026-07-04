@@ -1899,8 +1899,10 @@ Rules:
 
           const wordStart = clipStart + w.start;
           // Typography should be snappy. The API word boundaries often include trailing breath/silence.
-          // We scale the duration by 0.85 to ensure the text disappears the moment the vocal peaks end.
-          const wordDur = Math.max(0.1, (w.end - w.start) * 0.85);
+          // Cap the duration to a maximum of 0.45 seconds per word so the text doesn't stick around.
+          let wordDur = w.end - w.start;
+          if (wordDur > 0.45) wordDur = 0.45;
+          else wordDur = Math.max(0.1, wordDur * 0.75);
 
           const color = colors[i % colors.length];
           const animIn = animations[i % animations.length];

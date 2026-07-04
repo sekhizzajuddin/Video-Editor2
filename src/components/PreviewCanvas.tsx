@@ -3016,6 +3016,38 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     });
   };
 
+  let textXOffset = 0;
+  let textYOffset = 0;
+  let textScale = 1.0;
+  if ((mediaItem?.type === 'text' || (activeClip as any).textSettings || (activeClip as any).mediaId === 'text-placeholder') && (activeClip as any).textSettings) {
+    const ts = (activeClip as any).textSettings;
+    const clipDur = activeClip.duration;
+    const localTime = currentTime - activeClip.startTime;
+    const inDur = ts.animation?.inDuration ?? 0;
+    const outDur = ts.animation?.outDuration ?? 0;
+    let inProgress = inDur > 0 ? Math.min(1, localTime / inDur) : 1;
+    let outProgress = outDur > 0 ? Math.min(1, (clipDur - localTime) / outDur) : 1;
+
+    if (ts.animation?.in && ts.animation.in !== 'none') {
+      if (ts.animation.in === 'slideUp') textYOffset += (1 - inProgress) * 80;
+      else if (ts.animation.in === 'slideDown') textYOffset -= (1 - inProgress) * 80;
+      else if (ts.animation.in === 'slideLeft') textXOffset += (1 - inProgress) * 160;
+      else if (ts.animation.in === 'slideRight') textXOffset -= (1 - inProgress) * 160;
+      else if (ts.animation.in === 'zoom') textScale *= (0.2 + 0.8 * inProgress);
+      else if (ts.animation.in === 'bounce') {
+        const bounceFactor = inProgress < 0.6 ? 0.3 * Math.sin(inProgress * Math.PI / 0.6) : inProgress < 0.9 ? -0.1 * Math.sin((inProgress - 0.6) * Math.PI / 0.3) : 0;
+        textScale *= (1 + bounceFactor);
+      }
+    }
+    if (ts.animation?.out && ts.animation.out !== 'none') {
+      if (ts.animation.out === 'slideUp') textYOffset -= (1 - outProgress) * 80;
+      else if (ts.animation.out === 'slideDown') textYOffset += (1 - outProgress) * 80;
+      else if (ts.animation.out === 'slideLeft') textXOffset -= (1 - outProgress) * 160;
+      else if (ts.animation.out === 'slideRight') textXOffset += (1 - outProgress) * 160;
+      else if (ts.animation.out === 'zoom') textScale *= (0.2 + 0.8 * outProgress);
+    }
+  }
+
   const cx = 854 / 2;
   const cy = 480 / 2;
   const totalX = cx + viewport.x - cx * viewport.zoom;
@@ -3027,7 +3059,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
           <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom}) translate(${offsetX}, ${offsetY})`}>
             <g
-              transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
+              transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100}) translate(${textXOffset}, ${textYOffset}) scale(${textScale})`}
             >
               {/* Main selection border */}
               <rect

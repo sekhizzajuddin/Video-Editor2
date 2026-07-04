@@ -697,7 +697,7 @@ export function MediaPanel() {
       onDrop={handleZoneDrop}
     >
       {/* Tabs */}
-      <div className="flex border-b border-[#3e3e3e]">
+      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeMediaTab === tab.id;
