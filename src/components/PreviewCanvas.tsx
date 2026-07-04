@@ -525,6 +525,9 @@ export function PreviewCanvas() {
     if (!isPlaying) return;
     let animId: number;
     let lastTime = performance.now();
+    
+    // Reset particle time tracking when playback starts to prevent jump
+    lastParticleTimeRef.current = null;
 
     const loop = (now: number) => {
       const state = useEditorStore.getState();
@@ -644,12 +647,19 @@ export function PreviewCanvas() {
     const ctx = canvas.getContext('2d', { willReadFrequently: !settings.hardwareAcceleration });
     if (!ctx) return;
 
-    // Measure frame time delta
+    // Measure frame time delta for particles
     const now = performance.now();
     const lastTime = lastParticleTimeRef.current ?? now;
     lastParticleTimeRef.current = now;
-    const rawDelta = isPlaying ? (now - lastTime) : 0;
-    const deltaMs = Math.min(100, rawDelta); // clamp to 100ms max to prevent physics jumps
+    let rawDelta = 0;
+    if (isPlaying && lastParticleTimeRef.current !== null) {
+      rawDelta = now - lastTime;
+      // If delta is unexpectedly large (e.g., after tab switch/resume), reset it
+      if (rawDelta > 300) {
+        rawDelta = 16.67; // assume normal frame
+      }
+    }
+    const deltaMs = Math.min(100, rawDelta); // clampTURE to 100ms max to prevent physics jumps
 
     const W_target = 854;
     const H_target = 480;

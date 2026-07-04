@@ -707,6 +707,23 @@ export function Timeline() {
   const [hoverCutClipId, setHoverCutClipId] = useState<string | null>(null);
   const [hoverCutX, setHoverCutX] = useState<number | null>(null);
 
+  // Transaction tracking to prevent unbalanced start/end calls
+  const transactionActiveRef = useRef(false);
+
+  const startTransactionSafe = useCallback(() => {
+    if (!transactionActiveRef.current) {
+      useEditorStore.getState().startTransaction();
+      transactionActiveRef.current = true;
+    }
+  }, []);
+
+  const endTransactionSafe = useCallback(() => {
+    if (transactionActiveRef.current) {
+      useEditorStore.getState().endTransaction();
+      transactionActiveRef.current = false;
+    }
+  }, []);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; clipId: string; trackType: string; mediaType: string; isOverLayer?: boolean; trackId?: string;
@@ -1103,14 +1120,14 @@ export function Timeline() {
 
       // Left resize handle
       if (relX < 6) {
-        useEditorStore.getState().startTransaction();
+        startTransactionSafe();
         startResize(e, clip, 'left');
         return;
       }
 
       // Right resize handle
       if (relX > rect.width - 6) {
-        useEditorStore.getState().startTransaction();
+        startTransactionSafe();
         startResize(e, clip, 'right');
         return;
       }
@@ -1225,7 +1242,7 @@ export function Timeline() {
         });
       }
 
-      useEditorStore.getState().startTransaction();
+      startTransactionSafe();
       setDragState({
         clipId: clip.id,
         startX: e.clientX,
@@ -1528,6 +1545,23 @@ export function Timeline() {
         if (draggedIds.length > 0) {
           useEditorStore.getState().resolveOverlaps(draggedIds);
         }
+        setDragState(null);
+        setSnapLine(null);
+        setDropPreview(null);
+        endTransactionSafe(); // commit final snapshot
+      }
+      if (resizeState) {
+        setResizeState(null);
+        endTransactionSafe(); // commit final snapshot
+      }
+      if (dragOverLayerState) {
+        setDragOverLayerState(null);
+        endTransactionSafe(); // commit final snapshot
+      }
+      if (resizeOverLayerState) {
+        setResizeOverLayerState(null);
+        endTransactionSafe(); // commit final snapshot
+      }
         setDragState(null);
         setSnapLine(null);
         setDropPreview(null);
