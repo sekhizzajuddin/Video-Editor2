@@ -287,9 +287,20 @@ export function PropertiesPanel() {
       setIsSeparating(true);
       
       // 1. Fetch the clip's local audio/video file as binary
-      const fileResponse = await fetch(clipUrl);
-      if (!fileResponse.ok) throw new Error('Failed to fetch clip audio source.');
-      const audioBlob = await fileResponse.blob();
+      let audioBlob: Blob;
+      try {
+        console.log('[AI Separation] Fetching audio source from URL:', clipUrl);
+        const fileResponse = await fetch(clipUrl);
+        if (!fileResponse.ok) throw new Error(`HTTP error! status: ${fileResponse.status}`);
+        audioBlob = await fileResponse.blob();
+      } catch (fetchErr: any) {
+        console.error('[AI Separation] Failed to fetch media clip binary data from URL:', clipUrl, fetchErr);
+        if (clipUrl.startsWith('blob:')) {
+          throw new Error('This project was restored from IndexedDB, but the browser has expired the local file connection. Please re-import/drag this file into the project to activate it.');
+        } else {
+          throw new Error(`Unable to fetch source file: ${fetchErr.message || 'CORS / offline restriction'}`);
+        }
+      }
 
       let vocalsUrl = '';
       let instrumentsUrl = '';
