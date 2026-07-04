@@ -1164,6 +1164,7 @@ export function Timeline() {
   const timelineRef = useRef<HTMLDivElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const trackHeadersRef = useRef<HTMLDivElement>(null);
+  const rulerContainerRef = useRef<HTMLDivElement>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -2089,6 +2090,10 @@ Rules:
   const handleScroll = useCallback(() => {
     if (trackContainerRef.current) {
       const target = trackContainerRef.current;
+      // Sync ruler immediately via DOM
+      if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== target.scrollLeft) {
+        rulerContainerRef.current.scrollLeft = target.scrollLeft;
+      }
       // Throttle store updates; DOM position updates immediately
       setScrollLeftThrottled(target.scrollLeft);
       // Sync vertical scroll to headers
@@ -2106,6 +2111,13 @@ Rules:
       }
     }
   }, []);
+
+  // Ensure ruler syncs if store's scrollLeft changes externally (e.g. zooming)
+  useEffect(() => {
+    if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== scrollLeft) {
+      rulerContainerRef.current.scrollLeft = scrollLeft;
+    }
+  }, [scrollLeft]);
 
   // ── Auto-scroll timeline during playback ──────────────────────────────────
   useEffect(() => {
@@ -3686,13 +3698,14 @@ Rules:
 
           {/* ── Ruler ──────────────────────────────────────────────── */}
           <div
+            ref={rulerContainerRef}
             className="bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer select-none"
             style={{ height: RULER_HEIGHT }}
             onMouseDown={handleRulerMouseDown}
           >
             <div
               className="absolute top-0 left-0 h-full"
-              style={{ width: `${timelineWidth}px`, transform: `translateX(-${scrollLeft}px)` }}
+              style={{ width: `${timelineWidth}px` }}
             >
               {/* In-point flag (green triangle) */}
               {inPoint !== null && (
