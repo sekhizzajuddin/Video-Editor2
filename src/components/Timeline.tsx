@@ -1237,17 +1237,26 @@ export function Timeline() {
   // ── Global mouse move / up for drag & resize ───────────────────────────
 
   useEffect(() => {
+    let scrubRafId: number | null = null;
+
     const handleMouseMove = (e: MouseEvent) => {
       // ─ Playhead scrubbing ──────────────────────────────────────────
       if (isScrubbing) {
-        const rect = trackContainerRef.current?.getBoundingClientRect();
-        if (rect) {
-          const x = e.clientX - rect.left + scrollLeft;
-          const time = Math.max(0, x / zoomLevel);
-          seek(time);
-          setScrubTime(time);
-          setScrubMouseX(e.clientX);
+        if (scrubRafId !== null) {
+          cancelAnimationFrame(scrubRafId);
         }
+        const clientX = e.clientX;
+        scrubRafId = requestAnimationFrame(() => {
+          scrubRafId = null;
+          const rect = trackContainerRef.current?.getBoundingClientRect();
+          if (rect) {
+            const x = clientX - rect.left + scrollLeft;
+            const time = Math.max(0, x / zoomLevel);
+            seek(time);
+            setScrubTime(time);
+            setScrubMouseX(clientX);
+          }
+        });
       }
 
       // ─ Clip drag ────────────────────────────────────────────────────
@@ -1498,6 +1507,10 @@ export function Timeline() {
     };
 
     const handleMouseUp = () => {
+      if (scrubRafId !== null) {
+        cancelAnimationFrame(scrubRafId);
+        scrubRafId = null;
+      }
       if (isScrubbing) {
         setIsScrubbing(false);
         setScrubTime(null);
