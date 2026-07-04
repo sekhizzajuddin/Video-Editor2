@@ -221,7 +221,8 @@ interface EditorActions {
   // History
   undo: () => void;
   redo: () => void;
-  saveSnapshot: () => void;
+  saveSnapshot: (label?: string) => void;
+  jumpToHistoryIndex: (index: number) => void;
   startTransaction: () => void;
   endTransaction: () => void;
 
@@ -237,6 +238,10 @@ interface EditorActions {
   // Drag/Drop
   setDraggingClipId: (id: string | null) => void;
   setDragPreview: (time: number, trackId: string | null) => void;
+
+  // Voiceover Recording State
+  startVoiceoverRecordingState: (trackId: string) => void;
+  stopVoiceoverRecordingState: () => void;
 
   // Project
   resetProject: () => void;
@@ -319,6 +324,8 @@ const initialState: EditorState = {
   exportHeight: 480,
   showExportModal: false,
   showSettingsModal: false,
+  isRecordingVoiceover: false,
+  recordingTrackId: null,
   activeMediaTab: 'project',
   activePropertiesTab: 'transform',
   canvasTransformMode: 'resize',
@@ -329,6 +336,7 @@ const initialState: EditorState = {
     {
       tracks: JSON.parse(JSON.stringify(defaultTracks)),
       currentTime: 0,
+      label: 'Initial State',
     },
   ],
   historyIndex: 0,
@@ -349,7 +357,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (file) {
       saveFileToDB(item.id, file).catch(err => console.error('Failed to save file to DB:', err));
     }
-    get().saveSnapshot();
+    get().saveSnapshot('Import Media');
   },
   removeMedia: (id) => {
     // Also remove any clips referencing this media
@@ -371,7 +379,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       try { URL.revokeObjectURL(media.thumbnail); } catch { /* ignore */ }
     }
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    get().saveSnapshot('Remove Media');
   },
   updateMediaMetadata: (id, updates) => {
     set((state) => ({
@@ -394,7 +402,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
     get().recalcTotalDuration();
     get().resolveOverlaps([clip.id]);
-    get().saveSnapshot();
+    get().saveSnapshot('Add Clip');
   },
 
   insertTextClip: (settings) => {
@@ -505,7 +513,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    get().saveSnapshot('Delete Clip');
   },
 
   updateClip: (clipId, updates) => {
@@ -945,7 +953,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks: newTracks };
     });
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    get().saveSnapshot('Split Clip');
   },
 
   selectClip: (id, multi = false) =>
@@ -1011,7 +1019,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
       return { tracks: newTracks };
     });
-    get().saveSnapshot();
+    get().saveSnapshot('Update Transition');
   },
   removeTransition: (clipId) => {
     set((state) => {
@@ -1033,7 +1041,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           state.selectedTransitionClipId === clipId ? null : state.selectedTransitionClipId,
       };
     });
-    get().saveSnapshot();
+    get().saveSnapshot('Delete Transition');
   },
 
   // Audio/Video Unlink — splits the audio component of a video clip into its own
@@ -1143,7 +1151,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       return { tracks: updatedTracks };
     });
-    get().saveSnapshot();
+    get().saveSnapshot('Extract Audio');
   },
 
   breakLinkConnection: (clipId) => {
@@ -1165,7 +1173,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
       return { tracks: newTracks };
     });
-    get().saveSnapshot();
+    get().saveSnapshot('Unlink Audio/Video');
   },
 
 
@@ -1360,7 +1368,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       return { tracks };
     });
-    get().saveSnapshot();
+    get().saveSnapshot('Add Track');
   },
   removeTrack: (trackId) => {
     set((state) => {
@@ -1370,7 +1378,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks: updatedTracks };
     });
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    get().saveSnapshot('Delete Track');
   },
   reorderTrack: (trackId: string, newIndex: number) => {
     set((state) => {
@@ -1406,7 +1414,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       
       return { tracks };
     });
-    get().saveSnapshot();
+    get().saveSnapshot('Reorder Track');
   },
 
   // UI
@@ -1674,12 +1682,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   // History with transaction support
-  saveSnapshot: () => {
+  saveSnapshot: (label) => {
     set((state) => {
       if (_inTransaction) return {}; // Skip if inside a transaction
+      
+      let defaultLabel = 'Action';
+      if (state.activePropertiesTab === 'transform') defaultLabel = 'Edit Transform';
+      else if (state.activePropertiesTab === 'color') defaultLabel = 'Color Grading';
+      else if (state.activePropertiesTab === 'speed') defaultLabel = 'Change Speed';
+      else if (state.activePropertiesTab === 'audio') defaultLabel = 'Adjust Audio';
+      else if (state.activePropertiesTab === 'text') defaultLabel = 'Edit Text';
+      else if (state.activePropertiesTab === 'effects') defaultLabel = 'Adjust Effect';
+
       const snapshot: EditorSnapshot = {
         tracks: JSON.parse(JSON.stringify(state.tracks)),
         currentTime: state.currentTime,
+        label: label || defaultLabel,
       };
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(snapshot);
@@ -1700,7 +1718,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   endTransaction: () => {
     if (!_inTransaction) return;
     _inTransaction = false;
-    get().saveSnapshot(); // Save one snapshot after the transaction completes
+    get().saveSnapshot('Edit Timeline'); // Save one snapshot after the transaction completes
   },
   undo: () => {
     set((state) => {
@@ -1732,10 +1750,34 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       console.error('Failed to auto-save project:', err)
     );
   },
+  jumpToHistoryIndex: (index) => {
+    set((state) => {
+      if (index < 0 || index >= state.history.length) return {};
+      const snap = state.history[index];
+      return {
+        tracks: JSON.parse(JSON.stringify(snap.tracks)),
+        currentTime: snap.currentTime,
+        historyIndex: index,
+        selectedClipId: null,
+        selectedClipIds: [],
+        selectedOverLayerId: null,
+        selectedTransitionClipId: null,
+      };
+    });
+    get().recalcTotalDuration();
+    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
+    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
+      console.error('Failed to auto-save project:', err)
+    );
+  },
 
   // Drag/Drop
   setDraggingClipId: (id) => set({ draggingClipId: id }),
   setDragPreview: (time, trackId) => set({ dragPreviewTime: time, dragPreviewTrackId: trackId }),
+
+  // Voiceover Recording State
+  startVoiceoverRecordingState: (trackId) => set({ isRecordingVoiceover: true, recordingTrackId: trackId }),
+  stopVoiceoverRecordingState: () => set({ isRecordingVoiceover: false, recordingTrackId: null }),
 
   // Project
   resetProject: () => {
@@ -1840,7 +1882,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (!template) return;
 
     // Save history snapshot first
-    get().saveSnapshot();
+    get().saveSnapshot('Before Loading Template');
 
     // Resolve template's PENDING_RESTORE media items using resolveMediaItemFromDB
     const resolvedMediaLibrary: MediaItem[] = [];
@@ -1877,7 +1919,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
 
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    get().saveSnapshot('Load Template');
   },
 
   loadTemplatesFromDB: async () => {
@@ -1891,7 +1933,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   setAspectRatio: (ratio) => {
     set({ aspectRatio: ratio });
-    get().saveSnapshot();
+    get().saveSnapshot('Change Aspect Ratio');
   },
 
   // Recalculate total duration from all clips and clean up empty custom tracks
@@ -1962,7 +2004,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    get().saveSnapshot('Add PIP Layer');
   },
 
   removeOverLayer: (overLayerId) => {
@@ -1979,7 +2021,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    get().saveSnapshot('Delete PIP Layer');
   },
 
   updateOverLayer: (overLayerId, updates) => {

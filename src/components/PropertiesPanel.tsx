@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  History,
   Volume2,
   VolumeX,
   Sparkles,
@@ -211,6 +212,9 @@ export function PropertiesPanel() {
     removeTransition,
     addMasterKeyframe,
     deleteMasterKeyframe,
+    history,
+    historyIndex,
+    jumpToHistoryIndex,
   } = useEditorStore();
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
@@ -281,7 +285,12 @@ export function PropertiesPanel() {
   // Auto-switch properties panel tabs only when the clip selection CHANGES (not on property updates)
   const lastAutoSwitchedClip = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedClip) return;
+    if (!selectedClip) {
+      if (activePropertiesTab !== 'history') {
+        setActivePropertiesTab('history');
+      }
+      return;
+    }
     if (lastAutoSwitchedClip.current === primarySelectedId) return; // don't override manual tab changes
     lastAutoSwitchedClip.current = primarySelectedId;
     if (selectedTrack?.type === 'fx' || selectedClip.fxSettings || selectedClip.particleSettings) {
@@ -293,7 +302,7 @@ export function PropertiesPanel() {
     } else {
       setActivePropertiesTab('transform');
     }
-  }, [primarySelectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [primarySelectedId, selectedClip, activePropertiesTab, setActivePropertiesTab]);
 
 
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
@@ -394,6 +403,9 @@ export function PropertiesPanel() {
     baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
     baseTabs.push({ id: 'effects', label: 'FX', icon: Wand2 });
   }
+
+  // Always append History tab
+  baseTabs.push({ id: 'history', label: 'History', icon: History });
 
   const tabs = baseTabs;
 
@@ -506,10 +518,16 @@ export function PropertiesPanel() {
         <div className="flex border-b border-[#3e3e3e]">
           {tabs.map((tab) => {
             const Icon = tab.icon;
+            const isActive = activePropertiesTab === tab.id;
             return (
               <button
                 key={tab.id}
-                className="flex-1 py-2.5 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 text-[#a0a0a0]"
+                onClick={() => setActivePropertiesTab(tab.id)}
+                className={`flex-1 py-2.5 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                  isActive
+                    ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
+                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                }`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 {tab.label}
@@ -517,15 +535,72 @@ export function PropertiesPanel() {
             );
           })}
         </div>
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="text-center">
-            <Move3D className="w-10 h-10 text-[#3e3e3e] mx-auto mb-3" />
-            <p className="text-sm text-[#a0a0a0]">No clip selected</p>
-            <p className="text-xs text-[#a0a0a0] mt-1 opacity-60">
-              Click a clip on the timeline to edit its properties
-            </p>
+
+        {activePropertiesTab === 'history' ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="p-3 border-b border-[#3e3e3e] flex items-center justify-between shrink-0 bg-[#1e1e1e]/30">
+              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Undo/Redo History</span>
+              <span className="text-[9px] text-[#8a8a8a] bg-[#1e1e1e] border border-[#3e3e3e] rounded px-1.5 py-0.5 font-mono">
+                {history.length} Actions
+              </span>
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scrollbar-thin">
+              {history.map((snap, idx) => {
+                const isActive = idx === historyIndex;
+                const isFuture = idx > historyIndex;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => jumpToHistoryIndex(idx)}
+                    className={`w-full flex items-center gap-3 p-2 rounded text-left transition-all border ${
+                      isActive
+                        ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-medium shadow-md shadow-amber-500/5'
+                        : isFuture
+                        ? 'bg-[#1e1e1e]/40 border-transparent text-[#a0a0a0]/40 hover:text-white hover:bg-[#2d2d2d]'
+                        : 'bg-[#1e1e1e]/60 border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                    }`}
+                  >
+                    {/* Visual Line Node */}
+                    <div className="relative flex items-center justify-center shrink-0 w-4">
+                      {idx < history.length - 1 && (
+                        <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
+                          isFuture ? 'bg-[#3e3e3e]/40' : 'bg-amber-500/30'
+                        }`} />
+                      )}
+                      <div className={`w-2.5 h-2.5 rounded-full border-2 ${
+                        isActive
+                          ? 'bg-amber-400 border-amber-400 ring-4 ring-amber-500/20 scale-110'
+                          : isFuture
+                          ? 'bg-transparent border-[#3e3e3e]'
+                          : 'bg-amber-500/40 border-amber-500/80'
+                      }`} />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs truncate block">{snap.label || 'Action'}</span>
+                      <span className="text-[9px] opacity-60 block mt-0.5 font-mono">
+                        {idx === 0 ? 'Base State' : `Step ${idx}`}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center p-4">
+            <div className="text-center">
+              <Move3D className="w-10 h-10 text-[#3e3e3e] mx-auto mb-3" />
+              <p className="text-sm text-[#a0a0a0]">No clip selected</p>
+              <p className="text-xs text-[#a0a0a0] mt-1 opacity-60">
+                Click a clip on the timeline to edit its properties
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -921,49 +996,51 @@ export function PropertiesPanel() {
       </div>
 
       {/* Clip Info Header */}
-      <div className="p-3 border-b border-[#3e3e3e] bg-[#2a2a2a]">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium text-white">
-            {selectedTrack?.name} / Clip
-          </span>
-          <button
-            onClick={() => useEditorStore.getState().selectClip(null)}
-            className="p-1 text-[#a0a0a0] hover:text-white transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+      {activePropertiesTab !== 'history' && (
+        <div className="p-3 border-b border-[#3e3e3e] bg-[#2a2a2a]">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-white">
+              {selectedTrack?.name} / Clip
+            </span>
+            <button
+              onClick={() => useEditorStore.getState().selectClip(null)}
+              className="p-1 text-[#a0a0a0] hover:text-white transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex gap-1.5">
+            <button
+              onClick={copyClip}
+              title="Copy"
+              className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+            >
+              <Copy className="w-3 h-3" />
+            </button>
+            <button
+              onClick={duplicateClip}
+              title="Duplicate"
+              className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+            >
+              <CopyPlus className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => splitClip(selectedClip.id, currentTime)}
+              title="Split at playhead"
+              className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+            >
+              <Scissors className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => removeClip(selectedClip.id)}
+              title="Delete"
+              className="p-1.5 bg-[#1e1e1e] rounded text-red-400 hover:text-red-300 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
         </div>
-        <div className="flex gap-1.5">
-          <button
-            onClick={copyClip}
-            title="Copy"
-            className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
-          >
-            <Copy className="w-3 h-3" />
-          </button>
-          <button
-            onClick={duplicateClip}
-            title="Duplicate"
-            className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
-          >
-            <CopyPlus className="w-3 h-3" />
-          </button>
-          <button
-            onClick={() => splitClip(selectedClip.id, currentTime)}
-            title="Split at playhead"
-            className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
-          >
-            <Scissors className="w-3 h-3" />
-          </button>
-          <button
-            onClick={() => removeClip(selectedClip.id)}
-            title="Delete"
-            className="p-1.5 bg-[#1e1e1e] rounded text-red-400 hover:text-red-300 transition-colors"
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Properties Content */}
       <div className="flex-1 overflow-y-auto p-3">
@@ -3426,6 +3503,62 @@ export function PropertiesPanel() {
                 <p className="text-[10px] text-[#5a5a5a]">Drag a Timeline FX or Particle Effect from the Effects panel onto this clip</p>
               </div>
             )}
+          </div>
+        )}
+        {/* ── History Tab ─────────────────────────────────────────────────── */}
+        {activePropertiesTab === 'history' && (
+          <div className="flex-1 flex flex-col overflow-hidden h-full">
+            {/* Header */}
+            <div className="p-3 border-b border-[#3e3e3e] flex items-center justify-between shrink-0 bg-[#1e1e1e]/30">
+              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Undo/Redo History</span>
+              <span className="text-[9px] text-[#8a8a8a] bg-[#1e1e1e] border border-[#3e3e3e] rounded px-1.5 py-0.5 font-mono">
+                {history.length} Actions
+              </span>
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scrollbar-thin">
+              {history.map((snap, idx) => {
+                const isActive = idx === historyIndex;
+                const isFuture = idx > historyIndex;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => jumpToHistoryIndex(idx)}
+                    className={`w-full flex items-center gap-3 p-2 rounded text-left transition-all border ${
+                      isActive
+                        ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-medium shadow-md shadow-amber-500/5'
+                        : isFuture
+                        ? 'bg-[#1e1e1e]/40 border-transparent text-[#a0a0a0]/40 hover:text-white hover:bg-[#2d2d2d]'
+                        : 'bg-[#1e1e1e]/60 border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                    }`}
+                  >
+                    {/* Visual Line Node */}
+                    <div className="relative flex items-center justify-center shrink-0 w-4">
+                      {idx < history.length - 1 && (
+                        <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
+                          isFuture ? 'bg-[#3e3e3e]/40' : 'bg-amber-500/30'
+                        }`} />
+                      )}
+                      <div className={`w-2.5 h-2.5 rounded-full border-2 ${
+                        isActive
+                          ? 'bg-amber-400 border-amber-400 ring-4 ring-amber-500/20 scale-110'
+                          : isFuture
+                          ? 'bg-transparent border-[#3e3e3e]'
+                          : 'bg-amber-500/40 border-amber-500/80'
+                      }`} />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs truncate block">{snap.label || 'Action'}</span>
+                      <span className="text-[9px] opacity-60 block mt-0.5 font-mono">
+                        {idx === 0 ? 'Base State' : `Step ${idx}`}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

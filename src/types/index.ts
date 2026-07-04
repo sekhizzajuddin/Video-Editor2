@@ -365,8 +365,10 @@ export interface EditorState {
   exportWidth?: number;
   exportHeight?: number;
   showSettingsModal: boolean;
+  isRecordingVoiceover: boolean;
+  recordingTrackId: string | null;
   activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
-  activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';
+  activePropertiesTab: PropertiesTab;
 
   // Canvas Mode
   canvasTransformMode: 'resize' | 'crop';
@@ -412,6 +414,7 @@ export interface EditorState {
 export interface EditorSnapshot {
   tracks: TimelineTrack[];
   currentTime: number;
+  label?: string;
 }
 
 // Tool Types
@@ -421,7 +424,7 @@ export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trac
 export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
 
 // Properties Tab Types
-export type PropertiesTab = 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';
+export type PropertiesTab = 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'history';
 
 // Time formatting utility type
 export type TimeFormat = 'HH:MM:SS' | 'MM:SS' | 'frames';

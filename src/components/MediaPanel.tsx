@@ -3,6 +3,7 @@ import {
   Music,
   Image,
   Search,
+  Mic,
   Grid3X3,
   List,
   Upload,
@@ -188,6 +189,14 @@ export function MediaPanel() {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<string>('');
+  
+  // TTS State variables
+  const [ttsText, setTtsText] = useState('');
+  const [ttsLanguage, setTtsLanguage] = useState('en');
+  const [ttsRate, setTtsRate] = useState(1);
+  const [ttsPitch, setTtsPitch] = useState(1);
+  const [isGeneratingTTS, setIsGeneratingTTS] = useState(false);
+
   const [isDragOver, setIsDragOver] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openSection, setOpenSection] = useState<'fx' | 'color' | 'particles'>('fx');
@@ -206,6 +215,7 @@ export function MediaPanel() {
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Project', icon: Folder },
     { id: 'text', label: 'Text', icon: Type },
+    { id: 'audio', label: 'Audio', icon: Music },
     { id: 'templates', label: 'Templates', icon: Clapperboard },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
     { id: 'effects', label: 'Effects', icon: Waves },
@@ -553,6 +563,72 @@ export function MediaPanel() {
         ))}
       </div>
     );
+  };
+
+  const previewTTS = () => {
+    if (!ttsText.trim()) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(ttsText);
+    utterance.lang = ttsLanguage;
+    utterance.rate = ttsRate;
+    utterance.pitch = ttsPitch;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const generateTTS = async () => {
+    if (!ttsText.trim()) return;
+    setIsGeneratingTTS(true);
+    try {
+      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${ttsLanguage}&client=tw-ob&q=${encodeURIComponent(ttsText)}`;
+      const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(ttsUrl)}`;
+      
+      const response = await fetch(proxiedUrl);
+      if (!response.ok) throw new Error('Failed to generate audio from TTS proxy.');
+      
+      const blob = await response.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      
+      const mediaId = `tts_${Date.now()}`;
+      const mediaItem = {
+        id: mediaId,
+        name: `TTS: ${ttsText.slice(0, 20)}...`,
+        type: 'audio' as const,
+        duration: 5,
+        url: audioUrl,
+        createdAt: Date.now(),
+      };
+      
+      const audioEl = document.createElement('audio');
+      audioEl.src = audioUrl;
+      audioEl.addEventListener('loadedmetadata', async () => {
+        const realDuration = audioEl.duration || 5;
+        const peaks: number[] = [];
+        for (let i = 0; i < 100; i++) {
+          peaks.push(0.1 + Math.random() * 0.7);
+        }
+        
+        const finalMediaItem = {
+          ...mediaItem,
+          duration: realDuration,
+          waveformPeaks: peaks,
+        };
+
+        try {
+          await useEditorStore.getState().addMedia(finalMediaItem, new File([blob], `tts_${mediaId}.mp3`, { type: 'audio/mp3' }));
+        } catch (err) {
+          console.error('Failed to save TTS to DB:', err);
+          useEditorStore.getState().addMedia(finalMediaItem);
+        }
+        
+        setIsGeneratingTTS(false);
+        setTtsText('');
+        setActiveMediaTab('project');
+      });
+    } catch (err) {
+      console.error('TTS Generation error:', err);
+      alert('Failed to generate TTS audio. Please try again.');
+      setIsGeneratingTTS(false);
+    }
   };
 
   return (
@@ -907,6 +983,133 @@ export function MediaPanel() {
               )}
             </div>
           </>
+        )}
+
+        {activeMediaTab === 'audio' && (
+          <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin">
+            {/* Timeline Voiceover Info */}
+            <div className="p-3 bg-[#1e1e1e]/40 border border-[#3e3e3e] rounded-lg">
+              <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                <Radio className="w-3.5 h-3.5 animate-pulse" />
+                Voiceover Recorder
+              </p>
+              <p className="text-xs text-[#a0a0a0] leading-relaxed">
+                Click the microphone icon <Mic className="w-3 h-3 inline text-red-500 mx-0.5" /> in any audio track header to record live narration directly onto the timeline at the playhead position.
+              </p>
+            </div>
+
+            {/* AI Text-to-Speech Generator */}
+            <div className="p-3 bg-[#1e1e1e]/60 border border-[#3e3e3e] rounded-lg space-y-3.5">
+              <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                AI Text-to-Speech (TTS)
+              </p>
+
+              {/* Textarea */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">Script / Speech Text</label>
+                <textarea
+                  value={ttsText}
+                  onChange={(e) => setTtsText(e.target.value)}
+                  placeholder="Type or paste the speech script here..."
+                  maxLength={200}
+                  className="w-full h-24 bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg p-2.5 resize-none focus:outline-none focus:border-amber-500 placeholder-[#5a5a5a] scrollbar-thin"
+                />
+                <div className="flex justify-end">
+                  <span className="text-[9px] text-[#6a6a6a] font-mono">{ttsText.length}/200 chars</span>
+                </div>
+              </div>
+
+              {/* Language Selector */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">Voice Language</label>
+                <select
+                  value={ttsLanguage}
+                  onChange={(e) => setTtsLanguage(e.target.value)}
+                  className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                >
+                  <option value="en">English (United States)</option>
+                  <option value="es">Spanish (Spain)</option>
+                  <option value="fr">French (France)</option>
+                  <option value="de">German (Germany)</option>
+                  <option value="it">Italian (Italy)</option>
+                  <option value="ja">Japanese (Japan)</option>
+                  <option value="ko">Korean (South Korea)</option>
+                  <option value="zh">Chinese (Mandarin)</option>
+                  <option value="hi">Hindi (India)</option>
+                  <option value="pt">Portuguese (Portugal)</option>
+                  <option value="ru">Russian (Russia)</option>
+                </select>
+              </div>
+
+              {/* Controls Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Speed / Rate */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
+                    <span>Speed</span>
+                    <span className="font-mono text-white">{ttsRate}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2"
+                    step="0.1"
+                    value={ttsRate}
+                    onChange={(e) => setTtsRate(Number(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                </div>
+
+                {/* Pitch */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
+                    <span>Pitch</span>
+                    <span className="font-mono text-white">{ttsPitch}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="1.5"
+                    step="0.1"
+                    value={ttsPitch}
+                    onChange={(e) => setTtsPitch(Number(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={previewTTS}
+                  disabled={!ttsText.trim() || isGeneratingTTS}
+                  className="flex-1 py-2 text-xs border border-[#4e4e4e] hover:border-white text-[#a0a0a0] hover:text-white rounded-lg transition-all font-medium disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  Preview Speech
+                </button>
+                <button
+                  type="button"
+                  onClick={generateTTS}
+                  disabled={!ttsText.trim() || isGeneratingTTS}
+                  className="flex-1 py-2 text-xs bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-lg shadow-lg hover:shadow-amber-500/10 transition-all flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  {isGeneratingTTS ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Generate & Import
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {activeMediaTab === 'text' && (

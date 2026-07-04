@@ -20,6 +20,7 @@ import {
   Edit,
   Layers,
   Pin,
+  Mic,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -576,6 +577,12 @@ export function Timeline() {
     selectedTrackId,
     draggingClipId,
     totalDuration,
+    isRecordingVoiceover,
+    recordingTrackId,
+    startVoiceoverRecordingState,
+    stopVoiceoverRecordingState,
+    play,
+    pause,
     selectClip,
     selectClips,
     selectTrack,
@@ -625,6 +632,152 @@ export function Timeline() {
   const timelineRef = useRef<HTMLDivElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const trackHeadersRef = useRef<HTMLDivElement>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingStartPlayheadRef = useRef<number>(0);
+  const recordingStartTimeMsRef = useRef<number>(0);
+
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handleVoiceoverRecordingToggle = useCallback(async (trackId: string) => {
+    const isRecordingThis = isRecordingVoiceover && recordingTrackId === trackId;
+
+    if (isRecordingVoiceover && !isRecordingThis) {
+      return;
+    }
+
+    if (!isRecordingVoiceover) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+        audioChunksRef.current = [];
+
+        let mimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+          mimeType = 'audio/ogg;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        }
+
+        const recorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+          }
+        };
+
+        recorder.onstop = async () => {
+          const blob = new Blob(audioChunksRef.current, { type: mimeType });
+          const elapsed = (Date.now() - recordingStartTimeMsRef.current) / 1000;
+          const finalDuration = Math.max(0.5, elapsed);
+
+          const audioUrl = URL.createObjectURL(blob);
+          const mediaId = `recorded_voiceover_${Date.now()}`;
+
+          const peaks: number[] = [];
+          for (let i = 0; i < 100; i++) {
+            peaks.push(0.1 + Math.random() * 0.7);
+          }
+
+          try {
+            await useEditorStore.getState().addMedia({
+              id: mediaId,
+              name: `Voiceover Recording`,
+              type: 'audio',
+              duration: finalDuration,
+              url: audioUrl,
+              createdAt: Date.now(),
+              waveformPeaks: peaks,
+            }, new File([blob], `voiceover_${mediaId}.webm`, { type: mimeType }));
+          } catch (err) {
+            console.error('Failed to add voiceover media item:', err);
+            useEditorStore.getState().addMedia({
+              id: mediaId,
+              name: `Voiceover Recording`,
+              type: 'audio',
+              duration: finalDuration,
+              url: audioUrl,
+              createdAt: Date.now(),
+              waveformPeaks: peaks,
+            });
+          }
+
+          const clipId = `clip_recorded_${Math.random().toString(36).substr(2, 9)}`;
+          const newClip = {
+            id: clipId,
+            mediaId,
+            trackId,
+            startTime: recordingStartPlayheadRef.current,
+            duration: finalDuration,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+          };
+
+          addClip(newClip);
+
+          if (audioStreamRef.current) {
+            audioStreamRef.current.getTracks().forEach((t) => t.stop());
+            audioStreamRef.current = null;
+          }
+
+          stopVoiceoverRecordingState();
+          useEditorStore.getState().saveSnapshot('Record Voiceover');
+        };
+
+        setRecordingSeconds(0);
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingSeconds((s) => s + 1);
+        }, 1000);
+
+        recorder.start();
+        recordingStartPlayheadRef.current = currentTime;
+        recordingStartTimeMsRef.current = Date.now();
+        startVoiceoverRecordingState(trackId);
+        play();
+      } catch (err) {
+        console.error('Microphone access denied or voiceover recording failed:', err);
+        alert('Failed to access microphone. Please check your system/browser permissions.');
+      }
+    } else {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      pause();
+
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+  }, [
+    isRecordingVoiceover,
+    recordingTrackId,
+    currentTime,
+    startVoiceoverRecordingState,
+    stopVoiceoverRecordingState,
+    play,
+    pause,
+    addClip
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
 
   const [dragState, setDragState] = useState<{
     clipId: string;
@@ -2294,6 +2447,22 @@ export function Timeline() {
                   >
                     {track.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
                   </button>
+                  {track.type === 'audio' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleVoiceoverRecordingToggle(track.id);
+                      }}
+                      title={isRecordingVoiceover && recordingTrackId === track.id ? 'Stop Voiceover Recording' : 'Record Voiceover'}
+                      className={`p-0.5 rounded transition-all ${
+                        isRecordingVoiceover && recordingTrackId === track.id
+                          ? 'bg-red-600 text-white animate-pulse shadow-lg shadow-red-600/35 scale-110'
+                          : 'text-[#a0a0a0] hover:text-red-400'
+                      }`}
+                    >
+                      <Mic className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -3309,6 +3478,29 @@ export function Timeline() {
         </div>
       );
     })()}
+
+    {/* Floating Voiceover Recording Timer Banner */}
+    {isRecordingVoiceover && (
+      <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[300] bg-red-950/95 border border-red-500/30 text-white px-4 py-2 rounded-full shadow-2xl flex items-center gap-3 animate-pulse">
+        <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-red-200">
+          Recording Voiceover
+        </span>
+        <span className="text-xs font-mono font-bold text-red-100 bg-red-900/60 border border-red-500/20 px-2 py-0.5 rounded-full">
+          {Math.floor(recordingSeconds / 60).toString().padStart(2, '0')}:
+          {(recordingSeconds % 60).toString().padStart(2, '0')}s
+        </span>
+        <button
+          onClick={() => {
+            const track = tracks.find(t => t.id === recordingTrackId);
+            if (track) handleVoiceoverRecordingToggle(track.id);
+          }}
+          className="text-[10px] text-red-300 hover:text-white bg-red-900/40 hover:bg-red-800 border border-red-500/25 px-2.5 py-1 rounded-full transition-colors ml-1 uppercase font-semibold"
+        >
+          Done
+        </button>
+      </div>
+    )}
     </>
   );
 }
