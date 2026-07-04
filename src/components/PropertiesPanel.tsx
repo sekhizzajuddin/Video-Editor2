@@ -225,6 +225,34 @@ export function PropertiesPanel() {
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const [showTunedToast, setShowTunedToast] = useState(false);
+
+  // Find the selected clip (or the first selected clip in multi-selection)
+  let selectedClip: any = null;
+  let selectedTrack: any = null;
+  let isOverLayer = false;
+
+  if (selectedOverLayerId) {
+    for (const track of tracks) {
+      const ol = (track.overLayers || []).find((c) => c.id === selectedOverLayerId);
+      if (ol) {
+        selectedClip = ol as any;
+        selectedTrack = track;
+        isOverLayer = true;
+        break;
+      }
+    }
+  } else {
+    const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
+    for (const track of tracks) {
+      const clip = track.clips.find((c) => c.id === primarySelectedId);
+      if (clip) {
+        selectedClip = clip;
+        selectedTrack = track;
+        break;
+      }
+    }
+  }
+
   const [isSeparating, setIsSeparating] = useState(false);
 
   const handleAiSeparate = async () => {
@@ -361,32 +389,7 @@ export function PropertiesPanel() {
     }
   }
 
-  // Find the selected clip (or the first selected clip in multi-selection)
-  let selectedClip = null;
-  let selectedTrack = null;
-  let isOverLayer = false;
 
-  if (selectedOverLayerId) {
-    for (const track of tracks) {
-      const ol = (track.overLayers || []).find((c) => c.id === selectedOverLayerId);
-      if (ol) {
-        selectedClip = ol as any;
-        selectedTrack = track;
-        isOverLayer = true;
-        break;
-      }
-    }
-  } else {
-    const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
-    for (const track of tracks) {
-      const clip = track.clips.find((c) => c.id === primarySelectedId);
-      if (clip) {
-        selectedClip = clip;
-        selectedTrack = track;
-        break;
-      }
-    }
-  }
 
   const primarySelectedId = selectedOverLayerId || selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
 
@@ -3106,7 +3109,7 @@ export function PropertiesPanel() {
                       {/* Info Note */}
                       <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-1">
                         <p className="text-[10px] text-[#a0a0a0]">
-                          <span className="text-cyan-400 font-medium">How it works:</span> Uses a native **Multi-band Crossover Mid/Side Matrix**. Bass (< 180Hz) and treble (> 6000Hz) are preserved untouched to keep instrument punch and clarity, while phase cancellation is applied selectively to the vocal frequency band.
+                          <span className="text-cyan-400 font-medium">How it works:</span> Uses a native **Multi-band Crossover Mid/Side Matrix**. Bass (&lt; 180Hz) and treble (&gt; 6000Hz) are preserved untouched to keep instrument punch and clarity, while phase cancellation is applied selectively to the vocal frequency band.
                         </p>
                         <p className="text-[9px] text-[#6a6a6a]">
                           Requires stereo audio files. High-performance native processing with zero main thread overhead.

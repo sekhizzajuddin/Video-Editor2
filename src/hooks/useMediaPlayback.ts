@@ -616,7 +616,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
         entry.sourceNode.connect(entry.separationGraph.input);
         entry._fxConnected = false;
       }
-      const ctxTime = entry.audioCtx?.currentTime || 0;
 
       // Update Vocal Filter (notch metallic resonance or manual formant)
       if (entry.vocalFilter) {
@@ -992,19 +991,9 @@ function initAudioGraph(entry: MediaElement) {
       const pitch = (pitchNode as any).pitch || 0;
       const isHumanize = (pitchNode as any).humanize || false;
 
-      // Check if vocal separation is enabled for this clip
-      // We access it from the pool entry via a reference set when the graph is built
-      // Since we're inside the closure, we look it up from the entry cache
-      let sepEnabled = false;
-      let sepMode = 'removeVocals';
-      let sepStrength = 80;
-      // Try to read cached separation settings from the MediaElement entry
-      // This is set in the reactive sync effect when audioSettings change
-      if (entry.separationSettings) {
-        sepEnabled = entry.separationSettings.enabled;
-        sepMode = entry.separationSettings.mode;
-        sepStrength = entry.separationSettings.strength;
-      }
+      const sepEnabled = false;
+      const sepMode = 'removeVocals';
+      const sepStrength = 80;
 
       let jitter = 0;
       if (isHumanize) {
@@ -1123,6 +1112,8 @@ function initAudioGraph(entry: MediaElement) {
           readPosB = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
         }
       }
+    };
+
     // 0.5. Vocal Filter
     const vocalFilter = audioCtx.createBiquadFilter();
     vocalFilter.type = 'peaking';
@@ -1159,6 +1150,7 @@ function initAudioGraph(entry: MediaElement) {
     const gainNode = audioCtx.createGain();
 
     // Node connections (Default routing bypasses heavy FX)
+    const separationGraph = createSeparationGraph(audioCtx);
     sourceNode.connect(separationGraph.input);
     separationGraph.output.connect(vocalFilter);
     vocalFilter.connect(bassFilter);
