@@ -2804,45 +2804,9 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
 
       let { x, y, scale, rotation } = dragState.initTransform;
       const crop = { ...dragState.initCrop };
-
-      const W = 854;
-      const H = 480;
-      let vw = W;
-      let vh = H;
-      if (mediaItem?.type === 'video') {
-        const v = videoElements.get(activeClip.id);
-        if (v && v.videoWidth > 0) {
-          vw = v.videoWidth;
-          vh = v.videoHeight;
-        }
-      } else if (mediaItem?.type === 'image') {
-        // @ts-ignore
-        const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
-        if (img && img.naturalWidth > 0) {
-          vw = img.naturalWidth;
-          vh = img.naturalHeight;
-        }
-      } else if (mediaItem?.type === 'text' || (activeClip as any).textSettings || (activeClip as any).mediaId === 'text-placeholder') {
-        const ts = (activeClip as any).textSettings;
-        if (ts) {
-          const fontSize = Number(ts.fontSize) || 48;
-          const text = String(ts.text || '');
-          const lines = text.split('\n');
-          const estCharWidth = fontSize * 0.6;
-          const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
-          vw = Math.max(80, longestLine * estCharWidth + 40);
-          vh = lines.length * (fontSize * 1.35) + 20;
-        } else {
-          vw = 300;
-          vh = 80;
-        }
-      }
-      let scaleToFit = 1;
-      if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
-        scaleToFit = Math.min(W / vw, H / vh);
-      }
-      const baseW = vw * scaleToFit;
-      const baseH = vh * scaleToFit;
+      
+      const baseW = dragState.baseW || 854;
+      const baseH = dragState.baseH || 480;
 
       let animations = activeClip.animations || {};
       const localTime = currentTime - activeClip.startTime;
@@ -3013,40 +2977,10 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
       startY: e.clientY,
       initTransform: { x: aX, y: aY, scale: aScale, rotation: aRot },
       initCrop: { left: aCropLeft, top: aCropTop, right: aCropRight, bottom: aCropBot },
+      baseW,
+      baseH,
     });
   };
-
-  let textXOffset = 0;
-  let textYOffset = 0;
-  let textScale = 1.0;
-  if ((mediaItem?.type === 'text' || (activeClip as any).textSettings || (activeClip as any).mediaId === 'text-placeholder') && (activeClip as any).textSettings) {
-    const ts = (activeClip as any).textSettings;
-    const clipDur = activeClip.duration;
-    const localTime = currentTime - activeClip.startTime;
-    const inDur = ts.animation?.inDuration ?? 0;
-    const outDur = ts.animation?.outDuration ?? 0;
-    let inProgress = inDur > 0 ? Math.min(1, localTime / inDur) : 1;
-    let outProgress = outDur > 0 ? Math.min(1, (clipDur - localTime) / outDur) : 1;
-
-    if (ts.animation?.in && ts.animation.in !== 'none') {
-      if (ts.animation.in === 'slideUp') textYOffset += (1 - inProgress) * 80;
-      else if (ts.animation.in === 'slideDown') textYOffset -= (1 - inProgress) * 80;
-      else if (ts.animation.in === 'slideLeft') textXOffset += (1 - inProgress) * 160;
-      else if (ts.animation.in === 'slideRight') textXOffset -= (1 - inProgress) * 160;
-      else if (ts.animation.in === 'zoom') textScale *= (0.2 + 0.8 * inProgress);
-      else if (ts.animation.in === 'bounce') {
-        const bounceFactor = inProgress < 0.6 ? 0.3 * Math.sin(inProgress * Math.PI / 0.6) : inProgress < 0.9 ? -0.1 * Math.sin((inProgress - 0.6) * Math.PI / 0.3) : 0;
-        textScale *= (1 + bounceFactor);
-      }
-    }
-    if (ts.animation?.out && ts.animation.out !== 'none') {
-      if (ts.animation.out === 'slideUp') textYOffset -= (1 - outProgress) * 80;
-      else if (ts.animation.out === 'slideDown') textYOffset += (1 - outProgress) * 80;
-      else if (ts.animation.out === 'slideLeft') textXOffset -= (1 - outProgress) * 160;
-      else if (ts.animation.out === 'slideRight') textXOffset += (1 - outProgress) * 160;
-      else if (ts.animation.out === 'zoom') textScale *= (0.2 + 0.8 * outProgress);
-    }
-  }
 
   const cx = 854 / 2;
   const cy = 480 / 2;
@@ -3059,7 +2993,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
           <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom}) translate(${offsetX}, ${offsetY})`}>
             <g
-              transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100}) translate(${textXOffset}, ${textYOffset}) scale(${textScale})`}
+              transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
             >
               {/* Main selection border */}
               <rect
