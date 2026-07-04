@@ -494,6 +494,33 @@ function synthesizeProceduralSFX(category: string, duration: number): Promise<Bl
   });
 }
 
+async function handlePuterError(err: any, taskName: string): Promise<void> {
+  console.error(`${taskName} failed:`, err);
+  const isCreditsErr = String(err.message || err).toLowerCase().includes('credit') ||
+                       String(err.message || err).toLowerCase().includes('balance');
+  if (isCreditsErr) {
+    const puter = (window as any).puter;
+    if (puter) {
+      const confirmSignIn = window.confirm(
+        `${taskName} failed due to Insufficient Credits on Puter.\n\n` +
+        "Puter AI offers a generous free tier for registered accounts. Would you like to log in to (or sign up for) Puter for free to get your personal free credits?"
+      );
+      if (confirmSignIn) {
+        try {
+          await puter.auth.signIn();
+          alert("Successfully logged in! Please try your request again.");
+        } catch (authErr) {
+          console.error('Puter auth failed:', authErr);
+        }
+      }
+    } else {
+      alert(`${taskName} failed: ${err.message || 'Unknown error'}`);
+    }
+  } else {
+    alert(`${taskName} failed: ${err.message || 'Unknown error'}`);
+  }
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_TRACK_HEIGHT = 56;
@@ -1405,9 +1432,8 @@ Return your response ONLY as a JSON object with these two fields:
       useEditorStore.getState().saveSnapshot('AI Sound Effect Generation');
 
       setSfxModalClipId(null);
-    } catch (err) {
-      console.error('SFX synthesis failed:', err);
-      alert('Failed to synthesize SFX. Please try again.');
+    } catch (err: any) {
+      await handlePuterError(err, 'AI Sound Effect');
     } finally {
       setIsSynthesizingSfx(false);
     }
@@ -1631,8 +1657,7 @@ Return your response ONLY as a JSON array of objects:
       setSfxUserDescription('');
       alert(`Successfully generated and auto-placed ${cuePoints.length} sound effects!`);
     } catch (err: any) {
-      console.error('Auto-Cue SFX failed:', err);
-      alert(`Auto-Cue Sound Effects failed: ${err.message || 'Unknown error'}`);
+      await handlePuterError(err, 'Auto-Cue Sound Effects');
     } finally {
       setIsAnalyzingAutoCue(false);
       setAutoCueProgress(0);
@@ -1863,8 +1888,7 @@ IMPORTANT:
       useEditorStore.getState().endTransaction();
       useEditorStore.getState().saveSnapshot(mode === 'standard' ? 'Auto-Generate Captions' : 'Generate Dynamic Typography');
     } catch (err: any) {
-      console.error('Transcription error:', err);
-      alert(`AI Auto-Captioning failed: ${err.message || 'Unknown error'}`);
+      await handlePuterError(err, 'AI Auto-Captioning');
     } finally {
       setIsTranscribing(false);
     }
