@@ -300,51 +300,8 @@ export function TopToolbar() {
         </div>
       </div>
 
-      {/* Center: Tools */}
-      <div className="flex-1 flex items-center justify-center gap-1">
-        <div className="flex items-center bg-[#252525] rounded border border-[#3e3e3e] p-0.5">
-          {tools.map((tool) => {
-            const Icon = tool.icon;
-            const isActive = activeTool === tool.id;
-            return (
-              <button
-                key={tool.id}
-                onClick={() => setActiveTool(tool.id)}
-                title={`${tool.label} (${tool.shortcut})`}
-                className={`relative p-2 rounded transition-all duration-150 group ${
-                  isActive
-                    ? 'bg-[#3e3e3e] text-white'
-                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 px-2 py-1 bg-black text-white text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-                  {tool.label} ({tool.shortcut})
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="w-px h-6 bg-[#3e3e3e] mx-2" />
-
-        <button
-          onClick={undo}
-          disabled={!canUndo}
-          title="Undo (Ctrl+Z)"
-          className="p-2 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
-        >
-          <Undo2 className="w-4 h-4" />
-        </button>
-        <button
-          onClick={redo}
-          disabled={!canRedo}
-          title="Redo (Ctrl+Y)"
-          className="p-2 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
-        >
-          <Redo2 className="w-4 h-4" />
-        </button>
-      </div>
+      {/* Center: Empty (Tools moved to Timeline header) */}
+      <div className="flex-1" />
 
       {/* Right: Actions */}
       <div className="flex items-center gap-2">

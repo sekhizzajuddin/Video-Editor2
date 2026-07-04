@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { Music } from 'lucide-react';
+import { Music, MousePointer2, ArrowRightToLine, ArrowLeftToLine, ArrowLeftRight, Timer, Scissors, Hand, ZoomIn, Undo2, Redo2 } from 'lucide-react';
+import type { EditorTool } from '@/types';
 import { TopToolbar } from '@/components/TopToolbar';
 import { MediaPanel } from '@/components/MediaPanel';
 import { PreviewCanvas } from '@/components/PreviewCanvas';
@@ -29,6 +30,8 @@ function App() {
     zoomIn,
     zoomOut,
     currentTime,
+    history,
+    historyIndex,
     tracks,
     selectClips,
     selectedTransitionClipId,
@@ -324,6 +327,20 @@ function App() {
     };
   }, []);
 
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  const tools: { id: EditorTool; icon: any; label: string; shortcut: string }[] = [
+    { id: 'select', icon: MousePointer2, label: 'Select', shortcut: 'V' },
+    { id: 'trackSelect', icon: ArrowRightToLine, label: 'Track Select Forward', shortcut: 'A' },
+    { id: 'trackSelectBackward', icon: ArrowLeftToLine, label: 'Track Select Backward', shortcut: 'Shift+A' },
+    { id: 'ripple', icon: ArrowLeftRight, label: 'Ripple Edit', shortcut: 'B' },
+    { id: 'rateStretch', icon: Timer, label: 'Rate Stretch', shortcut: 'R' },
+    { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
+    { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },
+    { id: 'zoom', icon: ZoomIn, label: 'Zoom', shortcut: 'Z' },
+  ];
+
   return (
     <div className="h-screen w-screen flex flex-col bg-[#1e1e1e] overflow-hidden">
       {/* Top Toolbar */}
@@ -382,6 +399,52 @@ function App() {
                   }`}
                 >
                   <Music className="w-3 h-3 text-purple-400" /> Audio Mixer
+                </button>
+              </div>
+
+              {/* Editing Tools (Moved from Top Toolbar) */}
+              <div className="flex items-center gap-1 opacity-90 hover:opacity-100 transition-opacity">
+                <div className="flex items-center bg-[#252525] rounded border border-[#3e3e3e] p-0.5">
+                  {tools.map((tool) => {
+                    const Icon = tool.icon;
+                    const isActive = activeTool === tool.id;
+                    return (
+                      <button
+                        key={tool.id}
+                        onClick={() => setActiveTool(tool.id)}
+                        title={`${tool.label} (${tool.shortcut})`}
+                        className={`relative p-1.5 rounded transition-all duration-150 group ${
+                          isActive
+                            ? 'bg-[#3e3e3e] text-white'
+                            : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-black text-white text-[9px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+                          {tool.label} ({tool.shortcut})
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="w-px h-5 bg-[#3e3e3e] mx-1.5" />
+
+                <button
+                  onClick={undo}
+                  disabled={!canUndo}
+                  title="Undo (Ctrl+Z)"
+                  className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={redo}
+                  disabled={!canRedo}
+                  title="Redo (Ctrl+Y)"
+                  className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
+                >
+                  <Redo2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
