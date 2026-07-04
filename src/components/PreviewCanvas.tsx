@@ -2754,6 +2754,8 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     startY: number;
     initTransform: any;
     initCrop: any;
+    baseW?: number;
+    baseH?: number;
   } | null>(null);
   
   const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
