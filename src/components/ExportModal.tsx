@@ -180,7 +180,7 @@ export function ExportModal() {
     }, 200);
   };
 
-  const convertToMp4 = async (webmBlob: Blob): Promise<void> => {
+  const convertToMp4 = async (webmBlob: Blob, hasAudio: boolean): Promise<void> => {
     abortControllerRef.current = new AbortController();
     setConversionProgress(0);
     ffmpegLogs = []; // Clear logs for this run
@@ -207,12 +207,15 @@ export function ExportModal() {
       '-pix_fmt', 'yuv420p',
       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
       '-movflags', '+faststart',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-shortest',
-      '-y',
-      'output.mp4'
     ];
+
+    if (hasAudio) {
+      ffmpegArgs.push('-c:a', 'aac', '-b:a', '128k');
+    } else {
+      ffmpegArgs.push('-an');
+    }
+
+    ffmpegArgs.push('-shortest', '-y', 'output.mp4');
 
     const progressHandler = ({ progress: p }: { progress: number }) => {
       const pct = Math.min(99, Math.round(p * 100));
@@ -301,7 +304,7 @@ export function ExportModal() {
 
     // Audio is optional
     let combinedStream: MediaStream;
-    const hasAudio = masterAudioStream && masterAudioStream.getAudioTracks().length > 0;
+    const hasAudio = !!(masterAudioStream && masterAudioStream.getAudioTracks().length > 0);
     if (hasAudio) {
       combinedStream = new MediaStream([
         ...videoStream.getVideoTracks(),
@@ -402,7 +405,7 @@ export function ExportModal() {
       setStatusMsg('Starting MP4 conversion...');
 
       try {
-        await convertToMp4(webmBlob);
+        await convertToMp4(webmBlob, hasAudio);
         updateStatus('done');
         setStatusMsg('MP4 export complete!');
         isExportingRef.current = false;
