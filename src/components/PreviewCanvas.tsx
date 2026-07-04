@@ -783,7 +783,19 @@ export function PreviewCanvas() {
       opacityMultiplier: number = 1,
       extraTransform?: { translateX?: number; translateY?: number; scale?: number }
     ) => {
-      const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+      let mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+      if (!mediaItem) {
+        if (clip.mediaId === 'text-placeholder' || clip.textSettings || clip.id?.startsWith('clip_subtitle') || clip.id?.startsWith('clip_typo')) {
+          mediaItem = {
+            id: clip.mediaId,
+            name: 'Text',
+            type: 'text',
+            duration: clip.duration,
+            url: '',
+            createdAt: Date.now()
+          };
+        }
+      }
       if (!mediaItem) return;
 
       // Get animated values

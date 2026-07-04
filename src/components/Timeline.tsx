@@ -1642,7 +1642,8 @@ Return your response ONLY as a JSON array of objects:
   const handleGenerateSubtitles = useCallback(async (clipId: string, mode: 'standard' | 'dynamic') => {
     let targetClip: TimelineClip | null = null;
     let targetTrack: TimelineTrack | null = null;
-    for (const track of tracks) {
+    const liveTracks = useEditorStore.getState().tracks;
+    for (const track of liveTracks) {
       const found = track.clips.find(c => c.id === clipId);
       if (found) {
         targetClip = found;
@@ -1685,11 +1686,52 @@ Return your response ONLY as a JSON array of objects:
         throw new Error('No words detected in this clip. Ensure the clip has clear audible speech.');
       }
 
-      let textTrack = tracks.find(t => t.type === 'text');
+      // Detect and Transliterate Non-Latin (Urdu/Hindi) script to Hinglish
+      const hasNonLatin = result.words.some((w: any) => /[\u0600-\u06FF\u0900-\u097F]/.test(w.word));
+      if (hasNonLatin) {
+        try {
+          const wordsToTransliterate = result.words.map((w: any, idx: number) => ({ idx, word: w.word }));
+          const chunkSize = 60;
+          for (let c = 0; c < wordsToTransliterate.length; c += chunkSize) {
+            const chunk = wordsToTransliterate.slice(c, c + chunkSize);
+            const translitPrompt = `We have a list of transcribed words from a Hindi/Urdu video clip. Some words are written in Urdu Nastaliq/Arabic script or Hindi Devnagari script.
+Please transliterate all these words into Hinglish (Hindi/Urdu words written using the English/Latin alphabet, e.g. "kaise", "haan", "aap", "aur", "bahut", "achha").
+
+Input words:
+${JSON.stringify(chunk)}
+
+IMPORTANT:
+- Return ONLY a valid JSON array of objects, containing the index ("idx") and the transliterated word in the Latin alphabet:
+[
+  { "idx": 0, "word": "kaise" }
+]
+- The array length MUST be exactly ${chunk.length}. Keep the index mapping intact.
+- Transliterate to Latin characters, but DO NOT translate the meaning to English (e.g. if the word is "بہت", output "bahut", NOT "very").
+- Keep emojis, punctuation, or numbers as they are.`;
+
+            const transliterationResponse = await puter.ai.chat(translitPrompt);
+            const jsonMatch = transliterationResponse.match(/\[[\s\S]*?\]/);
+            if (jsonMatch) {
+              const parsedWords = JSON.parse(jsonMatch[0]);
+              for (const item of parsedWords) {
+                if (result.words[item.idx]) {
+                  result.words[item.idx].word = item.word;
+                }
+              }
+            }
+          }
+        } catch (translitErr) {
+          console.error('Failed to transliterate to Hinglish:', translitErr);
+        }
+      }
+
+      let textTrack = useEditorStore.getState().tracks.find(t => t.type === 'text');
       if (!textTrack) {
         useEditorStore.getState().addTrack('text');
-        const updatedTracks = useEditorStore.getState().tracks;
-        textTrack = updatedTracks.find(t => t.type === 'text') || updatedTracks[updatedTracks.length - 1];
+        const freshTracks = useEditorStore.getState().tracks;
+        textTrack = freshTracks.find(t => t.type === 'text') ||
+                    freshTracks.find(t => t.type === 'video') ||
+                    freshTracks[0];
       }
 
       useEditorStore.getState().startTransaction();
