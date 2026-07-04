@@ -36,9 +36,10 @@ export function clearPreviewCaches() {
 
 function getCachedImage(
   mediaId: string,
-  url: string,
+  url: string | null,
   onLoad: () => void,
 ): HTMLImageElement | null {
+  if (!url) return null;
   const cached = imageCache.get(mediaId);
   if (cached && cached.complete && cached.naturalWidth > 0) {
     // Move to end to mark as most recently used
@@ -2762,21 +2763,27 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
 
   if (selectedOverLayerId) {
     for (const track of tracks) {
-      if (track.hidden || track.type !== 'video') continue;
+      if (track.hidden) continue;
       const ol = (track.overLayers || []).find((c) => c.id === selectedOverLayerId);
       if (ol && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
         activeClip = ol;
-        mediaItem = mediaLibrary.find((m) => m.id === ol.mediaId);
+        mediaItem = mediaLibrary.find((m) => m.id === ol.mediaId) ||
+          (ol.textSettings || ol.mediaId === 'text-placeholder'
+            ? { id: ol.mediaId, name: 'Text', type: 'text', duration: ol.duration, url: '', createdAt: Date.now() }
+            : null);
         break;
       }
     }
   } else if (selectedClipId) {
     for (const track of tracks) {
-      if (track.hidden || track.type !== 'video') continue;
+      if (track.hidden) continue;
       const clip = track.clips.find((c) => c.id === selectedClipId);
       if (clip && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
         activeClip = clip;
-        mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+        mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId) ||
+          (clip.textSettings || clip.mediaId === 'text-placeholder'
+            ? { id: clip.mediaId, name: 'Text', type: 'text', duration: clip.duration, url: '', createdAt: Date.now() }
+            : null);
         break;
       }
     }
@@ -2809,7 +2816,8 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
           vh = v.videoHeight;
         }
       } else if (mediaItem?.type === 'image') {
-        const img = getCachedImage(mediaItem.id, mediaItem.url, () => {});
+        // @ts-ignore
+        const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
         if (img && img.naturalWidth > 0) {
           vw = img.naturalWidth;
           vh = img.naturalHeight;
@@ -2939,10 +2947,27 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
       vh = v.videoHeight;
     }
   } else if (mediaItem?.type === 'image') {
-    const img = getCachedImage(mediaItem.id, mediaItem.url, () => {});
+    // @ts-ignore
+    const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
     if (img && img.naturalWidth > 0) {
       vw = img.naturalWidth;
       vh = img.naturalHeight;
+    }
+  } else if (mediaItem?.type === 'text' || (activeClip as any).textSettings || (activeClip as any).mediaId === 'text-placeholder') {
+    // Estimate text bounding box from textSettings
+    const ts = (activeClip as any).textSettings;
+    if (ts) {
+      const fontSize = Number(ts.fontSize) || 48;
+      const text = String(ts.text || '');
+      const lines = text.split('\n');
+      const estCharWidth = fontSize * 0.6;
+      const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
+      vw = Math.max(80, longestLine * estCharWidth + 40);
+      vh = lines.length * (fontSize * 1.35) + 20;
+    } else {
+      // Generic text box
+      vw = 300;
+      vh = 80;
     }
   }
 

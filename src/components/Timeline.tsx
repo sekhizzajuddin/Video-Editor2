@@ -1897,7 +1897,8 @@ Rules:
           if (!wordText) continue;
 
           const wordStart = clipStart + w.start;
-          const wordDur = Math.max(0.24, w.end - w.start + 0.04);
+          // Use EXACT word audio duration - no padding. Text shows ONLY while word is being spoken
+          const wordDur = Math.max(0.1, w.end - w.start);
 
           const color = colors[i % colors.length];
           const animIn = animations[i % animations.length];
