@@ -195,6 +195,8 @@ export function MediaPanel() {
   const [ttsLanguage, setTtsLanguage] = useState('en');
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsPitch, setTtsPitch] = useState(1);
+  const [ttsEngine, setTtsEngine] = useState<'standard' | 'neural'>('neural');
+  const [ttsVoice, setTtsVoice] = useState('alloy');
   const [isGeneratingTTS, setIsGeneratingTTS] = useState(false);
 
   const [isDragOver, setIsDragOver] = useState(false);
@@ -565,33 +567,89 @@ export function MediaPanel() {
     );
   };
 
-  const previewTTS = () => {
+  const previewTTS = async () => {
     if (!ttsText.trim()) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(ttsText);
-    utterance.lang = ttsLanguage;
-    utterance.rate = ttsRate;
-    utterance.pitch = ttsPitch;
-    window.speechSynthesis.speak(utterance);
+    
+    if (ttsEngine === 'neural') {
+      const puter = (window as any).puter;
+      if (puter) {
+        try {
+          setIsGeneratingTTS(true);
+          const audio = await puter.ai.txt2speech(ttsText, {
+            provider: 'openai',
+            model: 'tts-1',
+            voice: ttsVoice
+          });
+          audio.play();
+          setIsGeneratingTTS(false);
+        } catch (err) {
+          console.error('Puter TTS preview error:', err);
+          alert('Failed to preview neural voice. Falling back to standard system voice.');
+          setIsGeneratingTTS(false);
+          // Fallback to standard
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(ttsText);
+          utterance.lang = ttsLanguage;
+          utterance.rate = ttsRate;
+          utterance.pitch = ttsPitch;
+          window.speechSynthesis.speak(utterance);
+        }
+      } else {
+        // Fallback if Puter script is blocked/failed
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(ttsText);
+        utterance.lang = ttsLanguage;
+        utterance.rate = ttsRate;
+        utterance.pitch = ttsPitch;
+        window.speechSynthesis.speak(utterance);
+      }
+    } else {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(ttsText);
+      utterance.lang = ttsLanguage;
+      utterance.rate = ttsRate;
+      utterance.pitch = ttsPitch;
+      window.speechSynthesis.speak(utterance);
+    }
   };
 
   const generateTTS = async () => {
     if (!ttsText.trim()) return;
     setIsGeneratingTTS(true);
     try {
-      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${ttsLanguage}&client=tw-ob&q=${encodeURIComponent(ttsText)}`;
-      const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(ttsUrl)}`;
+      let blob: Blob;
+      let mimeType = 'audio/mp3';
       
-      const response = await fetch(proxiedUrl);
-      if (!response.ok) throw new Error('Failed to generate audio from TTS proxy.');
+      if (ttsEngine === 'neural') {
+        const puter = (window as any).puter;
+        if (!puter) {
+          throw new Error('Puter AI engine is not loaded. Make sure you have active internet connection.');
+        }
+        
+        const audio = await puter.ai.txt2speech(ttsText, {
+          provider: 'openai',
+          model: 'tts-1',
+          voice: ttsVoice
+        });
+        
+        const response = await fetch(audio.src);
+        if (!response.ok) throw new Error('Failed to fetch audio from neural source.');
+        blob = await response.blob();
+        mimeType = blob.type || 'audio/mp3';
+      } else {
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${ttsLanguage}&client=tw-ob&q=${encodeURIComponent(ttsText)}`;
+        const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(ttsUrl)}`;
+        
+        const response = await fetch(proxiedUrl);
+        if (!response.ok) throw new Error('Failed to generate audio from standard TTS proxy.');
+        blob = await response.blob();
+      }
       
-      const blob = await response.blob();
       const audioUrl = URL.createObjectURL(blob);
-      
       const mediaId = `tts_${Date.now()}`;
       const mediaItem = {
         id: mediaId,
-        name: `TTS: ${ttsText.slice(0, 20)}...`,
+        name: `${ttsEngine === 'neural' ? 'Neural' : 'TTS'}: ${ttsText.slice(0, 25)}...`,
         type: 'audio' as const,
         duration: 5,
         url: audioUrl,
@@ -614,7 +672,7 @@ export function MediaPanel() {
         };
 
         try {
-          await useEditorStore.getState().addMedia(finalMediaItem, new File([blob], `tts_${mediaId}.mp3`, { type: 'audio/mp3' }));
+          await useEditorStore.getState().addMedia(finalMediaItem, new File([blob], `tts_${mediaId}.mp3`, { type: mimeType }));
         } catch (err) {
           console.error('Failed to save TTS to DB:', err);
           useEditorStore.getState().addMedia(finalMediaItem);
@@ -624,9 +682,9 @@ export function MediaPanel() {
         setTtsText('');
         setActiveMediaTab('project');
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('TTS Generation error:', err);
-      alert('Failed to generate TTS audio. Please try again.');
+      alert(`Failed to generate TTS audio: ${err.message || 'Unknown error'}`);
       setIsGeneratingTTS(false);
     }
   };
@@ -1020,64 +1078,114 @@ export function MediaPanel() {
                 </div>
               </div>
 
-              {/* Language Selector */}
+              {/* Engine Toggle */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">Voice Language</label>
-                <select
-                  value={ttsLanguage}
-                  onChange={(e) => setTtsLanguage(e.target.value)}
-                  className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
-                >
-                  <option value="en">English (United States)</option>
-                  <option value="es">Spanish (Spain)</option>
-                  <option value="fr">French (France)</option>
-                  <option value="de">German (Germany)</option>
-                  <option value="it">Italian (Italy)</option>
-                  <option value="ja">Japanese (Japan)</option>
-                  <option value="ko">Korean (South Korea)</option>
-                  <option value="zh">Chinese (Mandarin)</option>
-                  <option value="hi">Hindi (India)</option>
-                  <option value="pt">Portuguese (Portugal)</option>
-                  <option value="ru">Russian (Russia)</option>
-                </select>
-              </div>
-
-              {/* Controls Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Speed / Rate */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
-                    <span>Speed</span>
-                    <span className="font-mono text-white">{ttsRate}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2"
-                    step="0.1"
-                    value={ttsRate}
-                    onChange={(e) => setTtsRate(Number(e.target.value))}
-                    className="w-full accent-amber-500"
-                  />
-                </div>
-
-                {/* Pitch */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
-                    <span>Pitch</span>
-                    <span className="font-mono text-white">{ttsPitch}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="1.5"
-                    step="0.1"
-                    value={ttsPitch}
-                    onChange={(e) => setTtsPitch(Number(e.target.value))}
-                    className="w-full accent-amber-500"
-                  />
+                <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">TTS Voice Quality</label>
+                <div className="flex gap-1.5 bg-[#141414] p-1 border border-[#3e3e3e] rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setTtsEngine('neural')}
+                    className={`flex-1 py-1.5 text-xs rounded transition-all font-medium ${
+                      ttsEngine === 'neural'
+                        ? 'bg-amber-500 text-black font-semibold'
+                        : 'text-[#a0a0a0] hover:text-white'
+                    }`}
+                  >
+                    🔥 Neural (Ultra-Natural)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTtsEngine('standard')}
+                    className={`flex-1 py-1.5 text-xs rounded transition-all font-medium ${
+                      ttsEngine === 'standard'
+                        ? 'bg-amber-500 text-black font-semibold'
+                        : 'text-[#a0a0a0] hover:text-white'
+                    }`}
+                  >
+                    Standard
+                  </button>
                 </div>
               </div>
+
+              {ttsEngine === 'neural' ? (
+                /* Neural Voices selector */
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">AI Voice Profile (OpenAI)</label>
+                  <select
+                    value={ttsVoice}
+                    onChange={(e) => setTtsVoice(e.target.value)}
+                    className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                  >
+                    <option value="alloy">Alloy (Warm, Balanced)</option>
+                    <option value="echo">Echo (Crisp, Direct)</option>
+                    <option value="fable">Fable (Narrator, Dramatic)</option>
+                    <option value="onyx">Onyx (Deep, Professional)</option>
+                    <option value="nova">Nova (Energetic, Clear)</option>
+                    <option value="shimmer">Shimmer (Professional, Friendly)</option>
+                  </select>
+                </div>
+              ) : (
+                /* Standard Languages selector */
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">Voice Language</label>
+                    <select
+                      value={ttsLanguage}
+                      onChange={(e) => setTtsLanguage(e.target.value)}
+                      className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                    >
+                      <option value="en">English (United States)</option>
+                      <option value="es">Spanish (Spain)</option>
+                      <option value="fr">French (France)</option>
+                      <option value="de">German (Germany)</option>
+                      <option value="it">Italian (Italy)</option>
+                      <option value="ja">Japanese (Japan)</option>
+                      <option value="ko">Korean (South Korea)</option>
+                      <option value="zh">Chinese (Mandarin)</option>
+                      <option value="hi">Hindi (India)</option>
+                      <option value="pt">Portuguese (Portugal)</option>
+                      <option value="ru">Russian (Russia)</option>
+                    </select>
+                  </div>
+
+                  {/* Controls Grid */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Speed / Rate */}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
+                        <span>Speed</span>
+                        <span className="font-mono text-white">{ttsRate}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="2"
+                        step="0.1"
+                        value={ttsRate}
+                        onChange={(e) => setTtsRate(Number(e.target.value))}
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+
+                    {/* Pitch */}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
+                        <span>Pitch</span>
+                        <span className="font-mono text-white">{ttsPitch}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="1.5"
+                        step="0.1"
+                        value={ttsPitch}
+                        onChange={(e) => setTtsPitch(Number(e.target.value))}
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Action Buttons */}
               <div className="flex gap-2 pt-1">
