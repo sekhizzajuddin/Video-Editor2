@@ -1754,37 +1754,43 @@ export function PreviewCanvas() {
     ctx.restore(); // Restore from global canvas resolution scale
   }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying]);
 
+  // ── Unified render loop to prevent flickering during scrubbing ──
+  // Use a frame-pending flag + single rAF loop instead of canceling/rescheduling.
   const renderCanvasRef = useRef(renderCanvas);
+  const framePendingRef = useRef(true);
+  const rafActiveRef = useRef(false);
+
   useEffect(() => {
     renderCanvasRef.current = renderCanvas;
   });
 
-  // Kick off render whenever dependencies change, throttled by requestAnimationFrame
+  // Mark that a new frame is needed whenever renderCanvas changes
   useEffect(() => {
-    let rId: number;
-    const draw = () => {
-      renderCanvasRef.current();
-    };
-    rId = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(rId);
+    framePendingRef.current = true;
   }, [renderCanvas]);
 
-  // During playback, also schedule continuous redraws so video frames update
   useEffect(() => {
-    if (!isPlaying) return;
-    let id: number;
-    const draw = () => {
-      renderCanvasRef.current();
-      id = requestAnimationFrame(draw);
-    };
-    id = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(id);
-  }, [isPlaying]);
+    // If playback starts, always draw (the rAF loop handles continuous frames)
+    framePendingRef.current = true;
+    if (rafActiveRef.current) return;
 
-  // -------------------------------------------------------------------
-  // Interaction handlers (Viewport Gestures & Tools)
-  // -------------------------------------------------------------------
-  
+    rafActiveRef.current = true;
+    let rafId: number;
+
+    const tick = () => {
+      if (framePendingRef.current) {
+        framePendingRef.current = false;
+        renderCanvasRef.current();
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+      rafActiveRef.current = false;
+    };
+  }, []);
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
