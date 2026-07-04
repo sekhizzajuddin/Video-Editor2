@@ -169,7 +169,20 @@ const TEXT_TEMPLATES = [
 ];
 
 export function MediaPanel() {
-  const { mediaLibrary, activeMediaTab, setActiveMediaTab, addMedia, removeMedia, insertTextClip, addBeatMarkers, clearBeatMarkers } = useEditorStore();
+  const {
+    mediaLibrary,
+    activeMediaTab,
+    setActiveMediaTab,
+    addMedia,
+    removeMedia,
+    insertTextClip,
+    addBeatMarkers,
+    clearBeatMarkers,
+    projectTemplates,
+    saveProjectAsTemplate,
+    deleteProjectTemplate,
+    loadProjectTemplate,
+  } = useEditorStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -181,6 +194,11 @@ export function MediaPanel() {
   const [previewItem, setPreviewItem] = useState<any | null>(null);
   const [templateCategory, setTemplateCategory] = useState<TemplateCategory>('all');
   const [detectingBeatId, setDetectingBeatId] = useState<string | null>(null);
+  const [templateSubTab, setTemplateSubTab] = useState<'title' | 'project'>('title');
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateDesc, setTemplateDesc] = useState('');
+  const [confirmLoadTemplateId, setConfirmLoadTemplateId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
@@ -915,54 +933,155 @@ export function MediaPanel() {
           const filtered = templateCategory === 'all'
             ? TITLE_TEMPLATES
             : TITLE_TEMPLATES.filter((t) => t.category === templateCategory);
+          
           return (
-            <div className="flex-1 overflow-y-auto flex flex-col">
-              {/* Category filter pills */}
-              <div className="flex gap-1 p-2 flex-wrap border-b border-[#3e3e3e]">
-                {TEMPLATE_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setTemplateCategory(cat.id)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                      templateCategory === cat.id
-                        ? 'bg-amber-500 text-black'
-                        : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
-                    }`}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Sub-Tab Selector */}
+              <div className="flex border-b border-[#3e3e3e] bg-[#222]">
+                <button
+                  onClick={() => setTemplateSubTab('title')}
+                  className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
+                    templateSubTab === 'title'
+                      ? 'border-amber-500 text-amber-500 bg-[#2d2d2d]'
+                      : 'border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#252525]'
+                  }`}
+                >
+                  Text / Titles
+                </button>
+                <button
+                  onClick={() => setTemplateSubTab('project')}
+                  className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
+                    templateSubTab === 'project'
+                      ? 'border-amber-500 text-amber-500 bg-[#2d2d2d]'
+                      : 'border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#252525]'
+                  }`}
+                >
+                  Project Layouts
+                </button>
               </div>
-              <p className="text-[10px] text-[#6a6a6a] px-3 py-1.5">Drag onto a Text track to apply</p>
-              <div className="flex flex-col gap-1 p-2">
-                {filtered.map((tmpl) => (
-                  <div
-                    key={tmpl.id}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('application/procut-template', tmpl.id);
-                      e.dataTransfer.effectAllowed = 'copy';
-                    }}
-                    className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-grab transition-all group"
-                  >
-                    {/* Color accent dot */}
-                    <div
-                      className="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center"
-                      style={{ background: `${tmpl.accentColor}22`, border: `1px solid ${tmpl.accentColor}44` }}
-                    >
-                      <div className="w-3 h-3 rounded-full" style={{ background: tmpl.accentColor }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-white font-medium truncate">{tmpl.name}</p>
-                      <p className="text-[9px] text-[#6a6a6a] truncate">{tmpl.description}</p>
-                      <p className="text-[8px] mt-0.5" style={{ color: tmpl.accentColor + 'cc' }}>
-                        {tmpl.defaultDuration}s · {tmpl.category}
-                      </p>
-                    </div>
-                    <span className="text-[8px] text-amber-400/40 group-hover:text-amber-400/80 transition-colors shrink-0">DRAG</span>
+
+              {templateSubTab === 'title' ? (
+                <div className="flex-1 overflow-y-auto flex flex-col">
+                  {/* Category filter pills */}
+                  <div className="flex gap-1 p-2 flex-wrap border-b border-[#3e3e3e] bg-[#1e1e1e]">
+                    {TEMPLATE_CATEGORIES.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setTemplateCategory(cat.id)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                          templateCategory === cat.id
+                            ? 'bg-amber-500 text-black'
+                            : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <p className="text-[10px] text-[#6a6a6a] px-3 py-1.5">Drag onto a Text track to apply</p>
+                  <div className="flex flex-col gap-1 p-2">
+                    {filtered.map((tmpl) => (
+                      <div
+                        key={tmpl.id}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/procut-template', tmpl.id);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-grab transition-all group"
+                      >
+                        {/* Color accent dot */}
+                        <div
+                          className="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center"
+                          style={{ background: `${tmpl.accentColor}22`, border: `1px solid ${tmpl.accentColor}44` }}
+                        >
+                          <div className="w-3 h-3 rounded-full" style={{ background: tmpl.accentColor }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-white font-medium truncate">{tmpl.name}</p>
+                          <p className="text-[9px] text-[#6a6a6a] truncate">{tmpl.description}</p>
+                          <p className="text-[8px] mt-0.5" style={{ color: tmpl.accentColor + 'cc' }}>
+                            {tmpl.defaultDuration}s · {tmpl.category}
+                          </p>
+                        </div>
+                        <span className="text-[8px] text-amber-400/40 group-hover:text-amber-400/80 transition-colors shrink-0">DRAG</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto flex flex-col p-2 space-y-3">
+                  {/* Action card: Save Timeline */}
+                  <button
+                    onClick={() => setShowSaveTemplateModal(true)}
+                    className="w-full py-3 px-4 rounded border border-dashed border-amber-500/30 hover:border-amber-500 bg-amber-500/5 hover:bg-amber-500/10 text-amber-400 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
+                  >
+                    <span>Save Current Timeline as Template</span>
+                  </button>
+
+                  <div className="flex flex-col gap-2">
+                    {projectTemplates.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-8 text-center text-[#6a6a6a]">
+                        <p className="text-xs font-medium">No Project Templates saved yet</p>
+                        <p className="text-[10px] mt-1">Configure your tracks and clips, then click save above to reuse it.</p>
+                      </div>
+                    ) : (
+                      projectTemplates.map((tmpl) => {
+                        const dateStr = new Date(tmpl.createdAt).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric'
+                        });
+
+                        return (
+                          <div
+                            key={tmpl.id}
+                            className="flex flex-col p-3 rounded border border-[#3e3e3e] bg-[#1e1e1e] hover:border-amber-500/30 transition-all group"
+                          >
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="min-w-0">
+                                <h4 className="text-xs text-white font-semibold truncate">{tmpl.name}</h4>
+                                {tmpl.description && (
+                                  <p className="text-[10px] text-[#a0a0a0] mt-0.5 line-clamp-2 leading-relaxed">
+                                    {tmpl.description}
+                                  </p>
+                                )}
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  await deleteProjectTemplate(tmpl.id);
+                                }}
+                                className="p-1 hover:bg-[#2d2d2d] rounded text-[#a0a0a0] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                                title="Delete Template"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-[#2d2d2d]">
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[8px] text-[#6a6a6a]">
+                                  {dateStr}
+                                </span>
+                                <span className="text-[9px] text-[#a0a0a0] font-medium">
+                                  {tmpl.tracks.length} track(s) · {tmpl.totalDuration.toFixed(1)}s
+                                </span>
+                              </div>
+
+                              <button
+                                onClick={() => setConfirmLoadTemplateId(tmpl.id)}
+                                className="px-3 py-1 text-[10px] font-semibold text-black bg-amber-500 hover:bg-amber-400 rounded transition-colors"
+                              >
+                                Load
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -1133,6 +1252,103 @@ export function MediaPanel() {
         onChange={handleSrtImport}
         className="hidden"
       />
+
+      {/* Save Template Modal */}
+      {showSaveTemplateModal && (
+        <div className="fixed inset-0 bg-black/60 z-[120] flex items-center justify-center">
+          <div className="bg-[#2d2d2d] border border-[#3e3e3e] rounded-lg p-5 w-80 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-white uppercase tracking-wider">Save Project Template</h4>
+              <button
+                onClick={() => setShowSaveTemplateModal(false)}
+                className="text-[#a0a0a0] hover:text-white transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-[#a0a0a0]">Template Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. My Vlog Layout"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  className="bg-[#1e1e1e] border border-[#3e3e3e] rounded px-2 py-1.5 text-xs text-white placeholder-[#6a6a6a] focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-[#a0a0a0]">Description</label>
+                <textarea
+                  placeholder="What is this template for?"
+                  value={templateDesc}
+                  rows={2}
+                  onChange={(e) => setTemplateDesc(e.target.value)}
+                  className="bg-[#1e1e1e] border border-[#3e3e3e] rounded px-2 py-1.5 text-xs text-white placeholder-[#6a6a6a] focus:outline-none focus:border-amber-500 resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={async () => {
+                  if (!templateName.trim()) return;
+                  await saveProjectAsTemplate(templateName, templateDesc);
+                  setTemplateName('');
+                  setTemplateDesc('');
+                  setShowSaveTemplateModal(false);
+                }}
+                disabled={!templateName.trim()}
+                className="flex-1 py-1.5 text-xs font-medium text-black bg-amber-500 hover:bg-amber-400 disabled:opacity-50 rounded transition-colors"
+              >
+                Save Template
+              </button>
+              <button
+                onClick={() => setShowSaveTemplateModal(false)}
+                className="flex-1 py-1.5 text-xs font-medium text-[#a0a0a0] hover:text-white bg-[#3e3e3e] hover:bg-[#4d4d4d] rounded transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Template Confirmation Modal */}
+      {confirmLoadTemplateId && (
+        <div className="fixed inset-0 bg-black/60 z-[120] flex items-center justify-center">
+          <div className="bg-[#2d2d2d] border border-red-500/20 rounded-lg p-5 w-80 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-2 text-amber-500">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider">Overwrite Timeline?</h4>
+            </div>
+
+            <p className="text-xs text-[#a0a0a0] leading-relaxed">
+              Loading this template will **completely overwrite** your current timeline tracks and layout. This action can be undone.
+            </p>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={async () => {
+                  await loadProjectTemplate(confirmLoadTemplateId);
+                  setConfirmLoadTemplateId(null);
+                }}
+                className="flex-1 py-1.5 text-xs font-medium text-white bg-amber-500 hover:bg-amber-600 rounded transition-colors"
+              >
+                Load Template
+              </button>
+              <button
+                onClick={() => setConfirmLoadTemplateId(null)}
+                className="flex-1 py-1.5 text-xs font-medium text-[#a0a0a0] hover:text-white bg-[#3e3e3e] hover:bg-[#4d4d4d] rounded transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

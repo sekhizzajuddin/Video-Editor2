@@ -11,9 +11,10 @@ import type {
   Transition,
   ClipTextSettings,
   OverLayerClip,
+  ProjectTemplate,
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
-import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB } from '@/utils/projectPersistence';
+import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB } from '@/utils/projectPersistence';
 
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -263,6 +264,12 @@ interface EditorActions {
   // Beat Markers
   addBeatMarkers: (clipId: string, times: number[]) => void;
   clearBeatMarkers: (clipId: string) => void;
+
+  // Project Templates
+  saveProjectAsTemplate: (name: string, description: string) => Promise<void>;
+  deleteProjectTemplate: (templateId: string) => Promise<void>;
+  loadProjectTemplate: (templateId: string) => Promise<void>;
+  loadTemplatesFromDB: () => Promise<void>;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -301,6 +308,7 @@ const initialState: EditorState = {
   outPoint: null,
   markers: [],
   beatMarkers: [],
+  projectTemplates: [],
   aspectRatio: '16:9',
   zoomLevel: 80,
   scrollLeft: 0,
@@ -1777,10 +1785,107 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: 0
       });
       get().recalcTotalDuration();
+      // Auto load templates from IndexedDB
+      get().loadTemplatesFromDB().catch(err => console.error('Failed to load templates:', err));
       return true;
     } catch (err) {
       console.error('Failed to load project:', err);
       return false;
+    }
+  },
+
+  saveProjectAsTemplate: async (name, description) => {
+    const { tracks, mediaLibrary, totalDuration, projectTemplates } = get();
+    
+    // Create new template object
+    const newTemplate: ProjectTemplate = {
+      id: generateId(),
+      name,
+      description,
+      tracks: JSON.parse(JSON.stringify(tracks)),
+      mediaLibrary: JSON.parse(JSON.stringify(mediaLibrary)),
+      totalDuration,
+      createdAt: Date.now(),
+    };
+
+    const newTemplates = [...projectTemplates, newTemplate];
+    
+    // Update local state
+    set({ projectTemplates: newTemplates });
+    
+    // Persist to IndexedDB
+    try {
+      await saveTemplatesToDB(newTemplates);
+    } catch (err) {
+      console.error('Failed to save template to IndexedDB:', err);
+    }
+  },
+
+  deleteProjectTemplate: async (templateId) => {
+    const { projectTemplates } = get();
+    const newTemplates = projectTemplates.filter((t) => t.id !== templateId);
+    
+    set({ projectTemplates: newTemplates });
+    
+    try {
+      await saveTemplatesToDB(newTemplates);
+    } catch (err) {
+      console.error('Failed to delete template from IndexedDB:', err);
+    }
+  },
+
+  loadProjectTemplate: async (templateId) => {
+    const { projectTemplates, mediaLibrary } = get();
+    const template = projectTemplates.find((t) => t.id === templateId);
+    if (!template) return;
+
+    // Save history snapshot first
+    get().saveSnapshot();
+
+    // Resolve template's PENDING_RESTORE media items using resolveMediaItemFromDB
+    const resolvedMediaLibrary: MediaItem[] = [];
+    
+    for (const item of template.mediaLibrary) {
+      const existing = mediaLibrary.find((m) => m.id === item.id);
+      if (existing && existing.url !== 'PENDING_RESTORE') {
+        resolvedMediaLibrary.push(existing);
+      } else {
+        const resolved = await resolveMediaItemFromDB(item);
+        resolvedMediaLibrary.push(resolved);
+      }
+    }
+
+    // Merge in any other existing media items that are not in the template
+    const mergedMediaLibrary = [...resolvedMediaLibrary];
+    for (const item of mediaLibrary) {
+      if (!mergedMediaLibrary.some((m) => m.id === item.id)) {
+        mergedMediaLibrary.push(item);
+      }
+    }
+
+    // Deep clone the template tracks
+    const loadedTracks = JSON.parse(JSON.stringify(template.tracks));
+
+    set({
+      tracks: loadedTracks,
+      mediaLibrary: mergedMediaLibrary,
+      currentTime: 0,
+      selectedClipId: null,
+      selectedClipIds: [],
+      selectedOverLayerId: null,
+      selectedTransitionClipId: null,
+    });
+
+    get().recalcTotalDuration();
+    get().saveSnapshot();
+  },
+
+  loadTemplatesFromDB: async () => {
+    try {
+      const templates = await getTemplatesFromDB();
+      set({ projectTemplates: templates });
+    } catch (err) {
+      console.error('Failed to load templates from IndexedDB:', err);
     }
   },
 

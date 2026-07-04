@@ -321,3 +321,98 @@ export async function clearProjectDB(): Promise<void> {
     transaction.onerror = () => reject(transaction.error);
   });
 }
+
+/**
+ * Saves project templates to IndexedDB, cleaning temporary blob URLs.
+ */
+export async function saveTemplatesToDB(templates: any[]): Promise<void> {
+  const db = await getDB();
+  const cleanTemplates = templates.map(template => ({
+    ...template,
+    mediaLibrary: template.mediaLibrary.map((item: any) => ({
+      ...item,
+      url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
+      thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
+      frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+    })),
+    tracks: template.tracks.map((track: any) => ({
+      ...track,
+      clips: track.clips.map((clip: any) => ({
+        ...clip,
+        isPreview: false
+      }))
+    }))
+  }));
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('project', 'readwrite');
+    const store = transaction.objectStore('project');
+    store.put(cleanTemplates, 'templates');
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
+ * Loads project templates from IndexedDB.
+ */
+export async function getTemplatesFromDB(): Promise<any[]> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('project', 'readonly');
+    const store = transaction.objectStore('project');
+    const request = store.get('templates');
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Resolves a media item's PENDING_RESTORE state by retrieving the file from IndexedDB
+ * and generating Blob URLs, thumbnails, and frameStrips.
+ */
+export async function resolveMediaItemFromDB(item: MediaItem): Promise<MediaItem> {
+  if (item.type === 'text' || item.type === 'fx') {
+    return item;
+  }
+
+  try {
+    const file = await getFileFromDB(item.id);
+    if (file) {
+      const objectUrl = URL.createObjectURL(file);
+
+      // Regenerate thumbnail if present
+      let newThumb = undefined;
+      if (item.thumbnail === 'PENDING_RESTORE' || !item.thumbnail) {
+        if (item.type === 'image') {
+          newThumb = objectUrl;
+        } else if (item.type === 'video') {
+          newThumb = await generateVideoThumbnail(objectUrl, item.width, item.height);
+        }
+      } else {
+        newThumb = item.thumbnail;
+      }
+
+      // Handle frameStrip restoration
+      let restoredFrameStrip = item.frameStrip;
+      if (!restoredFrameStrip || restoredFrameStrip.includes('PENDING_RESTORE')) {
+        if (item.type === 'video') {
+          restoredFrameStrip = await generateFrameStrip(objectUrl, item.duration || 10, 10);
+        } else if (item.type === 'image') {
+          restoredFrameStrip = [objectUrl];
+        }
+      }
+
+      return {
+        ...item,
+        url: objectUrl,
+        thumbnail: newThumb,
+        frameStrip: restoredFrameStrip,
+      };
+    }
+  } catch (err) {
+    console.error('Failed to resolve media item from DB:', err);
+  }
+
+  return item;
+}

@@ -406,6 +406,7 @@ export interface EditorState {
   };
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];
+  projectTemplates: ProjectTemplate[];
 }
 
 export interface EditorSnapshot {
@@ -440,4 +441,14 @@ export interface Effect {
   name: string;
   type: 'color' | 'filter' | 'transform' | 'audio';
   params: Record<string, unknown>;
+}
+
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  tracks: TimelineTrack[];
+  mediaLibrary: MediaItem[];
+  totalDuration: number;
+  createdAt: number;
 }
