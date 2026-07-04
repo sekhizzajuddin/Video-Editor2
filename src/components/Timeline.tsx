@@ -521,6 +521,30 @@ async function handlePuterError(err: any, taskName: string): Promise<void> {
   }
 }
 
+function parseTransliteratedResponse(responseText: string): any[] | null {
+  try {
+    return JSON.parse(responseText.trim());
+  } catch (_) {
+    try {
+      const matches = responseText.match(/\[\s*\{[\s\S]*?\}\s*\]/g);
+      if (matches) {
+        for (const m of matches) {
+          if (m.includes('idx') && (m.includes('word') || m.includes('translit'))) {
+            return JSON.parse(m);
+          }
+        }
+      }
+      const simpleMatch = responseText.match(/\[[\s\S]*?\]/);
+      if (simpleMatch) {
+        return JSON.parse(simpleMatch[0]);
+      }
+    } catch (err) {
+      console.error('Failed to parse match:', err);
+    }
+  }
+  return null;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_TRACK_HEIGHT = 56;
@@ -1735,14 +1759,18 @@ IMPORTANT:
 - Keep emojis, punctuation, or numbers as they are.`;
 
             const transliterationResponse = await puter.ai.chat(translitPrompt);
-            const jsonMatch = transliterationResponse.match(/\[[\s\S]*?\]/);
-            if (jsonMatch) {
-              const parsedWords = JSON.parse(jsonMatch[0]);
+            console.log('Transliteration response from Puter:', transliterationResponse);
+            const parsedWords = parseTransliteratedResponse(transliterationResponse);
+            if (parsedWords && Array.isArray(parsedWords)) {
               for (const item of parsedWords) {
-                if (result.words[item.idx]) {
-                  result.words[item.idx].word = item.word;
+                if (item && typeof item === 'object' && 'idx' in item && 'word' in item) {
+                  if (result.words[item.idx]) {
+                    result.words[item.idx].word = String(item.word);
+                  }
                 }
               }
+            } else {
+              throw new Error('Puter AI did not return a valid JSON array for transliteration.');
             }
           }
         } catch (translitErr) {
@@ -1754,9 +1782,10 @@ IMPORTANT:
       if (!textTrack) {
         useEditorStore.getState().addTrack('text');
         const freshTracks = useEditorStore.getState().tracks;
-        textTrack = freshTracks.find(t => t.type === 'text') ||
-                    freshTracks.find(t => t.type === 'video') ||
-                    freshTracks[0];
+        textTrack = freshTracks.find(t => t.type === 'text') || freshTracks.find(t => t.type === 'video');
+        if (!textTrack) {
+          throw new Error('No text or video track is available to place subtitles.');
+        }
       }
 
       useEditorStore.getState().startTransaction();

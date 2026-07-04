@@ -1597,127 +1597,138 @@ export function PreviewCanvas() {
       ctx.restore();
     };
 
-    // Pass 1: Render main clips and transitions for all visual tracks
-    for (const track of visualTracks) {
-      const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
-      let activeTransition: { clipA: any; clipB: any; trans: any; t: number } | null = null;
+    // Helper function to draw main clips on a list of tracks
+    const drawMainClipsForTracks = (tracksList: any[]) => {
+      for (const track of tracksList) {
+        const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+        let activeTransition: { clipA: any; clipB: any; trans: any; t: number } | null = null;
 
-      // Check if currentTime falls into any active transition zone
-      for (let idx = 1; idx < sortedClips.length; idx++) {
-        const clipB = sortedClips[idx];
-        const clipA = sortedClips[idx - 1];
-        const gap = clipB.startTime - (clipA.startTime + clipA.duration);
+        // Check if currentTime falls into any active transition zone
+        for (let idx = 1; idx < sortedClips.length; idx++) {
+          const clipB = sortedClips[idx];
+          const clipA = sortedClips[idx - 1];
+          const gap = clipB.startTime - (clipA.startTime + clipA.duration);
 
-        if (Math.abs(gap) < 0.1 && clipB.transitionIn) {
-          const trans = clipB.transitionIn;
-          const duration = Math.max(0.01, trans.duration);
-          const alignment = trans.params?.alignment || 'center';
+          if (Math.abs(gap) < 0.1 && clipB.transitionIn) {
+            const trans = clipB.transitionIn;
+            const duration = Math.max(0.01, trans.duration);
+            const alignment = trans.params?.alignment || 'center';
 
-          let leftSec = clipB.startTime - duration / 2;
-          if (alignment === 'left') {
-            leftSec = clipB.startTime;
-          } else if (alignment === 'right') {
-            leftSec = clipB.startTime - duration;
+            let leftSec = clipB.startTime - duration / 2;
+            if (alignment === 'left') {
+              leftSec = clipB.startTime;
+            } else if (alignment === 'right') {
+              leftSec = clipB.startTime - duration;
+            }
+            const rightSec = leftSec + duration;
+
+            if (currentTime >= leftSec && currentTime < rightSec) {
+              const t = (currentTime - leftSec) / duration;
+              activeTransition = { clipA, clipB, trans, t };
+              break;
+            }
           }
-          const rightSec = leftSec + duration;
+        }
 
-          if (currentTime >= leftSec && currentTime < rightSec) {
-            const t = (currentTime - leftSec) / duration;
-            activeTransition = { clipA, clipB, trans, t };
-            break;
+        if (activeTransition) {
+          try {
+            const { clipA, clipB, trans, t } = activeTransition;
+            const type = trans.type;
+            const nameLower = trans.name.toLowerCase();
+
+            if (nameLower.includes('dissolve')) {
+              drawSingleClip(clipA, 1 - t);
+              drawSingleClip(clipB, t);
+            } else if (nameLower.includes('fade')) {
+              if (t < 0.5) {
+                drawSingleClip(clipA, 1 - t * 2);
+              } else {
+                drawSingleClip(clipB, (t - 0.5) * 2);
+              }
+            } else if (type === 'wipe') {
+              if (nameLower.includes('left')) {
+                drawSingleClip(clipA, 1);
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(W * (1 - t), 0, W * t, H);
+                ctx.clip();
+                drawSingleClip(clipB, 1);
+                ctx.restore();
+              } else {
+                drawSingleClip(clipA, 1);
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, 0, W * t, H);
+                ctx.clip();
+                drawSingleClip(clipB, 1);
+                ctx.restore();
+              }
+            } else if (type === 'slide') {
+              if (nameLower.includes('up')) {
+                drawSingleClip(clipA, 1, { translateY: -H * t });
+                drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
+              } else if (nameLower.includes('down')) {
+                drawSingleClip(clipA, 1, { translateY: H * t });
+                drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
+              } else {
+                drawSingleClip(clipA, 1, { translateX: -W * t });
+                drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
+              }
+            } else if (type === 'zoom') {
+              if (nameLower.includes('out')) {
+                drawSingleClip(clipB, 1);
+                drawSingleClip(clipA, 1 - t, { scale: 1 - t });
+                drawSingleClip(clipB, t, { scale: t });
+              }
+            } else {
+              drawSingleClip(clipA, 1 - t);
+              drawSingleClip(clipB, t);
+            }
+          } catch (err) {
+            console.error('[CanvasRenderError] Failed to draw transition:', err);
+            try { ctx.restore(); } catch (_) {}
+          }
+          continue;
+        }
+
+        const clip = sortedClips.find(
+          (c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration,
+        );
+        if (clip) {
+          try {
+            drawSingleClip(clip, 1);
+          } catch (err) {
+            console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
+            try { ctx.restore(); } catch (_) {}
           }
         }
       }
+    };
 
-      if (activeTransition) {
-        try {
-          const { clipA, clipB, trans, t } = activeTransition;
-          const type = trans.type;
-          const nameLower = trans.name.toLowerCase();
+    const drawOverLayersForTracks = (tracksList: any[]) => {
+      for (const track of tracksList) {
+        const activeOverLayers = (track.overLayers || []).filter(
+          (ol: any) => ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration
+        );
 
-          if (nameLower.includes('dissolve')) {
-            drawSingleClip(clipA, 1 - t);
-            drawSingleClip(clipB, t);
-          } else if (nameLower.includes('fade')) {
-            if (t < 0.5) {
-              drawSingleClip(clipA, 1 - t * 2);
-            } else {
-              drawSingleClip(clipB, (t - 0.5) * 2);
-            }
-          } else if (type === 'wipe') {
-            if (nameLower.includes('left')) {
-              drawSingleClip(clipA, 1);
-              ctx.save();
-              ctx.beginPath();
-              ctx.rect(W * (1 - t), 0, W * t, H);
-              ctx.clip();
-              drawSingleClip(clipB, 1);
-              ctx.restore();
-            } else {
-              drawSingleClip(clipA, 1);
-              ctx.save();
-              ctx.beginPath();
-              ctx.rect(0, 0, W * t, H);
-              ctx.clip();
-              drawSingleClip(clipB, 1);
-              ctx.restore();
-            }
-          } else if (type === 'slide') {
-            if (nameLower.includes('up')) {
-              drawSingleClip(clipA, 1, { translateY: -H * t });
-              drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
-            } else if (nameLower.includes('down')) {
-              drawSingleClip(clipA, 1, { translateY: H * t });
-              drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
-            } else {
-              drawSingleClip(clipA, 1, { translateX: -W * t });
-              drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
-            }
-          } else if (type === 'zoom') {
-            if (nameLower.includes('out')) {
-              drawSingleClip(clipB, 1);
-              drawSingleClip(clipA, 1 - t, { scale: 1 - t });
-              drawSingleClip(clipB, t, { scale: t });
-            }
-          } else {
-            drawSingleClip(clipA, 1 - t);
-            drawSingleClip(clipB, t);
+        for (const ol of activeOverLayers) {
+          try {
+            drawSingleClip(ol as any, 1);
+          } catch (err) {
+            console.error('[CanvasRenderError] Failed to draw over layer:', ol.id, err);
+            try { ctx.restore(); } catch (_) {}
           }
-        } catch (err) {
-          console.error('[CanvasRenderError] Failed to draw transition:', err);
-          try { ctx.restore(); } catch (_) {}
-        }
-        continue;
-      }
-
-      const clip = sortedClips.find(
-        (c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration,
-      );
-      if (clip) {
-        try {
-          drawSingleClip(clip, 1);
-        } catch (err) {
-          console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
-          try { ctx.restore(); } catch (_) {}
         }
       }
-    }
+    };
 
-    // Pass 2: Draw active over-layers on top of all main track clips for all visual tracks
-    for (const track of visualTracks) {
-      const activeOverLayers = (track.overLayers || []).filter(
-        (ol) => ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration
-      );
+    // Render Video tracks first (Pass 1 & 2 for video)
+    drawMainClipsForTracks(videoTracks);
+    drawOverLayersForTracks(videoTracks);
 
-      for (const ol of activeOverLayers) {
-        try {
-          drawSingleClip(ol as any, 1);
-        } catch (err) {
-          console.error('[CanvasRenderError] Failed to draw over layer:', ol.id, err);
-          try { ctx.restore(); } catch (_) {}
-        }
-      }
-    }
+    // Render Text tracks second (Pass 3 & 4 for text) so they are ALWAYS on top of video clips AND video overlayers
+    drawMainClipsForTracks(textTracks);
+    drawOverLayersForTracks(textTracks);
 
     if (!anyClipDrawn) {
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
