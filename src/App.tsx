@@ -9,6 +9,7 @@ import { AudioMixer } from '@/components/AudioMixer';
 import { ExportModal } from '@/components/ExportModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { useEditorStore } from '@/store/editorStore';
+import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 import './App.css';
 
 function App() {
@@ -35,6 +36,7 @@ function App() {
     removeSelectedKeyframeLines,
     removeOverLayer,
     selectOverLayer,
+    settings,
   } = useEditorStore();
 
   const [leftWidth, setLeftWidth] = useState(250);
@@ -53,119 +55,115 @@ function App() {
         return;
       }
 
-      switch (e.key.toLowerCase()) {
-        case ' ':
-          e.preventDefault();
-          // Don't toggle playback if 'hand' tool is active (Space is used for panning in canvas)
+      const pressed = getShortcutString(e);
+      if (!pressed) return;
+
+      const customShortcuts = settings.keyboardShortcuts || {};
+      const shortcutsMap: Record<string, string> = {};
+      for (const def of DEFAULT_SHORTCUTS) {
+        shortcutsMap[def.id] = customShortcuts[def.id] !== undefined ? customShortcuts[def.id] : def.defaultKey;
+      }
+
+      // Find if the pressed combination is assigned to an action
+      const actionId = Object.entries(shortcutsMap).find(([_, keyCombo]) => keyCombo.toLowerCase() === pressed.toLowerCase())?.[0];
+
+      if (!actionId) return;
+
+      e.preventDefault();
+
+      switch (actionId) {
+        case 'play_pause':
           if (activeTool !== 'hand') {
             togglePlayback();
           }
           break;
-        case 's':
-          if (!e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            setActiveTool('split');
-          }
+        case 'tool_split':
+          setActiveTool('split');
           break;
-        case 'v':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            pasteClip();
-          } else {
-            e.preventDefault();
-            setActiveTool('select');
-          }
+        case 'paste_clip':
+          pasteClip();
           break;
-        case 'h':
-          e.preventDefault();
+        case 'tool_select':
+          setActiveTool('select');
+          break;
+        case 'tool_hand':
           setActiveTool('hand');
           break;
-        case 'z':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (e.shiftKey) {
-              redo();
-            } else {
-              undo();
-            }
-          } else {
-            e.preventDefault();
-            setActiveTool('zoom');
-          }
+        case 'redo':
+        case 'redo_alt':
+          redo();
           break;
-        case 'delete':
-        case 'backspace':
+        case 'undo':
+          undo();
+          break;
+        case 'tool_zoom':
+          setActiveTool('zoom');
+          break;
+        case 'delete_selected': {
           const storeState = useEditorStore.getState();
           if (storeState.selectedKeyframeLines.length > 0) {
-            e.preventDefault();
             removeSelectedKeyframeLines();
           } else if (storeState.selectedOverLayerId) {
-            e.preventDefault();
             removeOverLayer(storeState.selectedOverLayerId);
             selectOverLayer(null);
           } else if (storeState.selectedClipIds.length > 0) {
-            e.preventDefault();
             removeClip(storeState.selectedClipIds[0]);
           } else if (selectedClipId) {
-            e.preventDefault();
             removeClip(selectedClipId);
           } else if (selectedTransitionClipId) {
-            e.preventDefault();
             removeTransition(selectedTransitionClipId);
           }
           break;
-        case 'r':
-          if (!e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            setActiveTool('rateStretch');
+        }
+        case 'tool_rate_stretch':
+          setActiveTool('rateStretch');
+          break;
+        case 'select_all_clips_forward': {
+          const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+          if (selectedClip) {
+            const refTime = selectedClip.startTime;
+            const matchingIds = tracks
+              .flatMap((t) => t.clips)
+              .filter((c) => c.startTime >= refTime)
+              .map((c) => c.id);
+            selectClips(matchingIds);
           }
           break;
-        case 'a':
-          e.preventDefault();
-          if (e.ctrlKey || e.metaKey) {
-            const allClipIds = tracks.flatMap((t) => t.clips).map((c) => c.id);
-            selectClips(allClipIds);
-          } else if (e.shiftKey) {
-            setActiveTool('trackSelectBackward');
-          } else {
-            setActiveTool('trackSelect');
+        }
+        case 'select_all_clips_backward': {
+          const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+          if (selectedClip) {
+            const refTime = selectedClip.startTime;
+            const matchingIds = tracks
+              .flatMap((t) => t.clips)
+              .filter((c) => c.startTime <= refTime)
+              .map((c) => c.id);
+            selectClips(matchingIds);
           }
           break;
-        case 'b':
-          if (!e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            setActiveTool('ripple');
-          }
+        }
+        case 'tool_track_select':
+          setActiveTool('trackSelect');
           break;
-        case 'c':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            copyClip();
-          } else {
-            e.preventDefault();
-            setActiveTool('split');
-          }
+        case 'tool_track_select_backward':
+          setActiveTool('trackSelectBackward');
           break;
-        case 'i':
-          if (!e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            useEditorStore.getState().setInPoint(currentTime);
-          }
+        case 'tool_ripple':
+          setActiveTool('ripple');
           break;
-        case 'o':
-          if (!e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            useEditorStore.getState().setOutPoint(currentTime);
-          }
+        case 'copy_clip':
+          copyClip();
           break;
-        case 'm':
-          if (!e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            useEditorStore.getState().addMarker(currentTime);
-          }
+        case 'set_in_point':
+          useEditorStore.getState().setInPoint(currentTime);
           break;
-        case 'j': {
-          e.preventDefault();
+        case 'set_out_point':
+          useEditorStore.getState().setOutPoint(currentTime);
+          break;
+        case 'add_marker':
+          useEditorStore.getState().addMarker(currentTime);
+          break;
+        case 'shuttle_reverse': {
           const state = useEditorStore.getState();
           const curDir = state.playbackDirection ?? 0;
           const curSpeed = state.playbackSpeed ?? 1;
@@ -176,27 +174,11 @@ function App() {
           }
           break;
         }
-        case 'k':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (selectedClipId) {
-              splitClip(selectedClipId, currentTime);
-            } else {
-              tracks.forEach((track) => {
-                track.clips.forEach((clip) => {
-                  if (currentTime > clip.startTime && currentTime < clip.startTime + clip.duration) {
-                    splitClip(clip.id, currentTime);
-                  }
-                });
-              });
-            }
-          } else {
-            e.preventDefault();
-            useEditorStore.getState().setPlaybackDirection(0);
-          }
+        case 'shuttle_pause': {
+          useEditorStore.getState().setPlaybackDirection(0);
           break;
-        case 'l': {
-          e.preventDefault();
+        }
+        case 'shuttle_forward': {
           const state = useEditorStore.getState();
           const curDir = state.playbackDirection ?? 0;
           const curSpeed = state.playbackSpeed ?? 1;
@@ -207,79 +189,50 @@ function App() {
           }
           break;
         }
-        case 'arrowleft':
-          e.preventDefault();
-          if (e.altKey) {
-            const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
-            if (selectedClip) {
-              const refTime = selectedClip.startTime;
-              const matchingIds = tracks
-                .flatMap((t) => t.clips)
-                .filter((c) => c.startTime <= refTime)
-                .map((c) => c.id);
-              selectClips(matchingIds);
-            }
-          } else {
-            const stepLeft = e.shiftKey ? 1.0 : (1 / 30);
-            useEditorStore.getState().seek(Math.max(0, currentTime - stepLeft));
-          }
+        case 'seek_frame_left':
+          useEditorStore.getState().seek(Math.max(0, currentTime - (1 / 30)));
           break;
-        case 'arrowright':
-          e.preventDefault();
-          if (e.altKey) {
-            const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
-            if (selectedClip) {
-              const refTime = selectedClip.startTime;
-              const matchingIds = tracks
-                .flatMap((t) => t.clips)
-                .filter((c) => c.startTime >= refTime)
-                .map((c) => c.id);
-              selectClips(matchingIds);
-            }
-          } else {
-            const stepRight = e.shiftKey ? 1.0 : (1 / 30);
-            useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + stepRight));
-          }
+        case 'seek_frame_right':
+          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + (1 / 30)));
           break;
-        case 'x':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            cutClip();
-          }
+        case 'seek_second_left':
+          useEditorStore.getState().seek(Math.max(0, currentTime - 1.0));
           break;
-        case 'd':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            duplicateClip();
-          }
+        case 'seek_second_right':
+          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + 1.0));
           break;
-        case 'y':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            redo();
-          }
+        case 'cut_clip':
+          cutClip();
           break;
-        case '=':
-        case '+':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            zoomIn();
-          }
+        case 'duplicate_clip':
+          duplicateClip();
           break;
-        case '-':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            zoomOut();
-          }
+        case 'zoom_timeline_in':
+          zoomIn();
           break;
-        case 'home':
-          e.preventDefault();
+        case 'zoom_timeline_out':
+          zoomOut();
+          break;
+        case 'seek_start':
           useEditorStore.getState().seek(0);
           break;
-        case 'end':
-          e.preventDefault();
+        case 'seek_end':
           useEditorStore.getState().seek(useEditorStore.getState().totalDuration);
           break;
+        case 'split_clip': {
+          if (selectedClipId) {
+            splitClip(selectedClipId, currentTime);
+          } else {
+            tracks.forEach((track) => {
+              track.clips.forEach((clip) => {
+                if (currentTime > clip.startTime && currentTime < clip.startTime + clip.duration) {
+                  splitClip(clip.id, currentTime);
+                }
+              });
+            });
+          }
+          break;
+        }
       }
     },
     [
@@ -298,6 +251,13 @@ function App() {
       zoomOut,
       currentTime,
       tracks,
+      settings,
+      selectedTransitionClipId,
+      removeTransition,
+      removeSelectedKeyframeLines,
+      removeOverLayer,
+      selectOverLayer,
+      cutClip,
       selectClips,
     ]
   );

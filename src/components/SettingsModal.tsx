@@ -1,8 +1,9 @@
-import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders } from 'lucide-react';
+import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { clearPreviewCaches } from './PreviewCanvas';
+import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 
 export function SettingsModal() {
   const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings } = useEditorStore();
@@ -23,6 +24,80 @@ export function SettingsModal() {
     e.target.value = '';
   }, [addMedia, setShowSettingsModal]);
   const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls'>('general');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [recordingActionId, setRecordingActionId] = useState<string | null>(null);
+  const [conflictDetail, setConflictDetail] = useState<{
+    actionId: string;
+    conflictingActionId: string;
+    keyCombo: string;
+  } | null>(null);
+
+  // Listen to window keydown while recording a hotkey combo
+  useEffect(() => {
+    if (!recordingActionId) return;
+
+    const handleRecordKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Escape key cancels recording
+      if (e.key === 'Escape') {
+        setRecordingActionId(null);
+        return;
+      }
+
+      const combo = getShortcutString(e);
+      if (!combo) return; // ignore pure modifiers
+
+      // Check if this key combo conflicts with any other action
+      const customShortcuts = settings.keyboardShortcuts || {};
+      const currentShortcuts: Record<string, string> = {};
+      for (const def of DEFAULT_SHORTCUTS) {
+        currentShortcuts[def.id] = customShortcuts[def.id] !== undefined ? customShortcuts[def.id] : def.defaultKey;
+      }
+
+      // Find the conflicting action ID
+      const conflictingActionId = Object.entries(currentShortcuts).find(
+        ([actionId, keyCombo]) => actionId !== recordingActionId && keyCombo.toLowerCase() === combo.toLowerCase()
+      )?.[0];
+
+      if (conflictingActionId) {
+        setConflictDetail({
+          actionId: recordingActionId,
+          conflictingActionId,
+          keyCombo: combo,
+        });
+      } else {
+        // Direct assignment
+        const newShortcuts = { ...customShortcuts, [recordingActionId]: combo };
+        updateSettings({ keyboardShortcuts: newShortcuts });
+        setRecordingActionId(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleRecordKeyDown, true); // useCapture to intercept before main App handler
+    return () => window.removeEventListener('keydown', handleRecordKeyDown, true);
+  }, [recordingActionId, settings.keyboardShortcuts, updateSettings]);
+
+  const handleResolveConflict = (overwrite: boolean) => {
+    if (!conflictDetail) return;
+    const { actionId, conflictingActionId, keyCombo } = conflictDetail;
+
+    if (overwrite) {
+      const customShortcuts = settings.keyboardShortcuts || {};
+      const newShortcuts = { ...customShortcuts };
+      
+      // Clear the conflicting action
+      newShortcuts[conflictingActionId] = '';
+      // Bind this action
+      newShortcuts[actionId] = keyCombo;
+
+      updateSettings({ keyboardShortcuts: newShortcuts });
+    }
+    
+    setConflictDetail(null);
+    setRecordingActionId(null);
+  };
 
   if (!showSettingsModal) return null;
 
@@ -31,33 +106,6 @@ export function SettingsModal() {
     { id: 'controls' as const, label: 'Controls', icon: Sliders },
     { id: 'keyboard' as const, label: 'Shortcuts', icon: Keyboard },
     { id: 'performance' as const, label: 'Performance', icon: Monitor },
-  ];
-
-  const shortcuts = [
-    { key: 'Space', action: 'Play / Pause' },
-    { key: 'V', action: 'Select Tool' },
-    { key: 'A', action: 'Track Select Forward Tool' },
-    { key: 'Shift + A', action: 'Track Select Backward Tool' },
-    { key: 'B', action: 'Ripple Edit Tool' },
-    { key: 'R', action: 'Rate Stretch Tool' },
-    { key: 'S / C', action: 'Split Tool' },
-    { key: 'H', action: 'Hand Tool' },
-    { key: 'Z', action: 'Zoom Tool' },
-    { key: 'Delete', action: 'Delete Clip' },
-    { key: 'Ctrl + A', action: 'Select All Clips' },
-    { key: 'Ctrl + K', action: 'Split at Playhead' },
-    { key: 'Alt + Left Arrow', action: 'Select Clips to the Left' },
-    { key: 'Alt + Right Arrow', action: 'Select Clips to the Right' },
-    { key: 'Left / Right Arrow', action: 'Step 1 Frame' },
-    { key: 'Shift + Left / Right Arrow', action: 'Step 1 Second' },
-    { key: 'Ctrl + C', action: 'Copy Clip' },
-    { key: 'Ctrl + V', action: 'Paste Clip' },
-    { key: 'Ctrl + X', action: 'Cut Clip' },
-    { key: 'Ctrl + D', action: 'Duplicate Clip' },
-    { key: 'Ctrl + Z', action: 'Undo' },
-    { key: 'Ctrl + Y', action: 'Redo' },
-    { key: 'Ctrl + [+/-]', action: 'Zoom Timeline' },
-    { key: 'Home / End', action: 'Go to Start / End' },
   ];
 
   return (
@@ -258,21 +306,141 @@ export function SettingsModal() {
             )}
 
             {activeTab === 'keyboard' && (
-              <div>
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Keyboard Shortcuts</h3>
-                <div className="space-y-0.5">
-                  {shortcuts.map(({ key, action }) => (
-                    <div
-                      key={key}
-                      className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[#3e3e3e] transition-colors"
-                    >
-                      <span className="text-xs text-white">{action}</span>
-                      <kbd className="px-2 py-0.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] font-mono">
-                        {key}
-                      </kbd>
-                    </div>
-                  ))}
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Keyboard Shortcuts</h3>
+                  <button
+                    onClick={() => updateSettings({ keyboardShortcuts: {} })}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-950/20 border border-red-900/30 rounded transition-colors"
+                  >
+                    <RotateCw className="w-3 h-3" />
+                    Reset to Defaults
+                  </button>
                 </div>
+
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <input
+                    type="text"
+                    placeholder="Search shortcuts..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#a0a0a0] focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Scrollable list of actions grouped by Category */}
+                <div className="overflow-y-auto space-y-4 pr-1" style={{ maxHeight: 'calc(80vh - 220px)' }}>
+                  {(() => {
+                    const customShortcuts = settings.keyboardShortcuts || {};
+                    
+                    // Filter shortcuts
+                    const filtered = DEFAULT_SHORTCUTS.filter((def) =>
+                      def.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      def.category.toLowerCase().includes(searchQuery.toLowerCase())
+                    );
+
+                    // Group by category
+                    const categories = Array.from(new Set(DEFAULT_SHORTCUTS.map(s => s.category)));
+
+                    return categories.map((cat) => {
+                      const catShortcuts = filtered.filter(s => s.category === cat);
+                      if (catShortcuts.length === 0) return null;
+
+                      return (
+                        <div key={cat} className="space-y-1.5">
+                          <p className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider px-1">{cat}</p>
+                          <div className="space-y-0.5">
+                            {catShortcuts.map((def) => {
+                              const customKey = customShortcuts[def.id];
+                              const isCustom = customKey !== undefined;
+                              const currentCombo = isCustom ? customKey : def.defaultKey;
+                              const isRecording = recordingActionId === def.id;
+
+                              return (
+                                <div
+                                  key={def.id}
+                                  className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[#252525] border border-transparent hover:border-[#3e3e3e]/40 transition-all group"
+                                >
+                                  <div className="flex flex-col">
+                                    <span className="text-xs text-white font-medium">{def.label}</span>
+                                    {isCustom && customKey === '' && (
+                                      <span className="text-[9px] text-red-400">Unbound</span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => setRecordingActionId(isRecording ? null : def.id)}
+                                      className={`px-2.5 py-1 text-[10px] font-mono border rounded min-w-[70px] text-center transition-all ${
+                                        isRecording
+                                          ? 'bg-amber-500/20 border-amber-500 text-amber-400 animate-pulse'
+                                          : currentCombo
+                                          ? 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0]'
+                                          : 'bg-[#1e1e1e] border-dashed border-red-500/40 text-red-400 hover:text-red-300'
+                                      }`}
+                                    >
+                                      {isRecording ? 'Press...' : currentCombo || 'None'}
+                                    </button>
+
+                                    {isCustom && (
+                                      <button
+                                        onClick={() => {
+                                          const newShortcuts = { ...customShortcuts };
+                                          delete newShortcuts[def.id]; // Delete custom mapping -> reverts to default
+                                          updateSettings({ keyboardShortcuts: newShortcuts });
+                                        }}
+                                        title="Reset to default key"
+                                        className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                      >
+                                        <RotateCcw className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+
+                {/* Conflict Overlay Modal */}
+                {conflictDetail && (
+                  <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-4 z-[110]">
+                    <div className="bg-[#2d2d2d] border border-red-500/30 rounded-lg p-4 max-w-sm w-full space-y-3 shadow-2xl">
+                      <div className="flex items-center gap-2 text-red-400">
+                        <AlertTriangle className="w-5 h-5 shrink-0" />
+                        <h4 className="text-xs font-semibold uppercase tracking-wider">Hotkey Conflict</h4>
+                      </div>
+                      
+                      <p className="text-xs text-[#a0a0a0] leading-relaxed">
+                        The combination <span className="font-mono text-white px-1.5 py-0.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px]">{conflictDetail.keyCombo}</span> is already bound to:
+                        <strong className="block text-white mt-1">
+                          {DEFAULT_SHORTCUTS.find(s => s.id === conflictDetail.conflictingActionId)?.label}
+                        </strong>
+                      </p>
+
+                      <div className="flex gap-2 pt-1.5">
+                        <button
+                          onClick={() => handleResolveConflict(true)}
+                          className="flex-1 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors"
+                        >
+                          Overwrite
+                        </button>
+                        <button
+                          onClick={() => handleResolveConflict(false)}
+                          className="flex-1 py-1.5 text-xs font-medium text-[#a0a0a0] hover:text-white bg-[#3e3e3e] hover:bg-[#4d4d4d] rounded transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

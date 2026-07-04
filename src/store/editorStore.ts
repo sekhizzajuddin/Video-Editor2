@@ -287,6 +287,7 @@ const initialState: EditorState = {
     previewQuality: 'full',
     showThumbnails: true,
     hardwareAcceleration: true,
+    keyboardShortcuts: {},
   },
   hasUnsavedChanges: false,
   currentTime: 0,

@@ -402,6 +402,7 @@ export interface EditorState {
     previewQuality: 'full' | 'half' | 'quarter';
     showThumbnails: boolean;
     hardwareAcceleration: boolean;
+    keyboardShortcuts?: Record<string, string>;
   };
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];
