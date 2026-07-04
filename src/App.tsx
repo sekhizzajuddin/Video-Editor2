@@ -56,6 +56,26 @@ function App() {
       }
 
       const pressed = getShortcutString(e);
+
+      if (e.key === 'Tab') {
+        const storeState = useEditorStore.getState();
+        const currentId = storeState.selectedClipIds[0] || storeState.selectedClipId;
+        if (currentId) {
+          e.preventDefault();
+          const allClips = storeState.tracks.flatMap(t => t.clips).sort((a, b) => a.startTime - b.startTime);
+          const currentIndex = allClips.findIndex(c => c.id === currentId);
+          if (currentIndex !== -1) {
+            let nextIndex = e.shiftKey ? currentIndex - 1 : currentIndex + 1;
+            if (nextIndex < 0) nextIndex = allClips.length - 1;
+            if (nextIndex >= allClips.length) nextIndex = 0;
+            const nextClip = allClips[nextIndex];
+            storeState.selectClips([nextClip.id]);
+            storeState.seek(nextClip.startTime);
+          }
+          return;
+        }
+      }
+
       if (!pressed) return;
 
       const customShortcuts = settings.keyboardShortcuts || {};

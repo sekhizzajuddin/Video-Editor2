@@ -4226,19 +4226,6 @@ Rules:
                           />
                         )}
 
-                        {/* ── Split button ───────────────────────────── */}
-                        {!track.locked && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSplit(clip.id);
-                            }}
-                            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-1 bg-black/60 rounded transition-opacity z-30 pointer-events-auto"
-                            title="Split at playhead"
-                          >
-                            <Scissors className="w-3 h-3 text-white" />
-                          </button>
-                        )}
 
                         {/* ── Overlap warning ────────────────────────── */}
                         {checkOverlapAt(track, clip.startTime, clip.duration, clip.id) && (

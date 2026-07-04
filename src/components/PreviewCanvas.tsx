@@ -2921,7 +2921,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
         getNewAnimations('transform.scale', scale);
       }
 
-      updateClip(activeClip.id, { transform: { x, y, scale, rotation }, crop, animations });
+      updateClip(activeClip.id, { transform: { ...activeClip.transform, x, y, scale, rotation }, crop, animations });
     };
 
     const handleUp = () => {
