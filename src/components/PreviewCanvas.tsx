@@ -428,6 +428,8 @@ export function PreviewCanvas() {
   const pixelateCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mirrorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastParticleTimeRef = useRef<number | null>(null);
+  // Snapshot of last successfully rendered frame to prevent flash during scrubbing
+  const lastFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const getOrCreateCanvas = (ref: React.MutableRefObject<HTMLCanvasElement | null>, w: number, h: number) => {
     if (!ref.current) {
@@ -665,6 +667,37 @@ export function PreviewCanvas() {
     const H_target = 480;
     const canvas_scale = canvas.width / W_target;
 
+    // ── Frame gate: during scrubbing, skip redraw if any active video is still seeking ──
+    // This prevents the flash (clear → placeholder → real frame) cycle.
+    if (!isPlaying) {
+      const allVideoTracks = tracks.filter((t) => t.type === 'video' && !t.hidden);
+      let anyVideoSeeking = false;
+      for (const track of allVideoTracks) {
+        for (const clip of track.clips) {
+          if (currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+            const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+            if (mediaItem && mediaItem.type === 'video') {
+              const videoEl = videoElements.get(clip.id);
+              if (videoEl && (videoEl.seeking || videoEl.readyState < 2)) {
+                anyVideoSeeking = true;
+                break;
+              }
+            }
+          }
+        }
+        if (anyVideoSeeking) break;
+      }
+
+      if (anyVideoSeeking) {
+        // Video elements are still decoding — show the last good frame instead of flashing
+        if (lastFrameCanvasRef.current && lastFrameCanvasRef.current.width > 0) {
+          ctx.drawImage(lastFrameCanvasRef.current, 0, 0);
+        }
+        // Don't clear or redraw — the seeked event will trigger a proper redraw
+        return;
+      }
+    }
+
     // 1. Clear to background color (entire canvas, regardless of viewport)
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -852,9 +885,12 @@ export function PreviewCanvas() {
           ctx.filter = 'none';
           hasRealMedia = true;
           anyClipDrawn = true;
-        } else {
-          // Video not ready yet – draw placeholder
+        } else if (isPlaying) {
+          // Video not ready yet during playback – draw placeholder
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'VIDEO', '#3b82f6');
+          anyClipDrawn = true;
+        } else {
+          // During scrubbing, skip placeholder to avoid flash — last frame is retained above
           anyClipDrawn = true;
         }
       } else if (mediaItem.type === 'image') {
@@ -1752,6 +1788,21 @@ export function PreviewCanvas() {
     ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
 
     ctx.restore(); // Restore from global canvas resolution scale
+
+    // Snapshot this successfully rendered frame for use during seeking gaps
+    if (!lastFrameCanvasRef.current) {
+      lastFrameCanvasRef.current = document.createElement('canvas');
+    }
+    const snapCanvas = lastFrameCanvasRef.current;
+    if (snapCanvas.width !== canvas.width || snapCanvas.height !== canvas.height) {
+      snapCanvas.width = canvas.width;
+      snapCanvas.height = canvas.height;
+    }
+    const snapCtx = snapCanvas.getContext('2d');
+    if (snapCtx) {
+      snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
+      snapCtx.drawImage(canvas, 0, 0);
+    }
   }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying]);
 
   // ── Unified render loop to prevent flickering during scrubbing ──
