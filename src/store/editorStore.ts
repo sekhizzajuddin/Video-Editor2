@@ -1683,6 +1683,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     _inTransaction = true;
   },
   endTransaction: () => {
+    if (!_inTransaction) return;
     _inTransaction = false;
     get().saveSnapshot(); // Save one snapshot after the transaction completes
   },

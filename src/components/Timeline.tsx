@@ -642,6 +642,14 @@ export function Timeline() {
   } | null>(null);
 
   const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (scrollIntervalRef.current) {
+        clearInterval(scrollIntervalRef.current);
+        scrollIntervalRef.current = null;
+      }
+    };
+  }, []);
   const dragMouseXRef = useRef<number | null>(null);
   const dragMouseYRef = useRef<number | null>(null);
 
@@ -783,8 +791,8 @@ export function Timeline() {
   // ── Media lookup ────────────────────────────────────────────────────────
 
   const getMedia = useCallback((clip: TimelineClip): MediaItem | null => {
-    return useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId) ?? null;
-  }, []);
+    return mediaLibrary.find((m) => m.id === clip.mediaId) ?? null;
+  }, [mediaLibrary]);
 
   const getMediaSafe = useCallback(
     (clip: TimelineClip) => {

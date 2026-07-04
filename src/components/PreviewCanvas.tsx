@@ -318,15 +318,17 @@ function renderParticles(
 
   const now = performance.now();
   const maxCount = ps.amount;
-  const emitInterval = Math.max(16, 1000 / (maxCount / ((ps.lifetime / 100) * 1.5)));
 
-  // Emit new particles
-  if (pool.particles.length < maxCount && (now - pool.lastEmit) > emitInterval) {
-    const batchSize = Math.min(3, maxCount - pool.particles.length);
-    for (let i = 0; i < batchSize; i++) {
-      pool.particles.push(spawnParticle(ps, W, H));
+  // Rate-limited emission: only spawn particles when playing and active
+  if (deltaMs > 0 && pool.particles.length < maxCount) {
+    const emitInterval = Math.max(16, 1000 / (maxCount / ((ps.lifetime / 100) * 1.5)));
+    if (now - pool.lastEmit > emitInterval) {
+      const batchSize = Math.min(3, maxCount - pool.particles.length);
+      for (let i = 0; i < batchSize; i++) {
+        pool.particles.push(spawnParticle(ps, W, H));
+      }
+      pool.lastEmit = now;
     }
-    pool.lastEmit = now;
   }
 
   const dtScale = deltaMs / (1000 / 60); // normalize to 60fps
@@ -343,19 +345,21 @@ function renderParticles(
 
   // Update & draw
   pool.particles = pool.particles.filter((p) => {
-    // Update physics
-    p.vy += gravityAcc;
-    p.vx += windAcc + (Math.random() - 0.5) * turbStr;
-    p.x  += p.vx * dtScale;
-    p.y  += p.vy * dtScale;
-    p.rotation += p.rotSpeed * dtScale;
-    p.life -= 1 / p.maxLife;
-    p.life = Math.max(0, p.life);
+    if (deltaMs > 0) {
+      // Update physics
+      p.vy += gravityAcc;
+      p.vx += windAcc + (Math.random() - 0.5) * turbStr;
+      p.x  += p.vx * dtScale;
+      p.y  += p.vy * dtScale;
+      p.rotation += p.rotSpeed * dtScale;
+      p.life -= (1 / p.maxLife) * dtScale;
+      p.life = Math.max(0, p.life);
 
-    // Matrix: randomize char occasionally
-    if (p.type === 'matrix' && Math.random() < 0.05) {
-      const chars = '0123456789ABCDEF';
-      p.char = chars[Math.floor(Math.random() * chars.length)];
+      // Matrix: randomize char occasionally
+      if (p.type === 'matrix' && Math.random() < 0.05) {
+        const chars = '0123456789ABCDEF';
+        p.char = chars[Math.floor(Math.random() * chars.length)];
+      }
     }
 
     if (p.life <= 0) return false;
@@ -418,6 +422,23 @@ export function PreviewCanvas() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const glitchRedCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const glitchBlueCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pixelateCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mirrorCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastParticleTimeRef = useRef<number | null>(null);
+
+  const getOrCreateCanvas = (ref: React.MutableRefObject<HTMLCanvasElement | null>, w: number, h: number) => {
+    if (!ref.current) {
+      ref.current = document.createElement('canvas');
+    }
+    // Setting width and height resets the canvas state and resizes its backing store.
+    if (ref.current.width !== w) ref.current.width = w;
+    if (ref.current.height !== h) ref.current.height = h;
+    return ref.current;
+  };
+
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showSafeZones, setShowSafeZones] = useState(false);
@@ -623,6 +644,13 @@ export function PreviewCanvas() {
     const ctx = canvas.getContext('2d', { willReadFrequently: !settings.hardwareAcceleration });
     if (!ctx) return;
 
+    // Measure frame time delta
+    const now = performance.now();
+    const lastTime = lastParticleTimeRef.current ?? now;
+    lastParticleTimeRef.current = now;
+    const rawDelta = isPlaying ? (now - lastTime) : 0;
+    const deltaMs = Math.min(100, rawDelta); // clamp to 100ms max to prevent physics jumps
+
     const W_target = 854;
     const H_target = 480;
     const canvas_scale = canvas.width / W_target;
@@ -792,9 +820,9 @@ export function PreviewCanvas() {
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
           const hasChroma = clip.chromaKey?.enabled;
           if (hasWheels || hasChroma) {
-            const offscreen = document.createElement('canvas');
-            offscreen.width = Math.max(1, Math.round(dw));
-            offscreen.height = Math.max(1, Math.round(dh));
+            const offscreenWidth = Math.max(1, Math.round(dw));
+            const offscreenHeight = Math.max(1, Math.round(dh));
+            const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
             const oCtx = offscreen.getContext('2d');
             if (oCtx) {
               oCtx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
@@ -866,9 +894,9 @@ export function PreviewCanvas() {
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
           const hasChroma = clip.chromaKey?.enabled;
           if (hasWheels || hasChroma) {
-            const offscreen = document.createElement('canvas');
-            offscreen.width = Math.max(1, Math.round(dw));
-            offscreen.height = Math.max(1, Math.round(dh));
+            const offscreenWidth = Math.max(1, Math.round(dw));
+            const offscreenHeight = Math.max(1, Math.round(dh));
+            const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
             const oCtx = offscreen.getContext('2d');
             if (oCtx) {
               oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
@@ -1250,8 +1278,7 @@ export function PreviewCanvas() {
               ctx.globalAlpha = 0.55;
               ctx.globalCompositeOperation = 'screen';
 
-              const offR = document.createElement('canvas');
-              offR.width = pxW; offR.height = pxH;
+              const offR = getOrCreateCanvas(glitchRedCanvasRef, pxW, pxH);
               const ctxR = offR.getContext('2d')!;
               ctxR.drawImage(videoEl, 0, 0, pxW, pxH);
               const dR = ctxR.getImageData(0, 0, pxW, pxH);
@@ -1259,8 +1286,7 @@ export function PreviewCanvas() {
               ctxR.putImageData(dR, 0, 0);
               ctx.drawImage(offR, -dw / 2 - shift, -dh / 2, dw, dh);
 
-              const offB = document.createElement('canvas');
-              offB.width = pxW; offB.height = pxH;
+              const offB = getOrCreateCanvas(glitchBlueCanvasRef, pxW, pxH);
               const ctxB = offB.getContext('2d')!;
               ctxB.drawImage(videoEl, 0, 0, pxW, pxH);
               const dB = ctxB.getImageData(0, 0, pxW, pxH);
@@ -1276,8 +1302,7 @@ export function PreviewCanvas() {
           const blockSize = Math.max(2, Math.round(intensity * 24));
           const tmpW = Math.max(1, Math.round(pxW / blockSize));
           const tmpH = Math.max(1, Math.round(pxH / blockSize));
-          const tmp = document.createElement('canvas');
-          tmp.width = tmpW; tmp.height = tmpH;
+          const tmp = getOrCreateCanvas(pixelateCanvasRef, tmpW, tmpH);
           const tCtx = tmp.getContext('2d')!;
           // FIXED: use pxL, pxT (absolute pixel coords) as the source rect from the main canvas
           tCtx.drawImage(ctx.canvas, pxL, pxT, pxW, pxH, 0, 0, tmpW, tmpH);
@@ -1293,8 +1318,7 @@ export function PreviewCanvas() {
           const halfW = Math.max(1, Math.round(pxW / 2));
           const leftData = ctx.getImageData(pxL, pxT, halfW, pxH);
           // Flip horizontally into a temp canvas
-          const flip = document.createElement('canvas');
-          flip.width = halfW; flip.height = pxH;
+          const flip = getOrCreateCanvas(mirrorCanvasRef, halfW, pxH);
           const fCtx = flip.getContext('2d')!;
           fCtx.putImageData(leftData, 0, 0);
           // Draw flipped onto right half in transform-space
@@ -1567,16 +1591,15 @@ export function PreviewCanvas() {
     }
     
     // 3b. Render particles for any clip that has particleSettings
-    const particleFrameMs = 1000 / 60; // assume 60fps for physics step
     for (const track of visualTracks) {
       for (const clip of track.clips) {
         if (clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
-          renderParticles(ctx, clip.id, clip.particleSettings, W, H, particleFrameMs);
+          renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs);
         }
       }
       for (const ol of track.overLayers || []) {
         if (ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
-          renderParticles(ctx, ol.id, ol.particleSettings, W, H, particleFrameMs);
+          renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs);
         }
       }
     }
@@ -1719,7 +1742,7 @@ export function PreviewCanvas() {
     ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
 
     ctx.restore(); // Restore from global canvas resolution scale
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying]);
 
   const renderCanvasRef = useRef(renderCanvas);
   useEffect(() => {
