@@ -1467,7 +1467,7 @@ Return your response ONLY as a JSON object with these two fields:
         const canvas = document.createElement('canvas');
         canvas.width = 32;
         canvas.height = 18;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
         if (!ctx) throw new Error('Failed to create offscreen canvas context.');
 
