@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Client } from '@gradio/client';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
@@ -261,49 +262,100 @@ export function PropertiesPanel() {
     const clipUrl = mediaItem?.url;
     if (!clipUrl) return;
 
+    const cleanName = (mediaItem?.name || 'audio').replace(/[^a-zA-Z0-9_-]/g, '_');
+
     try {
       setIsSeparating(true);
+      
+      // 1. Fetch the clip's local audio/video file as binary
       const fileResponse = await fetch(clipUrl);
       if (!fileResponse.ok) throw new Error('Failed to fetch clip audio source.');
       const audioBlob = await fileResponse.blob();
 
-      const response = await fetch(`/api/separate-audio?name=${encodeURIComponent(mediaItem?.name || 'audio')}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: audioBlob
-      });
+      let vocalsUrl = '';
+      let instrumentsUrl = '';
+      let vocalsName = '';
+      let instrumentsName = '';
+      let localSucceeded = false;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Server error during separation.');
+      // 2. Try local separator first if running on localhost
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isLocalhost) {
+        try {
+          const response = await fetch(`/api/separate-audio?name=${encodeURIComponent(mediaItem?.name || 'audio')}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: audioBlob
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+              vocalsUrl = data.vocalsUrl;
+              instrumentsUrl = data.instrumentsUrl;
+              vocalsName = data.vocalsName;
+              instrumentsName = data.instrumentsName;
+              localSucceeded = true;
+            }
+          }
+        } catch (localErr) {
+          console.warn('Local separation failed or unavailable. Falling back to Hugging Face AI...', localErr);
+        }
       }
 
-      const data = await response.json();
-      if (!data.success) throw new Error(data.error || 'Separation failed.');
+      // 3. Fallback to Hugging Face Gradio client if local separation failed/not on localhost
+      if (!localSucceeded) {
+        console.log('Connecting to Hugging Face Space (abidlabs/music-separation)...');
+        const app = await Client.connect("abidlabs/music-separation");
+        
+        console.log('Uploading audio to HF Space for neural stem extraction...');
+        // Gradio predict endpoint /inference accepts the binary audioBlob
+        const result = await app.predict("/inference", [
+          audioBlob
+        ]);
 
+        console.log('HF Space separation result:', result);
+        
+        const resultData = result.data as any[];
+        const vocalsData = resultData[0];
+        const instData = resultData[1];
+
+        if (!vocalsData || !instData || !vocalsData.url || !instData.url) {
+          throw new Error('AI Space did not return valid separated files. Check Space availability.');
+        }
+
+        vocalsUrl = vocalsData.url;
+        instrumentsUrl = instData.url;
+        vocalsName = `${cleanName}_Vocals.wav`;
+        instrumentsName = `${cleanName}_Instrumental.wav`;
+      }
+
+      // 4. Create new MediaItems for isolated stems
       const vocalsMedia: any = {
         id: `media_vocals_${Date.now()}`,
-        name: data.vocalsName,
+        name: vocalsName,
         type: 'audio',
         duration: selectedClip.duration,
-        url: data.vocalsUrl,
+        url: vocalsUrl,
         createdAt: Date.now(),
         waveformPeaks: Array.from({ length: 100 }, () => Math.random() * 0.4 + 0.1)
       };
 
       const instMedia: any = {
         id: `media_inst_${Date.now()}`,
-        name: data.instrumentsName,
+        name: instrumentsName,
         type: 'audio',
         duration: selectedClip.duration,
-        url: data.instrumentsUrl,
+        url: instrumentsUrl,
         createdAt: Date.now(),
         waveformPeaks: Array.from({ length: 100 }, () => Math.random() * 0.4 + 0.1)
       };
 
+      // Add to project media bin
       addMedia(vocalsMedia);
       addMedia(instMedia);
 
+      // 5. Place stems on audio tracks
       let audioTracks = tracks.filter(t => t.type === 'audio');
       if (audioTracks.length < 2) {
         addTrack('audio');
@@ -345,6 +397,7 @@ export function PropertiesPanel() {
       addClip(vocalsClip);
       addClip(instClip);
 
+      // 6. Mute original track
       updateClip(selectedClip.id, {
         audioSettings: {
           ...(selectedClip.audioSettings || {
