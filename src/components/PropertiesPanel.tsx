@@ -264,6 +264,15 @@ export function PropertiesPanel() {
 
     const cleanName = (mediaItem?.name || 'audio').replace(/[^a-zA-Z0-9_-]/g, '_');
 
+    // Temporarily monkeypatch fetch to fix Gradio credentials CORS issue on third-party domains (e.g. HF Space)
+    const originalFetch = window.fetch;
+    window.fetch = function (input: any, init: any) {
+      if (init && init.credentials === 'include') {
+        init.credentials = 'same-origin';
+      }
+      return originalFetch(input, init);
+    };
+
     try {
       setIsSeparating(true);
       
@@ -424,6 +433,7 @@ export function PropertiesPanel() {
       console.error('[AI Separation] Error:', err);
       alert(`AI Separation failed: ${err.message}`);
     } finally {
+      window.fetch = originalFetch;
       setIsSeparating(false);
     }
   };
