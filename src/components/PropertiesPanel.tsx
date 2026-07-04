@@ -20,6 +20,7 @@ import {
   Wand2,
   ArrowLeftRight,
   Image as ImageIcon,
+  Loader2,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -215,11 +216,136 @@ export function PropertiesPanel() {
     history,
     historyIndex,
     jumpToHistoryIndex,
+    addMedia,
+    addClip,
+    addTrack,
+    mediaLibrary,
   } = useEditorStore();
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const [showTunedToast, setShowTunedToast] = useState(false);
+  const [isSeparating, setIsSeparating] = useState(false);
+
+  const handleAiSeparate = async () => {
+    if (!selectedClip || isSeparating) return;
+    const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+    const clipUrl = mediaItem?.url;
+    if (!clipUrl) return;
+
+    try {
+      setIsSeparating(true);
+      const fileResponse = await fetch(clipUrl);
+      if (!fileResponse.ok) throw new Error('Failed to fetch clip audio source.');
+      const audioBlob = await fileResponse.blob();
+
+      const response = await fetch(`/api/separate-audio?name=${encodeURIComponent(mediaItem?.name || 'audio')}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: audioBlob
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Server error during separation.');
+      }
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Separation failed.');
+
+      const vocalsMedia: any = {
+        id: `media_vocals_${Date.now()}`,
+        name: data.vocalsName,
+        type: 'audio',
+        duration: selectedClip.duration,
+        url: data.vocalsUrl,
+        createdAt: Date.now(),
+        waveformPeaks: Array.from({ length: 100 }, () => Math.random() * 0.4 + 0.1)
+      };
+
+      const instMedia: any = {
+        id: `media_inst_${Date.now()}`,
+        name: data.instrumentsName,
+        type: 'audio',
+        duration: selectedClip.duration,
+        url: data.instrumentsUrl,
+        createdAt: Date.now(),
+        waveformPeaks: Array.from({ length: 100 }, () => Math.random() * 0.4 + 0.1)
+      };
+
+      addMedia(vocalsMedia);
+      addMedia(instMedia);
+
+      let audioTracks = tracks.filter(t => t.type === 'audio');
+      if (audioTracks.length < 2) {
+        addTrack('audio');
+        addTrack('audio');
+        audioTracks = useEditorStore.getState().tracks.filter(t => t.type === 'audio');
+      }
+
+      const track1 = audioTracks[0] || { id: 'A1' };
+      const track2 = audioTracks[1] || { id: 'A2' };
+
+      const vocalsClip = {
+        id: `clip_vocals_${Date.now()}`,
+        mediaId: vocalsMedia.id,
+        trackId: track1.id,
+        startTime: selectedClip.startTime,
+        duration: selectedClip.duration,
+        trimStart: selectedClip.trimStart,
+        trimEnd: selectedClip.trimEnd,
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        opacity: 1,
+        speed: selectedClip.speed,
+        effects: []
+      };
+
+      const instClip = {
+        id: `clip_inst_${Date.now()}`,
+        mediaId: instMedia.id,
+        trackId: track2.id,
+        startTime: selectedClip.startTime,
+        duration: selectedClip.duration,
+        trimStart: selectedClip.trimStart,
+        trimEnd: selectedClip.trimEnd,
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        opacity: 1,
+        speed: selectedClip.speed,
+        effects: []
+      };
+
+      addClip(vocalsClip);
+      addClip(instClip);
+
+      updateClip(selectedClip.id, {
+        audioSettings: {
+          ...(selectedClip.audioSettings || {
+            volume: 0,
+            pan: 0,
+            fadeIn: 0,
+            fadeOut: 0,
+            bass: 0,
+            treble: 0,
+            muted: false,
+            preservePitch: true,
+            pitch: 0,
+            voiceFormant: 0,
+            humanize: false,
+          }),
+          volume: -60,
+          muted: true
+        }
+      });
+
+      useEditorStore.getState().saveSnapshot?.('AI Stem Separation');
+      alert('AI Vocal / BGM Separation complete! The isolated stems have been placed on your timeline.');
+    } catch (err: any) {
+      console.error('[AI Separation] Error:', err);
+      alert(`AI Separation failed: ${err.message}`);
+    } finally {
+      setIsSeparating(false);
+    }
+  };
 
   // Find the selected transition
   let selectedTransitionClip = null;
@@ -2932,6 +3058,49 @@ export function PropertiesPanel() {
                           <span>Subtle</span>
                           <span>Extreme</span>
                         </div>
+                      </div>
+
+                      {/* AI separation (MDX-Net Offline) */}
+                      <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-2 mt-2">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <div>
+                            <span className="text-cyan-400 font-semibold block flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 animate-pulse" />
+                              AI Stem Extractor
+                            </span>
+                            <span className="text-[9px] text-[#a0a0a0] block">
+                              Split vocals & instrumental using MDX-Net AI
+                            </span>
+                          </div>
+                          <button
+                            onClick={handleAiSeparate}
+                            disabled={isSeparating}
+                            className={`px-2.5 py-1.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors flex items-center gap-1 ${
+                              isSeparating
+                                ? 'bg-[#2d2d2d] text-[#606060] cursor-not-allowed'
+                                : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold'
+                            }`}
+                          >
+                            {isSeparating ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Processing...
+                              </>
+                            ) : (
+                              'Extract (AI)'
+                            )}
+                          </button>
+                        </div>
+                        {isSeparating && (
+                          <div className="space-y-1 animate-pulse">
+                            <div className="h-1 bg-cyan-950 rounded-full overflow-hidden">
+                              <div className="h-full bg-cyan-500 rounded-full animate-[progress_15s_ease-out_infinite]" style={{ width: '80%' }}></div>
+                            </div>
+                            <span className="text-[8px] text-cyan-400/80 block text-center font-mono">
+                              Running neural network separation locally (MDX-Net)...
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Info Note */}
