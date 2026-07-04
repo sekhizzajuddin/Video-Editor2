@@ -1562,23 +1562,6 @@ export function Timeline() {
         setResizeOverLayerState(null);
         endTransactionSafe(); // commit final snapshot
       }
-        setDragState(null);
-        setSnapLine(null);
-        setDropPreview(null);
-        useEditorStore.getState().endTransaction(); // commit final snapshot
-      }
-      if (resizeState) {
-        setResizeState(null);
-        useEditorStore.getState().endTransaction(); // commit final snapshot
-      }
-      if (dragOverLayerState) {
-        setDragOverLayerState(null);
-        useEditorStore.getState().endTransaction(); // commit final snapshot
-      }
-      if (resizeOverLayerState) {
-        setResizeOverLayerState(null);
-        useEditorStore.getState().endTransaction(); // commit final snapshot
-      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
