@@ -392,6 +392,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Timeline Operations
   addClip: (clip) => {
     set((state) => {
+      // Find the target track
+      const targetTrack = state.tracks.find((t) => t.id === clip.trackId);
+      // If clip belongs to a text track, NEVER call resolveOverlaps - text subtitle clips are sequential
+      // and resolveOverlaps would incorrectly move them to audio tracks
+      const isTextClip = targetTrack?.type === 'text' ||
+        (clip as any).textSettings != null ||
+        clip.mediaId === 'text-placeholder';
+
       const newTracks = state.tracks.map((track) => {
         if (track.id === clip.trackId) {
           return { ...track, clips: [...track.clips, { ...clip, isPreview: false }] };
@@ -401,7 +409,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
     });
     get().recalcTotalDuration();
-    get().resolveOverlaps([clip.id]);
+    // Text clips are sequential in time - skip overlap resolution which would move them to audio tracks
+    const placedTrack = get().tracks.find((t) => t.id === clip.trackId);
+    if (placedTrack?.type !== 'text' && (clip as any).textSettings == null && clip.mediaId !== 'text-placeholder') {
+      get().resolveOverlaps([clip.id]);
+    }
     get().saveSnapshot('Add Clip');
   },
 
@@ -726,7 +738,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             }
           } else {
             const sameTypeCount = sameTypeTracks.length;
-            const newTrackId = `${currentTrack.type === 'video' ? 'v' : 'a'}${sameTypeCount + 1}`;
+            const prefix = currentTrack.type === 'video' ? 'v' : currentTrack.type === 'text' ? 't' : currentTrack.type === 'fx' ? 'fx' : 'a';
+            const newTrackId = `${prefix}${sameTypeCount + 1}`;
             const newTrackName = newTrackId.toUpperCase();
 
             const newTrack: TimelineTrack = {

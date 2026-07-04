@@ -522,26 +522,41 @@ async function handlePuterError(err: any, taskName: string): Promise<void> {
 }
 
 function parseTransliteratedResponse(responseText: string): any[] | null {
+  if (!responseText || typeof responseText !== 'string') return null;
+
+  // Step 1: Strip markdown code fences (```json ... ``` or ``` ... ```)
+  let cleaned = responseText
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .trim();
+
+  // Step 2: Try parsing the entire cleaned text as JSON
   try {
-    return JSON.parse(responseText.trim());
-  } catch (_) {
-    try {
-      const matches = responseText.match(/\[\s*\{[\s\S]*?\}\s*\]/g);
-      if (matches) {
-        for (const m of matches) {
-          if (m.includes('idx') && (m.includes('word') || m.includes('translit'))) {
-            return JSON.parse(m);
-          }
-        }
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (_) {}
+
+  // Step 3: Find JSON array using greedy bracket matching from first '[' 
+  const startIdx = cleaned.indexOf('[');
+  if (startIdx !== -1) {
+    let depth = 0;
+    let endIdx = -1;
+    for (let i = startIdx; i < cleaned.length; i++) {
+      if (cleaned[i] === '[') depth++;
+      else if (cleaned[i] === ']') {
+        depth--;
+        if (depth === 0) { endIdx = i; break; }
       }
-      const simpleMatch = responseText.match(/\[[\s\S]*?\]/);
-      if (simpleMatch) {
-        return JSON.parse(simpleMatch[0]);
-      }
-    } catch (err) {
-      console.error('Failed to parse match:', err);
+    }
+    if (endIdx !== -1) {
+      try {
+        const extracted = cleaned.slice(startIdx, endIdx + 1);
+        const parsed = JSON.parse(extracted);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (_) {}
     }
   }
+
   return null;
 }
 
@@ -1743,24 +1758,36 @@ Return your response ONLY as a JSON array of objects:
           const chunkSize = 60;
           for (let c = 0; c < wordsToTransliterate.length; c += chunkSize) {
             const chunk = wordsToTransliterate.slice(c, c + chunkSize);
-            const translitPrompt = `We have a list of transcribed words from a Hindi/Urdu video clip. Some words are written in Urdu Nastaliq/Arabic script or Hindi Devnagari script.
-Please transliterate all these words into Hinglish (Hindi/Urdu words written using the English/Latin alphabet, e.g. "kaise", "haan", "aap", "aur", "bahut", "achha").
+            const translitPrompt2 = `You are a transliteration engine. Convert the following Urdu/Hindi words to Hinglish (Roman/Latin script). Return ONLY a raw JSON array, no markdown, no explanation.
 
-Input words:
-${JSON.stringify(chunk)}
+Input: ${JSON.stringify(chunk)}
 
-IMPORTANT:
-- Return ONLY a valid JSON array of objects, containing the index ("idx") and the transliterated word in the Latin alphabet:
-[
-  { "idx": 0, "word": "kaise" }
-]
-- The array length MUST be exactly ${chunk.length}. Keep the index mapping intact.
-- Transliterate to Latin characters, but DO NOT translate the meaning to English (e.g. if the word is "بہت", output "bahut", NOT "very").
-- Keep emojis, punctuation, or numbers as they are.`;
+Rules:
+- Output ONLY: [{"idx":0,"word":"roman_word"},...]
+- Same length as input (${chunk.length} items)
+- Transliterate sound, don't translate meaning (بہت → bahut, نہیں → nahi, کیا → kya, হ্যাঁ → haan)
+- Keep numbers/punctuation unchanged
+- Use lowercase Latin letters only`;
 
-            const transliterationResponse = await puter.ai.chat(translitPrompt);
-            console.log('Transliteration response from Puter:', transliterationResponse);
-            const parsedWords = parseTransliteratedResponse(transliterationResponse);
+            const rawResponse = await puter.ai.chat(translitPrompt2);
+            console.log('Transliteration raw response type:', typeof rawResponse, rawResponse);
+            
+            // puter.ai.chat may return a string or an object with message.content
+            let responseText = '';
+            if (typeof rawResponse === 'string') {
+              responseText = rawResponse;
+            } else if (rawResponse?.message?.content) {
+              responseText = String(rawResponse.message.content);
+            } else if (rawResponse?.content) {
+              responseText = String(rawResponse.content);
+            } else if (rawResponse?.text) {
+              responseText = String(rawResponse.text);
+            } else {
+              responseText = String(rawResponse);
+            }
+            
+            console.log('Transliteration text to parse:', responseText);
+            const parsedWords = parseTransliteratedResponse(responseText);
             if (parsedWords && Array.isArray(parsedWords)) {
               for (const item of parsedWords) {
                 if (item && typeof item === 'object' && 'idx' in item && 'word' in item) {
@@ -1769,12 +1796,12 @@ IMPORTANT:
                   }
                 }
               }
-            } else {
-              throw new Error('Puter AI did not return a valid JSON array for transliteration.');
             }
+            // If parsedWords is null/invalid, we just keep the original words (don't throw)
           }
         } catch (translitErr) {
           console.error('Failed to transliterate to Hinglish:', translitErr);
+          // Continue with original words if transliteration fails
         }
       }
 
