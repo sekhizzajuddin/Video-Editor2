@@ -104,6 +104,7 @@ export async function saveProjectToDB(data: {
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
   currentTime: number;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
 }): Promise<void> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -129,6 +130,9 @@ export async function saveProjectToDB(data: {
     store.put(cleanTracks, 'tracks');
     store.put(cleanMediaLibrary, 'mediaLibrary');
     store.put(data.currentTime, 'currentTime');
+    if (data.aspectRatio) {
+      store.put(data.aspectRatio, 'aspectRatio');
+    }
 
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
@@ -142,6 +146,7 @@ export async function loadProjectFromDB(): Promise<{
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
   currentTime: number;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
 } | null> {
   const db = await getDB();
 
@@ -159,6 +164,7 @@ export async function loadProjectFromDB(): Promise<{
     const rawTracks = await getValue('tracks') as TimelineTrack[];
     const rawMediaLibrary = await getValue('mediaLibrary') as MediaItem[];
     const currentTime = (await getValue('currentTime') as number) || 0;
+    const aspectRatio = (await getValue('aspectRatio') as any) || '16:9';
 
     if (!rawTracks || !rawMediaLibrary) return null;
 
@@ -214,7 +220,8 @@ export async function loadProjectFromDB(): Promise<{
     return {
       tracks: rawTracks,
       mediaLibrary,
-      currentTime
+      currentTime,
+      aspectRatio
     };
   } catch (err) {
     console.error('Failed to load project from DB:', err);

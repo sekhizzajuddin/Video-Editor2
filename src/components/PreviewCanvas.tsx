@@ -412,6 +412,10 @@ export function PreviewCanvas() {
     setPreviewCanvas,
     activeTool,
     settings,
+    aspectRatio,
+    isExporting,
+    exportWidth,
+    exportHeight,
   } = useEditorStore();
 
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
@@ -721,17 +725,40 @@ export function PreviewCanvas() {
     ctx.save();
     ctx.scale(canvas_scale, canvas_scale);
 
-    const W = W_target;
-    const H = H_target;
+    let viewW = W_target;
+    let viewH = H_target;
+    if (aspectRatio === '9:16') {
+      viewW = Math.round(H_target * (9 / 16));
+    } else if (aspectRatio === '1:1') {
+      viewW = H_target;
+    } else if (aspectRatio === '4:3') {
+      viewW = Math.round(H_target * (4 / 3));
+    }
+    const W = viewW;
+    const H = viewH;
+    const offsetX = (W_target - viewW) / 2;
+    const offsetY = (H_target - viewH) / 2;
 
-    const cx = W / 2;
-    const cy = H / 2;
+    const cx = W_target / 2;
+    const cy = H_target / 2;
     const totalX = cx + viewport.x - cx * viewport.zoom;
     const totalY = cy + viewport.y - cy * viewport.zoom;
 
     ctx.save();
     ctx.translate(totalX, totalY);
     ctx.scale(viewport.zoom, viewport.zoom);
+
+    // Draw active aspect ratio frame boundary (so user can see the workspace bounds)
+    ctx.strokeStyle = '#3e3e3e';
+    ctx.lineWidth = 1 / viewport.zoom;
+    ctx.strokeRect(offsetX, offsetY, viewW, viewH);
+
+    // Clip rendering to the active aspect ratio frame
+    ctx.beginPath();
+    ctx.rect(offsetX, offsetY, viewW, viewH);
+    ctx.clip();
+
+    ctx.translate(offsetX, offsetY);
 
     // 2. Checkerboard removed per user request
 
@@ -1865,7 +1892,7 @@ export function PreviewCanvas() {
       snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
       snapCtx.drawImage(composite, 0, 0);
     }
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight]);
 
   // ── Unified render loop to prevent flickering during scrubbing ──
   // Use a frame-pending flag + single rAF loop instead of canceling/rescheduling.
@@ -2110,8 +2137,8 @@ export function PreviewCanvas() {
       >
         <canvas
           ref={canvasRef}
-          width={previewWidth}
-          height={previewHeight}
+          width={isExporting ? (exportWidth || 854) : previewWidth}
+          height={isExporting ? (exportHeight || 480) : previewHeight}
           className={`pointer-events-none ${
             isFullscreen
               ? 'absolute inset-0 w-full h-full object-contain bg-black'
@@ -2179,18 +2206,33 @@ export function PreviewCanvas() {
               >
                 <p className="text-[10px] font-semibold text-[#a0a0a0] uppercase tracking-wider">Canvas Settings</p>
 
+                {/* Aspect Ratio */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-[#a0a0a0]">Aspect Ratio</label>
+                  <select
+                    value={aspectRatio}
+                    onChange={(e) => useEditorStore.getState().setAspectRatio(e.target.value as any)}
+                    className="w-full bg-[#2d2d2d] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    <option value="16:9">16:9 (Landscape)</option>
+                    <option value="9:16">9:16 (Vertical/Reels)</option>
+                    <option value="1:1">1:1 (Square/Post)</option>
+                    <option value="4:3">4:3 (Standard)</option>
+                  </select>
+                </div>
+
                 {/* Background Color */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-[#a0a0a0]">Background Color</label>
                   <div className="flex items-center gap-2">
                     <input
-                      type="color"
-                      value={canvasBgColor}
-                      id="canvas-bg-color"
-                      onChange={(e) => setCanvasBgColor(e.target.value)}
-                      className="w-7 h-7 rounded border border-[#3e3e3e] cursor-pointer bg-transparent p-0.5"
-                    />
-                    <span className="text-[10px] text-white font-mono" id="canvas-bg-label">{canvasBgColor}</span>
+                       type="color"
+                       value={canvasBgColor}
+                       id="canvas-bg-color"
+                       onChange={(e) => setCanvasBgColor(e.target.value)}
+                       className="w-7 h-7 rounded border border-[#3e3e3e] cursor-pointer bg-transparent p-0.5"
+                     />
+                     <span className="text-[10px] text-white font-mono" id="canvas-bg-label">{canvasBgColor}</span>
                   </div>
                 </div>
 
@@ -2668,6 +2710,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     updateOverLayer,
     canvasTransformMode,
     setCanvasTransformMode,
+    aspectRatio,
   } = useEditorStore();
 
   const updateClip = useCallback((clipId: string, updates: any) => {
@@ -2845,12 +2888,25 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime]);
+  }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime, aspectRatio]);
 
   if (!activeClip) return null;
 
-  const W = 854;
-  const H = 480;
+  // Determine active viewport dimensions based on aspect ratio
+  let viewW = 854;
+  let viewH = 480;
+  if (aspectRatio === '9:16') {
+    viewW = Math.round(480 * (9 / 16));
+  } else if (aspectRatio === '1:1') {
+    viewW = 480;
+  } else if (aspectRatio === '4:3') {
+    viewW = Math.round(480 * (4 / 3));
+  }
+  const W = viewW;
+  const H = viewH;
+  const offsetX = (854 - viewW) / 2;
+  const offsetY = (480 - viewH) / 2;
+
   let vw = W;
   let vh = H;
   if (mediaItem?.type === 'video') {
@@ -2892,8 +2948,8 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     });
   };
 
-  const cx = W / 2;
-  const cy = H / 2;
+  const cx = 854 / 2;
+  const cy = 480 / 2;
   const totalX = cx + viewport.x - cx * viewport.zoom;
   const totalY = cy + viewport.y - cy * viewport.zoom;
 
@@ -2901,7 +2957,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     <>
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
-          <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom})`}>
+          <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom}) translate(${offsetX}, ${offsetY})`}>
             <g
               transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
             >

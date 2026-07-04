@@ -349,6 +349,7 @@ export interface EditorState {
   volume: number;
   inPoint: number | null;
   outPoint: number | null;
+  aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
 
   // Timeline Zoom & Scroll
   zoomLevel: number;     // pixels per second
@@ -361,6 +362,8 @@ export interface EditorState {
   showExportModal: boolean;
   isExporting: boolean;
   exportFps?: number;
+  exportWidth?: number;
+  exportHeight?: number;
   showSettingsModal: boolean;
   activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
   activePropertiesTab: 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects';

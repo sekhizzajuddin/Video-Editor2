@@ -204,6 +204,7 @@ interface EditorActions {
   setShowExportModal: (show: boolean) => void;
   setIsExporting: (isExporting: boolean) => void;
   setExportFps: (fps: number) => void;
+  setExportDimensions: (width: number, height: number) => void;
   setShowSettingsModal: (show: boolean) => void;
   setCanvasTransformMode: (mode: 'resize' | 'crop') => void;
 
@@ -242,6 +243,7 @@ interface EditorActions {
 
   // Computed: recalculate total duration from all clips
   recalcTotalDuration: () => void;
+  setAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
 
   // Transitions
   setShowTransitionLayer: (show: boolean) => void;
@@ -298,11 +300,14 @@ const initialState: EditorState = {
   outPoint: null,
   markers: [],
   beatMarkers: [],
+  aspectRatio: '16:9',
   zoomLevel: 80,
   scrollLeft: 0,
   activeTool: 'select',
   isExporting: false,
   exportFps: 30,
+  exportWidth: 854,
+  exportHeight: 480,
   showExportModal: false,
   showSettingsModal: false,
   activeMediaTab: 'project',
@@ -1401,6 +1406,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setShowExportModal: (show) => set({ showExportModal: show }),
   setIsExporting: (isExporting) => set({ isExporting }),
   setExportFps: (exportFps) => set({ exportFps }),
+  setExportDimensions: (exportWidth, exportHeight) => set({ exportWidth, exportHeight }),
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setCanvasTransformMode: (mode) => set({ canvasTransformMode: mode }),
 
@@ -1674,8 +1680,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     // Auto-save to IndexedDB
-    const { tracks, mediaLibrary, currentTime } = get();
-    saveProjectToDB({ tracks, mediaLibrary, currentTime }).catch((err) =>
+    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
+    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
   },
@@ -1697,8 +1703,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex - 1,
       };
     });
-    const { tracks, mediaLibrary, currentTime } = get();
-    saveProjectToDB({ tracks, mediaLibrary, currentTime }).catch((err) =>
+    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
+    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
   },
@@ -1712,8 +1718,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex + 1,
       };
     });
-    const { tracks, mediaLibrary, currentTime } = get();
-    saveProjectToDB({ tracks, mediaLibrary, currentTime }).catch((err) =>
+    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
+    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
   },
@@ -1760,6 +1766,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
         currentTime: data.currentTime,
+        aspectRatio: data.aspectRatio || '16:9',
         history: [
           {
             tracks: JSON.parse(JSON.stringify(loadedTracks)),
@@ -1774,6 +1781,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       console.error('Failed to load project:', err);
       return false;
     }
+  },
+
+  setAspectRatio: (ratio) => {
+    set({ aspectRatio: ratio });
+    get().saveSnapshot();
   },
 
   // Recalculate total duration from all clips and clean up empty custom tracks

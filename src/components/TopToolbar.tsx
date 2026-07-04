@@ -93,6 +93,7 @@ export function TopToolbar() {
       tracks: state.tracks,
       mediaLibrary: cleanMediaLibrary,
       currentTime: state.currentTime,
+      aspectRatio: state.aspectRatio,
     };
 
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
@@ -124,6 +125,7 @@ export function TopToolbar() {
           tracks: data.tracks,
           mediaLibrary: data.mediaLibrary,
           currentTime: data.currentTime || 0,
+          aspectRatio: data.aspectRatio || '16:9',
           history: [
             {
               tracks: JSON.parse(JSON.stringify(data.tracks)),

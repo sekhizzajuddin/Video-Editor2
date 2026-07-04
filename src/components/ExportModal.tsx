@@ -48,13 +48,21 @@ export function ExportModal() {
   const {
     showExportModal, setShowExportModal, totalDuration, tracks,
     previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime,
-    inPoint, outPoint, setIsExporting, setExportFps
+    inPoint, outPoint, setIsExporting, setExportFps, setExportDimensions, aspectRatio
   } = useEditorStore();
 
   const [fps, setFps] = useState('30');
   const [quality, setQuality] = useState('high');
   const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('webm'); // Default to webm — most reliable
+  const [resolution, setResolution] = useState('720p');
+  const [modalAspectRatio, setModalAspectRatio] = useState<'16:9' | '9:16' | '1:1' | '4:3'>('16:9');
   const [exportStatus, setExportStatus] = useState<ExportStatus>('idle');
+
+  useEffect(() => {
+    if (showExportModal) {
+      setModalAspectRatio(aspectRatio);
+    }
+  }, [showExportModal, aspectRatio]);
   const [progress, setProgress] = useState(0);
   const [conversionProgress, setConversionProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -109,7 +117,13 @@ export function ExportModal() {
     chunksRef.current = [];
     playbackStartedRef.current = false;
     setIsExporting(false);
-  }, [setIsExporting]);
+    if (previewCanvas) {
+      const previewWidth = useEditorStore.getState().settings.previewQuality === 'quarter' ? 213 : useEditorStore.getState().settings.previewQuality === 'half' ? 427 : 854;
+      const previewHeight = useEditorStore.getState().settings.previewQuality === 'quarter' ? 120 : useEditorStore.getState().settings.previewQuality === 'half' ? 240 : 480;
+      previewCanvas.width = previewWidth;
+      previewCanvas.height = previewHeight;
+    }
+  }, [setIsExporting, previewCanvas]);
 
   // Watch currentTime to update progress and stop recording at end
   useEffect(() => {
@@ -290,6 +304,26 @@ export function ExportModal() {
     // Reset state
     cleanup();
     chunksRef.current = [];
+
+    // Calculate export dimensions based on resolution and aspect ratio
+    const height = resolution === '4k' ? 2160 : resolution === '1080p' ? 1080 : resolution === '720p' ? 720 : 480;
+    let width = 854;
+    if (modalAspectRatio === '16:9') {
+      width = Math.round(height * (16 / 9));
+    } else if (modalAspectRatio === '9:16') {
+      width = Math.round(height * (9 / 16));
+    } else if (modalAspectRatio === '1:1') {
+      width = height;
+    } else if (modalAspectRatio === '4:3') {
+      width = Math.round(height * (4 / 3));
+    }
+
+    // Force synchronous resize on DOM element to prevent capture stream mismatch
+    previewCanvas.width = width;
+    previewCanvas.height = height;
+
+    // Set export settings in Zustand store
+    setExportDimensions(width, height);
     setIsExporting(true);
     setExportFps(parseInt(fps));
     updateStatus('recording');
@@ -533,7 +567,17 @@ export function ExportModal() {
               </div>
               <div>
                 <span className="text-[#a0a0a0]">Resolution: </span>
-                <span className="text-white">854 × 480</span>
+                <span className="text-white">
+                  {(() => {
+                    const height = resolution === '4k' ? 2160 : resolution === '1080p' ? 1080 : resolution === '720p' ? 720 : 480;
+                    let width = 854;
+                    if (modalAspectRatio === '16:9') width = Math.round(height * (16 / 9));
+                    else if (modalAspectRatio === '9:16') width = Math.round(height * (9 / 16));
+                    else if (modalAspectRatio === '1:1') width = height;
+                    else if (modalAspectRatio === '4:3') width = Math.round(height * (4 / 3));
+                    return `${width} × ${height} (${modalAspectRatio})`;
+                  })()}
+                </span>
               </div>
               <div>
                 <span className="text-[#a0a0a0]">Est. Size: </span>
@@ -570,6 +614,38 @@ export function ExportModal() {
                   <div className="text-[9px] opacity-60 mt-0.5">{fmt.desc}</div>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Resolution & Aspect Ratio */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[#a0a0a0] block mb-2">Resolution</label>
+              <select
+                disabled={isExporting}
+                value={resolution}
+                onChange={(e) => setResolution(e.target.value)}
+                className="w-full bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
+              >
+                <option value="480p">480p SD (854x480)</option>
+                <option value="720p">720p HD (1280x720)</option>
+                <option value="1080p">1080p Full HD (1920x1080)</option>
+                <option value="4k">4K Ultra HD (3840x2160)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-[#a0a0a0] block mb-2">Aspect Ratio</label>
+              <select
+                disabled={isExporting}
+                value={modalAspectRatio}
+                onChange={(e) => setModalAspectRatio(e.target.value as any)}
+                className="w-full bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
+              >
+                <option value="16:9">16:9 (Landscape)</option>
+                <option value="9:16">9:16 (Vertical/Reels)</option>
+                <option value="1:1">1:1 (Square/Post)</option>
+                <option value="4:3">4:3 (Standard)</option>
+              </select>
             </div>
           </div>
 
