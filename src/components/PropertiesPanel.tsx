@@ -267,10 +267,20 @@ export function PropertiesPanel() {
     // Temporarily monkeypatch fetch to fix Gradio credentials CORS issue on third-party domains (e.g. HF Space)
     const originalFetch = window.fetch;
     window.fetch = function (input: any, init: any) {
-      if (init && init.credentials === 'include') {
-        init.credentials = 'same-origin';
+      let requestInput = input;
+      let requestInit = init;
+
+      if (input instanceof Request) {
+        if (input.credentials === 'include') {
+          requestInput = new Request(input, { ...init, credentials: 'same-origin' });
+          requestInit = undefined;
+        }
+      } else {
+        if (init && init.credentials === 'include') {
+          requestInit = { ...init, credentials: 'same-origin' };
+        }
       }
-      return originalFetch(input, init);
+      return originalFetch(requestInput, requestInit);
     };
 
     try {
