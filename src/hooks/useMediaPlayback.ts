@@ -347,6 +347,13 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
 
     for (const [clipId, entry] of pool) {
       const clip = clips.find((c) => c.clipId === clipId);
+      const isActiveAndPlaying = !!clip && isPlaying;
+
+      if (isActiveAndPlaying) {
+        connectAudioNode(entry);
+      } else {
+        disconnectAudioNode(entry);
+      }
 
       if (!clip || !isPlaying) {
         // Pause this element
@@ -466,6 +473,9 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
   // Reactively sync audio parameters (volume, EQ, pitch, etc.) for all clips in the pool
   useEffect(() => {
     const pool = poolRef.current;
+    const clips = activeClips();
+    const playingIds = new Set(clips.map((c) => c.clipId));
+
     for (const [clipId, entry] of pool) {
       // Find the clip in the tracks
       let fullClip = null;
@@ -671,7 +681,7 @@ export function useMediaPlayback(): Map<string, HTMLVideoElement> {
 
       const linearGain = Math.pow(10, animatedVolume / 20);
       const trackVolume = targetTrack?.volume ?? 1;
-      const finalVolume = (globalMuted || isTransitionMuted) ? 0 : linearGain * volume * trackVolume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
+      const finalVolume = (globalMuted || isTransitionMuted || !playingIds.has(clipId)) ? 0 : linearGain * volume * trackVolume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
 
       if (entry.gainNode) {
         entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
@@ -823,6 +833,47 @@ function getOrCreateTrackAnalyser(trackId: string, audioCtx: AudioContext): Anal
     trackAnalysers.set(trackId, analyser);
   }
   return analyser;
+}
+
+function connectAudioNode(entry: MediaElement) {
+  if ((entry as any)._isGraphConnected) return;
+  const audioCtx = getMasterAudioCtx();
+  if (!audioCtx || !entry.gainNode) return;
+
+  const track = useEditorStore.getState().tracks.find(
+    (t) => t.clips.some((c) => c.id === entry.clipId) || (t.overLayers || []).some((c) => c.id === entry.clipId)
+  );
+  const trackAnalyser = track ? getOrCreateTrackAnalyser(track.id, audioCtx) : null;
+
+  try {
+    if (trackAnalyser) {
+      entry.gainNode.connect(trackAnalyser);
+    } else if (masterAnalyser) {
+      entry.gainNode.connect(masterAnalyser);
+    } else if (masterCompressor) {
+      entry.gainNode.connect(masterCompressor);
+    } else {
+      entry.gainNode.connect(audioCtx.destination);
+      if (masterAudioDestination) {
+        entry.gainNode.connect(masterAudioDestination);
+      }
+    }
+    (entry as any)._isGraphConnected = true;
+  } catch (err) {
+    console.warn('[Audio] Failed to connect node:', err);
+  }
+}
+
+function disconnectAudioNode(entry: MediaElement) {
+  if (!(entry as any)._isGraphConnected) return;
+  try {
+    if (entry.gainNode) {
+      entry.gainNode.disconnect();
+    }
+    (entry as any)._isGraphConnected = false;
+  } catch (err) {
+    console.warn('[Audio] Failed to disconnect node:', err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,18 +1167,8 @@ function initAudioGraph(entry: MediaElement) {
       delayGain.connect(gainNode);
     }
 
-    if (trackAnalyser) {
-      gainNode.connect(trackAnalyser);
-    } else if (masterAnalyser) {
-      gainNode.connect(masterAnalyser);
-    } else if (masterCompressor) {
-      gainNode.connect(masterCompressor);
-    } else {
-      gainNode.connect(audioCtx.destination);
-      if (masterAudioDestination) {
-        gainNode.connect(masterAudioDestination);
-      }
-    }
+    // Direct connection removed - managed dynamically by connectAudioNode/disconnectAudioNode
+
 
     // Attach to element pool entry
     entry.audioCtx = audioCtx;
