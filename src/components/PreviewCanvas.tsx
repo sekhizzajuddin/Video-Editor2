@@ -659,7 +659,7 @@ export function PreviewCanvas() {
         rawDelta = 16.67; // assume normal frame
       }
     }
-    const deltaMs = Math.min(100, rawDelta); // clampTURE to 100ms max to prevent physics jumps
+    const deltaMs = Math.min(100, rawDelta); // clamp to 100ms max to prevent physics jumps
 
     const W_target = 854;
     const H_target = 480;
