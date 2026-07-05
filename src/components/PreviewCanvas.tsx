@@ -34,6 +34,16 @@ export function clearPreviewCaches() {
   imageLoading.clear();
 }
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('procut-evict-media-cache', ((e: CustomEvent) => {
+    const id = e.detail?.id;
+    if (id) {
+      imageCache.delete(id);
+      imageLoading.delete(id);
+    }
+  }) as EventListener);
+}
+
 function getCachedImage(
   mediaId: string,
   url: string | null,
@@ -1110,6 +1120,402 @@ export function PreviewCanvas() {
       const saturation = Number.isFinite(filters.saturation) ? filters.saturation : 100;
       const blur = Number.isFinite(filters.blur) ? filters.blur : 0;
 
+      const applyFxToContext = (
+        oCtx: CanvasRenderingContext2D,
+        w: number,
+        h: number,
+        fxClip: any
+      ) => {
+        const fx = fxClip.fxSettings;
+        const dw = w;
+        const dh = h;
+        const pxW = w;
+        const pxH = h;
+        
+        const rand = (n: number) => {
+          const seed = Math.floor(currentTime * 30);
+          return ((Math.sin(seed * 7.3 + n * 113.7) * 43758.5) % 1 + 1) % 1;
+        };
+
+        oCtx.save();
+        
+        if (fx?.type === 'vfx_breakdown') {
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.beginPath();
+          oCtx.rect(-dw / 2, -dh / 2, dw * vfxProgress, dh);
+          oCtx.clip();
+
+          if (mediaItem.type === 'video') {
+            const videoEl = videoElements.get(clip.id);
+            if (videoEl && videoEl.readyState >= 2) {
+              const vw = videoEl.videoWidth || w;
+              const vh = videoEl.videoHeight || h;
+              const scale = Math.min(w / vw, h / vh);
+              const baseDw = vw * scale;
+              const baseDh = vh * scale;
+              const sx = vw * cLeft;
+              const sy = vh * cTop;
+              const sw = Math.max(1, vw * (1 - cLeft - cRight));
+              const sh = Math.max(1, vh * (1 - cTop - cBot));
+              const drawW = Math.max(1, baseDw * (1 - cLeft - cRight));
+              const drawH = Math.max(1, baseDh * (1 - cTop - cBot));
+              const dx = -baseDw / 2 + baseDw * cLeft;
+              const dy = -baseDh / 2 + baseDh * cTop;
+              oCtx.filter = `brightness(${120 + exposure}%) contrast(150%) saturate(200%)`;
+              oCtx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, drawW, drawH);
+              oCtx.filter = 'none';
+              applyColorOverlays(oCtx, dw, dh, { ...filters, contrast: 150, saturation: 200 });
+            }
+          }
+
+          oCtx.beginPath();
+          oCtx.moveTo(-dw / 2 + dw * vfxProgress, -dh / 2);
+          oCtx.lineTo(-dw / 2 + dw * vfxProgress,  dh / 2);
+          oCtx.lineWidth = 4;
+          oCtx.strokeStyle = '#3b82f6';
+          oCtx.shadowColor = '#3b82f6';
+          oCtx.shadowBlur = 15;
+          oCtx.stroke();
+          oCtx.restore();
+
+        } else if (fx?.type === 'bw_to_color') {
+          const progress = (currentTime - fxClip.startTime) / fxClip.duration;
+          const p = Math.max(0, Math.min(1, progress));
+          if (p < 1) {
+            const imgData = oCtx.getImageData(0, 0, w, h);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+              const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+              data[i]     = Math.round(luma + (data[i]     - luma) * p);
+              data[i + 1] = Math.round(luma + (data[i + 1] - luma) * p);
+              data[i + 2] = Math.round(luma + (data[i + 2] - luma) * p);
+            }
+            oCtx.putImageData(imgData, 0, 0);
+          }
+
+        } else if (fx?.type === 'old_film') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const seed = Math.floor(currentTime * 24);
+          let rngState = (seed * 0x9e3779b9 + 1) >>> 0;
+          const randF = () => {
+            rngState ^= rngState << 13;
+            rngState ^= rngState >>> 17;
+            rngState ^= rngState << 5;
+            return ((rngState >>> 0) & 0xFFFF) / 0x10000;
+          };
+
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalCompositeOperation = 'multiply';
+          oCtx.globalAlpha = 0.35 * intensity;
+          oCtx.fillStyle = 'rgb(200,160,110)';
+          oCtx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          oCtx.restore();
+
+          const grainW = Math.max(1, Math.round(dw / 2));
+          const grainH = Math.max(1, Math.round(dh / 2));
+          const grainData = new Uint8ClampedArray(grainW * grainH * 4);
+          const grainAlpha = Math.round(0.18 * intensity * 0.6 * 255);
+          for (let gi = 0; gi < grainW * grainH; gi++) {
+            const v = randF() > 0.5 ? 255 : 0;
+            const off = gi * 4;
+            grainData[off]     = v;
+            grainData[off + 1] = v;
+            grainData[off + 2] = v;
+            grainData[off + 3] = grainAlpha;
+          }
+          const grainImg = new ImageData(grainData, grainW, grainH);
+          const grainOffscreen = getOrCreateCanvas(offscreenCanvasRef, grainW, grainH);
+          const gCtx = grainOffscreen.getContext('2d');
+          if (gCtx) {
+            gCtx.putImageData(grainImg, 0, 0);
+            oCtx.save();
+            oCtx.imageSmoothingEnabled = false;
+            oCtx.drawImage(grainOffscreen, -dw / 2, -dh / 2, dw, dh);
+            oCtx.restore();
+          }
+
+          if (randF() > 0.85) {
+            oCtx.save();
+            oCtx.globalAlpha = 0.5 * intensity;
+            oCtx.strokeStyle = 'rgba(255,240,180,0.7)';
+            oCtx.lineWidth = 1;
+            const scratchX = -dw / 2 + randF() * dw;
+            oCtx.beginPath();
+            oCtx.moveTo(scratchX, -dh / 2);
+            oCtx.lineTo(scratchX + (randF() - 0.5) * 10, dh / 2);
+            oCtx.stroke();
+            oCtx.restore();
+          }
+
+          oCtx.save();
+          const vig = oCtx.createRadialGradient(0, 0, dw * 0.3, 0, 0, dw * 0.7);
+          vig.addColorStop(0, 'rgba(0,0,0,0)');
+          vig.addColorStop(1, `rgba(0,0,0,${0.55 * intensity})`);
+          oCtx.fillStyle = vig;
+          oCtx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          oCtx.restore();
+
+        } else if (fx?.type === 'vhs') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalAlpha = 0.25 * intensity;
+          oCtx.globalCompositeOperation = 'screen';
+          oCtx.fillStyle = 'rgba(255,0,0,0.15)';
+          oCtx.fillRect(-dw / 2 + 6 * intensity, -dh / 2, dw, dh);
+          oCtx.fillStyle = 'rgba(0,0,255,0.15)';
+          oCtx.fillRect(-dw / 2 - 6 * intensity, -dh / 2, dw, dh);
+          oCtx.restore();
+
+          oCtx.save();
+          const scanW = Math.max(1, Math.round(w));
+          const scanH = Math.max(1, Math.round(h));
+          const scanData = new Uint8ClampedArray(scanW * scanH * 4);
+          const scanAlpha = Math.round(0.2 * intensity * 0.9 * 255);
+          for (let row = 0; row < scanH; row++) {
+            if (row % 3 === 0) {
+              const rowOff = row * scanW * 4;
+              for (let col = 0; col < scanW; col++) {
+                const off = rowOff + col * 4;
+                scanData[off + 3] = scanAlpha;
+              }
+            }
+          }
+          const scanImg = new ImageData(scanData, scanW, scanH);
+          const scanOffscreen = getOrCreateCanvas(glitchRedCanvasRef, scanW, scanH);
+          const sCtx = scanOffscreen.getContext('2d');
+          if (sCtx) {
+            sCtx.putImageData(scanImg, 0, 0);
+            oCtx.globalAlpha = 1;
+            oCtx.drawImage(scanOffscreen, -dw / 2, -dh / 2, dw, dh);
+          }
+          oCtx.restore();
+
+          if (rand(1) > 0.7) {
+            oCtx.save();
+            oCtx.globalAlpha = 0.3 * intensity;
+            const bandY = -dh / 2 + rand(2) * dh;
+            oCtx.fillStyle = 'rgba(255,255,255,0.15)';
+            oCtx.fillRect(-dw / 2, bandY, dw, 4 + rand(3) * 20);
+            oCtx.restore();
+          }
+
+          oCtx.save();
+          oCtx.globalCompositeOperation = 'multiply';
+          oCtx.globalAlpha = 0.12 * intensity;
+          oCtx.fillStyle = 'rgb(180,255,180)';
+          oCtx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          oCtx.restore();
+
+        } else if (fx?.type === 'cinematic_bars') {
+          const barH = dh * 0.105;
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.fillStyle = 'rgb(0,0,0)';
+          oCtx.fillRect(-dw / 2, -dh / 2,       dw, barH);
+          oCtx.fillRect(-dw / 2,  dh / 2 - barH, dw, barH);
+          oCtx.restore();
+
+        } else if (fx?.type === 'neon_glow') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalAlpha = 0.45 * intensity;
+          oCtx.globalCompositeOperation = 'screen';
+          oCtx.filter = `blur(${6 * intensity}px) brightness(1.8)`;
+          oCtx.drawImage(oCtx.canvas, -dw / 2, -dh / 2, dw, dh);
+          oCtx.restore();
+
+          oCtx.save();
+          oCtx.globalAlpha = 0.15 * intensity;
+          oCtx.globalCompositeOperation = 'screen';
+          const neonGrad = oCtx.createLinearGradient(-dw / 2, 0, dw / 2, 0);
+          neonGrad.addColorStop(0, 'rgba(255,0,200,0.8)');
+          neonGrad.addColorStop(1, 'rgba(0,200,255,0.8)');
+          oCtx.fillStyle = neonGrad;
+          oCtx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          oCtx.restore();
+
+        } else if (fx?.type === 'rgb_split') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const shift = intensity * 14;
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalAlpha = 0.55;
+          oCtx.globalCompositeOperation = 'screen';
+
+          const offR = getOrCreateCanvas(glitchRedCanvasRef, w, h);
+          const ctxR = offR.getContext('2d')!;
+          ctxR.clearRect(0, 0, w, h);
+          ctxR.drawImage(oCtx.canvas, 0, 0, w, h);
+          const dR = ctxR.getImageData(0, 0, w, h);
+          for (let i = 0; i < dR.data.length; i += 4) { dR.data[i+1] = 0; dR.data[i+2] = 0; }
+          ctxR.putImageData(dR, 0, 0);
+          oCtx.drawImage(offR, -dw / 2 - shift, -dh / 2, dw, dh);
+
+          const offB = getOrCreateCanvas(glitchBlueCanvasRef, w, h);
+          const ctxB = offB.getContext('2d')!;
+          ctxB.clearRect(0, 0, w, h);
+          ctxB.drawImage(oCtx.canvas, 0, 0, w, h);
+          const dB = ctxB.getImageData(0, 0, w, h);
+          for (let i = 0; i < dB.data.length; i += 4) { dB.data[i] = 0; dB.data[i+1] = 0; }
+          ctxB.putImageData(dB, 0, 0);
+          oCtx.drawImage(offB, -dw / 2 + shift, -dh / 2, dw, dh);
+          oCtx.restore();
+
+        } else if (fx?.type === 'pixelate') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const blockSize = Math.max(2, Math.round(intensity * 24));
+          const tmpW = Math.max(1, Math.round(w / blockSize));
+          const tmpH = Math.max(1, Math.round(h / blockSize));
+          const tmp = getOrCreateCanvas(pixelateCanvasRef, tmpW, tmpH);
+          const tCtx = tmp.getContext('2d')!;
+          tCtx.clearRect(0, 0, tmpW, tmpH);
+          tCtx.drawImage(oCtx.canvas, 0, 0, w, h, 0, 0, tmpW, tmpH);
+          tCtx.imageSmoothingEnabled = false;
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          (oCtx as any).imageSmoothingEnabled = false;
+          oCtx.drawImage(tmp, 0, 0, tmpW, tmpH, -dw / 2, -dh / 2, dw, dh);
+          oCtx.restore();
+
+        } else if (fx?.type === 'mirror') {
+          const halfW = Math.max(1, Math.round(w / 2));
+          const leftData = oCtx.getImageData(0, 0, halfW, h);
+          const flip = getOrCreateCanvas(mirrorCanvasRef, halfW, h);
+          const fCtx = flip.getContext('2d')!;
+          fCtx.clearRect(0, 0, halfW, h);
+          fCtx.putImageData(leftData, 0, 0);
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.scale(-1, 1);
+          oCtx.drawImage(flip, 0, 0, halfW, h, -dw / 2, -dh / 2, dw / 2, dh);
+          oCtx.restore();
+
+        } else if (fx?.type === 'zoom_blur') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const steps = Math.round(6 + intensity * 8);
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalAlpha = 0.25 / steps;
+          for (let i = 1; i <= steps; i++) {
+            const s = 1 + (i / steps) * 0.1 * intensity;
+            oCtx.save();
+            oCtx.scale(s, s);
+            oCtx.drawImage(oCtx.canvas, -dw / 2, -dh / 2, dw, dh);
+            oCtx.restore();
+          }
+          oCtx.restore();
+
+        } else if (fx?.type === 'lens_flare') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const fcx = dw * 0.2, fcy = -dh * 0.25;
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalCompositeOperation = 'screen';
+          const flareGrad = oCtx.createRadialGradient(fcx, fcy, 0, fcx, fcy, 90 * intensity);
+          flareGrad.addColorStop(0,    `rgba(255,255,220,${0.9  * intensity})`);
+          flareGrad.addColorStop(0.15, `rgba(255,200,100,${0.5  * intensity})`);
+          flareGrad.addColorStop(0.5,  `rgba(200,180,255,${0.15 * intensity})`);
+          flareGrad.addColorStop(1,    'rgba(0,0,0,0)');
+          oCtx.fillStyle = flareGrad;
+          oCtx.fillRect(-dw / 2, -dh / 2, dw, dh);
+          
+          oCtx.globalAlpha = 0.35 * intensity;
+          const streakGrad = oCtx.createLinearGradient(-dw / 2, fcy, dw / 2, fcy);
+          streakGrad.addColorStop(0,   'rgba(100,150,255,0)');
+          streakGrad.addColorStop(0.5, `rgba(150,210,255,${0.85 * intensity})`);
+          streakGrad.addColorStop(1,   'rgba(100,150,255,0)');
+          oCtx.fillStyle = streakGrad;
+          oCtx.fillRect(-dw / 2, fcy - 2, dw, 4);
+          oCtx.restore();
+
+        } else if (fx?.type === 'night_vision') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const imgData = oCtx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          const seed = Math.floor(currentTime * 30);
+          const randNV = (n: number) => ((Math.sin(seed * 3.1 + n * 91.7) * 43758.5) % 1 + 1) % 1;
+          for (let i = 0; i < data.length; i += 4) {
+            const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            const noise = (randNV(i * 0.001) - 0.5) * 30 * intensity;
+            const v = Math.min(255, Math.max(0, luma * 1.4 + noise));
+            data[i]     = 0;
+            data[i + 1] = Math.round(v);
+            data[i + 2] = 0;
+          }
+          oCtx.putImageData(imgData, 0, 0);
+
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalAlpha = 0.12 * intensity;
+          for (let row = -dh / 2; row < dh / 2; row += 2) {
+            oCtx.fillStyle = 'rgba(0,0,0,0.9)';
+            oCtx.fillRect(-dw / 2, row, dw, 1);
+          }
+          oCtx.restore();
+
+        } else if (fx?.type === 'thermal') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const imgData = oCtx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+          for (let i = 0; i < data.length; i += 4) {
+            const luma = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+            let r = 0, g = 0, b2 = 0;
+            if      (luma < 0.25) { const t = luma / 0.25;        r = 0;          g = 0;          b2 = mix(128, 255, t); }
+            else if (luma < 0.5)  { const t = (luma-0.25)/0.25;   r = 0;          g = mix(0,255,t);  b2 = mix(255,255,t); }
+            else if (luma < 0.75) { const t = (luma-0.5)/0.25;    r = mix(0,255,t); g = mix(255,255,t); b2 = mix(255,0,t); }
+            else                  { const t = (luma-0.75)/0.25;   r = mix(255,255,t); g = mix(255,0,t); b2 = 0; }
+            data[i]     = Math.round(mix(data[i],     r,  intensity));
+            data[i + 1] = Math.round(mix(data[i + 1], g,  intensity));
+            data[i + 2] = Math.round(mix(data[i + 2], b2, intensity));
+          }
+          oCtx.putImageData(imgData, 0, 0);
+
+        } else if (fx?.type === 'glitch') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const seed = Math.floor(currentTime * 30);
+          const randGl = (n: number) => ((Math.sin(seed * 9.7 + n * 127.3) * 43758.5453) % 1 + 1) % 1;
+
+          const aberration = intensity * 8 * randGl(1);
+          oCtx.translate(w / 2, h / 2);
+          oCtx.save();
+          oCtx.globalAlpha = 0.45;
+          oCtx.globalCompositeOperation = 'screen';
+          oCtx.fillStyle = `rgba(255, 0, 0, 0.3)`;
+          oCtx.fillRect(-dw / 2 - aberration, -dh / 2, dw, dh);
+          oCtx.fillStyle = `rgba(0, 0, 255, 0.3)`;
+          oCtx.fillRect(-dw / 2 + aberration, -dh / 2, dw, dh);
+          oCtx.restore();
+
+          oCtx.save();
+          oCtx.globalAlpha = 0.15 * intensity;
+          for (let row = -dh / 2; row < dh / 2; row += 4) {
+            if (randGl(row + 5) > 0.5) {
+              oCtx.fillStyle = 'rgba(0,0,0,0.8)';
+              oCtx.fillRect(-dw / 2, row, dw, 2);
+            }
+          }
+          oCtx.restore();
+
+          const numSlices = Math.floor(3 + randGl(2) * 6 * intensity);
+          oCtx.save();
+          oCtx.globalAlpha = 0.65 * intensity;
+          for (let i = 0; i < numSlices; i++) {
+            const sliceY    = -dh / 2 + randGl(i * 3) * dh;
+            const sliceH    = 2 + randGl(i * 3 + 1) * 8;
+            const sliceShift = (randGl(i * 3 + 2) - 0.5) * 40 * intensity;
+            oCtx.drawImage(oCtx.canvas, 0, sliceY + dh / 2, w, sliceH, sliceShift, sliceY + dh / 2, w, sliceH);
+          }
+          oCtx.restore();
+        }
+        
+        oCtx.restore();
+      };
+
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
         const videoReady = videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0;
@@ -1174,6 +1580,9 @@ export function PreviewCanvas() {
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
           const hasChroma = clip.chromaKey?.enabled;
+          const hasLut = !!clip.lut?.mediaId;
+          const hasFx = !!activeFxClip;
+          const needsOffscreen = hasWheels || hasChroma || hasLut || hasFx;
 
           if (hasPerspectiveWarp && corners) {
             const offscreenWidth = Math.max(1, Math.round(sw));
@@ -1189,21 +1598,40 @@ export function PreviewCanvas() {
               if (hasWheels) {
                 applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
               }
+              if (hasLut) {
+                const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
+                if (lutMedia?.lutData) {
+                  applyLutToCanvas(oCtx, offscreen.width, offscreen.height, lutMedia.lutData, clip.lut!.intensity ?? 100);
+                }
+              }
+              if (hasFx) {
+                applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
+              }
               drawPerspectiveTexture(ctx, offscreen, corners);
             }
           } else {
-            if (hasWheels || hasChroma) {
+            if (needsOffscreen) {
               const offscreenWidth = Math.max(1, Math.round(dw));
               const offscreenHeight = Math.max(1, Math.round(dh));
               const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
               const oCtx = offscreen.getContext('2d');
               if (oCtx) {
+                oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
                 oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
                 if (hasChroma && clip.chromaKey) {
                   applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
                 }
                 if (hasWheels) {
                   applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
+                }
+                if (hasLut) {
+                  const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
+                  if (lutMedia?.lutData) {
+                    applyLutToCanvas(oCtx, offscreen.width, offscreen.height, lutMedia.lutData, clip.lut!.intensity ?? 100);
+                  }
+                }
+                if (hasFx) {
+                  applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
                 }
                 ctx.drawImage(offscreen, dx, dy, dw, dh);
               } else {
@@ -1270,6 +1698,9 @@ export function PreviewCanvas() {
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
           const hasChroma = clip.chromaKey?.enabled;
+          const hasLut = !!clip.lut?.mediaId;
+          const hasFx = !!activeFxClip;
+          const needsOffscreen = hasWheels || hasChroma || hasLut || hasFx;
 
           if (hasPerspectiveWarp && corners) {
             const offscreenWidth = Math.max(1, Math.round(sw));
@@ -1285,21 +1716,40 @@ export function PreviewCanvas() {
               if (hasWheels) {
                 applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
               }
+              if (hasLut) {
+                const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
+                if (lutMedia?.lutData) {
+                  applyLutToCanvas(oCtx, offscreen.width, offscreen.height, lutMedia.lutData, clip.lut!.intensity ?? 100);
+                }
+              }
+              if (hasFx) {
+                applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
+              }
               drawPerspectiveTexture(ctx, offscreen, corners);
             }
           } else {
-            if (hasWheels || hasChroma) {
+            if (needsOffscreen) {
               const offscreenWidth = Math.max(1, Math.round(dw));
               const offscreenHeight = Math.max(1, Math.round(dh));
               const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
               const oCtx = offscreen.getContext('2d');
               if (oCtx) {
+                oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
                 oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
                 if (hasChroma && clip.chromaKey) {
                   applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
                 }
                 if (hasWheels) {
                   applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
+                }
+                if (hasLut) {
+                  const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
+                  if (lutMedia?.lutData) {
+                    applyLutToCanvas(oCtx, offscreen.width, offscreen.height, lutMedia.lutData, clip.lut!.intensity ?? 100);
+                  }
+                }
+                if (hasFx) {
+                  applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
                 }
                 ctx.drawImage(offscreen, dx, dy, dw, dh);
               } else {
@@ -1484,380 +1934,6 @@ export function PreviewCanvas() {
         applyColorOverlays(ctx, dw, dh, filters);
       }
 
-      // Apply FX layer if active
-      if (hasRealMedia && activeFxClip) {
-        const fx = activeFxClip.fxSettings;
-
-        // ── Pixel-space origin: getImageData/putImageData use RAW canvas coords, NOT transform-space ──
-        // ctx is currently translated to (W/2 + aX + ...), so the clip center in pixel-space is:
-        const pxL = Math.round(W / 2 - dw / 2);  // left edge in canvas pixel coords
-        const pxT = Math.round(H / 2 - dh / 2);  // top edge in canvas pixel coords
-        const pxW = Math.max(1, Math.round(dw));
-        const pxH = Math.max(1, Math.round(dh));
-
-        if (fx?.type === 'vfx_breakdown') {
-          // Draw enhanced version over it, clipped by vfxProgress (transform-space is fine for drawImage/clip)
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(-dw / 2, -dh / 2, dw * vfxProgress, dh);
-          ctx.clip();
-
-          if (mediaItem.type === 'video') {
-            const videoEl = videoElements.get(clip.id);
-            if (videoEl && videoEl.readyState >= 2) {
-              const vw = videoEl.videoWidth || W;
-              const vh = videoEl.videoHeight || H;
-              const scale = Math.min(W / vw, H / vh);
-              const baseDw = vw * scale;
-              const baseDh = vh * scale;
-              const sx = vw * cLeft;
-              const sy = vh * cTop;
-              const sw = Math.max(1, vw * (1 - cLeft - cRight));
-              const sh = Math.max(1, vh * (1 - cTop - cBot));
-              const drawW = Math.max(1, baseDw * (1 - cLeft - cRight));
-              const drawH = Math.max(1, baseDh * (1 - cTop - cBot));
-              const dx = -baseDw / 2 + baseDw * cLeft;
-              const dy = -baseDh / 2 + baseDh * cTop;
-              ctx.filter = `brightness(${120 + exposure}%) contrast(150%) saturate(200%)`;
-              ctx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, drawW, drawH);
-              ctx.filter = 'none';
-              applyColorOverlays(ctx, dw, dh, { ...filters, contrast: 150, saturation: 200 });
-            }
-          }
-
-          // Neon wipe line
-          ctx.beginPath();
-          ctx.moveTo(-dw / 2 + dw * vfxProgress, -dh / 2);
-          ctx.lineTo(-dw / 2 + dw * vfxProgress,  dh / 2);
-          ctx.lineWidth = 4;
-          ctx.strokeStyle = '#3b82f6';
-          ctx.shadowColor = '#3b82f6';
-          ctx.shadowBlur = 15;
-          ctx.stroke();
-          ctx.restore();
-
-        } else if (fx?.type === 'bw_to_color') {
-          const progress = (currentTime - activeFxClip.startTime) / activeFxClip.duration;
-          const p = Math.max(0, Math.min(1, progress));
-          if (p < 1) {
-            // FIXED: use absolute pixel coords for getImageData
-            const imgData = ctx.getImageData(pxL, pxT, pxW, pxH);
-            const data = imgData.data;
-            for (let i = 0; i < data.length; i += 4) {
-              const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-              data[i]     = Math.round(luma + (data[i]     - luma) * p);
-              data[i + 1] = Math.round(luma + (data[i + 1] - luma) * p);
-              data[i + 2] = Math.round(luma + (data[i + 2] - luma) * p);
-            }
-            ctx.putImageData(imgData, pxL, pxT);
-          }
-
-        } else if (fx?.type === 'old_film') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          const seed = Math.floor(currentTime * 24);
-          const rand = (n: number) => ((Math.sin(seed * 7.3 + n * 113.7) * 43758.5) % 1 + 1) % 1;
-
-          // Sepia overlay (transform-space fillRect is fine)
-          ctx.save();
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.globalAlpha = 0.35 * intensity;
-          ctx.fillStyle = 'rgb(200,160,110)';
-          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-          ctx.restore();
-
-          // Grain (transform-space fillRect)
-          ctx.save();
-          ctx.globalAlpha = 0.18 * intensity;
-          const grainSize = 2;
-          for (let gy = -dh / 2; gy < dh / 2; gy += grainSize) {
-            for (let gx = -dw / 2; gx < dw / 2; gx += grainSize) {
-              const v = rand(gx * 0.3 + gy * 0.7 + seed) > 0.5 ? 255 : 0;
-              ctx.fillStyle = `rgba(${v},${v},${v},0.6)`;
-              ctx.fillRect(gx, gy, grainSize, grainSize);
-            }
-          }
-          ctx.restore();
-
-          // Occasional scratch line
-          if (rand(99) > 0.85) {
-            ctx.save();
-            ctx.globalAlpha = 0.5 * intensity;
-            ctx.strokeStyle = 'rgba(255,240,180,0.7)';
-            ctx.lineWidth = 1;
-            const scratchX = -dw / 2 + rand(55) * dw;
-            ctx.beginPath();
-            ctx.moveTo(scratchX, -dh / 2);
-            ctx.lineTo(scratchX + (rand(77) - 0.5) * 10, dh / 2);
-            ctx.stroke();
-            ctx.restore();
-          }
-
-          // Vignette
-          ctx.save();
-          const vig = ctx.createRadialGradient(0, 0, dw * 0.3, 0, 0, dw * 0.7);
-          vig.addColorStop(0, 'rgba(0,0,0,0)');
-          vig.addColorStop(1, `rgba(0,0,0,${0.55 * intensity})`);
-          ctx.fillStyle = vig;
-          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-          ctx.restore();
-
-        } else if (fx?.type === 'vhs') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          const seed = Math.floor(currentTime * 30);
-          const rand = (n: number) => ((Math.sin(seed * 11.3 + n * 97.4) * 43758.5) % 1 + 1) % 1;
-
-          ctx.save();
-          ctx.globalAlpha = 0.25 * intensity;
-          ctx.globalCompositeOperation = 'screen';
-          ctx.fillStyle = 'rgba(255,0,0,0.15)';
-          ctx.fillRect(-dw / 2 + 6 * intensity, -dh / 2, dw, dh);
-          ctx.fillStyle = 'rgba(0,0,255,0.15)';
-          ctx.fillRect(-dw / 2 - 6 * intensity, -dh / 2, dw, dh);
-          ctx.restore();
-
-          ctx.save();
-          ctx.globalAlpha = 0.2 * intensity;
-          for (let row = -dh / 2; row < dh / 2; row += 3) {
-            ctx.fillStyle = 'rgba(0,0,0,0.9)';
-            ctx.fillRect(-dw / 2, row, dw, 1);
-          }
-          ctx.restore();
-
-          if (rand(1) > 0.7) {
-            ctx.save();
-            ctx.globalAlpha = 0.3 * intensity;
-            const bandY = -dh / 2 + rand(2) * dh;
-            ctx.fillStyle = 'rgba(255,255,255,0.15)';
-            ctx.fillRect(-dw / 2, bandY, dw, 4 + rand(3) * 20);
-            ctx.restore();
-          }
-
-          ctx.save();
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.globalAlpha = 0.12 * intensity;
-          ctx.fillStyle = 'rgb(180,255,180)';
-          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-          ctx.restore();
-
-        } else if (fx?.type === 'cinematic_bars') {
-          const barH = dh * 0.105;
-          ctx.save();
-          ctx.fillStyle = 'rgb(0,0,0)';
-          ctx.fillRect(-dw / 2, -dh / 2,       dw, barH);
-          ctx.fillRect(-dw / 2,  dh / 2 - barH, dw, barH);
-          ctx.restore();
-
-        } else if (fx?.type === 'neon_glow') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          ctx.save();
-          ctx.globalAlpha = 0.45 * intensity;
-          ctx.globalCompositeOperation = 'screen';
-          ctx.filter = `blur(${6 * intensity}px) brightness(1.8)`;
-          if (mediaItem.type === 'video') {
-            const videoEl = videoElements.get(clip.id);
-            if (videoEl && videoEl.readyState >= 2) {
-              ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
-            }
-          }
-          ctx.restore();
-
-          ctx.save();
-          ctx.globalAlpha = 0.15 * intensity;
-          ctx.globalCompositeOperation = 'screen';
-          const neonGrad = ctx.createLinearGradient(-dw / 2, 0, dw / 2, 0);
-          neonGrad.addColorStop(0, 'rgba(255,0,200,0.8)');
-          neonGrad.addColorStop(1, 'rgba(0,200,255,0.8)');
-          ctx.fillStyle = neonGrad;
-          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-          ctx.restore();
-
-        } else if (fx?.type === 'rgb_split') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          const shift = intensity * 14;
-          // Use offscreen canvas to isolate channels — avoids ImageData coord issues
-          if (mediaItem.type === 'video') {
-            const videoEl = videoElements.get(clip.id);
-            if (videoEl && videoEl.readyState >= 2) {
-              ctx.save();
-              ctx.globalAlpha = 0.55;
-              ctx.globalCompositeOperation = 'screen';
-
-              const offR = getOrCreateCanvas(glitchRedCanvasRef, pxW, pxH);
-              const ctxR = offR.getContext('2d')!;
-              ctxR.drawImage(videoEl, 0, 0, pxW, pxH);
-              const dR = ctxR.getImageData(0, 0, pxW, pxH);
-              for (let i = 0; i < dR.data.length; i += 4) { dR.data[i+1] = 0; dR.data[i+2] = 0; }
-              ctxR.putImageData(dR, 0, 0);
-              ctx.drawImage(offR, -dw / 2 - shift, -dh / 2, dw, dh);
-
-              const offB = getOrCreateCanvas(glitchBlueCanvasRef, pxW, pxH);
-              const ctxB = offB.getContext('2d')!;
-              ctxB.drawImage(videoEl, 0, 0, pxW, pxH);
-              const dB = ctxB.getImageData(0, 0, pxW, pxH);
-              for (let i = 0; i < dB.data.length; i += 4) { dB.data[i] = 0; dB.data[i+1] = 0; }
-              ctxB.putImageData(dB, 0, 0);
-              ctx.drawImage(offB, -dw / 2 + shift, -dh / 2, dw, dh);
-              ctx.restore();
-            }
-          }
-
-        } else if (fx?.type === 'pixelate') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          const blockSize = Math.max(2, Math.round(intensity * 24));
-          const tmpW = Math.max(1, Math.round(pxW / blockSize));
-          const tmpH = Math.max(1, Math.round(pxH / blockSize));
-          const tmp = getOrCreateCanvas(pixelateCanvasRef, tmpW, tmpH);
-          const tCtx = tmp.getContext('2d')!;
-          // FIXED: use pxL, pxT (absolute pixel coords) as the source rect from the main canvas
-          tCtx.drawImage(ctx.canvas, pxL, pxT, pxW, pxH, 0, 0, tmpW, tmpH);
-          tCtx.imageSmoothingEnabled = false;
-          ctx.save();
-          (ctx as any).imageSmoothingEnabled = false;
-          // Draw back in transform-space
-          ctx.drawImage(tmp, 0, 0, tmpW, tmpH, -dw / 2, -dh / 2, dw, dh);
-          ctx.restore();
-
-        } else if (fx?.type === 'mirror') {
-          // FIXED: read left half in pixel-space, flip onto right half in pixel-space
-          const halfW = Math.max(1, Math.round(pxW / 2));
-          const leftData = ctx.getImageData(pxL, pxT, halfW, pxH);
-          // Flip horizontally into a temp canvas
-          const flip = getOrCreateCanvas(mirrorCanvasRef, halfW, pxH);
-          const fCtx = flip.getContext('2d')!;
-          fCtx.putImageData(leftData, 0, 0);
-          // Draw flipped onto right half in transform-space
-          ctx.save();
-          ctx.scale(-1, 1);
-          ctx.drawImage(flip, 0, 0, halfW, pxH, -dw / 2, -dh / 2, dw / 2, dh);
-          ctx.restore();
-
-        } else if (fx?.type === 'zoom_blur') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          const steps = Math.round(6 + intensity * 8);
-          ctx.save();
-          ctx.globalAlpha = 0.25 / steps;
-          for (let i = 1; i <= steps; i++) {
-            const s = 1 + (i / steps) * 0.1 * intensity;
-            ctx.save();
-            ctx.scale(s, s);
-            if (mediaItem.type === 'video') {
-              const videoEl = videoElements.get(clip.id);
-              if (videoEl && videoEl.readyState >= 2) {
-                ctx.drawImage(videoEl, -dw / 2, -dh / 2, dw, dh);
-              }
-            }
-            ctx.restore();
-          }
-          ctx.restore();
-
-        } else if (fx?.type === 'lens_flare') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          const fcx = dw * 0.2, fcy = -dh * 0.25;
-          ctx.save();
-          ctx.globalCompositeOperation = 'screen';
-          const flareGrad = ctx.createRadialGradient(fcx, fcy, 0, fcx, fcy, 90 * intensity);
-          flareGrad.addColorStop(0,    `rgba(255,255,220,${0.9  * intensity})`);
-          flareGrad.addColorStop(0.15, `rgba(255,200,100,${0.5  * intensity})`);
-          flareGrad.addColorStop(0.5,  `rgba(200,180,255,${0.15 * intensity})`);
-          flareGrad.addColorStop(1,    'rgba(0,0,0,0)');
-          ctx.fillStyle = flareGrad;
-          ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-          // Anamorphic horizontal streak
-          ctx.globalAlpha = 0.35 * intensity;
-          const streakGrad = ctx.createLinearGradient(-dw / 2, fcy, dw / 2, fcy);
-          streakGrad.addColorStop(0,   'rgba(100,150,255,0)');
-          streakGrad.addColorStop(0.5, `rgba(150,210,255,${0.85 * intensity})`);
-          streakGrad.addColorStop(1,   'rgba(100,150,255,0)');
-          ctx.fillStyle = streakGrad;
-          ctx.fillRect(-dw / 2, fcy - 2, dw, 4);
-          ctx.restore();
-
-        } else if (fx?.type === 'night_vision') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          // FIXED: absolute pixel coords
-          const imgData = ctx.getImageData(pxL, pxT, pxW, pxH);
-          const data = imgData.data;
-          const seed = Math.floor(currentTime * 30);
-          const rand = (n: number) => ((Math.sin(seed * 3.1 + n * 91.7) * 43758.5) % 1 + 1) % 1;
-          for (let i = 0; i < data.length; i += 4) {
-            const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            const noise = (rand(i * 0.001) - 0.5) * 30 * intensity;
-            const v = Math.min(255, Math.max(0, luma * 1.4 + noise));
-            data[i]     = 0;
-            data[i + 1] = Math.round(v);
-            data[i + 2] = 0;
-          }
-          ctx.putImageData(imgData, pxL, pxT);
-
-          // Scan lines (transform-space)
-          ctx.save();
-          ctx.globalAlpha = 0.12 * intensity;
-          for (let row = -dh / 2; row < dh / 2; row += 2) {
-            ctx.fillStyle = 'rgba(0,0,0,0.9)';
-            ctx.fillRect(-dw / 2, row, dw, 1);
-          }
-          ctx.restore();
-
-        } else if (fx?.type === 'thermal') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          // FIXED: absolute pixel coords
-          const imgData = ctx.getImageData(pxL, pxT, pxW, pxH);
-          const data = imgData.data;
-          const mix = (a: number, b: number, t: number) => a + (b - a) * t;
-          for (let i = 0; i < data.length; i += 4) {
-            const luma = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
-            let r = 0, g = 0, b2 = 0;
-            if      (luma < 0.25) { const t = luma / 0.25;        r = 0;          g = 0;          b2 = mix(128, 255, t); }
-            else if (luma < 0.5)  { const t = (luma-0.25)/0.25;   r = 0;          g = mix(0,255,t);  b2 = mix(255,255,t); }
-            else if (luma < 0.75) { const t = (luma-0.5)/0.25;    r = mix(0,255,t); g = mix(255,255,t); b2 = mix(255,0,t); }
-            else                  { const t = (luma-0.75)/0.25;   r = mix(255,255,t); g = mix(255,0,t); b2 = 0; }
-            data[i]     = Math.round(mix(data[i],     r,  intensity));
-            data[i + 1] = Math.round(mix(data[i + 1], g,  intensity));
-            data[i + 2] = Math.round(mix(data[i + 2], b2, intensity));
-          }
-          ctx.putImageData(imgData, pxL, pxT);
-
-        } else if (fx?.type === 'glitch') {
-          const intensity = (fx.intensity ?? 100) / 100;
-          const seed = Math.floor(currentTime * 30);
-          const rand = (n: number) => ((Math.sin(seed * 9.7 + n * 127.3) * 43758.5453) % 1 + 1) % 1;
-
-          // Chromatic aberration
-          const aberration = intensity * 8 * rand(1);
-          ctx.save();
-          ctx.globalAlpha = 0.45;
-          ctx.globalCompositeOperation = 'screen';
-          ctx.fillStyle = `rgba(255, 0, 0, 0.3)`;
-          ctx.fillRect(-dw / 2 - aberration, -dh / 2, dw, dh);
-          ctx.fillStyle = `rgba(0, 0, 255, 0.3)`;
-          ctx.fillRect(-dw / 2 + aberration, -dh / 2, dw, dh);
-          ctx.restore();
-
-          // Scan lines
-          ctx.save();
-          ctx.globalAlpha = 0.15 * intensity;
-          for (let row = -dh / 2; row < dh / 2; row += 4) {
-            if (rand(row + 5) > 0.5) {
-              ctx.fillStyle = 'rgba(0,0,0,0.8)';
-              ctx.fillRect(-dw / 2, row, dw, 2);
-            }
-          }
-          ctx.restore();
-
-          // Slice distortion
-          const numSlices = Math.floor(3 + rand(2) * 6 * intensity);
-          ctx.save();
-          ctx.globalAlpha = 0.65 * intensity;
-          for (let i = 0; i < numSlices; i++) {
-            const sliceY    = -dh / 2 + rand(i * 3) * dh;
-            const sliceH    = 2 + rand(i * 3 + 1) * 8;
-            const sliceShift = (rand(i * 3 + 2) - 0.5) * 40 * intensity;
-            ctx.fillStyle = `rgba(${Math.floor(rand(i*7)*255)},${Math.floor(rand(i*7+1)*100)},${Math.floor(rand(i*7+2)*255)},0.5)`;
-            ctx.fillRect(-dw / 2 + sliceShift, sliceY, dw, sliceH);
-          }
-          ctx.restore();
-        }
-      }
       ctx.restore();
     };
 
@@ -2068,14 +2144,14 @@ export function PreviewCanvas() {
 
       for (let c = 1; c < COLS; c++) {
         ctx.beginPath();
-        ctx.moveTo(c * cellW, 0);
-        ctx.lineTo(c * cellW, H);
+        ctx.moveTo(offsetX + c * cellW, offsetY);
+        ctx.lineTo(offsetX + c * cellW, offsetY + H);
         ctx.stroke();
       }
       for (let r = 1; r < ROWS; r++) {
         ctx.beginPath();
-        ctx.moveTo(0, r * cellH);
-        ctx.lineTo(W, r * cellH);
+        ctx.moveTo(offsetX, offsetY + r * cellH);
+        ctx.lineTo(offsetX + W, offsetY + r * cellH);
         ctx.stroke();
       }
 
@@ -2083,8 +2159,8 @@ export function PreviewCanvas() {
       ctx.strokeStyle = 'rgba(251,191,36,0.5)';
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(offsetX + W / 2, offsetY); ctx.lineTo(offsetX + W / 2, offsetY + H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(offsetX, offsetY + H / 2); ctx.lineTo(offsetX + W, offsetY + H / 2); ctx.stroke();
       ctx.setLineDash([]);
 
       // Rule-of-thirds intersection dots
@@ -2092,7 +2168,7 @@ export function PreviewCanvas() {
       for (let c = 1; c < COLS; c++) {
         for (let r = 1; r < ROWS; r++) {
           ctx.beginPath();
-          ctx.arc(c * cellW, r * cellH, 3, 0, Math.PI * 2);
+          ctx.arc(offsetX + c * cellW, offsetY + r * cellH, 3, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -2111,8 +2187,8 @@ export function PreviewCanvas() {
       const drawSafeRect = (pct: number, color: string, label: string) => {
         const rw = W * pct;
         const rh = H * pct;
-        const rx = (W - rw) / 2;
-        const ry = (H - rh) / 2;
+        const rx = offsetX + (W - rw) / 2;
+        const ry = offsetY + (H - rh) / 2;
         
         ctx.strokeStyle = color;
         ctx.lineWidth = 1;
@@ -2141,8 +2217,8 @@ export function PreviewCanvas() {
     const tcPadY = 4;
     const tcW = tcMetrics.width + tcPadX * 2;
     const tcH = 20;
-    const tcX = W - tcW - 8;
-    const tcY = 8;
+    const tcX = offsetX + W - tcW - 8;
+    const tcY = offsetY + 8;
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.beginPath();
     if (typeof (ctx as any).roundRect === 'function') {
@@ -2154,7 +2230,7 @@ export function PreviewCanvas() {
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    ctx.fillText(tcText, W - 8 - tcPadX, tcY + tcH / 2);
+    ctx.fillText(tcText, offsetX + W - 8 - tcPadX, tcY + tcH / 2);
 
     ctx.restore(); // Restore from global canvas resolution scale
 
@@ -2203,9 +2279,17 @@ export function PreviewCanvas() {
 
     rafActiveRef.current = true;
     let rafId: number;
+    let tabVisible = !document.hidden;
+
+    // PERF FIX: Pause rAF when the tab is not visible to save CPU
+    const onVisChange = () => {
+      tabVisible = !document.hidden;
+      if (tabVisible) framePendingRef.current = true; // redraw immediately on restore
+    };
+    document.addEventListener('visibilitychange', onVisChange);
 
     const tick = () => {
-      if (framePendingRef.current) {
+      if (tabVisible && framePendingRef.current) {
         framePendingRef.current = false;
         renderCanvasRef.current();
       }
@@ -2216,6 +2300,7 @@ export function PreviewCanvas() {
     return () => {
       cancelAnimationFrame(rafId);
       rafActiveRef.current = false;
+      document.removeEventListener('visibilitychange', onVisChange);
     };
   }, []);
   useEffect(() => {
@@ -3419,9 +3504,10 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       stroke="#141414"
                       strokeWidth={1.5 / viewport.zoom}
                       className="pointer-events-auto cursor-alias"
-                      title="Rotate"
                       onMouseDown={(e) => handleMouseDown(e, 'rot')}
-                    />
+                    >
+                      <title>Rotate</title>
+                    </circle>
                     {/* Resize handles */}
                     {[-1, 1].map((rx) =>
                       [-1, 1].map((ry) => (

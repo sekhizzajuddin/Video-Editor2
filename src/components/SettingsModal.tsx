@@ -1,7 +1,8 @@
-import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw } from 'lucide-react';
+import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw, History, Trash2 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
+import { getAutosavesFromDB, deleteAutosaveFromDB, restoreSnapshotMedia } from '@/utils/projectPersistence';
 import { clearPreviewCaches } from './PreviewCanvas';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 
@@ -24,8 +25,56 @@ export function SettingsModal() {
     setShowSettingsModal(false);
     e.target.value = '';
   }, [addMedia, setShowSettingsModal]);
-  const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls' | 'recovery'>('general');
   const [searchQuery, setSearchQuery] = useState('');
+  const [autosaves, setAutosaves] = useState<any[]>([]);
+
+  const loadAutosaves = useCallback(async () => {
+    try {
+      const list = await getAutosavesFromDB();
+      setAutosaves(list);
+    } catch (err) {
+      console.error('Failed to load autosaves:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showSettingsModal && activeTab === 'recovery') {
+      loadAutosaves();
+    }
+  }, [showSettingsModal, activeTab, loadAutosaves]);
+
+  const handleRestoreAutosave = async (as: any) => {
+    const confirmed = window.confirm("Restore this versioned auto-save? Unsaved changes in your current timeline will be lost.");
+    if (!confirmed) return;
+
+    try {
+      const restored = await restoreSnapshotMedia(as);
+      const loadedTracks = restored.tracks.map((t: any) => ({
+        ...t,
+        overLayers: t.overLayers || [],
+      }));
+      
+      useEditorStore.setState({
+        tracks: loadedTracks,
+        mediaLibrary: restored.mediaLibrary,
+        currentTime: restored.currentTime,
+        aspectRatio: restored.aspectRatio || '16:9',
+        history: [
+          {
+            tracks: JSON.parse(JSON.stringify(loadedTracks)),
+            currentTime: restored.currentTime,
+          }
+        ],
+        historyIndex: 0,
+      });
+      useEditorStore.getState().recalcTotalDuration();
+      setShowSettingsModal(false);
+    } catch (err) {
+      console.error("Failed to restore autosave:", err);
+      alert("Failed to restore autosave.");
+    }
+  };
   const [recordingActionId, setRecordingActionId] = useState<string | null>(null);
   const [conflictDetail, setConflictDetail] = useState<{
     actionId: string;
@@ -107,6 +156,7 @@ export function SettingsModal() {
     { id: 'controls' as const, label: 'Controls', icon: Sliders },
     { id: 'keyboard' as const, label: 'Shortcuts', icon: Keyboard },
     { id: 'performance' as const, label: 'Performance', icon: Monitor },
+    { id: 'recovery' as const, label: 'Recovery', icon: History },
   ];
 
   return (
@@ -541,6 +591,68 @@ export function SettingsModal() {
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'recovery' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Project Recovery History</h3>
+                  <button
+                    onClick={loadAutosaves}
+                    className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+                    title="Refresh autosaves list"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#a0a0a0]">
+                  Periodic background snapshots of your project. Keep up to 10 versions.
+                </p>
+
+                <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+                  {autosaves.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-[#6a6a6a]">
+                      No recovery snapshots found.
+                    </div>
+                  ) : (
+                    autosaves.map((as) => (
+                      <div
+                        key={as.timestamp}
+                        className="bg-[#252525] rounded p-2.5 border border-[#3e3e3e] flex items-center justify-between gap-3 text-xs hover:border-[#4e4e4e] transition-colors"
+                      >
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-semibold text-[#d0d0d0]">
+                            {new Date(as.timestamp).toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-[#808080]">
+                            {as.tracks.reduce((acc: number, t: any) => acc + t.clips.length, 0)} clips • {as.mediaLibrary.length} media items
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleRestoreAutosave(as)}
+                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-black font-semibold text-[10px] uppercase rounded transition-colors"
+                          >
+                            Restore
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm('Delete this recovery point?')) {
+                                await deleteAutosaveFromDB(as.timestamp);
+                                loadAutosaves();
+                              }
+                            }}
+                            className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}

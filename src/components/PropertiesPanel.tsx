@@ -1038,6 +1038,68 @@ export function PropertiesPanel() {
     useEditorStore.getState().saveSnapshot();
   };
 
+  const [isNormalizing, setIsNormalizing] = useState(false);
+
+  const handleNormalizeAudio = async () => {
+    if (!selectedClip) return;
+    const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+    if (!media?.url) return;
+
+    setIsNormalizing(true);
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const response = await fetch(media.url);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      await audioCtx.close();
+
+      let peakAmplitude = 0;
+      const numChannels = audioBuffer.numberOfChannels;
+      const sampleRate = audioBuffer.sampleRate;
+      
+      const startSample = Math.floor(selectedClip.trimStart * sampleRate);
+      const hasRamp = selectedClip.speedRamp && selectedClip.speedRamp.length >= 2;
+      const mediaDuration = hasRamp
+        ? getMediaTimeAtPosition(selectedClip.id, selectedClip.speedRamp, 1.0, selectedClip.duration)
+        : selectedClip.duration * selectedClip.speed;
+      const endSample = Math.min(
+        Math.floor((selectedClip.trimStart + mediaDuration) * sampleRate),
+        audioBuffer.length
+      );
+
+      for (let ch = 0; ch < numChannels; ch++) {
+        const rawData = audioBuffer.getChannelData(ch);
+        const subData = rawData.slice(startSample, endSample);
+        for (let i = 0; i < subData.length; i++) {
+          const val = Math.abs(subData[i]);
+          if (val > peakAmplitude) {
+            peakAmplitude = val;
+          }
+        }
+      }
+
+      if (peakAmplitude > 0) {
+        const targetDb = -3.0;
+        const peakDb = 20 * Math.log10(peakAmplitude);
+        const newVolumeDb = targetDb - peakDb;
+        const clampedVolume = Math.max(-40, Math.min(12, Math.round(newVolumeDb * 10) / 10));
+
+        const current = selectedClip.audioSettings || defaultAudioSettings;
+        updateClip(selectedClip.id, {
+          audioSettings: {
+            ...current,
+            volume: clampedVolume,
+          },
+        });
+        useEditorStore.getState().saveSnapshot('Normalize Audio');
+      }
+    } catch (err) {
+      console.error('Audio normalization failed:', err);
+    } finally {
+      setIsNormalizing(false);
+    }
+  };
+
   const handleAutoVoiceTune = () => {
     if (selectedClipIds.length < 2) return;
 
@@ -3061,6 +3123,25 @@ export function PropertiesPanel() {
                         title="Double-click to reset to 0 dB"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
+                    </div>
+                    {/* Peak Normalization */}
+                    <div className="pt-1.5 flex items-center justify-between">
+                      <span className="text-[10px] text-[#808080]">Peak Normalization</span>
+                      <button
+                        onClick={handleNormalizeAudio}
+                        disabled={isNormalizing || selectedClip.mediaId?.startsWith('text-placeholder')}
+                        className={`px-2 py-0.5 text-[10px] border border-amber-500/30 rounded text-amber-500 hover:text-white hover:bg-amber-500/20 transition-all font-semibold uppercase tracking-wider flex items-center gap-1 ${
+                          isNormalizing ? 'opacity-50 cursor-wait' : ''
+                        }`}
+                      >
+                        {isNormalizing ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" /> Normalizing...
+                          </>
+                        ) : (
+                          'Normalize to -3dB'
+                        )}
+                      </button>
                     </div>
                   </div>
 

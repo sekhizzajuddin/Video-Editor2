@@ -11,6 +11,7 @@ import { ExportModal } from '@/components/ExportModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { useEditorStore } from '@/store/editorStore';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
+import { saveAutosaveToDB } from '@/utils/projectPersistence';
 import './App.css';
 
 function App() {
@@ -29,7 +30,6 @@ function App() {
     redo,
     zoomIn,
     zoomOut,
-    currentTime,
     history,
     historyIndex,
     tracks,
@@ -40,6 +40,7 @@ function App() {
     removeOverLayer,
     selectOverLayer,
     settings,
+    updateSettings,
   } = useEditorStore();
 
   const [leftWidth, setLeftWidth] = useState(250);
@@ -122,6 +123,15 @@ function App() {
         case 'tool_zoom':
           setActiveTool('zoom');
           break;
+        case 'zoom_timeline_in':
+          zoomIn();
+          break;
+        case 'zoom_timeline_out':
+          zoomOut();
+          break;
+        case 'toggle_snap':
+          updateSettings({ snapEnabled: !settings.snapEnabled });
+          break;
         case 'delete_selected': {
           const storeState = useEditorStore.getState();
           if (storeState.selectedKeyframeLines.length > 0) {
@@ -178,78 +188,43 @@ function App() {
           copyClip();
           break;
         case 'set_in_point':
-          useEditorStore.getState().setInPoint(currentTime);
+          useEditorStore.getState().setInPoint(useEditorStore.getState().currentTime);
           break;
         case 'set_out_point':
-          useEditorStore.getState().setOutPoint(currentTime);
+          useEditorStore.getState().setOutPoint(useEditorStore.getState().currentTime);
           break;
         case 'add_marker':
-          useEditorStore.getState().addMarker(currentTime);
+          useEditorStore.getState().addMarker(useEditorStore.getState().currentTime);
           break;
-        case 'shuttle_reverse': {
-          const state = useEditorStore.getState();
-          const curDir = state.playbackDirection ?? 0;
-          const curSpeed = state.playbackSpeed ?? 1;
-          if (curDir >= 0) {
-            state.setPlaybackDirection(-1, 1);
-          } else {
-            state.setPlaybackDirection(-1, Math.min(curSpeed * 2, 8));
-          }
+        case 'seek_frame_left': {
+          const t = useEditorStore.getState().currentTime;
+          useEditorStore.getState().seek(Math.max(0, t - (1 / 30)));
           break;
         }
-        case 'shuttle_pause': {
-          useEditorStore.getState().setPlaybackDirection(0);
+        case 'seek_frame_right': {
+          const t = useEditorStore.getState().currentTime;
+          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, t + (1 / 30)));
           break;
         }
-        case 'shuttle_forward': {
-          const state = useEditorStore.getState();
-          const curDir = state.playbackDirection ?? 0;
-          const curSpeed = state.playbackSpeed ?? 1;
-          if (curDir <= 0) {
-            state.setPlaybackDirection(1, 1);
-          } else {
-            state.setPlaybackDirection(1, Math.min(curSpeed * 2, 8));
-          }
+        case 'seek_second_left': {
+          const t = useEditorStore.getState().currentTime;
+          useEditorStore.getState().seek(Math.max(0, t - 1.0));
           break;
         }
-        case 'seek_frame_left':
-          useEditorStore.getState().seek(Math.max(0, currentTime - (1 / 30)));
+        case 'seek_second_right': {
+          const t = useEditorStore.getState().currentTime;
+          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, t + 1.0));
           break;
-        case 'seek_frame_right':
-          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + (1 / 30)));
-          break;
-        case 'seek_second_left':
-          useEditorStore.getState().seek(Math.max(0, currentTime - 1.0));
-          break;
-        case 'seek_second_right':
-          useEditorStore.getState().seek(Math.min(useEditorStore.getState().totalDuration, currentTime + 1.0));
-          break;
-        case 'cut_clip':
-          cutClip();
-          break;
-        case 'duplicate_clip':
-          duplicateClip();
-          break;
-        case 'zoom_timeline_in':
-          zoomIn();
-          break;
-        case 'zoom_timeline_out':
-          zoomOut();
-          break;
-        case 'seek_start':
-          useEditorStore.getState().seek(0);
-          break;
-        case 'seek_end':
-          useEditorStore.getState().seek(useEditorStore.getState().totalDuration);
-          break;
+        }
         case 'split_clip': {
+          const t = useEditorStore.getState().currentTime;
           if (selectedClipId) {
-            splitClip(selectedClipId, currentTime);
+            splitClip(selectedClipId, t);
           } else {
             tracks.forEach((track) => {
               track.clips.forEach((clip) => {
-                if (currentTime > clip.startTime && currentTime < clip.startTime + clip.duration) {
-                  splitClip(clip.id, currentTime);
+                if (t > clip.startTime && t < clip.startTime + clip.duration) {
+                  splitClip(clip.id, t);
                 }
               });
             });
@@ -272,9 +247,9 @@ function App() {
       redo,
       zoomIn,
       zoomOut,
-      currentTime,
       tracks,
       settings,
+      updateSettings,
       selectedTransitionClipId,
       removeTransition,
       removeSelectedKeyframeLines,
@@ -296,6 +271,25 @@ function App() {
       if (loaded) console.log('Successfully restored project from IndexedDB');
     });
   }, []);
+
+  // Periodic Autosave Versioning (every 2 minutes)
+  useEffect(() => {
+    if (!settings.autosave) return;
+
+    const interval = setInterval(() => {
+      const state = useEditorStore.getState();
+      saveAutosaveToDB({
+        tracks: state.tracks,
+        mediaLibrary: state.mediaLibrary,
+        currentTime: state.currentTime,
+        aspectRatio: state.aspectRatio,
+      }, Date.now())
+        .then(() => console.log('Periodic versioned autosave saved to DB'))
+        .catch(err => console.error('Failed to create periodic autosave:', err));
+    }, 120000); // 2 minutes
+
+    return () => clearInterval(interval);
+  }, [settings.autosave]);
 
   // Resize handlers
   useEffect(() => {

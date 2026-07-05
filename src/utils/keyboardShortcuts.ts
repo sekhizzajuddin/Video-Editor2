@@ -44,6 +44,7 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcutDef[] = [
   { id: 'select_all_clips_backward', label: 'Select Clips Backward', category: 'Timeline Editing', defaultKey: 'Alt+ArrowLeft' },
   { id: 'zoom_timeline_in', label: 'Zoom Timeline In', category: 'Timeline Editing', defaultKey: 'Ctrl+=' },
   { id: 'zoom_timeline_out', label: 'Zoom Timeline Out', category: 'Timeline Editing', defaultKey: 'Ctrl+-' },
+  { id: 'toggle_snap', label: 'Toggle Snapping', category: 'Timeline Editing', defaultKey: 'n' },
 
   // System
   { id: 'undo', label: 'Undo Action', category: 'System', defaultKey: 'Ctrl+z' },

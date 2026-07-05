@@ -136,7 +136,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
       if (peakVal > level) {
         level = peakVal;
       } else {
-        level = level * 0.90 + peakVal * 0.10; // smooth decay
+        level = level * 0.85 + peakVal * 0.15; // smooth decay
       }
       levelRef.current = level;
 
@@ -149,10 +149,23 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
         if (peakHoldTimeRef.current > 0) {
           peakHoldTimeRef.current -= 1;
         } else {
-          peak = peak * 0.97; // decay peak line
+          peak = peak * 0.96; // decay peak line
         }
       }
       peakRef.current = peak;
+
+      // Convert to logarithmic Decibel scale (dBFS: -60 dB to 0 dB)
+      let db = -60;
+      if (level > 0.001) {
+        db = 20 * Math.log10(level);
+      }
+      const normalizedLevel = Math.max(0, Math.min(1, (db + 60) / 60));
+
+      let peakDb = -60;
+      if (peak > 0.001) {
+        peakDb = 20 * Math.log10(peak);
+      }
+      const normalizedPeak = Math.max(0, Math.min(1, (peakDb + 60) / 60));
 
       const w = canvas.width;
       const h = canvas.height;
@@ -163,7 +176,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
       ctx.fillRect(0, 0, w, h);
 
       // Render levels inside fader limits
-      const fillHeight = Math.min(h, level * h);
+      const fillHeight = Math.min(h, normalizedLevel * h);
       if (fillHeight > 0) {
         const grad = ctx.createLinearGradient(0, h, 0, 0);
         grad.addColorStop(0, '#10b981'); // green
@@ -176,7 +189,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
       }
 
       // Render Peak Hold line
-      const peakY = h - (peak * h);
+      const peakY = h - (normalizedPeak * h);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, Math.max(0, peakY - 1), w, 2);
 
@@ -276,7 +289,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
 
       {/* Value */}
       <div className="text-[10px] font-mono text-[#a0a0a0] mt-2 mb-1">
-        {Math.round(volume * 100)}%
+        {volume <= 0.001 ? '-∞ dB' : `${(20 * Math.log10(volume)).toFixed(1)} dB`}
       </div>
 
       {/* Track Label */}
@@ -304,11 +317,14 @@ interface MasterChannelStripProps {
 }
 
 function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: MasterChannelStripProps) {
+  const levelLRef = useRef<number>(0);
+  const levelRRef = useRef<number>(0);
+  const peakLRef = useRef<number>(0);
+  const peakRRef = useRef<number>(0);
+  const peakHoldTimeLRef = useRef<number>(0);
+  const peakHoldTimeRRef = useRef<number>(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
-  const levelRef = useRef<number>(0);
-  const peakRef = useRef<number>(0);
-  const peakHoldTimeRef = useRef<number>(0);
 
   // Real-time VU meter canvas draw loop for Master
   useEffect(() => {
@@ -319,46 +335,93 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
     if (!ctx) return;
 
     const drawMeter = () => {
-      const analyser = (window as any).procutMasterAnalyser;
+      const analyserL = (window as any).procutMasterAnalyserL;
+      const analyserR = (window as any).procutMasterAnalyserR;
 
-      let peakVal = 0;
+      let peakValL = 0;
+      let peakValR = 0;
 
-      if (analyser) {
-        const bufferLength = analyser.frequencyBinCount;
+      if (analyserL) {
+        const bufferLength = analyserL.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
-        analyser.getByteTimeDomainData(dataArray);
-
-        // Find the maximum absolute value from center (128)
+        analyserL.getByteTimeDomainData(dataArray);
         let maxVal = 0;
         for (let i = 0; i < bufferLength; i++) {
           const val = Math.abs(dataArray[i] - 128) / 128;
           if (val > maxVal) maxVal = val;
         }
-        peakVal = maxVal;
+        peakValL = maxVal;
       }
 
-      // Smooth levels
-      let level = levelRef.current;
-      if (peakVal > level) {
-        level = peakVal;
-      } else {
-        level = level * 0.90 + peakVal * 0.10;
+      if (analyserR) {
+        const bufferLength = analyserR.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyserR.getByteTimeDomainData(dataArray);
+        let maxVal = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          const val = Math.abs(dataArray[i] - 128) / 128;
+          if (val > maxVal) maxVal = val;
+        }
+        peakValR = maxVal;
       }
-      levelRef.current = level;
 
-      // Peak hold logic
-      let peak = peakRef.current;
-      if (level > peak) {
-        peak = level;
-        peakHoldTimeRef.current = 30;
+      // Smooth levels L
+      let levelL = levelLRef.current;
+      if (peakValL > levelL) {
+        levelL = peakValL;
       } else {
-        if (peakHoldTimeRef.current > 0) {
-          peakHoldTimeRef.current -= 1;
+        levelL = levelL * 0.85 + peakValL * 0.15;
+      }
+      levelLRef.current = levelL;
+
+      // Peak hold L
+      let peakL = peakLRef.current;
+      if (levelL > peakL) {
+        peakL = levelL;
+        peakHoldTimeLRef.current = 30;
+      } else {
+        if (peakHoldTimeLRef.current > 0) {
+          peakHoldTimeLRef.current -= 1;
         } else {
-          peak = peak * 0.97;
+          peakL = peakL * 0.96;
         }
       }
-      peakRef.current = peak;
+      peakLRef.current = peakL;
+
+      // Smooth levels R
+      let levelR = levelRRef.current;
+      if (peakValR > levelR) {
+        levelR = peakValR;
+      } else {
+        levelR = levelR * 0.85 + peakValR * 0.15;
+      }
+      levelRRef.current = levelR;
+
+      // Peak hold R
+      let peakR = peakRRef.current;
+      if (levelR > peakR) {
+        peakR = levelR;
+        peakHoldTimeRRef.current = 30;
+      } else {
+        if (peakHoldTimeRRef.current > 0) {
+          peakHoldTimeRRef.current -= 1;
+        } else {
+          peakR = peakR * 0.96;
+        }
+      }
+      peakRRef.current = peakR;
+
+      // Convert L & R to decibels and normalize to [0, 1]
+      const toDb = (val: number) => {
+        if (val <= 0.001) return -60;
+        return 20 * Math.log10(val);
+      };
+      const norm = (dbVal: number) => Math.max(0, Math.min(1, (dbVal + 60) / 60));
+
+      const normLevelL = norm(toDb(levelL));
+      const normLevelR = norm(toDb(levelR));
+      const normPeakL  = norm(toDb(peakL));
+      const normPeakR  = norm(toDb(peakR));
 
       const w = canvas.width;
       const h = canvas.height;
@@ -368,25 +431,31 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, w, h);
 
-      // Render levels inside fader limits
-      const fillHeight = Math.min(h, level * h);
-      if (fillHeight > 0) {
-        const grad = ctx.createLinearGradient(0, h, 0, 0);
-        grad.addColorStop(0, '#10b981');
-        grad.addColorStop(0.7, '#10b981');
-        grad.addColorStop(0.85, '#f59e0b');
-        grad.addColorStop(0.95, '#ef4444');
+      const grad = ctx.createLinearGradient(0, h, 0, 0);
+      grad.addColorStop(0, '#10b981');
+      grad.addColorStop(0.7, '#10b981');
+      grad.addColorStop(0.85, '#f59e0b');
+      grad.addColorStop(0.95, '#ef4444');
+      ctx.fillStyle = grad;
 
-        ctx.fillStyle = grad;
-        // Draw stereo columns (left/right columns next to each other on the master channel)
-        ctx.fillRect(0, h - fillHeight, w / 2 - 1, fillHeight);
-        ctx.fillRect(w / 2 + 1, h - fillHeight, w / 2 - 1, fillHeight);
+      // Render L channel
+      const fillHeightL = Math.min(h, normLevelL * h);
+      if (fillHeightL > 0) {
+        ctx.fillRect(0, h - fillHeightL, w / 2 - 1, fillHeightL);
       }
 
-      // Render Peak Hold lines
-      const peakY = h - (peak * h);
+      // Render R channel
+      const fillHeightR = Math.min(h, normLevelR * h);
+      if (fillHeightR > 0) {
+        ctx.fillRect(w / 2 + 1, h - fillHeightR, w / 2 - 1, fillHeightR);
+      }
+
+      // Render L/R Peak Hold lines
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, Math.max(0, peakY - 1), w, 2);
+      const peakYL = h - (normPeakL * h);
+      ctx.fillRect(0, Math.max(0, peakYL - 1), w / 2 - 1, 2);
+      const peakYR = h - (normPeakR * h);
+      ctx.fillRect(w / 2 + 1, Math.max(0, peakYR - 1), w / 2 - 1, 2);
 
       animationRef.current = requestAnimationFrame(drawMeter);
     };
@@ -448,7 +517,7 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
 
       {/* Value */}
       <div className="text-[10px] font-mono text-amber-400 mt-2 mb-1 font-semibold">
-        {isMuted ? 0 : Math.round(volume * 100)}%
+        {isMuted || volume <= 0.001 ? '-∞ dB' : `${(20 * Math.log10(volume)).toFixed(1)} dB`}
       </div>
 
       {/* Track Label */}

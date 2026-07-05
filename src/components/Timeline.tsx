@@ -23,6 +23,7 @@ import {
   Mic,
   Zap,
   Loader2,
+  Magnet,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -1091,12 +1092,106 @@ function TransitionTarget({
   );
 }
 
+// ─── Playhead Sub-components to prevent Timeline re-rendering ──────────────────
+
+function RulerPlayhead({ zoomLevel }: { zoomLevel: number }) {
+  const currentTime = useEditorStore((state) => state.currentTime);
+  return (
+    <div
+      className="absolute top-0 h-full z-10 pointer-events-none"
+      style={{ left: `${currentTime * zoomLevel}px` }}
+    >
+      <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-red-500 -translate-x-1/2" />
+    </div>
+  );
+}
+
+function WorkspacePlayhead({ zoomLevel }: { zoomLevel: number }) {
+  const currentTime = useEditorStore((state) => state.currentTime);
+  return (
+    <div
+      className="absolute top-0 bottom-0 z-30 pointer-events-none"
+      style={{ left: `${currentTime * zoomLevel}px` }}
+    >
+      <div className="w-px h-full bg-red-500" />
+      <div className="absolute top-0 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full -translate-y-px" />
+    </div>
+  );
+}
+
+function FloatingScrubTooltip({
+  zoomLevel,
+  scrollLeft,
+  isScrubbing,
+}: {
+  zoomLevel: number;
+  scrollLeft: number;
+  isScrubbing: boolean;
+}) {
+  const currentTime = useEditorStore((state) => state.currentTime);
+  if (!isScrubbing) return null;
+  return (
+    <div
+      className="absolute z-50 bg-[#141414]/95 text-amber-400 text-[10px] font-bold px-2 py-1 rounded border border-[#3e3e3e] shadow-2xl pointer-events-none -translate-x-1/2 flex items-center gap-1.5"
+      style={{
+        left: `${currentTime * zoomLevel - scrollLeft}px`,
+        top: `${RULER_HEIGHT + 6}px`,
+      }}
+    >
+      {/* Tooltip caret */}
+      <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#141414] border-t border-l border-[#3e3e3e] rotate-45" />
+      <span className="relative z-10 tabular-nums">
+        {formatDetailedTooltipTime(currentTime)}
+      </span>
+    </div>
+  );
+}
+
+function PlaybackAutoScroller({
+  zoomLevel,
+  totalDuration,
+  trackContainerRef,
+  setScrollLeftThrottled,
+}: {
+  zoomLevel: number;
+  totalDuration: number;
+  trackContainerRef: React.RefObject<HTMLDivElement | null>;
+  setScrollLeftThrottled: (scrollLeft: number) => void;
+}) {
+  const currentTime = useEditorStore((state) => state.currentTime);
+  const isPlaying = useEditorStore((state) => state.isPlaying);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    const container = trackContainerRef.current;
+    if (!container) return;
+
+    const visibleWidth = container.clientWidth;
+    const totalMediaWidth = totalDuration * zoomLevel;
+    if (totalMediaWidth <= visibleWidth) return;
+
+    const playheadX = currentTime * zoomLevel;
+    const thresholdX = container.scrollLeft + visibleWidth * 0.6;
+
+    if (playheadX > thresholdX) {
+      const targetScroll = playheadX - visibleWidth * 0.6;
+      container.scrollLeft = targetScroll;
+      setScrollLeftThrottled(targetScroll);
+    } else if (playheadX < container.scrollLeft) {
+      const targetScroll = Math.max(0, playheadX - visibleWidth * 0.1);
+      container.scrollLeft = targetScroll;
+      setScrollLeftThrottled(targetScroll);
+    }
+  }, [currentTime, isPlaying, zoomLevel, totalDuration, trackContainerRef, setScrollLeftThrottled]);
+
+  return null;
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export function Timeline() {
   const {
     tracks,
-    currentTime,
     isPlaying,
     zoomLevel,
     scrollLeft,
@@ -1157,6 +1252,8 @@ export function Timeline() {
     setHoveredOverLayerRegion,
     pinnedOverLayerTrackId,
     setPinnedOverLayerTrackId,
+    settings,
+    updateSettings,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -1274,7 +1371,7 @@ export function Timeline() {
         }, 1000);
 
         recorder.start();
-        recordingStartPlayheadRef.current = currentTime;
+        recordingStartPlayheadRef.current = useEditorStore.getState().currentTime;
         recordingStartTimeMsRef.current = Date.now();
         startVoiceoverRecordingState(trackId);
         play();
@@ -1296,7 +1393,6 @@ export function Timeline() {
   }, [
     isRecordingVoiceover,
     recordingTrackId,
-    currentTime,
     startVoiceoverRecordingState,
     stopVoiceoverRecordingState,
     play,
@@ -2121,29 +2217,7 @@ Rules:
     }
   }, [scrollLeft]);
 
-  // ── Auto-scroll timeline during playback ──────────────────────────────────
-  useEffect(() => {
-    if (!isPlaying) return;
-    const container = trackContainerRef.current;
-    if (!container) return;
-
-    const visibleWidth = container.clientWidth;
-    const totalMediaWidth = totalDuration * zoomLevel;
-    if (totalMediaWidth <= visibleWidth) return;
-
-    const playheadX = currentTime * zoomLevel;
-    const thresholdX = container.scrollLeft + visibleWidth * 0.6;
-
-    if (playheadX > thresholdX) {
-      const targetScroll = playheadX - visibleWidth * 0.6;
-      container.scrollLeft = targetScroll;
-      setScrollLeftThrottled(targetScroll);
-    } else if (playheadX < container.scrollLeft) {
-      const targetScroll = Math.max(0, playheadX - visibleWidth * 0.1);
-      container.scrollLeft = targetScroll;
-      setScrollLeftThrottled(targetScroll);
-    }
-  }, [currentTime, isPlaying, zoomLevel, totalDuration]);
+  // (Auto-scroll timeline during playback has been extracted to PlaybackAutoScroller sub-component)
 
   // ── Media lookup ────────────────────────────────────────────────────────
 
@@ -2176,10 +2250,13 @@ Rules:
 
   const computeSnap = useCallback(
     (rawTime: number, movingClipId: string, movingDuration: number) => {
+      if (!settings.snapEnabled) {
+        return { snappedTime: rawTime, snapPos: null };
+      }
       const threshold = SNAP_THRESHOLD_PX / zoomLevel;
 
       // Collect snap targets: all other clip edges + the playhead
-      const targets: number[] = [currentTime]; // ★ snap to playhead
+      const targets: number[] = [useEditorStore.getState().currentTime]; // ★ snap to playhead
       for (const track of tracks) {
         for (const clip of track.clips) {
           if (clip.id === movingClipId) continue;
@@ -2209,7 +2286,7 @@ Rules:
 
       return { snappedTime: Math.max(0, snappedTime), snapPos };
     },
-    [zoomLevel, currentTime, tracks],
+    [zoomLevel, tracks, settings.snapEnabled],
   );
 
   const updateDragPosition = useCallback((clientX: number, clientY: number, currScrollLeft: number) => {
@@ -2378,9 +2455,9 @@ Rules:
 
   const handleSplit = useCallback(
     (clipId: string) => {
-      splitClip(clipId, currentTime);
+      splitClip(clipId, useEditorStore.getState().currentTime);
     },
-    [splitClip, currentTime],
+    [splitClip],
   );
 
   // ── Clip drag / resize mousedown ────────────────────────────────────────
@@ -3528,6 +3605,19 @@ Rules:
           <Sparkles className="w-3 h-3" /> Transitions
         </button>
 
+        {/* Snapping Toggle */}
+        <button
+          onClick={() => updateSettings({ snapEnabled: !settings.snapEnabled })}
+          title={settings.snapEnabled ? "Disable Snapping (N)" : "Enable Snapping (N)"}
+          className={`px-2 py-0.5 text-[10px] rounded flex items-center gap-1 transition-colors ${
+            settings.snapEnabled
+              ? 'bg-yellow-600/30 text-yellow-300 border border-yellow-500/30 font-semibold'
+              : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
+          }`}
+        >
+          <Magnet className="w-3 h-3" /> Snapping
+        </button>
+
         <div className="flex-1" />
 
         {/* Tool indicator */}
@@ -3682,21 +3772,11 @@ Rules:
 
         <div className="flex-1 flex flex-col overflow-hidden relative">
           {/* Floating Scrub Tooltip */}
-          {isScrubbing && (
-            <div
-              className="absolute z-50 bg-[#141414]/95 text-amber-400 text-[10px] font-bold px-2 py-1 rounded border border-[#3e3e3e] shadow-2xl pointer-events-none -translate-x-1/2 flex items-center gap-1.5"
-              style={{
-                left: `${currentTime * zoomLevel - scrollLeft}px`,
-                top: `${RULER_HEIGHT + 6}px`,
-              }}
-            >
-              {/* Tooltip caret */}
-              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#141414] border-t border-l border-[#3e3e3e] rotate-45" />
-              <span className="relative z-10 tabular-nums">
-                {formatDetailedTooltipTime(currentTime)}
-              </span>
-            </div>
-          )}
+          <FloatingScrubTooltip
+            zoomLevel={zoomLevel}
+            scrollLeft={scrollLeft}
+            isScrubbing={isScrubbing}
+          />
 
           {/* ── Ruler ──────────────────────────────────────────────── */}
           <div
@@ -3810,12 +3890,7 @@ Rules:
               })}
 
               {/* Playhead on ruler */}
-              <div
-                className="absolute top-0 h-full z-10 pointer-events-none"
-                style={{ left: `${currentTime * zoomLevel}px` }}
-              >
-                <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-red-500 -translate-x-1/2" />
-              </div>
+              <RulerPlayhead zoomLevel={zoomLevel} />
             </div>
           </div>
 
@@ -4477,13 +4552,15 @@ Rules:
               )}
 
               {/* ── Playhead ───────────────────────────────────────────── */}
-              <div
-                className="absolute top-0 bottom-0 z-30 pointer-events-none"
-                style={{ left: `${currentTime * zoomLevel}px` }}
-              >
-                <div className="w-px h-full bg-red-500" />
-                <div className="absolute top-0 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full -translate-y-px" />
-              </div>
+              <WorkspacePlayhead zoomLevel={zoomLevel} />
+
+              {/* ── Playback Auto-Scroller ─────────────────────────────── */}
+              <PlaybackAutoScroller
+                zoomLevel={zoomLevel}
+                totalDuration={totalDuration}
+                trackContainerRef={trackContainerRef}
+                setScrollLeftThrottled={setScrollLeftThrottled}
+              />
             </div>
           </div>
         </div>
@@ -4502,7 +4579,7 @@ Rules:
             <button
               className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
               onClick={() => {
-                splitClip(contextMenu.clipId, currentTime);
+                splitClip(contextMenu.clipId, useEditorStore.getState().currentTime);
                 setContextMenu(null);
               }}
             >
@@ -4616,7 +4693,7 @@ Rules:
                 <button
                   className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                   onClick={() => {
-                    splitClip(contextMenu.clipId, currentTime);
+                    splitClip(contextMenu.clipId, useEditorStore.getState().currentTime);
                     setContextMenu(null);
                   }}
                 >

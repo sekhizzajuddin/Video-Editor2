@@ -9,7 +9,7 @@
 import { MediaItem, TimelineTrack } from '@/types';
 
 const DB_NAME = 'procut_editor_db';
-const DB_VERSION = 2; // Bumped to handle new schema with fileHash
+const DB_VERSION = 3; // Bumped to handle new autosaves object store
 
 let dbInstance: IDBDatabase | null = null;
 
@@ -35,6 +35,9 @@ function getDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('metadata')) {
         db.createObjectStore('metadata'); // stores file hashes mapping for re-linking
+      }
+      if (!db.objectStoreNames.contains('autosaves')) {
+        db.createObjectStore('autosaves'); // stores timestamped project snapshots
       }
     };
   });
@@ -142,6 +145,74 @@ export async function saveProjectToDB(data: {
 /**
  * Loads the project metadata from IndexedDB and regenerates Blob URLs for files.
  */
+/**
+ * Takes a clean snapshot (with PENDING_RESTORE files) and fully restores its Blob URLs and thumbnails from IndexedDB.
+ */
+export async function restoreSnapshotMedia(snapshot: {
+  tracks: TimelineTrack[];
+  mediaLibrary: MediaItem[];
+  currentTime: number;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
+}): Promise<{
+  tracks: TimelineTrack[];
+  mediaLibrary: MediaItem[];
+  currentTime: number;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
+}> {
+  const mediaLibrary: MediaItem[] = [];
+
+  for (const item of snapshot.mediaLibrary) {
+    if (item.type === 'text' || item.type === 'fx') {
+      mediaLibrary.push(item);
+      continue;
+    }
+
+    const file = await getFileFromDB(item.id);
+    if (file) {
+      const objectUrl = URL.createObjectURL(file);
+
+      // Regenerate thumbnail if present
+      let newThumb = undefined;
+      if (item.thumbnail === 'PENDING_RESTORE') {
+        if (item.type === 'image') {
+          newThumb = objectUrl;
+        } else if (item.type === 'video') {
+          newThumb = await generateVideoThumbnail(objectUrl, item.width, item.height);
+        }
+      }
+
+      // Handle frameStrip restoration
+      let restoredFrameStrip: string[] | undefined = undefined;
+      if (item.frameStrip && item.frameStrip.length > 0) {
+        if (item.type === 'video') {
+          restoredFrameStrip = await generateFrameStrip(objectUrl, item.duration || 10, 10);
+        } else if (item.type === 'image' && item.thumbnail !== 'PENDING_RESTORE') {
+          restoredFrameStrip = [objectUrl];
+        }
+      }
+
+      mediaLibrary.push({
+        ...item,
+        url: objectUrl,
+        thumbnail: newThumb || undefined,
+        frameStrip: restoredFrameStrip || item.frameStrip,
+      });
+    } else {
+      mediaLibrary.push(item);
+    }
+  }
+
+  return {
+    tracks: snapshot.tracks,
+    mediaLibrary,
+    currentTime: snapshot.currentTime,
+    aspectRatio: snapshot.aspectRatio,
+  };
+}
+
+/**
+ * Loads the project metadata from IndexedDB and regenerates Blob URLs for files.
+ */
 export async function loadProjectFromDB(): Promise<{
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
@@ -168,65 +239,115 @@ export async function loadProjectFromDB(): Promise<{
 
     if (!rawTracks || !rawMediaLibrary) return null;
 
-    // Restore Blob URLs from IndexedDB files store
-    const mediaLibrary: MediaItem[] = [];
-
-    for (const item of rawMediaLibrary) {
-      if (item.type === 'text' || item.type === 'fx') {
-        mediaLibrary.push(item);
-        continue;
-      }
-
-      const file = await getFileFromDB(item.id);
-      if (file) {
-        const objectUrl = URL.createObjectURL(file);
-
-        // Regenerate thumbnail if present
-        let newThumb = undefined;
-        if (item.thumbnail === 'PENDING_RESTORE') {
-          // For images, use the object URL directly; for video, we'll generate a frame thumbnail
-          if (item.type === 'image') {
-            newThumb = objectUrl;
-          } else if (item.type === 'video') {
-            // Try to generate a thumbnail from the video
-            newThumb = await generateVideoThumbnail(objectUrl, item.width, item.height);
-          }
-        }
-
-        // Handle frameStrip restoration
-        let restoredFrameStrip: string[] | undefined = undefined;
-        if (item.frameStrip && item.frameStrip.length > 0) {
-          if (item.type === 'video') {
-            // Regenerate frame strips for video
-            restoredFrameStrip = await generateFrameStrip(objectUrl, item.duration || 10, 10);
-          } else if (item.type === 'image' && item.thumbnail !== 'PENDING_RESTORE') {
-            // Images reuse the thumbnail or object URL
-            restoredFrameStrip = [objectUrl];
-          }
-        }
-
-        mediaLibrary.push({
-          ...item,
-          url: objectUrl,
-          thumbnail: newThumb || undefined,
-          frameStrip: restoredFrameStrip || item.frameStrip,
-        });
-      } else {
-        // File missing from DB, but keep metadata
-        mediaLibrary.push(item);
-      }
-    }
-
-    return {
+    return restoreSnapshotMedia({
       tracks: rawTracks,
-      mediaLibrary,
+      mediaLibrary: rawMediaLibrary,
       currentTime,
-      aspectRatio
-    };
+      aspectRatio,
+    });
   } catch (err) {
     console.error('Failed to load project from DB:', err);
     return null;
   }
+}
+
+/**
+ * Saves a versioned auto-save snapshot to the 'autosaves' object store.
+ */
+export async function saveAutosaveToDB(data: {
+  tracks: TimelineTrack[];
+  mediaLibrary: MediaItem[];
+  currentTime: number;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
+}, timestamp: number): Promise<void> {
+  const db = await getDB();
+  
+  // Clean media and tracks just like saveProjectToDB
+  const cleanMediaLibrary = data.mediaLibrary.map(item => ({
+    ...item,
+    url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
+    thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
+    frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+  }));
+
+  const cleanTracks = data.tracks.map(track => ({
+    ...track,
+    clips: track.clips.map(clip => ({
+      ...clip,
+      isPreview: false
+    }))
+  }));
+
+  const snapshot = {
+    tracks: cleanTracks,
+    mediaLibrary: cleanMediaLibrary,
+    currentTime: data.currentTime,
+    aspectRatio: data.aspectRatio || '16:9',
+    timestamp,
+  };
+
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction('autosaves', 'readwrite');
+    const store = transaction.objectStore('autosaves');
+    store.put(snapshot, timestamp.toString());
+
+    transaction.oncomplete = () => {
+      // Clean up old autosaves (keep only last 10)
+      const cleanupTx = db.transaction('autosaves', 'readwrite');
+      const cleanupStore = cleanupTx.objectStore('autosaves');
+      const keysReq = cleanupStore.getAllKeys();
+      keysReq.onsuccess = () => {
+        const keys = keysReq.result as string[];
+        if (keys.length > 10) {
+          keys.sort((a, b) => Number(a) - Number(b));
+          const numToDelete = keys.length - 10;
+          for (let i = 0; i < numToDelete; i++) {
+            cleanupStore.delete(keys[i]);
+          }
+        }
+      };
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
+ * Gets all versioned autosaves from IndexedDB.
+ */
+export async function getAutosavesFromDB(): Promise<{
+  tracks: TimelineTrack[];
+  mediaLibrary: MediaItem[];
+  currentTime: number;
+  aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
+  timestamp: number;
+}[]> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('autosaves', 'readonly');
+    const store = transaction.objectStore('autosaves');
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const results = request.result || [];
+      results.sort((a, b) => b.timestamp - a.timestamp);
+      resolve(results);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Deletes a specific autosave version.
+ */
+export async function deleteAutosaveFromDB(timestamp: number): Promise<void> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('autosaves', 'readwrite');
+    const store = transaction.objectStore('autosaves');
+    const request = store.delete(timestamp.toString());
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
 }
 
 /**

@@ -363,6 +363,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Import Media');
   },
   removeMedia: (id) => {
+    const media = get().mediaLibrary.find((m) => m.id === id);
+    if (media?.url) {
+      try { URL.revokeObjectURL(media.url); } catch { /* ignore */ }
+    }
+    if (media?.thumbnail) {
+      try { URL.revokeObjectURL(media.thumbnail); } catch { /* ignore */ }
+    }
+
+    // Evict from canvas image cache if registered
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('procut-evict-media-cache', { detail: { id } }));
+    }
+
     // Also remove any clips referencing this media
     set((state) => ({
       mediaLibrary: state.mediaLibrary.filter((m) => m.id !== id),
@@ -373,14 +386,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }));
     // Delete file from IndexedDB
     deleteFileFromDB(id).catch(err => console.error('Failed to delete file from DB:', err));
-    // Revoke the object URL to free memory
-    const media = get().mediaLibrary.find((m) => m.id === id);
-    if (media?.url) {
-      try { URL.revokeObjectURL(media.url); } catch { /* ignore */ }
-    }
-    if (media?.thumbnail) {
-      try { URL.revokeObjectURL(media.thumbnail); } catch { /* ignore */ }
-    }
     get().recalcTotalDuration();
     get().saveSnapshot('Remove Media');
   },
@@ -488,32 +493,37 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ? state.selectedClipIds
         : [clipId];
 
-      const newTracks = state.tracks.map((track) => {
-        const remainingClips = track.clips.filter((c) => !idsToRemove.includes(c.id));
-        const deletedClips = track.clips.filter((c) => idsToRemove.includes(c.id));
+      const deletedClips = state.tracks.flatMap(t => t.clips).filter(c => idsToRemove.includes(c.id));
 
-        if (state.activeTool === 'ripple' && deletedClips.length > 0) {
-          const sortedDeleted = [...deletedClips].sort((a, b) => a.startTime - b.startTime);
+      let newTracks;
+      if (state.activeTool === 'ripple' && deletedClips.length > 0) {
+        // Multi-track Ripple Delete: Shift all clips across ALL tracks starting at/after the deleted range
+        const minStartTime = Math.min(...deletedClips.map(c => c.startTime));
+        const maxEndTime = Math.max(...deletedClips.map(c => c.startTime + c.duration));
+        const shiftDuration = maxEndTime - minStartTime;
+
+        newTracks = state.tracks.map((track) => {
+          const remainingClips = track.clips.filter((c) => !idsToRemove.includes(c.id));
           const shiftedClips = remainingClips.map((clip) => {
-            const deletedBefore = sortedDeleted.filter((d) => d.startTime < clip.startTime);
-            const totalShift = deletedBefore.reduce((sum, d) => sum + d.duration, 0);
-            return {
-              ...clip,
-              startTime: Math.max(0, clip.startTime - totalShift),
-            };
+            if (clip.startTime >= minStartTime) {
+              return {
+                ...clip,
+                startTime: Math.max(0, clip.startTime - shiftDuration),
+              };
+            }
+            return clip;
           });
-
           return {
             ...track,
             clips: shiftedClips,
           };
-        }
-
-        return {
+        });
+      } else {
+        newTracks = state.tracks.map((track) => ({
           ...track,
-          clips: remainingClips,
-        };
-      });
+          clips: track.clips.filter((c) => !idsToRemove.includes(c.id)),
+        }));
+      }
 
       const newSelectedClipIds = state.selectedClipIds.filter((id) => !idsToRemove.includes(id));
       const newSelectedClipId =
@@ -567,12 +577,34 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       const oldStartTime = foundClip.startTime;
       const deltaTime = newStartTime - oldStartTime;
+      const D = foundClip.duration;
 
       const targetTrackId = newTrackId || foundClip.trackId;
       const targetTrack = newTracks.find((t) => t.id === targetTrackId);
 
       if (targetTrack) {
-        if (resolveOverlap) {
+        if (state.activeTool === 'ripple') {
+          // Multi-track Ripple Move: Close old gap, then open space at newStartTime
+          newTracks.forEach((track) => {
+            track.clips.forEach((clip) => {
+              if (clip.id === clipId) return;
+              if (clip.startTime >= oldStartTime) {
+                clip.startTime = Math.max(0, clip.startTime - D);
+              }
+            });
+          });
+
+          newTracks.forEach((track) => {
+            track.clips.forEach((clip) => {
+              if (clip.id === clipId) return;
+              if (clip.startTime >= newStartTime) {
+                clip.startTime += D;
+              }
+            });
+          });
+
+          foundClip.startTime = Math.max(0, newStartTime);
+        } else if (resolveOverlap) {
           const adjustedStart = findNonOverlappingPosition(
             targetTrack.clips,
             newStartTime,
@@ -1287,8 +1319,20 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Timeline View
   setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
   setScrollLeft: (scroll) => set({ scrollLeft: scroll }),
-  zoomIn: () => set((state) => ({ zoomLevel: Math.min(state.zoomLevel + 20, 400) })),
-  zoomOut: () => set((state) => ({ zoomLevel: Math.max(state.zoomLevel - 20, 20) })),
+  zoomIn: () =>
+    set((state) => {
+      const currentZoom = state.zoomLevel;
+      const newZoom = Math.min(currentZoom + 20, 400);
+      const newScrollLeft = Math.max(0, state.scrollLeft + state.currentTime * (newZoom - currentZoom));
+      return { zoomLevel: newZoom, scrollLeft: newScrollLeft };
+    }),
+  zoomOut: () =>
+    set((state) => {
+      const currentZoom = state.zoomLevel;
+      const newZoom = Math.max(currentZoom - 20, 20);
+      const newScrollLeft = Math.max(0, state.scrollLeft + state.currentTime * (newZoom - currentZoom));
+      return { zoomLevel: newZoom, scrollLeft: newScrollLeft };
+    }),
 
   // Track Operations
   toggleTrackLock: (trackId) =>

@@ -114,6 +114,10 @@ export function ExportModal() {
       timeoutRef.current = null;
     }
 
+    try {
+      ffmpeg.terminate();
+    } catch (_) {}
+
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     chunksRef.current = [];

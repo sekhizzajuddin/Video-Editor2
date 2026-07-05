@@ -35,7 +35,7 @@ function getMasterAudioCtx() {
       if (masterAudioCtx) {
         masterAudioDestination = masterAudioCtx.createMediaStreamDestination();
         
-        // Master Dynamics Compressor/Limiter to prevent clipping and balance track volume levels
+        // Master dynamics compressor/limiter
         masterCompressor = masterAudioCtx.createDynamicsCompressor();
         masterCompressor.threshold.value = -12; // dBFS
         masterCompressor.knee.value = 6;
@@ -43,17 +43,32 @@ function getMasterAudioCtx() {
         masterCompressor.attack.value = 0.003;
         masterCompressor.release.value = 0.25;
         
-        // Master analyser for VU metering
+        // Master analyser for VU metering (stereo mix)
         masterAnalyser = masterAudioCtx.createAnalyser();
         masterAnalyser.fftSize = 64;
+        
+        // Channel splitter and L/R analysers for true stereo metering
+        const splitter = masterAudioCtx.createChannelSplitter(2);
+        const masterAnalyserL = masterAudioCtx.createAnalyser();
+        masterAnalyserL.fftSize = 64;
+        const masterAnalyserR = masterAudioCtx.createAnalyser();
+        masterAnalyserR.fftSize = 64;
+        
         if (typeof window !== 'undefined') {
           (window as any).procutMasterAnalyser = masterAnalyser;
+          (window as any).procutMasterAnalyserL = masterAnalyserL;
+          (window as any).procutMasterAnalyserR = masterAnalyserR;
         }
         
         // Route master compressor output to master analyser, then to speakers and export
         masterCompressor.connect(masterAnalyser);
         masterAnalyser.connect(masterAudioCtx.destination);
         masterAnalyser.connect(masterAudioDestination);
+        
+        // Route to L/R splitter for metering
+        masterAnalyser.connect(splitter);
+        splitter.connect(masterAnalyserL, 0);
+        splitter.connect(masterAnalyserR, 1);
       }
     }
   }
