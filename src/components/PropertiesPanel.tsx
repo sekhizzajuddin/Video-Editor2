@@ -273,7 +273,7 @@ export function PropertiesPanel() {
       // 1. Compile storyboard chunks (10s intervals)
       const chunks = await compileStoryboard(
         videoEl,
-        selectedClip.startTime,
+        selectedClip.trimStart, // Use the local media start time, not the global timeline start time
         selectedClip.duration,
         (progress) => {
           setAudioAnalyzeProgress(`Compiling storyboard ${Math.round(progress * 100)}%`);
@@ -281,34 +281,29 @@ export function PropertiesPanel() {
       );
 
       // 2. Analyze each chunk with Gemini 2.0 Flash Vision
-      const allCues: any[] = [];
+      setAudioAnalyzeProgress('Gemini vision analyzing all chunks in parallel...');
       const freesoundToken = freesoundApiKey || localStorage.getItem('procut_freesound_key') || envFreesoundKey || undefined;
 
-      for (let i = 0; i < chunks.length; i++) {
-        setAudioAnalyzeProgress(`Gemini vision analyzing chunk ${i + 1}/${chunks.length}`);
+      const chunkPromises = chunks.map(async (chunk, i) => {
         const segmentCues = await analyzeStoryboardWithGemini(
-          chunks[i].base64Image,
-          chunks[i].duration,
+          chunk.base64Image,
+          chunk.duration,
           gKey
         );
+        return segmentCues.map((cue: any) => ({
+          ...cue,
+          start: cue.start + (i * 10),
+          end: cue.end + (i * 10)
+        }));
+      });
 
-        // Adjust cues' relative timestamps to clip-global times
-        for (const cue of segmentCues) {
-          const chunkOffset = i * 10;
-          allCues.push({
-            ...cue,
-            start: cue.start + chunkOffset,
-            end: cue.end + chunkOffset
-          });
-        }
-      }
+      const cuesArrays = await Promise.all(chunkPromises);
+      const allCues = cuesArrays.flat();
 
       // 3. Refine queries using Groq (Llama-3) and search Freesound
-      const cuesWithOptions: any[] = [];
-      for (let i = 0; i < allCues.length; i++) {
-        const cue = allCues[i];
-        setAudioAnalyzeProgress(`Groq refining query ${i + 1}/${allCues.length}: "${cue.query}"`);
-        
+      setAudioAnalyzeProgress(`Refining ${allCues.length} queries and searching Freesound in parallel...`);
+      
+      const optionsPromises = allCues.map(async (cue) => {
         let refinedQuery = cue.query;
         try {
           refinedQuery = await refineAudioQueryWithGroq(cue.query, grKey);
@@ -316,14 +311,14 @@ export function PropertiesPanel() {
           console.warn('Groq query refinement failed, falling back to original query:', groqErr);
         }
 
-        setAudioAnalyzeProgress(`Freesound searching options for: "${refinedQuery}"`);
         const options = await searchFreesound(refinedQuery, freesoundToken);
-
-        cuesWithOptions.push({
+        return {
           ...cue,
           options
-        });
-      }
+        };
+      });
+
+      const cuesWithOptions = await Promise.all(optionsPromises);
 
       setSoundDesignerCues(cuesWithOptions);
       setShowSoundDesigner(true);

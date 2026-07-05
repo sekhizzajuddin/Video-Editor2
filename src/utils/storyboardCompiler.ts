@@ -29,12 +29,28 @@ async function compileGridForSegment(
   const frameWidth = 480;
   const frameHeight = 270;
 
-  // Seek video and wait for seeked event
+  // Seek video and wait for seeked event, with a 1000ms safeguard timeout
   const seekVideo = (time: number): Promise<void> => {
     return new Promise((resolve) => {
-      const onSeeked = () => {
-        videoEl.removeEventListener('seeked', onSeeked);
+      if (Math.abs(videoEl.currentTime - time) < 0.01) {
         resolve();
+        return;
+      }
+      let resolved = false;
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          videoEl.removeEventListener('seeked', onSeeked);
+          resolve();
+        }
+      }, 1000);
+      const onSeeked = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          videoEl.removeEventListener('seeked', onSeeked);
+          resolve();
+        }
       };
       videoEl.addEventListener('seeked', onSeeked);
       videoEl.currentTime = time;
@@ -80,18 +96,40 @@ export async function compileStoryboard(
   const numChunks = Math.ceil(duration / chunkSize);
   const chunks: StoryboardChunk[] = [];
 
-  // Backup original video state
-  const originalTime = videoEl.currentTime;
-  const originalPaused = videoEl.paused;
+  // Optimization: Clone video to prevent flickering and playback disruption in the main UI
+  const cloneVideo = document.createElement('video');
+  cloneVideo.crossOrigin = 'anonymous';
+  cloneVideo.muted = true;
+  cloneVideo.playsInline = true;
+  
+  // Use currentSrc if available, otherwise src
+  cloneVideo.src = videoEl.currentSrc || videoEl.src;
+  
+  // Wait for the clone to load data before seeking
+  await new Promise<void>((resolve) => {
+    let resolved = false;
+    const onReady = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+    cloneVideo.onloadeddata = onReady;
+    cloneVideo.oncanplay = onReady;
+    // Fallback safeguard timeout in case events don't fire
+    setTimeout(onReady, 2000);
+  });
 
   try {
     for (let i = 0; i < numChunks; i++) {
       const segmentStart = startTime + i * chunkSize;
       const segmentDuration = Math.min(chunkSize, duration - i * chunkSize);
 
-      if (segmentStart >= videoEl.duration) break;
+      // Use the original video's duration as a safe fallback if clone duration is missing
+      const safeDuration = isNaN(cloneVideo.duration) ? videoEl.duration : cloneVideo.duration;
+      if (segmentStart >= safeDuration) break;
 
-      const base64Image = await compileGridForSegment(videoEl, segmentStart, segmentDuration);
+      const base64Image = await compileGridForSegment(cloneVideo, segmentStart, segmentDuration);
 
       chunks.push({
         chunkIndex: i,
@@ -105,11 +143,9 @@ export async function compileStoryboard(
       }
     }
   } finally {
-    // Restore video state
-    videoEl.currentTime = originalTime;
-    if (!originalPaused) {
-      videoEl.play().catch(() => {});
-    }
+    // Release clone video memory
+    cloneVideo.removeAttribute('src');
+    cloneVideo.load();
   }
 
   return chunks;

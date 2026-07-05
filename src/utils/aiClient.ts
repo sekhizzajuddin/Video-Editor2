@@ -71,10 +71,22 @@ Return strictly as a JSON array matching this schema:
     throw new Error('Gemini API returned an empty or invalid response.');
   }
 
+  let cleanedText = text.trim();
+  if (cleanedText.startsWith('```')) {
+    const firstNewline = cleanedText.indexOf('\n');
+    if (firstNewline !== -1) {
+      cleanedText = cleanedText.substring(firstNewline + 1);
+    }
+    if (cleanedText.endsWith('```')) {
+      cleanedText = cleanedText.substring(0, cleanedText.length - 3);
+    }
+    cleanedText = cleanedText.trim();
+  }
+
   try {
-    return JSON.parse(text) as AICueResult[];
+    return JSON.parse(cleanedText) as AICueResult[];
   } catch (e) {
-    throw new Error(`Failed to parse Gemini response as JSON: ${text}`);
+    throw new Error(`Failed to parse Gemini response as JSON: ${cleanedText}`);
   }
 }
 
@@ -123,5 +135,6 @@ Return ONLY the optimized keywords separated by spaces. Do NOT include any expla
     return query; // fallback to original query if empty
   }
 
-  return refined.trim().replace(/[\r\n]+/g, ' ');
+  let cleanRefined = refined.trim().replace(/^["']|["']$/g, '');
+  return cleanRefined.replace(/[\r\n]+/g, ' ');
 }
