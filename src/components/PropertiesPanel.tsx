@@ -28,6 +28,10 @@ import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { trackMotion } from '@/utils/motionTracker';
+import { compileStoryboard } from '@/utils/storyboardCompiler';
+import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq } from '@/utils/aiClient';
+import { searchFreesound } from '@/utils/audioSearchClient';
+import { AiSoundDesigner } from '@/components/AiSoundDesigner';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
@@ -232,6 +236,103 @@ export function PropertiesPanel() {
   const [isTracking, setIsTracking] = useState(false);
   const [trackProgress, setTrackProgress] = useState(0);
   const { videoElements } = useMediaPlayback();
+
+  // Environment variables fallbacks
+  const envGeminiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  const envGroqKey = (import.meta as any).env?.VITE_GROQ_API_KEY || '';
+  const envFreesoundKey = (import.meta as any).env?.VITE_FREESOUND_API_KEY || '';
+
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('procut_gemini_key') || '');
+  const [groqApiKey, setGroqApiKey] = useState(() => localStorage.getItem('procut_groq_key') || '');
+  const [freesoundApiKey, setFreesoundApiKey] = useState(() => localStorage.getItem('procut_freesound_key') || '');
+
+  const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
+  const [audioAnalyzeProgress, setAudioAnalyzeProgress] = useState('');
+  const [soundDesignerCues, setSoundDesignerCues] = useState<any[] | null>(null);
+  const [showSoundDesigner, setShowSoundDesigner] = useState(false);
+
+  const handleAiSoundDesign = async () => {
+    if (!selectedClip) return;
+    const gKey = geminiApiKey || localStorage.getItem('procut_gemini_key') || envGeminiKey;
+    const grKey = groqApiKey || localStorage.getItem('procut_groq_key') || envGroqKey;
+    if (!gKey || !grKey) {
+      alert('Please enter both your Gemini API Key and Groq API Key first (or configure them as VITE_GEMINI_API_KEY and VITE_GROQ_API_KEY in your environment).');
+      return;
+    }
+
+    const videoEl = videoElements.get(selectedClip.id);
+    if (!videoEl) {
+      alert('Video player is not loaded yet. Try seeking or playing first.');
+      return;
+    }
+
+    setIsAnalyzingAudio(true);
+    setAudioAnalyzeProgress('Compiling storyboard...');
+
+    try {
+      // 1. Compile storyboard chunks (10s intervals)
+      const chunks = await compileStoryboard(
+        videoEl,
+        selectedClip.startTime,
+        selectedClip.duration,
+        (progress) => {
+          setAudioAnalyzeProgress(`Compiling storyboard ${Math.round(progress * 100)}%`);
+        }
+      );
+
+      // 2. Analyze each chunk with Gemini 2.0 Flash Vision
+      const allCues: any[] = [];
+      const freesoundToken = freesoundApiKey || localStorage.getItem('procut_freesound_key') || envFreesoundKey || undefined;
+
+      for (let i = 0; i < chunks.length; i++) {
+        setAudioAnalyzeProgress(`Gemini vision analyzing chunk ${i + 1}/${chunks.length}`);
+        const segmentCues = await analyzeStoryboardWithGemini(
+          chunks[i].base64Image,
+          chunks[i].duration,
+          gKey
+        );
+
+        // Adjust cues' relative timestamps to clip-global times
+        for (const cue of segmentCues) {
+          const chunkOffset = i * 10;
+          allCues.push({
+            ...cue,
+            start: cue.start + chunkOffset,
+            end: cue.end + chunkOffset
+          });
+        }
+      }
+
+      // 3. Refine queries using Groq (Llama-3) and search Freesound
+      const cuesWithOptions: any[] = [];
+      for (let i = 0; i < allCues.length; i++) {
+        const cue = allCues[i];
+        setAudioAnalyzeProgress(`Groq refining query ${i + 1}/${allCues.length}: "${cue.query}"`);
+        
+        let refinedQuery = cue.query;
+        try {
+          refinedQuery = await refineAudioQueryWithGroq(cue.query, grKey);
+        } catch (groqErr) {
+          console.warn('Groq query refinement failed, falling back to original query:', groqErr);
+        }
+
+        setAudioAnalyzeProgress(`Freesound searching options for: "${refinedQuery}"`);
+        const options = await searchFreesound(refinedQuery, freesoundToken);
+
+        cuesWithOptions.push({
+          ...cue,
+          options
+        });
+      }
+
+      setSoundDesignerCues(cuesWithOptions);
+      setShowSoundDesigner(true);
+    } catch (e: any) {
+      alert(`AI Sound Design failed: ${e.message || e}`);
+    } finally {
+      setIsAnalyzingAudio(false);
+    }
+  };
 
   // Find the selected clip (or the first selected clip in multi-selection)
   let selectedClip: any = null;
@@ -3035,6 +3136,77 @@ export function PropertiesPanel() {
 
         {activePropertiesTab === 'audio' && (
           <div className="space-y-3">
+            {/* AI Sound Designer */}
+            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
+              <div className="bg-amber-950/20 border border-amber-500/30 rounded p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs text-white font-semibold">AI Sound Designer</span>
+                </div>
+                <p className="text-[11px] text-[#e0c090]">
+                  Analyze scene storyboard using Gemini 2.0 Vision and suggest optimized SFX options using Groq.
+                </p>
+
+                {/* API Keys Configuration Panel */}
+                <div className="space-y-2 pt-1 border-t border-[#3e3e3e]/40">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] text-[#a0a0a0]">Gemini API Key</label>
+                    <input
+                      type="password"
+                      placeholder="Paste Gemini API Key"
+                      value={geminiApiKey}
+                      onChange={(e) => {
+                        setGeminiApiKey(e.target.value);
+                        localStorage.setItem('procut_gemini_key', e.target.value);
+                      }}
+                      className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] text-[#a0a0a0]">Groq API Key</label>
+                    <input
+                      type="password"
+                      placeholder="Paste Groq API Key"
+                      value={groqApiKey}
+                      onChange={(e) => {
+                        setGroqApiKey(e.target.value);
+                        localStorage.setItem('procut_groq_key', e.target.value);
+                      }}
+                      className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] text-[#a0a0a0]">Freesound Key (Optional)</label>
+                    <input
+                      type="password"
+                      placeholder="Leave blank for public key"
+                      value={freesoundApiKey}
+                      onChange={(e) => {
+                        setFreesoundApiKey(e.target.value);
+                        localStorage.setItem('procut_freesound_key', e.target.value);
+                      }}
+                      className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {isAnalyzingAudio ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                    <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
+                    <span className="text-[10px] text-amber-400 font-medium">
+                      {audioAnalyzeProgress}...
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleAiSoundDesign}
+                    className="w-full py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-amber-950/50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Generate Sound Design
+                  </button>
+                )}
+              </div>
+            )}
             {/* AI Auto Voice Tune (Visible only when multiple clips selected) */}
             {selectedClipIds.length > 1 && (
               <div className="bg-purple-950/20 border border-purple-500/30 rounded p-3 space-y-2">
@@ -4160,6 +4332,14 @@ export function PropertiesPanel() {
           </div>
         )}
       </div>
+
+      {showSoundDesigner && soundDesignerCues && selectedClip && (
+        <AiSoundDesigner
+          clip={selectedClip}
+          cues={soundDesignerCues}
+          onClose={() => setShowSoundDesigner(false)}
+        />
+      )}
     </div>
   );
 }
