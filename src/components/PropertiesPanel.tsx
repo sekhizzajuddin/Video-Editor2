@@ -26,7 +26,9 @@ import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
-import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings } from '@/types';
+import { useMediaPlayback } from '@/hooks/useMediaPlayback';
+import { trackMotion } from '@/utils/motionTracker';
+import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 
@@ -227,6 +229,9 @@ export function PropertiesPanel() {
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const [showTunedToast, setShowTunedToast] = useState(false);
+  const [isTracking, setIsTracking] = useState(false);
+  const [trackProgress, setTrackProgress] = useState(0);
+  const { videoElements } = useMediaPlayback();
 
   // Find the selected clip (or the first selected clip in multi-selection)
   let selectedClip: any = null;
@@ -1446,16 +1451,18 @@ export function PropertiesPanel() {
                 onClick={() => toggleSection('rotation')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
               >
-                <span className="font-medium">Rotation</span>
+                <span className="font-medium">3D Rotation</span>
                 <div className="flex items-center gap-2">
                   <div
                     onClick={(e) => {
                       e.stopPropagation();
                       setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
+                      setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
+                      setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
                       useEditorStore.getState().saveSnapshot();
                     }}
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
-                    title="Reset Rotation"
+                    title="Reset All Rotations"
                   >
                     <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
                   </div>
@@ -1467,25 +1474,77 @@ export function PropertiesPanel() {
                 </div>
               </button>
               {!collapsedSections['rotation'] && (
-                <div className="px-2.5 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min={-180}
-                      max={180}
-                      value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
-                      title="Double-click to reset to 0°"
-                      onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                      onDoubleClick={() => {
-                        setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                        useEditorStore.getState().saveSnapshot();
-                      }}
-                      className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                    />
-                    <span className="text-[11px] text-white w-10 text-right">
-                      {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
-                    </span>
+                <div className="px-2.5 pb-2.5 space-y-3">
+                  {/* Rotate X */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-[#a0a0a0]">Rotate X (3D)</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
+                        title="Double-click to reset to 0°"
+                        onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => {
+                          setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                      <span className="text-[11px] text-white w-10 text-right">
+                        {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Rotate Y */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-[#a0a0a0]">Rotate Y (3D)</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
+                        title="Double-click to reset to 0°"
+                        onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => {
+                          setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                      <span className="text-[11px] text-white w-10 text-right">
+                        {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Rotate Z */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-[#a0a0a0]">Rotate Z (3D)</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
+                        title="Double-click to reset to 0°"
+                        onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => {
+                          setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                      <span className="text-[11px] text-white w-10 text-right">
+                        {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1539,6 +1598,193 @@ export function PropertiesPanel() {
                       {Math.round(getPropVal(selectedClip.opacity, 'opacity') * 100)}%
                     </span>
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* Perspective Warp & Motion Tracking */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('perspective')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+              >
+                <span className="font-medium">Perspective Warp & Tracker</span>
+                {collapsedSections['perspective'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['perspective'] && (
+                <div className="px-2.5 pb-2.5 space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer mt-1">
+                    <input
+                      type="checkbox"
+                      checked={!!selectedClip.transform.perspectivePin}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        let updates: any = {
+                          transform: {
+                            ...selectedClip.transform,
+                            perspectivePin: enabled
+                          }
+                        };
+                        if (enabled && !selectedClip.transform.perspectiveCorners) {
+                          const aX = selectedClip.transform.x;
+                          const aY = selectedClip.transform.y;
+                          const aScale = selectedClip.transform.scale;
+                          const media = mediaLibrary.find(m => m.id === selectedClip.mediaId);
+                          let vw = 854;
+                          let vh = 480;
+                          if (media?.type === 'video' || media?.type === 'image') {
+                            vw = media.width || 854;
+                            vh = media.height || 480;
+                          }
+                          const scaleToFit = Math.min(854 / vw, 480 / vh);
+                          const baseW = vw * scaleToFit * (aScale / 100);
+                          const baseH = vh * scaleToFit * (aScale / 100);
+
+                          updates.transform.perspectiveCorners = {
+                            x0: 427 + aX - baseW / 2,
+                            y0: 240 + aY - baseH / 2,
+                            x1: 427 + aX + baseW / 2,
+                            y1: 240 + aY - baseH / 2,
+                            x2: 427 + aX + baseW / 2,
+                            y2: 240 + aY + baseH / 2,
+                            x3: 427 + aX - baseW / 2,
+                            y3: 240 + aY + baseH / 2
+                          };
+                        }
+                        updateClip(selectedClip.id, updates);
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="rounded border-[#3e3e3e] text-amber-500 bg-[#1e1e1e] focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span className="text-xs text-white">Enable Corner Pinning</span>
+                  </label>
+
+                  {selectedClip.transform.perspectivePin && (
+                    <div className="pt-2 border-t border-[#3e3e3e] space-y-2">
+                      <p className="text-[10px] text-[#a0a0a0]">
+                        Drag the 4 corner handles on the preview screen to adjust the perspective warp.
+                      </p>
+
+                      <button
+                        onClick={async () => {
+                          if (isTracking) return;
+
+                          const selectedTrackIndex = tracks.findIndex(t => t.id === selectedClip.trackId);
+                          let bgClip = null;
+                          for (let i = selectedTrackIndex - 1; i >= 0; i--) {
+                            if (tracks[i].type === 'video') {
+                              const found = tracks[i].clips.find(c => currentTime >= c.startTime && currentTime < c.startTime + c.duration);
+                              if (found) {
+                                const mediaItem = mediaLibrary.find(m => m.id === found.mediaId);
+                                if (mediaItem?.type === 'video') {
+                                  bgClip = found;
+                                  break;
+                                }
+                              }
+                            }
+                          }
+
+                          if (!bgClip) {
+                            for (const track of tracks) {
+                              if (track.id === selectedClip.trackId) continue;
+                              const found = track.clips.find(c => currentTime >= c.startTime && currentTime < c.startTime + c.duration);
+                              if (found) {
+                                const mediaItem = mediaLibrary.find(m => m.id === found.mediaId);
+                                if (mediaItem?.type === 'video') {
+                                  bgClip = found;
+                                  break;
+                                }
+                              }
+                            }
+                          }
+
+                          if (!bgClip) {
+                            alert("No background video clip found to track! Add a video on a lower track first.");
+                            return;
+                          }
+
+                          const videoEl = videoElements.get(bgClip.id);
+                          if (!videoEl) {
+                            alert("Background video player is not loaded yet. Try playing/seeking first.");
+                            return;
+                          }
+
+                          const initialCorners = selectedClip.transform.perspectiveCorners || {
+                            x0: 427 - 100, y0: 240 - 100,
+                            x1: 427 + 100, y1: 240 - 100,
+                            x2: 427 + 100, y2: 240 + 100,
+                            x3: 427 - 100, y3: 240 + 100
+                          };
+
+                          setIsTracking(true);
+                          setTrackProgress(0);
+
+                          try {
+                            const trackDuration = Math.min(selectedClip.duration, videoEl.duration - currentTime);
+                            const trackingResults = await trackMotion(
+                              videoEl,
+                              currentTime,
+                              trackDuration,
+                              initialCorners,
+                              (progress) => {
+                                setTrackProgress(Math.round(progress * 100));
+                              }
+                            );
+
+                            const newAnimations = { ...(selectedClip.animations || {}) };
+                            for (let i = 0; i < 4; i++) {
+                              newAnimations[`transform.perspectiveCorners.x${i}`] = [];
+                              newAnimations[`transform.perspectiveCorners.y${i}`] = [];
+                            }
+
+                            trackingResults.forEach(res => {
+                              for (let i = 0; i < 4; i++) {
+                                const kx = `transform.perspectiveCorners.x${i}`;
+                                const ky = `transform.perspectiveCorners.y${i}`;
+                                const valX = res.corners[`x${i}` as keyof CornerPoints];
+                                const valY = res.corners[`y${i}` as keyof CornerPoints];
+
+                                newAnimations[kx].push({ time: res.time, value: valX, easing: 'linear' });
+                                newAnimations[ky].push({ time: res.time, value: valY, easing: 'linear' });
+                              }
+                            });
+
+                            updateClip(selectedClip.id, {
+                              transform: {
+                                ...selectedClip.transform,
+                                perspectiveCorners: trackingResults[0].corners
+                              },
+                              animations: newAnimations
+                            });
+
+                            alert("Motion tracking completed successfully! Keyframes generated.");
+                          } catch (e: any) {
+                            alert(`Motion tracking failed: ${e.message || e}`);
+                          } finally {
+                            setIsTracking(false);
+                          }
+                        }}
+                        disabled={isTracking}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-white bg-amber-500 hover:bg-amber-600 active:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+                      >
+                        {isTracking ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Tracking Background ({trackProgress}%)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Wand2 className="w-3.5 h-3.5" />
+                            <span>Track Background Motion (Auto)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

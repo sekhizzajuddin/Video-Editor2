@@ -73,6 +73,169 @@ function getCachedImage(
   return null;
 }
 
+interface LocalCornerPoints {
+  x0: number; y0: number;
+  x1: number; y1: number;
+  x2: number; y2: number;
+  x3: number; y3: number;
+}
+
+function getProjectedCorners(
+  w: number,
+  h: number,
+  scale: number,
+  rx: number, // X-rotation (degrees)
+  ry: number, // Y-rotation (degrees)
+  rz: number, // Z-rotation (degrees)
+  aX: number,
+  aY: number,
+  cx: number,
+  cy: number,
+  D: number = 800
+): LocalCornerPoints {
+  const radX = (rx * Math.PI) / 180;
+  const radY = (ry * Math.PI) / 180;
+  const radZ = (rz * Math.PI) / 180;
+
+  const cosX = Math.cos(radX), sinX = Math.sin(radX);
+  const cosY = Math.cos(radY), sinY = Math.sin(radY);
+  const cosZ = Math.cos(radZ), sinZ = Math.sin(radZ);
+
+  const halfW = w / 2;
+  const halfH = h / 2;
+
+  // 4 corners of standard flat rectangle
+  const localPts = [
+    { x: -halfW, y: -halfH }, // TL
+    { x: halfW, y: -halfH },  // TR
+    { x: halfW, y: halfH },   // BR
+    { x: -halfW, y: halfH }    // BL
+  ];
+
+  const projected = localPts.map(pt => {
+    // 1. Scale
+    const x = pt.x * scale;
+    const y = pt.y * scale;
+    const z = 0;
+
+    // 2. Rotate X
+    const y1 = y * cosX - z * sinX;
+    const z1 = y * sinX + z * cosX;
+
+    // 3. Rotate Y
+    const x2 = x * cosY + z1 * sinY;
+    const z2 = -x * sinY + z1 * cosY;
+
+    // 4. Rotate Z
+    const x3 = x2 * cosZ - y1 * sinZ;
+    const y3 = x2 * sinZ + y1 * cosZ;
+
+    // 5. Perspective Projection
+    const scaleFactor = D / (D - z2);
+    const xp = x3 * scaleFactor;
+    const yp = y3 * scaleFactor;
+
+    // 6. Translation
+    return {
+      x: cx + aX + xp,
+      y: cy + aY + yp
+    };
+  });
+
+  return {
+    x0: projected[0].x, y0: projected[0].y,
+    x1: projected[1].x, y1: projected[1].y,
+    x2: projected[2].x, y2: projected[2].y,
+    x3: projected[3].x, y3: projected[3].y
+  };
+}
+
+function drawPerspectiveTexture(
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  corners: LocalCornerPoints,
+  gridCols: number = 8,
+  gridRows: number = 8
+) {
+  const imgW = (img as any).videoWidth || (img as any).width || 854;
+  const imgH = (img as any).videoHeight || (img as any).height || 480;
+
+  // Bilinear interpolation mapping
+  const getBilinearPoint = (u: number, v: number) => {
+    const x = (1 - u) * (1 - v) * corners.x0 + u * (1 - v) * corners.x1 + u * v * corners.x2 + (1 - u) * v * corners.x3;
+    const y = (1 - u) * (1 - v) * corners.y0 + u * (1 - v) * corners.y1 + u * v * corners.y2 + (1 - u) * v * corners.y3;
+    return { x, y };
+  };
+
+  // Draw single affine-warped triangle
+  const drawTriangle = (
+    s0: { x: number; y: number },
+    s1: { x: number; y: number },
+    s2: { x: number; y: number },
+    d0: { x: number; y: number },
+    d1: { x: number; y: number },
+    d2: { x: number; y: number }
+  ) => {
+    ctx.save();
+    
+    // Path clipping to current triangle cell
+    ctx.beginPath();
+    ctx.moveTo(d0.x, d0.y);
+    ctx.lineTo(d1.x, d1.y);
+    ctx.lineTo(d2.x, d2.y);
+    ctx.closePath();
+    ctx.clip();
+
+    // Solve for affine transform coefficients
+    const den = s0.x * (s1.y - s2.y) + s1.x * (s2.y - s0.y) + s2.x * (s0.y - s1.y);
+    if (Math.abs(den) < 1e-6) {
+      ctx.restore();
+      return;
+    }
+
+    const a = (d0.x * (s1.y - s2.y) + d1.x * (s2.y - s0.y) + d2.x * (s0.y - s1.y)) / den;
+    const b = (d0.y * (s1.y - s2.y) + d1.y * (s2.y - s0.y) + d2.y * (s0.y - s1.y)) / den;
+    const c = (d0.x * (s2.x - s0.x) + d1.x * (s0.x - s2.x) + d2.x * (s1.x - s0.x)) / den;
+    const d = (d0.y * (s2.x - s0.x) + d1.y * (s0.x - s2.x) + d2.y * (s1.x - s0.x)) / den;
+    const e = (d0.x * (s1.x * s2.y - s2.x * s1.y) + d1.x * (s2.x * s0.y - s0.x * s2.y) + d2.x * (s0.x * s1.y - s1.x * s0.y)) / den;
+    const f = (d0.y * (s1.x * s2.y - s2.x * s1.y) + d1.y * (s2.x * s0.y - s0.x * s2.y) + d2.y * (s0.x * s1.y - s1.x * s0.y)) / den;
+
+    ctx.transform(a, b, c, d, e, f);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  };
+
+  // Render cells
+  for (let r = 0; r < gridRows; r++) {
+    for (let c = 0; c < gridCols; c++) {
+      const u0 = c / gridCols;
+      const u1 = (c + 1) / gridCols;
+      const v0 = r / gridRows;
+      const v1 = (r + 1) / gridRows;
+
+      const sx0 = u0 * imgW, sy0 = v0 * imgH;
+      const sx1 = u1 * imgW, sy1 = v0 * imgH;
+      const sx2 = u1 * imgW, sy2 = v1 * imgH;
+      const sx3 = u0 * imgW, sy3 = v1 * imgH;
+
+      const dTL = getBilinearPoint(u0, v0);
+      const dTR = getBilinearPoint(u1, v0);
+      const dBR = getBilinearPoint(u1, v1);
+      const dBL = getBilinearPoint(u0, v1);
+
+      drawTriangle(
+        { x: sx0, y: sy0 }, { x: sx1, y: sy1 }, { x: sx3, y: sy3 },
+        dTL, dTR, dBL
+      );
+
+      drawTriangle(
+        { x: sx1, y: sy1 }, { x: sx2, y: sy2 }, { x: sx3, y: sy3 },
+        dTR, dBR, dBL
+      );
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Particle system
 // ---------------------------------------------------------------------------
@@ -829,6 +992,11 @@ export function PreviewCanvas() {
       const aCropLeft = getAnimatedValue(clip.crop?.left || 0, currentTime, clip.startTime, clip.animations?.['crop.left']);
       const aCropRight = getAnimatedValue(clip.crop?.right || 0, currentTime, clip.startTime, clip.animations?.['crop.right']);
 
+      const aRotX = getAnimatedValue(clip.transform.rotationX ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationX']);
+      const aRotY = getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY']);
+
+      const hasPerspectiveWarp = !!(clip.transform.perspectivePin || Math.abs(aRotX) > 0.01 || Math.abs(aRotY) > 0.01);
+
       // Set up transform
       ctx.save();
       ctx.globalAlpha = aOpacity * opacityMultiplier;
@@ -837,20 +1005,51 @@ export function PreviewCanvas() {
       const cx = W / 2;
       const cy = H / 2;
 
-      let tx = cx;
-      let ty = cy;
-      if (extraTransform?.translateX !== undefined) tx += extraTransform.translateX;
-      if (extraTransform?.translateY !== undefined) ty += extraTransform.translateY;
-
-      ctx.translate(tx, ty);
-      ctx.translate(aX, aY);
-
-      let finalScale = aScale / 100;
-      if (extraTransform?.scale !== undefined) {
-        finalScale *= extraTransform.scale;
+      let corners: LocalCornerPoints | null = null;
+      if (hasPerspectiveWarp) {
+        if (clip.transform.perspectivePin) {
+          const pc = clip.transform.perspectiveCorners || { x0: 0, y0: 0, x1: 854, y1: 0, x2: 854, y2: 480, x3: 0, y3: 480 };
+          corners = {
+            x0: getAnimatedValue(pc.x0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x0']),
+            y0: getAnimatedValue(pc.y0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y0']),
+            x1: getAnimatedValue(pc.x1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x1']),
+            y1: getAnimatedValue(pc.y1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y1']),
+            x2: getAnimatedValue(pc.x2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x2']),
+            y2: getAnimatedValue(pc.y2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y2']),
+            x3: getAnimatedValue(pc.x3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x3']),
+            y3: getAnimatedValue(pc.y3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y3']),
+          };
+        } else {
+          // Calculate projected corners from 3D rotation
+          const vw = mediaItem.width || 854;
+          const vh = mediaItem.height || 480;
+          const fitScale = Math.min(W / vw, H / vh);
+          corners = getProjectedCorners(
+            vw, vh,
+            (aScale / 100) * fitScale,
+            aRotX, aRotY, aRot, // Z-rotation is aRot
+            aX, aY,
+            cx, cy
+          );
+        }
       }
-      ctx.scale(finalScale, finalScale);
-      ctx.rotate((aRot * Math.PI) / 180);
+
+      if (!hasPerspectiveWarp) {
+        let tx = cx;
+        let ty = cy;
+        if (extraTransform?.translateX !== undefined) tx += extraTransform.translateX;
+        if (extraTransform?.translateY !== undefined) ty += extraTransform.translateY;
+
+        ctx.translate(tx, ty);
+        ctx.translate(aX, aY);
+
+        let finalScale = aScale / 100;
+        if (extraTransform?.scale !== undefined) {
+          finalScale *= extraTransform.scale;
+        }
+        ctx.scale(finalScale, finalScale);
+        ctx.rotate((aRot * Math.PI) / 180);
+      }
 
       // Dynamic filters using keyframe animations
       const filters = {
@@ -975,12 +1174,14 @@ export function PreviewCanvas() {
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
           const hasChroma = clip.chromaKey?.enabled;
-          if (hasWheels || hasChroma) {
-            const offscreenWidth = Math.max(1, Math.round(dw));
-            const offscreenHeight = Math.max(1, Math.round(dh));
+
+          if (hasPerspectiveWarp && corners) {
+            const offscreenWidth = Math.max(1, Math.round(sw));
+            const offscreenHeight = Math.max(1, Math.round(sh));
             const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
             const oCtx = offscreen.getContext('2d');
             if (oCtx) {
+              oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
               if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
@@ -988,12 +1189,29 @@ export function PreviewCanvas() {
               if (hasWheels) {
                 applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
               }
-              ctx.drawImage(offscreen, dx, dy, dw, dh);
+              drawPerspectiveTexture(ctx, offscreen, corners);
+            }
+          } else {
+            if (hasWheels || hasChroma) {
+              const offscreenWidth = Math.max(1, Math.round(dw));
+              const offscreenHeight = Math.max(1, Math.round(dh));
+              const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
+              const oCtx = offscreen.getContext('2d');
+              if (oCtx) {
+                oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
+                if (hasChroma && clip.chromaKey) {
+                  applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                }
+                if (hasWheels) {
+                  applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
+                }
+                ctx.drawImage(offscreen, dx, dy, dw, dh);
+              } else {
+                ctx.drawImage(frameSource, sx, sy, sw, sh, dx, dy, dw, dh);
+              }
             } else {
               ctx.drawImage(frameSource, sx, sy, sw, sh, dx, dy, dw, dh);
             }
-          } else {
-            ctx.drawImage(frameSource, sx, sy, sw, sh, dx, dy, dw, dh);
           }
           ctx.filter = 'none';
           hasRealMedia = true;
@@ -1052,12 +1270,14 @@ export function PreviewCanvas() {
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
           const hasChroma = clip.chromaKey?.enabled;
-          if (hasWheels || hasChroma) {
-            const offscreenWidth = Math.max(1, Math.round(dw));
-            const offscreenHeight = Math.max(1, Math.round(dh));
+
+          if (hasPerspectiveWarp && corners) {
+            const offscreenWidth = Math.max(1, Math.round(sw));
+            const offscreenHeight = Math.max(1, Math.round(sh));
             const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
             const oCtx = offscreen.getContext('2d');
             if (oCtx) {
+              oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
               if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
@@ -1065,12 +1285,29 @@ export function PreviewCanvas() {
               if (hasWheels) {
                 applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
               }
-              ctx.drawImage(offscreen, dx, dy, dw, dh);
+              drawPerspectiveTexture(ctx, offscreen, corners);
+            }
+          } else {
+            if (hasWheels || hasChroma) {
+              const offscreenWidth = Math.max(1, Math.round(dw));
+              const offscreenHeight = Math.max(1, Math.round(dh));
+              const offscreen = getOrCreateCanvas(offscreenCanvasRef, offscreenWidth, offscreenHeight);
+              const oCtx = offscreen.getContext('2d');
+              if (oCtx) {
+                oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
+                if (hasChroma && clip.chromaKey) {
+                  applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                }
+                if (hasWheels) {
+                  applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
+                }
+                ctx.drawImage(offscreen, dx, dy, dw, dh);
+              } else {
+                ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+              }
             } else {
               ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
             }
-          } else {
-            ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
           }
           ctx.filter = 'none';
 
@@ -2774,6 +3011,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     initCrop: any;
     baseW?: number;
     baseH?: number;
+    initCorners?: LocalCornerPoints;
   } | null>(null);
   
   const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
@@ -2822,8 +3060,14 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
       const dx = ((e.clientX - dragState.startX) * scaleX) / viewport.zoom;
       const dy = ((e.clientY - dragState.startY) * scaleY) / viewport.zoom;
 
-      let { x, y, scale, rotation } = dragState.initTransform;
-      const crop = { ...dragState.initCrop };
+      let x = 0, y = 0, scale = 100, rotation = 0;
+      if (dragState.initTransform) {
+        x = dragState.initTransform.x;
+        y = dragState.initTransform.y;
+        scale = dragState.initTransform.scale;
+        rotation = dragState.initTransform.rotation;
+      }
+      const crop = dragState.initCrop ? { ...dragState.initCrop } : { left: 0, top: 0, right: 0, bottom: 0 };
       
       const baseW = dragState.baseW || 854;
       const baseH = dragState.baseH || 480;
@@ -2837,6 +3081,56 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
           animations = { ...animations, [prop]: addOrUpdateKeyframe(animations[prop], localTime, val) };
         }
       };
+
+      if (dragState.type.startsWith('perspective-corner-')) {
+        const cornerIdx = parseInt(dragState.type.split('-')[2]);
+        const initCorners = dragState.initCorners!;
+        const updatedCorners = { ...initCorners };
+
+        const targetKeyX = `x${cornerIdx}` as keyof typeof initCorners;
+        const targetKeyY = `y${cornerIdx}` as keyof typeof initCorners;
+
+        updatedCorners[targetKeyX] = initCorners[targetKeyX] + dx;
+        updatedCorners[targetKeyY] = initCorners[targetKeyY] + dy;
+
+        const hasKeyframes =
+          (animations[`transform.perspectiveCorners.x0`]?.length || 0) > 0 ||
+          (animations[`transform.perspectiveCorners.y0`]?.length || 0) > 0 ||
+          (animations[`transform.perspectiveCorners.x1`]?.length || 0) > 0 ||
+          (animations[`transform.perspectiveCorners.y1`]?.length || 0) > 0 ||
+          (animations[`transform.perspectiveCorners.x2`]?.length || 0) > 0 ||
+          (animations[`transform.perspectiveCorners.y2`]?.length || 0) > 0 ||
+          (animations[`transform.perspectiveCorners.x3`]?.length || 0) > 0 ||
+          (animations[`transform.perspectiveCorners.y3`]?.length || 0) > 0;
+
+        if (hasKeyframes) {
+          const newAnimations = { ...animations };
+          for (let i = 0; i < 4; i++) {
+            const kx = `transform.perspectiveCorners.x${i}`;
+            const ky = `transform.perspectiveCorners.y${i}`;
+            const valX = updatedCorners[`x${i}` as keyof typeof updatedCorners];
+            const valY = updatedCorners[`y${i}` as keyof typeof updatedCorners];
+
+            newAnimations[kx] = addOrUpdateKeyframe(animations[kx] || [], localTime, valX);
+            newAnimations[ky] = addOrUpdateKeyframe(animations[ky] || [], localTime, valY);
+          }
+          updateClip(activeClip.id, {
+            transform: {
+              ...activeClip.transform,
+              perspectiveCorners: updatedCorners
+            },
+            animations: newAnimations
+          });
+        } else {
+          updateClip(activeClip.id, {
+            transform: {
+              ...activeClip.transform,
+              perspectiveCorners: updatedCorners
+            }
+          });
+        }
+        return;
+      }
 
       if (dragState.type === 'move') {
         let newX = x + dx;
@@ -3007,114 +3301,168 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
   const totalX = cx + viewport.x - cx * viewport.zoom;
   const totalY = cy + viewport.y - cy * viewport.zoom;
 
+  const pc = activeClip.transform.perspectiveCorners || {
+    x0: W / 2 + aX - (baseW / 2) * (aScale / 100),
+    y0: H / 2 + aY - (baseH / 2) * (aScale / 100),
+    x1: W / 2 + aX + (baseW / 2) * (aScale / 100),
+    y1: H / 2 + aY - (baseH / 2) * (aScale / 100),
+    x2: W / 2 + aX + (baseW / 2) * (aScale / 100),
+    y2: H / 2 + aY + (baseH / 2) * (aScale / 100),
+    x3: W / 2 + aX - (baseW / 2) * (aScale / 100),
+    y3: H / 2 + aY + (baseH / 2) * (aScale / 100)
+  };
+
+  const handleCornerMouseDown = (e: React.MouseEvent, cornerIdx: number) => {
+    e.stopPropagation();
+    setDragState({
+      type: `perspective-corner-${cornerIdx}`,
+      startX: e.clientX,
+      startY: e.clientY,
+      initTransform: null,
+      initCrop: null,
+      initCorners: { ...pc }
+    });
+  };
+
   return (
     <>
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
           <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom}) translate(${offsetX}, ${offsetY})`}>
-            <g
-              transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
-            >
-              {/* Main selection border */}
-              <rect
-                x={-baseW / 2}
-                y={-baseH / 2}
-                width={baseW}
-                height={baseH}
-                fill="none"
-                stroke="#fbbf24"
-                strokeWidth={1.5 / viewport.zoom}
-                className="pointer-events-none"
-              />
+            {activeClip.transform.perspectivePin ? (
+              <g>
+                {/* Connected lines */}
+                <polygon
+                  points={`${pc.x0},${pc.y0} ${pc.x1},${pc.y1} ${pc.x2},${pc.y2} ${pc.x3},${pc.y3}`}
+                  fill="none"
+                  stroke="#fbbf24"
+                  strokeWidth={1.5 / viewport.zoom}
+                />
+                
+                {/* 4 corner circles */}
+                {([0, 1, 2, 3] as const).map((idx) => {
+                  const cx = pc[`x${idx}` as keyof typeof pc];
+                  const cy = pc[`y${idx}` as keyof typeof pc];
+                  return (
+                    <circle
+                      key={`corner-${idx}`}
+                      cx={cx}
+                      cy={cy}
+                      r={7 / viewport.zoom}
+                      fill="#fbbf24"
+                      stroke="#141414"
+                      strokeWidth={1.5 / viewport.zoom}
+                      className="pointer-events-auto cursor-crosshair"
+                      onMouseDown={(e) => handleCornerMouseDown(e, idx)}
+                    />
+                  );
+                })}
+              </g>
+            ) : (
+              <g
+                transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
+              >
+                {/* Main selection border */}
+                <rect
+                  x={-baseW / 2}
+                  y={-baseH / 2}
+                  width={baseW}
+                  height={baseH}
+                  fill="none"
+                  stroke="#fbbf24"
+                  strokeWidth={1.5 / viewport.zoom}
+                  className="pointer-events-none"
+                />
 
-              {canvasTransformMode === 'resize' ? (
-                <>
-                  {/* Invisible drag area for moving */}
-                  <rect
-                    x={-baseW / 2}
-                    y={-baseH / 2}
-                    width={baseW}
-                    height={baseH}
-                    fill="transparent"
-                    className="pointer-events-auto cursor-move"
-                    onMouseDown={(e) => handleMouseDown(e, 'move')}
-                  />
-                  {/* Resize handles */}
-                  {[-1, 1].map((rx) =>
-                    [-1, 1].map((ry) => (
-                      <circle
-                        key={`${rx}-${ry}`}
-                        cx={(rx * baseW) / 2}
-                        cy={(ry * baseH) / 2}
-                        r={6 / viewport.zoom}
-                        fill="#fbbf24"
-                        stroke="#141414"
-                        strokeWidth={1.5 / viewport.zoom}
-                        className="pointer-events-auto"
-                        style={{
-                          cursor: rx === ry ? 'nwse-resize' : 'nesw-resize',
-                        }}
-                        onMouseDown={(e) =>
-                          handleMouseDown(e, `resize-${rx > 0 ? 'r' : 'l'}${ry > 0 ? 'b' : 't'}`)
-                        }
-                      />
-                    )),
-                  )}
-                </>
-              ) : (
-                // CROP MODE
-                <>
-                  <rect
-                    x={-baseW / 2 + (aCropLeft / 100) * baseW}
-                    y={-baseH / 2 + (aCropTop / 100) * baseH}
-                    width={baseW * (1 - (aCropLeft + aCropRight) / 100)}
-                    height={baseH * (1 - (aCropTop + aCropBot) / 100)}
-                    fill="none"
-                    stroke="#3b82f6"
-                    strokeWidth={2 / viewport.zoom}
-                    strokeDasharray="4 4"
-                    className="pointer-events-none"
-                  />
-                  {/* Crop drag handles */}
-                  <rect
-                    x={-baseW / 2 + (aCropLeft / 100) * baseW - 6/viewport.zoom}
-                    y={-baseH / 2 + (aCropTop / 100) * baseH + (baseH * (1 - (aCropTop + aCropBot) / 100)) / 2 - 10/viewport.zoom}
-                    width={12/viewport.zoom}
-                    height={20/viewport.zoom}
-                    fill="#3b82f6"
-                    className="pointer-events-auto cursor-ew-resize"
-                    onMouseDown={(e) => handleMouseDown(e, 'crop-left')}
-                  />
-                  <rect
-                    x={-baseW / 2 + baseW - (aCropRight / 100) * baseW - 6/viewport.zoom}
-                    y={-baseH / 2 + (aCropTop / 100) * baseH + (baseH * (1 - (aCropTop + aCropBot) / 100)) / 2 - 10/viewport.zoom}
-                    width={12/viewport.zoom}
-                    height={20/viewport.zoom}
-                    fill="#3b82f6"
-                    className="pointer-events-auto cursor-ew-resize"
-                    onMouseDown={(e) => handleMouseDown(e, 'crop-right')}
-                  />
-                  <rect
-                    x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
-                    y={-baseH / 2 + (aCropTop / 100) * baseH - 6/viewport.zoom}
-                    width={20/viewport.zoom}
-                    height={12/viewport.zoom}
-                    fill="#3b82f6"
-                    className="pointer-events-auto cursor-ns-resize"
-                    onMouseDown={(e) => handleMouseDown(e, 'crop-top')}
-                  />
-                  <rect
-                    x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
-                    y={-baseH / 2 + baseH - (aCropBot / 100) * baseH - 6/viewport.zoom}
-                    width={20/viewport.zoom}
-                    height={12/viewport.zoom}
-                    fill="#3b82f6"
-                    className="pointer-events-auto cursor-ns-resize"
-                    onMouseDown={(e) => handleMouseDown(e, 'crop-bottom')}
-                  />
-                </>
-              )}
-            </g>
+                {canvasTransformMode === 'resize' ? (
+                  <>
+                    {/* Invisible drag area for moving */}
+                    <rect
+                      x={-baseW / 2}
+                      y={-baseH / 2}
+                      width={baseW}
+                      height={baseH}
+                      fill="transparent"
+                      className="pointer-events-auto cursor-move"
+                      onMouseDown={(e) => handleMouseDown(e, 'move')}
+                    />
+                    {/* Resize handles */}
+                    {[-1, 1].map((rx) =>
+                      [-1, 1].map((ry) => (
+                        <circle
+                          key={`${rx}-${ry}`}
+                          cx={(rx * baseW) / 2}
+                          cy={(ry * baseH) / 2}
+                          r={6 / viewport.zoom}
+                          fill="#fbbf24"
+                          stroke="#141414"
+                          strokeWidth={1.5 / viewport.zoom}
+                          className="pointer-events-auto"
+                          style={{
+                            cursor: rx === ry ? 'nwse-resize' : 'nesw-resize',
+                          }}
+                          onMouseDown={(e) =>
+                            handleMouseDown(e, `resize-${rx > 0 ? 'r' : 'l'}${ry > 0 ? 'b' : 't'}`)
+                          }
+                        />
+                      )),
+                    )}
+                  </>
+                ) : (
+                  // CROP MODE
+                  <>
+                    <rect
+                      x={-baseW / 2 + (aCropLeft / 100) * baseW}
+                      y={-baseH / 2 + (aCropTop / 100) * baseH}
+                      width={baseW * (1 - (aCropLeft + aCropRight) / 100)}
+                      height={baseH * (1 - (aCropTop + aCropBot) / 100)}
+                      fill="none"
+                      stroke="#3b82f6"
+                      strokeWidth={2 / viewport.zoom}
+                      strokeDasharray="4 4"
+                      className="pointer-events-none"
+                    />
+                    {/* Crop drag handles */}
+                    <rect
+                      x={-baseW / 2 + (aCropLeft / 100) * baseW - 6/viewport.zoom}
+                      y={-baseH / 2 + (aCropTop / 100) * baseH + (baseH * (1 - (aCropTop + aCropBot) / 100)) / 2 - 10/viewport.zoom}
+                      width={12/viewport.zoom}
+                      height={20/viewport.zoom}
+                      fill="#3b82f6"
+                      className="pointer-events-auto cursor-ew-resize"
+                      onMouseDown={(e) => handleMouseDown(e, 'crop-left')}
+                    />
+                    <rect
+                      x={-baseW / 2 + baseW - (aCropRight / 100) * baseW - 6/viewport.zoom}
+                      y={-baseH / 2 + (aCropTop / 100) * baseH + (baseH * (1 - (aCropTop + aCropBot) / 100)) / 2 - 10/viewport.zoom}
+                      width={12/viewport.zoom}
+                      height={20/viewport.zoom}
+                      fill="#3b82f6"
+                      className="pointer-events-auto cursor-ew-resize"
+                      onMouseDown={(e) => handleMouseDown(e, 'crop-right')}
+                    />
+                    <rect
+                      x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
+                      y={-baseH / 2 + (aCropTop / 100) * baseH - 6/viewport.zoom}
+                      width={20/viewport.zoom}
+                      height={12/viewport.zoom}
+                      fill="#3b82f6"
+                      className="pointer-events-auto cursor-ns-resize"
+                      onMouseDown={(e) => handleMouseDown(e, 'crop-top')}
+                    />
+                    <rect
+                      x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
+                      y={-baseH / 2 + baseH - (aCropBot / 100) * baseH - 6/viewport.zoom}
+                      width={20/viewport.zoom}
+                      height={12/viewport.zoom}
+                      fill="#3b82f6"
+                      className="pointer-events-auto cursor-ns-resize"
+                      onMouseDown={(e) => handleMouseDown(e, 'crop-bottom')}
+                    />
+                  </>
+                )}
+              </g>
+            )}
             
             {/* Smart Guides */}
             {snapGuides.map((g, i) => (

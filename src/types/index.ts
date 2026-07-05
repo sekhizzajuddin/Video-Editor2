@@ -38,12 +38,24 @@ export interface MediaItem {
   lutData?: LutData;
 }
 
+export interface CornerPoints {
+  x0: number; y0: number; // Top-Left
+  x1: number; y1: number; // Top-Right
+  x2: number; y2: number; // Bottom-Right
+  x3: number; y3: number; // Bottom-Left
+}
+
 // Transform for clips
 export interface ClipTransform {
   x: number;
   y: number;
   scale: number;
   rotation: number;
+  rotationX?: number; // 3D X rotation in degrees
+  rotationY?: number; // 3D Y rotation in degrees
+  rotationZ?: number; // 3D Z rotation in degrees (matches rotation)
+  perspectivePin?: boolean;
+  perspectiveCorners?: CornerPoints;
   blendMode?: GlobalCompositeOperation; // compositor blend modes
 }
 
