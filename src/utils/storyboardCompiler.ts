@@ -73,11 +73,11 @@ async function compileGridForSegment(
     ctx.drawImage(videoEl, 0, 0, videoEl.videoWidth || 854, videoEl.videoHeight || 480, dx, dy, frameWidth, frameHeight);
 
     // Draw a small timestamp indicator on each thumbnail
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(dx + 5, dy + 5, 55, 18);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(dx + 10, dy + 10, 75, 24);
     ctx.fillStyle = '#fbbf24';
-    ctx.font = '10px sans-serif';
-    ctx.fillText(`${targetTime.toFixed(1)}s`, dx + 10, dy + 17);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(`${targetTime.toFixed(1)}s`, dx + 18, dy + 27);
   }
 
   return canvas.toDataURL('image/jpeg', 0.85);
@@ -107,6 +107,10 @@ export async function compileStoryboard(
   
   // Wait for the clone to load data before seeking
   await new Promise<void>((resolve) => {
+    if (cloneVideo.readyState >= 2) {
+      resolve();
+      return;
+    }
     let resolved = false;
     const onReady = () => {
       if (!resolved) {
@@ -114,6 +118,7 @@ export async function compileStoryboard(
         resolve();
       }
     };
+    cloneVideo.onloadedmetadata = onReady;
     cloneVideo.onloadeddata = onReady;
     cloneVideo.oncanplay = onReady;
     // Fallback safeguard timeout in case events don't fire

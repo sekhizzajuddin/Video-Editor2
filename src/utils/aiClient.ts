@@ -48,7 +48,21 @@ Return strictly as a JSON array matching this schema:
       }
     ],
     generationConfig: {
-      responseMimeType: 'application/json'
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            start: { type: 'NUMBER', description: 'Start time of the sound cue in seconds relative to the chunk' },
+            end: { type: 'NUMBER', description: 'End time of the sound cue in seconds relative to the chunk' },
+            query: { type: 'STRING', description: 'Search query or keyword for sound search' },
+            type: { type: 'STRING', enum: ['sfx', 'bgm'], description: 'Type of the sound cue: sfx or bgm' },
+            reason: { type: 'STRING', description: 'Contextual reason or description of the visual trigger' }
+          },
+          required: ['start', 'end', 'query', 'type', 'reason']
+        }
+      }
     }
   };
 
@@ -72,7 +86,13 @@ Return strictly as a JSON array matching this schema:
   }
 
   let cleanedText = text.trim();
-  if (cleanedText.startsWith('```')) {
+  
+  // Strip any leading/trailing conversational text or markdown elements
+  const startIdx = cleanedText.indexOf('[');
+  const endIdx = cleanedText.lastIndexOf(']');
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    cleanedText = cleanedText.substring(startIdx, endIdx + 1);
+  } else if (cleanedText.startsWith('```')) {
     const firstNewline = cleanedText.indexOf('\n');
     if (firstNewline !== -1) {
       cleanedText = cleanedText.substring(firstNewline + 1);
@@ -107,6 +127,10 @@ Return ONLY the optimized keywords separated by spaces. Do NOT include any expla
   const payload = {
     model: 'llama3-8b-8192',
     messages: [
+      {
+        role: 'system',
+        content: 'You are a search query optimizer. Return ONLY the requested tags/keywords separated by space. Do not write any conversational text, explanations, or quotes.'
+      },
       {
         role: 'user',
         content: prompt

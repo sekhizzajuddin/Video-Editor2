@@ -94,68 +94,85 @@ export function AiSoundDesigner({ clip, cues, onClose }: AiSoundDesignerProps) {
     const totalCues = Object.keys(selectedOptions).length;
     let completed = 0;
 
-    for (const [cueIdxStr, optionIdx] of Object.entries(selectedOptions)) {
-      const cueIdx = parseInt(cueIdxStr);
-      const cue = cues[cueIdx];
-      const option = cue.options[optionIdx];
+    useEditorStore.getState().startTransaction();
+    try {
+      for (const [cueIdxStr, optionIdx] of Object.entries(selectedOptions)) {
+        const cueIdx = parseInt(cueIdxStr);
+        const cue = cues[cueIdx];
+        const option = cue.options[optionIdx];
 
-      if (!option) continue;
+        if (!option) continue;
 
-      try {
-        // 1. Download the audio preview blob
-        const res = await fetch(option.previewUrl);
-        if (!res.ok) throw new Error(`Fetch audio returned status ${res.status}`);
+        try {
+          // 1. Download the audio preview blob
+          const res = await fetch(option.previewUrl);
+          if (!res.ok) throw new Error(`Fetch audio returned status ${res.status}`);
 
-        const blob = await res.blob();
+          const blob = await res.blob();
 
-        // Convert blob to File object (needed by addMedia)
-        const filename = `${cue.query.replace(/\s+/g, '_')}_${option.id}.mp3`;
-        const file = new File([blob], filename, { type: 'audio/mp3', lastModified: Date.now() });
+          // Convert blob to File object (needed by addMedia)
+          const filename = `${cue.query.replace(/\s+/g, '_')}_${option.id}.mp3`;
+          const file = new File([blob], filename, { type: 'audio/mp3', lastModified: Date.now() });
 
-        // 2. Generate new MediaItem metadata
-        const mediaId = `ai_audio_${option.id}_${Date.now()}`;
-        const mediaItem = {
-          id: mediaId,
-          name: option.name.length > 30 ? option.name.substring(0, 30) + '...' : option.name,
-          type: 'audio' as const,
-          duration: option.duration,
-          url: URL.createObjectURL(blob),
-          createdAt: Date.now()
-        };
+          // 2. Generate new MediaItem metadata
+          const mediaId = `ai_audio_${option.id}_${Date.now()}`;
+          const mediaItem = {
+            id: mediaId,
+            name: option.name.length > 30 ? option.name.substring(0, 30) + '...' : option.name,
+            type: 'audio' as const,
+            duration: option.duration,
+            url: URL.createObjectURL(blob),
+            createdAt: Date.now()
+          };
 
-        // 3. Add to media library (and IndexedDB)
-        addMedia(mediaItem, file);
+          // 3. Add to media library (and IndexedDB)
+          addMedia(mediaItem, file);
 
-        // 4. Compute start position relative to clip
-        // Global timeline start time = clip.startTime + cue.start
-        const globalStart = clip.startTime + cue.start;
+          // 4. Compute start position relative to clip
+          // Global timeline start time = clip.startTime + cue.start
+          const globalStart = clip.startTime + cue.start;
 
-        // 5. Add audio clip to the audio track
-        const clipId = `clip_ai_audio_${option.id}_${Date.now()}`;
-        const audioClip = {
-          id: clipId,
-          mediaId: mediaId,
-          trackId: audioTrack.id,
-          startTime: globalStart,
-          duration: Math.min(option.duration, cue.end - cue.start),
-          trimStart: 0,
-          trimEnd: 0,
-          opacity: 1,
-          speed: 1,
-          effects: [],
-          transform: { x: 0, y: 0, scale: 100, rotation: 0 }
-        };
+          // 5. Add audio clip to the audio track
+          const clipId = `clip_ai_audio_${option.id}_${Date.now()}`;
+          const audioClip = {
+            id: clipId,
+            mediaId: mediaId,
+            trackId: audioTrack.id,
+            startTime: globalStart,
+            duration: Math.min(option.duration, cue.end - cue.start),
+            trimStart: 0,
+            trimEnd: 0,
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            audioSettings: {
+              volume: 0,
+              pan: 0,
+              fadeIn: 0,
+              fadeOut: 0,
+              bass: 0,
+              treble: 0,
+              muted: false,
+              preservePitch: true,
+              pitch: 0,
+              voiceFormant: 0,
+              humanize: false,
+            }
+          };
 
-        addClip(audioClip);
-      } catch (err) {
-        console.error(`Failed to download and add SFX: ${option.name}`, err);
+          addClip(audioClip);
+        } catch (err) {
+          console.error(`Failed to download and add SFX: ${option.name}`, err);
+        }
+
+        completed++;
+        setApplyProgress(Math.round((completed / totalCues) * 100));
       }
-
-      completed++;
-      setApplyProgress(Math.round((completed / totalCues) * 100));
+    } finally {
+      useEditorStore.getState().endTransaction();
     }
 
-    useEditorStore.getState().saveSnapshot();
     setIsApplying(false);
     onClose();
     alert('AI Sound Effects added to timeline successfully!');

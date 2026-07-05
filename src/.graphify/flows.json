@@ -1,0 +1,1278 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-05T15:38:42.925Z",
+  "graphPath": "D:\\Video-Editor\\src\\.graphify\\graph.json",
+  "maxDepth": 15,
+  "includeTests": false,
+  "warnings": [],
+  "flows": [
+    {
+      "id": "flow:hooks_usemediaplayback_connectaudionode",
+      "name": "connectAudioNode",
+      "entryPoint": "hooks_usemediaplayback_connectaudionode",
+      "entryPointId": "hooks_usemediaplayback_connectaudionode",
+      "path": [
+        "hooks_usemediaplayback_connectaudionode",
+        "hooks_usemediaplayback_getmasteraudioctx",
+        "hooks_usemediaplayback_getorcreatetrackanalyser"
+      ],
+      "qualifiedPath": [
+        "hooks_usemediaplayback_connectaudionode",
+        "hooks_usemediaplayback_getmasteraudioctx",
+        "hooks_usemediaplayback_getorcreatetrackanalyser"
+      ],
+      "depth": 1,
+      "nodeCount": 3,
+      "fileCount": 1,
+      "files": [
+        "hooks/useMediaPlayback.ts"
+      ],
+      "criticality": 0.2433,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_speedramp_getmediatimeforclip",
+      "name": "getMediaTimeForClip",
+      "entryPoint": "utils_speedramp_getmediatimeforclip",
+      "entryPointId": "utils_speedramp_getmediatimeforclip",
+      "path": [
+        "utils_speedramp_getmediatimeforclip",
+        "utils_speedramp_getmediatimeatposition",
+        "utils_speedramp_getintegraltable",
+        "utils_speedramp_getspeedatposition",
+        "utils_speedramp_getfullkeyframes"
+      ],
+      "qualifiedPath": [
+        "utils_speedramp_getmediatimeforclip",
+        "utils_speedramp_getmediatimeatposition",
+        "utils_speedramp_getintegraltable",
+        "utils_speedramp_getspeedatposition",
+        "utils_speedramp_getfullkeyframes"
+      ],
+      "depth": 3,
+      "nodeCount": 5,
+      "fileCount": 1,
+      "files": [
+        "utils/speedRamp.ts"
+      ],
+      "criticality": 0.18,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_mediaprobe_probefile",
+      "name": "probeFile",
+      "entryPoint": "utils_mediaprobe_probefile",
+      "entryPointId": "utils_mediaprobe_probefile",
+      "path": [
+        "utils_mediaprobe_probefile",
+        "utils_mediaprobe_detectmediatype",
+        "utils_mediaprobe_generateid",
+        "utils_mediaprobe_probeaudio",
+        "utils_mediaprobe_probeimage",
+        "utils_mediaprobe_probevideo",
+        "utils_mediaprobe_extractwaveformfromurl",
+        "utils_mediaprobe_capturevideoframe",
+        "utils_mediaprobe_bloburltoarraybuffer"
+      ],
+      "qualifiedPath": [
+        "utils_mediaprobe_probefile",
+        "utils_mediaprobe_detectmediatype",
+        "utils_mediaprobe_generateid",
+        "utils_mediaprobe_probeaudio",
+        "utils_mediaprobe_probeimage",
+        "utils_mediaprobe_probevideo",
+        "utils_mediaprobe_extractwaveformfromurl",
+        "utils_mediaprobe_capturevideoframe",
+        "utils_mediaprobe_bloburltoarraybuffer"
+      ],
+      "depth": 3,
+      "nodeCount": 9,
+      "fileCount": 1,
+      "files": [
+        "utils/mediaProbe.ts"
+      ],
+      "criticality": 0.18,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_waveformrenderer_renderwaveformtodataurl",
+      "name": "renderWaveformToDataUrl",
+      "entryPoint": "utils_waveformrenderer_renderwaveformtodataurl",
+      "entryPointId": "utils_waveformrenderer_renderwaveformtodataurl",
+      "path": [
+        "utils_waveformrenderer_renderwaveformtodataurl",
+        "utils_waveformrenderer_createwaveformcanvas",
+        "utils_waveformrenderer_renderwaveform",
+        "utils_waveformrenderer_roundrect"
+      ],
+      "qualifiedPath": [
+        "utils_waveformrenderer_renderwaveformtodataurl",
+        "utils_waveformrenderer_createwaveformcanvas",
+        "utils_waveformrenderer_renderwaveform",
+        "utils_waveformrenderer_roundrect"
+      ],
+      "depth": 3,
+      "nodeCount": 4,
+      "fileCount": 1,
+      "files": [
+        "utils/waveformRenderer.ts"
+      ],
+      "criticality": 0.18,
+      "warnings": []
+    },
+    {
+      "id": "flow:components_timeline_waveformoverlay",
+      "name": "WaveformOverlay",
+      "entryPoint": "components_timeline_waveformoverlay",
+      "entryPointId": "components_timeline_waveformoverlay",
+      "path": [
+        "components_timeline_waveformoverlay",
+        "components_timeline_generatefallbackwaveform",
+        "components_timeline_seededrandom"
+      ],
+      "qualifiedPath": [
+        "components_timeline_waveformoverlay",
+        "components_timeline_generatefallbackwaveform",
+        "components_timeline_seededrandom"
+      ],
+      "depth": 2,
+      "nodeCount": 3,
+      "fileCount": 1,
+      "files": [
+        "components/Timeline.tsx"
+      ],
+      "criticality": 0.17,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_loadprojectfromdb",
+      "name": "loadProjectFromDB",
+      "entryPoint": "utils_projectpersistence_loadprojectfromdb",
+      "entryPointId": "utils_projectpersistence_loadprojectfromdb",
+      "path": [
+        "utils_projectpersistence_loadprojectfromdb",
+        "utils_projectpersistence_getdb",
+        "utils_projectpersistence_restoresnapshotmedia",
+        "utils_projectpersistence_generateframestrip",
+        "utils_projectpersistence_generatevideothumbnail",
+        "utils_projectpersistence_getfilefromdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_loadprojectfromdb",
+        "utils_projectpersistence_getdb",
+        "utils_projectpersistence_restoresnapshotmedia",
+        "utils_projectpersistence_generateframestrip",
+        "utils_projectpersistence_generatevideothumbnail",
+        "utils_projectpersistence_getfilefromdb"
+      ],
+      "depth": 2,
+      "nodeCount": 6,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.17,
+      "warnings": []
+    },
+    {
+      "id": "flow:components_previewcanvas_renderparticles",
+      "name": "renderParticles",
+      "entryPoint": "components_previewcanvas_renderparticles",
+      "entryPointId": "components_previewcanvas_renderparticles",
+      "path": [
+        "components_previewcanvas_renderparticles",
+        "components_previewcanvas_spawnparticle",
+        "components_previewcanvas_hextorgb",
+        "components_previewcanvas_randomhue"
+      ],
+      "qualifiedPath": [
+        "components_previewcanvas_renderparticles",
+        "components_previewcanvas_spawnparticle",
+        "components_previewcanvas_hextorgb",
+        "components_previewcanvas_randomhue"
+      ],
+      "depth": 2,
+      "nodeCount": 4,
+      "fileCount": 1,
+      "files": [
+        "components/PreviewCanvas.tsx"
+      ],
+      "criticality": 0.17,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_resolvemediaitemfromdb",
+      "name": "resolveMediaItemFromDB",
+      "entryPoint": "utils_projectpersistence_resolvemediaitemfromdb",
+      "entryPointId": "utils_projectpersistence_resolvemediaitemfromdb",
+      "path": [
+        "utils_projectpersistence_resolvemediaitemfromdb",
+        "utils_projectpersistence_generateframestrip",
+        "utils_projectpersistence_generatevideothumbnail",
+        "utils_projectpersistence_getfilefromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_resolvemediaitemfromdb",
+        "utils_projectpersistence_generateframestrip",
+        "utils_projectpersistence_generatevideothumbnail",
+        "utils_projectpersistence_getfilefromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 2,
+      "nodeCount": 5,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.17,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_alert_alert",
+      "name": "Alert",
+      "entryPoint": "ui_alert_alert",
+      "entryPointId": "ui_alert_alert",
+      "path": [
+        "ui_alert_alert",
+        "ui_alert_alertvariants"
+      ],
+      "qualifiedPath": [
+        "ui_alert_alert",
+        "ui_alert_alertvariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/alert.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_badge_badge",
+      "name": "Badge",
+      "entryPoint": "ui_badge_badge",
+      "entryPointId": "ui_badge_badge",
+      "path": [
+        "ui_badge_badge",
+        "ui_badge_badgevariants"
+      ],
+      "qualifiedPath": [
+        "ui_badge_badge",
+        "ui_badge_badgevariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/badge.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_button_button",
+      "name": "Button",
+      "entryPoint": "ui_button_button",
+      "entryPointId": "ui_button_button",
+      "path": [
+        "ui_button_button",
+        "ui_button_buttonvariants"
+      ],
+      "qualifiedPath": [
+        "ui_button_button",
+        "ui_button_buttonvariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/button.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_button_group_buttongroup",
+      "name": "ButtonGroup",
+      "entryPoint": "ui_button_group_buttongroup",
+      "entryPointId": "ui_button_group_buttongroup",
+      "path": [
+        "ui_button_group_buttongroup",
+        "ui_button_group_buttongroupvariants"
+      ],
+      "qualifiedPath": [
+        "ui_button_group_buttongroup",
+        "ui_button_group_buttongroupvariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/button-group.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_carousel_carouselcontent",
+      "name": "CarouselContent",
+      "entryPoint": "ui_carousel_carouselcontent",
+      "entryPointId": "ui_carousel_carouselcontent",
+      "path": [
+        "ui_carousel_carouselcontent",
+        "ui_carousel_usecarousel"
+      ],
+      "qualifiedPath": [
+        "ui_carousel_carouselcontent",
+        "ui_carousel_usecarousel"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/carousel.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_carousel_carouselitem",
+      "name": "CarouselItem",
+      "entryPoint": "ui_carousel_carouselitem",
+      "entryPointId": "ui_carousel_carouselitem",
+      "path": [
+        "ui_carousel_carouselitem",
+        "ui_carousel_usecarousel"
+      ],
+      "qualifiedPath": [
+        "ui_carousel_carouselitem",
+        "ui_carousel_usecarousel"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/carousel.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_carousel_carouselnext",
+      "name": "CarouselNext",
+      "entryPoint": "ui_carousel_carouselnext",
+      "entryPointId": "ui_carousel_carouselnext",
+      "path": [
+        "ui_carousel_carouselnext",
+        "ui_carousel_usecarousel"
+      ],
+      "qualifiedPath": [
+        "ui_carousel_carouselnext",
+        "ui_carousel_usecarousel"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/carousel.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_carousel_carouselprevious",
+      "name": "CarouselPrevious",
+      "entryPoint": "ui_carousel_carouselprevious",
+      "entryPointId": "ui_carousel_carouselprevious",
+      "path": [
+        "ui_carousel_carouselprevious",
+        "ui_carousel_usecarousel"
+      ],
+      "qualifiedPath": [
+        "ui_carousel_carouselprevious",
+        "ui_carousel_usecarousel"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/carousel.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_chart_chartlegendcontent",
+      "name": "ChartLegendContent",
+      "entryPoint": "ui_chart_chartlegendcontent",
+      "entryPointId": "ui_chart_chartlegendcontent",
+      "path": [
+        "ui_chart_chartlegendcontent",
+        "ui_chart_usechart"
+      ],
+      "qualifiedPath": [
+        "ui_chart_chartlegendcontent",
+        "ui_chart_usechart"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/chart.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_chart_charttooltipcontent",
+      "name": "ChartTooltipContent",
+      "entryPoint": "ui_chart_charttooltipcontent",
+      "entryPointId": "ui_chart_charttooltipcontent",
+      "path": [
+        "ui_chart_charttooltipcontent",
+        "ui_chart_usechart"
+      ],
+      "qualifiedPath": [
+        "ui_chart_charttooltipcontent",
+        "ui_chart_usechart"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/chart.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_empty_emptymedia",
+      "name": "EmptyMedia",
+      "entryPoint": "ui_empty_emptymedia",
+      "entryPointId": "ui_empty_emptymedia",
+      "path": [
+        "ui_empty_emptymedia",
+        "ui_empty_emptymediavariants"
+      ],
+      "qualifiedPath": [
+        "ui_empty_emptymedia",
+        "ui_empty_emptymediavariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/empty.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_field_field",
+      "name": "Field",
+      "entryPoint": "ui_field_field",
+      "entryPointId": "ui_field_field",
+      "path": [
+        "ui_field_field",
+        "ui_field_fieldvariants"
+      ],
+      "qualifiedPath": [
+        "ui_field_field",
+        "ui_field_fieldvariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/field.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:components_timeline_floatingscrubtooltip",
+      "name": "FloatingScrubTooltip",
+      "entryPoint": "components_timeline_floatingscrubtooltip",
+      "entryPointId": "components_timeline_floatingscrubtooltip",
+      "path": [
+        "components_timeline_floatingscrubtooltip",
+        "components_timeline_formatdetailedtooltiptime"
+      ],
+      "qualifiedPath": [
+        "components_timeline_floatingscrubtooltip",
+        "components_timeline_formatdetailedtooltiptime"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/Timeline.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_form_formcontrol",
+      "name": "FormControl",
+      "entryPoint": "ui_form_formcontrol",
+      "entryPointId": "ui_form_formcontrol",
+      "path": [
+        "ui_form_formcontrol",
+        "ui_form_useformfield"
+      ],
+      "qualifiedPath": [
+        "ui_form_formcontrol",
+        "ui_form_useformfield"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/form.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_form_formdescription",
+      "name": "FormDescription",
+      "entryPoint": "ui_form_formdescription",
+      "entryPointId": "ui_form_formdescription",
+      "path": [
+        "ui_form_formdescription",
+        "ui_form_useformfield"
+      ],
+      "qualifiedPath": [
+        "ui_form_formdescription",
+        "ui_form_useformfield"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/form.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_form_formlabel",
+      "name": "FormLabel",
+      "entryPoint": "ui_form_formlabel",
+      "entryPointId": "ui_form_formlabel",
+      "path": [
+        "ui_form_formlabel",
+        "ui_form_useformfield"
+      ],
+      "qualifiedPath": [
+        "ui_form_formlabel",
+        "ui_form_useformfield"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/form.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_form_formmessage",
+      "name": "FormMessage",
+      "entryPoint": "ui_form_formmessage",
+      "entryPointId": "ui_form_formmessage",
+      "path": [
+        "ui_form_formmessage",
+        "ui_form_useformfield"
+      ],
+      "qualifiedPath": [
+        "ui_form_formmessage",
+        "ui_form_useformfield"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/form.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:components_timeline_framestripoverlay",
+      "name": "FrameStripOverlay",
+      "entryPoint": "components_timeline_framestripoverlay",
+      "entryPointId": "components_timeline_framestripoverlay",
+      "path": [
+        "components_timeline_framestripoverlay",
+        "components_timeline_seededrandom"
+      ],
+      "qualifiedPath": [
+        "components_timeline_framestripoverlay",
+        "components_timeline_seededrandom"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/Timeline.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_input_group_inputgroupaddon",
+      "name": "InputGroupAddon",
+      "entryPoint": "ui_input_group_inputgroupaddon",
+      "entryPointId": "ui_input_group_inputgroupaddon",
+      "path": [
+        "ui_input_group_inputgroupaddon",
+        "ui_input_group_inputgroupaddonvariants"
+      ],
+      "qualifiedPath": [
+        "ui_input_group_inputgroupaddon",
+        "ui_input_group_inputgroupaddonvariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/input-group.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_input_group_inputgroupbutton",
+      "name": "InputGroupButton",
+      "entryPoint": "ui_input_group_inputgroupbutton",
+      "entryPointId": "ui_input_group_inputgroupbutton",
+      "path": [
+        "ui_input_group_inputgroupbutton",
+        "ui_input_group_inputgroupbuttonvariants"
+      ],
+      "qualifiedPath": [
+        "ui_input_group_inputgroupbutton",
+        "ui_input_group_inputgroupbuttonvariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/input-group.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:components_previewcanvas_interactivecanvasoverlay",
+      "name": "InteractiveCanvasOverlay",
+      "entryPoint": "components_previewcanvas_interactivecanvasoverlay",
+      "entryPointId": "components_previewcanvas_interactivecanvasoverlay",
+      "path": [
+        "components_previewcanvas_interactivecanvasoverlay",
+        "components_previewcanvas_getcachedimage"
+      ],
+      "qualifiedPath": [
+        "components_previewcanvas_interactivecanvasoverlay",
+        "components_previewcanvas_getcachedimage"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/PreviewCanvas.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_item_item",
+      "name": "Item",
+      "entryPoint": "ui_item_item",
+      "entryPointId": "ui_item_item",
+      "path": [
+        "ui_item_item",
+        "ui_item_itemvariants"
+      ],
+      "qualifiedPath": [
+        "ui_item_item",
+        "ui_item_itemvariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/item.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_item_itemmedia",
+      "name": "ItemMedia",
+      "entryPoint": "ui_item_itemmedia",
+      "entryPointId": "ui_item_itemmedia",
+      "path": [
+        "ui_item_itemmedia",
+        "ui_item_itemmediavariants"
+      ],
+      "qualifiedPath": [
+        "ui_item_itemmedia",
+        "ui_item_itemmediavariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/item.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_navigation_menu_navigationmenutrigger",
+      "name": "NavigationMenuTrigger",
+      "entryPoint": "ui_navigation_menu_navigationmenutrigger",
+      "entryPointId": "ui_navigation_menu_navigationmenutrigger",
+      "path": [
+        "ui_navigation_menu_navigationmenutrigger",
+        "ui_navigation_menu_navigationmenutriggerstyle"
+      ],
+      "qualifiedPath": [
+        "ui_navigation_menu_navigationmenutrigger",
+        "ui_navigation_menu_navigationmenutriggerstyle"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/navigation-menu.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_sidebar_sidebar",
+      "name": "Sidebar",
+      "entryPoint": "ui_sidebar_sidebar",
+      "entryPointId": "ui_sidebar_sidebar",
+      "path": [
+        "ui_sidebar_sidebar",
+        "ui_sidebar_usesidebar"
+      ],
+      "qualifiedPath": [
+        "ui_sidebar_sidebar",
+        "ui_sidebar_usesidebar"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/sidebar.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_sidebar_sidebarmenubutton",
+      "name": "SidebarMenuButton",
+      "entryPoint": "ui_sidebar_sidebarmenubutton",
+      "entryPointId": "ui_sidebar_sidebarmenubutton",
+      "path": [
+        "ui_sidebar_sidebarmenubutton",
+        "ui_sidebar_sidebarmenubuttonvariants",
+        "ui_sidebar_usesidebar"
+      ],
+      "qualifiedPath": [
+        "ui_sidebar_sidebarmenubutton",
+        "ui_sidebar_sidebarmenubuttonvariants",
+        "ui_sidebar_usesidebar"
+      ],
+      "depth": 1,
+      "nodeCount": 3,
+      "fileCount": 1,
+      "files": [
+        "components/ui/sidebar.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_sidebar_sidebarrail",
+      "name": "SidebarRail",
+      "entryPoint": "ui_sidebar_sidebarrail",
+      "entryPointId": "ui_sidebar_sidebarrail",
+      "path": [
+        "ui_sidebar_sidebarrail",
+        "ui_sidebar_usesidebar"
+      ],
+      "qualifiedPath": [
+        "ui_sidebar_sidebarrail",
+        "ui_sidebar_usesidebar"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/sidebar.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_sidebar_sidebartrigger",
+      "name": "SidebarTrigger",
+      "entryPoint": "ui_sidebar_sidebartrigger",
+      "entryPointId": "ui_sidebar_sidebartrigger",
+      "path": [
+        "ui_sidebar_sidebartrigger",
+        "ui_sidebar_usesidebar"
+      ],
+      "qualifiedPath": [
+        "ui_sidebar_sidebartrigger",
+        "ui_sidebar_usesidebar"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/sidebar.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:components_timeline_timeline",
+      "name": "Timeline",
+      "entryPoint": "components_timeline_timeline",
+      "entryPointId": "components_timeline_timeline",
+      "path": [
+        "components_timeline_timeline",
+        "components_timeline_gettrackheight",
+        "components_timeline_gettracktop"
+      ],
+      "qualifiedPath": [
+        "components_timeline_timeline",
+        "components_timeline_gettrackheight",
+        "components_timeline_gettracktop"
+      ],
+      "depth": 1,
+      "nodeCount": 3,
+      "fileCount": 1,
+      "files": [
+        "components/Timeline.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:ui_toggle_toggle",
+      "name": "Toggle",
+      "entryPoint": "ui_toggle_toggle",
+      "entryPointId": "ui_toggle_toggle",
+      "path": [
+        "ui_toggle_toggle",
+        "ui_toggle_togglevariants"
+      ],
+      "qualifiedPath": [
+        "ui_toggle_toggle",
+        "ui_toggle_togglevariants"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/ui/toggle.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_lutparser_applyluttocanvas",
+      "name": "applyLutToCanvas",
+      "entryPoint": "utils_lutparser_applyluttocanvas",
+      "entryPointId": "utils_lutparser_applyluttocanvas",
+      "path": [
+        "utils_lutparser_applyluttocanvas",
+        "utils_lutparser_applyluttopixel"
+      ],
+      "qualifiedPath": [
+        "utils_lutparser_applyluttocanvas",
+        "utils_lutparser_applyluttopixel"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/lutParser.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_clearprojectdb",
+      "name": "clearProjectDB",
+      "entryPoint": "utils_projectpersistence_clearprojectdb",
+      "entryPointId": "utils_projectpersistence_clearprojectdb",
+      "path": [
+        "utils_projectpersistence_clearprojectdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_clearprojectdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_storyboardcompiler_compilestoryboard",
+      "name": "compileStoryboard",
+      "entryPoint": "utils_storyboardcompiler_compilestoryboard",
+      "entryPointId": "utils_storyboardcompiler_compilestoryboard",
+      "path": [
+        "utils_storyboardcompiler_compilestoryboard",
+        "utils_storyboardcompiler_compilegridforsegment"
+      ],
+      "qualifiedPath": [
+        "utils_storyboardcompiler_compilestoryboard",
+        "utils_storyboardcompiler_compilegridforsegment"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/storyboardCompiler.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_audioseparation_createseparationnode",
+      "name": "createSeparationNode",
+      "entryPoint": "utils_audioseparation_createseparationnode",
+      "entryPointId": "utils_audioseparation_createseparationnode",
+      "path": [
+        "utils_audioseparation_createseparationnode",
+        "utils_audioseparation_createfallbackseparationnode",
+        "utils_audioseparation_updateseparationparam"
+      ],
+      "qualifiedPath": [
+        "utils_audioseparation_createseparationnode",
+        "utils_audioseparation_createfallbackseparationnode",
+        "utils_audioseparation_updateseparationparam"
+      ],
+      "depth": 1,
+      "nodeCount": 3,
+      "fileCount": 1,
+      "files": [
+        "utils/audioSeparation.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_deleteautosavefromdb",
+      "name": "deleteAutosaveFromDB",
+      "entryPoint": "utils_projectpersistence_deleteautosavefromdb",
+      "entryPointId": "utils_projectpersistence_deleteautosavefromdb",
+      "path": [
+        "utils_projectpersistence_deleteautosavefromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_deleteautosavefromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_deletefilefromdb",
+      "name": "deleteFileFromDB",
+      "entryPoint": "utils_projectpersistence_deletefilefromdb",
+      "entryPointId": "utils_projectpersistence_deletefilefromdb",
+      "path": [
+        "utils_projectpersistence_deletefilefromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_deletefilefromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_beatdetection_detectbeats",
+      "name": "detectBeats",
+      "entryPoint": "utils_beatdetection_detectbeats",
+      "entryPointId": "utils_beatdetection_detectbeats",
+      "path": [
+        "utils_beatdetection_detectbeats",
+        "utils_beatdetection_smootharray"
+      ],
+      "qualifiedPath": [
+        "utils_beatdetection_detectbeats",
+        "utils_beatdetection_smootharray"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/beatDetection.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:store_editorstore_findnonoverlappingposition",
+      "name": "findNonOverlappingPosition",
+      "entryPoint": "store_editorstore_findnonoverlappingposition",
+      "entryPointId": "store_editorstore_findnonoverlappingposition",
+      "path": [
+        "store_editorstore_findnonoverlappingposition",
+        "store_editorstore_checkoverlap"
+      ],
+      "qualifiedPath": [
+        "store_editorstore_findnonoverlappingposition",
+        "store_editorstore_checkoverlap"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "store/editorStore.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_getautosavesfromdb",
+      "name": "getAutosavesFromDB",
+      "entryPoint": "utils_projectpersistence_getautosavesfromdb",
+      "entryPointId": "utils_projectpersistence_getautosavesfromdb",
+      "path": [
+        "utils_projectpersistence_getautosavesfromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_getautosavesfromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_gettemplatesfromdb",
+      "name": "getTemplatesFromDB",
+      "entryPoint": "utils_projectpersistence_gettemplatesfromdb",
+      "entryPointId": "utils_projectpersistence_gettemplatesfromdb",
+      "path": [
+        "utils_projectpersistence_gettemplatesfromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_gettemplatesfromdb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:components_timeline_gettrackaty",
+      "name": "getTrackAtY",
+      "entryPoint": "components_timeline_gettrackaty",
+      "entryPointId": "components_timeline_gettrackaty",
+      "path": [
+        "components_timeline_gettrackaty",
+        "components_timeline_gettrackheight"
+      ],
+      "qualifiedPath": [
+        "components_timeline_gettrackaty",
+        "components_timeline_gettrackheight"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "components/Timeline.tsx"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:hooks_usemediaplayback_initaudiograph",
+      "name": "initAudioGraph",
+      "entryPoint": "hooks_usemediaplayback_initaudiograph",
+      "entryPointId": "hooks_usemediaplayback_initaudiograph",
+      "path": [
+        "hooks_usemediaplayback_initaudiograph",
+        "hooks_usemediaplayback_createseparationgraph",
+        "hooks_usemediaplayback_getmasteraudioctx",
+        "hooks_usemediaplayback_getorcreatetrackanalyser"
+      ],
+      "qualifiedPath": [
+        "hooks_usemediaplayback_initaudiograph",
+        "hooks_usemediaplayback_createseparationgraph",
+        "hooks_usemediaplayback_getmasteraudioctx",
+        "hooks_usemediaplayback_getorcreatetrackanalyser"
+      ],
+      "depth": 1,
+      "nodeCount": 4,
+      "fileCount": 1,
+      "files": [
+        "hooks/useMediaPlayback.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_saveautosavetodb",
+      "name": "saveAutosaveToDB",
+      "entryPoint": "utils_projectpersistence_saveautosavetodb",
+      "entryPointId": "utils_projectpersistence_saveautosavetodb",
+      "path": [
+        "utils_projectpersistence_saveautosavetodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_saveautosavetodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_savefiletodb",
+      "name": "saveFileToDB",
+      "entryPoint": "utils_projectpersistence_savefiletodb",
+      "entryPointId": "utils_projectpersistence_savefiletodb",
+      "path": [
+        "utils_projectpersistence_savefiletodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_savefiletodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_saveprojecttodb",
+      "name": "saveProjectToDB",
+      "entryPoint": "utils_projectpersistence_saveprojecttodb",
+      "entryPointId": "utils_projectpersistence_saveprojecttodb",
+      "path": [
+        "utils_projectpersistence_saveprojecttodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_saveprojecttodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_projectpersistence_savetemplatestodb",
+      "name": "saveTemplatesToDB",
+      "entryPoint": "utils_projectpersistence_savetemplatestodb",
+      "entryPointId": "utils_projectpersistence_savetemplatestodb",
+      "path": [
+        "utils_projectpersistence_savetemplatestodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "qualifiedPath": [
+        "utils_projectpersistence_savetemplatestodb",
+        "utils_projectpersistence_getdb"
+      ],
+      "depth": 1,
+      "nodeCount": 2,
+      "fileCount": 1,
+      "files": [
+        "utils/projectPersistence.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    },
+    {
+      "id": "flow:utils_motiontracker_trackmotion",
+      "name": "trackMotion",
+      "entryPoint": "utils_motiontracker_trackmotion",
+      "entryPointId": "utils_motiontracker_trackmotion",
+      "path": [
+        "utils_motiontracker_trackmotion",
+        "utils_motiontracker_getgrayscalepatch",
+        "utils_motiontracker_matchtemplate"
+      ],
+      "qualifiedPath": [
+        "utils_motiontracker_trackmotion",
+        "utils_motiontracker_getgrayscalepatch",
+        "utils_motiontracker_matchtemplate"
+      ],
+      "depth": 1,
+      "nodeCount": 3,
+      "fileCount": 1,
+      "files": [
+        "utils/motionTracker.ts"
+      ],
+      "criticality": 0.16,
+      "warnings": []
+    }
+  ]
+}

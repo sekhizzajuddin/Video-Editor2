@@ -3132,7 +3132,7 @@ export function PropertiesPanel() {
         {activePropertiesTab === 'audio' && (
           <div className="space-y-3">
             {/* AI Sound Designer */}
-            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
+            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
               <div className="bg-amber-950/20 border border-amber-500/30 rounded p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-400" />
