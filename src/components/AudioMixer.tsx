@@ -16,7 +16,7 @@ export function AudioMixer() {
     toggleTrackMute,
   } = useEditorStore();
 
-  const [activePanTrack, setActivePanTrack] = useState<string | null>(null);
+  // (activePanTrack state removed — M14 fix: it was declared but never used)
 
   // Audio tracks and video tracks with audio
   const audioCapableTracks = tracks.filter(t => t.type === 'audio' || t.type === 'video');
@@ -85,7 +85,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
   const isMuted = track.muted || false;
   const isSolo = track.solo || false;
 
-  // Real-time VU meter canvas draw loop
+  // Real-time VU meter canvas draw loop — FIX M13: stop rAF when not visible
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -93,7 +93,25 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    let isVisible = !document.hidden;
+
+    const handleVisibilityChange = () => {
+      isVisible = !document.hidden;
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // IntersectionObserver: pause loop when canvas is off-screen
+    const observer = new IntersectionObserver((entries) => {
+      isVisible = entries[0]?.isIntersecting && !document.hidden;
+    }, { threshold: 0 });
+    observer.observe(canvas);
+
     const drawMeter = () => {
+      if (!isVisible) {
+        animationRef.current = requestAnimationFrame(drawMeter);
+        return;
+      }
+
       const analysers = (window as any).procutTrackAnalysers;
       const analyser = analysers?.get(track.id);
 
@@ -169,6 +187,8 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
 
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      observer.disconnect();
     };
   }, [track.id]);
 
@@ -236,17 +256,20 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
           className="w-2 rounded bg-black border border-[#1e1e1e]"
         />
 
-        {/* Fader Input */}
+        {/* Fader Input — FIX H13: disable fader when muted so drag doesn't change volume invisibly */}
         <div className="relative w-4 flex flex-col justify-center items-center">
           <input
             type="range"
             min={0}
             max={1.0}
             step={0.01}
-            value={volume}
-            onChange={(e) => onVolumeChange(Number(e.target.value))}
+            value={isMuted ? 0 : volume}
+            disabled={isMuted}
+            onChange={(e) => !isMuted && onVolumeChange(Number(e.target.value))}
             style={{ writingMode: 'bt-lr', WebkitAppearance: 'slider-vertical' } as any}
-            className="h-36 w-4 bg-[#1e1e1e] border border-[#2d2d2d] rounded cursor-pointer appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black [&::-webkit-slider-thumb]:rounded-sm"
+            className={`h-36 w-4 bg-[#1e1e1e] border border-[#2d2d2d] rounded appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black [&::-webkit-slider-thumb]:rounded-sm ${
+              isMuted ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
+            }`}
           />
         </div>
       </div>

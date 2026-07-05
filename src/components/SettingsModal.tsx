@@ -15,7 +15,8 @@ export function SettingsModal() {
     for (const file of Array.from(files)) {
       try {
         const mediaItem = await probeFile(file);
-        addMedia(mediaItem);
+        // FIX C6: Pass the actual File object so it gets persisted to IndexedDB
+        addMedia(mediaItem, file);
       } catch (err) {
         console.error(`Failed to import ${file.name}:`, err);
       }
@@ -221,8 +222,15 @@ export function SettingsModal() {
                         type="number"
                         value={settings.defaultDuration}
                         onChange={(e) => updateSettings({ defaultDuration: Number(e.target.value) })}
+                        onBlur={(e) => {
+                          // FIX M16: Clamp value to valid range on blur so invalid values are not persisted
+                          const val = Number(e.target.value);
+                          const clamped = Math.max(1, Math.min(60, isNaN(val) ? 5 : val));
+                          updateSettings({ defaultDuration: clamped });
+                        }}
                         min={1}
                         max={60}
+                        placeholder="1-60"
                         className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
@@ -248,7 +256,18 @@ export function SettingsModal() {
                       className="hidden"
                     />
                     <button
-                      onClick={() => { resetProject(); setShowSettingsModal(false); }}
+                      onClick={() => {
+                        // FIX C8: Confirm before resetting from settings panel
+                        const hasContent = useEditorStore.getState().tracks.some(t => t.clips.length > 0);
+                        if (hasContent) {
+                          const confirmed = window.confirm(
+                            'Reset the project?\n\nAll tracks, clips and media will be removed. This cannot be undone.'
+                          );
+                          if (!confirmed) return;
+                        }
+                        resetProject();
+                        setShowSettingsModal(false);
+                      }}
                       className="w-full px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-2"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -310,7 +329,12 @@ export function SettingsModal() {
                 <div className="flex justify-between items-center">
                   <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Keyboard Shortcuts</h3>
                   <button
-                    onClick={() => updateSettings({ keyboardShortcuts: {} })}
+                    onClick={() => {
+                      // FIX M17: Also clear any active recording state when resetting shortcuts
+                      setRecordingActionId(null);
+                      setConflictDetail(null);
+                      updateSettings({ keyboardShortcuts: {} });
+                    }}
                     className="flex items-center gap-1 px-2.5 py-1 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-950/20 border border-red-900/30 rounded transition-colors"
                   >
                     <RotateCw className="w-3 h-3" />

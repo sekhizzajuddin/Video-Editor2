@@ -24,9 +24,11 @@ async function ensureFFmpegLoaded(): Promise<void> {
     const baseURL = window.location.origin + '/ffmpeg';
 
     ffmpeg.on('log', ({ message }) => {
-      ffmpegLogs.push(message);
-      console.log('[FFmpeg]', message);
-    });
+    // FIX M9: Cap log array at 500 entries to prevent unbounded memory growth
+    if (ffmpegLogs.length >= 500) ffmpegLogs.splice(0, ffmpegLogs.length - 499);
+    ffmpegLogs.push(message);
+    console.log('[FFmpeg]', message);
+  });
 
     await ffmpeg.load({
       coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
@@ -116,13 +118,14 @@ export function ExportModal() {
     abortControllerRef.current = null;
     chunksRef.current = [];
     playbackStartedRef.current = false;
-    setIsExporting(false);
+    // FIX M12: restore canvas BEFORE calling setIsExporting(false) to avoid flicker
     if (previewCanvas) {
       const previewWidth = useEditorStore.getState().settings.previewQuality === 'quarter' ? 213 : useEditorStore.getState().settings.previewQuality === 'half' ? 427 : 854;
       const previewHeight = useEditorStore.getState().settings.previewQuality === 'quarter' ? 120 : useEditorStore.getState().settings.previewQuality === 'half' ? 240 : 480;
       previewCanvas.width = previewWidth;
       previewCanvas.height = previewHeight;
     }
+    setIsExporting(false);
   }, [setIsExporting, previewCanvas]);
 
   // Watch currentTime to update progress and stop recording at end
@@ -338,11 +341,13 @@ export function ExportModal() {
 
     // Audio is optional
     let combinedStream: MediaStream;
+    // FIX M10: capture hasAudio in a ref so the stale closure in onstop reads the correct value
     const hasAudio = !!(masterAudioStream && masterAudioStream.getAudioTracks().length > 0);
+    const hasAudioRef = { current: hasAudio };
     if (hasAudio) {
       combinedStream = new MediaStream([
         ...videoStream.getVideoTracks(),
-        ...masterAudioStream.getAudioTracks()
+        ...masterAudioStream!.getAudioTracks()
       ]);
     } else {
       combinedStream = new MediaStream([...videoStream.getVideoTracks()]);
@@ -439,7 +444,8 @@ export function ExportModal() {
       setStatusMsg('Starting MP4 conversion...');
 
       try {
-        await convertToMp4(webmBlob, hasAudio);
+        // FIX M10: use hasAudioRef.current instead of stale closure variable
+        await convertToMp4(webmBlob, hasAudioRef.current);
         updateStatus('done');
         setStatusMsg('MP4 export complete!');
         isExportingRef.current = false;
@@ -748,21 +754,21 @@ export function ExportModal() {
           )}
         </div>
 
-        {/* Footer */}
+        {/* FIX M11: Separate Cancel and Export buttons with clear, non-contradictory labels */}
         <div className="flex items-center justify-end gap-2 p-4 border-t border-[#3e3e3e]">
           {isExporting ? (
-            <button onClick={handleCancel} className="px-4 py-2 text-xs text-red-400 hover:text-red-300 border border-red-400/30 rounded">
-              Cancel
+            <button onClick={handleCancel} className="px-4 py-2 text-xs text-red-400 hover:text-red-300 border border-red-400/30 rounded transition-colors">
+              Cancel Export
             </button>
           ) : (
-            <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white">
+            <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors">
               Close
             </button>
           )}
           <button
-            onClick={isExporting ? handleCancel : handleExport}
-            disabled={isExporting && exportStatus === 'converting'}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-[#3e3e3e] disabled:cursor-not-allowed text-white text-xs rounded flex items-center gap-1.5 font-medium"
+            onClick={handleExport}
+            disabled={isExporting || totalClips === 0}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-[#3e3e3e] disabled:cursor-not-allowed text-white text-xs rounded flex items-center gap-1.5 font-medium transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
             {exportStatus === 'recording' ? 'Recording...'

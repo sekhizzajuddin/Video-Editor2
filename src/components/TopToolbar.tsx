@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 
 export function TopToolbar() {
@@ -80,20 +80,28 @@ export function TopToolbar() {
 
   const handleSaveProjectFile = () => {
     const state = useEditorStore.getState();
-    
-    // Clean up urls since they are session-specific blob URLs
+
+    // Clean up blob URLs since they are session-specific
     const cleanMediaLibrary = state.mediaLibrary.map(item => ({
       ...item,
       url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
       thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
+      frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
     }));
 
+    // FIX C9: Include all critical state fields that were previously missing
     const projectData = {
-      version: '1.0.0',
+      version: '1.1.0',
       tracks: state.tracks,
       mediaLibrary: cleanMediaLibrary,
       currentTime: state.currentTime,
       aspectRatio: state.aspectRatio,
+      volume: state.volume,
+      isMuted: state.isMuted,
+      inPoint: state.inPoint,
+      outPoint: state.outPoint,
+      zoomLevel: state.zoomLevel,
+      settings: state.settings,
     };
 
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
@@ -116,31 +124,52 @@ export function TopToolbar() {
     reader.onload = (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
-        if (!data.tracks || !data.mediaLibrary) {
-          alert('Invalid project file format.');
+
+        // FIX H11: Validate structure before overwriting state
+        if (!data || typeof data !== 'object') {
+          alert('Invalid project file: not a valid JSON object.');
+          return;
+        }
+        if (!Array.isArray(data.tracks)) {
+          alert('Invalid project file: missing or invalid "tracks" array.');
+          return;
+        }
+        if (!Array.isArray(data.mediaLibrary)) {
+          alert('Invalid project file: missing or invalid "mediaLibrary" array.');
           return;
         }
 
+        const loadedTracks = data.tracks.map((t: any) => ({
+          ...t,
+          overLayers: t.overLayers || [],
+        }));
+
         useEditorStore.setState({
-          tracks: data.tracks,
+          tracks: loadedTracks,
           mediaLibrary: data.mediaLibrary,
-          currentTime: data.currentTime || 0,
+          currentTime: typeof data.currentTime === 'number' ? data.currentTime : 0,
           aspectRatio: data.aspectRatio || '16:9',
+          // FIX C9 (load): Restore previously-missing state fields
+          volume: typeof data.volume === 'number' ? data.volume : 1,
+          isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : false,
+          inPoint: typeof data.inPoint === 'number' ? data.inPoint : null,
+          outPoint: typeof data.outPoint === 'number' ? data.outPoint : null,
+          zoomLevel: typeof data.zoomLevel === 'number' ? data.zoomLevel : 100,
+          ...(data.settings ? { settings: { ...useEditorStore.getState().settings, ...data.settings } } : {}),
           history: [
             {
-              tracks: JSON.parse(JSON.stringify(data.tracks)),
-              currentTime: data.currentTime || 0,
+              tracks: JSON.parse(JSON.stringify(loadedTracks)),
+              currentTime: typeof data.currentTime === 'number' ? data.currentTime : 0,
             }
           ],
-          historyIndex: 0
+          historyIndex: 0,
         });
 
-        // Trigger recalc
         useEditorStore.getState().recalcTotalDuration();
-        alert('Project loaded successfully! Please re-import local media files to link them.');
+        alert('Project loaded! Please re-import local media files to relink them.');
       } catch (err) {
         console.error('Error parsing project file:', err);
-        alert('Failed to parse project file.');
+        alert('Failed to parse project file. The file may be corrupted.');
       }
     };
     reader.readAsText(file);
@@ -150,7 +179,7 @@ export function TopToolbar() {
 
   const handleZoomToFit = () => {
     const container = document.querySelector('.timeline-track-workspace');
-    const width = container ? container.clientWidth - 150 : 800; // Subtract headers width
+    const width = container ? container.clientWidth - 150 : 800;
     const totalDuration = useEditorStore.getState().totalDuration;
     if (totalDuration > 0) {
       const targetZoom = Math.max(20, Math.min(400, width / totalDuration));
@@ -159,8 +188,36 @@ export function TopToolbar() {
     setShowViewMenu(false);
   };
 
+  // FIX C8: Confirm before destructively resetting the project
+  const handleNewProject = () => {
+    const hasContent = useEditorStore.getState().tracks.some(t => t.clips.length > 0);
+    if (hasContent) {
+      const confirmed = window.confirm(
+        'Start a new project?\n\nAll unsaved changes will be lost. Make sure to save your project file first.'
+      );
+      if (!confirmed) return;
+    }
+    resetProject();
+    setShowFileMenu(false);
+  };
+
+  // FIX H10: Close all menus when clicking outside the toolbar
+  useEffect(() => {
+    if (!showFileMenu && !showEditMenu && !showViewMenu) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      const toolbar = document.getElementById('top-toolbar-root');
+      if (toolbar && !toolbar.contains(e.target as Node)) {
+        setShowFileMenu(false);
+        setShowEditMenu(false);
+        setShowViewMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showFileMenu, showEditMenu, showViewMenu]);
+
   return (
-    <div className="h-12 bg-[#1e1e1e] border-b border-[#3e3e3e] flex items-center px-3 select-none z-50">
+    <div id="top-toolbar-root" className="h-12 bg-[#1e1e1e] border-b border-[#3e3e3e] flex items-center px-3 select-none z-50">
       {/* Left: Logo + Menus */}
       <div className="flex items-center gap-1">
         <div className="flex items-center gap-2 mr-4">
@@ -204,8 +261,8 @@ export function TopToolbar() {
               </button>
               <div className="border-t border-[#3e3e3e] my-1" />
               <button
-                onClick={() => { resetProject(); setShowFileMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                onClick={handleNewProject}
+                className="w-full px-3 py-2 text-xs text-left text-red-400 hover:text-red-300 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> New Project
               </button>

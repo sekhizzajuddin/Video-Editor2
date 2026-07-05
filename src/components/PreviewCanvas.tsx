@@ -1436,32 +1436,40 @@ export function PreviewCanvas() {
         lines.forEach((line: string, lineIdx: number) => {
           const lineY = -totalTextH / 2 + lineIdx * lineHeight + lineHeight / 2;
 
-          if (ts.shadow) {
-            ctx.shadowColor = ts.shadowColor;
-            ctx.shadowBlur  = ts.shadowBlur;
-          }
-
-          // 3D depth layers
+          // 3D depth layers — FIX H3: no shadow on depth layers (shadow goes on the main text below)
           if (ts.threeD) {
+            ctx.shadowBlur = 0;
             ctx.fillStyle = ts.shadowColor;
             for (let d = 1; d <= (ts.threeDDepth || 4); d++) {
               ctx.fillText(line, textX + d, lineY + d);
             }
           }
 
-          ctx.shadowBlur = 0;
-
           // Stroke
           if (ts.strokeWidth > 0) {
+            ctx.shadowBlur = 0;
             ctx.strokeStyle = ts.strokeColor;
             ctx.lineWidth   = ts.strokeWidth;
             ctx.lineJoin    = 'round';
             ctx.strokeText(line, textX, lineY);
           }
 
+          // FIX H3: Apply shadow immediately before the main fill text so it actually renders on the text
+          if (ts.shadow) {
+            ctx.shadowColor = ts.shadowColor;
+            ctx.shadowBlur  = ts.shadowBlur;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+          }
+
           // Fill
           ctx.fillStyle = ts.color;
           ctx.fillText(line, textX, lineY);
+
+          // Clear shadow after drawing main text
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
         });
 
         ctx.shadowBlur = 0;
@@ -2581,7 +2589,15 @@ export function PreviewCanvas() {
           )}
           <div className="flex items-center gap-1.5 bg-black/50 rounded px-2 py-1">
             <Film className="w-3 h-3 text-[#a0a0a0]" />
-            <span className="text-[10px] text-[#a0a0a0]">854 × 480 • 16:9</span>
+            {/* FIX H4: Compute resolution from actual aspectRatio state instead of hardcoding */}
+            <span className="text-[10px] text-[#a0a0a0]">
+              {(() => {
+                if (aspectRatio === '9:16') return '270 × 480 • 9:16';
+                if (aspectRatio === '1:1') return '480 × 480 • 1:1';
+                if (aspectRatio === '4:3') return '640 × 480 • 4:3';
+                return '854 × 480 • 16:9';
+              })()}
+            </span>
           </div>
         </div>
 
@@ -3160,16 +3176,16 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
         const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (scale / 100);
         const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) / (scale / 100);
 
-        if (dragState.type === 'crop-l') {
+        if (dragState.type === 'crop-left') {
           crop.left = Math.max(0, Math.min(100 - crop.right - 1, crop.left + (localDx / baseW) * 100));
           getNewAnimations('crop.left', crop.left);
-        } else if (dragState.type === 'crop-r') {
+        } else if (dragState.type === 'crop-right') {
           crop.right = Math.max(0, Math.min(100 - crop.left - 1, crop.right - (localDx / baseW) * 100));
           getNewAnimations('crop.right', crop.right);
-        } else if (dragState.type === 'crop-t') {
+        } else if (dragState.type === 'crop-top') {
           crop.top = Math.max(0, Math.min(100 - crop.bottom - 1, crop.top + (localDy / baseH) * 100));
           getNewAnimations('crop.top', crop.top);
-        } else if (dragState.type === 'crop-b') {
+        } else if (dragState.type === 'crop-bottom') {
           crop.bottom = Math.max(0, Math.min(100 - crop.top - 1, crop.bottom - (localDy / baseH) * 100));
           getNewAnimations('crop.bottom', crop.bottom);
         }
@@ -3385,6 +3401,26 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       fill="transparent"
                       className="pointer-events-auto cursor-move"
                       onMouseDown={(e) => handleMouseDown(e, 'move')}
+                    />
+                    {/* Rotation handle — circle above the top-center of the clip */}
+                    <line
+                      x1={0}
+                      y1={-baseH / 2}
+                      x2={0}
+                      y2={-baseH / 2 - 24 / viewport.zoom}
+                      stroke="#fbbf24"
+                      strokeWidth={1.5 / viewport.zoom}
+                    />
+                    <circle
+                      cx={0}
+                      cy={-baseH / 2 - 28 / viewport.zoom}
+                      r={6 / viewport.zoom}
+                      fill="#fbbf24"
+                      stroke="#141414"
+                      strokeWidth={1.5 / viewport.zoom}
+                      className="pointer-events-auto cursor-alias"
+                      title="Rotate"
+                      onMouseDown={(e) => handleMouseDown(e, 'rot')}
                     />
                     {/* Resize handles */}
                     {[-1, 1].map((rx) =>

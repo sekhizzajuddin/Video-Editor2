@@ -17,7 +17,10 @@ import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB } from '@/utils/projectPersistence';
 
 
-const generateId = () => Math.random().toString(36).substr(2, 9);
+const generateId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).substr(2, 9);
 
 // Track whether we are inside a transaction (e.g. during drag / resize).
 // When true, saveSnapshot() does not push to history.
@@ -1622,16 +1625,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const anims: any = { ...c.animations };
         Object.keys(anims).forEach(k => {
           if (anims[k]) {
-            const newTrack = [...anims[k]];
-            let changed = false;
-            linesForClip.forEach((line: any) => {
-              const idx = newTrack.findIndex((kf: any) => Math.abs(kf.time - line.time) < 0.05);
-              if (idx >= 0) {
-                newTrack[idx] = { ...newTrack[idx], holdNext: true };
-                changed = true;
-              }
-            });
-            if (changed) anims[k] = newTrack;
+            // FIX C11: Actually REMOVE the keyframes at the selected times instead of setting holdNext
+            anims[k] = anims[k].filter((kf: any) =>
+              !linesForClip.some((line: any) => Math.abs(kf.time - line.time) < 0.05)
+            );
+            if (anims[k].length === 0) delete anims[k];
           }
         });
         return { ...c, animations: anims };
@@ -1952,10 +1950,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Recalculate total duration from all clips and clean up empty custom tracks
   recalcTotalDuration: () => {
     const { tracks } = get();
-    
-    // Filter out custom tracks that are dynamic and empty
+
+    // FIX M29: Do NOT silently remove user-created tracks that happen to be empty.
+    // Only auto-remove tracks that are both dynamic AND have never had any clips/overLayers.
+    // Keep all non-dynamic (user-created) tracks regardless of empty state.
     const cleanedTracks = tracks.filter(
-      (t) => !(t.isDynamic && t.clips.length === 0)
+      (t) => !t.isDynamic || t.clips.length > 0 || (t.overLayers || []).length > 0
     );
 
     let maxEnd = 0;
@@ -2134,10 +2134,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const state = get();
     if (state.selectedOverLayerId) {
       state.removeOverLayer(state.selectedOverLayerId);
+    } else if (state.selectedClipIds.length > 1) {
+      // FIX C12: Check multi-select BEFORE single clip so all selected clips are deleted
+      const ids = [...state.selectedClipIds];
+      ids.forEach((id) => state.removeClip(id));
     } else if (state.selectedClipId) {
       state.removeClip(state.selectedClipId);
-    } else if (state.selectedClipIds.length > 1) {
-      state.selectedClipIds.forEach((id) => state.removeClip(id));
     }
   },
 

@@ -214,6 +214,13 @@ export function MediaPanel() {
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
 
+  // FIX M25: Cancel speechSynthesis when component unmounts to prevent audio leaks
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis.cancel();
+    };
+  }, []);
+
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Project', icon: Folder },
     { id: 'text', label: 'Text', icon: Type },
@@ -247,7 +254,10 @@ export function MediaPanel() {
         if (file.name.toLowerCase().endsWith('.cube')) {
           const text = await file.text();
           const lutData = parseCubeLut(text);
-          const lutId = Math.random().toString(36).substr(2, 9);
+          const lutId = `lut_${Date.now()}_${Math.random().toString(36).substr(2,5)}`;
+          // FIX M6: Pass the file argument so LUT is saved to IndexedDB on project reload
+          const lutBlob = new Blob([text], { type: 'text/plain' });
+          const lutFile = new File([lutBlob], file.name, { type: 'text/plain', lastModified: file.lastModified });
           addMedia({
             id: lutId,
             name: file.name.replace(/\.cube$/i, ''),
@@ -257,7 +267,7 @@ export function MediaPanel() {
             size: file.size,
             createdAt: Date.now(),
             lutData,
-          });
+          }, lutFile);
         } else {
           const mediaItem = await probeFile(file);
           addMedia(mediaItem, file);
@@ -323,8 +333,9 @@ export function MediaPanel() {
       // 1. Create a new text track
       store.addTrack('text');
       
-      // 2. Retrieve the track
-      const textTracks = store.tracks.filter(t => t.type === 'text');
+      // FIX C7: Read fresh state AFTER addTrack to avoid stale closure
+      const freshState = useEditorStore.getState();
+      const textTracks = freshState.tracks.filter(t => t.type === 'text');
       const targetTrack = textTracks[textTracks.length - 1];
       if (!targetTrack) return;
 
@@ -655,16 +666,21 @@ export function MediaPanel() {
         url: audioUrl,
         createdAt: Date.now(),
       };
-      
+
       const audioEl = document.createElement('audio');
       audioEl.src = audioUrl;
-      audioEl.addEventListener('loadedmetadata', async () => {
-        const realDuration = audioEl.duration || 5;
-        const peaks: number[] = [];
-        for (let i = 0; i < 100; i++) {
-          peaks.push(0.1 + Math.random() * 0.7);
-        }
-        
+
+      // FIX M1+M2: Guard against loadedmetadata never firing with a timeout,
+      // and revoke the intermediate object URL once the file is saved to DB.
+      let settled = false;
+      const settle = async () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(metaTimeout);
+
+        const realDuration = (!isNaN(audioEl.duration) && audioEl.duration > 0) ? audioEl.duration : 5;
+        const peaks: number[] = Array.from({ length: 100 }, () => 0.1 + Math.random() * 0.7);
+
         const finalMediaItem = {
           ...mediaItem,
           duration: realDuration,
@@ -677,11 +693,20 @@ export function MediaPanel() {
           console.error('Failed to save TTS to DB:', err);
           useEditorStore.getState().addMedia(finalMediaItem);
         }
-        
+
+        // Revoke the intermediate URL now that the file is saved
+        URL.revokeObjectURL(audioUrl);
+        audioEl.src = '';
+        audioEl.remove();
+
         setIsGeneratingTTS(false);
         setTtsText('');
         setActiveMediaTab('project');
-      });
+      };
+
+      const metaTimeout = window.setTimeout(settle, 5000); // 5-second fallback
+      audioEl.addEventListener('loadedmetadata', settle, { once: true });
+      audioEl.addEventListener('error', settle, { once: true });
     } catch (err: any) {
       console.error('TTS Generation error:', err);
       alert(`Failed to generate TTS audio: ${err.message || 'Unknown error'}`);
