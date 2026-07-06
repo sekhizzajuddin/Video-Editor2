@@ -20,7 +20,7 @@ import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, cle
 const generateId = () =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
-    : Math.random().toString(36).substr(2, 9);
+    : Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 
 // Track whether we are inside a transaction (e.g. during drag / resize).
 // When true, saveSnapshot() does not push to history.
@@ -1042,7 +1042,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const newClips = [...track.clips];
 
       const baseStart = targetClip.startTime;
-      const baseSourceStart = targetClip.sourceStartTime;
+      const baseTrimStart = targetClip.trimStart || 0;
+      const baseTrimEnd = targetClip.trimEnd || 0;
+      const clipSpeed = targetClip.speed || 1;
 
       let currentTimeOffset = 0;
       let timeSaved = 0;
@@ -1055,7 +1057,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             ...targetClip,
             id: targetClip.id + '-cut-' + seg.start.toFixed(1),
             startTime: baseStart + currentTimeOffset,
-            sourceStartTime: baseSourceStart + seg.start,
+            trimStart: baseTrimStart + seg.start * clipSpeed,
+            trimEnd: baseTrimEnd + (targetClip.duration - seg.end) * clipSpeed,
             duration: dur,
           });
           currentTimeOffset += dur;
@@ -1215,6 +1218,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             ? clip.trimEnd + (originalMediaDuration - (splitMediaTime - clip.trimStart))
             : clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
           effects: [...clip.effects],
+          transitionOut: undefined, // Clear transition on the first half of the split
           speedRamp: leftSpeedRamp,
         };
 

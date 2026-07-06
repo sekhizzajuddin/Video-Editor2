@@ -49,11 +49,11 @@ export async function generateAutoCaptions(
       duration: duration,
       trimStart: 0,
       trimEnd: duration,
-      opacity: 100,
+      opacity: 1,
       transform: {
         x: 0,
-        y: 400, // lower third
-        scale: 1,
+        y: 150, // lower third centered (400 is way below coordinate center which is -H/2 to H/2)
+        scale: 100,
         rotation: 0
       },
       speed: 1,

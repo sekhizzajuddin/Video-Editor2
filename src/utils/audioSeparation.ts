@@ -193,7 +193,9 @@ class VocalSeparationProcessor extends AudioWorkletProcessor {
     return [
       { name: 'mode', defaultValue: 0, minValue: 0, maxValue: 2 }, // 0=removeVocals, 1=removeBgm, 2=separateBoth
       { name: 'strength', defaultValue: 0.8, minValue: 0, maxValue: 1 },
-      { name: (paramName) => paramName === 'lowBand' || paramName === 'midBand' || paramName === 'highBand', defaultValue: 1.0, minValue: 0, maxValue: 1 }
+      { name: 'lowBand', defaultValue: 1.0, minValue: 0, maxValue: 1 },
+      { name: 'midBand', defaultValue: 1.0, minValue: 0, maxValue: 1 },
+      { name: 'highBand', defaultValue: 1.0, minValue: 0, maxValue: 1 }
     ];
   }
 

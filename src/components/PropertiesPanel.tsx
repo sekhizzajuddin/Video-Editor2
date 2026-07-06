@@ -243,9 +243,9 @@ export function PropertiesPanel() {
   const envGroqKey = (import.meta as any).env?.VITE_GROQ_API_KEY || '';
   const envFreesoundKey = (import.meta as any).env?.VITE_FREESOUND_API_KEY || '';
 
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('procut_gemini_key') || '');
-  const [groqApiKey, setGroqApiKey] = useState(() => localStorage.getItem('procut_groq_key') || '');
-  const [freesoundApiKey, setFreesoundApiKey] = useState(() => localStorage.getItem('procut_freesound_key') || '');
+  const [geminiApiKey, setGeminiApiKey] = useState(() => sessionStorage.getItem('procut_gemini_key') || '');
+  const [groqApiKey, setGroqApiKey] = useState(() => sessionStorage.getItem('procut_groq_key') || '');
+  const [freesoundApiKey, setFreesoundApiKey] = useState(() => sessionStorage.getItem('procut_freesound_key') || '');
 
   const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
   const [audioAnalyzeProgress, setAudioAnalyzeProgress] = useState('');
@@ -254,8 +254,8 @@ export function PropertiesPanel() {
 
   const handleAiSoundDesign = async () => {
     if (!selectedClip) return;
-    const gKey = geminiApiKey || localStorage.getItem('procut_gemini_key') || envGeminiKey;
-    const grKey = groqApiKey || localStorage.getItem('procut_groq_key') || envGroqKey;
+    const gKey = geminiApiKey || sessionStorage.getItem('procut_gemini_key') || envGeminiKey;
+    const grKey = groqApiKey || sessionStorage.getItem('procut_groq_key') || envGroqKey;
     if (!gKey || !grKey) {
       alert('Please enter both your Gemini API Key and Groq API Key first (or configure them as VITE_GEMINI_API_KEY and VITE_GROQ_API_KEY in your environment).');
       return;
@@ -283,19 +283,24 @@ export function PropertiesPanel() {
 
       // 2. Analyze each chunk with Gemini 2.0 Flash Vision
       setAudioAnalyzeProgress('Gemini vision analyzing all chunks in parallel...');
-      const freesoundToken = freesoundApiKey || localStorage.getItem('procut_freesound_key') || envFreesoundKey || undefined;
+      const freesoundToken = freesoundApiKey || sessionStorage.getItem('procut_freesound_key') || envFreesoundKey || undefined;
 
       const chunkPromises = chunks.map(async (chunk, i) => {
-        const segmentCues = await analyzeStoryboardWithGemini(
-          chunk.base64Image,
-          chunk.duration,
-          gKey
-        );
-        return segmentCues.map((cue: any) => ({
-          ...cue,
-          start: cue.start + (i * 10),
-          end: cue.end + (i * 10)
-        }));
+        try {
+          const segmentCues = await analyzeStoryboardWithGemini(
+            chunk.base64Image,
+            chunk.duration,
+            gKey
+          );
+          return segmentCues.map((cue: any) => ({
+            ...cue,
+            start: cue.start + (i * 10),
+            end: cue.end + (i * 10)
+          }));
+        } catch (err) {
+          console.warn('[AI Storyboard] Chunk failed to process, skipping:', err);
+          return [];
+        }
       });
 
       const cuesArrays = await Promise.all(chunkPromises);
@@ -369,8 +374,11 @@ export function PropertiesPanel() {
     const cleanName = (mediaItem?.name || 'audio').replace(/[^a-zA-Z0-9_-]/g, '_');
 
     // Temporarily monkeypatch fetch to fix Gradio credentials CORS issue on third-party domains (e.g. HF Space)
-    const originalFetch = window.fetch;
-    window.fetch = function (input: any, init: any) {
+    
+    const win = window as any;
+    if (!win._procutFetchMonkeyPatched) {
+      win._procutOriginalFetch = window.fetch;
+      window.fetch = function (input: any, init: any) {
       let requestInput = input;
       let requestInit = init;
 
@@ -384,8 +392,12 @@ export function PropertiesPanel() {
           requestInit = { ...init, credentials: 'same-origin' };
         }
       }
-      return originalFetch(requestInput, requestInit);
-    };
+      return win._procutOriginalFetch(requestInput, requestInit);
+      };
+      win._procutFetchMonkeyPatched = true;
+      win._procutFetchCount = 0;
+    }
+    win._procutFetchCount++;
 
     try {
       setIsSeparating(true);
@@ -572,9 +584,15 @@ export function PropertiesPanel() {
       console.error('[AI Separation] Error:', err);
       alert(`AI Separation failed: ${err.message}`);
     } finally {
-      window.fetch = originalFetch;
-      setIsSeparating(false);
-    }
+        const win = window as any;
+        win._procutFetchCount--;
+        if (win._procutFetchCount <= 0) {
+          window.fetch = win._procutOriginalFetch;
+          win._procutFetchMonkeyPatched = false;
+          win._procutFetchCount = 0;
+        }
+        setIsSeparating(false);
+      }
   };
 
   // Find the selected transition
@@ -1113,6 +1131,9 @@ export function PropertiesPanel() {
           [key]: val,
         },
       });
+      if (['muted', 'preservePitch', 'humanize', 'vocalSeparation'].includes(key)) {
+        useEditorStore.getState().saveSnapshot();
+      }
     }
   };
 
@@ -1206,6 +1227,7 @@ export function PropertiesPanel() {
 
     // Use an async IIFE so we can await real audio decoding
     (async () => {
+      let audioCtx: AudioContext | null = null;
       try {
         // Find all selected clips
         const selectedClips = tracks
@@ -1213,7 +1235,7 @@ export function PropertiesPanel() {
           .filter((c) => selectedClipIds.includes(c.id));
 
         // Analyze each clip's actual audio data
-        const audioCtx = new AudioContext();
+        audioCtx = new AudioContext();
         const clipAnalyses: {
           clip: typeof selectedClips[0];
           rmsDb: number;        // RMS loudness in dB
@@ -1249,15 +1271,15 @@ export function PropertiesPanel() {
               Math.floor((clip.trimStart + mediaDuration) * sampleRate),
               rawData.length
             );
-            const window = rawData.slice(startSample, endSample);
+            const audioWindow = rawData.slice(startSample, endSample);
 
-            if (window.length > 0) {
+            if (audioWindow.length > 0) {
               // 1. RMS Loudness (dB)
               let sumSquares = 0;
-              for (let i = 0; i < window.length; i++) {
-                sumSquares += window[i] * window[i];
+              for (let i = 0; i < audioWindow.length; i++) {
+                sumSquares += audioWindow[i] * audioWindow[i];
               }
-              const rms = Math.sqrt(sumSquares / window.length);
+              const rms = Math.sqrt(sumSquares / audioWindow.length);
               rmsDb = rms > 0 ? 20 * Math.log10(rms) : -60;
 
               // 2. Spectral Centroid (bass/treble balance)
@@ -1265,14 +1287,14 @@ export function PropertiesPanel() {
               const blockSize = 2048;
               let lowEnergy = 0;
               let highEnergy = 0;
-              const numBlocks = Math.floor(window.length / blockSize);
+              const numBlocks = Math.floor(audioWindow.length / blockSize);
               for (let b = 0; b < Math.min(numBlocks, 50); b++) {
                 const offset = b * blockSize;
                 // Low band: compute autocorrelation-like energy for slow oscillations
                 let lo = 0, hi = 0;
                 for (let i = 0; i < blockSize - 1; i++) {
-                  const sample = window[offset + i];
-                  const nextSample = window[offset + i + 1];
+                  const sample = audioWindow[offset + i];
+                  const nextSample = audioWindow[offset + i + 1];
                   // Low freq: samples that change slowly (similar neighbors)
                   lo += Math.abs(sample) * (1 - Math.abs(sample - nextSample));
                   // High freq: samples that change rapidly (different neighbors)
@@ -1286,13 +1308,13 @@ export function PropertiesPanel() {
 
               // 3. Zero-Crossing Rate (pitch/brightness indicator)
               let crossings = 0;
-              for (let i = 1; i < window.length; i++) {
-                if ((window[i] >= 0 && window[i - 1] < 0) ||
-                    (window[i] < 0 && window[i - 1] >= 0)) {
+              for (let i = 1; i < audioWindow.length; i++) {
+                if ((audioWindow[i] >= 0 && audioWindow[i - 1] < 0) ||
+                    (audioWindow[i] < 0 && audioWindow[i - 1] >= 0)) {
                   crossings++;
                 }
               }
-              zeroCrossRate = crossings / window.length;
+              zeroCrossRate = crossings / audioWindow.length;
             }
           } catch {
             // If decoding fails, use clip-specific deterministic estimates
@@ -1311,10 +1333,7 @@ export function PropertiesPanel() {
           });
         }
 
-        await audioCtx.close();
-
         if (clipAnalyses.length < 2) {
-          setIsAnalyzingVoice(false);
           return;
         }
 
@@ -1352,7 +1371,6 @@ export function PropertiesPanel() {
         }
 
         useEditorStore.getState().saveSnapshot();
-        setIsAnalyzingVoice(false);
         setShowTunedToast(true);
 
         setTimeout(() => {
@@ -1360,6 +1378,10 @@ export function PropertiesPanel() {
         }, 3000);
       } catch (err) {
         console.error('Auto Voice Tune error:', err);
+      } finally {
+        if (audioCtx && audioCtx.state !== 'closed') {
+          audioCtx.close().catch(console.error);
+        }
         setIsAnalyzingVoice(false);
       }
     })();
@@ -3428,7 +3450,7 @@ export function PropertiesPanel() {
                       value={geminiApiKey}
                       onChange={(e) => {
                         setGeminiApiKey(e.target.value);
-                        localStorage.setItem('procut_gemini_key', e.target.value);
+                        sessionStorage.setItem('procut_gemini_key', e.target.value);
                       }}
                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                     />
@@ -3441,7 +3463,7 @@ export function PropertiesPanel() {
                       value={groqApiKey}
                       onChange={(e) => {
                         setGroqApiKey(e.target.value);
-                        localStorage.setItem('procut_groq_key', e.target.value);
+                        sessionStorage.setItem('procut_groq_key', e.target.value);
                       }}
                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                     />
@@ -3454,7 +3476,7 @@ export function PropertiesPanel() {
                       value={freesoundApiKey}
                       onChange={(e) => {
                         setFreesoundApiKey(e.target.value);
-                        localStorage.setItem('procut_freesound_key', e.target.value);
+                        sessionStorage.setItem('procut_freesound_key', e.target.value);
                       }}
                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                     />
@@ -4104,6 +4126,7 @@ export function PropertiesPanel() {
                 <textarea
                   value={selectedClip.textSettings.text}
                   onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, text: e.target.value } })}
+                  onBlur={() => useEditorStore.getState().saveSnapshot()}
                   className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
                 />
               </div>
@@ -4112,7 +4135,10 @@ export function PropertiesPanel() {
                 <label className="text-xs text-[#a0a0a0]">Font Family</label>
                 <select
                   value={selectedClip.textSettings.fontFamily || 'Inter'}
-                  onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontFamily: e.target.value } })}
+                  onChange={(e) => {
+                    updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontFamily: e.target.value } });
+                    useEditorStore.getState().saveSnapshot();
+                  }}
                   className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer"
                 >
                   <option value="Inter">Inter</option>
@@ -4140,6 +4166,8 @@ export function PropertiesPanel() {
                     max="150"
                     value={selectedClip.textSettings.fontSize}
                     onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontSize: Number(e.target.value) } })}
+                    onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                    onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
                     className="flex-1 accent-amber-500"
                   />
                   <span className="text-xs text-white w-8 text-right">{selectedClip.textSettings.fontSize}</span>
@@ -4154,6 +4182,7 @@ export function PropertiesPanel() {
                       type="color"
                       value={selectedClip.textSettings.color || '#ffffff'}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, color: e.target.value } })}
+                      onBlur={() => useEditorStore.getState().saveSnapshot()}
                       className="w-6 h-6 rounded bg-transparent cursor-pointer"
                     />
                     <span className="text-xs text-white uppercase">{selectedClip.textSettings.color}</span>
@@ -4167,10 +4196,14 @@ export function PropertiesPanel() {
                       type="color"
                       value={selectedClip.textSettings.backgroundColor === 'transparent' ? '#000000' : selectedClip.textSettings.backgroundColor}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: e.target.value } })}
+                      onBlur={() => useEditorStore.getState().saveSnapshot()}
                       className="w-6 h-6 rounded bg-transparent cursor-pointer"
                     />
                     <button 
-                      onClick={() => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: 'transparent' } })}
+                      onClick={() => {
+                        updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: 'transparent' } });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
                       className="text-[10px] bg-[#3e3e3e] hover:bg-[#5e5e5e] px-2 py-1 rounded text-white transition-colors"
                     >
                       Clear
@@ -4187,6 +4220,7 @@ export function PropertiesPanel() {
                       type="color"
                       value={selectedClip.textSettings.strokeColor || '#000000'}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, strokeColor: e.target.value } })}
+                      onBlur={() => useEditorStore.getState().saveSnapshot()}
                       className="w-6 h-6 rounded bg-transparent cursor-pointer"
                     />
                     <span className="text-xs text-white uppercase">{selectedClip.textSettings.strokeColor || '#000000'}</span>
@@ -4202,6 +4236,8 @@ export function PropertiesPanel() {
                       max="20"
                       value={selectedClip.textSettings.strokeWidth || 0}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, strokeWidth: Number(e.target.value) } })}
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
                       className="flex-1 accent-amber-500"
                     />
                     <span className="text-xs text-white w-5 text-right">{selectedClip.textSettings.strokeWidth || 0}</span>
@@ -4214,7 +4250,10 @@ export function PropertiesPanel() {
                   <input
                     type="checkbox"
                     checked={selectedClip.textSettings.bold}
-                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, bold: e.target.checked } })}
+                    onChange={(e) => {
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, bold: e.target.checked } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
                   <span className="text-xs text-white font-bold">Bold</span>
@@ -4223,7 +4262,10 @@ export function PropertiesPanel() {
                   <input
                     type="checkbox"
                     checked={selectedClip.textSettings.italic}
-                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, italic: e.target.checked } })}
+                    onChange={(e) => {
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, italic: e.target.checked } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
                   <span className="text-xs text-white italic">Italic</span>
@@ -4236,7 +4278,10 @@ export function PropertiesPanel() {
                   {(['left','center','right'] as const).map((align) => (
                     <button
                       key={align}
-                      onClick={() => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, textAlign: align } })}
+                      onClick={() => {
+                        updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, textAlign: align } });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
                       className={`flex-1 py-1.5 text-xs rounded border transition-colors capitalize ${
                         (selectedClip.textSettings as any).textAlign === align || (!((selectedClip.textSettings as any).textAlign) && align === 'center')
                           ? 'bg-amber-500/20 border-amber-500 text-amber-400'
@@ -4254,7 +4299,10 @@ export function PropertiesPanel() {
                   <input
                     type="checkbox"
                     checked={selectedClip.textSettings.shadow}
-                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadow: e.target.checked } })}
+                    onChange={(e) => {
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadow: e.target.checked } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
                   <span className="text-xs text-white">Drop Shadow</span>
@@ -4266,6 +4314,7 @@ export function PropertiesPanel() {
                         type="color"
                         value={selectedClip.textSettings.shadowColor || '#000000'}
                         onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadowColor: e.target.value } })}
+                        onBlur={() => useEditorStore.getState().saveSnapshot()}
                         className="w-5 h-5 rounded bg-transparent cursor-pointer"
                       />
                       <input
@@ -4274,6 +4323,8 @@ export function PropertiesPanel() {
                         max="30"
                         value={selectedClip.textSettings.shadowBlur}
                         onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadowBlur: Number(e.target.value) } })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
                         className="flex-1 accent-amber-500"
                       />
                     </div>
@@ -4286,7 +4337,10 @@ export function PropertiesPanel() {
                   <input
                     type="checkbox"
                     checked={selectedClip.textSettings.threeD}
-                    onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeD: e.target.checked } })}
+                    onChange={(e) => {
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeD: e.target.checked } });
+                      useEditorStore.getState().saveSnapshot();
+                    }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
                   <span className="text-xs text-white">3D Effect</span>
@@ -4301,6 +4355,8 @@ export function PropertiesPanel() {
                         max="20"
                         value={selectedClip.textSettings.threeDDepth}
                         onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeDDepth: Number(e.target.value) } })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
                         className="flex-1 accent-amber-500"
                       />
                       <span className="text-[10px] text-white w-6">{selectedClip.textSettings.threeDDepth}px</span>

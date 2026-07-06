@@ -115,15 +115,42 @@ export async function trackMotion(
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Could not create 2D canvas context');
 
-  // Video seeking helper (returns promise that resolves on seeked)
   const seekVideo = (time: number): Promise<void> => {
     return new Promise((resolve) => {
+      let resolved = false;
+      const timeoutId = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          videoEl.removeEventListener('seeked', onSeeked);
+          try {
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          } catch (e) {}
+          resolve();
+        }
+      }, 500);
+
       const onSeeked = () => {
-        videoEl.removeEventListener('seeked', onSeeked);
-        // Draw frame to offscreen canvas
-        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-        resolve();
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeoutId);
+          videoEl.removeEventListener('seeked', onSeeked);
+          try {
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          } catch (e) {}
+          resolve();
+        }
       };
+
+      if (Math.abs(videoEl.currentTime - time) < 0.001) {
+        resolved = true;
+        clearTimeout(timeoutId);
+        try {
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        } catch (e) {}
+        resolve();
+        return;
+      }
+
       videoEl.addEventListener('seeked', onSeeked);
       videoEl.currentTime = time;
     });

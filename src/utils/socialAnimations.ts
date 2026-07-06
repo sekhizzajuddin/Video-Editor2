@@ -82,19 +82,21 @@ export function drawSubscribeAnimation(
   }
 
   // --- Draw Cursor ---
-  let cursorX = dw / 2;
-  let cursorY = dh / 2;
+  const localOffscreenX = 180;
+  const localOffscreenY = 120;
+  let cursorX = localOffscreenX;
+  let cursorY = localOffscreenY;
   
   if (localTime < 0.5) {
     // offscreen
-    cursorX = dw / 2;
-    cursorY = dh / 2;
+    cursorX = localOffscreenX;
+    cursorY = localOffscreenY;
   } else if (localTime >= 0.5 && localTime < 2.0) {
     // fly to button
     const t = (localTime - 0.5) / 1.5;
     const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // ease in out
-    cursorX = (dw / 2) + ease * (0 - dw / 2);
-    cursorY = (dh / 2) + ease * (0 - dh / 2);
+    cursorX = localOffscreenX + ease * (0 - localOffscreenX);
+    cursorY = localOffscreenY + ease * (0 - localOffscreenY);
   } else if (localTime >= 2.0 && localTime < 2.1) {
     // click button
     cursorX = 0;
@@ -113,8 +115,8 @@ export function drawSubscribeAnimation(
     // fly away
     const t = Math.min(1, (localTime - 3.5) / 1.0);
     const ease = t * t;
-    cursorX = (btnW / 2 + 40) + ease * (dw / 2);
-    cursorY = 0 + ease * (dh / 2);
+    cursorX = (btnW / 2 + 40) + ease * localOffscreenX;
+    cursorY = 0 + ease * localOffscreenY;
   }
 
   // Draw simple mac-like cursor

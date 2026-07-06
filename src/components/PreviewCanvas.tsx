@@ -278,9 +278,6 @@ interface ParticlePool {
   lastEmit: number;        // timestamp of last emission
 }
 
-// Module-level particle pools keyed by clipId
-const particlePools = new Map<string, ParticlePool>();
-
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.replace('#', ''), 16);
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
@@ -491,7 +488,7 @@ function renderParticles(
   W: number,
   H: number,
   deltaMs: number,
-): void {
+  particlePools: Map<string, ParticlePool>): void {
   let pool = particlePools.get(clipId);
   if (!pool) {
     pool = { particles: [], lastEmit: 0 };
@@ -569,6 +566,7 @@ function renderParticles(
 // Component
 // ---------------------------------------------------------------------------
 export function PreviewCanvas() {
+  const particlePoolsRef = useRef<Map<string, ParticlePool>>(new Map());
   const {
     currentTime,
     isPlaying,
@@ -657,11 +655,11 @@ export function PreviewCanvas() {
   // Clean up unused particle pools to prevent memory leaks
   useEffect(() => {
     const allClipIds = new Set(allClips.map((c) => c.id));
-    for (const clipId of particlePools.keys()) {
-      if (!allClipIds.has(clipId)) {
-        particlePools.delete(clipId);
+    for (const clipId of particlePoolsRef.current.keys()) {
+        if (!allClipIds.has(clipId)) {
+          particlePoolsRef.current.delete(clipId);
+        }
       }
-    }
   }, [allClips]);
   
   // Hand tool panning state
@@ -716,8 +714,22 @@ export function PreviewCanvas() {
   // Keep a mutable ref of currentTime so the playback loop effect doesn't tear down/setup on every frame
   const currentTimeRef = useRef(currentTime);
   useEffect(() => {
-    currentTimeRef.current = currentTime;
-  }, [currentTime]);
+      // Synchronously catch external seeks to prevent race conditions
+      return useEditorStore.subscribe(
+        (state) => {
+          if (!state.isPlaying) {
+            currentTimeRef.current = state.currentTime;
+          }
+        }
+      );
+    }, []);
+    
+    // Fallback sync just in case
+    useEffect(() => {
+      if (!useEditorStore.getState().isPlaying) {
+         currentTimeRef.current = currentTime;
+      }
+    }, [currentTime]);
 
   // -------------------------------------------------------------------
   // Playback loop – advance currentTime via rAF when playing
@@ -1176,6 +1188,8 @@ export function PreviewCanvas() {
       // ---------------------------------------------------------------
       let dw = W;
       let dh = H;
+      let dx = -W / 2;
+      let dy = -H / 2;
       let hasRealMedia = false;
 
       // Ensure crops are sanitized and don't sum up to >= 100% (which would yield 0 or negative width/height)
@@ -1259,7 +1273,7 @@ export function PreviewCanvas() {
               oCtx.filter = `brightness(${120 + exposure}%) contrast(150%) saturate(200%)`;
               oCtx.drawImage(videoEl, sx, sy, sw, sh, dx, dy, drawW, drawH);
               oCtx.filter = 'none';
-              applyColorOverlays(oCtx, dw, dh, { ...filters, contrast: 150, saturation: 200 });
+              applyColorOverlays(oCtx, dx, dy, drawW, drawH, { ...filters, contrast: 150, saturation: 200 });
             }
           }
 
@@ -1667,8 +1681,8 @@ export function PreviewCanvas() {
 
           dw = Math.max(1, baseDw * (1 - cLeft - cRight));
           dh = Math.max(1, baseDh * (1 - cTop - cBot));
-          const dx = -baseDw / 2 + baseDw * cLeft;
-          const dy = -baseDh / 2 + baseDh * cTop;
+          dx = -baseDw / 2 + baseDw * cLeft;
+          dy = -baseDh / 2 + baseDh * cTop;
 
           applyClipMask(ctx, clip.mask, dx, dy, dw, dh);
 
@@ -1779,8 +1793,8 @@ export function PreviewCanvas() {
 
           dw = Math.max(1, baseDw * (1 - cLeft - cRight));
           dh = Math.max(1, baseDh * (1 - cTop - cBot));
-          const dx = -baseDw / 2 + baseDw * cLeft;
-          const dy = -baseDh / 2 + baseDh * cTop;
+          dx = -baseDw / 2 + baseDw * cLeft;
+          dy = -baseDh / 2 + baseDh * cTop;
 
           // ── Ken Burns zoom + pan ──────────────────────────────
           const kb = clip.kenBurns;
@@ -2076,7 +2090,7 @@ export function PreviewCanvas() {
 
       // Apply temperature, tint, faded film, and vignette overlays on top of the drawn media
       if (hasRealMedia && mediaItem.type !== 'text') {
-        applyColorOverlays(ctx, dw, dh, filters);
+        applyColorOverlays(ctx, dx, dy, dw, dh, filters);
       }
 
       ctx.restore();
@@ -2298,12 +2312,12 @@ export function PreviewCanvas() {
     for (const track of visualTracks) {
       for (const clip of track.clips) {
         if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
-          renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs);
+          renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
         }
       }
       for (const ol of track.overLayers || []) {
         if (!ol.disabled && ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
-          renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs);
+          renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs, particlePoolsRef.current);
         }
       }
     }
@@ -2390,12 +2404,12 @@ export function PreviewCanvas() {
     for (const track of visualTracks) {
       for (const clip of track.clips) {
         if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
-          renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs);
+          renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
         }
       }
       for (const ol of track.overLayers || []) {
         if (!ol.disabled && ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
-          renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs);
+          renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs, particlePoolsRef.current);
         }
       }
     }
@@ -2798,22 +2812,30 @@ export function PreviewCanvas() {
   useEffect(() => {
     if (!showSpeedMenu) return;
     const close = () => setShowSpeedMenu(false);
-    const timer = setTimeout(() => window.addEventListener('click', close), 0);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('click', close);
-    };
+    let mounted = true;
+      const timer = setTimeout(() => {
+        if (mounted) window.addEventListener('click', close);
+      }, 0);
+      return () => {
+        mounted = false;
+        clearTimeout(timer);
+        window.removeEventListener('click', close);
+      };
   }, [showSpeedMenu]);
 
   // Close canvas settings panel when clicking elsewhere
   useEffect(() => {
     if (!showSettingsPanel) return;
     const close = () => setShowSettingsPanel(false);
-    const timer = setTimeout(() => window.addEventListener('click', close), 0);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('click', close);
-    };
+    let mounted = true;
+      const timer = setTimeout(() => {
+        if (mounted) window.addEventListener('click', close);
+      }, 0);
+      return () => {
+        mounted = false;
+        clearTimeout(timer);
+        window.removeEventListener('click', close);
+      };
   }, [showSettingsPanel]);
 
   const handleTimelineSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2848,7 +2870,7 @@ export function PreviewCanvas() {
             const x = ((e.clientX - rect.left) / rect.width) * 100;
             const y = ((e.clientY - rect.top) / rect.height) * 100;
             // Clear old pool so particles restart from new position
-            particlePools.delete(selClip.id);
+            particlePoolsRef.current.delete(selClip.id);
             updateClip(selClip.id, { particleSettings: { ...selClip.particleSettings, emitterX: Math.round(x), emitterY: Math.round(y) } });
           }
         }}
@@ -2946,282 +2968,92 @@ export function PreviewCanvas() {
             )}
           </div>
         </div>
-
-        {/* Overlay: viewport zoom badge + resolution (bottom-right) */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-2" onPointerDown={(e) => e.stopPropagation()}>
-          {viewport.zoom !== 1 && (
-            <button
-              onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })}
-              className="text-[9px] text-amber-300 bg-amber-500/20 border border-amber-500/30 rounded px-1.5 py-0.5 hover:bg-amber-500/30 transition-colors"
-            >
-              {Math.round(viewport.zoom * 100)}% — Reset
-            </button>
-          )}
-          <div className="flex items-center gap-1.5 bg-black/50 rounded px-2 py-1">
-            <Film className="w-3 h-3 text-[#a0a0a0]" />
-            {/* FIX H4: Compute resolution from actual aspectRatio state instead of hardcoding */}
-            <span className="text-[10px] text-[#a0a0a0]">
-              {(() => {
-                if (aspectRatio === '9:16') return '270 × 480 • 9:16';
-                if (aspectRatio === '1:1') return '480 × 480 • 1:1';
-                if (aspectRatio === '4:3') return '640 × 480 • 4:3';
-                return '854 × 480 • 16:9';
-              })()}
-            </span>
-          </div>
-        </div>
-
-        {/* Particle emitter position indicator */}
-        {(() => {
-          const sc = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
-          if (!sc?.particleSettings) return null;
-          const ps = sc.particleSettings;
-          return (
-            <div
-              className="absolute pointer-events-none z-10"
-              style={{ left: `${ps.emitterX}%`, top: `${ps.emitterY}%`, transform: 'translate(-50%,-50%)' }}
-            >
-              <div className="w-5 h-5 rounded-full border-2 border-violet-400 bg-violet-400/20 animate-pulse" />
-              <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] text-violet-300 bg-black/80 px-1.5 py-0.5 rounded pointer-events-none">
-                ✦ Ctrl+Click to move
-              </div>
-            </div>
-          );
-        })()}
       </div>
-
-      {/* Playback Controls */}
-      <div className="h-14 bg-[#252525] border-t border-[#3e3e3e] flex items-center px-4 gap-3">
-        {/* Play / Pause */}
-        <button
-          onClick={hasClips ? togglePlayback : undefined}
-          disabled={!hasClips}
-          className={`p-2 text-white rounded-full transition-colors ${
-            hasClips ? 'hover:bg-[#3e3e3e]' : 'opacity-40 cursor-not-allowed'
-          }`}
-          title={!hasClips ? 'No media on timeline' : isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-        >
-          {isPlaying ? (
-            <Pause className="w-5 h-5" fill="white" />
-          ) : (
-            <Play className="w-5 h-5 ml-0.5" fill="white" />
-          )}
-        </button>
-
-        {/* Skip controls */}
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={handleRestart}
-            className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
-            title="Restart"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleSkipBackward}
-            className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
-            title="Skip Back 10s"
-          >
-            <SkipBack className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleSkipForward}
-            className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
-            title="Skip Forward 10s"
-          >
-            <SkipForward className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Timecode */}
-        <div className="flex items-center gap-1 text-xs font-mono">
-          <span className="text-amber-400">{formatTime(currentTime)}</span>
-          <span className="text-[#a0a0a0]">/</span>
-          <span className="text-[#a0a0a0]">{formatTime(totalDuration)}</span>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="flex-1 flex items-center">
-          <input
-            type="range"
-            min={0}
-            max={totalDuration}
-            step={0.01}
-            value={currentTime}
-            onChange={handleTimelineSeek}
-            className="w-full h-1.5 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
-          />
-        </div>
-
-        {/* Speed Control */}
-        <div className="relative">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowSpeedMenu(!showSpeedMenu);
-            }}
-            className="px-2 py-1 text-[11px] text-[#a0a0a0] hover:text-white bg-[#1e1e1e] rounded border border-[#3e3e3e] transition-colors"
-          >
-            {playbackSpeed}x
-          </button>
-          {showSpeedMenu && (
-            <div className="absolute bottom-full right-0 mb-1 w-20 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
-              {speedOptions.map((s) => (
-                <button
-                  key={s}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPlaybackSpeed(s);
-                    setShowSpeedMenu(false);
-                  }}
-                  className={`w-full px-3 py-1 text-xs text-left transition-colors ${
-                    playbackSpeed === s
-                      ? 'text-amber-400 bg-[#3e3e3e]'
-                      : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
-                  }`}
-                >
-                  {s}x
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Volume */}
-        <button
-          onClick={toggleMute}
-          className="p-1.5 text-[#a0a0a0] hover:text-white transition-colors"
-          title={isMuted ? 'Unmute' : 'Mute'}
-        >
-          {isMuted ? (
-            <VolumeX className="w-4 h-4" />
-          ) : (
-            <Volume2 className="w-4 h-4" />
-          )}
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={isMuted ? 0 : volume}
-          onChange={(e) => setVolume(Number(e.target.value))}
-          className="w-20 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-        />
-        
-        {/* Scopes Toggle */}
-        <button
-          className={`p-1.5 ml-2 transition-colors rounded ${
-            showScopes ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
-          }`}
-          onClick={(e) => { e.stopPropagation(); setShowScopes(!showScopes); }}
-          title="Color Scopes"
-        >
-          <Grid className="w-4 h-4" />
-        </button>
-      </div>
-
-      <ColorScopes canvasRef={canvasRef} />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Helper: draw a styled placeholder when the real media isn't ready yet
+// Helper: apply color overlays (temperature, tint, faded film, vignette)
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Helper: draw media placeholder
 // ---------------------------------------------------------------------------
 function drawMediaPlaceholder(
   ctx: CanvasRenderingContext2D,
-  W: number,
-  H: number,
+  w: number,
+  h: number,
   name: string,
-  typeLabel: string,
-  accentColor: string,
+  type: string,
+  color: string
 ) {
-  const pw = W * 0.6;
-  const ph = H * 0.5;
-  const px = -pw / 2;
-  const py = -ph / 2;
+  ctx.save();
+  ctx.fillStyle = '#222';
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(-w / 2, -h / 2, w, h);
 
-  // Background
-  ctx.fillStyle = accentColor + '18'; // very faint tint
-  ctx.beginPath();
-  ctx.roundRect(px, py, pw, ph, 8);
-  ctx.fill();
-
-  // Border
-  ctx.strokeStyle = accentColor + '60';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(px, py, pw, ph, 8);
-  ctx.stroke();
-
-  // Type label
-  ctx.fillStyle = accentColor;
-  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.fillStyle = color;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(typeLabel, 0, -8);
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText(type, 0, -15);
 
-  // File name
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = '11px system-ui, sans-serif';
-  const truncated = name.length > 30 ? name.slice(0, 27) + '…' : name;
-  ctx.fillText(truncated, 0, 12);
-
-  // Loading dots
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.font = '10px system-ui, sans-serif';
-  ctx.fillText('Loading…', 0, 28);
+  ctx.fillStyle = '#aaa';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(name, 0, 20);
+  ctx.restore();
 }
 
-// ---------------------------------------------------------------------------
-// Helper: apply Temperature, Tint, Faded Film, and Vignette color overlays
-// ---------------------------------------------------------------------------
 function applyColorOverlays(
   ctx: CanvasRenderingContext2D,
+  dx: number,
+  dy: number,
   dw: number,
   dh: number,
   filters: any
 ) {
-  const { temperature, tint, fadedFilm, vignette } = filters;
+  if (!filters) return;
 
-  // 1. Temperature: Cool (Cyan) to Warm (Amber/Orange)
-  if (temperature !== 0) {
+  const { temperature = 0, tint = 0, fadedFilm = 0, vignette = 0 } = filters;
+
+  if (temperature !== 0 || tint !== 0) {
     ctx.save();
-    ctx.globalCompositeOperation = 'color';
-    // Warm: amber `#ff8c00`. Cool: cyan `#00bfff`.
-    ctx.fillStyle = temperature > 0 ? '#ff8c00' : '#00bfff';
-    ctx.globalAlpha = Math.min(1, Math.max(0, Math.abs(temperature) / 400));
-    ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+    ctx.globalCompositeOperation = 'overlay';
+    
+    let r = 0, g = 0, b = 0;
+    if (temperature > 0) {
+      r = Math.min(255, temperature * 1.5);
+      g = Math.min(255, temperature * 0.5);
+    } else if (temperature < 0) {
+      b = Math.min(255, Math.abs(temperature) * 1.5);
+      g = Math.min(255, Math.abs(temperature) * 0.2);
+    }
+    if (tint > 0) {
+      g = Math.min(255, g + tint * 1.5);
+    } else if (tint < 0) {
+      r = Math.min(255, r + Math.abs(tint));
+      b = Math.min(255, b + Math.abs(tint));
+    }
+    
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${Math.max(Math.abs(temperature), Math.abs(tint)) / 100 * 0.3})`;
+    ctx.fillRect(dx, dy, dw, dh);
     ctx.restore();
   }
 
-  // 2. Tint: Green to Magenta
-  if (tint !== 0) {
-    ctx.save();
-    ctx.globalCompositeOperation = 'color';
-    // Positive: magenta `#ff00ff`. Negative: green `#00ff00`.
-    ctx.fillStyle = tint > 0 ? '#ff00ff' : '#00ff00';
-    ctx.globalAlpha = Math.min(1, Math.max(0, Math.abs(tint) / 400));
-    ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-    ctx.restore();
-  }
-
-  // 3. Faded Film wash
   if (fadedFilm > 0) {
     ctx.save();
-    // screen composite operation with middle gray washes out shadow/black levels
     ctx.globalCompositeOperation = 'screen';
-    ctx.fillStyle = '#808080';
-    ctx.globalAlpha = Math.min(1, Math.max(0, fadedFilm / 400));
-    ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+    const fadeStrength = fadedFilm / 100 * 0.15;
+    ctx.fillStyle = `rgba(40, 45, 50, ${fadeStrength})`;
+    ctx.fillRect(dx, dy, dw, dh);
     ctx.restore();
   }
 
-  // 4. Vignette: Positive (black vignette) or Negative (white vignette)
   if (vignette !== 0) {
     ctx.save();
-
+    ctx.translate(dx + dw / 2, dy + dh / 2);
     const radius = Math.sqrt(dw * dw + dh * dh) / 2;
     const grad = ctx.createRadialGradient(0, 0, radius * 0.4, 0, 0, radius);
 

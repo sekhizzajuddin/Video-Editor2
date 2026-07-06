@@ -104,7 +104,8 @@ function App() {
 
       if (!pressed) return;
 
-      const customShortcuts = settings.keyboardShortcuts || {};
+      const currentSettings = useEditorStore.getState().settings;
+      const customShortcuts = currentSettings.keyboardShortcuts || {};
       const shortcutsMap: Record<string, string> = {};
       for (const def of DEFAULT_SHORTCUTS) {
         shortcutsMap[def.id] = customShortcuts[def.id] !== undefined ? customShortcuts[def.id] : def.defaultKey;
@@ -159,7 +160,7 @@ function App() {
           zoomOut();
           break;
         case 'toggle_snap':
-          updateSettings({ snapEnabled: !settings.snapEnabled });
+          updateSettings({ snapEnabled: !currentSettings.snapEnabled });
           break;
         case 'delete_selected': {
           const storeState = useEditorStore.getState();
@@ -284,7 +285,6 @@ function App() {
       zoomIn,
       zoomOut,
       tracks,
-      settings,
       updateSettings,
       selectedTransitionClipId,
       removeTransition,
@@ -326,15 +326,15 @@ function App() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDraggingLeft.current) {
-        setLeftWidth(Math.max(180, Math.min(400, e.clientX)));
+        setLeftWidth(() => Math.max(180, Math.min(400, e.clientX)));
       }
       if (isDraggingRight.current) {
         const windowWidth = window.innerWidth;
-        setRightWidth(Math.max(200, Math.min(400, windowWidth - e.clientX)));
+        setRightWidth(() => Math.max(200, Math.min(400, windowWidth - e.clientX)));
       }
       if (isDraggingTimeline.current) {
         const windowHeight = window.innerHeight;
-        setTimelineHeight(Math.max(200, Math.min(500, windowHeight - e.clientY)));
+        setTimelineHeight(() => Math.max(200, Math.min(500, windowHeight - e.clientY)));
       }
     };
 

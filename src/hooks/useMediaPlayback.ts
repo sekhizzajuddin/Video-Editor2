@@ -141,9 +141,25 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const pendingSeeksRef = useRef<Map<string, number>>(new Map());
 
   // Trigger a custom event on window so PreviewCanvas can redraw immediately on async frame seek
+  
   const triggerRedraw = useCallback(() => {
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
   }, []);
+  const stableTriggerRedrawRef = useRef(triggerRedraw);
+  stableTriggerRedrawRef.current = triggerRedraw;
+  const stableTriggerRedraw = useCallback(() => stableTriggerRedrawRef.current(), []);
+
+  const getMediaContainer = () => {
+    let mediaContainer = document.getElementById('procut-media-pool');
+    if (!mediaContainer) {
+      mediaContainer = document.createElement('div');
+      mediaContainer.id = 'procut-media-pool';
+      mediaContainer.style.display = 'none';
+      document.body.appendChild(mediaContainer);
+    }
+    return mediaContainer;
+  };
+
 
   // Sync master stream to store once
   useEffect(() => {
@@ -273,13 +289,18 @@ export function useMediaPlayback(): MediaPlaybackResult {
       if (existing) {
         const currentSrc = existing.el.src;
         const isPendingRestore = media.url === 'PENDING_RESTORE';
-        const isUrlDifferent = !isPendingRestore && !currentSrc.includes(media.url);
         
-        if (isUrlDifferent || (isPendingRestore && !currentSrc.includes('PENDING_RESTORE'))) {
+        // Only update source if it actually changed
+        // Use exact comparison and endsWith to handle absolute resolution
+        const isUrlActuallyDifferent = currentSrc !== media.url && !currentSrc.endsWith(media.url);
+        
+        if (!isPendingRestore && isUrlActuallyDifferent) {
           existing.el.src = media.url;
           if (existing.type === 'video') {
             existing.el.load();
           }
+        } else if (isPendingRestore && !currentSrc.includes('PENDING_RESTORE')) {
+          existing.el.src = media.url;
         }
         continue;
       }
@@ -298,8 +319,12 @@ export function useMediaPlayback(): MediaPlaybackResult {
           // Cache this decoded frame as ImageBitmap for instant scrubbing
           if (el.videoWidth > 0 && el.readyState >= 2) {
             createImageBitmap(el).then(bitmap => {
-              let clipCache = frameCacheRef.current.get(clipId);
-              if (!clipCache) {
+          if (!poolRef.current.has(clipId) && !pendingSeeksRef.current.has(clipId)) {
+            bitmap.close();
+            return;
+          }
+          let clipCache = frameCacheRef.current.get(clipId);
+          if (!clipCache) {
                 clipCache = [];
                 frameCacheRef.current.set(clipId, clipCache);
               }
@@ -331,10 +356,10 @@ export function useMediaPlayback(): MediaPlaybackResult {
         (el as any)._handleSeeked = handleSeeked;
 
         el.addEventListener('seeked', handleSeeked);
-        el.addEventListener('timeupdate', triggerRedraw);
-        el.addEventListener('canplay', triggerRedraw);
+        el.addEventListener('timeupdate', stableTriggerRedraw);
+        el.addEventListener('canplay', stableTriggerRedraw);
 
-        document.body.appendChild(el);
+        getMediaContainer().appendChild(el);
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
         initAudioGraph(entry);
         pool.set(clipId, entry);
@@ -345,7 +370,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         el.crossOrigin = 'anonymous';
         el.src = media.url;
         el.style.display = 'none';
-        document.body.appendChild(el);
+        getMediaContainer().appendChild(el);
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'audio' };
         initAudioGraph(entry);
         pool.set(clipId, entry);
@@ -361,8 +386,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
           if (el._handleSeeked) {
             el.removeEventListener('seeked', el._handleSeeked);
           }
-          el.removeEventListener('timeupdate', triggerRedraw);
-          el.removeEventListener('canplay', triggerRedraw);
+          el.removeEventListener('timeupdate', stableTriggerRedraw);
+          el.removeEventListener('canplay', stableTriggerRedraw);
+        }
+        if (entry.el.src.startsWith('blob:')) {
+          URL.revokeObjectURL(entry.el.src);
         }
         entry.el.src = '';
         if (entry.audioCtx) {
@@ -374,7 +402,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         pendingSeeksRef.current.delete(clipId);
       }
     }
-  }, [tracks, mediaLibrary, triggerRedraw]);
+  }, [tracks, mediaLibrary, stableTriggerRedraw]);
 
   // Sync playback state — play / pause / seek
   useEffect(() => {
@@ -413,7 +441,13 @@ export function useMediaPlayback(): MediaPlaybackResult {
       } else {
         // Resume Audio Context if suspended (browser user interaction gesture unlock)
         if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
-          entry.audioCtx.resume().catch(() => {});
+          try {
+            entry.audioCtx.resume().catch((e) => {
+              console.warn("Failed to resume audio context:", e);
+            });
+          } catch (err) {
+            console.warn("Exception during audioCtx.resume:", err);
+          }
         }
 
         // Calculate the media time corresponding to currentTime
@@ -519,6 +553,17 @@ export function useMediaPlayback(): MediaPlaybackResult {
     // Update active clip IDs ref
     lastActiveClipIdsRef.current = playingIds;
   }, [isPlaying, currentTime, playbackSpeed, activeClips, mediaLibrary, tracks]);
+
+  // Cleanup orphaned track analysers
+  useEffect(() => {
+    const activeTrackIds = new Set(tracks.map(t => t.id));
+    for (const [trackId, analyser] of trackAnalysers.entries()) {
+      if (!activeTrackIds.has(trackId)) {
+        try { analyser.disconnect(); } catch (e) {}
+        trackAnalysers.delete(trackId);
+      }
+    }
+  }, [tracks]);
 
   // Reactively sync audio parameters (volume, EQ, pitch, etc.) for all clips in the pool
   useEffect(() => {
@@ -871,8 +916,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
           if (el._handleSeeked) {
             el.removeEventListener('seeked', el._handleSeeked);
           }
-          el.removeEventListener('timeupdate', triggerRedraw);
-          el.removeEventListener('canplay', triggerRedraw);
+          el.removeEventListener('timeupdate', stableTriggerRedraw);
+          el.removeEventListener('canplay', stableTriggerRedraw);
+        }
+        if (entry.el.src.startsWith('blob:')) {
+          URL.revokeObjectURL(entry.el.src);
         }
         entry.el.src = '';
         if (entry.audioCtx) {
@@ -1123,14 +1171,16 @@ function initAudioGraph(entry: MediaElement) {
           grainCounterA = 0;
           // Snap grain A read head near the write head to stay in sync
           // Add a tiny random jitter (up to ±4ms / 180 samples) to break up periodic phase cancellation
-          const jitterSamples = Math.floor((Math.random() - 0.5) * 180);
+          const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
+            const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
           readPosA = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
         }
         // Reset grain B when it completes a cycle
         if (grainCounterB >= grainSize) {
           grainCounterB = 0;
           // Add a tiny random jitter (up to ±4ms / 180 samples) to break up periodic phase cancellation
-          const jitterSamples = Math.floor((Math.random() - 0.5) * 180);
+          const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
+            const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
           readPosB = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
         }
       }

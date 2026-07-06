@@ -66,13 +66,17 @@ Return strictly as a JSON array matching this schema:
     }
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: controller.signal
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -139,14 +143,18 @@ Return ONLY the optimized keywords separated by spaces. Do NOT include any expla
     temperature: 0.1
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${groqKey}`
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: controller.signal
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errorText = await response.text();

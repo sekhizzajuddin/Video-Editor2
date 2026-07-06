@@ -38,10 +38,15 @@ export async function extractFrames(
 
   // Wait for the video to be ready
   await new Promise<void>((resolve, reject) => {
-    video.onloadeddata = () => resolve();
-    video.onerror = () => reject(new Error(`Failed to load video: ${videoUrl}`));
-    // Timeout fallback
-    setTimeout(() => resolve(), 5000);
+    const timeoutId = setTimeout(() => reject(new Error(`Video load timeout: ${videoUrl}`)), 5000);
+    video.onloadeddata = () => {
+      clearTimeout(timeoutId);
+      resolve();
+    };
+    video.onerror = () => {
+      clearTimeout(timeoutId);
+      reject(new Error(`Failed to load video: ${videoUrl}`));
+    };
   });
 
   const actualDuration = isFinite(video.duration) ? video.duration : duration;
@@ -65,13 +70,18 @@ export async function extractFrames(
 
     await new Promise<void>((resolve) => {
       video.currentTime = seekTime;
-      const onSeeked = () => {
-        video.removeEventListener('seeked', onSeeked);
-        resolve();
-      };
-      video.addEventListener('seeked', onSeeked);
-      // Timeout fallback for frames that don't trigger seeked
-      setTimeout(resolve, 1000);
+      let fallbackTimeout: any;
+        const onSeeked = () => {
+          clearTimeout(fallbackTimeout);
+          video.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        video.addEventListener('seeked', onSeeked);
+        // Timeout fallback for frames that don't trigger seeked
+        fallbackTimeout = setTimeout(() => {
+          video.removeEventListener('seeked', onSeeked);
+          resolve();
+        }, 1000);
     });
 
     ctx.drawImage(video, 0, 0, frameWidth, frameHeight);

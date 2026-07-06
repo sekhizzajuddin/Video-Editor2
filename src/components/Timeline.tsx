@@ -111,7 +111,8 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
 }
 
 function synthesizeProceduralSFX(category: string, duration: number): Promise<Blob> {
-  return new Promise(async (resolve) => {
+  return new Promise((resolve, reject) => {
+    (async () => {
     const sampleRate = 44100;
     const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
 
@@ -505,6 +506,7 @@ function synthesizeProceduralSFX(category: string, duration: number): Promise<Bl
     const renderedBuffer = await offlineCtx.startRendering();
     const wavBlob = audioBufferToWav(renderedBuffer);
     resolve(wavBlob);
+  })().catch(reject);
   });
 }
 
@@ -859,7 +861,7 @@ function TransitionPreviewTooltipCanvas({ transitionName }: { transitionName: st
     const H = canvas.height;
 
     let animationId: number;
-    let start: number | null = null;
+    const startRef = { current: null as number | null };
     const duration = 1500; // 1.5s loop duration
 
     const draw = (t: number) => {
@@ -933,8 +935,8 @@ function TransitionPreviewTooltipCanvas({ transitionName }: { transitionName: st
     };
 
     const animate = (timestamp: number) => {
-      if (!start) start = timestamp;
-      const elapsed = timestamp - start;
+      if (!startRef.current) startRef.current = timestamp;
+      const elapsed = timestamp - startRef.current;
       const progress = (elapsed % duration) / duration;
       draw(progress);
       animationId = requestAnimationFrame(animate);
@@ -1424,6 +1426,12 @@ export function Timeline() {
     return () => {
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
@@ -2230,10 +2238,13 @@ Rules:
     }
   }, []);
 
-  // Ensure ruler syncs if store's scrollLeft changes externally (e.g. zooming)
+  // Ensure ruler and track containers sync if store's scrollLeft changes externally (e.g. zooming, auto-scroll)
   useEffect(() => {
     if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== scrollLeft) {
       rulerContainerRef.current.scrollLeft = scrollLeft;
+    }
+    if (trackContainerRef.current && trackContainerRef.current.scrollLeft !== scrollLeft) {
+      trackContainerRef.current.scrollLeft = scrollLeft;
     }
   }, [scrollLeft]);
 
@@ -2495,6 +2506,8 @@ Rules:
       e.preventDefault();
       const track = tracks.find((t) => t.id === clip.trackId);
       if (track?.locked) return;
+      
+      useEditorStore.getState().startTransaction();
 
       let rippleClips: { id: string; originalStartTime: number }[] = [];
       if ((activeTool === 'ripple' || activeTool === 'rateStretch') && track) {
@@ -3567,7 +3580,7 @@ Rules:
   return (
     <>
     <div className="h-full flex flex-col bg-[#1e1e1e] border-t border-[#3e3e3e]" ref={timelineRef}>
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style>{`
         @keyframes rateStretchPulse {
           0% {
             box-shadow: 0 0 0 0px rgba(168, 85, 247, 0.7), inset 0 0 0 1px rgba(168, 85, 247, 0.5);
@@ -3582,7 +3595,7 @@ Rules:
         .rate-stretch-active {
           animation: rateStretchPulse 1.5s infinite ease-in-out;
         }
-      `}} />
+      `}</style>
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div className="h-8 flex items-center px-2 bg-[#252525] border-b border-[#3e3e3e] shrink-0">
         {/* Zoom */}
