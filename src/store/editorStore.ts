@@ -261,7 +261,7 @@ interface EditorActions {
   stopVoiceoverRecordingState: () => void;
 
   // Project
-  resetProject: () => Promise<void>;
+  resetProject: (clearDB?: boolean) => Promise<void>;
   loadProject: () => Promise<boolean>;
   setProjectInfo: (id: string, name: string) => void;
 
@@ -2199,18 +2199,20 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Project
   setProjectInfo: (id, name) => set({ projectId: id, projectName: name }),
-  resetProject: async () => {
+  resetProject: async (clearDB = false) => {
     // Revoke all object URLs
     const { mediaLibrary } = get();
     mediaLibrary.forEach((m) => {
       if (m.url) try { URL.revokeObjectURL(m.url); } catch { /* ignore */ }
       if (m.thumbnail) try { URL.revokeObjectURL(m.thumbnail); } catch { /* ignore */ }
     });
-    // Clear IndexedDB completely
-    try {
-      await clearProjectDB();
-    } catch(err) {
-      console.error('Failed to clear database:', err);
+    // Clear IndexedDB completely only if requested
+    if (clearDB) {
+      try {
+        await clearProjectDB();
+      } catch(err) {
+        console.error('Failed to clear database:', err);
+      }
     }
     const freshTracks = createEmptyTracks();
     set({

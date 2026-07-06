@@ -39,7 +39,7 @@ export const WelcomeScreen: React.FC = () => {
     const newId = crypto.randomUUID();
     
     // Set up the store for a completely new project
-    await resetProject();
+    await resetProject(false);
     setProjectInfo(newId, finalName);
     setActiveProject(newId);
     
@@ -53,7 +53,7 @@ export const WelcomeScreen: React.FC = () => {
 
   const handleOpenProject = async (id: string, name: string) => {
     // Reset to clear previous tracks/media to prevent flashing old content
-    resetProject();
+    await resetProject(false);
     setProjectInfo(id, name);
     setActiveProject(id);
     

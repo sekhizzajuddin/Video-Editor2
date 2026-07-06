@@ -357,7 +357,7 @@ export function SettingsModal() {
                           );
                           if (!confirmed) return;
                         }
-                        resetProject();
+                        resetProject(true);
                         setShowSettingsModal(false);
                       }}
                       className="w-full px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-2"

@@ -259,6 +259,8 @@ export function TopToolbar() {
       if (!confirmed) return;
     }
     await resetProject();
+    useEditorStore.getState().setProjectInfo('default', '');
+    import('@/utils/projectPersistence').then(m => m.setActiveProject('default'));
     setShowFileMenu(false);
   };
 
@@ -343,7 +345,13 @@ export function TopToolbar() {
                 <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File
               </button>
               <button
-                onClick={async () => { await useEditorStore.getState().resetProject(); setShowFileMenu(false); }}
+                onClick={async () => { 
+                  await useEditorStore.getState().resetProject();
+                  useEditorStore.getState().setProjectInfo('default', '');
+                  const m = await import('@/utils/projectPersistence');
+                  m.setActiveProject('default');
+                  setShowFileMenu(false); 
+                }}
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
                 <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recent Projects
