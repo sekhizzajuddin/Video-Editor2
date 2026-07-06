@@ -358,6 +358,7 @@ export function PropertiesPanel() {
   }
 
   const [isSeparating, setIsSeparating] = useState(false);
+  const [isNormalizing, setIsNormalizing] = useState(false);
 
   const handleAiSeparate = async () => {
     if (!selectedClip || isSeparating) return;
@@ -1137,8 +1138,7 @@ export function PropertiesPanel() {
     useEditorStore.getState().saveSnapshot();
   };
 
-  const [isNormalizing, setIsNormalizing] = useState(false);
-
+  
   const handleNormalizeAudio = async () => {
     if (!selectedClip) return;
     const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === selectedClip.mediaId);
