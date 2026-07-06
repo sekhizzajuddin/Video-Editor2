@@ -250,7 +250,7 @@ export function TopToolbar() {
   };
 
   // FIX C8: Confirm before destructively resetting the project
-  const handleNewProject = () => {
+  const handleNewProject = async () => {
     const hasContent = useEditorStore.getState().tracks.some(t => t.clips.length > 0);
     if (hasContent) {
       const confirmed = window.confirm(
@@ -258,7 +258,7 @@ export function TopToolbar() {
       );
       if (!confirmed) return;
     }
-    resetProject();
+    await resetProject();
     setShowFileMenu(false);
   };
 
@@ -343,7 +343,7 @@ export function TopToolbar() {
                 <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File
               </button>
               <button
-                onClick={() => { useEditorStore.getState().resetProject(); setShowFileMenu(false); }}
+                onClick={async () => { await useEditorStore.getState().resetProject(); setShowFileMenu(false); }}
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
                 <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recent Projects

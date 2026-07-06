@@ -39,7 +39,7 @@ export const WelcomeScreen: React.FC = () => {
     const newId = crypto.randomUUID();
     
     // Set up the store for a completely new project
-    resetProject();
+    await resetProject();
     setProjectInfo(newId, finalName);
     setActiveProject(newId);
     
