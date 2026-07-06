@@ -84,6 +84,7 @@ interface MediaElement {
   sourceNode?: MediaElementAudioSourceNode;
   pitchNode?: ScriptProcessorNode;
   vocalFilter?: BiquadFilterNode;
+  denoiseFilter?: BiquadFilterNode;
   bassFilter?: BiquadFilterNode;
   trebleFilter?: BiquadFilterNode;
   pannerNode?: StereoPannerNode;
@@ -638,7 +639,13 @@ export function useMediaPlayback(): MediaPlaybackResult {
         entry.vocalFilter.gain.setTargetAtTime(targetGain, ctxTime, rampTime);
       }
 
-      // Update Bass / Treble Equalizers
+      // Update Bass / Treble Equalizers and Denoise
+      if (entry.denoiseFilter) {
+        const denoiseVal = audioSettings.denoise ?? 0;
+        // Denoise 0-100 reduces high frequencies above 4000Hz up to -30dB
+        const denoiseGain = -(denoiseVal / 100) * 30;
+        entry.denoiseFilter.gain.setTargetAtTime(denoiseGain, ctxTime, rampTime);
+      }
       if (entry.bassFilter) {
         const baseBass = audioSettings.bass + (audioSettings.humanize ? 1.5 : 0);
         entry.bassFilter.gain.setTargetAtTime(Math.max(-15, Math.min(15, baseBass)), ctxTime, rampTime);
@@ -664,7 +671,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
       const anyTrackSoloed = tracks.some(t => t.solo);
       const isMutedTrack = targetTrack ? (anyTrackSoloed ? !targetTrack.solo : targetTrack.muted) : false;
       const isMutedGlobally = isMutedTrack || isMuted;
-      const globalMuted = isMutedGlobally || audioSettings.muted;
+      const globalMuted = isMutedGlobally || audioSettings.muted || (fullClip as any).disabled;
 
       const clipElapsed = currentTime - fullClip.startTime;
       let fadeInMultiplier = 1;
@@ -1136,6 +1143,12 @@ function initAudioGraph(entry: MediaElement) {
     vocalFilter.Q.value = 1.0;
     vocalFilter.gain.value = 0;
 
+    // 0.8. Denoise Filter (Highshelf to cut hiss)
+    const denoiseFilter = audioCtx.createBiquadFilter();
+    denoiseFilter.type = 'highshelf';
+    denoiseFilter.frequency.value = 4000;
+    denoiseFilter.gain.value = 0;
+
     // 1. Bass equalizer filter (lowshelf at 200 Hz)
     const bassFilter = audioCtx.createBiquadFilter();
     bassFilter.type = 'lowshelf';
@@ -1168,7 +1181,8 @@ function initAudioGraph(entry: MediaElement) {
     const separationGraph = createSeparationGraph(audioCtx);
     sourceNode.connect(separationGraph.input);
     separationGraph.output.connect(vocalFilter);
-    vocalFilter.connect(bassFilter);
+    vocalFilter.connect(denoiseFilter);
+    denoiseFilter.connect(bassFilter);
     bassFilter.connect(trebleFilter);
 
     // Split treble output into direct path and room ambience loop
@@ -1197,6 +1211,7 @@ function initAudioGraph(entry: MediaElement) {
     entry.sourceNode = sourceNode;
     entry.pitchNode = pitchNode;
     entry.vocalFilter = vocalFilter;
+    entry.denoiseFilter = denoiseFilter;
     entry.bassFilter = bassFilter;
     entry.trebleFilter = trebleFilter;
     entry.delayNode = delayNode;

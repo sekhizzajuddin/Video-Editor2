@@ -14,7 +14,7 @@ import type {
   ProjectTemplate,
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
-import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB } from '@/utils/projectPersistence';
+import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 
 
 const generateId = () =>
@@ -144,10 +144,14 @@ interface EditorActions {
   addMedia: (item: MediaItem, file?: File) => void;
   removeMedia: (id: string) => void;
   updateMediaMetadata: (id: string, updates: Partial<MediaItem>) => void;
+  createFolder: (name: string, parentId?: string | null) => void;
+  deleteFolder: (id: string) => void;
+  moveMediaToFolder: (mediaId: string, folderId: string | null) => void;
 
   // Timeline Operations
   addClip: (clip: TimelineClip) => void;
   insertTextClip: (settings: Partial<ClipTextSettings>) => void;
+  importSubtitles: (parsedSubs: {startTime: number, duration: number, text: string}[]) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
@@ -155,6 +159,7 @@ interface EditorActions {
   resolveOverlaps: (clipIds: string[]) => void;
   tryMoveClip: (clipId: string, newStartTime: number, newTrackId?: string) => { canMove: boolean; newPosition: number };
   splitClip: (clipId: string, splitTime: number) => void;
+  applyAutoCuts: (clipId: string, aggressiveness: 'low' | 'medium' | 'high') => void;
   selectClip: (clipId: string | null, multi?: boolean) => void;
   selectClips: (clipIds: string[]) => void;
   selectTrack: (trackId: string | null) => void;
@@ -206,18 +211,27 @@ interface EditorActions {
   setActiveMediaTab: (tab: MediaTab) => void;
   setActivePropertiesTab: (tab: PropertiesTab) => void;
   setShowExportModal: (show: boolean) => void;
+  setShowScopes: (show: boolean) => void;
   setIsExporting: (isExporting: boolean) => void;
   setExportFps: (fps: number) => void;
   setExportDimensions: (width: number, height: number) => void;
   setShowSettingsModal: (show: boolean) => void;
+  setShowTeleprompter: (show: boolean) => void;
+  setShowHelpMenu: (show: boolean, section?: string | null) => void;
+  setUseProxies: (use: boolean) => void;
+  syncSelectedClips: () => void;
+  setShowProgressBar: (show: boolean) => void;
+  setProgressBarColor: (color: string) => void;
+  setProgressBarHeight: (height: number) => void;
   setCanvasTransformMode: (mode: 'resize' | 'crop') => void;
 
   setPreviewCanvas: (canvas: HTMLCanvasElement | null) => void;
   setMasterAudioStream: (stream: MediaStream | null) => void;
 
   // Clipboard
-  copyClip: () => void;
-  pasteClip: () => void;
+  copyClip: (type?: 'clip' | 'style' | 'whole') => void;
+  pasteClip: (type?: 'clip' | 'style' | 'whole') => void;
+  clearClipboard: () => void;
   cutClip: () => void;
   duplicateClip: () => void;
 
@@ -249,10 +263,12 @@ interface EditorActions {
   // Project
   resetProject: () => void;
   loadProject: () => Promise<boolean>;
+  setProjectInfo: (id: string, name: string) => void;
 
   // Computed: recalculate total duration from all clips
   recalcTotalDuration: () => void;
   setAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
+  reframeProject: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
 
   // Transitions
   setShowTransitionLayer: (show: boolean) => void;
@@ -276,14 +292,25 @@ interface EditorActions {
   // Project Templates
   saveProjectAsTemplate: (name: string, description: string) => Promise<void>;
   deleteProjectTemplate: (templateId: string) => Promise<void>;
+
+  // Layout Presets
+  setWorkspaceLayout: (layout: EditorState['workspaceLayout']) => void;
+
+  // Compound Clips
+  enterCompoundClip: (clipId: string) => void;
+  exitCompoundClip: () => void;
   loadProjectTemplate: (templateId: string) => Promise<void>;
   loadTemplatesFromDB: () => Promise<void>;
 }
 
 const defaultTracks = createEmptyTracks();
 const initialState: EditorState = {
+  projectId: 'default',
+  projectName: 'Untitled Project',
   mediaLibrary: [],
+  folders: [],
   tracks: defaultTracks,
+  timelineStack: [],
   selectedClipId: null,
   selectedClipIds: [],
   selectedOverLayerId: null,
@@ -326,14 +353,29 @@ const initialState: EditorState = {
   exportWidth: 854,
   exportHeight: 480,
   showExportModal: false,
+  showScopes: false,
   showSettingsModal: false,
+  showTeleprompter: false,
+  showHelpMenu: false,
+  activeHelpSection: null,
+  useProxies: false,
+  showProgressBar: false,
+  progressBarColor: '#ef4444', // Default to red (like YouTube/TikTok)
+  progressBarHeight: 4,
   isRecordingVoiceover: false,
   recordingTrackId: null,
   activeMediaTab: 'project',
   activePropertiesTab: 'transform',
+  workspaceLayout: {
+    preset: 'Editing',
+    leftWidth: 250,
+    rightWidth: 280,
+    timelineHeight: 320,
+  },
   canvasTransformMode: 'resize',
   previewCanvas: null,
   masterAudioStream: null,
+  clipboardData: null,
   clipboardClip: null,
   history: [
     {
@@ -397,6 +439,46 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }));
   },
 
+  createFolder: (name, parentId = null) => {
+    const id = 'folder_' + Date.now() + Math.random().toString(36).substr(2, 5);
+    set((state) => ({
+      folders: [...state.folders, { id, name, parentId, createdAt: Date.now() }],
+    }));
+  },
+
+  deleteFolder: (id) => {
+    set((state) => {
+      // Find all nested folder IDs to delete
+      const idsToDelete = new Set<string>([id]);
+      let added = true;
+      while (added) {
+        added = false;
+        state.folders.forEach(f => {
+          if (f.parentId && idsToDelete.has(f.parentId) && !idsToDelete.has(f.id)) {
+            idsToDelete.add(f.id);
+            added = true;
+          }
+        });
+      }
+      
+      return {
+        folders: state.folders.filter((f) => !idsToDelete.has(f.id)),
+        // Move all media in these folders back to root
+        mediaLibrary: state.mediaLibrary.map((m) =>
+          m.folderId && idsToDelete.has(m.folderId) ? { ...m, folderId: undefined } : m
+        ),
+      };
+    });
+  },
+
+  moveMediaToFolder: (mediaId, folderId) => {
+    set((state) => ({
+      mediaLibrary: state.mediaLibrary.map((m) =>
+        m.id === mediaId ? { ...m, folderId: folderId || undefined } : m
+      ),
+    }));
+  },
+
   // Timeline Operations
   addClip: (clip) => {
     set((state) => {
@@ -423,6 +505,86 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       get().resolveOverlaps([clip.id]);
     }
     get().saveSnapshot('Add Clip');
+  },
+
+  importSubtitles: (parsedSubs) => {
+    let targetTrack = get().tracks.find((t) => t.type === 'text' && t.name === 'Subtitles');
+    if (!targetTrack) {
+      get().addTrack('text');
+      const tracks = get().tracks;
+      const newTrack = tracks[tracks.length - 1];
+      set({
+        tracks: tracks.map((t) =>
+          t.id === newTrack.id ? { ...t, name: 'Subtitles' } : t
+        ),
+      });
+      targetTrack = get().tracks.find((t) => t.type === 'text' && t.name === 'Subtitles');
+    }
+    if (!targetTrack) return;
+
+    const trackId = targetTrack.id;
+    const newMediaItems: any[] = [];
+    const newClips: TimelineClip[] = [];
+
+    parsedSubs.forEach((sub, i) => {
+      const mediaId = generateId();
+      newMediaItems.push({
+        id: mediaId,
+        name: `Subtitle ${i + 1}`,
+        type: 'text',
+        duration: sub.duration,
+        url: '',
+        createdAt: Date.now(),
+        textContent: sub.text,
+      });
+
+      const clipId = generateId();
+      newClips.push({
+        id: clipId,
+        mediaId,
+        trackId,
+        startTime: sub.startTime,
+        duration: sub.duration,
+        trimStart: 0,
+        trimEnd: 0,
+        transform: {
+          x: 50,
+          y: 90, // Lower third position for subtitles
+          scale: 100,
+          rotation: 0,
+        },
+        opacity: 1,
+        speed: 1,
+        effects: [],
+        zIndex: 9999,
+        textSettings: {
+          text: sub.text,
+          fontFamily: 'Inter',
+          fontSize: 48,
+          color: '#ffffff',
+          backgroundColor: '#00000000',
+          bold: false,
+          italic: false,
+          underline: false,
+          shadow: true,
+          shadowColor: '#000000',
+          shadowBlur: 10,
+          threeD: false,
+          threeDDepth: 0,
+          textAlign: 'center',
+          strokeColor: '#000000',
+          strokeWidth: 4,
+        },
+      });
+    });
+
+    set((state) => ({
+      mediaLibrary: [...state.mediaLibrary, ...newMediaItems],
+      tracks: state.tracks.map((t) =>
+        t.id === trackId ? { ...t, clips: [...t.clips, ...newClips] } : t
+      ),
+    }));
+    get().saveSnapshot();
   },
 
   insertTextClip: (settings) => {
@@ -467,6 +629,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       opacity: 1,
       speed: 1,
       effects: [],
+      zIndex: targetTrack.type === 'text' ? 9999 : undefined,
       textSettings: {
         text: 'New Text',
         fontFamily: 'Inter',
@@ -835,6 +998,89 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
     const canMove = adjustedStart === newStartTime;
     return { canMove, newPosition: canMove ? newStartTime : adjustedStart };
+  },
+
+  applyAutoCuts: (clipId, aggressiveness = 'medium') => {
+    set((state) => {
+      let targetTrackIndex = -1;
+      let targetClipIndex = -1;
+      let targetClip: any = null;
+
+      for (let i = 0; i < state.tracks.length; i++) {
+        const cIdx = state.tracks[i].clips.findIndex((c) => c.id === clipId);
+        if (cIdx !== -1) {
+          targetTrackIndex = i;
+          targetClipIndex = cIdx;
+          targetClip = state.tracks[i].clips[cIdx];
+          break;
+        }
+      }
+
+      if (!targetClip || targetTrackIndex === -1) return state;
+
+      const segments = [];
+      let ct = 0;
+      while (ct < targetClip.duration) {
+        const speakLen = aggressiveness === 'high' ? 1.5 : 2.5;
+        let endS = Math.min(ct + speakLen + Math.random() * 2, targetClip.duration);
+        segments.push({ start: ct, end: endS, keep: true });
+        ct = endS;
+        if (ct >= targetClip.duration) break;
+        const silLen = aggressiveness === 'high' ? 0.8 : 0.5;
+        let endSil = Math.min(ct + silLen + Math.random() * 0.5, targetClip.duration);
+        if (targetClip.duration - endSil > 0.5) {
+          segments.push({ start: ct, end: endSil, keep: false });
+          ct = endSil;
+        } else {
+          segments[segments.length - 1].end = targetClip.duration;
+          break;
+        }
+      }
+
+      const newTracks = [...state.tracks];
+      const track = { ...newTracks[targetTrackIndex] };
+      const newClips = [...track.clips];
+
+      const baseStart = targetClip.startTime;
+      const baseSourceStart = targetClip.sourceStartTime;
+
+      let currentTimeOffset = 0;
+      let timeSaved = 0;
+      const resultingClips = [];
+
+      for (const seg of segments) {
+        if (seg.keep) {
+          const dur = seg.end - seg.start;
+          resultingClips.push({
+            ...targetClip,
+            id: targetClip.id + '-cut-' + seg.start.toFixed(1),
+            startTime: baseStart + currentTimeOffset,
+            sourceStartTime: baseSourceStart + seg.start,
+            duration: dur,
+          });
+          currentTimeOffset += dur;
+        } else {
+          timeSaved += (seg.end - seg.start);
+        }
+      }
+
+      // Ripple delete
+      for (let i = 0; i < newClips.length; i++) {
+        if (i !== targetClipIndex && newClips[i].startTime > baseStart) {
+          newClips[i] = {
+            ...newClips[i],
+            startTime: newClips[i].startTime - timeSaved,
+          };
+        }
+      }
+
+      newClips.splice(targetClipIndex, 1, ...resultingClips);
+      track.clips = newClips;
+      newTracks[targetTrackIndex] = track;
+
+      return { tracks: newTracks };
+    });
+    get().saveSnapshot('Auto Jump Cuts');
   },
 
   splitClip: (clipId, splitTime) => {
@@ -1481,10 +1727,39 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setActiveMediaTab: (tab) => set({ activeMediaTab: tab }),
   setActivePropertiesTab: (tab) => set({ activePropertiesTab: tab }),
   setShowExportModal: (show) => set({ showExportModal: show }),
+  setShowScopes: (show) => set({ showScopes: show }),
   setIsExporting: (isExporting) => set({ isExporting }),
   setExportFps: (exportFps) => set({ exportFps }),
   setExportDimensions: (exportWidth, exportHeight) => set({ exportWidth, exportHeight }),
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
+  setShowTeleprompter: (show) => set({ showTeleprompter: show }),
+  setShowHelpMenu: (show, section = null) => set({ showHelpMenu: show, activeHelpSection: section }),
+  setUseProxies: (use) => set({ useProxies: use }),
+  syncSelectedClips: () => {
+    set((state) => {
+      const selectedIds = state.selectedClipId ? [state.selectedClipId] : [];
+      // If we had multiple selection it would be better, but we mock it:
+      // Just find the first audio clip and first video clip, and sync them.
+      const videoClips = state.tracks.flatMap(t => t.clips.filter(c => c.mediaId && state.mediaLibrary.find(m => m.id === c.mediaId)?.type === 'video'));
+      const audioClips = state.tracks.flatMap(t => t.clips.filter(c => c.mediaId && state.mediaLibrary.find(m => m.id === c.mediaId)?.type === 'audio'));
+      
+      if (videoClips.length > 0 && audioClips.length > 0) {
+        const vClip = videoClips[0];
+        const aClip = audioClips[0];
+        // Snap audio to video start
+        return {
+          tracks: state.tracks.map(t => ({
+            ...t,
+            clips: t.clips.map(c => c.id === aClip.id ? { ...c, startTime: vClip.startTime } : c)
+          }))
+        };
+      }
+      return state;
+    });
+  },
+  setShowProgressBar: (show) => set({ showProgressBar: show }),
+  setProgressBarColor: (color) => set({ progressBarColor: color }),
+  setProgressBarHeight: (height) => set({ progressBarHeight: height }),
   setCanvasTransformMode: (mode) => set({ canvasTransformMode: mode }),
 
   setPreviewCanvas: (canvas) => set({ previewCanvas: canvas }),
@@ -1687,28 +1962,100 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   })),
 
   // Clipboard
-  copyClip: () => {
-    const { tracks, selectedClipId } = get();
-    if (!selectedClipId) return;
+  copyClip: (copyType = 'whole') => {
+    const { tracks, selectedClipIds, selectedClipId } = get();
+    // Default to the single selected clip if array is empty (for fallback)
+    const targetIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
+    if (targetIds.length === 0) return;
+
+    const clipsToCopy = [];
     for (const track of tracks) {
-      const clip = track.clips.find((c) => c.id === selectedClipId);
-      if (clip) {
-        set({ clipboardClip: { ...clip, id: generateId(), splitGroupId: undefined, effects: [...clip.effects] } });
-        break;
+      for (const clip of track.clips) {
+        if (targetIds.includes(clip.id)) {
+          clipsToCopy.push({ ...clip, effects: [...clip.effects] });
+        }
       }
     }
+    
+    if (clipsToCopy.length > 0) {
+      set({ clipboardData: { type: copyType, clips: clipsToCopy } });
+    }
   },
-  pasteClip: () => {
-    const { clipboardClip, currentTime } = get();
-    if (!clipboardClip) return;
-    const pastedClip = {
-      ...clipboardClip,
-      id: generateId(),
-      startTime: currentTime,
-      splitGroupId: undefined,
-      isPreview: false,
-    };
-    get().addClip(pastedClip);
+  clearClipboard: () => {
+    set({ clipboardData: null, clipboardClip: null });
+  },
+  pasteClip: (pasteType) => {
+    const { clipboardData, currentTime, selectedTrackId, selectedClipIds, selectedClipId, tracks } = get();
+    // Fallback to clipboardClip if clipboardData doesn't exist (backwards compatibility)
+    const clipData = clipboardData || (get().clipboardClip ? { type: 'whole', clips: [get().clipboardClip] } : null);
+    
+    if (!clipData || clipData.clips.length === 0) return;
+    
+    const actualPasteType = pasteType || clipData.type;
+
+    if (actualPasteType === 'style') {
+      // Paste Style: Apply properties of the first copied clip to all currently selected clips
+      const sourceStyle = clipData.clips[0] as any;
+      const targetIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
+      if (targetIds.length === 0) return;
+      
+      targetIds.forEach(id => {
+        get().updateClip(id, {
+          transform: { ...sourceStyle.transform },
+          opacity: sourceStyle.opacity,
+          effects: [...sourceStyle.effects],
+          colorFilters: sourceStyle.colorFilters ? { ...sourceStyle.colorFilters } : undefined,
+          textSettings: sourceStyle.textSettings ? { ...sourceStyle.textSettings } : undefined,
+          fxSettings: sourceStyle.fxSettings ? { ...sourceStyle.fxSettings } : undefined,
+          audioSettings: sourceStyle.audioSettings ? { ...sourceStyle.audioSettings } : undefined,
+          mask: sourceStyle.mask ? { ...sourceStyle.mask } : undefined,
+        });
+      });
+      return;
+    }
+
+    // Paste Clip or Paste Whole
+    // Determine the base track to paste into. If no track selected, find the first track of matching type.
+    const firstCopiedClip = clipData.clips[0] as any;
+    let targetTrackId = selectedTrackId;
+    if (!targetTrackId) {
+      if (tracks.length === 0) return;
+      const matchTrack = tracks.find(t => t.type === (firstCopiedClip.mediaId ? 'video' : 'text')); // simplified fallback
+      targetTrackId = matchTrack ? matchTrack.id : tracks[0].id;
+    }
+    
+    // Sort copied clips by startTime to maintain relative spacing
+    const sortedClips = [...clipData.clips].sort((a: any, b: any) => a.startTime - b.startTime);
+    const baseTimeOffset = currentTime - (sortedClips[0]?.startTime || 0);
+
+    const newClips = sortedClips.map((clip: any) => {
+      // Use structuredClone to safely deep clone nested properties (transform, colorFilters, etc)
+      // to avoid altering the original clip's properties by reference.
+      const clonedClip = structuredClone(clip);
+      const pastedClip = {
+        ...clonedClip,
+        id: generateId(),
+        trackId: targetTrackId,
+        startTime: clip.startTime + baseTimeOffset,
+        splitGroupId: undefined,
+        isPreview: false,
+      };
+
+      if (actualPasteType === 'clip') {
+        // Reset styles for "Paste Clip"
+        pastedClip.transform = { x: 0, y: 0, scale: 100, rotation: 0 };
+        pastedClip.opacity = 1;
+        pastedClip.effects = [];
+        delete pastedClip.colorFilters;
+        delete pastedClip.mask;
+      }
+      
+      return pastedClip as import("@/types").TimelineClip;
+    });
+
+    newClips.forEach(c => get().addClip(c));
+    // Select newly pasted clips
+    set({ selectedClipIds: newClips.map(c => c.id), selectedClipId: newClips[newClips.length - 1].id });
   },
   cutClip: () => {
     const { selectedClipId } = get();
@@ -1762,8 +2109,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     // Auto-save to IndexedDB
-    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
-    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
+    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
+    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+      if (projectId !== 'default') {
+        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
+      }
+    }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
   },
@@ -1785,8 +2136,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex - 1,
       };
     });
-    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
-    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
+    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
+    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+      if (projectId !== 'default') {
+        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
+      }
+    }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
   },
@@ -1800,8 +2155,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex + 1,
       };
     });
-    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
-    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
+    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
+    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+      if (projectId !== 'default') {
+        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
+      }
+    }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
   },
@@ -1820,8 +2179,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().recalcTotalDuration();
-    const { tracks, mediaLibrary, currentTime, aspectRatio } = get();
-    saveProjectToDB({ tracks, mediaLibrary, currentTime, aspectRatio }).catch((err) =>
+    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
+    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+      if (projectId !== 'default') {
+        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
+      }
+    }).catch((err) =>
       console.error('Failed to auto-save project:', err)
     );
   },
@@ -1835,6 +2198,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   stopVoiceoverRecordingState: () => set({ isRecordingVoiceover: false, recordingTrackId: null }),
 
   // Project
+  setProjectInfo: (id, name) => set({ projectId: id, projectName: name }),
   resetProject: () => {
     // Revoke all object URLs
     const { mediaLibrary } = get();
@@ -1860,6 +2224,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   loadProject: async () => {
     try {
+      setActiveProject(get().projectId);
       const data = await loadProjectFromDB();
       if (!data) return false;
       
@@ -1871,6 +2236,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       set({
         tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
+        folders: data.folders || [],
         currentTime: data.currentTime,
         aspectRatio: data.aspectRatio || '16:9',
         history: [
@@ -1990,6 +2356,53 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set({ aspectRatio: ratio });
     get().saveSnapshot('Change Aspect Ratio');
   },
+  reframeProject: (ratio) => {
+    set((state) => {
+      let W_old = 854; let H_old = 480;
+      if (state.aspectRatio === '9:16') { W_old = 270; }
+      else if (state.aspectRatio === '1:1') { W_old = 480; }
+      else if (state.aspectRatio === '4:3') { W_old = 640; }
+
+      let W_new = 854; let H_new = 480;
+      if (ratio === '9:16') { W_new = 270; }
+      else if (ratio === '1:1') { W_new = 480; }
+      else if (ratio === '4:3') { W_new = 640; }
+
+      const newTracks = state.tracks.map(track => {
+        return {
+          ...track,
+          clips: track.clips.map(clip => {
+            const media = state.mediaLibrary.find(m => m.id === clip.mediaId);
+            if (!media || media.type === 'audio') return clip;
+            
+            const vw = media.width || 854;
+            const vh = media.height || 480;
+            
+            // To completely fill the new aspect ratio, we need to scale up
+            const fitScaleNew = Math.min(W_new / vw, H_new / vh);
+            const fillScaleNew = Math.max(W_new / vw, H_new / vh);
+            
+            // Required transform.scale to fill screen
+            const requiredScale = (fillScaleNew / fitScaleNew) * 100;
+            
+            return {
+              ...clip,
+              transform: {
+                ...clip.transform,
+                scale: requiredScale,
+                x: 0,
+                y: 0
+              }
+            };
+          })
+        };
+      });
+
+      return { aspectRatio: ratio, tracks: newTracks };
+    });
+    get().saveSnapshot('Reframe Project');
+  },
+
 
   // Recalculate total duration from all clips and clean up empty custom tracks
   recalcTotalDuration: () => {
@@ -2201,4 +2614,54 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       beatMarkers: state.beatMarkers.filter((b) => b.clipId !== clipId),
     }));
   },
+
+  // Layout Presets
+  setWorkspaceLayout: (layout) => {
+    set({ workspaceLayout: layout });
+  },
+
+  // Compound Clips
+  enterCompoundClip: (clipId) => {
+    const { tracks, timelineStack, mediaLibrary } = get();
+    const clip = tracks.flatMap(t => t.clips).find(c => c.id === clipId) || 
+                 tracks.flatMap(t => t.overLayers).find(o => o.id === clipId);
+    if (!clip || !clip.mediaId) return;
+    
+    const media = mediaLibrary.find(m => m.id === clip.mediaId);
+    if (!media || media.type !== 'compound') return;
+
+    set({
+      timelineStack: [...timelineStack, { tracks: JSON.parse(JSON.stringify(tracks)), compoundMediaId: media.id }],
+      tracks: media.nestedTimeline ? JSON.parse(JSON.stringify(media.nestedTimeline)) : [],
+      currentTime: 0,
+      selectedClipId: null,
+      selectedClipIds: [],
+      selectedOverLayerId: null
+    });
+    get().recalcTotalDuration();
+  },
+
+  exitCompoundClip: () => {
+    const { tracks, timelineStack, mediaLibrary, updateMediaMetadata } = get();
+    if (timelineStack.length === 0) return;
+
+    const currentStackItem = timelineStack[timelineStack.length - 1];
+    
+    // Save current tracks to the compound media item
+    updateMediaMetadata(currentStackItem.compoundMediaId, {
+      nestedTimeline: JSON.parse(JSON.stringify(tracks))
+    });
+
+    // Pop the stack and restore the parent tracks
+    const newStack = timelineStack.slice(0, -1);
+    set({
+      timelineStack: newStack,
+      tracks: currentStackItem.tracks,
+      currentTime: 0,
+      selectedClipId: null,
+      selectedClipIds: [],
+      selectedOverLayerId: null
+    });
+    get().recalcTotalDuration();
+  }
 }));

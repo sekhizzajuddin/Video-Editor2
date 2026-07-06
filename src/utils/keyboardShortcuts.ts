@@ -37,8 +37,12 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcutDef[] = [
   { id: 'split_clip', label: 'Split Clip at Playhead', category: 'Timeline Editing', defaultKey: 'Ctrl+k' },
   { id: 'delete_selected', label: 'Delete Selected Clip/Transition', category: 'Timeline Editing', defaultKey: 'Delete' },
   { id: 'cut_clip', label: 'Cut Clip', category: 'Timeline Editing', defaultKey: 'Ctrl+x' },
-  { id: 'copy_clip', label: 'Copy Clip', category: 'Timeline Editing', defaultKey: 'Ctrl+c' },
-  { id: 'paste_clip', label: 'Paste Clip', category: 'Timeline Editing', defaultKey: 'Ctrl+v' },
+  { id: 'copy_clip_whole', label: 'Copy (Whole)', category: 'Timeline Editing', defaultKey: 'Ctrl+c' },
+  { id: 'copy_clip_base', label: 'Copy Clip (Base)', category: 'Timeline Editing', defaultKey: 'Ctrl+Shift+C' },
+  { id: 'copy_clip_style', label: 'Copy Style', category: 'Timeline Editing', defaultKey: 'Ctrl+Alt+C' },
+  { id: 'paste_clip_whole', label: 'Paste (Whole)', category: 'Timeline Editing', defaultKey: 'Ctrl+v' },
+  { id: 'paste_clip_base', label: 'Paste Clip (Base)', category: 'Timeline Editing', defaultKey: 'Ctrl+Shift+V' },
+  { id: 'paste_clip_style', label: 'Paste Style', category: 'Timeline Editing', defaultKey: 'Ctrl+Alt+V' },
   { id: 'duplicate_clip', label: 'Duplicate Selected Clip', category: 'Timeline Editing', defaultKey: 'Ctrl+d' },
   { id: 'select_all_clips_forward', label: 'Select Clips Forward', category: 'Timeline Editing', defaultKey: 'Alt+ArrowRight' },
   { id: 'select_all_clips_backward', label: 'Select Clips Backward', category: 'Timeline Editing', defaultKey: 'Alt+ArrowLeft' },
@@ -51,6 +55,29 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcutDef[] = [
   { id: 'redo', label: 'Redo Action', category: 'System', defaultKey: 'Ctrl+Shift+z' },
   { id: 'redo_alt', label: 'Redo Action (Alt)', category: 'System', defaultKey: 'Ctrl+y' },
 ];
+
+export const SHORTCUT_PROFILES: Record<string, Record<string, string>> = {
+  'Default': {},
+  'Premiere Pro': {
+    'tool_select': 'v',
+    'tool_split': 'c',
+    'tool_track_select': 'a',
+    'split_clip': 'Ctrl+k',
+    'undo': 'Ctrl+z',
+  },
+  'Final Cut Pro': {
+    'tool_select': 'a',
+    'tool_split': 'b',
+    'split_clip': 'Ctrl+b',
+    'zoom_timeline_in': 'Ctrl+=',
+    'zoom_timeline_out': 'Ctrl+-',
+  },
+  'DaVinci Resolve': {
+    'tool_select': 'a',
+    'tool_split': 'b',
+    'split_clip': 'Ctrl+\\',
+  }
+};
 
 export function getShortcutString(e: KeyboardEvent | React.KeyboardEvent): string {
   const parts: string[] = [];

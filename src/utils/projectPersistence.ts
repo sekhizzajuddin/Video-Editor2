@@ -11,13 +11,89 @@ import { MediaItem, TimelineTrack } from '@/types';
 const DB_NAME = 'procut_editor_db';
 const DB_VERSION = 3; // Bumped to handle new autosaves object store
 
+let activeProjectId: string = 'default';
 let dbInstance: IDBDatabase | null = null;
+
+export function setActiveProject(id: string) {
+  if (activeProjectId !== id) {
+    activeProjectId = id;
+    if (dbInstance) {
+      dbInstance.close();
+      dbInstance = null;
+    }
+  }
+}
+
+// Global DB for storing the list of recent projects
+const GLOBAL_DB_NAME = 'procut_global_db';
+let globalDbInstance: IDBDatabase | null = null;
+
+export interface ProjectMetadata {
+  id: string;
+  name: string;
+  lastModified: number;
+}
+
+function getGlobalDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (globalDbInstance) return resolve(globalDbInstance);
+    const request = indexedDB.open(GLOBAL_DB_NAME, 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      globalDbInstance = request.result;
+      resolve(request.result);
+    };
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('projects')) {
+        db.createObjectStore('projects', { keyPath: 'id' });
+      }
+    };
+  });
+}
+
+export async function listRecentProjects(): Promise<ProjectMetadata[]> {
+  const db = await getGlobalDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('projects', 'readonly');
+    const store = transaction.objectStore('projects');
+    const request = store.getAll();
+    request.onsuccess = () => resolve((request.result as ProjectMetadata[]).sort((a,b) => b.lastModified - a.lastModified));
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveProjectMeta(meta: ProjectMetadata): Promise<void> {
+  const db = await getGlobalDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('projects', 'readwrite');
+    const store = transaction.objectStore('projects');
+    const request = store.put(meta);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteProjectMeta(id: string): Promise<void> {
+  const db = await getGlobalDB();
+  // Also delete the actual DB!
+  indexedDB.deleteDatabase(`procut_editor_db_${id}`);
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('projects', 'readwrite');
+    const store = transaction.objectStore('projects');
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
 
 function getDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (dbInstance) return resolve(dbInstance);
 
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const dbName = activeProjectId === 'default' ? DB_NAME : `${DB_NAME}_${activeProjectId}`;
+    const request = indexedDB.open(dbName, DB_VERSION);
 
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
@@ -106,6 +182,7 @@ export function generateFileHash(file: File): string {
 export async function saveProjectToDB(data: {
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
+  folders?: any[]; // Making it optional for backward compatibility
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
 }): Promise<void> {
@@ -216,6 +293,7 @@ export async function restoreSnapshotMedia(snapshot: {
 export async function loadProjectFromDB(): Promise<{
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
+  folders?: any[];
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
 } | null> {

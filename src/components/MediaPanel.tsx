@@ -40,11 +40,13 @@ import {
   Code2,
   ChevronDown,
   ChevronRight,
+  Square,
 } from 'lucide-react';
 import React from 'react';
 
 
 import { useEditorStore } from '@/store/editorStore';
+import { TranscriptPanel } from './TranscriptPanel';
 import { useState, useRef, useCallback } from 'react';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
@@ -185,6 +187,7 @@ export function MediaPanel() {
     loadProjectTemplate,
   } = useEditorStore();
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -214,6 +217,68 @@ export function MediaPanel() {
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
 
+  const [isRecordingScreen, setIsRecordingScreen] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  const startScreenRecord = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const file = new File([blob], 'Screen Record.webm', { type: 'video/webm' });
+        
+        setImporting(true);
+        try {
+          const url = URL.createObjectURL(file);
+          const meta = await probeFile(file);
+          const id = 'rec_' + Date.now();
+          await saveFileToDB(id, file); // Save to OPFS/IDB for persistence
+          
+          addMedia({
+            id,
+            name: 'Screen Record.webm',
+            type: 'video',
+            url,
+            duration: meta.duration,
+            width: meta.width,
+            height: meta.height,
+            frameRate: meta.frameRate,
+            createdAt: Date.now()
+          });
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setImporting(false);
+          setIsRecordingScreen(false);
+        }
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecordingScreen(true);
+
+      stream.getVideoTracks()[0].onended = () => {
+        if (recorder.state === 'recording') recorder.stop();
+      };
+    } catch (err) {
+      console.error(err);
+      setIsRecordingScreen(false);
+    }
+  };
+
+  const stopScreenRecord = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+    }
+  };
+
   // FIX M25: Cancel speechSynthesis when component unmounts to prevent audio leaks
   useEffect(() => {
     return () => {
@@ -224,6 +289,7 @@ export function MediaPanel() {
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Project', icon: Folder },
     { id: 'text', label: 'Text', icon: Type },
+    { id: 'transcript', label: 'Transcript', icon: List as any },
     { id: 'audio', label: 'Audio', icon: Music },
     { id: 'templates', label: 'Templates', icon: Clapperboard },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
@@ -329,79 +395,8 @@ export function MediaPanel() {
       }
 
       const store = useEditorStore.getState();
-      
-      // 1. Create a new text track
-      store.addTrack('text');
-      
-      // FIX C7: Read fresh state AFTER addTrack to avoid stale closure
-      const freshState = useEditorStore.getState();
-      const textTracks = freshState.tracks.filter(t => t.type === 'text');
-      const targetTrack = textTracks[textTracks.length - 1];
-      if (!targetTrack) return;
-
-      // 3. Generate text clips in one batch
-      const newClips = parsed.map((sub, idx) => {
-        const mediaId = `sub_media_${idx}_${Math.random().toString(36).substr(2, 9)}`;
-        store.addMedia({
-          id: mediaId,
-          name: `Subtitle ${idx + 1}`,
-          type: 'text',
-          duration: sub.duration,
-          url: '',
-          createdAt: Date.now(),
-          textContent: sub.text,
-        });
-
-        const clipId = `sub_clip_${idx}_${Math.random().toString(36).substr(2, 9)}`;
-
-        return {
-          id: clipId,
-          mediaId,
-          trackId: targetTrack.id,
-          startTime: sub.startTime,
-          duration: sub.duration,
-          trimStart: 0,
-          trimEnd: 0,
-          transform: { x: 0, y: 160, scale: 100, rotation: 0 }, 
-          opacity: 1,
-          speed: 1,
-          effects: [],
-          textSettings: {
-            text: sub.text,
-            fontFamily: 'Inter',
-            fontSize: 22,
-            color: '#ffffff',
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            bold: false,
-            italic: false,
-            underline: false,
-            shadow: true,
-            shadowColor: '#000000',
-            shadowBlur: 3,
-            threeD: false,
-            threeDDepth: 0,
-            textAlign: 'center',
-          }
-        } as import('@/types').TimelineClip;
-      });
-
-      // 4. Update the tracks state and save to snapshot
-      useEditorStore.setState(state => {
-        const finalTracks = state.tracks.map(t => {
-          if (t.id === targetTrack.id) {
-            return {
-              ...t,
-              name: 'Subtitles',
-              clips: newClips,
-            };
-          }
-          return t;
-        });
-        return { tracks: finalTracks };
-      });
-
-      store.recalcTotalDuration();
-      store.saveSnapshot();
+      store.importSubtitles(parsed);
+      store.recalcTotalDuration?.(); // If it exists
       alert(`Imported ${parsed.length} subtitles onto a new 'Subtitles' track!`);
     };
 
@@ -694,7 +689,6 @@ export function MediaPanel() {
           useEditorStore.getState().addMedia(finalMediaItem);
         }
 
-        // Revoke the intermediate URL now that the file is saved
         URL.revokeObjectURL(audioUrl);
         audioEl.src = '';
         audioEl.remove();
@@ -704,7 +698,7 @@ export function MediaPanel() {
         setActiveMediaTab('project');
       };
 
-      const metaTimeout = window.setTimeout(settle, 5000); // 5-second fallback
+      const metaTimeout = window.setTimeout(settle, 5000);
       audioEl.addEventListener('loadedmetadata', settle, { once: true });
       audioEl.addEventListener('error', settle, { once: true });
     } catch (err: any) {
@@ -716,6 +710,7 @@ export function MediaPanel() {
 
   return (
     <div
+      data-help-id="media-panel"
       className="h-full flex flex-col bg-[#252525] border-r border-[#3e3e3e]"
       onDragOver={handleZoneDragOver}
       onDragLeave={handleZoneDragLeave}
@@ -756,7 +751,7 @@ export function MediaPanel() {
           </div>
         )}
 
-        {/* Import progress */}
+                {/* Import progress */}
         {importing && (
           <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin" />
@@ -779,9 +774,11 @@ export function MediaPanel() {
                 />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-[#a0a0a0]">
-                  {filteredMedia.length} items
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-[#a0a0a0]">
+                    {filteredMedia.length} items
+                  </span>
+                </div>
                 <div className="flex bg-[#1e1e1e] rounded border border-[#3e3e3e]">
                   <button
                     onClick={() => setViewMode('grid')}
@@ -828,6 +825,17 @@ export function MediaPanel() {
                 >
                   <Type className="w-3 h-3 text-purple-400" />
                   Import Subtitles
+                </button>
+              </div>
+              <div className="flex px-2 mt-2 gap-2">
+                <button
+                  onClick={isRecordingScreen ? stopScreenRecord : startScreenRecord}
+                  disabled={importing}
+                  className={`flex-1 py-2 border-2 ${isRecordingScreen ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-dashed border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-red-500'} rounded text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50`}
+                  title="Record Screen"
+                >
+                  {isRecordingScreen ? <Square className="w-3 h-3 text-red-400" /> : <Monitor className="w-3 h-3 text-red-400" />}
+                  {isRecordingScreen ? 'Stop Recording' : 'Record Screen'}
                 </button>
               </div>
 
@@ -1068,6 +1076,11 @@ export function MediaPanel() {
           </>
         )}
 
+
+        {activeMediaTab === 'transcript' && (
+          <TranscriptPanel />
+        )}
+
         {activeMediaTab === 'audio' && (
           <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin">
             {/* Timeline Voiceover Info */}
@@ -1246,7 +1259,18 @@ export function MediaPanel() {
         )}
 
         {activeMediaTab === 'text' && (
-          <div className="flex-1 overflow-y-auto p-2">
+          <div className="flex-1 overflow-y-auto flex flex-col p-2">
+            <div className="mb-4">
+              <button
+                onClick={() => srtInputRef.current?.click()}
+                disabled={importing}
+                className="w-full py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-purple-500 text-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                title="Import Subtitles (.srt file) and auto-sync"
+              >
+                <Type className="w-4 h-4 text-purple-400" />
+                Import .SRT Subtitles
+              </button>
+            </div>
             <p className="text-xs text-[#a0a0a0] mb-3">Click to add text at playhead</p>
             <div className="flex flex-col gap-2">
               {TEXT_TEMPLATES.map((template) => (

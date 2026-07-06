@@ -1,3 +1,4 @@
+import { applyAiBackgroundMask } from '../utils/aiBackground';
 import {
   Play,
   Pause,
@@ -9,17 +10,23 @@ import {
   Minimize2,
   Settings2,
   Film,
+  Camera,
   RotateCcw,
   Scissors,
   Grid,
+  ExternalLink,
+  X,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useMediaPlayback, FrameCacheEntry } from '@/hooks/useMediaPlayback';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatTime } from '@/utils/time';
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { ColorScopes } from './ColorScopes';
+import { ThumbnailModal } from './ThumbnailModal';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { applyLutToCanvas } from '@/utils/lutParser';
+import { drawSubscribeAnimation } from '@/utils/socialAnimations';
 
 // ---------------------------------------------------------------------------
 // Image cache – shared across renders, keyed by mediaId.
@@ -590,6 +597,12 @@ export function PreviewCanvas() {
     isExporting,
     exportWidth,
     exportHeight,
+    showScopes,
+    setShowScopes,
+    showProgressBar,
+    progressBarColor,
+    progressBarHeight,
+    useProxies,
   } = useEditorStore();
 
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
@@ -629,7 +642,7 @@ export function PreviewCanvas() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const [showSafeZones, setShowSafeZones] = useState(false);
+  
   const [showGrid, setShowGrid] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
@@ -829,7 +842,7 @@ export function PreviewCanvas() {
   // -------------------------------------------------------------------
   // Canvas rendering – called whenever time, tracks, or images change
   // -------------------------------------------------------------------
-  const renderCanvas = useCallback(() => {
+  const renderCanvas = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -969,8 +982,41 @@ export function PreviewCanvas() {
 
     let anyClipDrawn = false;
 
+    // Helper to apply masking
+    const applyClipMask = (context: CanvasRenderingContext2D, mask: any, dx: number, dy: number, dw: number, dh: number) => {
+      if (!mask || !mask.enabled) return;
+      context.beginPath();
+      if (mask.type === 'rectangle') {
+        const mx = dx + (mask.x / 100) * dw - (mask.width / 100) * dw / 2;
+        const my = dy + (mask.y / 100) * dh - (mask.height / 100) * dh / 2;
+        const mw = (mask.width / 100) * dw;
+        const mh = (mask.height / 100) * dh;
+        context.rect(mx, my, mw, mh);
+      } else if (mask.type === 'circle') {
+        const mx = dx + (mask.x / 100) * dw;
+        const my = dy + (mask.y / 100) * dh;
+        const mr = (mask.width / 100) * Math.min(dw, dh) / 2;
+        context.arc(mx, my, mr, 0, Math.PI * 2);
+      } else if (mask.type === 'path' && mask.points?.length > 0) {
+        mask.points.forEach((pt: any, i: number) => {
+          const px = dx + (pt.x / 100) * dw;
+          const py = dy + (pt.y / 100) * dh;
+          if (i === 0) context.moveTo(px, py);
+          else context.lineTo(px, py);
+        });
+        context.closePath();
+      }
+      
+      if (mask.invert) {
+        context.rect(dx - 10000, dy - 10000, dw + 20000, dh + 20000);
+        context.clip('evenodd');
+      } else {
+        context.clip();
+      }
+    };
+
     // Helper to draw a single clip with custom opacity/transform multipliers
-    const drawSingleClip = (
+    const drawSingleClip = async (
       clip: any,
       opacityMultiplier: number = 1,
       extraTransform?: { translateX?: number; translateY?: number; scale?: number }
@@ -991,7 +1037,22 @@ export function PreviewCanvas() {
       if (!mediaItem) return;
 
       // Get animated values
-      const aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.opacity);
+            let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity']);
+      
+      const localTime = currentTime - clip.startTime;
+      if (clip.transitionIn?.type === 'dissolve' && localTime < 1 && localTime >= 0) {
+        aOpacity *= (localTime / 1);
+      } else if (clip.transitionOut?.type === 'dissolve' && localTime > clip.duration - 1 && localTime <= clip.duration) {
+        aOpacity *= ((clip.duration - localTime) / 1);
+      }
+      
+      let slideX = 0;
+      if (clip.transitionIn?.type === 'slide' && localTime < 1 && localTime >= 0) {
+        slideX = (1 - (localTime / 1)) * -1000;
+      } else if (clip.transitionOut?.type === 'slide' && localTime > clip.duration - 1 && localTime <= clip.duration) {
+        slideX = ((localTime - (clip.duration - 1)) / 1) * 1000;
+      }
+
       const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
       const aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
       const aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
@@ -1019,16 +1080,36 @@ export function PreviewCanvas() {
       if (hasPerspectiveWarp) {
         if (clip.transform.perspectivePin) {
           const pc = clip.transform.perspectiveCorners || { x0: 0, y0: 0, x1: 854, y1: 0, x2: 854, y2: 480, x3: 0, y3: 480 };
-          corners = {
-            x0: getAnimatedValue(pc.x0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x0']),
-            y0: getAnimatedValue(pc.y0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y0']),
-            x1: getAnimatedValue(pc.x1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x1']),
-            y1: getAnimatedValue(pc.y1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y1']),
-            x2: getAnimatedValue(pc.x2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x2']),
-            y2: getAnimatedValue(pc.y2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y2']),
-            x3: getAnimatedValue(pc.x3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x3']),
-            y3: getAnimatedValue(pc.y3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y3']),
-          };
+          
+          let trackedCorners = null;
+          const trackingData = clip.transform.perspectiveTrackingData;
+          if (trackingData && trackingData.length > 0) {
+            // Find closest frame data
+            const localTime = currentTime - clip.startTime;
+            let closestDist = Infinity;
+            for (const pt of trackingData) {
+              const dist = Math.abs(pt.time - localTime);
+              if (dist < closestDist) {
+                closestDist = dist;
+                trackedCorners = pt.corners;
+              }
+            }
+          }
+
+          if (trackedCorners) {
+            corners = { ...trackedCorners };
+          } else {
+            corners = {
+              x0: getAnimatedValue(pc.x0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x0']),
+              y0: getAnimatedValue(pc.y0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y0']),
+              x1: getAnimatedValue(pc.x1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x1']),
+              y1: getAnimatedValue(pc.y1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y1']),
+              x2: getAnimatedValue(pc.x2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x2']),
+              y2: getAnimatedValue(pc.y2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y2']),
+              x3: getAnimatedValue(pc.x3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x3']),
+              y3: getAnimatedValue(pc.y3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y3']),
+            };
+          }
         } else {
           // Calculate projected corners from 3D rotation
           const vw = mediaItem.width || 854;
@@ -1147,6 +1228,19 @@ export function PreviewCanvas() {
           oCtx.clip();
 
           if (mediaItem.type === 'video') {
+          if (useProxies) {
+             ctx.save();
+             ctx.setTransform(1,0,0,1,0,0);
+             ctx.fillStyle = 'rgba(0,0,0,0.5)';
+             ctx.fillRect(10, 10, 80, 30);
+             ctx.fillStyle = '#10b981';
+             ctx.font = '16px monospace';
+             ctx.textAlign = 'left';
+             ctx.textBaseline = 'top';
+             ctx.fillText('[PROXY]', 15, 15);
+             ctx.restore();
+          }
+
             const videoEl = videoElements.get(clip.id);
             if (videoEl && videoEl.readyState >= 2) {
               const vw = videoEl.videoWidth || w;
@@ -1576,13 +1670,17 @@ export function PreviewCanvas() {
           const dx = -baseDw / 2 + baseDw * cLeft;
           const dy = -baseDh / 2 + baseDh * cTop;
 
+          applyClipMask(ctx, clip.mask, dx, dy, dw, dh);
+
           // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
+          const hasAiBg = clip.aiBackground?.enabled;
           const hasChroma = clip.chromaKey?.enabled;
+          const hasLuma = clip.lumaKey?.enabled;
           const hasLut = !!clip.lut?.mediaId;
           const hasFx = !!activeFxClip;
-          const needsOffscreen = hasWheels || hasChroma || hasLut || hasFx;
+          const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg;
 
           if (hasPerspectiveWarp && corners) {
             const offscreenWidth = Math.max(1, Math.round(sw));
@@ -1592,8 +1690,14 @@ export function PreviewCanvas() {
             if (oCtx) {
               oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
-              if (hasChroma && clip.chromaKey) {
+                if (hasAiBg) {
+                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource, clip.aiBackground?.edgeBlur);
+                }
+                if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+              }
+              if (hasLuma && clip.lumaKey) {
+                applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);
               }
               if (hasWheels) {
                 applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
@@ -1618,8 +1722,14 @@ export function PreviewCanvas() {
               if (oCtx) {
                 oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
                 oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
+                if (hasAiBg) {
+                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource, clip.aiBackground?.edgeBlur);
+                }
                 if (hasChroma && clip.chromaKey) {
                   applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                }
+                if (hasLuma && clip.lumaKey) {
+                  applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);
                 }
                 if (hasWheels) {
                   applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
@@ -1694,13 +1804,17 @@ export function PreviewCanvas() {
           }
           // ─────────────────────────────────────────────────────
 
+          applyClipMask(ctx, clip.mask, dx, dy, dw, dh);
+
           // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
+          const hasAiBg = clip.aiBackground?.enabled;
           const hasChroma = clip.chromaKey?.enabled;
+          const hasLuma = clip.lumaKey?.enabled;
           const hasLut = !!clip.lut?.mediaId;
           const hasFx = !!activeFxClip;
-          const needsOffscreen = hasWheels || hasChroma || hasLut || hasFx;
+          const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg;
 
           if (hasPerspectiveWarp && corners) {
             const offscreenWidth = Math.max(1, Math.round(sw));
@@ -1710,8 +1824,14 @@ export function PreviewCanvas() {
             if (oCtx) {
               oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
-              if (hasChroma && clip.chromaKey) {
+                if (hasAiBg) {
+                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, img, clip.aiBackground?.edgeBlur);
+                }
+                if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+              }
+              if (hasLuma && clip.lumaKey) {
+                applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);
               }
               if (hasWheels) {
                 applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
@@ -1736,8 +1856,14 @@ export function PreviewCanvas() {
               if (oCtx) {
                 oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
                 oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
+                if (hasAiBg) {
+                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, img, clip.aiBackground?.edgeBlur);
+                }
                 if (hasChroma && clip.chromaKey) {
                   applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                }
+                if (hasLuma && clip.lumaKey) {
+                  applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);
                 }
                 if (hasWheels) {
                   applyColorGradingWheelsOnData(oCtx, offscreen.width, offscreen.height, filters.shadows, filters.midtones, filters.highlights);
@@ -1771,9 +1897,18 @@ export function PreviewCanvas() {
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'IMAGE', '#f59e0b');
           anyClipDrawn = true;
         }
+      } else if (mediaItem.type === 'compound') {
+        drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'COMPOUND CLIP', '#8b5cf6');
+        anyClipDrawn = true;
       } else if (mediaItem.type === 'text') {
         // Use clip textSettings or fall back to sensible defaults so text is always visible
         const rawTs = clip.textSettings as any;
+        if (rawTs?.animationPreset === 'subscribe') {
+          const localTime = Math.max(0, currentTime - clip.startTime);
+          drawSubscribeAnimation(ctx, localTime, clip.duration, dw, dh);
+          ctx.restore();
+          return;
+        }
         const ts = {
           text: String(rawTs?.text ?? 'Sample Text'),
           fontSize: Math.max(8, Number(rawTs?.fontSize) || 48),
@@ -1842,6 +1977,16 @@ export function PreviewCanvas() {
         }
 
         // ── Multiline split ───────────────────────────────────────────────
+                
+        if (rawTs?.animationPreset === 'typewriter') {
+          const totalChars = displayText.length;
+          displayText = displayText.slice(0, Math.floor(inProgress * totalChars));
+        } else if (rawTs?.animationPreset === 'bounce') {
+          const bounceFactor = inProgress < 0.6 ? 0.3 * Math.sin(inProgress * Math.PI / 0.6)
+                             : inProgress < 0.9 ? -0.1 * Math.sin((inProgress - 0.6) * Math.PI / 0.3) : 0;
+          textScale *= (1 + bounceFactor);
+        }
+        
         const lines = displayText.split('\n');
         const lineHeight = ts.fontSize * 1.35;
 
@@ -1937,10 +2082,13 @@ export function PreviewCanvas() {
       ctx.restore();
     };
 
-    // Helper function to draw main clips on a list of tracks
-    const drawMainClipsForTracks = (tracksList: any[]) => {
-      for (const track of tracksList) {
-        const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+    // Array to queue rendering operations, allowing them to be sorted by zIndex
+    const drawQueue: { zIndex: number; fn: () => Promise<void> }[] = [];
+
+    // Helper function to queue main clips on a list of tracks
+    const queueMainClipsForTracks = (tracksList: any[], isText: boolean) => {
+      tracksList.forEach((track, trackIdx) => {
+        const sortedClips = [...track.clips].filter(c => !c.disabled).sort((a, b) => a.startTime - b.startTime);
         let activeTransition: { clipA: any; clipB: any; trans: any; t: number } | null = null;
 
         // Check if currentTime falls into any active transition zone
@@ -1971,104 +2119,169 @@ export function PreviewCanvas() {
         }
 
         if (activeTransition) {
-          try {
-            const { clipA, clipB, trans, t } = activeTransition;
-            const type = trans.type;
-            const nameLower = trans.name.toLowerCase();
+          const { clipA, clipB, trans, t } = activeTransition;
+          const z = clipB.zIndex ?? (trackIdx * 10 + (isText ? 1000 : 0));
+          
+          drawQueue.push({
+            zIndex: z,
+            fn: async () => {
+              try {
+                const type = trans.type;
+                const nameLower = trans.name.toLowerCase();
 
-            if (nameLower.includes('dissolve')) {
-              drawSingleClip(clipA, 1 - t);
-              drawSingleClip(clipB, t);
-            } else if (nameLower.includes('fade')) {
-              if (t < 0.5) {
-                drawSingleClip(clipA, 1 - t * 2);
-              } else {
-                drawSingleClip(clipB, (t - 0.5) * 2);
+                if (nameLower.includes('dissolve')) {
+                  await drawSingleClip(clipA, 1 - t);
+                  await drawSingleClip(clipB, t);
+                } else if (nameLower.includes('fade')) {
+                  if (t < 0.5) {
+                    await drawSingleClip(clipA, 1 - t * 2);
+                  } else {
+                    await drawSingleClip(clipB, (t - 0.5) * 2);
+                  }
+                } else if (type === 'wipe') {
+                  if (nameLower.includes('left')) {
+                    await drawSingleClip(clipA, 1);
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(W * (1 - t), 0, W * t, H);
+                    ctx.clip();
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
+                  } else {
+                    await drawSingleClip(clipA, 1);
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(0, 0, W * t, H);
+                    ctx.clip();
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
+                  }
+                } else if (type === 'slide') {
+                  if (nameLower.includes('up')) {
+                    await drawSingleClip(clipA, 1, { translateY: -H * t });
+                    await drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
+                  } else if (nameLower.includes('down')) {
+                    await drawSingleClip(clipA, 1, { translateY: H * t });
+                    await drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
+                  } else {
+                    await drawSingleClip(clipA, 1, { translateX: -W * t });
+                    await drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
+                  }
+                } else if (type === 'zoom') {
+                  if (nameLower.includes('out')) {
+                    await drawSingleClip(clipB, 1);
+                    await drawSingleClip(clipA, 1 - t, { scale: 1 - t });
+                    await drawSingleClip(clipB, t, { scale: t });
+                  }
+                } else {
+                  await drawSingleClip(clipA, 1 - t);
+                  await drawSingleClip(clipB, t);
+                }
+              } catch (err) {
+                console.error('[CanvasRenderError] Failed to draw transition:', err);
+                try { ctx.restore(); } catch (_) {}
               }
-            } else if (type === 'wipe') {
-              if (nameLower.includes('left')) {
-                drawSingleClip(clipA, 1);
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(W * (1 - t), 0, W * t, H);
-                ctx.clip();
-                drawSingleClip(clipB, 1);
-                ctx.restore();
-              } else {
-                drawSingleClip(clipA, 1);
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(0, 0, W * t, H);
-                ctx.clip();
-                drawSingleClip(clipB, 1);
-                ctx.restore();
-              }
-            } else if (type === 'slide') {
-              if (nameLower.includes('up')) {
-                drawSingleClip(clipA, 1, { translateY: -H * t });
-                drawSingleClip(clipB, 1, { translateY: H * (1 - t) });
-              } else if (nameLower.includes('down')) {
-                drawSingleClip(clipA, 1, { translateY: H * t });
-                drawSingleClip(clipB, 1, { translateY: -H * (1 - t) });
-              } else {
-                drawSingleClip(clipA, 1, { translateX: -W * t });
-                drawSingleClip(clipB, 1, { translateX: W * (1 - t) });
-              }
-            } else if (type === 'zoom') {
-              if (nameLower.includes('out')) {
-                drawSingleClip(clipB, 1);
-                drawSingleClip(clipA, 1 - t, { scale: 1 - t });
-                drawSingleClip(clipB, t, { scale: t });
-              }
-            } else {
-              drawSingleClip(clipA, 1 - t);
-              drawSingleClip(clipB, t);
             }
-          } catch (err) {
-            console.error('[CanvasRenderError] Failed to draw transition:', err);
-            try { ctx.restore(); } catch (_) {}
-          }
-          continue;
+          });
+          return;
         }
 
         const clip = sortedClips.find(
           (c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration,
         );
         if (clip) {
-          try {
-            drawSingleClip(clip, 1);
-          } catch (err) {
-            console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
-            try { ctx.restore(); } catch (_) {}
-          }
+          const z = clip.zIndex ?? (trackIdx * 10 + (isText ? 1000 : 0));
+          drawQueue.push({
+            zIndex: z,
+            fn: async () => {
+              try {
+                let opacityMultiplier = 1;
+                
+                // Handle single-clip transition In (fade, etc)
+                if (clip.transitionIn) {
+                  const trans = clip.transitionIn;
+                  const duration = trans.duration || 1.0;
+                  const alignment = trans.params?.alignment || 'center';
+                  let leftSec = clip.startTime - duration / 2;
+                  if (alignment === 'left') leftSec = clip.startTime;
+                  else if (alignment === 'right') leftSec = clip.startTime - duration;
+                  const rightSec = leftSec + duration;
+                  
+                  if (currentTime >= leftSec && currentTime < rightSec) {
+                    const t = (currentTime - leftSec) / duration;
+                    if (trans.name.toLowerCase().includes('fade') || trans.name.toLowerCase().includes('dissolve')) {
+                      opacityMultiplier = t;
+                    }
+                  }
+                }
+                
+                // Handle single-clip transition Out
+                if (clip.transitionOut && opacityMultiplier === 1) {
+                  const trans = clip.transitionOut;
+                  const duration = trans.duration || 1.0;
+                  const alignment = trans.params?.alignment || 'center';
+                  let leftSec = (clip.startTime + clip.duration) - duration / 2;
+                  if (alignment === 'left') leftSec = (clip.startTime + clip.duration);
+                  else if (alignment === 'right') leftSec = (clip.startTime + clip.duration) - duration;
+                  const rightSec = leftSec + duration;
+                  
+                  if (currentTime >= leftSec && currentTime < rightSec) {
+                    const t = (currentTime - leftSec) / duration;
+                    if (trans.name.toLowerCase().includes('fade') || trans.name.toLowerCase().includes('dissolve')) {
+                      opacityMultiplier = 1 - t;
+                    }
+                  }
+                }
+
+                await drawSingleClip(clip, opacityMultiplier);
+              } catch (err) {
+                console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
+                try { ctx.restore(); } catch (_) {}
+              }
+            }
+          });
         }
-      }
+      });
     };
 
-    const drawOverLayersForTracks = (tracksList: any[]) => {
-      for (const track of tracksList) {
+    const queueOverLayersForTracks = (tracksList: any[], isText: boolean) => {
+      tracksList.forEach((track, trackIdx) => {
         const activeOverLayers = (track.overLayers || []).filter(
-          (ol: any) => ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration
+          (ol: any) => !ol.disabled && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration
         );
 
         for (const ol of activeOverLayers) {
-          try {
-            drawSingleClip(ol as any, 1);
-          } catch (err) {
-            console.error('[CanvasRenderError] Failed to draw over layer:', ol.id, err);
-            try { ctx.restore(); } catch (_) {}
-          }
+          const z = ol.zIndex ?? (trackIdx * 10 + 5 + (isText ? 1000 : 0));
+          drawQueue.push({
+            zIndex: z,
+            fn: async () => {
+              try {
+                await drawSingleClip(ol as any, 1);
+              } catch (err) {
+                console.error('[CanvasRenderError] Failed to draw over layer:', ol.id, err);
+                try { ctx.restore(); } catch (_) {}
+              }
+            }
+          });
         }
-      }
+      });
     };
 
-    // Render Video tracks first (Pass 1 & 2 for video)
-    drawMainClipsForTracks(videoTracks);
-    drawOverLayersForTracks(videoTracks);
+    // Queue Video tracks
+    queueMainClipsForTracks(videoTracks, false);
+    queueOverLayersForTracks(videoTracks, false);
 
-    // Render Text tracks second (Pass 3 & 4 for text) so they are ALWAYS on top of video clips AND video overlayers
-    drawMainClipsForTracks(textTracks);
-    drawOverLayersForTracks(textTracks);
+    // Queue Text tracks (Default 1000+ zIndex)
+    queueMainClipsForTracks(textTracks, true);
+    queueOverLayersForTracks(textTracks, true);
+
+    // Sort by Z-Index (ascending: lowest drawn first, highest drawn last)
+    drawQueue.sort((a, b) => a.zIndex - b.zIndex);
+
+    // Execute drawing queue in order
+    for (const task of drawQueue) {
+      await task.fn();
+    }
 
     if (!anyClipDrawn) {
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
@@ -2084,12 +2297,12 @@ export function PreviewCanvas() {
     // 3b. Render particles for any clip that has particleSettings
     for (const track of visualTracks) {
       for (const clip of track.clips) {
-        if (clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+        if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
           renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs);
         }
       }
       for (const ol of track.overLayers || []) {
-        if (ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
+        if (!ol.disabled && ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
           renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs);
         }
       }
@@ -2113,6 +2326,7 @@ export function PreviewCanvas() {
       }
       for (const ol of track.overLayers || []) {
         if (
+          !ol.disabled &&
           ol.lut?.mediaId &&
           currentTime >= ol.startTime &&
           currentTime < ol.startTime + ol.duration
@@ -2129,6 +2343,98 @@ export function PreviewCanvas() {
 
     // ── Grid Overlay ────────────────────────────────────────────────────
     if (showGrid) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+
+      const COLS = 4;
+      const ROWS = 3;
+      const cellW = W / COLS;
+      const cellH = H / ROWS;
+
+      // Thin grid lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+
+      for (let c = 1; c < COLS; c++) {
+        ctx.beginPath();
+        ctx.moveTo(offsetX + c * cellW, offsetY);
+        ctx.lineTo(offsetX + c * cellW, offsetY + H);
+        ctx.stroke();
+      }
+      for (let r = 1; r < ROWS; r++) {
+        ctx.beginPath();
+        ctx.moveTo(offsetX, offsetY + r * cellH);
+        ctx.lineTo(offsetX + W, offsetY + r * cellH);
+        ctx.stroke();
+      }
+
+      // Center crosshair
+      ctx.strokeStyle = 'rgba(251,191,36,0.5)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+    }
+
+    if (!anyClipDrawn && !isExporting) {
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.font = '14px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('No clip at current position', W / 2, H / 2 - 10);
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillText('Add clips to the timeline to preview', W / 2, H / 2 + 12);
+    }
+    
+    // 3b. Render particles for any clip that has particleSettings
+    for (const track of visualTracks) {
+      for (const clip of track.clips) {
+        if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+          renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs);
+        }
+      }
+      for (const ol of track.overLayers || []) {
+        if (!ol.disabled && ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
+          renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs);
+        }
+      }
+    }
+
+    // ── Apply LUT per active clip ──────────────────────────────────────────
+    // After compositing all clips, apply LUT grading per clip that has one.
+    // We apply the last active clip's LUT to the full canvas for simplicity.
+    for (const track of visualTracks) {
+      for (const clip of track.clips) {
+        if (
+          clip.lut?.mediaId &&
+          currentTime >= clip.startTime &&
+          currentTime < clip.startTime + clip.duration
+        ) {
+          const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
+          if (lutMedia?.lutData) {
+            applyLutToCanvas(ctx, W, H, lutMedia.lutData, clip.lut!.intensity ?? 100);
+          }
+        }
+      }
+      for (const ol of track.overLayers || []) {
+        if (
+          !ol.disabled &&
+          ol.lut?.mediaId &&
+          currentTime >= ol.startTime &&
+          currentTime < ol.startTime + ol.duration
+        ) {
+          const lutMedia = mediaLibrary.find((m) => m.id === ol.lut!.mediaId);
+          if (lutMedia?.lutData) {
+            applyLutToCanvas(ctx, W, H, lutMedia.lutData, ol.lut!.intensity ?? 100);
+          }
+        }
+      }
+    }
+
+    ctx.restore(); // Restore from viewport transform
+
+    // ── Grid Overlay ────────────────────────────────────────────────────
+    if (showGrid && !isExporting) {
       ctx.save();
       ctx.globalAlpha = 1;
 
@@ -2176,61 +2482,94 @@ export function PreviewCanvas() {
       ctx.restore();
     }
 
+    
     // Safe Zones Overlay
-    if (showSafeZones) {
-      const actionSafe = 0.9; // 90%
-      const titleSafe = 0.8;  // 80%
-
+    if (settings.showSafeZones && !isExporting) {
       ctx.save();
       ctx.globalAlpha = 1;
-      
-      const drawSafeRect = (pct: number, color: string, label: string) => {
-        const rw = W * pct;
-        const rh = H * pct;
-        const rx = offsetX + (W - rw) / 2;
-        const ry = offsetY + (H - rh) / 2;
-        
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(rx, ry, rw, rh);
-        
-        ctx.fillStyle = color;
-        ctx.font = '9px system-ui, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText(label, rx + 4, ry + 4);
-      };
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.2)'; // Red-ish blind spot
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
 
-      drawSafeRect(actionSafe, 'rgba(234, 179, 8, 0.6)', 'Action Safe 90%');
-      drawSafeRect(titleSafe, 'rgba(14, 165, 233, 0.6)', 'Title Safe 80%');
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      
+      if (aspectRatio === '16:9') {
+        const brW = W * 0.15;
+        const brH = H * 0.12;
+        const brX = offsetX + W - brW;
+        const brY = offsetY + H - brH;
+        ctx.fillRect(brX, brY, brW, brH);
+        ctx.strokeRect(brX, brY, brW, brH);
+        ctx.fillStyle = 'white';
+        ctx.fillText('Logo/Time', brX + brW/2, brY + brH/2);
+
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+        const trW = W * 0.1;
+        const trH = H * 0.1;
+        const trX = offsetX + W - trW;
+        const trY = offsetY;
+        ctx.fillRect(trX, trY, trW, trH);
+        ctx.strokeRect(trX, trY, trW, trH);
+        ctx.fillStyle = 'white';
+        ctx.fillText('Info', trX + trW/2, trY + trH/2);
+        
+      } else if (aspectRatio === '9:16') {
+        const rsW = W * 0.18;
+        const rsH = H * 0.45;
+        const rsX = offsetX + W - rsW;
+        const rsY = offsetY + H * 0.4;
+        ctx.fillRect(rsX, rsY, rsW, rsH);
+        ctx.strokeRect(rsX, rsY, rsW, rsH);
+        
+        ctx.save();
+        ctx.translate(rsX + rsW/2, rsY + rsH/2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = 'white';
+        ctx.fillText('Action Buttons', 0, 0);
+        ctx.restore();
+
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+        const bW = W * 0.82;
+        const bH = H * 0.15;
+        const bX = offsetX;
+        const bY = offsetY + H - bH;
+        ctx.fillRect(bX, bY, bW, bH);
+        ctx.strokeRect(bX, bY, bW, bH);
+        ctx.fillStyle = 'white';
+        ctx.fillText('Title & Audio', bX + bW/2, bY + bH/2);
+      }
       
       ctx.restore();
     }
 
-    // 5. Timecode overlay – top-right
-    ctx.globalAlpha = 1;
-    const tcText = formatTime(currentTime);
-    ctx.font = 'bold 12px monospace';
-    const tcMetrics = ctx.measureText(tcText);
-    const tcPadX = 8;
-    const tcPadY = 4;
-    const tcW = tcMetrics.width + tcPadX * 2;
-    const tcH = 20;
-    const tcX = offsetX + W - tcW - 8;
-    const tcY = offsetY + 8;
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.beginPath();
-    if (typeof (ctx as any).roundRect === 'function') {
-      (ctx as any).roundRect(tcX, tcY, tcW, tcH, 4);
-    } else {
-      ctx.rect(tcX, tcY, tcW, tcH);
+    // 5. Timecode overlay ?" top-right
+    if (!isExporting) {
+      ctx.globalAlpha = 1;
+      const tcText = formatTime(currentTime);
+      ctx.font = 'bold 12px monospace';
+      const tcMetrics = ctx.measureText(tcText);
+      const tcPadX = 8;
+      const tcPadY = 4;
+      const tcW = tcMetrics.width + tcPadX * 2;
+      const tcH = 20;
+      const tcX = offsetX + W - tcW - 8;
+      const tcY = offsetY + 8;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath();
+      if (typeof (ctx as any).roundRect === 'function') {
+        (ctx as any).roundRect(tcX, tcY, tcW, tcH, 4);
+      } else {
+        ctx.rect(tcX, tcY, tcW, tcH);
+      }
+      ctx.fill();
+      ctx.fillStyle = '#fbbf24';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tcText, offsetX + W - 8 - tcPadX, tcY + tcH / 2);
     }
-    ctx.fill();
-    ctx.fillStyle = '#fbbf24';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(tcText, offsetX + W - 8 - tcPadX, tcY + tcH / 2);
 
     ctx.restore(); // Restore from global canvas resolution scale
 
@@ -2255,7 +2594,7 @@ export function PreviewCanvas() {
       snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
       snapCtx.drawImage(composite, 0, 0);
     }
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight]);
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, settings.showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight, showProgressBar, progressBarColor, progressBarHeight, useProxies]);
 
   // ── Unified render loop to prevent flickering during scrubbing ──
   // Use a frame-pending flag + single rAF loop instead of canceling/rescheduling.
@@ -2263,7 +2602,7 @@ export function PreviewCanvas() {
   const framePendingRef = useRef(true);
   const rafActiveRef = useRef(false);
 
-  useEffect(() => {
+    useEffect(() => {
     renderCanvasRef.current = renderCanvas;
   });
 
@@ -2288,10 +2627,18 @@ export function PreviewCanvas() {
     };
     document.addEventListener('visibilitychange', onVisChange);
 
-    const tick = () => {
-      if (tabVisible && framePendingRef.current) {
+    let isRendering = false;
+    const tick = async () => {
+      if (tabVisible && framePendingRef.current && !isRendering) {
         framePendingRef.current = false;
-        renderCanvasRef.current();
+        isRendering = true;
+        try {
+          await renderCanvasRef.current();
+        } catch (err) {
+          console.error("Error in renderCanvas:", err);
+        } finally {
+          isRendering = false;
+        }
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -2524,136 +2871,74 @@ export function PreviewCanvas() {
           {/* Fullscreen */}
           <button
             onClick={toggleFullscreen}
-            className="p-1.5 bg-black/50 hover:bg-black/70 rounded text-white/70 hover:text-white transition-colors"
-            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen (F)'}
+            className="p-1.5 bg-black/50 hover:bg-black/70 text-white/70 hover:text-white rounded transition-colors"
           >
-            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            <Maximize2 className="w-4 h-4" />
           </button>
 
-          {/* Grid (Rule of Thirds) */}
-          <button
-            onClick={() => { setShowGrid((g) => !g); setShowSettingsPanel(false); }}
-            className={`p-1.5 rounded transition-colors ${
-              showGrid
-                ? 'bg-yellow-500/30 text-yellow-300 border border-yellow-500/40'
-                : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white'
-            }`}
-            title="Grid / Rule of Thirds"
-          >
-            <Grid className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Safe Zones */}
-          <button
-            onClick={() => { setShowSafeZones((s) => !s); setShowSettingsPanel(false); }}
-            className={`p-1.5 rounded transition-colors ${
-              showSafeZones
-                ? 'bg-sky-500/30 text-sky-300 border border-sky-500/40'
-                : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white'
-            }`}
-            title="Safe Zones (Action 90% / Title 80%)"
-          >
-            <Film className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Canvas Settings Dropdown */}
+          {/* Settings Menu */}
           <div className="relative">
             <button
-              onClick={(e) => { e.stopPropagation(); setShowSettingsPanel((p) => !p); }}
+              onClick={() => setShowSettingsPanel(!showSettingsPanel)}
               className={`p-1.5 rounded transition-colors ${
                 showSettingsPanel
-                  ? 'bg-[#3e3e3e] text-white border border-[#5e5e5e]'
-                  : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white'
+                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                  : 'bg-black/50 hover:bg-black/70 text-white/70 hover:text-white border border-transparent'
               }`}
-              title="Canvas Settings"
             >
-              <Settings2 className="w-3.5 h-3.5" />
+              <Settings2 className="w-4 h-4" />
             </button>
 
+            {/* The Settings Panel Dropdown */}
             {showSettingsPanel && (
-              <div
-                className="absolute top-full left-0 mt-1.5 w-52 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-2xl z-50 p-3 space-y-3"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <p className="text-[10px] font-semibold text-[#a0a0a0] uppercase tracking-wider">Canvas Settings</p>
-
-                {/* Aspect Ratio */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#a0a0a0]">Aspect Ratio</label>
-                  <select
-                    value={aspectRatio}
-                    onChange={(e) => useEditorStore.getState().setAspectRatio(e.target.value as any)}
-                    className="w-full bg-[#2d2d2d] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    <option value="16:9">16:9 (Landscape)</option>
-                    <option value="9:16">9:16 (Vertical/Reels)</option>
-                    <option value="1:1">1:1 (Square/Post)</option>
-                    <option value="4:3">4:3 (Standard)</option>
-                  </select>
+              <div className="absolute top-full left-0 mt-2 w-72 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl overflow-hidden pointer-events-auto z-50">
+                <div className="p-3 bg-[#252525] border-b border-[#3e3e3e] flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-white">Preview Settings</h3>
+                  <button onClick={() => setShowSettingsPanel(false)} className="text-[#888] hover:text-white">
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-
-                {/* Background Color */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#a0a0a0]">Background Color</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                       type="color"
-                       value={canvasBgColor}
-                       id="canvas-bg-color"
-                       onChange={(e) => setCanvasBgColor(e.target.value)}
-                       className="w-7 h-7 rounded border border-[#3e3e3e] cursor-pointer bg-transparent p-0.5"
-                     />
-                     <span className="text-[10px] text-white font-mono" id="canvas-bg-label">{canvasBgColor}</span>
+                <div className="p-3 space-y-4 max-h-[60vh] overflow-y-auto scrollbar-thin">
+                  
+                  {/* Quality */}
+                  <div>
+                    <label className="text-[10px] text-[#a0a0a0] mb-2 block">Preview Quality</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(['full', 'half', 'quarter'] as const).map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => useEditorStore.getState().updateSettings({ previewQuality: q })}
+                          className={`py-1.5 text-[10px] rounded capitalize transition-colors ${
+                            settings.previewQuality === q
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-[#2a2a2a] hover:bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                          }`}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Viewport Zoom */}
-                <div className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] text-[#a0a0a0]">Viewport Zoom</label>
-                    <span className="text-[10px] text-white font-mono">{Math.round(viewport.zoom * 100)}%</span>
-                  </div>
-                  <input
-                    type="range" min={10} max={400} step={5}
-                    value={Math.round(viewport.zoom * 100)}
-                    onChange={(e) => {
-                      const newZoom = Number(e.target.value) / 100;
-                      setViewport(prev => {
-                        const nx = prev.x * (newZoom / prev.zoom);
-                        const ny = prev.y * (newZoom / prev.zoom);
-                        return { x: nx, y: ny, zoom: newZoom };
-                      });
-                    }}
-                    className="w-full h-1 bg-[#3e3e3e] rounded appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-400 [&::-webkit-slider-thumb]:rounded-full"
-                  />
-                </div>
-
-                {/* Reset Viewport */}
-                <button
-                  onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })}
-                  className="w-full py-1.5 text-[11px] text-[#a0a0a0] hover:text-white bg-[#2d2d2d] hover:bg-[#3e3e3e] rounded border border-[#3e3e3e] transition-colors"
-                >
-                  Reset Viewport (100%)
-                </button>
-
-                <div className="pt-1 border-t border-[#3e3e3e] space-y-1.5">
-                  <div className="flex items-center gap-2 justify-between">
-                    <label className="text-[10px] text-[#a0a0a0]">Grid</label>
+                  {/* Hardware Acceleration */}
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-[#a0a0a0]">Hardware Acceleration</label>
                     <button
-                      onClick={() => setShowGrid((g) => !g)}
-                      className={`w-8 h-4 rounded-full transition-colors relative ${showGrid ? 'bg-yellow-500' : 'bg-[#3e3e3e]'}`}
+                      onClick={() => useEditorStore.getState().updateSettings({ hardwareAcceleration: !settings.hardwareAcceleration })}
+                      className={`w-8 h-4 rounded-full transition-colors relative ${settings.hardwareAcceleration ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
                     >
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${showGrid ? 'left-4' : 'left-0.5'}`} />
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${settings.hardwareAcceleration ? 'left-4' : 'left-0.5'}`} />
                     </button>
                   </div>
-                  <div className="flex items-center gap-2 justify-between">
+
+                  {/* Safe Zones */}
+                  <div className="flex items-center justify-between">
                     <label className="text-[10px] text-[#a0a0a0]">Safe Zones</label>
                     <button
-                      onClick={() => setShowSafeZones((s) => !s)}
-                      className={`w-8 h-4 rounded-full transition-colors relative ${showSafeZones ? 'bg-sky-500' : 'bg-[#3e3e3e]'}`}
+                      onClick={() => useEditorStore.getState().updateSettings({ showSafeZones: !settings.showSafeZones })}
+                      className={`w-8 h-4 rounded-full transition-colors relative ${settings.showSafeZones ? 'bg-sky-500' : 'bg-[#3e3e3e]'}`}
                     >
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${showSafeZones ? 'left-4' : 'left-0.5'}`} />
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${settings.showSafeZones ? 'left-4' : 'left-0.5'}`} />
                     </button>
                   </div>
                 </div>
@@ -2823,7 +3108,20 @@ export function PreviewCanvas() {
           onChange={(e) => setVolume(Number(e.target.value))}
           className="w-20 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
         />
+        
+        {/* Scopes Toggle */}
+        <button
+          className={`p-1.5 ml-2 transition-colors rounded ${
+            showScopes ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
+          }`}
+          onClick={(e) => { e.stopPropagation(); setShowScopes(!showScopes); }}
+          title="Color Scopes"
+        >
+          <Grid className="w-4 h-4" />
+        </button>
       </div>
+
+      <ColorScopes canvasRef={canvasRef} />
     </div>
   );
 }
@@ -2994,10 +3292,63 @@ function applyChromaKeyOnData(
         data[i + 3] = Math.round(data[i + 3] * factor);
       }
     }
-
     oCtx.putImageData(imgData, 0, 0);
-  } catch (e) {
-    console.warn('Chroma key calculation error:', e);
+  } catch (err) {
+    console.error('Failed to apply Chroma Key', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: apply Luma Key / Luminance threshold removal
+// ---------------------------------------------------------------------------
+function applyLumaKeyOnData(
+  oCtx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  type: 'dark' | 'light',
+  threshold: number, // 0 to 100
+  softness: number   // 0 to 100
+) {
+  try {
+    const imgData = oCtx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    const th = (threshold / 100) * 255;
+    const soft = (softness / 100) * 255;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Calculate standard luminance
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      
+      if (type === 'dark') {
+        if (luma < th) {
+          data[i + 3] = 0;
+        } else if (luma < th + soft && soft > 0) {
+          const factor = (luma - th) / soft;
+          data[i + 3] = Math.round(data[i + 3] * factor);
+        }
+      } else {
+        // Light key (threshold is usually around 80-100%, meaning 204-255)
+        // th corresponds to the high point. Wait, for light key, higher means keying out more brights.
+        // If luma > th, then alpha = 0.
+        // Softness means fade between th - soft and th.
+        const lightTh = 255 - th; // If threshold is 100%, we key out everything. If 0%, key out nothing.
+        
+        if (luma > lightTh) {
+          data[i + 3] = 0;
+        } else if (luma > lightTh - soft && soft > 0) {
+          const factor = (lightTh - luma) / soft;
+          data[i + 3] = Math.round(data[i + 3] * factor);
+        }
+      }
+    }
+    oCtx.putImageData(imgData, 0, 0);
+  } catch (err) {
+    console.error('Failed to apply Luma Key', err);
   }
 }
 
@@ -3091,6 +3442,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     canvasTransformMode,
     setCanvasTransformMode,
     aspectRatio,
+    useProxies,
   } = useEditorStore();
 
   const updateClip = useCallback((clipId: string, updates: any) => {
@@ -3402,7 +3754,7 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
   const totalX = cx + viewport.x - cx * viewport.zoom;
   const totalY = cy + viewport.y - cy * viewport.zoom;
 
-  const pc = activeClip.transform.perspectiveCorners || {
+  const pcBase = activeClip.transform.perspectiveCorners || {
     x0: W / 2 + aX - (baseW / 2) * (aScale / 100),
     y0: H / 2 + aY - (baseH / 2) * (aScale / 100),
     x1: W / 2 + aX + (baseW / 2) * (aScale / 100),
@@ -3412,6 +3764,39 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     x3: W / 2 + aX - (baseW / 2) * (aScale / 100),
     y3: H / 2 + aY + (baseH / 2) * (aScale / 100)
   };
+
+  let pc = { ...pcBase };
+  
+  if (activeClip.transform.perspectivePin) {
+    let trackedCorners = null;
+    const trackingData = activeClip.transform.perspectiveTrackingData;
+    if (trackingData && trackingData.length > 0) {
+      const localTime = currentTime - activeClip.startTime;
+      let closestDist = Infinity;
+      for (const pt of trackingData) {
+        const dist = Math.abs(pt.time - localTime);
+        if (dist < closestDist) {
+          closestDist = dist;
+          trackedCorners = pt.corners;
+        }
+      }
+    }
+    
+    if (trackedCorners) {
+      pc = { ...trackedCorners };
+    } else {
+      pc = {
+        x0: getAnimatedValue(pcBase.x0, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.x0']),
+        y0: getAnimatedValue(pcBase.y0, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.y0']),
+        x1: getAnimatedValue(pcBase.x1, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.x1']),
+        y1: getAnimatedValue(pcBase.y1, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.y1']),
+        x2: getAnimatedValue(pcBase.x2, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.x2']),
+        y2: getAnimatedValue(pcBase.y2, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.y2']),
+        x3: getAnimatedValue(pcBase.x3, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.x3']),
+        y3: getAnimatedValue(pcBase.y3, currentTime, activeClip.startTime, activeClip.animations?.['transform.perspectiveCorners.y3']),
+      };
+    }
+  }
 
   const handleCornerMouseDown = (e: React.MouseEvent, cornerIdx: number) => {
     e.stopPropagation();

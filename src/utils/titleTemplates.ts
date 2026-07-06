@@ -11,17 +11,63 @@ import type { ClipTextSettings, ClipAnimations } from '@/types';
 export interface TitleTemplate {
   id: string;
   name: string;
-  category: 'lower-third' | 'title' | 'subtitle' | 'kinetic';
+  category: 'lower-third' | 'title' | 'subtitle' | 'kinetic' | 'social';
   description: string;
   accentColor: string;         // CSS color for preview card accent
   defaultDuration: number;     // seconds
   textSettings: ClipTextSettings;
   animations?: ClipAnimations;
+  animationPreset?: 'subscribe' | 'typewriter' | 'bounce';
 }
 
 // ── Template Definitions ──────────────────────────────────────────────────────
 
 export const TITLE_TEMPLATES: TitleTemplate[] = [
+  // Kinetic Typography
+  {
+    id: 'kinetic_typewriter',
+    name: 'Typewriter',
+    category: 'kinetic',
+    description: 'Types out text letter by letter',
+    accentColor: '#34d399',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'Typewriter Effect...',
+      fontSize: 80,
+      fontFamily: 'Courier New',
+      color: '#ffffff',
+      textAlign: 'center',
+      bold: true,
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      threeD: false
+    },
+    animations: {}, animationPreset: "typewriter" // handled via PreviewCanvas animationPreset
+  },
+  {
+    id: 'kinetic_bounce',
+    name: 'Scale Bounce',
+    category: 'kinetic',
+    description: 'Bounces in dynamically',
+    accentColor: '#fbbf24',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'BOUNCE!',
+      fontSize: 120,
+      fontFamily: 'Inter',
+      color: '#fbbf24',
+      textAlign: 'center',
+      bold: true,
+      shadow: true,
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      threeD: false
+    },
+    animations: {}, animationPreset: "bounce" // handled via PreviewCanvas animationPreset
+  },
   // ── Lower Thirds ──────────────────────────────────────────────────────────
   {
     id: 'lower_third_classic',
@@ -137,6 +183,7 @@ export const TITLE_TEMPLATES: TitleTemplate[] = [
       threeD: false,
       threeDDepth: 4,
       textAlign: 'center',
+      animationPreset: 'subscribe',
       animation: {
         in: 'fadeIn',
         out: 'fadeOut',
@@ -285,9 +332,89 @@ export const TITLE_TEMPLATES: TitleTemplate[] = [
       ],
     },
   },
+
+  // 💡 Subscribe & Bell
+  {
+    id: 'subscribe_bell',
+    name: 'Subscribe & Bell',
+    category: 'social',
+    description: 'YouTube subscribe animation with bell',
+    accentColor: '#ff0000',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'SUBSCRIBE  🔔',
+      fontFamily: 'Roboto',
+      fontSize: 48,
+      color: '#ffffff',
+      backgroundColor: '#ff0000',
+      bold: true,
+      italic: false,
+      underline: false,
+      shadow: true,
+      shadowColor: 'rgba(0,0,0,0.5)',
+      shadowBlur: 10,
+      threeD: false,
+      textAlign: 'center',
+      animation: {
+        in: 'slideUp',
+        out: 'slideDown',
+        inDuration: 0.5,
+        outDuration: 0.5,
+      },
+    },
+    animations: {
+      'transform.y': [
+        { time: 0, value: 200, easing: 'ease-out' },
+        { time: 0.5, value: 0, easing: 'linear' },
+        { time: 4.5, value: 0, easing: 'ease-in' },
+        { time: 5, value: 200 },
+      ],
+      'transform.scale': [
+        { time: 0.5, value: 100 },
+        { time: 2.5, value: 100, easing: 'ease-out' },
+        { time: 2.6, value: 110, easing: 'ease-in' },
+        { time: 2.7, value: 100 },
+      ],
+    },
+  },
+
+  // 💡 Progress Bar
+  {
+    id: 'progress_bar',
+    name: 'Progress Bar',
+    category: 'social',
+    description: 'Thin progress bar at bottom of screen',
+    accentColor: '#ff0000',
+    defaultDuration: 10,
+    textSettings: {
+      text: ' ',
+      fontFamily: 'Arial',
+      fontSize: 8,
+      color: 'transparent',
+      backgroundColor: '#ff0000',
+      bold: false,
+      italic: false,
+      underline: false,
+      shadow: false,
+      threeD: false,
+      textAlign: 'center',
+    },
+    animations: {
+      'transform.x': [
+        { time: 0, value: -854, easing: 'linear' },
+        { time: 10, value: 0, easing: 'linear' },
+      ],
+      'transform.y': [
+        { time: 0, value: 235 }, // bottom of 480px canvas (480/2 - thin bar height)
+      ],
+      'transform.scale': [
+        { time: 0, value: 100 },
+      ]
+    },
+  },
 ];
 
-// ── Category Helpers ──────────────────────────────────────────────────────────
+// 💡 Category Helpers ──────────────────────────────────────────────────────────
 
 export const TEMPLATE_CATEGORIES = [
   { id: 'all',         label: 'All' },
@@ -295,6 +422,7 @@ export const TEMPLATE_CATEGORIES = [
   { id: 'title',       label: 'Titles' },
   { id: 'subtitle',    label: 'Subtitles' },
   { id: 'kinetic',     label: 'Kinetic' },
+  { id: 'social',      label: 'Social Media' },
 ] as const;
 
 export type TemplateCategory = typeof TEMPLATE_CATEGORIES[number]['id'];

@@ -1,5 +1,5 @@
 // Media Types
-export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx' | 'lut';
+export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx' | 'lut' | 'compound';
 
 // LUT (Color Look-Up Table) data parsed from .cube files
 export interface LutData {
@@ -15,6 +15,13 @@ export interface ClipLutSettings {
   intensity: number;      // 0-100%, blend between original and LUT-graded
 }
 
+export interface MediaFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: number;
+}
+
 export interface MediaItem {
   id: string;
   name: string;
@@ -23,6 +30,7 @@ export interface MediaItem {
   url: string;      // object URL for the file blob
   size?: number;
   createdAt: number;
+  folderId?: string; // ID of the parent MediaFolder
   // Real metadata from probing
   thumbnail?: string;       // object URL for a thumbnail frame (video/image)
   waveformPeaks?: number[]; // normalized audio peaks [0..1]
@@ -36,6 +44,8 @@ export interface MediaItem {
   fxType?: string;          // specific effect identifier
   // LUT data (only set for type === 'lut')
   lutData?: LutData;
+  // Compound Clip data
+  nestedTimeline?: TimelineTrack[];
 }
 
 export interface CornerPoints {
@@ -56,6 +66,7 @@ export interface ClipTransform {
   rotationZ?: number; // 3D Z rotation in degrees (matches rotation)
   perspectivePin?: boolean;
   perspectiveCorners?: CornerPoints;
+  perspectiveTrackingData?: { time: number; corners: CornerPoints }[];
   blendMode?: GlobalCompositeOperation; // compositor blend modes
 }
 
@@ -105,6 +116,7 @@ export interface ClipAudioSettings {
   pitch: number;        // -12 to 12 semitones (default 0)
   voiceFormant: number; // -100 to 100 (default 0)
   humanize: boolean;    // one-click AI humanizer toggle (default false)
+  denoise?: number;     // 0 to 100 (default 0, noise reduction intensity)
   // Vocal / BGM Separation
   vocalSeparation?: {
     enabled: boolean;     // Enable vocal/BGM separation (default false)
@@ -148,11 +160,12 @@ export interface ClipTextSettings {
   italic: boolean;
   underline: boolean;
   shadow: boolean;
-  shadowColor: string;
-  shadowBlur: number;
+  shadowColor?: string;
+  shadowBlur?: number;
   threeD: boolean;
-  threeDDepth: number;
+  threeDDepth?: number;
   textAlign?: 'left' | 'center' | 'right';
+  animationPreset?: 'subscribe' | 'typewriter' | 'bounce';
   strokeColor?: string;
   strokeWidth?: number;
   animation?: ClipTextAnimation;
@@ -224,9 +237,21 @@ export interface ClipAnimations {
   'crop.right'?: PropertyKeyframe[];
 }
 
+export interface ClipAiBackgroundSettings {
+  enabled: boolean;
+  edgeBlur: number;
+}
+
 export interface ClipChromaKeySettings {
   enabled: boolean;
   color: string;      // Hex color, e.g. '#00ff00'
+  threshold: number;  // 0 to 100
+  softness: number;   // 0 to 100
+}
+
+export interface ClipLumaKeySettings {
+  enabled: boolean;
+  type: 'dark' | 'light'; // Key out darks or lights
   threshold: number;  // 0 to 100
   softness: number;   // 0 to 100
 }
@@ -242,6 +267,18 @@ export interface ClipKenBurnsSettings {
   easing: 'linear' | 'easeInOut' | 'easeIn' | 'easeOut';
 }
 
+export interface ClipMaskSettings {
+  enabled: boolean;
+  type: 'rectangle' | 'circle' | 'path';
+  x: number; // 0-100%
+  y: number; // 0-100%
+  width: number; // 0-100%
+  height: number; // 0-100% (or radius for circle)
+  points: { x: number, y: number }[]; // For path type
+  feather: number; // 0-100
+  invert: boolean;
+}
+
 // Timeline Clip
 export interface TimelineClip {
   id: string;
@@ -252,6 +289,7 @@ export interface TimelineClip {
   trimStart: number;    // seconds trimmed from beginning of source
   trimEnd: number;      // seconds trimmed from end of source
   transform: ClipTransform;
+  zIndex?: number;      // custom layer ordering (higher = on top)
   crop?: ClipCrop;      // crop bounding box in percentages (0-100)
   opacity: number;      // 0-1
   speed: number;        // playback speed multiplier
@@ -261,6 +299,8 @@ export interface TimelineClip {
   effects: string[];
   // For drag preview
   isPreview?: boolean;
+  // If the clip is completely disabled (muted and hidden)
+  disabled?: boolean;
   // Kinship tracking for split clips
   splitGroupId?: string;
   // Audio/Video unlink: when a video clip’s audio is extracted to a separate
@@ -268,6 +308,8 @@ export interface TimelineClip {
   linkedClipId?: string;
   // Transition at the beginning of the clip (blending previous clip into this one)
   transitionIn?: Transition;
+  // Transition at the end of the clip
+  transitionOut?: Transition;
   // Premiere Pro-style color grading filters
   colorFilters?: ClipColorFilters;
   // Premiere Pro-style advanced audio configurations
@@ -276,9 +318,12 @@ export interface TimelineClip {
   textSettings?: ClipTextSettings;
   fxSettings?: ClipFxSettings;
   particleSettings?: ClipParticleSettings;
+  aiBackground?: ClipAiBackgroundSettings;
   chromaKey?: ClipChromaKeySettings;
+  lumaKey?: ClipLumaKeySettings;
   kenBurns?: ClipKenBurnsSettings;
   lut?: ClipLutSettings;
+  mask?: ClipMaskSettings;
 }
 
 // NEW: Over Layer Clip — lightweight sub-clip living inside a track
@@ -291,6 +336,7 @@ export interface OverLayerClip {
   trimStart: number;         // seconds trimmed from beginning of source
   trimEnd: number;           // seconds trimmed from end of source
   transform: ClipTransform;  // PIP position, scale, rotation
+  zIndex?: number;           // custom layer ordering (higher = on top)
   crop?: ClipCrop;           // crop bounding box in percentages (0-100)
   opacity: number;           // 0-1
   speed: number;             // playback speed multiplier
@@ -298,14 +344,18 @@ export interface OverLayerClip {
   animations?: ClipAnimations; // timeline keyframes for properties
   effects: string[];
   isPreview?: boolean;
+  disabled?: boolean;
   colorFilters?: ClipColorFilters;
   audioSettings?: ClipAudioSettings;
   textSettings?: ClipTextSettings;
   fxSettings?: ClipFxSettings;
   particleSettings?: ClipParticleSettings;
+  aiBackground?: ClipAiBackgroundSettings;
   chromaKey?: ClipChromaKeySettings;
+  lumaKey?: ClipLumaKeySettings;
   kenBurns?: ClipKenBurnsSettings;
   lut?: ClipLutSettings;
+  mask?: ClipMaskSettings;
 }
 
 // Timeline Track
@@ -330,15 +380,24 @@ export interface TimelineMarker {
   time: number;
   name: string;
   color: string; // Hex color code
+  type?: 'standard' | 'sponsor' | 'chapter';
 }
 
 // Editor State
 export interface EditorState {
+  projectId: string;
+  projectName: string;
+  showTeleprompter: boolean;
+  showHelpMenu: boolean;
+  activeHelpSection: string | null;
+  useProxies: boolean;
   // Media Library
   mediaLibrary: MediaItem[];
+  folders: MediaFolder[];
 
   // Timeline
   tracks: TimelineTrack[];
+  timelineStack: { tracks: TimelineTrack[]; compoundMediaId: string }[]; // for compound clip nesting
   selectedClipId: string | null;
   selectedClipIds: string[];
   selectedOverLayerId: string | null;      // currently selected over layer
@@ -371,7 +430,11 @@ export interface EditorState {
   activeTool: 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch';
 
   // UI State
+  showProgressBar: boolean;
+  progressBarColor: string;
+  progressBarHeight: number;
   showExportModal: boolean;
+  showScopes: boolean;
   isExporting: boolean;
   exportFps?: number;
   exportWidth?: number;
@@ -379,8 +442,14 @@ export interface EditorState {
   showSettingsModal: boolean;
   isRecordingVoiceover: boolean;
   recordingTrackId: string | null;
-  activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
+  activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates' | 'transcript';
   activePropertiesTab: PropertiesTab;
+  workspaceLayout: {
+    preset: 'Editing' | 'Color' | 'Audio' | 'Custom';
+    leftWidth: number;
+    rightWidth: number;
+    timelineHeight: number;
+  };
 
   // Canvas Mode
   canvasTransformMode: 'resize' | 'crop';
@@ -388,6 +457,7 @@ export interface EditorState {
   masterAudioStream: MediaStream | null;
 
   // Clipboard
+  clipboardData: { type: 'clip' | 'style' | 'whole'; clips: TimelineClip[] } | null;
   clipboardClip: TimelineClip | null;
 
   // History for undo/redo
@@ -416,11 +486,21 @@ export interface EditorState {
     previewQuality: 'full' | 'half' | 'quarter';
     showThumbnails: boolean;
     hardwareAcceleration: boolean;
+    showSafeZones?: boolean;
     keyboardShortcuts?: Record<string, string>;
   };
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];
   projectTemplates: ProjectTemplate[];
+}
+
+export interface EditorActions {
+  setShowHelpMenu: (show: boolean, section?: string | null) => void;
+  setProjectInfo: (id: string, name: string) => void;
+  resetProject: () => void;
+  setTracks: (tracks: TimelineTrack[]) => void;
+  currentTime: number;
+  label?: string;
 }
 
 export interface EditorSnapshot {
@@ -433,10 +513,10 @@ export interface EditorSnapshot {
 export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch';
 
 // Media Tab Types
-export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
+export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates' | 'transcript';
 
 // Properties Tab Types
-export type PropertiesTab = 'transform' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'history';
+export type PropertiesTab = 'transform' | 'color' | 'mask' | 'speed' | 'audio' | 'text' | 'effects' | 'history' | 'thumbnail';
 
 // Time formatting utility type
 export type TimeFormat = 'HH:MM:SS' | 'MM:SS' | 'frames';

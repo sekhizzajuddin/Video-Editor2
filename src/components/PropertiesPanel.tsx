@@ -19,8 +19,9 @@ import {
   Type,
   Wand2,
   ArrowLeftRight,
-  Image as ImageIcon,
+  ImageIcon,
   Loader2,
+  Crop,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -727,6 +728,7 @@ export function PropertiesPanel() {
   } else {
     // Video / Audio / Image/Text clips on other tracks: full set of tabs
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+    baseTabs.push({ id: 'mask', label: 'Mask', icon: Crop });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
     baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
@@ -735,6 +737,7 @@ export function PropertiesPanel() {
 
   // Always append History tab
   baseTabs.push({ id: 'history', label: 'History', icon: History });
+  baseTabs.push({ id: 'thumbnail', label: 'Thumbnail', icon: ImageIcon });
 
   const tabs = baseTabs;
 
@@ -1402,7 +1405,7 @@ export function PropertiesPanel() {
           </div>
           <div className="flex gap-1.5">
             <button
-              onClick={copyClip}
+              onClick={() => copyClip()}
               title="Copy"
               className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
             >
@@ -1443,6 +1446,33 @@ export function PropertiesPanel() {
 
           return (
             <div className="space-y-3">
+                            {/* Smart Reframe AI */}
+              <div className="bg-[#1e1e1e] p-3 rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-1.5 bg-cyan-500/20 rounded">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect width="10" height="14" x="7" y="5" rx="2"/></svg>
+                  </div>
+                  <div>
+                    <h4 className="text-[11px] font-semibold text-white">Smart Reframe</h4>
+                    <p className="text-[9px] text-[#a0a0a0]">Auto-track subject for 9:16</p>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!selectedClip) return;
+                    // Dynamic import to avoid heavy loads if not used
+                    const { generateSmartReframeKeyframes } = await import('../utils/smartReframe');
+                    const aspect = useEditorStore.getState().aspectRatio;
+                    const newAnimations = generateSmartReframeKeyframes(selectedClip, aspect as any);
+                    updateClip(selectedClip.id, { animations: newAnimations });
+                    useEditorStore.getState().saveSnapshot('Smart Reframe');
+                  }}
+                  className="w-full py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-medium transition-colors shadow-md shadow-cyan-950/50"
+                >
+                  Analyze & Track
+                </button>
+              </div>
+
               {/* Master Keyframes */}
               <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
                 <div className="flex items-center justify-between mb-2">
@@ -2228,6 +2258,91 @@ export function PropertiesPanel() {
           );
         })()}
 
+        {activePropertiesTab === 'mask' && (() => {
+          const mask = selectedClip.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, points: [], feather: 0, invert: false };
+          const updateMask = (updates: any) => {
+            updateClip(selectedClip.id, { mask: { ...mask, ...updates } });
+          };
+          const handleMouseUp = () => useEditorStore.getState().saveSnapshot();
+
+          const Slider = ({ label, value, min, max, unit, prop }: { label: string, value: number, min: number, max: number, unit: string, prop: string }) => (
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-[11px]">
+                <span className="text-[#d0d0d0]">{label}</span>
+                <span className="font-mono text-[#a0a0a0]">{value}{unit}</span>
+              </div>
+              <input
+                type="range"
+                min={min}
+                max={max}
+                value={value}
+                onChange={(e) => updateMask({ [prop]: Number(e.target.value) })}
+                onMouseUp={handleMouseUp}
+                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+              />
+            </div>
+          );
+
+          return (
+            <div className="space-y-4">
+              {/* Enable Toggle */}
+              <div className="flex items-center justify-between p-3 bg-[#1e1e1e] rounded-md border border-[#3e3e3e]">
+                <span className="text-xs text-[#a0a0a0]">Enable Masking</span>
+                <button
+                  onClick={() => { updateMask({ enabled: !mask.enabled }); handleMouseUp(); }}
+                  className={`w-10 h-5 rounded-full transition-colors relative ${mask.enabled ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${mask.enabled ? 'left-[22px]' : 'left-0.5'}`} />
+                </button>
+              </div>
+
+              {mask.enabled && (
+                <>
+                  {/* Mask Type */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-[#a0a0a0]">Mask Shape</label>
+                    <div className="flex gap-2">
+                      {['rectangle', 'circle'].map(t => (
+                        <button
+                          key={t}
+                          onClick={() => { updateMask({ type: t }); handleMouseUp(); }}
+                          className={`flex-1 py-1.5 text-xs rounded border transition-colors ${mask.type === t ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-[#3e3e3e] bg-[#2d2d2d] text-[#a0a0a0] hover:border-[#4e4e4e]'}`}
+                        >
+                          {t.charAt(0).toUpperCase() + t.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Properties depending on type */}
+                  <div className="space-y-3 p-3 bg-[#2d2d2d] rounded-md border border-[#3e3e3e]">
+                    <Slider label="Position X" value={mask.x} min={0} max={100} unit="%" prop="x" />
+                    <Slider label="Position Y" value={mask.y} min={0} max={100} unit="%" prop="y" />
+                    <Slider label={mask.type === 'circle' ? 'Radius' : 'Width'} value={mask.width} min={0} max={100} unit="%" prop="width" />
+                    {mask.type === 'rectangle' && (
+                      <Slider label="Height" value={mask.height} min={0} max={100} unit="%" prop="height" />
+                    )}
+                    
+                    <div className="h-px bg-[#3e3e3e] my-2" />
+                    
+                    <Slider label="Feather" value={mask.feather} min={0} max={100} unit="px" prop="feather" />
+                    
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-xs text-[#a0a0a0]">Invert Mask</span>
+                      <button
+                        onClick={() => { updateMask({ invert: !mask.invert }); handleMouseUp(); }}
+                        className={`w-8 h-4 rounded-full transition-colors relative ${mask.invert ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
+                      >
+                        <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${mask.invert ? 'left-[18px]' : 'left-0.5'}`} />
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
+
         {activePropertiesTab === 'color' && (
           <div className="space-y-3">
             {/* Basic Correction Section */}
@@ -2291,6 +2406,33 @@ export function PropertiesPanel() {
                     </div>
                   </div>
 
+                                    {/* Auto Color AI */}
+                  <div className="flex justify-end pb-2">
+                    <button
+                      onClick={() => {
+                        if (!selectedClip) return;
+                        // Simulated AI Analysis
+                        const tempShift = Math.floor(Math.random() * 20) - 10;
+                        const expShift = Math.floor(Math.random() * 20) - 10;
+                        const contShift = Math.floor(Math.random() * 30);
+                        
+                        setPropVal('color.temperature', tempShift, {
+                          colorFilters: {
+                            ...(selectedClip.colorFilters || defaultColorFilters),
+                            temperature: tempShift,
+                            exposure: expShift,
+                            contrast: 100 + contShift
+                          }
+                        });
+                        useEditorStore.getState().saveSnapshot('Auto Color');
+                      }}
+                      className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-medium rounded-md shadow-sm transition-all flex items-center gap-1.5"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+                      Auto Color
+                    </button>
+                  </div>
+                  
                   {/* Exposure */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
@@ -2608,6 +2750,35 @@ export function PropertiesPanel() {
               })()}
             </div>
 
+            {/* AI Background Removal */}
+            <div className="bg-[#1e1e1e] rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-1.5 bg-cyan-500/20 rounded">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
+                </div>
+                <div>
+                  <h4 className="text-[11px] font-semibold text-white">Magic Eraser (AI)</h4>
+                  <p className="text-[9px] text-[#a0a0a0]">Auto-detects and removes background</p>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer mt-3">
+                <input
+                  type="checkbox"
+                  checked={selectedClip.aiBackground?.enabled || false}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    const existing = selectedClip.aiBackground ?? { enabled: false, edgeBlur: 0 };
+                    updateClip(selectedClip.id, {
+                      aiBackground: { ...existing, enabled }
+                    });
+                    useEditorStore.getState().saveSnapshot('Toggle AI Background');
+                  }}
+                  className="rounded bg-[#2a2a2a] border-[#3e3e3e] text-cyan-500 focus:ring-0 focus:ring-offset-0"
+                />
+                <span className="text-[11px] text-[#d0d0d0]">Enable AI Background Removal</span>
+              </label>
+            </div>
+
             {/* Chroma Key / Green Screen */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
@@ -2699,6 +2870,111 @@ export function PropertiesPanel() {
                         const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
                         updateClip(selectedClip.id, {
                           chromaKey: { ...existing, softness: Number(e.target.value) }
+                        });
+                      }}
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Luma Key / Luminance Thresholding */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('lumaKey')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Luma Key (Luminance)</span>
+                {collapsedSections['lumaKey'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['lumaKey'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  {/* Enable Luma Key */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedClip.lumaKey?.enabled || false}
+                      onChange={(e) => {
+                        const existing = selectedClip.lumaKey ?? { type: 'light', threshold: 100, softness: 10, enabled: false };
+                        updateClip(selectedClip.id, {
+                          lumaKey: { ...existing, enabled: e.target.checked }
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-amber-500 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span className="text-[11px] text-[#d0d0d0]">Enable Luma Key</span>
+                  </label>
+
+                  {/* Type Selection */}
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-[#a0a0a0]">Key Type</span>
+                    <div className="flex gap-2">
+                      {(['light', 'dark'] as const).map((type) => (
+                        <button
+                          key={type}
+                          onClick={() => {
+                            const existing = selectedClip.lumaKey ?? { enabled: true, type: 'light', threshold: 100, softness: 10 };
+                            updateClip(selectedClip.id, {
+                              lumaKey: { ...existing, type }
+                            });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className={`flex-1 py-1 text-[11px] rounded border ${
+                            (selectedClip.lumaKey?.type || 'light') === type
+                              ? 'bg-[#3e3e3e] border-amber-500/50 text-white'
+                              : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:bg-[#252525]'
+                          } capitalize`}
+                        >
+                          Key {type === 'light' ? 'Brights' : 'Darks'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Threshold Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Threshold</span>
+                      <span className="font-mono text-[#a0a0a0]">{selectedClip.lumaKey?.threshold ?? 100}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={selectedClip.lumaKey?.threshold ?? 100}
+                      onChange={(e) => {
+                        const existing = selectedClip.lumaKey ?? { enabled: true, type: 'light', threshold: 100, softness: 10 };
+                        updateClip(selectedClip.id, {
+                          lumaKey: { ...existing, threshold: Number(e.target.value) }
+                        });
+                      }}
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                  </div>
+
+                  {/* Softness Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Softness / Spill</span>
+                      <span className="font-mono text-[#a0a0a0]">{selectedClip.lumaKey?.softness ?? 10}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={selectedClip.lumaKey?.softness ?? 10}
+                      onChange={(e) => {
+                        const existing = selectedClip.lumaKey ?? { enabled: true, type: 'light', threshold: 100, softness: 10 };
+                        updateClip(selectedClip.id, {
+                          lumaKey: { ...existing, softness: Number(e.target.value) }
                         });
                       }}
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
@@ -3237,6 +3513,28 @@ export function PropertiesPanel() {
               </div>
             )}
 
+                        {/* Auto Jump Cuts AI */}
+            <div className="bg-[#1e1e1e] p-3 rounded border border-purple-500/30 mb-3 shadow-lg shadow-purple-900/20">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-1.5 bg-purple-500/20 rounded">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></svg>
+                </div>
+                <div>
+                  <h4 className="text-[11px] font-semibold text-white">Auto Jump Cuts</h4>
+                  <p className="text-[9px] text-[#a0a0a0]">Remove silences instantly</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!selectedClip) return;
+                  useEditorStore.getState().applyAutoCuts(selectedClip.id, 'medium');
+                }}
+                className="w-full py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-medium transition-colors shadow-md shadow-purple-950/50"
+              >
+                Apply Magic Cut
+              </button>
+            </div>
+
             {/* Clip Volume & Pan */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
@@ -3478,6 +3776,48 @@ export function PropertiesPanel() {
                         onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                         onDoubleClick={() => handleAudioReset('fadeOut')}
                         title="Double-click to reset to 0s"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* AI Audio Enhancements */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('audioEnhancements')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Wand2 className="w-3.5 h-3.5" />
+                  <span>AI Noise Reduction</span>
+                </div>
+                {collapsedSections['audioEnhancements'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['audioEnhancements'] && (
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Reduce Background Noise</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipAudio.denoise ?? 0}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={clipAudio.denoise ?? 0}
+                        onChange={(e) => handleAudioChange('denoise', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('denoise')}
+                        title="Double-click to reset to 0%"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
@@ -4271,6 +4611,100 @@ export function PropertiesPanel() {
           </div>
         )}
         {/* ── History Tab ─────────────────────────────────────────────────── */}
+        
+        {/* Thumbnail Designer Tab */}
+        {activePropertiesTab === 'thumbnail' && (
+          <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 flex flex-col gap-3">
+              <h3 className="text-xs font-semibold text-white flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-amber-500" />
+                Thumbnail Designer
+              </h3>
+              <p className="text-[10px] text-[#a0a0a0] leading-relaxed">
+                Add text, stickers, and shapes to the timeline to design your thumbnail. Click the button below to capture the current frame as an image.
+              </p>
+              
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-white flex-1 cursor-pointer select-none">
+                  Show YouTube Safe Zones
+                </label>
+                <button
+                  onClick={() => {
+                     const current = useEditorStore.getState().settings.showSafeZones;
+                     useEditorStore.getState().updateSettings({ showSafeZones: !current });
+                  }}
+                  className={`w-8 h-4 rounded-full transition-colors relative ${
+                    useEditorStore.getState().settings.showSafeZones ? 'bg-amber-500' : 'bg-[#1e1e1e] border border-[#3e3e3e]'
+                  }`}
+                >
+                  <div className={`w-3 h-3 rounded-full bg-white absolute top-[1px] transition-all ${
+                    useEditorStore.getState().settings.showSafeZones ? 'left-[17px]' : 'left-[1px]'
+                  }`} />
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                   const canvas = document.querySelector('.preview-canvas') as HTMLCanvasElement;
+                   if (!canvas) {
+                     alert("Preview canvas not found!");
+                     return;
+                   }
+                   const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+                   const link = document.createElement('a');
+                   link.download = 'thumbnail.jpg';
+                   link.href = dataUrl;
+                   link.click();
+                }}
+                className="mt-2 w-full py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded text-xs font-semibold shadow-lg shadow-orange-900/20 transition-all flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                Capture High-Res Thumbnail
+              </button>
+            </div>
+            
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 flex flex-col gap-3">
+              <h3 className="text-xs font-semibold text-white">Quick Branding</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                     useEditorStore.getState().insertTextClip({ text: 'BRAND NAME', fontSize: 40 });
+                  }}
+                  className="py-2 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-white rounded text-[10px] transition-colors flex flex-col items-center gap-1"
+                >
+                  <Type className="w-4 h-4 text-blue-400" />
+                  Add Bold Text
+                </button>
+                <button
+                  onClick={() => {
+                     const input = document.createElement('input');
+                     input.type = 'file';
+                     input.accept = 'image/*';
+                     input.onchange = (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0];
+                        if (file) {
+                           useEditorStore.getState().addMedia({
+                              id: Math.random().toString(36).substr(2, 9),
+                              name: file.name,
+                              type: 'image',
+                              url: URL.createObjectURL(file),
+                              duration: 5,
+                              createdAt: Date.now(),
+                           });
+                        }
+                     };
+                     input.click();
+                  }}
+                  className="py-2 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-white rounded text-[10px] transition-colors flex flex-col items-center gap-1"
+                >
+                  <ImageIcon className="w-4 h-4 text-green-400" />
+                  Import Logo
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activePropertiesTab === 'history' && (
           <div className="flex-1 flex flex-col overflow-hidden h-full">
             {/* Header */}

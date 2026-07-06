@@ -1,9 +1,13 @@
+import React from 'react';
 import {
   Lock,
   Unlock,
   Eye,
   EyeOff,
   Trash2,
+  Tag,
+  Type,
+  Bookmark,
   ZoomIn,
   ZoomOut,
   Scissors,
@@ -24,6 +28,15 @@ import {
   Zap,
   Loader2,
   Magnet,
+  Volume2,
+  VolumeX,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowDown,
+  Copy,
+  Palette,
+  Box,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -822,6 +835,7 @@ function WaveformOverlay({
 // ─── Transitions Sub-Component ────────────────────────────────────────────────
 
 interface TransitionTargetProps {
+  position?: 'in' | 'out';
   clipId: string;
   trackId: string;
   left: number;
@@ -943,6 +957,7 @@ function TransitionPreviewTooltipCanvas({ transitionName }: { transitionName: st
 function TransitionTarget({
   clipId,
   trackId,
+  position,
   left,
   width,
   hasTransition,
@@ -987,9 +1002,11 @@ function TransitionTarget({
       params: { alignment: 'center' },
     };
 
-    useEditorStore.getState().updateClip(clipId, {
-      transitionIn: newTransition,
-    });
+    if (position === 'in') {
+      useEditorStore.getState().updateClip(clipId, { transitionIn: newTransition });
+    } else {
+      useEditorStore.getState().updateClip(clipId, { transitionOut: newTransition });
+    }
     useEditorStore.getState().saveSnapshot();
   };
 
@@ -1254,6 +1271,9 @@ export function Timeline() {
     setPinnedOverLayerTrackId,
     settings,
     updateSettings,
+    timelineStack,
+    exitCompoundClip,
+    enterCompoundClip,
   } = useEditorStore();
 
   // ── Refs & local state ──────────────────────────────────────────────────
@@ -2080,7 +2100,7 @@ Rules:
 
   const [resizeState, setResizeState] = useState<{
     clipId: string;
-    edge: 'left' | 'right';
+    edge: 'left' |'right';
     startX: number;
     originalDuration: number;
     originalTrimStart: number;
@@ -2111,7 +2131,7 @@ Rules:
 
   const [resizeOverLayerState, setResizeOverLayerState] = useState<{
     overLayerId: string;
-    edge: 'left' | 'right';
+    edge: 'left' |'right';
     startX: number;
     originalDuration: number;
     originalStartTime: number;
@@ -2262,6 +2282,13 @@ Rules:
           if (clip.id === movingClipId) continue;
           targets.push(clip.startTime);
           targets.push(clip.startTime + clip.duration);
+        }
+        if (track.overLayers) {
+          for (const ol of track.overLayers) {
+            if (ol.id === movingClipId) continue;
+            targets.push(ol.startTime);
+            targets.push(ol.startTime + ol.duration);
+          }
         }
       }
 
@@ -2710,20 +2737,33 @@ Rules:
 
       // ─ Over Layer drag ──────────────────────────────────────────────
       if (dragOverLayerState) {
-        const dx = e.clientX - dragOverLayerState.startX;
-        const dt = dx / zoomLevel;
-        const newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
-        moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
+        if (!(window as any).__olDragRaf) {
+          (window as any).__olDragRaf = requestAnimationFrame(() => {
+            const dx = e.clientX - dragOverLayerState.startX;
+            const dt = dx / zoomLevel;
+            let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
+            
+            // Apply snapping
+            const track = tracks.find((t) => t.id === dragOverLayerState.trackId);
+            const ol = track?.overLayers?.find(o => o.id === dragOverLayerState.overLayerId);
+            if (ol) {
+              const { snappedTime, snapPos } = computeSnap(newStartTime, ol.id, ol.duration);
+              newStartTime = snappedTime;
+              setSnapLine(snapPos);
+            }
+            
+            moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
 
-        // Vertical row swapping reordering
-        const track = tracks.find((t) => t.id === dragOverLayerState.trackId);
-        const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
-        if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
-          const trackRect = trackEl.getBoundingClientRect();
-          const relY = e.clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
-          const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
-          
-          reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
+            // Vertical row swapping reordering
+            const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
+            if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
+              const trackRect = trackEl.getBoundingClientRect();
+              const relY = e.clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
+              const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
+              reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
+            }
+            (window as any).__olDragRaf = null;
+          });
         }
       }
 
@@ -2972,6 +3012,11 @@ Rules:
         endTransactionSafe(); // commit final snapshot
       }
       if (dragOverLayerState) {
+        if ((window as any).__olDragRaf) {
+          cancelAnimationFrame((window as any).__olDragRaf);
+          (window as any).__olDragRaf = null;
+        }
+        setSnapLine(null);
         setDragOverLayerState(null);
         endTransactionSafe(); // commit final snapshot
       }
@@ -3439,6 +3484,8 @@ Rules:
 
   // ── Ruler markers ───────────────────────────────────────────────────────
 
+  const sortedMarkers = useMemo(() => [...markers].sort((a, b) => a.time - b.time), [markers]);
+
   const rulerData = useMemo(() => {
     const markers: { time: number; label: string; type: 'major' | 'medium' | 'minor' }[] = [];
 
@@ -3743,14 +3790,22 @@ Rules:
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleTrackMute(track.id);
+                      if (track.type === 'audio') {
+                        toggleTrackMute(track.id);
+                      } else {
+                        useEditorStore.getState().toggleTrackHidden(track.id);
+                      }
                     }}
-                    title={track.muted ? 'Unmute' : 'Mute'}
+                    title={track.type === 'audio' ? (track.muted ? 'Unmute Track' : 'Mute Track') : (track.hidden ? 'Show Track' : 'Hide Track')}
                     className={`p-0.5 rounded transition-colors ${
-                      track.muted ? 'text-red-400' : 'text-[#a0a0a0] hover:text-white'
+                      (track.type === 'audio' ? track.muted : track.hidden) ? 'text-red-400' : 'text-[#a0a0a0] hover:text-white'
                     }`}
                   >
-                    {track.muted ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    {track.type === 'audio' ? (
+                      track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />
+                    ) : (
+                      track.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />
+                    )}
                   </button>
                   {tracks.length > 1 && (
                     <button
@@ -3810,7 +3865,7 @@ Rules:
               )}
 
               {/* Timeline Markers */}
-              {markers.map((marker) => {
+              {sortedMarkers.map((marker) => {
                 const markerX = marker.time * zoomLevel;
                 return (
                   <div
@@ -3834,9 +3889,15 @@ Rules:
                   >
                     {/* Diamond shape */}
                     <div 
-                      className="w-2.5 h-2.5 rotate-45 border border-white/40 shadow-sm mt-0.5 mx-auto transition-transform group-hover:scale-110"
+                      className={`${marker.type === 'sponsor' ? 'w-3 h-3' : marker.type === 'chapter' ? 'w-2 h-4 rounded-sm' : 'w-2.5 h-2.5 rotate-45'} border border-white/40 shadow-sm mt-0.5 mx-auto transition-transform group-hover:scale-110`}
                       style={{ backgroundColor: marker.color }}
                     />
+                    {marker.type === 'sponsor' && (
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] font-bold text-green-400 bg-black/60 px-1 rounded shadow pointer-events-none">SPONSOR</div>
+                    )}
+                    {marker.type === 'chapter' && (
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] font-bold text-blue-400 bg-black/60 px-1 rounded shadow pointer-events-none">CHAPTER</div>
+                    )}
                     {/* Tooltip on hover */}
                     <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1 bg-[#141414] border border-[#3e3e3e] px-1.5 py-0.5 rounded text-[8px] text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-md">
                       {marker.name}
@@ -3941,16 +4002,37 @@ Rules:
               )}
 
               {/* Marker vertical guide lines */}
-              {markers.map((marker) => (
-                <div
-                  key={`ml-${marker.id}`}
-                  className="absolute top-0 bottom-0 w-px pointer-events-none z-10 opacity-35 border-l border-dashed"
-                  style={{
-                    left: `${marker.time * zoomLevel}px`,
-                    borderColor: marker.color
-                  }}
-                />
-              ))}
+              {sortedMarkers.map((marker, i) => {
+                // If it's a sponsor or chapter marker, render a colored block until the next marker
+                let nextTime = totalDuration;
+                if (marker.type === 'sponsor' || marker.type === 'chapter') {
+                  const nextMarker = sortedMarkers.slice(i+1).find(m => m.time > marker.time);
+                  if (nextMarker) nextTime = nextMarker.time;
+                }
+                const isSegment = marker.type === 'sponsor' || marker.type === 'chapter';
+
+                return (
+                  <React.Fragment key={`ml-${marker.id}`}>
+                    <div
+                      className={`absolute top-0 bottom-0 pointer-events-none z-10 opacity-35 ${isSegment ? 'border-l-2 border-solid' : 'w-px border-l border-dashed'}`}
+                      style={{
+                        left: `${marker.time * zoomLevel}px`,
+                        borderColor: marker.color
+                      }}
+                    />
+                    {isSegment && (
+                      <div 
+                        className="absolute top-0 bottom-0 pointer-events-none z-0 opacity-5"
+                        style={{
+                          left: `${marker.time * zoomLevel}px`,
+                          width: `${(nextTime - marker.time) * zoomLevel}px`,
+                          backgroundColor: marker.color
+                        }}
+                      />
+                    )}
+                  </React.Fragment>
+                );
+              })}
 
               {/* ── Tracks ─────────────────────────────────────────── */}
               {tracks.map((track) => {
@@ -4082,6 +4164,12 @@ Rules:
                           e.stopPropagation();
                           if (e.ctrlKey || e.metaKey) return;
                           selectClip(clip.id);
+                        }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          if (media.type === 'compound') {
+                            enterCompoundClip(clip.id);
+                          }
                         }}
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -4277,7 +4365,9 @@ Rules:
                             {media.type === 'text' && <span className="text-[8px] shrink-0 opacity-70">T</span>}
                             {media.type === 'fx' && <Sparkles className="w-2.5 h-2.5 shrink-0 opacity-70" />}
                             <span
-                              className={`text-[9px] font-medium truncate drop-shadow-sm ${colors.text}`}
+                              className={`text-[9px] font-medium drop-shadow-sm ${colors.text} ${media.type === 'text' ? 'animate-text-slide' : 'truncate'}`}
+                              style={media.type === 'text' ? { '--marquee-width': `${width}px` } as any : undefined}
+                              title={media.type === 'text' && (clip as any).textSettings?.text ? (clip as any).textSettings.text : media.name}
                             >
                               {media.type === 'text' && (clip as any).textSettings?.text
                                 ? (clip as any).textSettings.text
@@ -4361,7 +4451,7 @@ Rules:
                       return (
                         <div
                           key={ol.id}
-                          className={`absolute rounded cursor-pointer group select-none ${bgClass} border transition-all duration-75 flex items-center justify-between px-2 ${
+                          className={`absolute rounded cursor-pointer group select-none ${bgClass} border overflow-hidden transition-all duration-75 flex items-center justify-between px-2 ${
                             isSelected ? 'ring-2 ring-white shadow-lg z-20' : ''
                           } ${isDragging ? 'opacity-80 brightness-125' : ''}`}
                           style={{
@@ -4369,6 +4459,15 @@ Rules:
                             width: `${width}px`,
                             top: `${topOffset}px`,
                             height: `${OVER_LAYER_ROW_HEIGHT - 4}px`,
+                          }}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            if (ol.mediaId) {
+                               const olMedia = useEditorStore.getState().mediaLibrary.find(m => m.id === ol.mediaId);
+                               if (olMedia && olMedia.type === 'compound') {
+                                 enterCompoundClip(ol.id);
+                               }
+                            }
                           }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
@@ -4440,16 +4539,29 @@ Rules:
                             });
                           }}
                         >
-                          <div className="flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
+                          {media && (media.type === 'video' || media.type === 'image') && media.thumbnail && (
+                            <img 
+                              src={media.thumbnail} 
+                              alt="" 
+                              className="absolute inset-0 w-full h-full object-cover opacity-40 pointer-events-none" 
+                            />
+                          )}
+                          <div className="relative z-10 flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
                             {track.type === 'audio' ? (
-                              <Music className="w-3 h-3 text-emerald-300" />
+                              <Music className="w-3 h-3 text-emerald-300 drop-shadow-md" />
                             ) : media?.type === 'image' ? (
-                              <Image className="w-3 h-3 text-amber-300" />
+                              <Image className="w-3 h-3 text-amber-300 drop-shadow-md" />
+                            ) : track.type === 'text' ? (
+                              <Type className="w-3 h-3 text-purple-300 drop-shadow-md" />
                             ) : (
-                              <Film className="w-3 h-3 text-blue-300" />
+                              <Film className="w-3 h-3 text-blue-300 drop-shadow-md" />
                             )}
-                            <span className="text-[10px] text-white font-medium truncate">
-                              {media ? media.name : '(Empty Over Layer — Drop Media Here)'}
+                            <span 
+                              className={`text-[10px] text-white font-medium drop-shadow-md ${track.type === 'text' ? 'animate-text-slide' : 'truncate'}`}
+                              style={track.type === 'text' ? { '--marquee-width': `${width}px` } as any : undefined}
+                              title={media ? media.name : (track.type === 'text' ? 'Text OverLayer' : '(Empty Over Layer)')}
+                            >
+                              {media ? media.name : (track.type === 'text' ? 'Text OverLayer' : '(Empty Over Layer)')}
                             </span>
                           </div>
                           
@@ -4616,6 +4728,38 @@ Rules:
 
             {contextMenu.clipId && (
               <>
+                {(() => {
+                  const clip = tracks.flatMap(t => [...t.clips, ...t.overLayers]).find(c => c.id === contextMenu.clipId);
+                  if (!clip) return null;
+                  return (
+                    <>
+                      <button
+                        className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e] pb-2"
+                        onClick={() => {
+                          useEditorStore.getState().updateClip(clip.id, { disabled: !clip.disabled });
+                          setContextMenu(null);
+                        }}
+                      >
+                        {clip.disabled ? <Eye className="w-3.5 h-3.5 text-green-400" /> : <EyeOff className="w-3.5 h-3.5 text-red-400" />}
+                        {clip.disabled ? 'Enable Clip' : 'Disable Clip'}
+                      </button>
+                      {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'audio') && (
+                        <button
+                          className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e] pb-2"
+                          onClick={() => {
+                            useEditorStore.getState().updateClip(clip.id, {
+                              audioSettings: { ...(clip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, humanize: false }), muted: !clip.audioSettings?.muted }
+                            });
+                            setContextMenu(null);
+                          }}
+                        >
+                          {clip.audioSettings?.muted ? <Volume2 className="w-3.5 h-3.5 text-green-400" /> : <VolumeX className="w-3.5 h-3.5 text-red-400" />}
+                          {clip.audioSettings?.muted ? 'Unmute Audio' : 'Mute Audio'}
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
                 {/* AI Transcription Options */}
                 {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'audio') && (
                   <>
@@ -4702,6 +4846,37 @@ Rules:
                 </button>
                 <div className="h-px bg-[#3e3e3e] my-1" />
                 <button
+                  className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                  onClick={() => {
+                    useEditorStore.getState().copyClip('clip');
+                    setContextMenu(null);
+                  }}
+                >
+                  <Copy className="w-3.5 h-3.5 text-blue-400" />
+                  Copy Clip (Base)
+                </button>
+                <button
+                  className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                  onClick={() => {
+                    useEditorStore.getState().copyClip('style');
+                    setContextMenu(null);
+                  }}
+                >
+                  <Palette className="w-3.5 h-3.5 text-purple-400" />
+                  Copy Style
+                </button>
+                <button
+                  className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                  onClick={() => {
+                    useEditorStore.getState().copyClip('whole');
+                    setContextMenu(null);
+                  }}
+                >
+                  <Box className="w-3.5 h-3.5 text-amber-400" />
+                  Copy (Whole)
+                </button>
+                <div className="h-px bg-[#3e3e3e] my-1" />
+                <button
                   className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                   onClick={() => {
                     useEditorStore.getState().removeClip(contextMenu.clipId);
@@ -4722,7 +4897,30 @@ Rules:
     {markerContextMenu && (() => {
       const marker = markers.find(m => m.id === markerContextMenu.markerId);
       if (!marker) return null;
-      return (
+    
+  const handleZIndexChange = (clipId: string, isOverLayer: boolean, action: 'front' | 'back' | 'forward' | 'backward', trackId?: string) => {
+    const clip = isOverLayer 
+      ? tracks.flatMap(t => t.overLayers || []).find(c => c.id === clipId)
+      : tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+    
+    if (!clip) return;
+    const currentZ = clip.zIndex || 0;
+    
+    let newZ = currentZ;
+    if (action === 'forward') newZ = currentZ + 1;
+    else if (action === 'backward') newZ = currentZ - 1;
+    else if (action === 'front') newZ = 9999;
+    else if (action === 'back') newZ = -9999;
+
+    if (isOverLayer) {
+      updateOverLayer(clipId, { zIndex: newZ });
+    } else {
+      updateClip(clipId, { zIndex: newZ });
+    }
+    setContextMenu(null);
+  };
+
+  return (
         <div
           className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-2 min-w-[200px] text-white"
           style={{ left: markerContextMenu.x, top: markerContextMenu.y }}
@@ -4762,6 +4960,29 @@ Rules:
                 style={{ backgroundColor: color }}
               />
             ))}
+                    </div>
+
+          {/* Type Selection */}
+          <div className="px-3 py-1 text-[10px] text-[#a0a0a0] mt-1">Marker Type</div>
+          <div className="px-1.5 pb-1.5 space-y-0.5">
+            <button
+              className={`w-full text-left px-2 py-1 text-xs rounded flex items-center gap-2 transition-colors ${marker.type === 'standard' || !marker.type ? 'bg-amber-500/20 text-amber-400' : 'text-white hover:bg-[#3e3e3e]'}`}
+              onClick={() => { updateMarker(marker.id, { type: 'standard' }); setMarkerContextMenu(null); }}
+            >
+              <Bookmark className="w-3 h-3" /> Standard
+            </button>
+            <button
+              className={`w-full text-left px-2 py-1 text-xs rounded flex items-center gap-2 transition-colors ${marker.type === 'sponsor' ? 'bg-green-500/20 text-green-400' : 'text-white hover:bg-[#3e3e3e]'}`}
+              onClick={() => { updateMarker(marker.id, { type: 'sponsor', color: '#22c55e' }); setMarkerContextMenu(null); }}
+            >
+              <Tag className="w-3 h-3" /> Sponsor Segment
+            </button>
+            <button
+              className={`w-full text-left px-2 py-1 text-xs rounded flex items-center gap-2 transition-colors ${marker.type === 'chapter' ? 'bg-blue-500/20 text-blue-400' : 'text-white hover:bg-[#3e3e3e]'}`}
+              onClick={() => { updateMarker(marker.id, { type: 'chapter', color: '#3b82f6' }); setMarkerContextMenu(null); }}
+            >
+              <Layers className="w-3 h-3" /> Chapter Marker
+            </button>
           </div>
 
           <div className="h-px bg-[#3e3e3e] my-1.5" />

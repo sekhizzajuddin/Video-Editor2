@@ -1,4 +1,42 @@
-import {
+import { 
+  Menu,
+  X,
+  FileVideo,
+  Image as ImageIcon,
+  Volume2,
+  Search,
+  Check,
+  Folder,
+  Film,
+  Clock,
+  DownloadCloud,
+  PlaySquare,
+  FileAudio,
+  Settings2,
+  FileVideo2,
+  Play,
+  Zap,
+  UploadCloud,
+  Monitor,
+  Share2,
+  Music,
+  Speaker,
+  Maximize2,
+  Minimize2,
+  SkipBack,
+  SplitSquareHorizontal,
+  Layers,
+  PenTool,
+  Hash,
+  Shield,
+  Database,
+  Cpu,
+  Wifi,
+  Globe,
+  Map,
+  Compass,
+  Book,
+  Target,
   Clapperboard,
   Undo2,
   Redo2,
@@ -18,7 +56,9 @@ import {
   Timer,
   Save,
   FileUp,
-} from 'lucide-react';
+  Layout,
+  Type,
+  MonitorPlay, Link } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -34,17 +74,38 @@ export function TopToolbar() {
     history,
     setShowExportModal,
     setShowSettingsModal,
+    setShowTeleprompter,
+    syncSelectedClips,
     resetProject,
     copyClip,
     pasteClip,
     cutClip,
     duplicateClip,
     addMedia,
+    workspaceLayout,
+    setWorkspaceLayout,
+    clipboardData,
+    clearClipboard,
   } = useEditorStore();
 
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showEditMenu, setShowEditMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
+  const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
+  const [captionProgress, setCaptionProgress] = useState(0);
+
+  const handleGenerateCaptions = async () => {
+    setIsGeneratingCaptions(true);
+    setCaptionProgress(0);
+    try {
+      const { generateAutoCaptions } = await import('@/utils/autoCaptions');
+      await generateAutoCaptions((p) => setCaptionProgress(p));
+    } catch (err) {
+      console.error(err);
+    }
+    setIsGeneratingCaptions(false);
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canUndo = historyIndex > 0;
@@ -203,18 +264,18 @@ export function TopToolbar() {
 
   // FIX H10: Close all menus when clicking outside the toolbar
   useEffect(() => {
-    if (!showFileMenu && !showEditMenu && !showViewMenu) return;
+    if (!showFileMenu && !showEditMenu && !showViewMenu && !showLayoutMenu) return;
     const handleOutsideClick = (e: MouseEvent) => {
-      const toolbar = document.getElementById('top-toolbar-root');
-      if (toolbar && !toolbar.contains(e.target as Node)) {
+      if (!(e.target as Element).closest('.relative')) {
         setShowFileMenu(false);
         setShowEditMenu(false);
         setShowViewMenu(false);
+        setShowLayoutMenu(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [showFileMenu, showEditMenu, showViewMenu]);
+  }, [showFileMenu, showEditMenu, showViewMenu, showLayoutMenu]);
 
   return (
     <div id="top-toolbar-root" className="h-12 bg-[#1e1e1e] border-b border-[#3e3e3e] flex items-center px-3 select-none z-50">
@@ -225,10 +286,38 @@ export function TopToolbar() {
           <span className="text-sm font-semibold text-white tracking-wide">ProCut</span>
         </div>
 
+        {/* Workspace Layout Menu */}
+        <div className="relative ml-2 mr-2">
+          <button
+            onClick={() => { setShowLayoutMenu(!showLayoutMenu); setShowFileMenu(false); setShowEditMenu(false); setShowViewMenu(false); }}
+            className="px-3 py-1.5 text-xs text-amber-400 font-medium hover:text-amber-300 hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+          >
+            <Layout className="w-3.5 h-3.5" /> Workspace: {workspaceLayout?.preset || 'Editing'} <ChevronDown className="w-3 h-3" />
+          </button>
+          {showLayoutMenu && (
+            <div className="absolute top-full left-0 mt-1 w-40 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
+              {['Editing', 'Color', 'Audio'].map((preset) => (
+                <button
+                  key={preset}
+                  onClick={() => {
+                    if (preset === 'Editing') setWorkspaceLayout({ preset: 'Editing', leftWidth: 250, rightWidth: 280, timelineHeight: 320 });
+                    if (preset === 'Color') setWorkspaceLayout({ preset: 'Color', leftWidth: 200, rightWidth: 400, timelineHeight: 320 });
+                    if (preset === 'Audio') setWorkspaceLayout({ preset: 'Audio', leftWidth: 200, rightWidth: 280, timelineHeight: 250 });
+                    setShowLayoutMenu(false);
+                  }}
+                  className={`w-full px-3 py-2 text-xs text-left hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors ${workspaceLayout?.preset === preset ? 'text-amber-400' : 'text-[#a0a0a0]'}`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* File Menu */}
         <div className="relative">
           <button
-            onClick={() => { setShowFileMenu(!showFileMenu); setShowEditMenu(false); setShowViewMenu(false); }}
+            onClick={() => { setShowFileMenu(!showFileMenu); setShowEditMenu(false); setShowViewMenu(false); setShowLayoutMenu(false); }}
             className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
           >
             File <ChevronDown className="w-3 h-3" />
@@ -252,6 +341,12 @@ export function TopToolbar() {
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
                 <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File
+              </button>
+              <button
+                onClick={() => { useEditorStore.getState().resetProject(); setShowFileMenu(false); }}
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recent Projects
               </button>
               <button
                 onClick={() => { setShowExportModal(true); setShowFileMenu(false); }}
@@ -362,6 +457,53 @@ export function TopToolbar() {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-2">
+        
+
+        
+
+        {clipboardData && (
+          <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs rounded-full">
+            <span className="font-medium">
+              📋 Copied: {clipboardData.clips.length} Clip{clipboardData.clips.length !== 1 ? 's' : ''} 
+              ({clipboardData.type === 'clip' ? 'Media' : clipboardData.type === 'style' ? 'Style' : 'Whole'})
+            </span>
+            <button 
+              onClick={clearClipboard} 
+              className="p-0.5 hover:bg-amber-500/20 rounded-full transition-colors"
+              title="Clear Clipboard"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        <button
+          onClick={() => syncSelectedClips()}
+          title="Sync Audio/Video"
+          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
+        >
+          <Link className="w-3.5 h-3.5" />
+          Sync
+        </button>
+
+        <button
+          onClick={() => setShowTeleprompter(true)}
+          title="Teleprompter"
+          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
+        >
+          <MonitorPlay className="w-3.5 h-3.5" />
+          Teleprompter
+        </button>
+
+        <button
+          onClick={handleGenerateCaptions}
+          disabled={isGeneratingCaptions}
+          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium disabled:opacity-50"
+        >
+          <Type className="w-3.5 h-3.5" />
+          {isGeneratingCaptions ? `${captionProgress}%` : 'Auto-Captions'}
+        </button>
+
         <button
           onClick={() => setShowExportModal(true)}
           className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded flex items-center gap-1.5 transition-colors font-medium"

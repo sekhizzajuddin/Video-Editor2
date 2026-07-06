@@ -9,6 +9,10 @@ import { Timeline } from '@/components/Timeline';
 import { AudioMixer } from '@/components/AudioMixer';
 import { ExportModal } from '@/components/ExportModal';
 import { SettingsModal } from '@/components/SettingsModal';
+import { TeleprompterModal } from '@/components/TeleprompterModal';
+import { HelpModal } from '@/components/HelpModal';
+import { HelpTooltipManager } from '@/components/HelpTooltipManager';
+import { WelcomeScreen } from '@/components/WelcomeScreen';
 import { useEditorStore } from '@/store/editorStore';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 import { saveAutosaveToDB } from '@/utils/projectPersistence';
@@ -40,12 +44,30 @@ function App() {
     removeOverLayer,
     selectOverLayer,
     settings,
+    workspaceLayout,
+    setWorkspaceLayout,
     updateSettings,
+    showTeleprompter,
+    setShowTeleprompter,
+    projectId,
   } = useEditorStore();
 
-  const [leftWidth, setLeftWidth] = useState(250);
-  const [rightWidth, setRightWidth] = useState(280);
-  const [timelineHeight, setTimelineHeight] = useState(320);
+  const leftWidth = workspaceLayout.leftWidth;
+  const rightWidth = workspaceLayout.rightWidth;
+  const timelineHeight = workspaceLayout.timelineHeight;
+
+  const setLeftWidth = (w: number | ((w: number) => number)) => {
+    const newW = typeof w === 'function' ? w(leftWidth) : w;
+    setWorkspaceLayout({ ...workspaceLayout, preset: 'Custom', leftWidth: newW });
+  };
+  const setRightWidth = (w: number | ((w: number) => number)) => {
+    const newW = typeof w === 'function' ? w(rightWidth) : w;
+    setWorkspaceLayout({ ...workspaceLayout, preset: 'Custom', rightWidth: newW });
+  };
+  const setTimelineHeight = (h: number | ((h: number) => number)) => {
+    const newH = typeof h === 'function' ? h(timelineHeight) : h;
+    setWorkspaceLayout({ ...workspaceLayout, preset: 'Custom', timelineHeight: newH });
+  };
   const [bottomTab, setBottomTab] = useState<'timeline' | 'mixer'>('timeline');
   const isDraggingLeft = useRef(false);
   const isDraggingRight = useRef(false);
@@ -105,8 +127,15 @@ function App() {
           setActiveTool('split');
           break;
         case 'paste_clip':
-          pasteClip();
-          break;
+          case 'paste_clip_whole':
+            pasteClip('whole');
+            break;
+          case 'paste_clip_base':
+            pasteClip('clip');
+            break;
+          case 'paste_clip_style':
+            pasteClip('style');
+            break;
         case 'tool_select':
           setActiveTool('select');
           break;
@@ -185,8 +214,15 @@ function App() {
           setActiveTool('ripple');
           break;
         case 'copy_clip':
-          copyClip();
-          break;
+          case 'copy_clip_whole':
+            copyClip('whole');
+            break;
+          case 'copy_clip_base':
+            copyClip('clip');
+            break;
+          case 'copy_clip_style':
+            copyClip('style');
+            break;
         case 'set_in_point':
           useEditorStore.getState().setInPoint(useEditorStore.getState().currentTime);
           break;
@@ -265,12 +301,7 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  // Load project on mount
-  useEffect(() => {
-    useEditorStore.getState().loadProject().then((loaded) => {
-      if (loaded) console.log('Successfully restored project from IndexedDB');
-    });
-  }, []);
+  // Load project on mount is removed since WelcomeScreen handles it
 
   // Periodic Autosave Versioning (every 2 minutes)
   useEffect(() => {
@@ -336,7 +367,8 @@ function App() {
   ];
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#1e1e1e] overflow-hidden">
+    <div className="h-screen flex flex-col bg-surface-900 text-white overflow-hidden select-none">
+      {projectId === 'default' && <WelcomeScreen />}
       {/* Top Toolbar */}
       <TopToolbar />
 
@@ -471,6 +503,7 @@ function App() {
       {/* Modals */}
       <ExportModal />
       <SettingsModal />
+      <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />
     </div>
   );
 }

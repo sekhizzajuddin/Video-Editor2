@@ -1,13 +1,13 @@
-import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw, History, Trash2 } from 'lucide-react';
+import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw, History, Trash2, Heart } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { getAutosavesFromDB, deleteAutosaveFromDB, restoreSnapshotMedia } from '@/utils/projectPersistence';
 import { clearPreviewCaches } from './PreviewCanvas';
-import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
+import { DEFAULT_SHORTCUTS, getShortcutString, SHORTCUT_PROFILES } from '@/utils/keyboardShortcuts';
 
 export function SettingsModal() {
-  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings } = useEditorStore();
+  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings, aspectRatio, reframeProject, showProgressBar, useProxies, setUseProxies, setShowProgressBar, progressBarColor, setProgressBarColor, progressBarHeight, setProgressBarHeight } = useEditorStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -25,7 +25,7 @@ export function SettingsModal() {
     setShowSettingsModal(false);
     e.target.value = '';
   }, [addMedia, setShowSettingsModal]);
-  const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls' | 'recovery'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls' | 'recovery' | 'engagement'>('general');
   const [searchQuery, setSearchQuery] = useState('');
   const [autosaves, setAutosaves] = useState<any[]>([]);
 
@@ -157,6 +157,7 @@ export function SettingsModal() {
     { id: 'keyboard' as const, label: 'Shortcuts', icon: Keyboard },
     { id: 'performance' as const, label: 'Performance', icon: Monitor },
     { id: 'recovery' as const, label: 'Recovery', icon: History },
+    { id: 'engagement' as const, label: 'Engagement', icon: Heart },
   ];
 
   return (
@@ -287,6 +288,47 @@ export function SettingsModal() {
                   </div>
                 </div>
 
+                
+                <div className="border-t border-[#3e3e3e] pt-4">
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Smart Reframing</h3>
+                  <p className="text-[10px] text-[#a0a0a0] mb-3">
+                    Automatically convert your project for different platforms (e.g. TikTok / Shorts). 
+                    This will scale and crop all your existing video clips to fill the new aspect ratio.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        if (confirm('Reframe project to 16:9 Landscape? This will adjust all clip scales.')) {
+                          reframeProject('16:9');
+                        }
+                      }}
+                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '16:9' ? 'bg-amber-500 text-black font-semibold' : 'bg-[#252525] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white'}`}
+                    >
+                      16:9 (Landscape)
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm('Reframe project to 9:16 Vertical? This will adjust all clip scales.')) {
+                          reframeProject('9:16');
+                        }
+                      }}
+                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '9:16' ? 'bg-amber-500 text-black font-semibold' : 'bg-[#252525] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white'}`}
+                    >
+                      9:16 (Vertical)
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm('Reframe project to 1:1 Square? This will adjust all clip scales.')) {
+                          reframeProject('1:1');
+                        }
+                      }}
+                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '1:1' ? 'bg-amber-500 text-black font-semibold' : 'bg-[#252525] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white'}`}
+                    >
+                      1:1 (Square)
+                    </button>
+                  </div>
+                </div>
+
                 <div className="border-t border-[#3e3e3e] pt-4">
                   <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Project Actions</h3>
                   <div className="space-y-2">
@@ -323,6 +365,67 @@ export function SettingsModal() {
                       <RotateCcw className="w-3.5 h-3.5" />
                       Reset Project
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'engagement' && (
+              <div className="space-y-4">
+                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Social Engagement</h3>
+                
+                <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Heart className="w-4 h-4 text-pink-500" />
+                      <span className="text-xs text-white font-medium">Dynamic Progress Bar</span>
+                    </div>
+                    <button
+                      onClick={() => setShowProgressBar(!showProgressBar)}
+                      className={`w-9 h-5 rounded-full transition-colors relative ${
+                        showProgressBar ? 'bg-pink-500' : 'bg-[#3e3e3e]'
+                      }`}
+                    >
+                      <div
+                        className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
+                        style={{ left: showProgressBar ? '18px' : '2px' }}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-[#a0a0a0] mb-4">
+                    Displays a continuous progress bar during playback. Often used in YouTube Shorts and TikToks to improve viewer retention.
+                  </p>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-white">Bar Color</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[#a0a0a0] font-mono">{progressBarColor.toUpperCase()}</span>
+                        <input
+                          type="color"
+                          value={progressBarColor}
+                          onChange={(e) => setProgressBarColor(e.target.value)}
+                          className="w-6 h-6 rounded cursor-pointer bg-transparent border-0 p-0"
+                          style={{ WebkitAppearance: 'none' }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs text-white">
+                        <span>Bar Height</span>
+                        <span className="text-pink-500">{progressBarHeight}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={20}
+                        step={1}
+                        value={progressBarHeight}
+                        onChange={(e) => setProgressBarHeight(Number(e.target.value))}
+                        className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-pink-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -378,18 +481,72 @@ export function SettingsModal() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Keyboard Shortcuts</h3>
-                  <button
-                    onClick={() => {
-                      // FIX M17: Also clear any active recording state when resetting shortcuts
-                      setRecordingActionId(null);
-                      setConflictDetail(null);
-                      updateSettings({ keyboardShortcuts: {} });
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-1 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-950/20 border border-red-900/30 rounded transition-colors"
-                  >
-                    <RotateCw className="w-3 h-3" />
-                    Reset to Defaults
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = '.json';
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (re) => {
+                            try {
+                              const json = JSON.parse(re.target?.result as string);
+                              updateSettings({ keyboardShortcuts: json });
+                              alert("Shortcuts imported successfully.");
+                            } catch (err) { alert("Invalid JSON file"); }
+                          };
+                          reader.readAsText(file);
+                        };
+                        input.click();
+                      }}
+                      className="px-2.5 py-1 text-[10px] text-amber-400 hover:text-amber-300 border border-amber-900/30 hover:bg-amber-900/20 rounded transition-colors"
+                    >Import</button>
+                    <button
+                      onClick={() => {
+                        const json = JSON.stringify(settings.keyboardShortcuts || {}, null, 2);
+                        const blob = new Blob([json], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'procut-shortcuts.json';
+                        a.click();
+                      }}
+                      className="px-2.5 py-1 text-[10px] text-amber-400 hover:text-amber-300 border border-amber-900/30 hover:bg-amber-900/20 rounded transition-colors"
+                    >Export</button>
+                    <select
+                      className="bg-[#1e1e1e] border border-[#3e3e3e] text-[10px] text-[#a0a0a0] hover:text-white px-2 py-1 rounded focus:outline-none"
+                      onChange={(e) => {
+                        if (e.target.value === 'Default') {
+                          updateSettings({ keyboardShortcuts: {} });
+                        } else {
+                          const profile = SHORTCUT_PROFILES[e.target.value];
+                          if (profile) {
+                             updateSettings({ keyboardShortcuts: profile });
+                          }
+                        }
+                        // Reset dropdown selection visually
+                        e.target.value = "";
+                      }}
+                    >
+                       <option value="">-- Presets --</option>
+                       {Object.keys(SHORTCUT_PROFILES).map(k => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                    <button
+                      onClick={() => {
+                        // FIX M17: Also clear any active recording state when resetting shortcuts
+                        setRecordingActionId(null);
+                        setConflictDetail(null);
+                        updateSettings({ keyboardShortcuts: {} });
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-950/20 border border-red-900/30 rounded transition-colors"
+                    >
+                      <RotateCw className="w-3 h-3" />
+                      Reset
+                    </button>
+                  </div>
                 </div>
 
                 {/* Search Bar */}
@@ -537,6 +694,27 @@ export function SettingsModal() {
                       <option value="half">Half (Balanced)</option>
                       <option value="quarter">Quarter (Best Performance)</option>
                     </select>
+                  </div>
+
+                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <Monitor className="w-4 h-4 text-emerald-400" />
+                        <span className="text-xs text-white font-medium">Proxy Workflow</span>
+                      </div>
+                      <button
+                        onClick={() => setUseProxies(!useProxies)}
+                        className={`w-9 h-5 rounded-full transition-colors relative ${
+                          useProxies ? 'bg-emerald-500' : 'bg-[#3e3e3e]'
+                        }`}
+                      >
+                        <div
+                          className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
+                          style={{ left: useProxies ? '18px' : '2px' }}
+                        />
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-[#a0a0a0]">Use low-resolution proxy files for smooth playback on heavy projects.</p>
                   </div>
 
                   <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
