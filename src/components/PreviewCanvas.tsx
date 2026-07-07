@@ -1190,6 +1190,94 @@ export function PreviewCanvas() {
             oCtx.drawImage(oCtx.canvas, 0, sliceY + dh / 2, w, sliceH, sliceShift, sliceY + dh / 2, w, sliceH);
           }
           oCtx.restore();
+        } else if (fx?.type === 'posterize') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const levels = Math.max(2, Math.round(16 - 12 * intensity));
+          const imgData = oCtx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.round(Math.round(data[i] / 255 * levels) / levels * 255);
+            data[i + 1] = Math.round(Math.round(data[i + 1] / 255 * levels) / levels * 255);
+            data[i + 2] = Math.round(Math.round(data[i + 2] / 255 * levels) / levels * 255);
+          }
+          oCtx.putImageData(imgData, 0, 0);
+
+        } else if (fx?.type === 'dreamy_blur') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          oCtx.save();
+          oCtx.globalAlpha = 0.5 * intensity;
+          oCtx.globalCompositeOperation = 'screen';
+          oCtx.filter = `blur(${Math.round(12 * intensity)}px)`;
+          oCtx.drawImage(oCtx.canvas, 0, 0, w, h);
+          oCtx.restore();
+
+        } else if (fx?.type === 'fisheye') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const srcData = oCtx.getImageData(0, 0, w, h);
+          const dstData = oCtx.createImageData(w, h);
+          const src = srcData.data;
+          const dst = dstData.data;
+          const cx = w / 2;
+          const cy = h / 2;
+          const strength = 0.5 * intensity;
+          
+          for (let y = 0; y < h; y++) {
+            const dy = y - cy;
+            for (let x = 0; x < w; x++) {
+              const dx = x - cx;
+              const r = Math.sqrt(dx * dx + dy * dy);
+              const maxR = Math.sqrt(cx * cx + cy * cy);
+              if (r < maxR) {
+                const theta = Math.atan2(dy, dx);
+                const rn = Math.pow(r / maxR, 1 + strength) * maxR;
+                const sx = Math.round(cx + rn * Math.cos(theta));
+                const sy = Math.round(cy + rn * Math.sin(theta));
+                if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+                  const srcIdx = (sy * w + sx) * 4;
+                  const dstIdx = (y * w + x) * 4;
+                  dst[dstIdx] = src[srcIdx];
+                  dst[dstIdx + 1] = src[srcIdx + 1];
+                  dst[dstIdx + 2] = src[srcIdx + 2];
+                  dst[dstIdx + 3] = src[srcIdx + 3];
+                  continue;
+                }
+              }
+              const dstIdx = (y * w + x) * 4;
+              dst[dstIdx] = src[dstIdx];
+              dst[dstIdx + 1] = src[dstIdx + 1];
+              dst[dstIdx + 2] = src[dstIdx + 2];
+              dst[dstIdx + 3] = src[dstIdx + 3];
+            }
+          }
+          oCtx.putImageData(dstData, 0, 0);
+
+        } else if (fx?.type === 'vignette_burn') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          oCtx.save();
+          oCtx.globalCompositeOperation = 'multiply';
+          const grad = oCtx.createRadialGradient(w/2, h/2, Math.min(w,h) * 0.25, w/2, h/2, Math.max(w,h) * 0.7);
+          grad.addColorStop(0, 'rgba(255,255,255,1)');
+          grad.addColorStop(1, `rgba(0,0,0,${0.95 * intensity})`);
+          oCtx.fillStyle = grad;
+          oCtx.fillRect(0, 0, w, h);
+          oCtx.restore();
+
+        } else if (fx?.type === 'gameboy') {
+          const intensity = (fx.intensity ?? 100) / 100;
+          const imgData = oCtx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            let r = 15, g = 56, b = 15;
+            if (gray > 192) { r = 155; g = 188; b = 15; }
+            else if (gray > 128) { r = 139; g = 172; b = 15; }
+            else if (gray > 64) { r = 48; g = 98; b = 48; }
+            
+            data[i] = Math.round(data[i] + (r - data[i]) * intensity);
+            data[i + 1] = Math.round(data[i + 1] + (g - data[i + 1]) * intensity);
+            data[i + 2] = Math.round(data[i + 2] + (b - data[i + 2]) * intensity);
+          }
+          oCtx.putImageData(imgData, 0, 0);
         }
         
         oCtx.restore();

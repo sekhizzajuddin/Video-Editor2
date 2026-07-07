@@ -40370,7 +40370,7 @@
       "label": "FX_EFFECTS",
       "file_type": "code",
       "source_file": "src/components/MediaPanel.tsx",
-      "source_location": "L72",
+      "source_location": "L82",
       "community": 40,
       "community_name": "Community 40"
     },
@@ -40379,7 +40379,7 @@
       "label": "COLOR_CORRECTION_EFFECTS",
       "file_type": "code",
       "source_file": "src/components/MediaPanel.tsx",
-      "source_location": "L90",
+      "source_location": "L105",
       "community": 40,
       "community_name": "Community 40"
     },
@@ -40388,7 +40388,7 @@
       "label": "PARTICLE_EFFECTS",
       "file_type": "code",
       "source_file": "src/components/MediaPanel.tsx",
-      "source_location": "L102",
+      "source_location": "L117",
       "community": 40,
       "community_name": "Community 40"
     },
@@ -40397,7 +40397,7 @@
       "label": "TEXT_TEMPLATES",
       "file_type": "code",
       "source_file": "src/components/MediaPanel.tsx",
-      "source_location": "L165",
+      "source_location": "L180",
       "community": 40,
       "community_name": "Community 40"
     },
@@ -40406,7 +40406,7 @@
       "label": "MediaPanel()",
       "file_type": "code",
       "source_file": "src/components/MediaPanel.tsx",
-      "source_location": "L171",
+      "source_location": "L244",
       "community": 40,
       "community_name": "Community 40"
     },
@@ -40415,7 +40415,7 @@
       "label": "TransitionCardProps",
       "file_type": "code",
       "source_file": "src/components/MediaPanel.tsx",
-      "source_location": "L1846",
+      "source_location": "L1919",
       "community": 40,
       "community_name": "Community 40"
     },
@@ -40424,7 +40424,7 @@
       "label": "TransitionCard()",
       "file_type": "code",
       "source_file": "src/components/MediaPanel.tsx",
-      "source_location": "L1854",
+      "source_location": "L1927",
       "community": 40,
       "community_name": "Community 40"
     },
@@ -40451,7 +40451,7 @@
       "label": "InteractiveCanvasOverlay()",
       "file_type": "code",
       "source_file": "src/components/PreviewCanvas.tsx",
-      "source_location": "L2472",
+      "source_location": "L2560",
       "community": 19,
       "community_name": "Community 19"
     },

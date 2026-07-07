@@ -36,7 +36,7 @@ one-sentence description — no prose, no markdown fences.
 - "components_exportmodal_exportmodal": "ExportModal()" | kind=code-symbol | source=src/components/ExportModal.tsx:L49 | neighbors=[ExportModal.tsx, App.tsx]
 - "components_helpmodal_helpmodal": "HelpModal()" | kind=code-symbol | source=src/components/HelpModal.tsx:L110 | neighbors=[HelpModal.tsx, App.tsx]
 - "components_helptooltipmanager_helptooltipmanager": "HelpTooltipManager()" | kind=code-symbol | source=src/components/HelpTooltipManager.tsx:L5 | neighbors=[HelpTooltipManager.tsx, App.tsx]
-- "components_mediapanel_mediapanel": "MediaPanel()" | kind=code-symbol | source=src/components/MediaPanel.tsx:L171 | neighbors=[MediaPanel.tsx, App.tsx]
+- "components_mediapanel_mediapanel": "MediaPanel()" | kind=code-symbol | source=src/components/MediaPanel.tsx:L244 | neighbors=[MediaPanel.tsx, App.tsx]
 - "components_previewcanvas_previewcanvas": "PreviewCanvas()" | kind=code-symbol | source=src/components/PreviewCanvas.tsx:L49 | neighbors=[PreviewCanvas.tsx, App.tsx]
 - "components_propertiespanel_propertiespanel": "PropertiesPanel()" | kind=code-symbol | source=src/components/PropertiesPanel.tsx:L242 | neighbors=[PropertiesPanel.tsx, App.tsx]
 - "components_settingsmodal_settingsmodal": "SettingsModal()" | kind=code-symbol | source=src/components/SettingsModal.tsx:L9 | neighbors=[SettingsModal.tsx, App.tsx]
