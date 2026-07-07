@@ -43,6 +43,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { TimelineClip, TimelineTrack, MediaItem, EditorState, OverLayerClip } from '@/types';
 import { formatSimpleTime } from '@/utils/time';
 import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
+import { toast } from 'sonner';
 
 // ─── Web Audio SFX Helper Functions ───────────────────────────────────────────
 
@@ -1284,6 +1285,9 @@ export function Timeline() {
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const trackHeadersRef = useRef<HTMLDivElement>(null);
   const rulerContainerRef = useRef<HTMLDivElement>(null);
+  const scrubRafIdRef = useRef<number | null>(null);
+  const handleMouseMoveRef = useRef<any>(null);
+  const handleMouseUpRef = useRef<any>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -2457,9 +2461,16 @@ Rules:
     (e: React.MouseEvent) => {
       if (activeTool === 'split') return;
       // Clicked timeline background -> deselect everything
+      const hasSelection = selectedClipId !== null || 
+                          selectedClipIds.length > 0 || 
+                          selectedTransitionClipId !== null || 
+                          selectedTrackId !== null;
       selectClip(null);
       selectTransition(null);
       selectTrack(null);
+      if (hasSelection) {
+        toast.info("Deselected all clips. Press Ctrl+Z to undo edits.", { duration: 2000 });
+      }
 
       const rect = trackContainerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -2467,7 +2478,7 @@ Rules:
       const x = e.clientX - rect.left + scroll;
       seek(Math.max(0, x / zoomLevel));
     },
-    [activeTool, zoomLevel, seek, selectClip, selectTransition, selectTrack],
+    [activeTool, zoomLevel, seek, selectClip, selectTransition, selectTrack, selectedClipId, selectedClipIds, selectedTransitionClipId, selectedTrackId],
   );
 
   const handleRulerMouseDown = useCallback(
@@ -2718,358 +2729,346 @@ Rules:
 
   // ── Global mouse move / up for drag & resize ───────────────────────────
 
-  useEffect(() => {
-    let scrubRafId: number | null = null;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      // ─ Playhead scrubbing ──────────────────────────────────────────
-      if (isScrubbing) {
-        if (scrubRafId !== null) {
-          cancelAnimationFrame(scrubRafId);
+  const handleMouseMove = (e: MouseEvent) => {
+    // ─ Playhead scrubbing ──────────────────────────────────────────
+    if (isScrubbing) {
+      if (scrubRafIdRef.current !== null) {
+        cancelAnimationFrame(scrubRafIdRef.current);
+      }
+      const clientX = e.clientX;
+      scrubRafIdRef.current = requestAnimationFrame(() => {
+        scrubRafIdRef.current = null;
+        const rect = trackContainerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const x = clientX - rect.left + scrollLeft;
+          const time = Math.max(0, x / zoomLevel);
+          seek(time);
+          setScrubTime(time);
+          setScrubMouseX(clientX);
         }
-        const clientX = e.clientX;
-        scrubRafId = requestAnimationFrame(() => {
-          scrubRafId = null;
-          const rect = trackContainerRef.current?.getBoundingClientRect();
-          if (rect) {
-            const x = clientX - rect.left + scrollLeft;
-            const time = Math.max(0, x / zoomLevel);
-            seek(time);
-            setScrubTime(time);
-            setScrubMouseX(clientX);
+      });
+    }
+
+    // ─ Clip drag ────────────────────────────────────────────────────
+    if (dragState && dragState.draggedClips && dragState.draggedClips.length > 0) {
+      dragMouseXRef.current = e.clientX;
+      dragMouseYRef.current = e.clientY;
+      updateDragPosition(e.clientX, e.clientY, scrollLeft);
+    }
+
+    // ─ Over Layer drag ──────────────────────────────────────────────
+    if (dragOverLayerState) {
+      if (!(window as any).__olDragRaf) {
+        (window as any).__olDragRaf = requestAnimationFrame(() => {
+          const dx = e.clientX - dragOverLayerState.startX;
+          const dt = dx / zoomLevel;
+          let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
+          
+          // Apply snapping
+          const track = tracks.find((t) => t.id === dragOverLayerState.trackId);
+          const ol = track?.overLayers?.find(o => o.id === dragOverLayerState.overLayerId);
+          if (ol) {
+            const { snappedTime, snapPos } = computeSnap(newStartTime, ol.id, ol.duration);
+            newStartTime = snappedTime;
+            setSnapLine(snapPos);
           }
+          
+          moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
+
+          // Vertical row swapping reordering
+          const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
+          if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
+            const trackRect = trackEl.getBoundingClientRect();
+            const relY = e.clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
+            const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
+            reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
+          }
+          (window as any).__olDragRaf = null;
         });
       }
+    }
 
-      // ─ Clip drag ────────────────────────────────────────────────────
-      if (dragState && dragState.draggedClips && dragState.draggedClips.length > 0) {
-        dragMouseXRef.current = e.clientX;
-        dragMouseYRef.current = e.clientY;
-        updateDragPosition(e.clientX, e.clientY, scrollLeft);
-      }
-
-      // ─ Over Layer drag ──────────────────────────────────────────────
-      if (dragOverLayerState) {
-        if (!(window as any).__olDragRaf) {
-          (window as any).__olDragRaf = requestAnimationFrame(() => {
-            const dx = e.clientX - dragOverLayerState.startX;
-            const dt = dx / zoomLevel;
-            let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
-            
-            // Apply snapping
-            const track = tracks.find((t) => t.id === dragOverLayerState.trackId);
-            const ol = track?.overLayers?.find(o => o.id === dragOverLayerState.overLayerId);
-            if (ol) {
-              const { snappedTime, snapPos } = computeSnap(newStartTime, ol.id, ol.duration);
-              newStartTime = snappedTime;
-              setSnapLine(snapPos);
-            }
-            
-            moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
-
-            // Vertical row swapping reordering
-            const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
-            if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
-              const trackRect = trackEl.getBoundingClientRect();
-              const relY = e.clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
-              const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
-              reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
-            }
-            (window as any).__olDragRaf = null;
-          });
-        }
-      }
-
-      // ─ Over Layer resize ────────────────────────────────────────────
-      if (resizeOverLayerState) {
-        const dx = e.clientX - resizeOverLayerState.startX;
-        const dt = dx / zoomLevel;
-        
-        const track = tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
-        const ol = track?.overLayers.find((ol) => ol.id === resizeOverLayerState.overLayerId);
-        if (ol) {
-          if (resizeOverLayerState.edge === 'right') {
-            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration + dt);
-            updateOverLayer(ol.id, { duration: newDuration });
-          } else {
-            const newStartTime = Math.max(0, resizeOverLayerState.originalStartTime + dt);
-            const delta = newStartTime - resizeOverLayerState.originalStartTime;
-            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration - delta);
-            if (newDuration > 0.1) {
-              updateOverLayer(ol.id, { startTime: newStartTime, duration: newDuration });
-            }
+    // ─ Over Layer resize ────────────────────────────────────────────
+    if (resizeOverLayerState) {
+      const dx = e.clientX - resizeOverLayerState.startX;
+      const dt = dx / zoomLevel;
+      
+      const track = tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
+      const ol = track?.overLayers.find((ol) => ol.id === resizeOverLayerState.overLayerId);
+      if (ol) {
+        if (resizeOverLayerState.edge === 'right') {
+          const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration + dt);
+          updateOverLayer(ol.id, { duration: newDuration });
+        } else {
+          const newStartTime = Math.max(0, resizeOverLayerState.originalStartTime + dt);
+          const delta = newStartTime - resizeOverLayerState.originalStartTime;
+          const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration - delta);
+          if (newDuration > 0.1) {
+            updateOverLayer(ol.id, { startTime: newStartTime, duration: newDuration });
           }
         }
       }
+    }
 
-      // ─ Clip resize ──────────────────────────────────────────────────
-      if (resizeState) {
-        const dx = e.clientX - resizeState.startX;
-        const dt = dx / zoomLevel;
-        const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === resizeState.clipId);
-        if (!clip) return;
+    // ─ Clip resize ──────────────────────────────────────────────────
+    if (resizeState) {
+      const dx = e.clientX - resizeState.startX;
+      const dt = dx / zoomLevel;
+      const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === resizeState.clipId);
+      if (!clip) return;
 
-        const media = getMediaSafe(clip);
-        const sourceDuration = media.duration || 30;
+      const media = getMediaSafe(clip);
+      const sourceDuration = media.duration || 30;
 
-        if (activeTool === 'rateStretch') {
-          const originalSpeed = resizeState.originalSpeed || 1.0;
-          const sourceContentDuration = resizeState.originalDuration * originalSpeed;
-
-          if (resizeState.edge === 'right') {
-            const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-            const newSpeed = sourceContentDuration / newDuration;
-            const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
-            const clampedDuration = sourceContentDuration / clampedSpeed;
-            const delta = clampedDuration - resizeState.originalDuration;
-
-            updateClip(resizeState.clipId, {
-              duration: clampedDuration,
-              speed: clampedSpeed,
-              trimStart: resizeState.originalTrimStart,
-              trimEnd: resizeState.originalTrimEnd,
-            });
-
-            if (resizeState.rippleClips) {
-              resizeState.rippleClips.forEach((c) => {
-                updateClip(c.id, {
-                  startTime: c.originalStartTime + delta,
-                });
-              });
-            }
-          } else {
-            const shrink = -dt;
-            const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
-            const newSpeed = sourceContentDuration / newDuration;
-            const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
-            let clampedDuration = sourceContentDuration / clampedSpeed;
-            let shift = resizeState.originalDuration - clampedDuration;
-            shift = Math.max(-resizeState.originalStartTime, shift);
-            clampedDuration = resizeState.originalDuration - shift;
-            const finalSpeed = Math.min(20, Math.max(0.1, sourceContentDuration / clampedDuration));
-
-            updateClip(resizeState.clipId, {
-              startTime: resizeState.originalStartTime + shift,
-              duration: clampedDuration,
-              speed: finalSpeed,
-              trimStart: resizeState.originalTrimStart,
-              trimEnd: resizeState.originalTrimEnd,
-            });
-
-            if (resizeState.rippleClips) {
-              resizeState.rippleClips.forEach((c) => {
-                updateClip(c.id, {
-                  startTime: c.originalStartTime + shift,
-                });
-              });
-            }
-          }
-          return;
-        }
-
-        if (activeTool === 'ripple') {
-          if (resizeState.edge === 'right') {
-            const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-            const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
-            const clamped = Math.min(newDuration, maxDuration);
-            const delta = clamped - resizeState.originalDuration;
-
-            const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
-            updateClip(resizeState.clipId, {
-              duration: clamped,
-              trimEnd: Math.max(0, newTrimEnd),
-            });
-
-            if (resizeState.rippleClips) {
-              resizeState.rippleClips.forEach((c) => {
-                updateClip(c.id, {
-                  startTime: c.originalStartTime + delta,
-                });
-              });
-            }
-          } else {
-            const shrink = -dt;
-            const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
-            const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
-            let clamped = Math.min(newDuration, maxDuration);
-            let shift = resizeState.originalDuration - clamped;
-            shift = Math.max(-resizeState.originalStartTime, shift);
-            clamped = resizeState.originalDuration - shift;
-
-            updateClip(resizeState.clipId, {
-              startTime: resizeState.originalStartTime + shift,
-              duration: clamped,
-              trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
-            });
-
-            if (resizeState.rippleClips) {
-              resizeState.rippleClips.forEach((c) => {
-                updateClip(c.id, {
-                  startTime: c.originalStartTime + shift,
-                });
-              });
-            }
-          }
-          return;
-        }
+      if (activeTool === 'rateStretch') {
+        const originalSpeed = resizeState.originalSpeed || 1.0;
+        const sourceContentDuration = resizeState.originalDuration * originalSpeed;
 
         if (resizeState.edge === 'right') {
-          let newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-          const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
-          let clamped = Math.min(newDuration, maxDuration);
+          const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+          const newSpeed = sourceContentDuration / newDuration;
+          const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
+          const clampedDuration = sourceContentDuration / clampedSpeed;
+          const delta = clampedDuration - resizeState.originalDuration;
 
-          if (resizeState.siblingClip) {
-            const sib = resizeState.siblingClip;
-            const newAEnd = clip.trimStart + clamped * clip.speed;
-            if (newAEnd > sib.originalTrimStart) {
-              let deltaSource = newAEnd - sib.originalTrimStart;
-              let delta = deltaSource / sib.speed;
-              
-              // Clamp so sibling duration doesn't shrink below 0.1s
-              const maxDelta = sib.originalDuration - 0.1;
-              if (delta > maxDelta) {
-                delta = Math.max(0, maxDelta);
-                deltaSource = delta * sib.speed;
-                clamped = (sib.originalTrimStart + deltaSource - clip.trimStart) / clip.speed;
-              }
+          updateClip(resizeState.clipId, {
+            duration: clampedDuration,
+            speed: clampedSpeed,
+            trimStart: resizeState.originalTrimStart,
+            trimEnd: resizeState.originalTrimEnd,
+          });
 
-              // Update sibling boundary in tandem
-              updateClip(sib.id, {
-                trimStart: sib.originalTrimStart + deltaSource,
-                duration: sib.originalDuration - delta,
-                startTime: sib.originalStartTime + delta,
+          if (resizeState.rippleClips) {
+            resizeState.rippleClips.forEach((c) => {
+              updateClip(c.id, {
+                startTime: c.originalStartTime + delta,
               });
-            } else {
-              // Restore sibling state if user dragged back
-              updateClip(sib.id, {
-                trimStart: sib.originalTrimStart,
-                duration: sib.originalDuration,
-                startTime: sib.originalStartTime,
-              });
-            }
+            });
           }
+        } else {
+          const shrink = -dt;
+          const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
+          const newSpeed = sourceContentDuration / newDuration;
+          const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
+          let clampedDuration = sourceContentDuration / clampedSpeed;
+          let shift = resizeState.originalDuration - clampedDuration;
+          shift = Math.max(-resizeState.originalStartTime, shift);
+          clampedDuration = resizeState.originalDuration - shift;
+          const finalSpeed = Math.min(20, Math.max(0.1, sourceContentDuration / clampedDuration));
+
+          updateClip(resizeState.clipId, {
+            startTime: resizeState.originalStartTime + shift,
+            duration: clampedDuration,
+            speed: finalSpeed,
+            trimStart: resizeState.originalTrimStart,
+            trimEnd: resizeState.originalTrimEnd,
+          });
+
+          if (resizeState.rippleClips) {
+            resizeState.rippleClips.forEach((c) => {
+              updateClip(c.id, {
+                startTime: c.originalStartTime + shift,
+              });
+            });
+          }
+        }
+        return;
+      }
+
+      if (activeTool === 'ripple') {
+        if (resizeState.edge === 'right') {
+          const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+          const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+          const clamped = Math.min(newDuration, maxDuration);
+          const delta = clamped - resizeState.originalDuration;
 
           const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
           updateClip(resizeState.clipId, {
             duration: clamped,
             trimEnd: Math.max(0, newTrimEnd),
           });
+
+          if (resizeState.rippleClips) {
+            resizeState.rippleClips.forEach((c) => {
+              updateClip(c.id, {
+                startTime: c.originalStartTime + delta,
+              });
+            });
+          }
         } else {
           const shrink = -dt;
           const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
           const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
           let clamped = Math.min(newDuration, maxDuration);
           let shift = resizeState.originalDuration - clamped;
-
-          if (resizeState.siblingClip) {
-            const sib = resizeState.siblingClip;
-            const newBStart = resizeState.originalTrimStart + shift * clip.speed;
-            if (newBStart < sib.originalTrimStart + sib.originalDuration * sib.speed) {
-              let deltaSource = (sib.originalTrimStart + sib.originalDuration * sib.speed) - newBStart;
-              let delta = deltaSource / sib.speed;
-              
-              // Clamp so sibling duration doesn't shrink below 0.1s
-              const maxDelta = sib.originalDuration - 0.1;
-              if (delta > maxDelta) {
-                delta = Math.max(0, maxDelta);
-                deltaSource = delta * sib.speed;
-                const allowedNewBStart = sib.originalTrimStart + sib.originalDuration * sib.speed - deltaSource;
-                shift = (allowedNewBStart - resizeState.originalTrimStart) / clip.speed;
-                clamped = resizeState.originalDuration - shift;
-              }
-
-              // Update sibling boundary in tandem
-              updateClip(sib.id, {
-                trimEnd: sib.originalTrimEnd + deltaSource,
-                duration: sib.originalDuration - delta,
-              });
-            } else {
-              // Restore sibling state if user dragged back
-              updateClip(sib.id, {
-                trimEnd: sib.originalTrimEnd,
-                duration: sib.originalDuration,
-              });
-            }
-          }
+          shift = Math.max(-resizeState.originalStartTime, shift);
+          clamped = resizeState.originalDuration - shift;
 
           updateClip(resizeState.clipId, {
             startTime: resizeState.originalStartTime + shift,
             duration: clamped,
             trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
           });
+
+          if (resizeState.rippleClips) {
+            resizeState.rippleClips.forEach((c) => {
+              updateClip(c.id, {
+                startTime: c.originalStartTime + shift,
+              });
+            });
+          }
         }
+        return;
       }
+
+      if (resizeState.edge === 'right') {
+        let newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+        const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+        let clamped = Math.min(newDuration, maxDuration);
+
+        if (resizeState.siblingClip) {
+          const sib = resizeState.siblingClip;
+          const newAEnd = clip.trimStart + clamped * clip.speed;
+          if (newAEnd > sib.originalTrimStart) {
+            let deltaSource = newAEnd - sib.originalTrimStart;
+            let delta = deltaSource / sib.speed;
+            
+            // Clamp so sibling duration doesn't shrink below 0.1s
+            const maxDelta = sib.originalDuration - 0.1;
+            if (delta > maxDelta) {
+              delta = Math.max(0, maxDelta);
+              deltaSource = delta * sib.speed;
+              clamped = (sib.originalTrimStart + deltaSource - clip.trimStart) / clip.speed;
+            }
+
+            // Update sibling boundary in tandem
+            updateClip(sib.id, {
+              trimStart: sib.originalTrimStart + deltaSource,
+              duration: sib.originalDuration - delta,
+              startTime: sib.originalStartTime + delta,
+            });
+          } else {
+            // Restore sibling state if user dragged back
+            updateClip(sib.id, {
+              trimStart: sib.originalTrimStart,
+              duration: sib.originalDuration,
+              startTime: sib.originalStartTime,
+            });
+          }
+        }
+
+        const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
+        updateClip(resizeState.clipId, {
+          duration: clamped,
+          trimEnd: Math.max(0, newTrimEnd),
+        });
+      } else {
+        const shrink = -dt;
+        const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
+        const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
+        let clamped = Math.min(newDuration, maxDuration);
+        let shift = resizeState.originalDuration - clamped;
+
+        if (resizeState.siblingClip) {
+          const sib = resizeState.siblingClip;
+          const newBStart = resizeState.originalTrimStart + shift * clip.speed;
+          if (newBStart < sib.originalTrimStart + sib.originalDuration * sib.speed) {
+            let deltaSource = (sib.originalTrimStart + sib.originalDuration * sib.speed) - newBStart;
+            let delta = deltaSource / sib.speed;
+            
+            // Clamp so sibling duration doesn't shrink below 0.1s
+            const maxDelta = sib.originalDuration - 0.1;
+            if (delta > maxDelta) {
+              delta = Math.max(0, maxDelta);
+              deltaSource = delta * sib.speed;
+              const allowedNewBStart = sib.originalTrimStart + sib.originalDuration * sib.speed - deltaSource;
+              shift = (allowedNewBStart - resizeState.originalTrimStart) / clip.speed;
+              clamped = resizeState.originalDuration - shift;
+            }
+
+            // Update sibling boundary in tandem
+            updateClip(sib.id, {
+              trimEnd: sib.originalTrimEnd + deltaSource,
+              duration: sib.originalDuration - delta,
+            });
+          } else {
+            // Restore sibling state if user dragged back
+            updateClip(sib.id, {
+              trimEnd: sib.originalTrimEnd,
+              duration: sib.originalDuration,
+            });
+          }
+        }
+
+        updateClip(resizeState.clipId, {
+          startTime: resizeState.originalStartTime + shift,
+          duration: clamped,
+          trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
+        });
+      }
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (scrubRafIdRef.current !== null) {
+      cancelAnimationFrame(scrubRafIdRef.current);
+      scrubRafIdRef.current = null;
+    }
+    if (isScrubbing) {
+      setIsScrubbing(false);
+      setScrubTime(null);
+    }
+    if (dragState) {
+      const draggedIds = dragState.draggedClips?.map((c) => c.id) || [];
+      if (draggedIds.length > 0) {
+        useEditorStore.getState().resolveOverlaps(draggedIds);
+      }
+      setDragState(null);
+      setSnapLine(null);
+      setDropPreview(null);
+      endTransactionSafe(); // commit final snapshot
+    }
+    if (resizeState) {
+      setResizeState(null);
+      endTransactionSafe(); // commit final snapshot
+    }
+    if (dragOverLayerState) {
+      if ((window as any).__olDragRaf) {
+        cancelAnimationFrame((window as any).__olDragRaf);
+        (window as any).__olDragRaf = null;
+      }
+      setSnapLine(null);
+      setDragOverLayerState(null);
+      endTransactionSafe(); // commit final snapshot
+    }
+    if (resizeOverLayerState) {
+      setResizeOverLayerState(null);
+      endTransactionSafe(); // commit final snapshot
+    }
+  };
+
+  handleMouseMoveRef.current = handleMouseMove;
+  handleMouseUpRef.current = handleMouseUp;
+
+  const isDragging = dragState !== null || resizeState !== null || isScrubbing || dragOverLayerState !== null || resizeOverLayerState !== null;
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      handleMouseMoveRef.current?.(e);
+    };
+    const onMouseUp = () => {
+      handleMouseUpRef.current?.();
     };
 
-    const handleMouseUp = () => {
-      if (scrubRafId !== null) {
-        cancelAnimationFrame(scrubRafId);
-        scrubRafId = null;
-      }
-      if (isScrubbing) {
-        setIsScrubbing(false);
-        setScrubTime(null);
-      }
-      if (dragState) {
-        const draggedIds = dragState.draggedClips?.map((c) => c.id) || [];
-        if (draggedIds.length > 0) {
-          useEditorStore.getState().resolveOverlaps(draggedIds);
-        }
-        setDragState(null);
-        setSnapLine(null);
-        setDropPreview(null);
-        endTransactionSafe(); // commit final snapshot
-      }
-      if (resizeState) {
-        setResizeState(null);
-        endTransactionSafe(); // commit final snapshot
-      }
-      if (dragOverLayerState) {
-        if ((window as any).__olDragRaf) {
-          cancelAnimationFrame((window as any).__olDragRaf);
-          (window as any).__olDragRaf = null;
-        }
-        setSnapLine(null);
-        setDragOverLayerState(null);
-        endTransactionSafe(); // commit final snapshot
-      }
-      if (resizeOverLayerState) {
-        setResizeOverLayerState(null);
-        endTransactionSafe(); // commit final snapshot
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [
-    dragState,
-    resizeState,
-    isScrubbing,
-    scrollLeft,
-    seek,
-    zoomLevel,
-    tracks,
-    moveClip,
-    moveClips,
-    updateDragPosition,
-    resolveOverlaps,
-    updateClip,
-    setDragPreview,
-    addClip,
-    reorderTrack,
-    getTrackFromMouseY,
-    getMediaSafe,
-    activeTool,
-    dragOverLayerState,
-    resizeOverLayerState,
-    moveOverLayer,
-    updateOverLayer,
-    hoveredOverLayerRegion,
-  ]);
+  }, [isDragging]);
 
   // ── Drop from media panel ───────────────────────────────────────────────
 
@@ -3580,29 +3579,14 @@ Rules:
   return (
     <>
     <div className="h-full flex flex-col bg-[#1e1e1e] border-t border-[#3e3e3e]" ref={timelineRef}>
-      <style>{`
-        @keyframes rateStretchPulse {
-          0% {
-            box-shadow: 0 0 0 0px rgba(168, 85, 247, 0.7), inset 0 0 0 1px rgba(168, 85, 247, 0.5);
-          }
-          70% {
-            box-shadow: 0 0 0 8px rgba(168, 85, 247, 0), inset 0 0 0 2px rgba(168, 85, 247, 0.8);
-          }
-          100% {
-            box-shadow: 0 0 0 0px rgba(168, 85, 247, 0), inset 0 0 0 1px rgba(168, 85, 247, 0.5);
-          }
-        }
-        .rate-stretch-active {
-          animation: rateStretchPulse 1.5s infinite ease-in-out;
-        }
-      `}</style>
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
-      <div className="h-8 flex items-center px-2 bg-[#252525] border-b border-[#3e3e3e] shrink-0">
+      <div className="h-8 flex items-center px-2 bg-[#252525] border-b border-[#3e3e3e] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Zoom */}
         <div className="flex items-center gap-1">
           <button
             onClick={zoomOut}
             title="Zoom Out"
+            aria-label="Zoom Out"
             className="p-1 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
           >
             <ZoomOut className="w-3.5 h-3.5" />
@@ -3613,6 +3597,7 @@ Rules:
           <button
             onClick={zoomIn}
             title="Zoom In"
+            aria-label="Zoom In"
             className="p-1 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
           >
             <ZoomIn className="w-3.5 h-3.5" />
@@ -4695,7 +4680,7 @@ Rules:
     {/* ── Right-click Context Menu ──────────────────────────────────── */}
     {contextMenu && (
       <div
-        className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-1 min-w-[180px]"
+        className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-1 min-w-[180px] max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         style={{ left: contextMenu.x, top: contextMenu.y }}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -4935,7 +4920,7 @@ Rules:
 
   return (
         <div
-          className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-2 min-w-[200px] text-white"
+          className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-2 min-w-[200px] text-white max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
           style={{ left: markerContextMenu.x, top: markerContextMenu.y }}
           onMouseDown={(e) => e.stopPropagation()}
         >

@@ -567,10 +567,17 @@ export function ExportModal() {
   const getEstimatedSize = () => {
     const duration = (outPoint !== null ? outPoint : totalDuration) - (inPoint !== null ? inPoint : 0);
     if (duration <= 0) return '—';
-    const bits = quality === 'max' ? 12_000_000 : quality === 'high' ? 6_000_000 : 3_000_000;
+    let bits = quality === 'max' ? 12_000_000 : quality === 'high' ? 6_000_000 : 3_000_000;
+    
+    // Add 192kbps for audio if audio tracks are present
+    const hasAudio = tracks.some(t => t.type === 'audio');
+    if (hasAudio) {
+      bits += 192_000;
+    }
+
     const sizeBytes = (duration * bits) / 8;
-    if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(0)} KB`;
-    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(0)} KB (may vary)`;
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB (may vary)`;
   };
 
   if (!showExportModal) return null;
@@ -672,6 +679,7 @@ export function ExportModal() {
                   key={fmt.id}
                   disabled={isExporting}
                   onClick={() => setExportFormat(fmt.id as any)}
+                  aria-pressed={exportFormat === fmt.id}
                   className={`flex-1 px-3 py-2 rounded text-xs border transition-colors text-left ${
                     exportFormat === fmt.id
                       ? 'bg-amber-600/20 border-amber-500 text-amber-400'

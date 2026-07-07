@@ -24,7 +24,8 @@ import {
   Crop,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
+import { toast } from 'sonner';
 import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
@@ -105,6 +106,27 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
   const puckX = 50 + Math.cos(angleRad) * radiusPct * 50;
   const puckY = 50 + Math.sin(angleRad) * radiusPct * 50;
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    const step = e.shiftKey ? 10 : 1;
+    let newHue = hue;
+    let newSat = sat;
+
+    if (e.key === 'ArrowLeft') {
+      newHue = (hue - step + 360) % 360;
+    } else if (e.key === 'ArrowRight') {
+      newHue = (hue + step) % 360;
+    } else if (e.key === 'ArrowUp') {
+      newSat = Math.min(100, sat + step);
+    } else if (e.key === 'ArrowDown') {
+      newSat = Math.max(0, sat - step);
+    }
+
+    onChange({ hue: newHue, saturation: newSat, lift });
+    useEditorStore.getState().saveSnapshot();
+  };
+
   return (
     <div className="flex flex-col items-center gap-1.5 p-2 bg-[#1e1e1e] rounded border border-[#3e3e3e] flex-1">
       <span className="text-[9px] font-bold tracking-wider uppercase text-white">{label}</span>
@@ -114,8 +136,17 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
         ref={wheelRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        className="w-16 h-16 rounded-full relative cursor-crosshair border border-[#3e3e3e] shadow-[inset_0_0_6px_rgba(0,0,0,0.6)] select-none touch-none"
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
+        role="slider"
+        aria-label={`${label} Color Wheel`}
+        aria-valuenow={hue}
+        aria-valuemin={0}
+        aria-valuemax={360}
+        aria-valuetext={`Hue: ${hue}°, Saturation: ${sat}%`}
+        className="w-16 h-16 rounded-full relative cursor-crosshair border border-[#3e3e3e] shadow-[inset_0_0_6px_rgba(0,0,0,0.6)] select-none touch-none focus:outline-none focus:ring-1 focus:ring-amber-500"
         style={{
+          backgroundColor: '#3a3a3a',
           background: 'conic-gradient(from 0deg, red, yellow, lime, cyan, blue, magenta, red)',
         }}
       >
@@ -135,6 +166,11 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
             top: `${puckY}%`,
           }}
         />
+      </div>
+
+      {/* Hidden aria-live region to announce changes */}
+      <div className="sr-only" aria-live="polite">
+        {`${label} settings: Hue is ${hue} degrees, Saturation is ${sat}%, Lift is ${lift}%`}
       </div>
 
       {/* Info labels */}
@@ -257,13 +293,13 @@ export function PropertiesPanel() {
     const gKey = geminiApiKey || sessionStorage.getItem('procut_gemini_key') || envGeminiKey;
     const grKey = groqApiKey || sessionStorage.getItem('procut_groq_key') || envGroqKey;
     if (!gKey || !grKey) {
-      alert('Please enter both your Gemini API Key and Groq API Key first (or configure them as VITE_GEMINI_API_KEY and VITE_GROQ_API_KEY in your environment).');
+      toast.error('Please enter both your Gemini API Key and Groq API Key first (or configure them as VITE_GEMINI_API_KEY and VITE_GROQ_API_KEY in your environment).');
       return;
     }
 
     const videoEl = videoElements.get(selectedClip.id);
     if (!videoEl) {
-      alert('Video player is not loaded yet. Try seeking or playing first.');
+      toast.error('Video player is not loaded yet. Try seeking or playing first.');
       return;
     }
 
@@ -329,7 +365,7 @@ export function PropertiesPanel() {
       setSoundDesignerCues(cuesWithOptions);
       setShowSoundDesigner(true);
     } catch (e: any) {
-      alert(`AI Sound Design failed: ${e.message || e}`);
+      toast.error(`AI Sound Design failed: ${e.message || e}`);
     } finally {
       setIsAnalyzingAudio(false);
     }
@@ -866,23 +902,25 @@ export function PropertiesPanel() {
     return (
       <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
         {/* Tabs */}
-        <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {tabs.map((tab) => {
+        <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
+          {tabs.map((tab, idx) => {
             const Icon = tab.icon;
             const isActive = activePropertiesTab === tab.id;
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActivePropertiesTab(tab.id)}
-                className={`flex-1 py-2.5 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
-                  isActive
-                    ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
-                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
+              <Fragment key={tab.id}>
+                {idx > 0 && <div className="w-px h-5 bg-[#3e3e3e] self-center shrink-0 mx-1" />}
+                <button
+                  onClick={() => setActivePropertiesTab(tab.id)}
+                  className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                    isActive
+                      ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
+                      : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {tab.label}
+                </button>
+              </Fragment>
             );
           })}
         </div>
@@ -1386,27 +1424,28 @@ export function PropertiesPanel() {
       }
     })();
   };
-
   return (
     <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
       {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {tabs.map((tab) => {
+      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
+        {tabs.map((tab, idx) => {
           const Icon = tab.icon;
           const isActive = activePropertiesTab === tab.id;
           return (
-            <button
-              key={tab.id}
-              onClick={() => setActivePropertiesTab(tab.id)}
-              className={`flex-1 py-2.5 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
-                isActive
-                  ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
-                  : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {tab.label}
-            </button>
+            <Fragment key={tab.id}>
+              {idx > 0 && <div className="w-px h-5 bg-[#3e3e3e] self-center shrink-0 mx-1" />}
+              <button
+                onClick={() => setActivePropertiesTab(tab.id)}
+                className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                  isActive
+                    ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
+                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            </Fragment>
           );
         })}
       </div>
@@ -3088,6 +3127,8 @@ export function PropertiesPanel() {
                       ref={svgRef}
                       viewBox="0 0 240 100"
                       preserveAspectRatio="none"
+                      width="100%"
+                      height="112"
                       className="w-full h-28 cursor-crosshair select-none"
                       onClick={handleSvgClick}
                     >
@@ -4033,6 +4074,7 @@ export function PropertiesPanel() {
                           <button
                             onClick={handleAiSeparate}
                             disabled={isSeparating}
+                            aria-disabled={isSeparating ? "true" : "false"}
                             className={`px-2.5 py-1.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors flex items-center gap-1 ${
                               isSeparating
                                 ? 'bg-[#2d2d2d] text-[#606060] cursor-not-allowed'
@@ -4050,7 +4092,7 @@ export function PropertiesPanel() {
                           </button>
                         </div>
                         {isSeparating && (
-                          <div className="space-y-1 animate-pulse">
+                          <div className="space-y-1 animate-pulse" role="status" aria-live="polite">
                             <div className="h-1 bg-cyan-950 rounded-full overflow-hidden">
                               <div className="h-full bg-cyan-500 rounded-full animate-[progress_15s_ease-out_infinite]" style={{ width: '80%' }}></div>
                             </div>

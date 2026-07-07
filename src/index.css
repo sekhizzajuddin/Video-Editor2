@@ -70,3 +70,20 @@
   white-space: nowrap;
   animation: text-slide 6s linear infinite alternate;
 }
+
+@keyframes rateStretchPulse {
+  0% {
+    box-shadow: 0 0 0 0px rgba(168, 85, 247, 0.7), inset 0 0 0 1px rgba(168, 85, 247, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(168, 85, 247, 0), inset 0 0 0 2px rgba(168, 85, 247, 0.8);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(168, 85, 247, 0), inset 0 0 0 1px rgba(168, 85, 247, 0.5);
+  }
+}
+
+.rate-stretch-active {
+  animation: rateStretchPulse 1.5s infinite ease-in-out;
+}
+

@@ -16,6 +16,7 @@ import { WelcomeScreen } from '@/components/WelcomeScreen';
 import { useEditorStore } from '@/store/editorStore';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 import { saveAutosaveToDB } from '@/utils/projectPersistence';
+import { Toaster } from '@/components/ui/sonner';
 import './App.css';
 
 function App() {
@@ -504,6 +505,7 @@ function App() {
       <ExportModal />
       <SettingsModal />
       <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />
+      <Toaster />
     </div>
   );
 }

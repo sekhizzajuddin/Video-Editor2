@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useMediaPlayback, FrameCacheEntry } from '@/hooks/useMediaPlayback';
+import type { TimelineTrack, MediaItem } from '@/types';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatTime } from '@/utils/time';
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
@@ -627,6 +628,7 @@ export function PreviewCanvas() {
   const lastFrameCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   // Frame counter for throttling expensive operations
   const frameCounterRef = useRef(0);
+  const framePendingRef = useRef(true);
 
   const getOrCreateCanvas = (ref: React.MutableRefObject<HTMLCanvasElement | null>, w: number, h: number) => {
     if (!ref.current) {
@@ -668,6 +670,57 @@ export function PreviewCanvas() {
 
   const [imageRevision, setImageRevision] = useState(0);
   const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
+
+  const renderDepsRef = useRef<any>({
+    currentTime,
+    tracks,
+    selectedClipId,
+    mediaLibrary,
+    videoElements,
+    frameCache,
+    imageRevision,
+    requestRedraw,
+    viewport,
+    settings,
+    showGrid,
+    canvasBgColor,
+    isPlaying,
+    aspectRatio,
+    isExporting,
+    exportWidth,
+    exportHeight,
+    showProgressBar,
+    progressBarColor,
+    progressBarHeight,
+    useProxies
+  });
+
+  useEffect(() => {
+    renderDepsRef.current = {
+      currentTime,
+      tracks,
+      selectedClipId,
+      mediaLibrary,
+      videoElements,
+      frameCache,
+      imageRevision,
+      requestRedraw,
+      viewport,
+      settings,
+      showGrid,
+      canvasBgColor,
+      isPlaying,
+      aspectRatio,
+      isExporting,
+      exportWidth,
+      exportHeight,
+      showProgressBar,
+      progressBarColor,
+      progressBarHeight,
+      useProxies
+    };
+    framePendingRef.current = true;
+  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, settings, showGrid, canvasBgColor, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight, showProgressBar, progressBarColor, progressBarHeight, useProxies]);
   
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
@@ -855,6 +908,34 @@ export function PreviewCanvas() {
   // Canvas rendering – called whenever time, tracks, or images change
   // -------------------------------------------------------------------
   const renderCanvas = useCallback(async () => {
+    const {
+      currentTime,
+      tracks: tracksRaw,
+      selectedClipId,
+      mediaLibrary: mediaLibraryRaw,
+      videoElements,
+      frameCache: frameCacheRaw,
+      imageRevision,
+      requestRedraw,
+      viewport,
+      settings,
+      showGrid,
+      canvasBgColor,
+      isPlaying,
+      aspectRatio,
+      isExporting,
+      exportWidth,
+      exportHeight,
+      showProgressBar,
+      progressBarColor,
+      progressBarHeight,
+      useProxies
+    } = renderDepsRef.current;
+
+    const tracks = tracksRaw as TimelineTrack[];
+    const mediaLibrary = mediaLibraryRaw as MediaItem[];
+    const frameCache = frameCacheRaw as Map<string, FrameCacheEntry[]>;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -1705,7 +1786,7 @@ export function PreviewCanvas() {
               oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
                 if (hasAiBg) {
-                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource, clip.aiBackground?.edgeBlur);
+                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource as any, clip.aiBackground?.edgeBlur);
                 }
                 if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
@@ -1737,7 +1818,7 @@ export function PreviewCanvas() {
                 oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
                 oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
                 if (hasAiBg) {
-                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource, clip.aiBackground?.edgeBlur);
+                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource as any, clip.aiBackground?.edgeBlur);
                 }
                 if (hasChroma && clip.chromaKey) {
                   applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
@@ -2563,7 +2644,7 @@ export function PreviewCanvas() {
     if (!isExporting) {
       ctx.globalAlpha = 1;
       const tcText = formatTime(currentTime);
-      ctx.font = 'bold 12px monospace';
+      ctx.font = 'bold 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
       const tcMetrics = ctx.measureText(tcText);
       const tcPadX = 8;
       const tcPadY = 4;
@@ -2576,7 +2657,13 @@ export function PreviewCanvas() {
       if (typeof (ctx as any).roundRect === 'function') {
         (ctx as any).roundRect(tcX, tcY, tcW, tcH, 4);
       } else {
-        ctx.rect(tcX, tcY, tcW, tcH);
+        // Fallback using arcTo
+        const r = 4;
+        ctx.moveTo(tcX + r, tcY);
+        ctx.arcTo(tcX + tcW, tcY, tcX + tcW, tcY + tcH, r);
+        ctx.arcTo(tcX + tcW, tcY + tcH, tcX, tcY + tcH, r);
+        ctx.arcTo(tcX, tcY + tcH, tcX, tcY, r);
+        ctx.arcTo(tcX, tcY, tcX + tcW, tcY, r);
       }
       ctx.fill();
       ctx.fillStyle = '#fbbf24';
@@ -2608,12 +2695,11 @@ export function PreviewCanvas() {
       snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
       snapCtx.drawImage(composite, 0, 0);
     }
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, settings.showSafeZones, showGrid, canvasBgColor, settings.previewQuality, settings.hardwareAcceleration, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight, showProgressBar, progressBarColor, progressBarHeight, useProxies]);
+  }, []);
 
   // ── Unified render loop to prevent flickering during scrubbing ──
   // Use a frame-pending flag + single rAF loop instead of canceling/rescheduling.
   const renderCanvasRef = useRef(renderCanvas);
-  const framePendingRef = useRef(true);
   const rafActiveRef = useRef(false);
 
     useEffect(() => {
@@ -2669,6 +2755,14 @@ export function PreviewCanvas() {
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
+      const isZoomModifier = e.altKey || e.ctrlKey || e.metaKey;
+      const isPanModifier = activeTool === 'hand' || isSpacePressed;
+
+      if (!isZoomModifier && !isPanModifier) {
+        // Allow standard page/component scrolling to bubble up naturally
+        return;
+      }
+
       e.preventDefault();
       
       const rect = el.getBoundingClientRect();
@@ -3630,6 +3724,99 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
     }
   }
 
+  const handleCornerKeyDown = (e: React.KeyboardEvent, idx: number) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const step = e.shiftKey ? 10 : 1;
+    const pcBase = activeClip.transform.perspectiveCorners || {
+      x0: W / 2 + aX - (baseW / 2) * (aScale / 100),
+      y0: H / 2 + aY - (baseH / 2) * (aScale / 100),
+      x1: W / 2 + aX + (baseW / 2) * (aScale / 100),
+      y1: H / 2 + aY - (baseH / 2) * (aScale / 100),
+      x2: W / 2 + aX + (baseW / 2) * (aScale / 100),
+      y2: H / 2 + aY + (baseH / 2) * (aScale / 100),
+      x3: W / 2 + aX - (baseW / 2) * (aScale / 100),
+      y3: H / 2 + aY + (baseH / 2) * (aScale / 100)
+    };
+
+    const newPc = { ...pcBase };
+    const keyX = `x${idx}` as keyof typeof newPc;
+    const keyY = `y${idx}` as keyof typeof newPc;
+
+    if (e.key === 'ArrowLeft') newPc[keyX] -= step;
+    else if (e.key === 'ArrowRight') newPc[keyX] += step;
+    else if (e.key === 'ArrowUp') newPc[keyY] -= step;
+    else if (e.key === 'ArrowDown') newPc[keyY] += step;
+
+    updateClip(activeClip.id, {
+      transform: {
+        ...activeClip.transform,
+        perspectiveCorners: newPc
+      }
+    });
+    useEditorStore.getState().saveSnapshot();
+  };
+
+  const handleHandleKeyDown = (e: React.KeyboardEvent, type: string) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const step = e.shiftKey ? 10 : 1;
+
+    if (type === 'move') {
+      let newX = aX;
+      let newY = aY;
+      if (e.key === 'ArrowLeft') newX -= step;
+      else if (e.key === 'ArrowRight') newX += step;
+      else if (e.key === 'ArrowUp') newY -= step;
+      else if (e.key === 'ArrowDown') newY += step;
+
+      updateClip(activeClip.id, {
+        transform: { ...activeClip.transform, x: newX, y: newY }
+      });
+    } else if (type === 'rot') {
+      const rotStep = e.shiftKey ? 5 : 1;
+      let newRot = aRot;
+      if (e.key === 'ArrowLeft') newRot = (newRot - rotStep) % 360;
+      else if (e.key === 'ArrowRight') newRot = (newRot + rotStep) % 360;
+
+      updateClip(activeClip.id, {
+        transform: { ...activeClip.transform, rotation: newRot }
+      });
+    } else if (type.startsWith('resize')) {
+      // Scale
+      let newScale = aScale;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowRight') newScale = Math.min(1000, newScale + step);
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') newScale = Math.max(10, newScale - step);
+
+      updateClip(activeClip.id, {
+        transform: { ...activeClip.transform, scale: newScale }
+      });
+    } else if (type.startsWith('crop-')) {
+      const crop = activeClip.crop || { left: 0, top: 0, right: 0, bottom: 0 };
+      const newCrop = { ...crop };
+      if (type === 'crop-left') {
+        if (e.key === 'ArrowLeft') newCrop.left = Math.max(0, newCrop.left - step);
+        else if (e.key === 'ArrowRight') newCrop.left = Math.min(100 - newCrop.right, newCrop.left + step);
+      } else if (type === 'crop-right') {
+        if (e.key === 'ArrowRight') newCrop.right = Math.max(0, newCrop.right - step);
+        else if (e.key === 'ArrowLeft') newCrop.right = Math.min(100 - newCrop.left, newCrop.right + step);
+      } else if (type === 'crop-top') {
+        if (e.key === 'ArrowUp') newCrop.top = Math.max(0, newCrop.top - step);
+        else if (e.key === 'ArrowDown') newCrop.top = Math.min(100 - newCrop.bottom, newCrop.top + step);
+      } else if (type === 'crop-bottom') {
+        if (e.key === 'ArrowDown') newCrop.bottom = Math.max(0, newCrop.bottom - step);
+        else if (e.key === 'ArrowUp') newCrop.bottom = Math.min(100 - newCrop.top, newCrop.bottom + step);
+      }
+
+      updateClip(activeClip.id, { crop: newCrop });
+    }
+    useEditorStore.getState().saveSnapshot();
+  };
+
   const handleCornerMouseDown = (e: React.MouseEvent, cornerIdx: number) => {
     e.stopPropagation();
     setDragState({
@@ -3645,7 +3832,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
   return (
     <>
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
-        <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
+          viewBox="0 0 854 480"
+          role="region"
+          aria-label="Interactive canvas overlay"
+        >
           <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom}) translate(${offsetX}, ${offsetY})`}>
             {activeClip.transform.perspectivePin ? (
               <g>
@@ -3670,8 +3862,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       fill="#fbbf24"
                       stroke="#141414"
                       strokeWidth={1.5 / viewport.zoom}
-                      className="pointer-events-auto cursor-crosshair"
+                      className="pointer-events-auto cursor-crosshair focus:outline-none focus:stroke-white focus:stroke-2"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Perspective corner ${idx + 1}`}
                       onMouseDown={(e) => handleCornerMouseDown(e, idx)}
+                      onKeyDown={(e) => handleCornerKeyDown(e, idx)}
                     />
                   );
                 })}
@@ -3701,8 +3897,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       width={baseW}
                       height={baseH}
                       fill="transparent"
-                      className="pointer-events-auto cursor-move"
+                      className="pointer-events-auto cursor-move focus:outline-none focus:stroke-white focus:stroke-2"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Move clip"
                       onMouseDown={(e) => handleMouseDown(e, 'move')}
+                      onKeyDown={(e) => handleHandleKeyDown(e, 'move')}
                     />
                     {/* Rotation handle — circle above the top-center of the clip */}
                     <line
@@ -3720,8 +3920,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       fill="#fbbf24"
                       stroke="#141414"
                       strokeWidth={1.5 / viewport.zoom}
-                      className="pointer-events-auto cursor-alias"
+                      className="pointer-events-auto cursor-alias focus:outline-none focus:stroke-white focus:stroke-2"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Rotate clip"
                       onMouseDown={(e) => handleMouseDown(e, 'rot')}
+                      onKeyDown={(e) => handleHandleKeyDown(e, 'rot')}
                     >
                       <title>Rotate</title>
                     </circle>
@@ -3736,12 +3940,18 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                           fill="#fbbf24"
                           stroke="#141414"
                           strokeWidth={1.5 / viewport.zoom}
-                          className="pointer-events-auto"
+                          className="pointer-events-auto focus:outline-none focus:stroke-white focus:stroke-2"
                           style={{
                             cursor: rx === ry ? 'nwse-resize' : 'nesw-resize',
                           }}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Resize handle ${rx > 0 ? 'right' : 'left'}-${ry > 0 ? 'bottom' : 'top'}`}
                           onMouseDown={(e) =>
                             handleMouseDown(e, `resize-${rx > 0 ? 'r' : 'l'}${ry > 0 ? 'b' : 't'}`)
+                          }
+                          onKeyDown={(e) =>
+                            handleHandleKeyDown(e, `resize-${rx > 0 ? 'r' : 'l'}${ry > 0 ? 'b' : 't'}`)
                           }
                         />
                       )),
@@ -3768,8 +3978,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       width={12/viewport.zoom}
                       height={20/viewport.zoom}
                       fill="#3b82f6"
-                      className="pointer-events-auto cursor-ew-resize"
+                      className="pointer-events-auto cursor-ew-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Crop Left"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-left')}
+                      onKeyDown={(e) => handleHandleKeyDown(e, 'crop-left')}
                     />
                     <rect
                       x={-baseW / 2 + baseW - (aCropRight / 100) * baseW - 6/viewport.zoom}
@@ -3777,8 +3991,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       width={12/viewport.zoom}
                       height={20/viewport.zoom}
                       fill="#3b82f6"
-                      className="pointer-events-auto cursor-ew-resize"
+                      className="pointer-events-auto cursor-ew-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Crop Right"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-right')}
+                      onKeyDown={(e) => handleHandleKeyDown(e, 'crop-right')}
                     />
                     <rect
                       x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
@@ -3786,8 +4004,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       width={20/viewport.zoom}
                       height={12/viewport.zoom}
                       fill="#3b82f6"
-                      className="pointer-events-auto cursor-ns-resize"
+                      className="pointer-events-auto cursor-ns-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Crop Top"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-top')}
+                      onKeyDown={(e) => handleHandleKeyDown(e, 'crop-top')}
                     />
                     <rect
                       x={-baseW / 2 + (aCropLeft / 100) * baseW + (baseW * (1 - (aCropLeft + aCropRight) / 100)) / 2 - 10/viewport.zoom}
@@ -3795,8 +4017,12 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
                       width={20/viewport.zoom}
                       height={12/viewport.zoom}
                       fill="#3b82f6"
-                      className="pointer-events-auto cursor-ns-resize"
+                      className="pointer-events-auto cursor-ns-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Crop Bottom"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-bottom')}
+                      onKeyDown={(e) => handleHandleKeyDown(e, 'crop-bottom')}
                     />
                   </>
                 )}

@@ -42,19 +42,16 @@ import {
   ChevronRight,
   Square,
 } from 'lucide-react';
-import React from 'react';
-
-
+import React, { useState, useRef, useCallback, useEffect, Fragment } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { TranscriptPanel } from './TranscriptPanel';
-import { useState, useRef, useCallback } from 'react';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { parseSRT } from '@/utils/srtParser';
 import demoA from '../assets/transition_demo_a.webp';
 import demoB from '../assets/transition_demo_b.webp';
-import { useEffect } from 'react';
+import { toast } from 'sonner';
 import { parseCubeLut } from '@/utils/lutParser';
 import { detectBeats } from '@/utils/beatDetection';
 import { TITLE_TEMPLATES, TEMPLATE_CATEGORIES } from '@/utils/titleTemplates';
@@ -192,6 +189,7 @@ export function MediaPanel() {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<string>('');
+  const [importProgressPct, setImportProgressPct] = useState<number>(0);
   
   // TTS State variables
   const [ttsText, setTtsText] = useState('');
@@ -309,11 +307,13 @@ export function MediaPanel() {
   // Real import with probing
   const importFiles = useCallback(async (files: FileList | File[]) => {
     setImporting(true);
+    setImportProgressPct(0);
     const fileArray = Array.from(files);
 
     for (let i = 0; i < fileArray.length; i++) {
       const file = fileArray[i];
       setImportProgress(`Importing ${file.name} (${i + 1}/${fileArray.length})...`);
+      setImportProgressPct((i / fileArray.length) * 100);
 
       try {
         // Handle .cube LUT files specially
@@ -340,11 +340,14 @@ export function MediaPanel() {
         }
       } catch (err) {
         console.error(`Failed to import ${file.name}:`, err);
+        toast.error(`Failed to import ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
       }
+      setImportProgressPct(((i + 1) / fileArray.length) * 100);
     }
 
     setImporting(false);
     setImportProgress('');
+    setImportProgressPct(0);
   }, [addMedia]);
 
   // Beat detection handler
@@ -412,6 +415,7 @@ export function MediaPanel() {
 
     setImporting(true);
     setImportProgress('Re-linking project files...');
+    setImportProgressPct(0);
 
     const fileArray = Array.from(files);
     const missing = mediaLibrary.filter(
@@ -420,8 +424,10 @@ export function MediaPanel() {
 
     let linkedCount = 0;
 
-    for (const file of fileArray) {
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
       const match = missing.find((m) => m.name === file.name);
+      setImportProgressPct((i / fileArray.length) * 100);
       if (match) {
         setImportProgress(`Linking ${file.name}...`);
         try {
@@ -449,6 +455,7 @@ export function MediaPanel() {
       }
     }
 
+    setImportProgressPct(100);
     // Refresh state in editor store
     useEditorStore.getState().recalcTotalDuration();
     useEditorStore.getState().saveSnapshot();
@@ -458,7 +465,8 @@ export function MediaPanel() {
 
     setImporting(false);
     setImportProgress('');
-    alert(`Successfully re-linked ${linkedCount} files!`);
+    setImportProgressPct(0);
+    toast.success(`Successfully re-linked ${linkedCount} files!`);
     e.target.value = '';
   };
 
@@ -717,23 +725,25 @@ export function MediaPanel() {
       onDrop={handleZoneDrop}
     >
       {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {tabs.map((tab) => {
+      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
+        {tabs.map((tab, idx) => {
           const Icon = tab.icon;
           const isActive = activeMediaTab === tab.id;
           return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveMediaTab(tab.id)}
-              className={`flex-1 py-2.5 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
-                isActive
-                  ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
-                  : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {tab.label}
-            </button>
+            <Fragment key={tab.id}>
+              {idx > 0 && <div className="w-px h-5 bg-[#3e3e3e] self-center shrink-0 mx-1" />}
+              <button
+                onClick={() => setActiveMediaTab(tab.id)}
+                className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                  isActive
+                    ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
+                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            </Fragment>
           );
         })}
       </div>
@@ -751,11 +761,22 @@ export function MediaPanel() {
           </div>
         )}
 
-                {/* Import progress */}
+        {/* Import progress */}
         {importing && (
-          <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2">
-            <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-            <span className="text-[10px] text-amber-300 truncate">{importProgress}</span>
+          <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 space-y-1.5 shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 overflow-hidden">
+                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                <span className="text-[10px] text-amber-300 truncate font-medium">{importProgress}</span>
+              </div>
+              <span className="text-[10px] text-amber-400 font-mono shrink-0">{Math.round(importProgressPct)}%</span>
+            </div>
+            <div className="w-full h-1 bg-amber-950 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-500 rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${importProgressPct}%` }}
+              />
+            </div>
           </div>
         )}
 
@@ -765,7 +786,9 @@ export function MediaPanel() {
             <div className="p-2 border-b border-[#3e3e3e]">
               <div className="relative mb-2">
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#a0a0a0]" />
+                <label htmlFor="media-search" className="sr-only">Search media</label>
                 <input
+                  id="media-search"
                   type="text"
                   placeholder="Search media..."
                   value={searchQuery}
