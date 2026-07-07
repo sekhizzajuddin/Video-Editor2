@@ -1,0 +1,1 @@
+{"nodes":[{"id":"test","label":"test.ts","file_type":"code","source_file":"test.ts","source_location":"L1"},{"id":"test_a","label":"a","file_type":"code","source_file":"test.ts","source_location":"L1"}],"edges":[{"source":"test","target":"test_a","relation":"contains","confidence":"EXTRACTED","source_file":"test.ts","source_location":"L1","weight":1}]}

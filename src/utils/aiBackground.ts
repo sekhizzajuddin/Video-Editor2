@@ -1,6 +1,7 @@
 let selfieSegmentationInstance: any = null;
 let isInitializing = false;
 let initializationPromise: Promise<void> | null = null;
+let sharedMaskCanvas: HTMLCanvasElement | null = null;
 
 /**
  * Dynamically loads the MediaPipe Selfie Segmentation library.
@@ -115,32 +116,40 @@ export async function applyAiBackgroundMask(
     const mask = await segmentFrame(sourceElement);
     if (!mask) return;
 
-    // Create a temporary canvas for the mask
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = width;
-    maskCanvas.height = height;
-    const mCtx = maskCanvas.getContext('2d');
+    // Reuse the shared offscreen canvas to avoid GC thrashing in the rendering loop
+    if (!sharedMaskCanvas) {
+      sharedMaskCanvas = document.createElement('canvas');
+    }
+    if (sharedMaskCanvas.width !== width || sharedMaskCanvas.height !== height) {
+      sharedMaskCanvas.width = width;
+      sharedMaskCanvas.height = height;
+    }
+    
+    const mCtx = sharedMaskCanvas.getContext('2d');
     if (!mCtx) return;
+
+    // Clear previous mask contents
+    mCtx.clearRect(0, 0, width, height);
+
+    // Apply edge blur to the mask if requested to soften edges
+    if (edgeBlur > 0) {
+      mCtx.filter = `blur(${edgeBlur}px)`;
+    } else {
+      mCtx.filter = 'none';
+    }
 
     // Draw the mask (it's grayscale, subject is white)
     mCtx.drawImage(mask, 0, 0, width, height);
-
-    // If edge blur is requested, we can apply a slight blur to the mask to soften edges
-    if (edgeBlur > 0) {
-      mCtx.filter = `blur(${edgeBlur}px)`;
-      mCtx.drawImage(maskCanvas, 0, 0); // draw over itself to blur?
-      // Actually applying filter and re-drawing is tricky in standard canvas without another buffer.
-      // We will skip advanced blur for MVP to keep performance high.
-    }
+    mCtx.filter = 'none'; // reset filter
 
     // Now apply the mask to the target context
     // Target context currently has the FULL image drawn.
     // We want to KEEP pixels where the mask is white.
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(maskCanvas, 0, 0, width, height);
+    ctx.drawImage(sharedMaskCanvas, 0, 0, width, height);
     ctx.globalCompositeOperation = 'source-over'; // reset
 
   } catch (err) {
     console.error('Error applying AI background mask:', err);
   }
-};
+}

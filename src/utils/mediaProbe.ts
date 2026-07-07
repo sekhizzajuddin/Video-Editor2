@@ -53,12 +53,12 @@ export async function probeVideo(
   const video = document.createElement('video');
   video.preload = 'auto';
   video.muted = true;
-  video.src = objectUrl;
 
   // Wait for metadata
   await new Promise<void>((resolve, reject) => {
     video.onloadedmetadata = () => resolve();
     video.onerror = () => reject(new Error('Failed to load video'));
+    video.src = objectUrl;
   });
 
   const duration = video.duration;
@@ -147,12 +147,12 @@ export async function probeAudio(
 ): Promise<Partial<MediaItem>> {
   const audio = document.createElement('audio');
   audio.preload = 'auto';
-  audio.src = objectUrl;
 
   // Wait for metadata
   await new Promise<void>((resolve, reject) => {
     audio.onloadedmetadata = () => resolve();
     audio.onerror = () => reject(new Error('Failed to load audio'));
+    audio.src = objectUrl;
   });
 
   const duration = audio.duration;
@@ -185,11 +185,11 @@ export async function probeImage(
   objectUrl: string
 ): Promise<Partial<MediaItem>> {
   const img = document.createElement('img');
-  img.src = objectUrl;
 
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve();
     img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = objectUrl;
   });
 
   // Create a smaller thumbnail

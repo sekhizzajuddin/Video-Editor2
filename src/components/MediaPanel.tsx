@@ -196,8 +196,8 @@ export function MediaPanel() {
   const [ttsLanguage, setTtsLanguage] = useState('en');
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsPitch, setTtsPitch] = useState(1);
-  const [ttsEngine, setTtsEngine] = useState<'standard' | 'neural'>('neural');
-  const [ttsVoice, setTtsVoice] = useState('alloy');
+  const [ttsEngine, setTtsEngine] = useState<'standard' | 'neural' | 'edge'>('edge');
+  const [ttsVoice, setTtsVoice] = useState('en-US-AriaNeural');
   const [isGeneratingTTS, setIsGeneratingTTS] = useState(false);
 
   const [isDragOver, setIsDragOver] = useState(false);
@@ -217,6 +217,7 @@ export function MediaPanel() {
 
   const [isRecordingScreen, setIsRecordingScreen] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const startScreenRecord = async () => {
     try {
@@ -583,8 +584,53 @@ export function MediaPanel() {
 
   const previewTTS = async () => {
     if (!ttsText.trim()) return;
+
+    // Cancel any running speech synthesis or custom audio element preview to prevent overlapping voices
+    if (ttsAudioRef.current) {
+      try {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current.src = '';
+      } catch (_) {}
+      ttsAudioRef.current = null;
+    }
+    window.speechSynthesis.cancel();
     
-    if (ttsEngine === 'neural') {
+    if (ttsEngine === 'edge') {
+      try {
+        setIsGeneratingTTS(true);
+        const audioUrl = `/api/tts?text=${encodeURIComponent(ttsText)}&voice=${ttsVoice}&rate=${ttsRate}&pitch=${ttsPitch}`;
+        const audio = new Audio(audioUrl);
+        ttsAudioRef.current = audio;
+        
+        audio.oncanplaythrough = () => {
+          audio.play();
+          setIsGeneratingTTS(false);
+        };
+        audio.onended = () => {
+          if (ttsAudioRef.current === audio) {
+            ttsAudioRef.current = null;
+          }
+        };
+        audio.onerror = (e) => {
+          console.error('Edge TTS preview error:', e);
+          alert('Failed to preview Edge natural voice. Falling back to standard system voice.');
+          setIsGeneratingTTS(false);
+          if (ttsAudioRef.current === audio) {
+            ttsAudioRef.current = null;
+          }
+          // Fallback to standard
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(ttsText);
+          utterance.lang = ttsLanguage;
+          utterance.rate = ttsRate;
+          utterance.pitch = ttsPitch;
+          window.speechSynthesis.speak(utterance);
+        };
+      } catch (err) {
+        console.error('Edge TTS preview setup error:', err);
+        setIsGeneratingTTS(false);
+      }
+    } else if (ttsEngine === 'neural') {
       const puter = (window as any).puter;
       if (puter) {
         try {
@@ -594,8 +640,24 @@ export function MediaPanel() {
             model: 'tts-1',
             voice: ttsVoice
           });
-          audio.play();
-          setIsGeneratingTTS(false);
+          
+          const audioEl = new Audio(audio.src);
+          ttsAudioRef.current = audioEl;
+          audioEl.oncanplaythrough = () => {
+            audioEl.play();
+            setIsGeneratingTTS(false);
+          };
+          audioEl.onended = () => {
+            if (ttsAudioRef.current === audioEl) {
+              ttsAudioRef.current = null;
+            }
+          };
+          audioEl.onerror = () => {
+            setIsGeneratingTTS(false);
+            if (ttsAudioRef.current === audioEl) {
+              ttsAudioRef.current = null;
+            }
+          };
         } catch (err) {
           console.error('Puter TTS preview error:', err);
           alert('Failed to preview neural voice. Falling back to standard system voice.');
@@ -634,7 +696,13 @@ export function MediaPanel() {
       let blob: Blob;
       let mimeType = 'audio/mp3';
       
-      if (ttsEngine === 'neural') {
+      if (ttsEngine === 'edge') {
+        const ttsUrl = `/api/tts?text=${encodeURIComponent(ttsText)}&voice=${ttsVoice}&rate=${ttsRate}&pitch=${ttsPitch}`;
+        const response = await fetch(ttsUrl);
+        if (!response.ok) throw new Error('Failed to generate audio from Edge TTS proxy.');
+        blob = await response.blob();
+        mimeType = blob.type || 'audio/mp3';
+      } else if (ttsEngine === 'neural') {
         const puter = (window as any).puter;
         if (!puter) {
           throw new Error('Puter AI engine is not loaded. Make sure you have active internet connection.');
@@ -663,7 +731,7 @@ export function MediaPanel() {
       const mediaId = `tts_${Date.now()}`;
       const mediaItem = {
         id: mediaId,
-        name: `${ttsEngine === 'neural' ? 'Neural' : 'TTS'}: ${ttsText.slice(0, 25)}...`,
+        name: `${ttsEngine === 'edge' ? 'Edge' : (ttsEngine === 'neural' ? 'Neural' : 'TTS')}: ${ttsText.slice(0, 25)}...`,
         type: 'audio' as const,
         duration: 5,
         url: audioUrl,
@@ -1142,24 +1210,41 @@ export function MediaPanel() {
               {/* Engine Toggle */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">TTS Voice Quality</label>
-                <div className="flex gap-1.5 bg-[#141414] p-1 border border-[#3e3e3e] rounded-lg">
+                <div className="flex gap-1 bg-[#141414] p-1 border border-[#3e3e3e] rounded-lg">
                   <button
                     type="button"
-                    onClick={() => setTtsEngine('neural')}
-                    className={`flex-1 py-1.5 text-xs rounded transition-all font-medium ${
-                      ttsEngine === 'neural'
-                        ? 'bg-amber-500 text-black font-semibold'
+                    onClick={() => {
+                      setTtsEngine('edge');
+                      setTtsVoice('en-US-AriaNeural');
+                    }}
+                    className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
+                      ttsEngine === 'edge'
+                        ? 'bg-amber-500 text-black font-bold shadow'
                         : 'text-[#a0a0a0] hover:text-white'
                     }`}
                   >
-                    🔥 Neural (Ultra-Natural)
+                    🚀 Natural (Edge)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTtsEngine('neural');
+                      setTtsVoice('alloy');
+                    }}
+                    className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
+                      ttsEngine === 'neural'
+                        ? 'bg-amber-500 text-black font-bold shadow'
+                        : 'text-[#a0a0a0] hover:text-white'
+                    }`}
+                  >
+                    🔥 Neural (Cloud)
                   </button>
                   <button
                     type="button"
                     onClick={() => setTtsEngine('standard')}
-                    className={`flex-1 py-1.5 text-xs rounded transition-all font-medium ${
+                    className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
                       ttsEngine === 'standard'
-                        ? 'bg-amber-500 text-black font-semibold'
+                        ? 'bg-amber-500 text-black font-bold shadow'
                         : 'text-[#a0a0a0] hover:text-white'
                     }`}
                   >
@@ -1168,7 +1253,29 @@ export function MediaPanel() {
                 </div>
               </div>
 
-              {ttsEngine === 'neural' ? (
+              {ttsEngine === 'edge' ? (
+                /* Edge Voices selector */
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">AI Voice Profile (Microsoft Edge)</label>
+                  <select
+                    value={ttsVoice}
+                    onChange={(e) => setTtsVoice(e.target.value)}
+                    className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    <option value="en-US-AriaNeural">English (US) - Aria (Female)</option>
+                    <option value="en-US-GuyNeural">English (US) - Guy (Male)</option>
+                    <option value="en-US-JennyNeural">English (US) - Jenny (Female)</option>
+                    <option value="en-GB-SoniaNeural">English (UK) - Sonia (Female)</option>
+                    <option value="en-GB-RyanNeural">English (UK) - Ryan (Male)</option>
+                    <option value="hi-IN-SwaraNeural">Hindi (India) - Swara (Female)</option>
+                    <option value="hi-IN-MadhurNeural">Hindi (India) - Madhur (Male)</option>
+                    <option value="es-ES-ElviraNeural">Spanish (Spain) - Elvira (Female)</option>
+                    <option value="es-ES-AlvaroNeural">Spanish (Spain) - Alvaro (Male)</option>
+                    <option value="fr-FR-DeniseNeural">French (France) - Denise (Female)</option>
+                    <option value="fr-FR-HenriNeural">French (France) - Henri (Male)</option>
+                  </select>
+                </div>
+              ) : ttsEngine === 'neural' ? (
                 /* Neural Voices selector */
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">AI Voice Profile (OpenAI)</label>

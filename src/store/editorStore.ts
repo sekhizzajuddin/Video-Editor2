@@ -760,6 +760,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         clips: track.clips.map((clip) =>
           clip.id === clipId ? { ...clip, ...updates } : clip
         ),
+        overLayers: (track.overLayers || []).map((ol) =>
+          ol.id === clipId ? { ...ol, ...updates } : ol
+        ),
       }));
       return { tracks: newTracks };
     });

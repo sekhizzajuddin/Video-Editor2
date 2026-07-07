@@ -434,7 +434,6 @@ export async function deleteAutosaveFromDB(timestamp: number): Promise<void> {
 function generateVideoThumbnail(videoUrl: string, width?: number, height?: number): Promise<string> {
   return new Promise((resolve) => {
     const video = document.createElement('video');
-    video.src = videoUrl;
     video.crossOrigin = 'anonymous';
     video.muted = true;
     video.playsInline = true;
@@ -478,6 +477,8 @@ function generateVideoThumbnail(videoUrl: string, width?: number, height?: numbe
       cleanup();
       resolve('');
     };
+
+    video.src = videoUrl;
   });
 }
 
@@ -487,7 +488,6 @@ function generateVideoThumbnail(videoUrl: string, width?: number, height?: numbe
 function generateFrameStrip(videoUrl: string, duration: number, count: number): Promise<string[]> {
   return new Promise((resolve) => {
     const video = document.createElement('video');
-    video.src = videoUrl;
     video.crossOrigin = 'anonymous';
     video.muted = true;
     video.playsInline = true;
@@ -536,6 +536,8 @@ function generateFrameStrip(videoUrl: string, duration: number, count: number): 
       cleanup();
       resolve(frames);
     };
+
+    video.src = videoUrl;
   });
 }
 

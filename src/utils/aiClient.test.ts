@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq } from './aiClient';
+import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini } from './aiClient';
 
 describe('aiClient tests', () => {
   beforeEach(() => {
@@ -141,6 +141,53 @@ Hope this helps!`;
       await expect(
         refineAudioQueryWithGroq(originalQuery, 'mockKey')
       ).rejects.toThrow('Groq API error: 401 - Unauthorized');
+    });
+  });
+
+  describe('analyzeMotionGraphicsWithGemini', () => {
+    it('successfully recommendations templates from Gemini response', async () => {
+      const mockSuggestions = [
+        {
+          templateId: 'lower_third_classic',
+          start: 2,
+          end: 6,
+          suggestedText: 'Dr. Jane Doe\nNeuroscientist',
+          reason: 'Jane is speaking on screen'
+        }
+      ];
+
+      const globalFetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: JSON.stringify(mockSuggestions) }
+                ]
+              }
+            }
+          ]
+        })
+      });
+      vi.stubGlobal('fetch', globalFetchMock);
+
+      const result = await analyzeMotionGraphicsWithGemini('base64String', 10, 'mockKey');
+      expect(result).toEqual(mockSuggestions);
+      expect(globalFetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws error when Gemini API fails', async () => {
+      const globalFetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => 'Bad Request'
+      });
+      vi.stubGlobal('fetch', globalFetchMock);
+
+      await expect(
+        analyzeMotionGraphicsWithGemini('base64String', 10, 'mockKey')
+      ).rejects.toThrow('Gemini API error: 400 - Bad Request');
     });
   });
 });

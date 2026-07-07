@@ -102,11 +102,8 @@ export async function compileStoryboard(
   cloneVideo.muted = true;
   cloneVideo.playsInline = true;
   
-  // Use currentSrc if available, otherwise src
-  cloneVideo.src = videoEl.currentSrc || videoEl.src;
-  
   // Wait for the clone to load data before seeking
-  await new Promise<void>((resolve) => {
+  const loadPromise = new Promise<void>((resolve) => {
     if (cloneVideo.readyState >= 2) {
       resolve();
       return;
@@ -124,6 +121,12 @@ export async function compileStoryboard(
     // Fallback safeguard timeout in case events don't fire
     setTimeout(onReady, 2000);
   });
+
+  // Use currentSrc if available, otherwise src
+  cloneVideo.src = videoEl.currentSrc || videoEl.src;
+  cloneVideo.load(); // Force loading algorithm execution
+  
+  await loadPromise;
 
   try {
     for (let i = 0; i < numChunks; i++) {

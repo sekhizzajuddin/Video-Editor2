@@ -34,7 +34,6 @@ export async function extractFrames(
   video.preload = 'auto';
   video.muted = true;
   video.crossOrigin = 'anonymous';
-  video.src = videoUrl;
 
   // Wait for the video to be ready
   await new Promise<void>((resolve, reject) => {
@@ -47,6 +46,7 @@ export async function extractFrames(
       clearTimeout(timeoutId);
       reject(new Error(`Failed to load video: ${videoUrl}`));
     };
+    video.src = videoUrl;
   });
 
   const actualDuration = isFinite(video.duration) ? video.duration : duration;

@@ -1,0 +1,1314 @@
+{
+  "D:/Video-Editor/eslint.config.js": {
+    "mtime": 1782070888563.2053,
+    "hash": "b8893da386a89dfd3672dad848f4ec7e"
+  },
+  "D:/Video-Editor/fix_mediapanel.ps1": {
+    "mtime": 1782797914954.7932,
+    "hash": "d2ec258ca240bea675b1239e6a1a494d"
+  },
+  "D:/Video-Editor/packages/core/src/actions/action-executor.ts": {
+    "mtime": 1781202614657.9905,
+    "hash": "f6b447e679a658bd8f2783dde3d3eedf"
+  },
+  "D:/Video-Editor/packages/core/src/actions/action-history.ts": {
+    "mtime": 1781202614660.0017,
+    "hash": "dd6081ebb27a9d9083d0a3defc748ccd"
+  },
+  "D:/Video-Editor/packages/core/src/actions/action-serializer.ts": {
+    "mtime": 1781202614661.0012,
+    "hash": "c027ce93c46c008c885be67a452cb2c5"
+  },
+  "D:/Video-Editor/packages/core/src/actions/action-validator.ts": {
+    "mtime": 1781202614663.5562,
+    "hash": "19e25523207fff701ffd59ca50c7a660"
+  },
+  "D:/Video-Editor/packages/core/src/actions/index.ts": {
+    "mtime": 1781202614666.0151,
+    "hash": "68d9fb18a301b80944edea11baca2de3"
+  },
+  "D:/Video-Editor/packages/core/src/actions/inverse-action-generator.ts": {
+    "mtime": 1781202614668.0205,
+    "hash": "45dd00baf04da62c0fe0d817e7b2a20b"
+  },
+  "D:/Video-Editor/packages/core/src/ai/auto-reframe-engine.ts": {
+    "mtime": 1781202614670.5322,
+    "hash": "6e9042bb948004eaf31d733cd64b903b"
+  },
+  "D:/Video-Editor/packages/core/src/ai/background-removal-engine.ts": {
+    "mtime": 1781202614698.0896,
+    "hash": "a6a7ff69c33ffe358ef69bce65f6d015"
+  },
+  "D:/Video-Editor/packages/core/src/ai/index.ts": {
+    "mtime": 1781202614699.553,
+    "hash": "8e607baf95a2f09551f3fd171f0fac53"
+  },
+  "D:/Video-Editor/packages/core/src/ai/person-segmentation-engine.ts": {
+    "mtime": 1781202614702.0298,
+    "hash": "52fddbe512dfe2f6d64167ad41c711f0"
+  },
+  "D:/Video-Editor/packages/core/src/animation/animation-exporter.ts": {
+    "mtime": 1781202614704.538,
+    "hash": "76e804d1ce0059efd7d846c80eea80e5"
+  },
+  "D:/Video-Editor/packages/core/src/animation/animation-importer.ts": {
+    "mtime": 1781202614708.6184,
+    "hash": "6f47921a325391e355692cfba86079a1"
+  },
+  "D:/Video-Editor/packages/core/src/animation/animation-schema.ts": {
+    "mtime": 1781202614710.7783,
+    "hash": "8b28b707f76f1cf8a310afe46e6d5ec8"
+  },
+  "D:/Video-Editor/packages/core/src/animation/composition-renderer.ts": {
+    "mtime": 1781202614713.428,
+    "hash": "f4bf6053d61fb5417836efcdde7ea584"
+  },
+  "D:/Video-Editor/packages/core/src/animation/easing-functions.ts": {
+    "mtime": 1781202614714.437,
+    "hash": "934acc3dd88281a2b6326ffeea869b6d"
+  },
+  "D:/Video-Editor/packages/core/src/animation/gsap-engine.ts": {
+    "mtime": 1781202614715.9824,
+    "hash": "793087cfade8da47abca8cb125d4f44c"
+  },
+  "D:/Video-Editor/packages/core/src/animation/index.ts": {
+    "mtime": 1781202614717.4895,
+    "hash": "edb7274a4b882e94fc960729a5f0a973"
+  },
+  "D:/Video-Editor/packages/core/src/audio/audio-effect-routing.test.ts": {
+    "mtime": 1781202614720.5637,
+    "hash": "86f0c983b239624774feb6578a4f18ff"
+  },
+  "D:/Video-Editor/packages/core/src/audio/audio-effect-routing.ts": {
+    "mtime": 1781202614724.7302,
+    "hash": "96a56fdfcf8caf0d3c28a8b335ba86e0"
+  },
+  "D:/Video-Editor/packages/core/src/audio/audio-effects-engine.test.ts": {
+    "mtime": 1781202614727.0864,
+    "hash": "edfb93f1904a76321b4f1fa3c2e8f8aa"
+  },
+  "D:/Video-Editor/packages/core/src/audio/audio-effects-engine.ts": {
+    "mtime": 1781202614729.6936,
+    "hash": "f6b640448f1f5d748193917216a885fb"
+  },
+  "D:/Video-Editor/packages/core/src/audio/audio-engine.ts": {
+    "mtime": 1781202614731.693,
+    "hash": "205b0496fd1d6f30f68ce8699fe730f5"
+  },
+  "D:/Video-Editor/packages/core/src/audio/beat-detection-engine.ts": {
+    "mtime": 1781202614735.5347,
+    "hash": "ea08fbe33224a9668aadcb5c040caf09"
+  },
+  "D:/Video-Editor/packages/core/src/audio/clip-audio-resolution.test.ts": {
+    "mtime": 1781202614739.7368,
+    "hash": "eff6b9ec196f86ea0aabb2e9c7fb4b48"
+  },
+  "D:/Video-Editor/packages/core/src/audio/clip-audio-resolution.ts": {
+    "mtime": 1781202614749.6484,
+    "hash": "0266170f32c7d2df206b78367fc45940"
+  },
+  "D:/Video-Editor/packages/core/src/audio/clip-volume-automation.test.ts": {
+    "mtime": 1781202614753.1614,
+    "hash": "3e820b76186a97cdfd33b4b4e13a2f29"
+  },
+  "D:/Video-Editor/packages/core/src/audio/clip-volume-automation.ts": {
+    "mtime": 1781202614758.703,
+    "hash": "f7295961ee949492d39bb23069467643"
+  },
+  "D:/Video-Editor/packages/core/src/audio/effects-worklet-processor.ts": {
+    "mtime": 1781202614760.699,
+    "hash": "37479d1a8ea91af9934b5d09e14163e2"
+  },
+  "D:/Video-Editor/packages/core/src/audio/fft.ts": {
+    "mtime": 1781202614764.7402,
+    "hash": "6515b7fd3d974c85db82ea886978a56b"
+  },
+  "D:/Video-Editor/packages/core/src/audio/highlight-analyzer.ts": {
+    "mtime": 1781202614767.5515,
+    "hash": "614a61198c4c22a801f01c2c353c7aa9"
+  },
+  "D:/Video-Editor/packages/core/src/audio/index.ts": {
+    "mtime": 1781202614769.5857,
+    "hash": "f8837cae7f663e0f25aa7dc92c5f2d75"
+  },
+  "D:/Video-Editor/packages/core/src/audio/noise-reduction.test.ts": {
+    "mtime": 1781202614771.5732,
+    "hash": "a629cf5ba79b824ad452bd4a92e3d2a6"
+  },
+  "D:/Video-Editor/packages/core/src/audio/noise-reduction.ts": {
+    "mtime": 1781202614773.572,
+    "hash": "eb07036737166760ada0848f37e33316"
+  },
+  "D:/Video-Editor/packages/core/src/audio/realtime-audio-graph.ts": {
+    "mtime": 1781202614777.0835,
+    "hash": "2de07d9f933dd7c54e42807529eeaeb2"
+  },
+  "D:/Video-Editor/packages/core/src/audio/realtime-processor.ts": {
+    "mtime": 1781202614780.615,
+    "hash": "57907641b136d7d24e48166ad50718c9"
+  },
+  "D:/Video-Editor/packages/core/src/audio/sound-generator.ts": {
+    "mtime": 1781202614782.8076,
+    "hash": "0aa0217252466be998738b9213a08fe4"
+  },
+  "D:/Video-Editor/packages/core/src/audio/sound-library-engine.ts": {
+    "mtime": 1781202614783.808,
+    "hash": "0a41e89e0a7e8f96bba2d7bc3e1a31f6"
+  },
+  "D:/Video-Editor/packages/core/src/audio/types.ts": {
+    "mtime": 1781202614786.3867,
+    "hash": "d41d8d6dbeec9171e0a8e0c0216444f9"
+  },
+  "D:/Video-Editor/packages/core/src/audio/volume-automation.ts": {
+    "mtime": 1781202614788.0752,
+    "hash": "6d5ac20fb52c6fca93db014267bbc3fb"
+  },
+  "D:/Video-Editor/packages/core/src/device/device-capabilities.test.ts": {
+    "mtime": 1781202614799.1323,
+    "hash": "17e56d914e48c9d230244c5e057ec6a4"
+  },
+  "D:/Video-Editor/packages/core/src/device/device-capabilities.ts": {
+    "mtime": 1781202614816.4038,
+    "hash": "aeafe968c8cc5348b5154546b4e7effd"
+  },
+  "D:/Video-Editor/packages/core/src/device/export-estimator.test.ts": {
+    "mtime": 1781202614818.3652,
+    "hash": "dded31e3dff19bfc0dcee6d2d4a602dc"
+  },
+  "D:/Video-Editor/packages/core/src/device/export-estimator.ts": {
+    "mtime": 1781202614821.3853,
+    "hash": "e839d60aeed039d7809cebd14e95bfaf"
+  },
+  "D:/Video-Editor/packages/core/src/device/index.ts": {
+    "mtime": 1781202614822.3845,
+    "hash": "c6b596584fef9c60bcf95dc4161e9fa2"
+  },
+  "D:/Video-Editor/packages/core/src/editing-templates/built-in-templates.ts": {
+    "mtime": 1781202614830.9243,
+    "hash": "f2a27bd111defb36dc5bea1ced7d4ecd"
+  },
+  "D:/Video-Editor/packages/core/src/editing-templates/categories.ts": {
+    "mtime": 1781202614832.9246,
+    "hash": "871af5100601aa628645edf09cba42cf"
+  },
+  "D:/Video-Editor/packages/core/src/editing-templates/index.ts": {
+    "mtime": 1781202614836.5408,
+    "hash": "508b02772e2ce797d41fa98b6679ff43"
+  },
+  "D:/Video-Editor/packages/core/src/editing-templates/registry.ts": {
+    "mtime": 1781202614843.7751,
+    "hash": "741b8eb56ccad5d84caa3e0f55d1ab2c"
+  },
+  "D:/Video-Editor/packages/core/src/editing-templates/resolver.ts": {
+    "mtime": 1781202614846.8242,
+    "hash": "f0875cb12e512112afcf1c43d53ac2c6"
+  },
+  "D:/Video-Editor/packages/core/src/editing-templates/types.ts": {
+    "mtime": 1781202614847.8428,
+    "hash": "81f632faeda7e21bb2b93831585af84a"
+  },
+  "D:/Video-Editor/packages/core/src/effects/blend-modes.ts": {
+    "mtime": 1781202614849.2695,
+    "hash": "f92054600fcb98e48a97e653ef2b8853"
+  },
+  "D:/Video-Editor/packages/core/src/effects/expression-engine.ts": {
+    "mtime": 1781202614852.5073,
+    "hash": "0630a6986935e2db314eee825a65e452"
+  },
+  "D:/Video-Editor/packages/core/src/effects/index.ts": {
+    "mtime": 1781202614853.5066,
+    "hash": "2f7517e2de605fe8470f6a20429041f7"
+  },
+  "D:/Video-Editor/packages/core/src/effects/particle-engine.ts": {
+    "mtime": 1781202614854.5056,
+    "hash": "9bf0f9b464fb8a8bb756872514a1cbed"
+  },
+  "D:/Video-Editor/packages/core/src/effects/particle-presets.ts": {
+    "mtime": 1781202614855.01,
+    "hash": "1250a3b9c62bbd02c47401df5ddcf5c2"
+  },
+  "D:/Video-Editor/packages/core/src/effects/particle-types.ts": {
+    "mtime": 1781202614857.2195,
+    "hash": "949db6fde289f5bef346eceed4ec45bb"
+  },
+  "D:/Video-Editor/packages/core/src/export/export-engine.test.ts": {
+    "mtime": 1781202614859.6853,
+    "hash": "6a77a813ef992a3719f6dabb97a7965c"
+  },
+  "D:/Video-Editor/packages/core/src/export/export-engine.ts": {
+    "mtime": 1781202614861.1929,
+    "hash": "c05f35e01063a06cdc51cb48393f61e5"
+  },
+  "D:/Video-Editor/packages/core/src/export/export-worker.ts": {
+    "mtime": 1781202614863.7195,
+    "hash": "1842982abb75f0d585b0c0e26461b46c"
+  },
+  "D:/Video-Editor/packages/core/src/export/index.ts": {
+    "mtime": 1781202614865.232,
+    "hash": "acdc0d68eb6ae371d7e1e7acbc38a46c"
+  },
+  "D:/Video-Editor/packages/core/src/export/types.ts": {
+    "mtime": 1781202614865.232,
+    "hash": "bcf508fe5a2854bcc7d396faaa190b28"
+  },
+  "D:/Video-Editor/packages/core/src/graphics/graphics-engine.test.ts": {
+    "mtime": 1781202614867.9065,
+    "hash": "9a08763bb091dc4673f03fadb6d5f14d"
+  },
+  "D:/Video-Editor/packages/core/src/graphics/graphics-engine.ts": {
+    "mtime": 1781202614869.3196,
+    "hash": "a1b47a1cf02246c28f30dafd4f4c4498"
+  },
+  "D:/Video-Editor/packages/core/src/graphics/index.ts": {
+    "mtime": 1781202614871.3188,
+    "hash": "0b54738f9bbd7523fa98285dbcfe7f5a"
+  },
+  "D:/Video-Editor/packages/core/src/graphics/sticker-library.ts": {
+    "mtime": 1781202614871.3188,
+    "hash": "3e72475055755dad89673ae144eb25f0"
+  },
+  "D:/Video-Editor/packages/core/src/graphics/svg-animation-presets.ts": {
+    "mtime": 1781202614872.5535,
+    "hash": "7457312629cbbda5ab29f24aec1560be"
+  },
+  "D:/Video-Editor/packages/core/src/graphics/types.ts": {
+    "mtime": 1781202614874.5652,
+    "hash": "1862a9b2b511e2feb14b02ca52a77210"
+  },
+  "D:/Video-Editor/packages/core/src/index.ts": {
+    "mtime": 1781202614875.5771,
+    "hash": "be8fdd7e5f5628c7eaef0849de9fe953"
+  },
+  "D:/Video-Editor/packages/core/src/media/audio-match-engine.ts": {
+    "mtime": 1781773145611.9204,
+    "hash": "d1729b4ca13ae7b43148231d995d68bf"
+  },
+  "D:/Video-Editor/packages/core/src/media/ffmpeg-fallback.ts": {
+    "mtime": 1781202614880.1104,
+    "hash": "f8b4e0d8409243034d7876c2307c30cc"
+  },
+  "D:/Video-Editor/packages/core/src/media/gif-decoder.ts": {
+    "mtime": 1781202614884.7693,
+    "hash": "2a2b5bc5c9430af4cc201117ce0f5408"
+  },
+  "D:/Video-Editor/packages/core/src/media/index.ts": {
+    "mtime": 1781772991712.3853,
+    "hash": "e2604a0bbc8d6ea8006d906a8a5d22db"
+  },
+  "D:/Video-Editor/packages/core/src/media/media-import-service.ts": {
+    "mtime": 1781202614888.8013,
+    "hash": "8f01ed81198449c3146a284498d09642"
+  },
+  "D:/Video-Editor/packages/core/src/media/mediabunny-engine.ts": {
+    "mtime": 1781202614891.3093,
+    "hash": "c79ef71d060ea49292d7ef8d4cef7762"
+  },
+  "D:/Video-Editor/packages/core/src/media/transcription-engine.ts": {
+    "mtime": 1781949537893.9382,
+    "hash": "73ff5d2f543cdfc87309615bf21101d2"
+  },
+  "D:/Video-Editor/packages/core/src/media/types.ts": {
+    "mtime": 1781202614893.4941,
+    "hash": "87a7d4b87084b6b71886f2714b0ba01f"
+  },
+  "D:/Video-Editor/packages/core/src/media/waveform-generator.ts": {
+    "mtime": 1781202614896.0173,
+    "hash": "2e84e7ed9161379c0250a79abdd74790"
+  },
+  "D:/Video-Editor/packages/core/src/media/waveform-renderer.ts": {
+    "mtime": 1781202614897.0176,
+    "hash": "3e95d26bb5b61730a840249550bf4919"
+  },
+  "D:/Video-Editor/packages/core/src/photo/index.ts": {
+    "mtime": 1781202614898.969,
+    "hash": "ac959104fc616e8623760d917d118a18"
+  },
+  "D:/Video-Editor/packages/core/src/photo/photo-adjustments.ts": {
+    "mtime": 1781202614898.969,
+    "hash": "59d52e8f5c152cb4e602cf6af86937df"
+  },
+  "D:/Video-Editor/packages/core/src/photo/photo-engine.ts": {
+    "mtime": 1781202614902.3208,
+    "hash": "721f8263c5d93dcff56471d455e562e1"
+  },
+  "D:/Video-Editor/packages/core/src/photo/retouching-engine.ts": {
+    "mtime": 1781202614903.5771,
+    "hash": "8de562ed6ea9c8044a802140ba6f6509"
+  },
+  "D:/Video-Editor/packages/core/src/photo/types.ts": {
+    "mtime": 1781202614906.0862,
+    "hash": "1396103d67915bb5477441261a869f60"
+  },
+  "D:/Video-Editor/packages/core/src/playback/index.ts": {
+    "mtime": 1781202614908.092,
+    "hash": "ed29c757e3ee2919e9ee6b5de7c6b466"
+  },
+  "D:/Video-Editor/packages/core/src/playback/master-timeline-clock.ts": {
+    "mtime": 1781202614910.2888,
+    "hash": "585b5af2208ec359e1773c445e95dce1"
+  },
+  "D:/Video-Editor/packages/core/src/playback/playback-controller.ts": {
+    "mtime": 1781202614922.12,
+    "hash": "055e393aca17df035428ef39ba4343f9"
+  },
+  "D:/Video-Editor/packages/core/src/playback/types.ts": {
+    "mtime": 1781202614925.622,
+    "hash": "c4fdede4fe2c9777b4e697d5106c39de"
+  },
+  "D:/Video-Editor/packages/core/src/storage/cache-manager.ts": {
+    "mtime": 1781202614931.5032,
+    "hash": "43687b11c84004e2badaa76b113b7a9e"
+  },
+  "D:/Video-Editor/packages/core/src/storage/index.ts": {
+    "mtime": 1781202614934.6624,
+    "hash": "81f33f6a152d70e5a9c718ceabf0736b"
+  },
+  "D:/Video-Editor/packages/core/src/storage/project-serializer.ts": {
+    "mtime": 1781202614936.743,
+    "hash": "db4b846e6adf56d20279a6924f5509d3"
+  },
+  "D:/Video-Editor/packages/core/src/storage/schema-types.ts": {
+    "mtime": 1781202614939.0547,
+    "hash": "c4af050ed3eff9a1c4498e4b23716592"
+  },
+  "D:/Video-Editor/packages/core/src/storage/storage-engine.ts": {
+    "mtime": 1781202614940.457,
+    "hash": "ea6d352b26f9a6f8469a1f3b1046c2b1"
+  },
+  "D:/Video-Editor/packages/core/src/storage/types.ts": {
+    "mtime": 1781202614943.4885,
+    "hash": "37d3e94f4ecbc5771341c6fc98775641"
+  },
+  "D:/Video-Editor/packages/core/src/template/index.ts": {
+    "mtime": 1781202614946.007,
+    "hash": "42ebb4e0779fe35b0ffc6036178e3006"
+  },
+  "D:/Video-Editor/packages/core/src/template/template-engine.ts": {
+    "mtime": 1781202614948.5132,
+    "hash": "b728be93e0d01fe98ad114c75515a11f"
+  },
+  "D:/Video-Editor/packages/core/src/test/fc-config.ts": {
+    "mtime": 1781202614953.1023,
+    "hash": "3e8772d2b8ddd49ae14b8c7d4c357102"
+  },
+  "D:/Video-Editor/packages/core/src/test/generators.ts": {
+    "mtime": 1781202614955.6455,
+    "hash": "69025abc588c626038d6f8724d559be8"
+  },
+  "D:/Video-Editor/packages/core/src/test/index.ts": {
+    "mtime": 1781202614959.4343,
+    "hash": "5e2a4d6383a8812f2c0b6c47c7cd40e5"
+  },
+  "D:/Video-Editor/packages/core/src/text/audio-text-sync-engine.ts": {
+    "mtime": 1781202614960.4387,
+    "hash": "3024bafdce9d8e1e16e2a05bac3cce1f"
+  },
+  "D:/Video-Editor/packages/core/src/text/caption-animation-renderer.ts": {
+    "mtime": 1781202614961.4385,
+    "hash": "f25a7ef1042e2a6a83b72214a9eb1553"
+  },
+  "D:/Video-Editor/packages/core/src/text/character-animator.ts": {
+    "mtime": 1781202614962.9446,
+    "hash": "50727d2832803625f257e8e26eb062d6"
+  },
+  "D:/Video-Editor/packages/core/src/text/index.ts": {
+    "mtime": 1781202614964.4504,
+    "hash": "5712c22d0f2f0d010fc8c8cd3daa23bd"
+  },
+  "D:/Video-Editor/packages/core/src/text/speech-to-text-engine.ts": {
+    "mtime": 1781942824236.0493,
+    "hash": "ef65428a243e5cd559f525e51ebe7779"
+  },
+  "D:/Video-Editor/packages/core/src/text/subtitle-engine.ts": {
+    "mtime": 1781202614967.478,
+    "hash": "c3fbddec13adee32adc3f96e415a19d5"
+  },
+  "D:/Video-Editor/packages/core/src/text/text-animation-presets.ts": {
+    "mtime": 1781202614969.4788,
+    "hash": "01b331780b40c3429f130968aa99f982"
+  },
+  "D:/Video-Editor/packages/core/src/text/text-animation.ts": {
+    "mtime": 1781202614970.48,
+    "hash": "f3da90b75ad13ca61acf6c3b47da5224"
+  },
+  "D:/Video-Editor/packages/core/src/text/title-engine.ts": {
+    "mtime": 1781202614971.6768,
+    "hash": "8b38c30f22957cad15910f6a807106e2"
+  },
+  "D:/Video-Editor/packages/core/src/text/transcription-service.ts": {
+    "mtime": 1781202614974.1914,
+    "hash": "2be7d7f5820a069f9990bdc4eca0a71b"
+  },
+  "D:/Video-Editor/packages/core/src/text/types.ts": {
+    "mtime": 1781202614987.2588,
+    "hash": "ace30fc750d6d7f276448d570da7e866"
+  },
+  "D:/Video-Editor/packages/core/src/timeline/auto-edit-service.ts": {
+    "mtime": 1781202614988.259,
+    "hash": "6f5ff85008a9dcaaf519d2010b8d11a6"
+  },
+  "D:/Video-Editor/packages/core/src/timeline/clip-manager.test.ts": {
+    "mtime": 1781202614990.2595,
+    "hash": "443ea48456c359cb2f3626cfea77f2e5"
+  },
+  "D:/Video-Editor/packages/core/src/timeline/clip-manager.ts": {
+    "mtime": 1781202614992.2598,
+    "hash": "6ce21686d36910513f77ee0ee13b0bb1"
+  },
+  "D:/Video-Editor/packages/core/src/timeline/index.ts": {
+    "mtime": 1781202614993.5002,
+    "hash": "97737db6840115054f59c7add4972406"
+  },
+  "D:/Video-Editor/packages/core/src/timeline/nested-sequence-engine.ts": {
+    "mtime": 1781202614995.5144,
+    "hash": "e6d37248da56c78326a0993358091cec"
+  },
+  "D:/Video-Editor/packages/core/src/timeline/track-manager.ts": {
+    "mtime": 1781202614997.041,
+    "hash": "21b66eb9a3b30a83d6dc1febcfc58dda"
+  },
+  "D:/Video-Editor/packages/core/src/types/actions.ts": {
+    "mtime": 1781202614999.132,
+    "hash": "6fe0f129c532e6d36d212b2333e7dc7f"
+  },
+  "D:/Video-Editor/packages/core/src/types/composition.ts": {
+    "mtime": 1781202615001.5032,
+    "hash": "94d49fa0f2cdaf3f26d8b1cac5a4612b"
+  },
+  "D:/Video-Editor/packages/core/src/types/effects.ts": {
+    "mtime": 1781202615005.01,
+    "hash": "9bb4c0a556121f6ddd4cc7d11e21f622"
+  },
+  "D:/Video-Editor/packages/core/src/types/index.ts": {
+    "mtime": 1781202615009.02,
+    "hash": "cecaf68e9643c843c251f04045c77e7c"
+  },
+  "D:/Video-Editor/packages/core/src/types/lottie.ts": {
+    "mtime": 1781202615010.2896,
+    "hash": "8401384dcb728d484bb5dce591e88f58"
+  },
+  "D:/Video-Editor/packages/core/src/types/project.ts": {
+    "mtime": 1781202615011.2905,
+    "hash": "f8fd65ba600262163bd0c1554fe50cc4"
+  },
+  "D:/Video-Editor/packages/core/src/types/result.ts": {
+    "mtime": 1781202615019.3704,
+    "hash": "bbbffd5c11c47f753df6c7db97eec706"
+  },
+  "D:/Video-Editor/packages/core/src/types/scriptable-template.ts": {
+    "mtime": 1781202615024.52,
+    "hash": "42154606c56051a7942bc2eeff74a1a7"
+  },
+  "D:/Video-Editor/packages/core/src/types/shape-tools.ts": {
+    "mtime": 1781202615026.5476,
+    "hash": "5e43a303e061aab524e9786fc6c81051"
+  },
+  "D:/Video-Editor/packages/core/src/types/sound-library.ts": {
+    "mtime": 1781202615028.555,
+    "hash": "56faa923f1f3c6743b610d29cc271561"
+  },
+  "D:/Video-Editor/packages/core/src/types/template.ts": {
+    "mtime": 1781202615030.5557,
+    "hash": "d7a8e039190b208fb57393504f5d1ef5"
+  },
+  "D:/Video-Editor/packages/core/src/types/timeline.ts": {
+    "mtime": 1781274016366.3406,
+    "hash": "4f0212dba65f9458d6ffdac1bd24d8de"
+  },
+  "D:/Video-Editor/packages/core/src/types/transform-3d.ts": {
+    "mtime": 1781202615034.556,
+    "hash": "34e79a846b73c0adf22cb58098accfbf"
+  },
+  "D:/Video-Editor/packages/core/src/types/transitions.ts": {
+    "mtime": 1781202615035.5652,
+    "hash": "9963ef8991ec4225e4b23ff5dcfe5c06"
+  },
+  "D:/Video-Editor/packages/core/src/utils/immutable-updates.ts": {
+    "mtime": 1781202615038.6982,
+    "hash": "6b2ba536ed2bcc291cfaa6191281bed3"
+  },
+  "D:/Video-Editor/packages/core/src/utils/index.ts": {
+    "mtime": 1781202615046.7578,
+    "hash": "3b25ab392305b8427f627eda407a01d2"
+  },
+  "D:/Video-Editor/packages/core/src/utils/serialization.ts": {
+    "mtime": 1781202615050.7686,
+    "hash": "0413fbcd061628c31ddcbb042f297a01"
+  },
+  "D:/Video-Editor/packages/core/src/video/adjustment-layer-engine.ts": {
+    "mtime": 1781202615052.895,
+    "hash": "6568c686bf094e652270f2a3ba71c743"
+  },
+  "D:/Video-Editor/packages/core/src/video/animation-engine.ts": {
+    "mtime": 1781202615054.3997,
+    "hash": "e9fe24bdbe0e50605b59bc5faf74b968"
+  },
+  "D:/Video-Editor/packages/core/src/video/canvas2d-fallback-renderer.ts": {
+    "mtime": 1781202615055.424,
+    "hash": "445a743a51eb0cdca5fa90c90daf6d0f"
+  },
+  "D:/Video-Editor/packages/core/src/video/chroma-key-engine.ts": {
+    "mtime": 1781202615058.4336,
+    "hash": "aa142d11b34dfc67b74e74e7aa968baf"
+  },
+  "D:/Video-Editor/packages/core/src/video/color-grading-engine.ts": {
+    "mtime": 1781202615060.4336,
+    "hash": "2ad17d8ab5e1124d249709d8301f874f"
+  },
+  "D:/Video-Editor/packages/core/src/video/composite-engine.ts": {
+    "mtime": 1781202615061.4346,
+    "hash": "b04c7a3bcc39d578fbbc72d4a7f77c2a"
+  },
+  "D:/Video-Editor/packages/core/src/video/decode-worker.ts": {
+    "mtime": 1781202615064.9675,
+    "hash": "a71528e89f12f0b2fbb914ea7e374dff"
+  },
+  "D:/Video-Editor/packages/core/src/video/filter-presets.ts": {
+    "mtime": 1781202615066.52,
+    "hash": "9c4731905ef820c8c01e403d4df408e5"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-cache.ts": {
+    "mtime": 1781202615068.558,
+    "hash": "f975e05f6a1563e14fae57b8eaf5d949"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-interpolation/flow-field-cache.ts": {
+    "mtime": 1781202615070.7156,
+    "hash": "6cdc1847b5a2b9289b4fb901fb0cc993"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-interpolation/frame-interpolation-engine.ts": {
+    "mtime": 1781202615072.3313,
+    "hash": "231d6d3a1d39a6d6e340a4d4dd826ec2"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-interpolation/index.ts": {
+    "mtime": 1781202615080.4148,
+    "hash": "624967e881bbd8fd65e7382d3bef4126"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-interpolation/optical-flow-cpu.ts": {
+    "mtime": 1781202615085.9255,
+    "hash": "21d3ef0b4b7a787c439dab0bf55508e9"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-interpolation/optical-flow-gpu.ts": {
+    "mtime": 1781202615105.473,
+    "hash": "e9cedd3497229e4f2f4e1ef7f934948b"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-interpolation/types.ts": {
+    "mtime": 1781202615110.8694,
+    "hash": "ec7adb72b5ad2506bb456584d22ff94b"
+  },
+  "D:/Video-Editor/packages/core/src/video/frame-ring-buffer.ts": {
+    "mtime": 1781202615117.9087,
+    "hash": "eddedc81d957788c46cb3d86b3f957bf"
+  },
+  "D:/Video-Editor/packages/core/src/video/gpu-compositor.ts": {
+    "mtime": 1781202615122.997,
+    "hash": "185a52c2143ad831e0291871631039c3"
+  },
+  "D:/Video-Editor/packages/core/src/video/index.ts": {
+    "mtime": 1781202615141.7031,
+    "hash": "66288ac07c608d9a6267f2a5349caacb"
+  },
+  "D:/Video-Editor/packages/core/src/video/keyframe-engine.ts": {
+    "mtime": 1781202615151.197,
+    "hash": "223b34db0ea8d94852197f8af05c9b39"
+  },
+  "D:/Video-Editor/packages/core/src/video/mask-engine.ts": {
+    "mtime": 1781202615153.222,
+    "hash": "500d07900f295dd9b9ee1b57c67e081e"
+  },
+  "D:/Video-Editor/packages/core/src/video/motion-tracking-engine.ts": {
+    "mtime": 1781202615161.3208,
+    "hash": "c25597209043a5ad6ead298783e3acd0"
+  },
+  "D:/Video-Editor/packages/core/src/video/multicam-engine.ts": {
+    "mtime": 1781202615163.3315,
+    "hash": "b8a63156e941fdc2ed3f67a0fdcf87b6"
+  },
+  "D:/Video-Editor/packages/core/src/video/parallel-frame-decoder.ts": {
+    "mtime": 1781202615164.9253,
+    "hash": "76f164295ddcdf06b1d78725fee3d621"
+  },
+  "D:/Video-Editor/packages/core/src/video/playback-engine.ts": {
+    "mtime": 1781202615169.4673,
+    "hash": "005385d3dd79d5c8225d27916aa331e7"
+  },
+  "D:/Video-Editor/packages/core/src/video/renderer-factory.ts": {
+    "mtime": 1781202615175.5386,
+    "hash": "f6afff06aac5c875a8dad9be313fee3b"
+  },
+  "D:/Video-Editor/packages/core/src/video/shaders/index.ts": {
+    "mtime": 1781202615183.1887,
+    "hash": "44e64204708df45126e31ccf117cc126"
+  },
+  "D:/Video-Editor/packages/core/src/video/speed-engine.test.ts": {
+    "mtime": 1781202615189.86,
+    "hash": "700819d3f6a3576036ef96288351f597"
+  },
+  "D:/Video-Editor/packages/core/src/video/speed-engine.ts": {
+    "mtime": 1781202615191.8596,
+    "hash": "42e52a804772b3941c07307d398f8b47"
+  },
+  "D:/Video-Editor/packages/core/src/video/speed-presets.ts": {
+    "mtime": 1781202615196.1853,
+    "hash": "74de288cc4ea2632b6bf9155bbb6ecec"
+  },
+  "D:/Video-Editor/packages/core/src/video/stabilization/index.ts": {
+    "mtime": 1781202615199.9873,
+    "hash": "703537fed6bf1539c2d0dce3c1df7820"
+  },
+  "D:/Video-Editor/packages/core/src/video/stabilization/motion-path.ts": {
+    "mtime": 1781202615205.5222,
+    "hash": "1a7afe2f094057a63884dff27a2cd485"
+  },
+  "D:/Video-Editor/packages/core/src/video/stabilization/stabilization-engine.ts": {
+    "mtime": 1781202615218.52,
+    "hash": "0d9d30ddf94259e4d6007e6afb36dcae"
+  },
+  "D:/Video-Editor/packages/core/src/video/stabilization/types.ts": {
+    "mtime": 1781202615219.5232,
+    "hash": "615a7bc584c04726964ba7dedcc41be6"
+  },
+  "D:/Video-Editor/packages/core/src/video/stabilization/vidstab-engine.ts": {
+    "mtime": 1781202615221.5237,
+    "hash": "f07e854495f38919acf320b9146b63a7"
+  },
+  "D:/Video-Editor/packages/core/src/video/texture-cache.ts": {
+    "mtime": 1781202615245.9358,
+    "hash": "34ef6f0ab20eec46d0ee57cc643c6eba"
+  },
+  "D:/Video-Editor/packages/core/src/video/transform-animator.ts": {
+    "mtime": 1781202615249.9412,
+    "hash": "c4b9852a0f7bc45211afcdb22d8ce436"
+  },
+  "D:/Video-Editor/packages/core/src/video/transition-engine.test.ts": {
+    "mtime": 1781202615256.4814,
+    "hash": "263fc81206a3a1ed4c6807c2f160c5f7"
+  },
+  "D:/Video-Editor/packages/core/src/video/transition-engine.ts": {
+    "mtime": 1781202615259.9814,
+    "hash": "cfed46487d2e98bbe3d5d72d3c666988"
+  },
+  "D:/Video-Editor/packages/core/src/video/types.ts": {
+    "mtime": 1781202615261.1375,
+    "hash": "ff68ec6f746dfbff909831753ee198e7"
+  },
+  "D:/Video-Editor/packages/core/src/video/unified-effects-processor.ts": {
+    "mtime": 1781202615264.6685,
+    "hash": "3fb5c6678f37fb3e1df3d427518fa3bb"
+  },
+  "D:/Video-Editor/packages/core/src/video/upscaling/index.ts": {
+    "mtime": 1781202615265.6838,
+    "hash": "37c3705aee7bec66c2a660326d161fdf"
+  },
+  "D:/Video-Editor/packages/core/src/video/upscaling/shaders/index.ts": {
+    "mtime": 1781202615270.7527,
+    "hash": "760eb1f1aae857b2502cab6e3da75c30"
+  },
+  "D:/Video-Editor/packages/core/src/video/upscaling/upscaling-engine.ts": {
+    "mtime": 1781202615296.1333,
+    "hash": "542dcdc3fc19425fd5cbba55bea0c632"
+  },
+  "D:/Video-Editor/packages/core/src/video/upscaling/upscaling-types.ts": {
+    "mtime": 1781202615301.138,
+    "hash": "34ee05b7cde164a326dfa77fea268c37"
+  },
+  "D:/Video-Editor/packages/core/src/video/video-effects-engine.test.ts": {
+    "mtime": 1781202615303.1382,
+    "hash": "2b946b3a6f0c5d73d9db9fe2d62a0df5"
+  },
+  "D:/Video-Editor/packages/core/src/video/video-effects-engine.ts": {
+    "mtime": 1781202615308.6865,
+    "hash": "30c3e71f0cf9e73cc76c128dda479348"
+  },
+  "D:/Video-Editor/packages/core/src/video/video-engine.ts": {
+    "mtime": 1781202615314.9329,
+    "hash": "c16283b96121953859e2532b49024f03"
+  },
+  "D:/Video-Editor/packages/core/src/video/webgpu-effects-processor.ts": {
+    "mtime": 1781202615318.4414,
+    "hash": "e2f21eca3691cd315f777297a3e9e61f"
+  },
+  "D:/Video-Editor/packages/core/src/video/webgpu-renderer-impl.ts": {
+    "mtime": 1781202615319.4463,
+    "hash": "238fea1b8abf956dc022a6ec26ebfa64"
+  },
+  "D:/Video-Editor/packages/core/src/video/webgpu-types.d.ts": {
+    "mtime": 1781202615321.9724,
+    "hash": "58969f061ed61aaadaf376881cfd2941"
+  },
+  "D:/Video-Editor/packages/core/src/wasm/beat-detection/assembly/index.ts": {
+    "mtime": 1781202615327.5154,
+    "hash": "97da9424086eea993eb63422d690ced5"
+  },
+  "D:/Video-Editor/packages/core/src/wasm/beat-detection/index.ts": {
+    "mtime": 1781202615330.5151,
+    "hash": "3fb213cd74925d80ca7e4ad1d38ce95f"
+  },
+  "D:/Video-Editor/packages/core/src/wasm/fft/assembly/index.ts": {
+    "mtime": 1781202615333.5173,
+    "hash": "1d17eb1f258218efce61cac36291993f"
+  },
+  "D:/Video-Editor/packages/core/src/wasm/fft/index.ts": {
+    "mtime": 1781202615335.0232,
+    "hash": "3b0daf903eca679234979bffc4744314"
+  },
+  "D:/Video-Editor/packages/core/src/wasm/index.ts": {
+    "mtime": 1781202615338.7324,
+    "hash": "39a6a4e834ecf14d71db3c6bc05dbaf0"
+  },
+  "D:/Video-Editor/packages/core/src/wasm/wav/assembly/index.ts": {
+    "mtime": 1781202615341.8975,
+    "hash": "8def7496820ae21af73882e5b5c113c9"
+  },
+  "D:/Video-Editor/packages/core/src/wasm/wav/index.ts": {
+    "mtime": 1781202615345.933,
+    "hash": "b747c38f27d39153352cd16b7c895f8c"
+  },
+  "D:/Video-Editor/packages/core/vitest.config.ts": {
+    "mtime": 1781202615350.9358,
+    "hash": "259d0daaea05ce68f765509066187c40"
+  },
+  "D:/Video-Editor/packages/image-core/src/adjustments.ts": {
+    "mtime": 1781202615352.9363,
+    "hash": "11343e6a7a22f1c7430bdf14ea9b867d"
+  },
+  "D:/Video-Editor/packages/image-core/src/commands.test.ts": {
+    "mtime": 1781202615358.471,
+    "hash": "c3a0a2733c9d04fb8597fa1022f7501c"
+  },
+  "D:/Video-Editor/packages/image-core/src/commands.ts": {
+    "mtime": 1781202615360.4724,
+    "hash": "25c25b122d47e552ecb929089735c726"
+  },
+  "D:/Video-Editor/packages/image-core/src/index.ts": {
+    "mtime": 1781202615361.4731,
+    "hash": "56fef6a4ca274b90e1cab00bd8140cb8"
+  },
+  "D:/Video-Editor/packages/image-core/src/mask.ts": {
+    "mtime": 1781202615363.473,
+    "hash": "c9cc9ddde27f9d6b39fbf837915e02f2"
+  },
+  "D:/Video-Editor/packages/image-core/src/migration.ts": {
+    "mtime": 1781202615369.986,
+    "hash": "69a8f483a06d818ff4799886aab3aaa3"
+  },
+  "D:/Video-Editor/packages/image-core/src/operations.test.ts": {
+    "mtime": 1781202615370.9868,
+    "hash": "9876d626e344318e3126db9496e59038"
+  },
+  "D:/Video-Editor/packages/image-core/src/operations.ts": {
+    "mtime": 1781202615376.515,
+    "hash": "c6172ab8bbf8fbd35ddc63cf76ef7a53"
+  },
+  "D:/Video-Editor/packages/image-core/src/project.ts": {
+    "mtime": 1781202615392.0393,
+    "hash": "812861e1b991d951b0b5110cdf88b67b"
+  },
+  "D:/Video-Editor/packages/image-core/src/schema.test.ts": {
+    "mtime": 1781202615397.0923,
+    "hash": "c073e0d8ad96741223bb881fdbe26ebe"
+  },
+  "D:/Video-Editor/packages/image-core/src/schema.ts": {
+    "mtime": 1781202615398.0928,
+    "hash": "85ae043d0b8afc692769cfb2868cfa24"
+  },
+  "D:/Video-Editor/packages/image-core/src/selection.ts": {
+    "mtime": 1781202615400.094,
+    "hash": "fba20fbcb7a440223cafe5021abb7894"
+  },
+  "D:/Video-Editor/postcss.config.js": {
+    "mtime": 1782070888615.2444,
+    "hash": "ef3ba2a81ba19f8ea5ddf625521e96f0"
+  },
+  "D:/Video-Editor/public/ffmpeg/ffmpeg-core.js": {
+    "mtime": 1783099356711.013,
+    "hash": "eaefa8c3c4ebcb6a283f0d1012babece"
+  },
+  "D:/Video-Editor/public/puter.js": {
+    "mtime": 1783367740772.6692,
+    "hash": "bd000878eef1e9cd1b96571cb67104fe"
+  },
+  "D:/Video-Editor/public/sw.js": {
+    "mtime": 1783367054062.6235,
+    "hash": "19dea24baf4c2e388a89b91d1a1352f4"
+  },
+  "D:/Video-Editor/src/App.tsx": {
+    "mtime": 1783421694424.861,
+    "hash": "1ae312bcae6ecbe4e6a73f4b5cbedf38"
+  },
+  "D:/Video-Editor/src/components/AiSoundDesigner.tsx": {
+    "mtime": 1783249053388.2058,
+    "hash": "b2fb5a21f292f5d3bcd28fe9b8b1cc38"
+  },
+  "D:/Video-Editor/src/components/AudioMixer.tsx": {
+    "mtime": 1783239549054.1804,
+    "hash": "c1bcceb9b10540ae7d3a574b16ab604c"
+  },
+  "D:/Video-Editor/src/components/ColorScopes.tsx": {
+    "mtime": 1783274716879.4539,
+    "hash": "36daff53b8353800c4b6b40b5c6ae594"
+  },
+  "D:/Video-Editor/src/components/ExportModal.tsx": {
+    "mtime": 1783422126644.697,
+    "hash": "303ffb79d3157630fc7527693311d34a"
+  },
+  "D:/Video-Editor/src/components/HelpModal.tsx": {
+    "mtime": 1783358066599.2122,
+    "hash": "a40c7e49305500997005effb04129f72"
+  },
+  "D:/Video-Editor/src/components/HelpTooltipManager.tsx": {
+    "mtime": 1783357938631.884,
+    "hash": "0490faca8a25d79e7453d75f4616071d"
+  },
+  "D:/Video-Editor/src/components/MediaPanel.tsx": {
+    "mtime": 1783457456227.0986,
+    "hash": "8145db2e0f6ed1d494b6d64df1439aad"
+  },
+  "D:/Video-Editor/src/components/PreviewCanvas.tsx": {
+    "mtime": 1783446935514.4893,
+    "hash": "83f35d164b947e03069b0484c6ffdf42"
+  },
+  "D:/Video-Editor/src/components/PropertiesPanel.tsx": {
+    "mtime": 1783458465237.1448,
+    "hash": "1caa29b7fb530e99bca1bec1f8516248"
+  },
+  "D:/Video-Editor/src/components/SettingsModal.tsx": {
+    "mtime": 1783446234333.4897,
+    "hash": "488ae4252439aa9e87ecff76fb281cb3"
+  },
+  "D:/Video-Editor/src/components/TeleprompterModal.tsx": {
+    "mtime": 1783283957540.6008,
+    "hash": "85ae9917887364c4e1c016faccf06341"
+  },
+  "D:/Video-Editor/src/components/ThumbnailModal.tsx": {
+    "mtime": 1783283686588.0896,
+    "hash": "be3dbe6715975e3a4c39a392228a0a1d"
+  },
+  "D:/Video-Editor/src/components/Timeline.tsx": {
+    "mtime": 1783383690421.7017,
+    "hash": "0c974dc2302e8457f02d318982c9ac25"
+  },
+  "D:/Video-Editor/src/components/TopToolbar.tsx": {
+    "mtime": 1783367783679.221,
+    "hash": "c592b0248b403ca54c578549297076b5"
+  },
+  "D:/Video-Editor/src/components/TranscriptPanel.tsx": {
+    "mtime": 1783330891539.44,
+    "hash": "06bfe71f927caf2c0b6aac57d05ef3ae"
+  },
+  "D:/Video-Editor/src/components/WelcomeScreen.tsx": {
+    "mtime": 1783367718627.7112,
+    "hash": "5c7e094a4acc1a1b46301283505af02f"
+  },
+  "D:/Video-Editor/src/components/ui/accordion.tsx": {
+    "mtime": 1782070888089.6704,
+    "hash": "581b83215a419af526e5447e6d01fcdb"
+  },
+  "D:/Video-Editor/src/components/ui/alert-dialog.tsx": {
+    "mtime": 1782070888097.034,
+    "hash": "815fc512f7d24dfa437dee6622e027f7"
+  },
+  "D:/Video-Editor/src/components/ui/alert.tsx": {
+    "mtime": 1782070888104.9802,
+    "hash": "8e59179ed2f0f6e33320d0081b9782fa"
+  },
+  "D:/Video-Editor/src/components/ui/aspect-ratio.tsx": {
+    "mtime": 1782070888113.4954,
+    "hash": "be7a9b030095db724fb3d9ca4e62293c"
+  },
+  "D:/Video-Editor/src/components/ui/avatar.tsx": {
+    "mtime": 1782070888121.817,
+    "hash": "a94ddb60cff346499b10e164b2db790d"
+  },
+  "D:/Video-Editor/src/components/ui/badge.tsx": {
+    "mtime": 1782070888129.9563,
+    "hash": "7efa8abd36eee59f14998b447d169304"
+  },
+  "D:/Video-Editor/src/components/ui/breadcrumb.tsx": {
+    "mtime": 1782070888138.3738,
+    "hash": "14763038175abd2410d97d8166c89480"
+  },
+  "D:/Video-Editor/src/components/ui/button-group.tsx": {
+    "mtime": 1782070888147.4377,
+    "hash": "73a99a33fdbb8cf7742f0aad44829e25"
+  },
+  "D:/Video-Editor/src/components/ui/button.tsx": {
+    "mtime": 1782070888156.8083,
+    "hash": "7e1b8d2215587c9ea334242b2afa4a40"
+  },
+  "D:/Video-Editor/src/components/ui/calendar.tsx": {
+    "mtime": 1782070888164.8271,
+    "hash": "5d3fb01c5e7002fb7d8a3a9b7eb490da"
+  },
+  "D:/Video-Editor/src/components/ui/card.tsx": {
+    "mtime": 1782070888172.5667,
+    "hash": "a6752f4d1da504c7f03196d90cde4b2c"
+  },
+  "D:/Video-Editor/src/components/ui/carousel.tsx": {
+    "mtime": 1782070888180.2947,
+    "hash": "002c75de6ce1dec35a6dd9f6c0d1d07b"
+  },
+  "D:/Video-Editor/src/components/ui/chart.tsx": {
+    "mtime": 1782070888188.7156,
+    "hash": "fda4a5662ef4c6d63fe3ae0323e502a5"
+  },
+  "D:/Video-Editor/src/components/ui/checkbox.tsx": {
+    "mtime": 1782070888216.51,
+    "hash": "4b0b973d7b0463443696a35f9f73743d"
+  },
+  "D:/Video-Editor/src/components/ui/collapsible.tsx": {
+    "mtime": 1782070888224.1995,
+    "hash": "e978727a4d734730f3b7bfd0c2e22ea6"
+  },
+  "D:/Video-Editor/src/components/ui/command.tsx": {
+    "mtime": 1782070888232.3828,
+    "hash": "2fb812963643e439707b72a80b3a5628"
+  },
+  "D:/Video-Editor/src/components/ui/context-menu.tsx": {
+    "mtime": 1782070888240.674,
+    "hash": "e427ed2770f6d3a8018481c61f90d24b"
+  },
+  "D:/Video-Editor/src/components/ui/dialog.tsx": {
+    "mtime": 1782070888250.1064,
+    "hash": "3f1e562b11b0d89ddfdf756ca4a8d71d"
+  },
+  "D:/Video-Editor/src/components/ui/drawer.tsx": {
+    "mtime": 1782070888257.7012,
+    "hash": "d2f77e51ad7cefcf112c855235a172dc"
+  },
+  "D:/Video-Editor/src/components/ui/dropdown-menu.tsx": {
+    "mtime": 1782070888266.227,
+    "hash": "8a7f49b4f303577830fafaaaedb8c4f3"
+  },
+  "D:/Video-Editor/src/components/ui/empty.tsx": {
+    "mtime": 1782070888274.242,
+    "hash": "82cc505b749945f1cc9ff2f28cca5010"
+  },
+  "D:/Video-Editor/src/components/ui/field.tsx": {
+    "mtime": 1782070888282.119,
+    "hash": "9e1f956571f6fb6ec2db4f9530d3a501"
+  },
+  "D:/Video-Editor/src/components/ui/form.tsx": {
+    "mtime": 1782070888290.5513,
+    "hash": "cc761fa32f15b47f7cacf623f48b115f"
+  },
+  "D:/Video-Editor/src/components/ui/hover-card.tsx": {
+    "mtime": 1782070888299.3296,
+    "hash": "a1010352934f4cdf860caa32491a3706"
+  },
+  "D:/Video-Editor/src/components/ui/input-group.tsx": {
+    "mtime": 1782070888306.8706,
+    "hash": "0543d798938fe000ce50c08db1623194"
+  },
+  "D:/Video-Editor/src/components/ui/input-otp.tsx": {
+    "mtime": 1782070888314.68,
+    "hash": "225d01c4ef58e641b5e1da4a625b3a92"
+  },
+  "D:/Video-Editor/src/components/ui/input.tsx": {
+    "mtime": 1782070888323.7346,
+    "hash": "6666f8369b53c79d39be8060dc6c4ce5"
+  },
+  "D:/Video-Editor/src/components/ui/item.tsx": {
+    "mtime": 1782070888331.329,
+    "hash": "4e417a2db9cd3144bd5d1f2f0ad399fa"
+  },
+  "D:/Video-Editor/src/components/ui/kbd.tsx": {
+    "mtime": 1782070888338.6484,
+    "hash": "226fdb1bb271e6fe392e96e7742c28b2"
+  },
+  "D:/Video-Editor/src/components/ui/label.tsx": {
+    "mtime": 1782070888346.6387,
+    "hash": "14f124762142b39a666ce10d3b42d28c"
+  },
+  "D:/Video-Editor/src/components/ui/menubar.tsx": {
+    "mtime": 1782070888353.908,
+    "hash": "002ba75dff73bd945ffd9ab3e6c95613"
+  },
+  "D:/Video-Editor/src/components/ui/navigation-menu.tsx": {
+    "mtime": 1782070888362.234,
+    "hash": "bea6b8a7ef7d7e7d5dc09afe7631fb59"
+  },
+  "D:/Video-Editor/src/components/ui/pagination.tsx": {
+    "mtime": 1782070888371.2905,
+    "hash": "ba23d7233a420983feef894ee045234d"
+  },
+  "D:/Video-Editor/src/components/ui/popover.tsx": {
+    "mtime": 1782070888377.824,
+    "hash": "d7255316c532c766cee7792d775e4d0f"
+  },
+  "D:/Video-Editor/src/components/ui/progress.tsx": {
+    "mtime": 1782070888386.118,
+    "hash": "99485ee3f0e4ca4498b61ce92ea1a2a9"
+  },
+  "D:/Video-Editor/src/components/ui/radio-group.tsx": {
+    "mtime": 1782070888395.3481,
+    "hash": "42634c5e24aebafa3f4ce9c91960dbfe"
+  },
+  "D:/Video-Editor/src/components/ui/resizable.tsx": {
+    "mtime": 1782070888403.2102,
+    "hash": "ba59b159222ff15aace4bf830adf1b3d"
+  },
+  "D:/Video-Editor/src/components/ui/scroll-area.tsx": {
+    "mtime": 1782070888410.2563,
+    "hash": "360243727fcdcb4d509af4516aaa9d0d"
+  },
+  "D:/Video-Editor/src/components/ui/select.tsx": {
+    "mtime": 1782070888418.7295,
+    "hash": "321b9fcc46c1b24952663ccc7c46d6a2"
+  },
+  "D:/Video-Editor/src/components/ui/separator.tsx": {
+    "mtime": 1782070888425.8372,
+    "hash": "07b35dc35f811b26a1ee3982582ba9fb"
+  },
+  "D:/Video-Editor/src/components/ui/sheet.tsx": {
+    "mtime": 1782070888434.923,
+    "hash": "6945241f834cad4ca26b2b06a7c49a50"
+  },
+  "D:/Video-Editor/src/components/ui/sidebar.tsx": {
+    "mtime": 1782070888442.468,
+    "hash": "686da2b9988bb2320a83efa07b4bd551"
+  },
+  "D:/Video-Editor/src/components/ui/skeleton.tsx": {
+    "mtime": 1782070888450.6162,
+    "hash": "ee5017bac14efeda715feaceb488382a"
+  },
+  "D:/Video-Editor/src/components/ui/slider.tsx": {
+    "mtime": 1782070888461.2766,
+    "hash": "d2fa780e560966380be921f5fda38615"
+  },
+  "D:/Video-Editor/src/components/ui/sonner.tsx": {
+    "mtime": 1782070888471.0515,
+    "hash": "2b9423344bf169fe8fddb5649fe4f95c"
+  },
+  "D:/Video-Editor/src/components/ui/spinner.tsx": {
+    "mtime": 1782070888481.2607,
+    "hash": "28b695734ef3b6840b47d713ae3d31ce"
+  },
+  "D:/Video-Editor/src/components/ui/switch.tsx": {
+    "mtime": 1782070888489.2493,
+    "hash": "f93349e0eb061fc4e6c055ded4cff087"
+  },
+  "D:/Video-Editor/src/components/ui/table.tsx": {
+    "mtime": 1782070888496.2808,
+    "hash": "bad93c98f980433a2dda868c4289e942"
+  },
+  "D:/Video-Editor/src/components/ui/tabs.tsx": {
+    "mtime": 1782070888504.714,
+    "hash": "65854b541abbc3c9f39cb075d4cb43ca"
+  },
+  "D:/Video-Editor/src/components/ui/textarea.tsx": {
+    "mtime": 1782070888512.201,
+    "hash": "04f9af2a78672f7018b16db2bcec5036"
+  },
+  "D:/Video-Editor/src/components/ui/toggle-group.tsx": {
+    "mtime": 1782070888519.288,
+    "hash": "27b499cb2dc497e3ab9691a1d3557469"
+  },
+  "D:/Video-Editor/src/components/ui/toggle.tsx": {
+    "mtime": 1782070888527.7603,
+    "hash": "cc63619fa22a57807b699d1e23fd1452"
+  },
+  "D:/Video-Editor/src/components/ui/tooltip.tsx": {
+    "mtime": 1782070888535.0312,
+    "hash": "34079b3ac4d0eb8851c6cab74bd68e00"
+  },
+  "D:/Video-Editor/src/hooks/use-mobile.ts": {
+    "mtime": 1782070888007.087,
+    "hash": "209b5193af16624cdd89d3591480dd48"
+  },
+  "D:/Video-Editor/src/hooks/useMediaPlayback.ts": {
+    "mtime": 1783380858292.9011,
+    "hash": "36b5e91510711f77ecd1bbe2ee35c0e8"
+  },
+  "D:/Video-Editor/src/lib/utils.ts": {
+    "mtime": 1782070887992.4324,
+    "hash": "5a6fd53fdcf2be529e9cc0b718fde352"
+  },
+  "D:/Video-Editor/src/main.tsx": {
+    "mtime": 1783041213148.0222,
+    "hash": "347f0a5026a3ee8bf013d19904ece7ee"
+  },
+  "D:/Video-Editor/src/pages/Home.tsx": {
+    "mtime": 1782070887977.522,
+    "hash": "e415e608e98bb87d7642ec6655c9a62f"
+  },
+  "D:/Video-Editor/src/store/editorStore.ts": {
+    "mtime": 1783455299222.4917,
+    "hash": "bf05ae7eff43a9e911dc54b95ae2435a"
+  },
+  "D:/Video-Editor/src/types/index.ts": {
+    "mtime": 1783359723939.0513,
+    "hash": "28e2b88cc6c10a11052909d31a0784bc"
+  },
+  "D:/Video-Editor/src/utils/aiBackground.ts": {
+    "mtime": 1783455306110.4753,
+    "hash": "a5fc66470d9e3d9135648c9d9319c8b0"
+  },
+  "D:/Video-Editor/src/utils/aiClient.test.ts": {
+    "mtime": 1783458495667.2422,
+    "hash": "ed9586fe009a18b0480db0737c36fd41"
+  },
+  "D:/Video-Editor/src/utils/aiClient.ts": {
+    "mtime": 1783458457766.5293,
+    "hash": "bbb56f873ce3711c45e5cfce15a9713e"
+  },
+  "D:/Video-Editor/src/utils/audioSearchClient.ts": {
+    "mtime": 1783246282357.984,
+    "hash": "733dc60c01bb66d83a73bd429bf8541e"
+  },
+  "D:/Video-Editor/src/utils/audioSeparation.ts": {
+    "mtime": 1783372697909.6118,
+    "hash": "418ec7e31e14de10b5aa095c93e99253"
+  },
+  "D:/Video-Editor/src/utils/autoCaptions.ts": {
+    "mtime": 1783372690224.3625,
+    "hash": "fa811ea361bcc1c50e253b4813c8d9f1"
+  },
+  "D:/Video-Editor/src/utils/autoColor.ts": {
+    "mtime": 1783312884514.3374,
+    "hash": "290965afb47c0263c0ab8aaaffca8fca"
+  },
+  "D:/Video-Editor/src/utils/autoCut.ts": {
+    "mtime": 1783312964019.2861,
+    "hash": "0142afef8a6682a0fe3c59651d6dcbfd"
+  },
+  "D:/Video-Editor/src/utils/beatDetection.ts": {
+    "mtime": 1783372716007.9106,
+    "hash": "b26c29d37f5d46690481122d8121ddfe"
+  },
+  "D:/Video-Editor/src/utils/canvasEffects.ts": {
+    "mtime": 1783446239186.7065,
+    "hash": "8ccc25d6caa32e6256176cbc6a068fbc"
+  },
+  "D:/Video-Editor/src/utils/frameExtractor.ts": {
+    "mtime": 1783455599001.8115,
+    "hash": "ecc28cc76bf7d843911e01c0fbf7203e"
+  },
+  "D:/Video-Editor/src/utils/keyboardShortcuts.ts": {
+    "mtime": 1783359773749.2922,
+    "hash": "b9d224b8a4d3813b0e8398e39d1863c4"
+  },
+  "D:/Video-Editor/src/utils/keyframes.ts": {
+    "mtime": 1782597640455.8594,
+    "hash": "ddecf8fa2b4b4d42d04b8ffe5a0c38e6"
+  },
+  "D:/Video-Editor/src/utils/lutParser.ts": {
+    "mtime": 1782977300946.6028,
+    "hash": "273d30022db0cc1888389b72180ec50f"
+  },
+  "D:/Video-Editor/src/utils/mediaProbe.ts": {
+    "mtime": 1783455595591.647,
+    "hash": "ec47da6ab55d2a2d9b3aff2645769a8e"
+  },
+  "D:/Video-Editor/src/utils/motionTracker.ts": {
+    "mtime": 1783372706518.9116,
+    "hash": "33f10e72b19f43c550001ec341208d5a"
+  },
+  "D:/Video-Editor/src/utils/projectPersistence.ts": {
+    "mtime": 1783455616722.8518,
+    "hash": "ed6937f10f6fecaafcd7748f01b8a997"
+  },
+  "D:/Video-Editor/src/utils/smartReframe.ts": {
+    "mtime": 1783313380434.03,
+    "hash": "836844936c4e323e582bd4c50e2f49c4"
+  },
+  "D:/Video-Editor/src/utils/socialAnimations.ts": {
+    "mtime": 1783372683488.4802,
+    "hash": "83b75301dbc98df15bd4e09a234da3b3"
+  },
+  "D:/Video-Editor/src/utils/speedRamp.ts": {
+    "mtime": 1783444827566.9421,
+    "hash": "77eba92ae0663cfc082671b633b99ec9"
+  },
+  "D:/Video-Editor/src/utils/srtParser.ts": {
+    "mtime": 1783446901664.341,
+    "hash": "e782dbbf3dbf7b8ef825798772f5542f"
+  },
+  "D:/Video-Editor/src/utils/storyboardCompiler.ts": {
+    "mtime": 1783455604494.813,
+    "hash": "5022d0d3e70d7d00ca8383fdd7dea3de"
+  },
+  "D:/Video-Editor/src/utils/time.ts": {
+    "mtime": 1782070887933.5913,
+    "hash": "5e03b83034deabf0aa6a2045d78db703"
+  },
+  "D:/Video-Editor/src/utils/titleTemplates.ts": {
+    "mtime": 1783459124873.9597,
+    "hash": "c1099a1cb1573e9ef52ce1cc9b4b1379"
+  },
+  "D:/Video-Editor/src/utils/waveformRenderer.ts": {
+    "mtime": 1782074958694.5183,
+    "hash": "26f71c9dd840bc957c6603e113002200"
+  },
+  "D:/Video-Editor/tailwind.config.js": {
+    "mtime": 1782070888636.7097,
+    "hash": "bb6f7289ceb7822e4bfe655fec0911ef"
+  },
+  "D:/Video-Editor/test.ts": {
+    "mtime": 1783374314932.5938,
+    "hash": "cb0cbc2196c77d170c6160946eb23244"
+  },
+  "D:/Video-Editor/vite.config.ts": {
+    "mtime": 1783457437287.0913,
+    "hash": "f7cfb0e6296deafd2071db34b912a4cf"
+  },
+  "D:/Video-Editor/vitest.config.ts": {
+    "mtime": 1783267114080.6628,
+    "hash": "60ff7c254f1ab79bb0b3084244c2faf4"
+  },
+  "D:/Video-Editor/README.md": {
+    "mtime": 1782070888628.461,
+    "hash": "cac141da861c855e069a9c32557458ac"
+  },
+  "D:/Video-Editor/index.html": {
+    "mtime": 1783367748366.998,
+    "hash": "bc3f767728724ba001f63aada3a47fa3"
+  },
+  "D:/Video-Editor/info.md": {
+    "mtime": 1782070888587.496,
+    "hash": "1bdf950c33ac0cd2a999bbe70d79b317"
+  },
+  "D:/Video-Editor/public/help_audio.png": {
+    "mtime": 1783340712101.076,
+    "hash": "e7efc1f058f7b7f4f8a8b742b902a753"
+  },
+  "D:/Video-Editor/public/help_export.png": {
+    "mtime": 1783340721724.1006,
+    "hash": "f9d743880c0f50e953b234c025156129"
+  },
+  "D:/Video-Editor/public/help_media_panel.png": {
+    "mtime": 1783340651211.7483,
+    "hash": "578442539bcec13b5e9df2476957f1c7"
+  },
+  "D:/Video-Editor/public/help_preview.png": {
+    "mtime": 1783340693975.3147,
+    "hash": "e565e5d936f8ea121966af8f1076a933"
+  },
+  "D:/Video-Editor/public/help_properties.png": {
+    "mtime": 1783340683872.5513,
+    "hash": "349eed19f77feb67461e511c4229af91"
+  },
+  "D:/Video-Editor/public/help_timeline.png": {
+    "mtime": 1783340671775.631,
+    "hash": "30bf0d628d4f71b205f6ee2be6f913cc"
+  },
+  "D:/Video-Editor/public/icon-192.png": {
+    "mtime": 1783041187121.4468,
+    "hash": "016b6192e79cf8ab422d15422793629d"
+  },
+  "D:/Video-Editor/public/icon-512.png": {
+    "mtime": 1783041187104.2234,
+    "hash": "22097584eca3c7fda24b9431d4097870"
+  },
+  "D:/Video-Editor/src/assets/transition_demo_a.webp": {
+    "mtime": 1782160293033.255,
+    "hash": "0dcd716306726f0ddf6305f7b08943fc"
+  },
+  "D:/Video-Editor/src/assets/transition_demo_b.webp": {
+    "mtime": 1782160293308.2668,
+    "hash": "27309c6374c4cdd2d4cdafbc76d3756f"
+  },
+  "D:/Video-Editor/src/components/AiMotionGraphicsDesigner.tsx": {
+    "mtime": 1783458634564.1062,
+    "hash": "4864dc6c43bc5b070df0a57e6fb87c64"
+  }
+}

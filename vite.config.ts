@@ -3,6 +3,32 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { exec } from "child_process"
 import fs from "fs"
+import WebSocket from "ws"
+import crypto from "crypto"
+
+// Microsoft Edge TTS anti-abuse token generator
+function generateSecMSGec() {
+  const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+  let ticks = Math.floor(Date.now() / 1000) + 11644473600;
+  ticks -= ticks % 300;
+  ticks *= 10000000;
+  const stringToHash = `${ticks}${TRUSTED_CLIENT_TOKEN}`;
+  return crypto.createHash("sha256").update(stringToHash, "ascii").digest("hex").toUpperCase();
+}
+
+// XML escaping helper to prevent SSML parsing failures on special characters
+function escapeXml(unsafe: string): string {
+  return unsafe.replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+      default: return c;
+    }
+  });
+}
 
 // Custom Vite plugin to handle local AI Audio Separation
 const audioSeparatorPlugin = () => ({
@@ -80,6 +106,122 @@ const audioSeparatorPlugin = () => ({
           console.error('[Audio Separator] Middleware error:', err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: err.message }));
+          return;
+        }
+      } else if (req.url && req.url.startsWith('/api/tts')) {
+        try {
+          const urlObj = new URL(req.url, `http://${req.headers.host}`);
+          const text = urlObj.searchParams.get('text') || '';
+          const voice = urlObj.searchParams.get('voice') || 'en-US-AriaNeural';
+          const rateMultiplier = parseFloat(urlObj.searchParams.get('rate') || '1.0');
+          const pitchMultiplier = parseFloat(urlObj.searchParams.get('pitch') || '1.0');
+
+          if (!text.trim()) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Text parameter is required' }));
+            return;
+          }
+
+          // Escape text for XML/SSML compatibility
+          const escapedText = escapeXml(text);
+
+          // Convert rate multiplier to percentage offset (e.g. 1.0 -> +0%, 1.2 -> +20%, 0.8 -> -20%)
+          const ratePercent = Math.round((rateMultiplier - 1) * 100);
+          const rateSign = ratePercent >= 0 ? '+' : '';
+          const rateStr = `${rateSign}${ratePercent}%`;
+
+          // Convert pitch multiplier to percentage offset
+          const pitchPercent = Math.round((pitchMultiplier - 1) * 100);
+          const pitchSign = pitchPercent >= 0 ? '+' : '';
+          const pitchStr = `${pitchSign}${pitchPercent}%`;
+
+          const gec = generateSecMSGec();
+          const connectionId = crypto.randomUUID().replace(/-/g, "").toUpperCase();
+          const wsUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=${connectionId}&Sec-MS-GEC=${gec}&Sec-MS-GEC-Version=1-143.0.3650.75`;
+
+          const ws = new WebSocket(wsUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
+              "Origin": "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold"
+            }
+          });
+
+          // Close WebSocket if the client disconnects/aborts the request to prevent memory leaks
+          req.on('close', () => {
+            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+              ws.close();
+            }
+          });
+
+          const audioChunks: Uint8Array[] = [];
+
+          ws.on('open', () => {
+            // Send config
+            const configMsg = `Content-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}`;
+            ws.send(configMsg);
+
+            // Send SSML
+            const requestId = crypto.randomUUID().replace(/-/g, "").toLowerCase();
+            const ssmlMsg = `X-RequestId:${requestId}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voice}"><prosody pitch="${pitchStr}" rate="${rateStr}">${escapedText}</prosody></voice></speak>`;
+            ws.send(ssmlMsg);
+          });
+
+          ws.on('message', (data: any, isBinary: boolean) => {
+            if (!isBinary) {
+              const textMsg = data.toString();
+              if (textMsg.includes('Path:turn.end')) {
+                ws.close();
+              }
+            } else {
+              const headerLength = data.readUInt16BE(0);
+              const headerText = data.toString('utf8', 2, 2 + headerLength);
+              if (headerText.includes('Path:audio')) {
+                const audioChunk = data.subarray(2 + headerLength);
+                audioChunks.push(new Uint8Array(audioChunk));
+              }
+            }
+          });
+
+          ws.on('close', () => {
+            if (res.headersSent) return;
+
+            if (audioChunks.length > 0) {
+              // Concatenate chunks
+              const totalLen = audioChunks.reduce((acc, chunk) => acc + chunk.length, 0);
+              const combined = new Uint8Array(totalLen);
+              let offset = 0;
+              for (const chunk of audioChunks) {
+                combined.set(chunk, offset);
+                offset += chunk.length;
+              }
+
+              res.writeHead(200, {
+                'Content-Type': 'audio/mp3',
+                'Content-Length': combined.length,
+                'Cache-Control': 'public, max-age=31536000'
+              });
+              res.end(Buffer.from(combined));
+            } else {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to synthesize speech (no audio received)' }));
+            }
+          });
+
+          ws.on('error', (err: any) => {
+            console.error('[Edge TTS Proxy] WebSocket error:', err);
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `WebSocket error: ${err.message}` }));
+            }
+          });
+
+          return;
+        } catch (err: any) {
+          console.error('[Edge TTS Proxy] Middleware error:', err);
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
           return;
         }
       }

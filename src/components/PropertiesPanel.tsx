@@ -31,12 +31,14 @@ import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { trackMotion } from '@/utils/motionTracker';
 import { compileStoryboard } from '@/utils/storyboardCompiler';
-import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq } from '@/utils/aiClient';
+import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini, AIMotionGraphicSuggestion } from '@/utils/aiClient';
 import { searchFreesound } from '@/utils/audioSearchClient';
 import { AiSoundDesigner } from '@/components/AiSoundDesigner';
+import { AiMotionGraphicsDesigner } from '@/components/AiMotionGraphicsDesigner';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
+import { calculateAutoColor } from '@/utils/autoColor';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -288,6 +290,11 @@ export function PropertiesPanel() {
   const [soundDesignerCues, setSoundDesignerCues] = useState<any[] | null>(null);
   const [showSoundDesigner, setShowSoundDesigner] = useState(false);
 
+  const [isAnalyzingMotionGraphics, setIsAnalyzingMotionGraphics] = useState(false);
+  const [motionGraphicsAnalyzeProgress, setMotionGraphicsAnalyzeProgress] = useState('');
+  const [motionGraphicsSuggestions, setMotionGraphicsSuggestions] = useState<AIMotionGraphicSuggestion[] | null>(null);
+  const [showMotionGraphicsDesigner, setShowMotionGraphicsDesigner] = useState(false);
+
   const handleAiSoundDesign = async () => {
     if (!selectedClip) return;
     const gKey = geminiApiKey || sessionStorage.getItem('procut_gemini_key') || envGeminiKey;
@@ -368,6 +375,71 @@ export function PropertiesPanel() {
       toast.error(`AI Sound Design failed: ${e.message || e}`);
     } finally {
       setIsAnalyzingAudio(false);
+    }
+  };
+
+  const handleAiMotionGraphicsDesign = async () => {
+    if (!selectedClip) return;
+    const gKey = geminiApiKey || sessionStorage.getItem('procut_gemini_key') || envGeminiKey;
+    if (!gKey) {
+      toast.error('Please enter your Gemini API Key first (or configure VITE_GEMINI_API_KEY in your environment).');
+      return;
+    }
+
+    const videoEl = videoElements.get(selectedClip.id);
+    if (!videoEl) {
+      toast.error('Video player is not loaded yet. Try seeking or playing first.');
+      return;
+    }
+
+    setIsAnalyzingMotionGraphics(true);
+    setMotionGraphicsAnalyzeProgress('Compiling storyboard...');
+
+    try {
+      // 1. Compile storyboard chunks (10s intervals)
+      const chunks = await compileStoryboard(
+        videoEl,
+        selectedClip.trimStart,
+        selectedClip.duration,
+        (progress) => {
+          setMotionGraphicsAnalyzeProgress(`Compiling storyboard ${Math.round(progress * 100)}%`);
+        }
+      );
+
+      // 2. Analyze each chunk with Gemini 2.0 Flash Vision
+      setMotionGraphicsAnalyzeProgress('Gemini vision recommending motion graphics...');
+      const chunkPromises = chunks.map(async (chunk, i) => {
+        try {
+          const suggestions = await analyzeMotionGraphicsWithGemini(
+            chunk.base64Image,
+            chunk.duration,
+            gKey
+          );
+          return suggestions.map((s) => ({
+            ...s,
+            start: s.start + (i * 10),
+            end: s.end + (i * 10)
+          }));
+        } catch (err) {
+          console.warn('[AI Storyboard] Motion chunk failed to process, skipping:', err);
+          return [];
+        }
+      });
+
+      const suggestionsArrays = await Promise.all(chunkPromises);
+      const allSuggestions = suggestionsArrays.flat();
+
+      if (allSuggestions.length === 0) {
+        toast.info('No motion graphics suggested for this segment.');
+        return;
+      }
+
+      setMotionGraphicsSuggestions(allSuggestions);
+      setShowMotionGraphicsDesigner(true);
+    } catch (e: any) {
+      toast.error(`AI Motion Graphics Design failed: ${e.message || e}`);
+    } finally {
+      setIsAnalyzingMotionGraphics(false);
     }
   };
 
@@ -2472,17 +2544,30 @@ export function PropertiesPanel() {
                     <button
                       onClick={() => {
                         if (!selectedClip) return;
-                        // Simulated AI Analysis
-                        const tempShift = Math.floor(Math.random() * 20) - 10;
-                        const expShift = Math.floor(Math.random() * 20) - 10;
-                        const contShift = Math.floor(Math.random() * 30);
                         
-                        setPropVal('color.temperature', tempShift, {
-                          colorFilters: {
-                            ...(selectedClip.colorFilters || defaultColorFilters),
+                        const videoEl = videoElements.get(selectedClip.id);
+                        let suggested: any = {};
+                        
+                        if (videoEl) {
+                          suggested = calculateAutoColor(videoEl, selectedClip.colorFilters);
+                        } else {
+                          // Fallback to simulation if media element is not ready
+                          const tempShift = Math.floor(Math.random() * 20) - 10;
+                          const expShift = Math.floor(Math.random() * 20) - 10;
+                          const contShift = Math.floor(Math.random() * 30);
+                          suggested = {
                             temperature: tempShift,
                             exposure: expShift,
-                            contrast: 100 + contShift
+                            contrast: 100 + contShift,
+                            saturation: selectedClip.colorFilters?.saturation ?? 100,
+                            tint: selectedClip.colorFilters?.tint ?? 0
+                          };
+                        }
+
+                        setPropVal('color.temperature', suggested.temperature, {
+                          colorFilters: {
+                            ...(selectedClip.colorFilters || defaultColorFilters),
+                            ...suggested
                           }
                         });
                         useEditorStore.getState().saveSnapshot('Auto Color');
@@ -4528,6 +4613,54 @@ export function PropertiesPanel() {
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
             <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Effect Settings</h3>
 
+            {/* AI Motion Graphics Suggester */}
+            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
+              <div className="bg-[#142323] border border-teal-500/30 rounded p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-teal-400" />
+                  <span className="text-xs text-white font-semibold">AI Motion Graphics Suggester</span>
+                </div>
+                <p className="text-[11px] text-[#90b8b8]">
+                  Automatically suggest 3-4 professional motion graphics, kinetic typography, or lower-thirds overlay titles based on visual scene analysis.
+                </p>
+
+                {/* API Keys Configuration Panel (Only if Gemini key is missing) */}
+                {!geminiApiKey && !sessionStorage.getItem('procut_gemini_key') && !envGeminiKey && (
+                  <div className="pt-2 border-t border-[#3e3e3e]/40 space-y-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] text-[#a0a0a0]">Gemini API Key</label>
+                      <input
+                        type="password"
+                        placeholder="Paste Gemini API Key"
+                        value={geminiApiKey}
+                        onChange={(e) => {
+                          setGeminiApiKey(e.target.value);
+                          sessionStorage.setItem('procut_gemini_key', e.target.value);
+                        }}
+                        className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-teal-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {isAnalyzingMotionGraphics ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e2828] rounded border border-teal-500/20">
+                    <Loader2 className="w-4 h-4 text-teal-500 animate-spin" />
+                    <span className="text-[10px] text-teal-400 font-medium">
+                      {motionGraphicsAnalyzeProgress}...
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleAiMotionGraphicsDesign}
+                    className="w-full py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Suggest Motion Graphics
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* ── Timeline FX Settings ── */}
             {selectedClip.fxSettings && (
               <div className="flex flex-col gap-3 bg-[#1e1e1e] rounded p-3 border border-rose-500/20">
@@ -4865,6 +4998,14 @@ export function PropertiesPanel() {
           clip={selectedClip}
           cues={soundDesignerCues}
           onClose={() => setShowSoundDesigner(false)}
+        />
+      )}
+
+      {showMotionGraphicsDesigner && motionGraphicsSuggestions && selectedClip && (
+        <AiMotionGraphicsDesigner
+          clip={selectedClip}
+          suggestions={motionGraphicsSuggestions}
+          onClose={() => setShowMotionGraphicsDesigner(false)}
         />
       )}
     </div>
