@@ -439,6 +439,16 @@ function generateVideoThumbnail(videoUrl: string, width?: number, height?: numbe
     video.muted = true;
     video.playsInline = true;
 
+    const cleanup = () => {
+      video.onloadedmetadata = null;
+      video.onseeked = null;
+      video.onerror = null;
+      video.src = "";
+      try {
+        video.load();
+      } catch (_) {}
+    };
+
     video.onloadedmetadata = () => {
       video.currentTime = 0.5;
     };
@@ -451,16 +461,23 @@ function generateVideoThumbnail(videoUrl: string, width?: number, height?: numbe
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL('image/jpeg', 0.7));
+          const data = canvas.toDataURL('image/jpeg', 0.7);
+          cleanup();
+          resolve(data);
         } else {
+          cleanup();
           resolve('');
         }
       } catch {
+        cleanup();
         resolve('');
       }
     };
 
-    video.onerror = () => resolve('');
+    video.onerror = () => {
+      cleanup();
+      resolve('');
+    };
   });
 }
 
@@ -476,8 +493,20 @@ function generateFrameStrip(videoUrl: string, duration: number, count: number): 
     video.playsInline = true;
 
     const frames: string[] = [];
+
+    const cleanup = () => {
+      video.onloadedmetadata = null;
+      video.onseeked = null;
+      video.onerror = null;
+      video.src = "";
+      try {
+        video.load();
+      } catch (_) {}
+    };
+
     const captureFrame = (index: number) => {
       if (index >= count) {
+        cleanup();
         resolve(frames);
         return;
       }
@@ -503,7 +532,10 @@ function generateFrameStrip(videoUrl: string, duration: number, count: number): 
       captureFrame(0);
     };
 
-    video.onerror = () => resolve(frames);
+    video.onerror = () => {
+      cleanup();
+      resolve(frames);
+    };
   });
 }
 

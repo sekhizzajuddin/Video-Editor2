@@ -29,22 +29,19 @@ export function parseSRT(text: string): ParsedSubtitle[] {
 
   for (const block of blocks) {
     const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
-    if (lines.length >= 3) {
-      // Line 0 is usually index (e.g. "1")
-      // Line 1 is the timecode (e.g. "00:00:01,000 --> 00:00:04,500")
-      const timeLine = lines[1];
-      if (timeLine.includes('-->')) {
-        const timeParts = timeLine.split('-->');
-        const start = normalizeTime(timeParts[0]);
-        const end = normalizeTime(timeParts[1]);
-        const subText = lines.slice(2).join('\n');
-        
-        results.push({
-          startTime: start,
-          duration: Math.max(0.2, end - start),
-          text: subText,
-        });
-      }
+    const timeLineIndex = lines.findIndex(l => l.includes('-->'));
+    if (timeLineIndex !== -1) {
+      const timeLine = lines[timeLineIndex];
+      const timeParts = timeLine.split('-->');
+      const start = normalizeTime(timeParts[0]);
+      const end = normalizeTime(timeParts[1]);
+      const subText = lines.slice(timeLineIndex + 1).join('\n');
+      
+      results.push({
+        startTime: start,
+        duration: Math.max(0.2, end - start),
+        text: subText,
+      });
     }
   }
 

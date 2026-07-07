@@ -103,6 +103,14 @@ function getIntegralTable(clipId: string, ramp: SpeedRampKeyframe[] | undefined)
   }
 
   integralCache.set(clipId, { key: cacheKey, table });
+  
+  if (integralCache.size > 100) {
+    const firstKey = integralCache.keys().next().value;
+    if (firstKey !== undefined) {
+      integralCache.delete(firstKey);
+    }
+  }
+
   return table;
 }
 

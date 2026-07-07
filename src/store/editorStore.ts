@@ -15,6 +15,26 @@ import type {
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
+import { getAnimatedValue } from '@/utils/keyframes';
+
+let saveTimeoutId: any = null;
+
+const debouncedSaveProject = (state: any) => {
+  if (saveTimeoutId) {
+    clearTimeout(saveTimeoutId);
+  }
+  saveTimeoutId = setTimeout(() => {
+    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = state;
+    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+      if (projectId !== 'default') {
+        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
+      }
+    }).catch((err) =>
+      console.error('Failed to auto-save project:', err)
+    );
+    saveTimeoutId = null;
+  }, 1000);
+};
 
 
 const generateId = () =>
@@ -652,9 +672,24 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   removeClip: (clipId) => {
     set((state) => {
-      const idsToRemove = state.selectedClipIds.includes(clipId)
+      const initialIds = state.selectedClipIds.includes(clipId)
         ? state.selectedClipIds
         : [clipId];
+
+      const allClips = state.tracks.flatMap((t) => t.clips);
+      const idsToRemoveSet = new Set<string>(initialIds);
+      initialIds.forEach((id) => {
+        const c = allClips.find((clip) => clip.id === id);
+        if (c && c.linkedClipId) {
+          idsToRemoveSet.add(c.linkedClipId);
+        }
+        allClips.forEach((clip) => {
+          if (clip.linkedClipId === id) {
+            idsToRemoveSet.add(clip.id);
+          }
+        });
+      });
+      const idsToRemove = Array.from(idsToRemoveSet);
 
       const deletedClips = state.tracks.flatMap(t => t.clips).filter(c => idsToRemove.includes(c.id));
 
@@ -676,15 +711,29 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             }
             return clip;
           });
+
+          const remainingOls = (track.overLayers || []).filter((ol) => !idsToRemove.includes(ol.id));
+          const shiftedOls = remainingOls.map((ol) => {
+            if (ol.startTime >= minStartTime) {
+              return {
+                ...ol,
+                startTime: Math.max(0, ol.startTime - shiftDuration),
+              };
+            }
+            return ol;
+          });
+
           return {
             ...track,
             clips: shiftedClips,
+            overLayers: shiftedOls,
           };
         });
       } else {
         newTracks = state.tracks.map((track) => ({
           ...track,
           clips: track.clips.filter((c) => !idsToRemove.includes(c.id)),
+          overLayers: (track.overLayers || []).filter((c) => !idsToRemove.includes(c.id)),
         }));
       }
 
@@ -715,6 +764,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks: newTracks };
     });
     get().recalcTotalDuration();
+    get().saveSnapshot();
   },
 
   moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
@@ -746,6 +796,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const targetTrack = newTracks.find((t) => t.id === targetTrackId);
 
       if (targetTrack) {
+        // Enforce track type compatibility (ARCH-5)
+        const media = state.mediaLibrary.find((m) => m.id === foundClip!.mediaId);
+        const isClipAudio = media ? media.type === 'audio' : (foundClip!.audioSettings !== undefined && !foundClip!.transform);
+        if (targetTrack.type === 'audio' && !isClipAudio) {
+          return {}; // Reject move of visual clip to audio track
+        }
+        if (targetTrack.type === 'video' && isClipAudio) {
+          return {}; // Reject move of audio clip to video track
+        }
         if (state.activeTool === 'ripple') {
           // Multi-track Ripple Move: Close old gap, then open space at newStartTime
           newTracks.forEach((track) => {
@@ -838,6 +897,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const targetTrack = newTracks.find((t) => t.id === targetTrackId);
 
         if (targetTrack) {
+          // Enforce track type compatibility (ARCH-5)
+          const media = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+          const isClipAudio = media ? media.type === 'audio' : (clip.audioSettings !== undefined && !clip.transform);
+          if (targetTrack.type === 'audio' && !isClipAudio) {
+            continue; // Skip move of visual clip to audio track
+          }
+          if (targetTrack.type === 'video' && isClipAudio) {
+            continue; // Skip move of audio clip to video track
+          }
           if (resolveOverlap) {
             const adjustedStart = findNonOverlappingPosition(
               targetTrack.clips,
@@ -1209,6 +1277,48 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
           : clip.duration * clip.speed;
 
+        // Remap keyframe animations for split
+        let leftAnimations = clip.animations ? { ...clip.animations } : undefined;
+        let rightAnimations = clip.animations ? { ...clip.animations } : undefined;
+
+        if (clip.animations) {
+          leftAnimations = {};
+          rightAnimations = {};
+
+          for (const key of Object.keys(clip.animations)) {
+            const kfs = clip.animations[key];
+            if (!kfs || kfs.length === 0) continue;
+
+            let baseVal = 1;
+            if (key === 'opacity') baseVal = clip.opacity;
+            else if (key === 'transform.scale') baseVal = clip.transform.scale;
+            else if (key === 'transform.x') baseVal = clip.transform.x;
+            else if (key === 'transform.y') baseVal = clip.transform.y;
+            else if (key === 'transform.rotation') baseVal = clip.transform.rotation;
+            else if (key === 'transform.rotationX') baseVal = (clip.transform as any).rotationX ?? 0;
+            else if (key === 'transform.rotationY') baseVal = (clip.transform as any).rotationY ?? 0;
+            else if (key.startsWith('crop.')) {
+              const cropKey = key.split('.')[1];
+              baseVal = (clip.crop as any)?.[cropKey] ?? 0;
+            }
+
+            const splitVal = getAnimatedValue(baseVal, splitTime, clip.startTime, kfs);
+
+            const leftKfs = kfs.filter((k) => k.time < relativeSplitTime);
+            leftKfs.push({ time: relativeSplitTime, value: splitVal });
+            leftAnimations[key] = leftKfs;
+
+            const rightKfs = kfs
+              .filter((k) => k.time > relativeSplitTime)
+              .map((k) => ({
+                ...k,
+                time: k.time - relativeSplitTime,
+              }));
+            rightKfs.unshift({ time: 0, value: splitVal });
+            rightAnimations[key] = rightKfs;
+          }
+        }
+
         const leftClip: TimelineClip = {
           ...clip,
           id: leftClipId,
@@ -1220,6 +1330,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           effects: [...clip.effects],
           transitionOut: undefined, // Clear transition on the first half of the split
           speedRamp: leftSpeedRamp,
+          animations: leftAnimations,
         };
 
         const rightClip: TimelineClip = {
@@ -1232,6 +1343,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           effects: [...clip.effects],
           transitionIn: undefined, // Clear transition on the second half of the split
           speedRamp: rightSpeedRamp,
+          animations: rightAnimations,
         };
 
         const newClips = [...track.clips];
@@ -2112,15 +2224,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: newHistory.length - 1,
       };
     });
-    // Auto-save to IndexedDB
-    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
-    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
-      if (projectId !== 'default') {
-        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
-      }
-    }).catch((err) =>
-      console.error('Failed to auto-save project:', err)
-    );
+    // Debounced auto-save to IndexedDB
+    debouncedSaveProject(get());
   },
   startTransaction: () => {
     _inTransaction = true;
@@ -2140,14 +2245,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex - 1,
       };
     });
-    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
-    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
-      if (projectId !== 'default') {
-        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
-      }
-    }).catch((err) =>
-      console.error('Failed to auto-save project:', err)
-    );
+    debouncedSaveProject(get());
   },
   redo: () => {
     set((state) => {
@@ -2159,14 +2257,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: state.historyIndex + 1,
       };
     });
-    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
-    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
-      if (projectId !== 'default') {
-        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
-      }
-    }).catch((err) =>
-      console.error('Failed to auto-save project:', err)
-    );
+    debouncedSaveProject(get());
   },
   jumpToHistoryIndex: (index) => {
     set((state) => {
@@ -2183,14 +2274,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().recalcTotalDuration();
-    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = get();
-    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
-      if (projectId !== 'default') {
-        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
-      }
-    }).catch((err) =>
-      console.error('Failed to auto-save project:', err)
-    );
+    debouncedSaveProject(get());
   },
 
   // Drag/Drop
@@ -2675,3 +2759,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().recalcTotalDuration();
   }
 }));
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (saveTimeoutId) {
+      clearTimeout(saveTimeoutId);
+      const state = useEditorStore.getState();
+      const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = state;
+      // Immediate save on close
+      saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+        if (projectId !== 'default') {
+          saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
+        }
+      }).catch(console.error);
+    }
+  });
+}

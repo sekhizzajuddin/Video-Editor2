@@ -3,7 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { getAutosavesFromDB, deleteAutosaveFromDB, restoreSnapshotMedia } from '@/utils/projectPersistence';
-import { clearPreviewCaches } from './PreviewCanvas';
+import { clearPreviewCaches } from '@/utils/canvasEffects';
 import { DEFAULT_SHORTCUTS, getShortcutString, SHORTCUT_PROFILES } from '@/utils/keyboardShortcuts';
 
 export function SettingsModal() {
