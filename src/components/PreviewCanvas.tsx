@@ -2433,11 +2433,11 @@ export function PreviewCanvas() {
 
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e]">
-      {/* Canvas Container */}
+      {/* Canvas Container — flex-1 so it shares space with the control bar */}
       <div 
         ref={containerRef} 
         id="preview-canvas-wrapper" 
-        className="relative w-full h-full overflow-hidden bg-[#0a0a0a] select-none touch-none"
+        className="relative flex-1 overflow-hidden bg-[#0a0a0a] select-none touch-none min-h-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -2546,6 +2546,158 @@ export function PreviewCanvas() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Playback Control Bar ───────────────────────────────────────────── */}
+      <div
+        className="shrink-0 flex flex-col bg-[#181818] border-t border-[#2e2e2e]"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {/* Progress / Scrub Bar */}
+        <div className="px-3 pt-2 pb-1">
+          <div className="relative h-1.5 group cursor-pointer">
+            <div className="absolute inset-0 rounded-full bg-[#333]" />
+            <div
+              className="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400"
+              style={{ width: `${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}%` }}
+            />
+            <input
+              type="range"
+              min={0}
+              max={totalDuration || 1}
+              step={0.01}
+              value={currentTime}
+              onChange={handleTimelineSeek}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              style={{ margin: 0 }}
+            />
+            {/* Scrub thumb */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-amber-400 shadow-lg shadow-amber-500/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+              style={{ left: `calc(${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}% - 6px)` }}
+            />
+          </div>
+        </div>
+
+        {/* Controls Row */}
+        <div className="flex items-center justify-between px-3 pb-2">
+          {/* Left: time display */}
+          <div className="flex items-center gap-2 min-w-[90px]">
+            <span className="text-[10px] font-mono text-[#a0a0a0] tabular-nums select-text">
+              {String(Math.floor(currentTime / 60)).padStart(2, '0')}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
+              <span className="text-[#555]"> / {String(Math.floor(totalDuration / 60)).padStart(2, '0')}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
+            </span>
+          </div>
+
+          {/* Center: playback controls */}
+          <div className="flex items-center gap-0.5">
+            {/* Go to Start */}
+            <button
+              onClick={handleRestart}
+              title="Go to Start"
+              className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Skip Backward 10s */}
+            <button
+              onClick={handleSkipBackward}
+              title="Skip Back 10s"
+              className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            >
+              <SkipBack className="w-4 h-4" />
+            </button>
+
+            {/* Play / Pause */}
+            <button
+              onClick={togglePlayback}
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+              className={`
+                flex items-center justify-center w-9 h-9 rounded-full mx-1 transition-all duration-150 active:scale-95
+                ${isPlaying
+                  ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-md shadow-amber-500/40'
+                  : 'bg-white/10 hover:bg-white/20 text-white border border-white/10 hover:border-white/20'}
+              `}
+            >
+              {isPlaying
+                ? <Pause className="w-4 h-4 fill-current" />
+                : <Play className="w-4 h-4 fill-current ml-0.5" />}
+            </button>
+
+            {/* Skip Forward 10s */}
+            <button
+              onClick={handleSkipForward}
+              title="Skip Forward 10s"
+              className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            >
+              <SkipForward className="w-4 h-4" />
+            </button>
+
+            {/* Reverse playback badge */}
+            {playbackDirection === -1 && (
+              <span className="ml-1 text-[9px] text-amber-400 font-bold px-1 py-0.5 bg-amber-500/10 rounded border border-amber-500/20">REV</span>
+            )}
+          </div>
+
+          {/* Right: volume + speed */}
+          <div className="flex items-center gap-2 min-w-[90px] justify-end">
+            {/* Volume */}
+            <div className="flex items-center gap-1 group/vol">
+              <button
+                onClick={toggleMute}
+                title={isMuted ? 'Unmute' : 'Mute'}
+                className="p-1 text-[#888] hover:text-white transition-colors shrink-0"
+              >
+                {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+              </button>
+              <div className="w-14 h-1.5 relative">
+                <div className="absolute inset-0 rounded-full bg-[#333]" />
+                <div
+                  className="absolute top-0 left-0 h-full rounded-full bg-[#666] group-hover/vol:bg-amber-500 transition-colors"
+                  style={{ width: `${isMuted ? 0 : volume * 100}%` }}
+                />
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={isMuted ? 0 : volume}
+                  onChange={(e) => setVolume(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* Playback Speed */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                title="Playback Speed"
+                className="text-[10px] font-mono text-[#888] hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-white/5 border border-transparent hover:border-white/10"
+              >
+                {playbackSpeed === 1 ? '1×' : `${playbackSpeed}×`}
+              </button>
+              {showSpeedMenu && (
+                <div className="absolute bottom-full right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl overflow-hidden z-50 pointer-events-auto">
+                  {speedOptions.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => { setPlaybackSpeed(s); setShowSpeedMenu(false); }}
+                      className={`block w-full text-left px-4 py-1.5 text-xs transition-colors ${
+                        playbackSpeed === s
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : 'text-[#a0a0a0] hover:bg-[#2a2a2a] hover:text-white'
+                      }`}
+                    >
+                      {s}×
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
