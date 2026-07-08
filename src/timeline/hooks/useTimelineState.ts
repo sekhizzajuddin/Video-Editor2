@@ -59,6 +59,9 @@ export interface DropPreview {
   time: number;
   duration: number;
   trackIdx: number;
+  mediaId?: string;
+  mediaType?: string;
+  mediaName?: string;
 }
 
 export interface ContextMenuState {

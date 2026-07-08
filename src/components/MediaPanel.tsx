@@ -376,6 +376,9 @@ export function MediaPanel() {
   const handleDragStart = (e: React.DragEvent, mediaId: string) => {
     e.dataTransfer.setData('application/procut-media', mediaId);
     e.dataTransfer.effectAllowed = 'copy';
+    // Store on window so timeline can read it during dragover
+    // (browsers block dataTransfer.getData during dragover for security)
+    (window as any).__procutDraggingMediaId = mediaId;
   };
 
   // Real import with probing

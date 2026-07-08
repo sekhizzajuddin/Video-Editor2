@@ -20,6 +20,7 @@ import {
   FloatingScrubTooltip,
   WorkspacePlayhead,
   PlaybackAutoScroller,
+  CLIP_COLORS,
 } from '@/timeline';
 
 export function Timeline() {
@@ -383,18 +384,28 @@ export function Timeline() {
                   );
                 })}
 
-                {/* ── Drop preview box ───────────────────────────────── */}
-                {dropPreview && hoveredTrackId && (
-                  <div
-                    className="absolute border-2 border-amber-500/50 border-dashed rounded pointer-events-none z-40 bg-amber-500/5 animate-pulse"
-                    style={{
-                      top: `${getTrackTop(tracks, dropPreview.trackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
-                      left: `${dropPreview.time * zoomLevel}px`,
-                      width: `${Math.max(16, dropPreview.duration * zoomLevel)}px`,
-                      height: `${getTrackHeight(tracks[dropPreview.trackIdx], hoveredOverLayerRegion, pinnedOverLayerTrackId) - 8}px`,
-                    }}
-                  />
-                )}
+                {/* ── Drop preview ghost clip ──────────────────────── */}
+                {dropPreview && hoveredTrackId && (() => {
+                  const mediaType = dropPreview.mediaType || 'video';
+                  const colors = CLIP_COLORS[mediaType] || CLIP_COLORS.video;
+                  return (
+                    <div
+                      className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border}`}
+                      style={{
+                        top: `${getTrackTop(tracks, dropPreview.trackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
+                        left: `${dropPreview.time * zoomLevel}px`,
+                        width: `${Math.max(16, dropPreview.duration * zoomLevel)}px`,
+                        height: `${getTrackHeight(tracks[dropPreview.trackIdx], hoveredOverLayerRegion, pinnedOverLayerTrackId) - 8}px`,
+                      }}
+                    >
+                      <div className="absolute inset-0 flex items-center px-2 overflow-hidden pointer-events-none">
+                        <span className={`text-[10px] font-medium truncate ${colors.text} drop-shadow-md`}>
+                          {dropPreview.mediaName || 'Drop here'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Snap indicator line */}
                 {snapLine !== null && (

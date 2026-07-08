@@ -29,6 +29,8 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
   const handleDrop = useCallback(
     (e: React.DragEvent, trackId: string) => {
       e.preventDefault();
+      // Clear the dragging media tracker set in MediaPanel's onDragStart
+      (window as any).__procutDraggingMediaId = undefined;
       const track = useEditorStore.getState().tracks.find((t) => t.id === trackId);
       if (!track) return;
 
@@ -383,13 +385,44 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
       
       if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate) && trackIdx >= 0) {
-        const approxDuration = (hasColorPreset || hasParticle || hasTransition) ? 0 : 5;
-        setDropPreview({ time: (x + scrollLeft) / zoomLevel, duration: approxDuration, trackIdx });
+        const dropTime = Math.max(0, (x + scrollLeft) / zoomLevel);
+
+        let approxDuration = 5;
+        let mediaId: string | undefined;
+        let mediaType: string | undefined;
+        let mediaName: string | undefined;
+
+        if (hasMedia) {
+          // During dragover, dataTransfer.getData() returns '' in most browsers for security.
+          // We use window.__procutDraggingMediaId set on drag start by MediaPanel.
+          const draggingId = (window as any).__procutDraggingMediaId as string | undefined;
+          if (draggingId) {
+            const m = useEditorStore.getState().mediaLibrary.find(mi => mi.id === draggingId);
+            if (m) {
+              mediaId = m.id;
+              mediaType = m.type;
+              mediaName = m.name;
+              approxDuration = m.type === 'image' ? 5 : Math.min(10, m.duration);
+            }
+          }
+        } else if (hasEffect) {
+          mediaType = 'fx';
+          mediaName = 'VFX Effect';
+          approxDuration = 5;
+        } else if (hasTemplate) {
+          mediaType = 'text';
+          mediaName = 'Title Template';
+          approxDuration = 5;
+        } else if (hasColorPreset || hasParticle || hasTransition) {
+          approxDuration = 0;
+        }
+
+        setDropPreview({ time: dropTime, duration: approxDuration, trackIdx, mediaId, mediaType, mediaName });
         setHoveredTrackId(trackId);
 
         const track = tracks[trackIdx];
         if (track && (track.overLayers || []).length > 0) {
-          const time = (x + scrollLeft) / zoomLevel;
+          const time = dropTime;
           const matchingOl = track.overLayers.find((ol) => {
             return time >= ol.startTime && time < ol.startTime + ol.duration;
           });
