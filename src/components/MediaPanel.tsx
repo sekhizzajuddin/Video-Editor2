@@ -1479,7 +1479,7 @@ export function MediaPanel() {
               {TEXT_TEMPLATES.map((template) => (
                 <div
                   key={template.name}
-                  onClick={() => insertTextClip({ text: template.name, ...template.settings })}
+                  onClick={() => insertTextClip({ text: template.name, ...(template.settings as any) })}
                   className="p-4 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] hover:border-[#5e5e5e] rounded cursor-pointer transition-all flex items-center justify-center text-center group"
                 >
                   <span className={`${template.style} transition-transform group-hover:scale-105`}>

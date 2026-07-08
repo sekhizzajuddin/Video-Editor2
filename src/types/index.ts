@@ -162,7 +162,7 @@ export interface ClipTextSettings {
   shadow: boolean;
   shadowColor?: string;
   shadowBlur?: number;
-  threeD: boolean;
+  threeD?: boolean;
   threeDDepth?: number;
   textAlign?: 'left' | 'center' | 'right';
   animationPreset?: 'subscribe' | 'typewriter' | 'bounce';

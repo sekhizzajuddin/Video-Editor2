@@ -118,12 +118,15 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
         {/* Content List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3.5 scrollbar-thin">
           {suggestions.map((suggestion, idx) => {
-            const tmpl = TITLE_TEMPLATES.find((t) => t.id === suggestion.templateId) || {
+            const tmpl = (TITLE_TEMPLATES.find((t) => t.id === suggestion.templateId) || {
+              id: suggestion.templateId,
               name: suggestion.templateId,
               description: 'Motion Graphic Template',
               accentColor: '#0d9488',
-              category: 'Motion Graphic'
-            };
+              category: 'Motion Graphic',
+              defaultDuration: 4,
+              textSettings: { text: '', fontFamily: 'Inter', fontSize: 24, color: '#ffffff', backgroundColor: 'transparent', bold: false, italic: false, underline: false, shadow: false }
+            }) as any;
 
             return (
               <div 
