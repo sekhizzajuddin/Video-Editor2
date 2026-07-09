@@ -27,7 +27,6 @@ export function Timeline() {
   const {
     tracks,
     zoomLevel,
-    scrollLeft,
     selectedClipId,
     selectedClipIds,
     selectedOverLayerId,
@@ -78,7 +77,6 @@ export function Timeline() {
     trackContainerRef,
     trackHeadersRef,
     rulerContainerRef,
-    scrollStoreThrottleRef,
     isScrubbing,
     hoveredTrackId,
     setHoveredTrackId,
@@ -100,9 +98,6 @@ export function Timeline() {
     trackContainerRef,
     rulerContainerRef,
     trackHeadersRef,
-    scrollStoreThrottleRef,
-    scrollLeft,
-    zoomLevel,
   });
 
   const voiceover = useVoiceoverRecording();
@@ -244,7 +239,6 @@ export function Timeline() {
           <div className="flex-1 flex flex-col overflow-hidden relative">
             <FloatingScrubTooltip
               zoomLevel={zoomLevel}
-              scrollLeft={scrollLeft}
               isScrubbing={isScrubbing}
             />
 
@@ -348,7 +342,6 @@ export function Timeline() {
                       track={track}
                       tracks={tracks}
                       zoomLevel={zoomLevel}
-                      scrollLeft={scrollLeft}
                       selectedClipIds={selectedClipIds}
                       draggingClipId={draggingClipId}
                       selectedOverLayerId={selectedOverLayerId}
@@ -427,7 +420,6 @@ export function Timeline() {
         zoomLevel={zoomLevel}
         totalDuration={totalDuration}
         trackContainerRef={trackContainerRef}
-        setScrollLeftThrottled={scrollHandlers.setScrollLeftThrottled}
       />
 
       <TimelineModals

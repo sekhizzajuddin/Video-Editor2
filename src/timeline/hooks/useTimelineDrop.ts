@@ -14,7 +14,6 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
   const {
     tracks,
     zoomLevel,
-    scrollLeft,
     hoveredOverLayerRegion,
     pinnedOverLayerTrackId,
     setHoveredOverLayerRegion,
@@ -39,7 +38,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       if (transitionName && track && track.type === 'video') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
-        const dropTime = (x + scrollLeft) / zoomLevel;
+        const dropTime = x / zoomLevel;
         // Find the clip at the drop position
         const hitClip = track.clips.find(
           (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
@@ -74,7 +73,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
           const x = e.clientX - rect.left;
           const y = e.clientY - rect.top;
-          const dropTime = (x + scrollLeft) / zoomLevel;
+          const dropTime = x / zoomLevel;
           
           const baseHeight = DEFAULT_TRACK_HEIGHT;
           const isOverLayerArea = y > baseHeight;
@@ -123,7 +122,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        const dropTime = (x + scrollLeft) / zoomLevel;
+        const dropTime = x / zoomLevel;
 
         const baseHeight = DEFAULT_TRACK_HEIGHT;
         const isOverLayerArea = y > baseHeight;
@@ -200,7 +199,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
           const x = e.clientX - rect.left;
-          const startTime = Math.max(0, (x + scrollLeft) / zoomLevel);
+          const startTime = Math.max(0, x / zoomLevel);
           const mediaId = `tmpl_media_${Math.random().toString(36).substr(2, 9)}`;
           const clipId  = `tmpl_clip_${Math.random().toString(36).substr(2, 9)}`;
           useEditorStore.getState().addMedia({
@@ -239,7 +238,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       if (effectName && track?.type === 'fx') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
-        const startTime = Math.max(0, (x + scrollLeft) / zoomLevel);
+        const startTime = Math.max(0, x / zoomLevel);
 
         const FX_TYPE_MAP: Record<string, string> = {
           'VFX Breakdown':     'vfx_breakdown',
@@ -301,7 +300,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      const startTime = Math.max(0, (x + scrollLeft) / zoomLevel);
+      const startTime = Math.max(0, x / zoomLevel);
 
       const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
       const isOverLayerArea = y > baseHeight;
@@ -365,7 +364,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       setHoveredTrackId(null);
       setDropPreview(null);
     },
-    [zoomLevel, scrollLeft, hoveredOverLayerRegion, setHoveredTrackId, setDropPreview],
+    [zoomLevel, hoveredOverLayerRegion, setHoveredTrackId, setDropPreview],
   );
 
   const handleDragOver = useCallback(
@@ -385,7 +384,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
       
       if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate) && trackIdx >= 0) {
-        const dropTime = Math.max(0, (x + scrollLeft) / zoomLevel);
+        const dropTime = Math.max(0, x / zoomLevel);
 
         let approxDuration = 5;
         let mediaId: string | undefined;
@@ -438,7 +437,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         }
       }
     },
-    [tracks, zoomLevel, scrollLeft, hoveredOverLayerRegion, setDropPreview, setHoveredTrackId, setHoveredOverLayerRegion],
+    [tracks, zoomLevel, hoveredOverLayerRegion, setDropPreview, setHoveredTrackId, setHoveredOverLayerRegion],
   );
 
   return {

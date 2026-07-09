@@ -19,7 +19,6 @@ interface TimelineClipRowProps {
   track: TimelineTrack;
   tracks: TimelineTrack[];
   zoomLevel: number;
-  scrollLeft: number;
   selectedClipIds: string[];
   draggingClipId: string | null;
   selectedOverLayerId: string | null;
@@ -385,7 +384,6 @@ export function TimelineClipRow({
   track,
   tracks,
   zoomLevel,
-  scrollLeft,
   selectedClipIds,
   draggingClipId,
   selectedOverLayerId,
@@ -449,8 +447,10 @@ export function TimelineClipRow({
       }}
       onMouseMove={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
+        // rect.left is already offset by the scroll amount because the track row spans the entire timeline width
+        // Therefore, e.clientX - rect.left gives the absolute pixel position from time 0.
         const mouseX = e.clientX - rect.left;
-        const hoverTime = (scrollLeft + mouseX) / zoomLevel;
+        const hoverTime = mouseX / zoomLevel;
         
         const hoveredOl = (track.overLayers || []).find(
           (ol) => hoverTime >= ol.startTime && hoverTime < ol.startTime + ol.duration

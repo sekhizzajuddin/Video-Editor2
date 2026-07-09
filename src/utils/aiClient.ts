@@ -1,3 +1,7 @@
+export function getGeminiKey(): string {
+  return sessionStorage.getItem('procut_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+}
+
 export interface AICueResult {
   start: number;
   end: number;
@@ -282,5 +286,79 @@ Return strictly as a JSON array matching this schema:
     return JSON.parse(cleanedText) as AIMotionGraphicSuggestion[];
   } catch (e) {
     throw new Error(`Failed to parse Gemini motion graphics response: ${cleanedText}`);
+  }
+}
+
+export async function analyzeSceneForMotionGraphics(
+  frames: string[],
+  userPrompt: string
+): Promise<AIMotionGraphicSuggestion[]> {
+  const geminiKey = getGeminiKey();
+  if (!geminiKey) {
+    throw new Error('Gemini API Key is not set.');
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiKey}`;
+
+  const prompt = `You are a professional video editor and motion graphics designer.
+Analyze these chronological video frames (extracted from a clip).
+${userPrompt}
+
+For each suggested motion graphic or lower-third overlay, determine:
+1. Relative start time (seconds from clip start)
+2. Relative end time (seconds from clip start)
+3. Suggested text / titles to display
+4. Reason/justification based on the visual scene
+
+Return strictly as a JSON array matching this schema:
+[
+  { "start": number, "end": number, "suggestedText": string, "reason": string }
+]`;
+
+  const inlineDataParts = frames.map((f) => {
+    const base64Data = f.split(',')[1] || f;
+    return {
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: base64Data,
+      },
+    };
+  });
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          { text: prompt },
+          ...inlineDataParts,
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+    },
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  
+  try {
+    const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(cleanedText) as AIMotionGraphicSuggestion[];
+  } catch (e) {
+    throw new Error(`Failed to parse Gemini motion graphics response: ${text}`);
   }
 }

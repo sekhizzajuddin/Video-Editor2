@@ -5,28 +5,14 @@ interface UseTimelineScrollDeps {
   trackContainerRef: React.RefObject<HTMLDivElement | null>;
   rulerContainerRef: React.RefObject<HTMLDivElement | null>;
   trackHeadersRef: React.RefObject<HTMLDivElement | null>;
-  scrollStoreThrottleRef: React.RefObject<ReturnType<typeof setTimeout> | null>;
-  scrollLeft: number;
-  zoomLevel: number;
 }
 
 export function useTimelineScroll({
   trackContainerRef,
   rulerContainerRef,
   trackHeadersRef,
-  scrollStoreThrottleRef,
-  scrollLeft,
-  zoomLevel,
 }: UseTimelineScrollDeps) {
   
-  const setScrollLeftThrottled = useCallback((value: number) => {
-    if (scrollStoreThrottleRef.current) return;
-    scrollStoreThrottleRef.current = setTimeout(() => {
-      useEditorStore.getState().setScrollLeft(value);
-      scrollStoreThrottleRef.current = null;
-    }, 33); // ~30fps
-  }, [scrollStoreThrottleRef]);
-
   const handleScroll = useCallback(() => {
     if (trackContainerRef.current) {
       const target = trackContainerRef.current;
@@ -34,14 +20,14 @@ export function useTimelineScroll({
       if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== target.scrollLeft) {
         rulerContainerRef.current.scrollLeft = target.scrollLeft;
       }
-      // Throttle store updates; DOM position updates immediately
-      setScrollLeftThrottled(target.scrollLeft);
+      // Update store immediately; since timeline no longer selects scrollLeft, this won't trigger re-renders
+      useEditorStore.getState().setScrollLeft(target.scrollLeft);
       // Sync vertical scroll to headers
       if (trackHeadersRef.current && trackHeadersRef.current.scrollTop !== target.scrollTop) {
         trackHeadersRef.current.scrollTop = target.scrollTop;
       }
     }
-  }, [setScrollLeftThrottled, trackContainerRef, rulerContainerRef, trackHeadersRef]);
+  }, [trackContainerRef, rulerContainerRef, trackHeadersRef]);
 
   const handleHeadersScroll = useCallback(() => {
     if (trackHeadersRef.current && trackContainerRef.current) {
@@ -54,13 +40,19 @@ export function useTimelineScroll({
 
   // Sync scroll positions when store's scrollLeft changes externally
   useEffect(() => {
-    if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== scrollLeft) {
-      rulerContainerRef.current.scrollLeft = scrollLeft;
-    }
-    if (trackContainerRef.current && trackContainerRef.current.scrollLeft !== scrollLeft) {
-      trackContainerRef.current.scrollLeft = scrollLeft;
-    }
-  }, [scrollLeft, rulerContainerRef, trackContainerRef]);
+    const unsubscribe = useEditorStore.subscribe(
+      (state) => {
+        const scrollLeft = state.scrollLeft;
+        if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== scrollLeft) {
+          rulerContainerRef.current.scrollLeft = scrollLeft;
+        }
+        if (trackContainerRef.current && trackContainerRef.current.scrollLeft !== scrollLeft) {
+          trackContainerRef.current.scrollLeft = scrollLeft;
+        }
+      }
+    );
+    return unsubscribe;
+  }, [rulerContainerRef, trackContainerRef]);
 
   // Native wheel pinch-to-zoom gesture listener
   useEffect(() => {
@@ -85,6 +77,14 @@ export function useTimelineScroll({
         // Calculate the new scrollLeft so that timeUnderCursor stays at mouseX
         const newScrollLeft = Math.max(0, timeUnderCursor * newZoom - mouseX);
 
+        // Preemptively update the inner container width to prevent the DOM
+        // from clamping the new scrollLeft before React can render the new zoom
+        const innerDiv = el.firstElementChild as HTMLElement;
+        if (innerDiv) {
+          const newWidth = (store.totalDuration + 30) * newZoom;
+          innerDiv.style.width = `${newWidth}px`;
+        }
+
         store.setZoomLevel(newZoom);
         store.setScrollLeft(newScrollLeft);
       }
@@ -97,6 +97,5 @@ export function useTimelineScroll({
   return {
     handleScroll,
     handleHeadersScroll,
-    setScrollLeftThrottled,
   };
 }

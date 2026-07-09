@@ -13,7 +13,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const {
     tracks,
     zoomLevel,
-    scrollLeft,
     activeTool,
     settings,
     selectedClipId,
@@ -342,6 +341,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const relX = e.clientX - rect.left;
+      const currentScrollLeft = useEditorStore.getState().scrollLeft;
 
       if (relX < 6) {
         startTransactionSafe();
@@ -384,7 +384,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           startX: e.clientX,
           startY: e.clientY,
           originalStartTime: clip.startTime,
-          originalScrollLeft: scrollLeft,
+          originalScrollLeft: currentScrollLeft,
           trackId: clip.trackId,
           trackType: track?.type || 'video',
           draggedClips,
@@ -423,7 +423,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           startX: e.clientX,
           startY: e.clientY,
           originalStartTime: clip.startTime,
-          originalScrollLeft: scrollLeft,
+          originalScrollLeft: currentScrollLeft,
           trackId: clip.trackId,
           trackType: track?.type || 'video',
           draggedClips,
@@ -469,7 +469,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         startX: e.clientX,
         startY: e.clientY,
         originalStartTime: clip.startTime,
-        originalScrollLeft: scrollLeft,
+        originalScrollLeft: currentScrollLeft,
         trackId: clip.trackId,
         trackType: track?.type || 'video',
         draggedClips,
@@ -477,7 +477,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       e.stopPropagation();
     },
-    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, scrollLeft, startTransactionSafe, startResize, setDragState, setDraggingClipId],
+    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, startTransactionSafe, startResize, setDragState, setDraggingClipId],
   );
 
   const handleTimelineClick = useCallback(
@@ -506,7 +506,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       setIsScrubbing(true);
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const x = e.clientX - rect.left + scrollLeft;
+      const currentScrollLeft = useEditorStore.getState().scrollLeft;
+      const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
       
       setScrubTime(time);
@@ -516,7 +517,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       e.preventDefault();
       e.stopPropagation();
     },
-    [scrollLeft, zoomLevel, seek, setIsScrubbing, setScrubTime, setScrubMouseX],
+    [zoomLevel, seek, setIsScrubbing, setScrubTime, setScrubMouseX],
   );
 
   const handleSplit = useCallback(
@@ -536,7 +537,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         scrubRafIdRef.current = null;
         const rect = trackContainerRef.current?.getBoundingClientRect();
         if (rect) {
-          const x = clientX - rect.left + scrollLeft;
+          const currentScrollLeft = useEditorStore.getState().scrollLeft;
+          const x = clientX - rect.left + currentScrollLeft;
           const time = Math.max(0, x / zoomLevel);
           seek(time);
           setScrubTime(time);
@@ -555,7 +557,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const clientY = e.clientY;
       dragRafIdRef.current = requestAnimationFrame(() => {
         dragRafIdRef.current = null;
-        updateDragPosition(clientX, clientY, scrollLeft);
+        const currentScrollLeft = useEditorStore.getState().scrollLeft;
+        updateDragPosition(clientX, clientY, currentScrollLeft);
       });
     }
 

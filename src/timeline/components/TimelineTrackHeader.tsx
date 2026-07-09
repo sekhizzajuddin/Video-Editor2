@@ -93,6 +93,34 @@ export function TimelineTrackHeader({
         <GripVertical className="w-3 h-3 text-[#a0a0a0] shrink-0 cursor-grab" />
         <span className="text-[11px] text-white font-medium truncate">{track.name}</span>
         
+        {track.subtitleVariants && Object.keys(track.subtitleVariants).length > 0 && (
+          <select
+            value={track.selectedSubtitleLanguage || ''}
+            onChange={(e) => {
+              e.stopPropagation();
+              const lang = e.target.value;
+              const store = useEditorStore.getState();
+              const newTracks = store.tracks.map(t => {
+                if (t.id === track.id) {
+                  return {
+                    ...t,
+                    selectedSubtitleLanguage: lang,
+                    clips: t.subtitleVariants![lang] || []
+                  };
+                }
+                return t;
+              });
+              useEditorStore.setState({ tracks: newTracks });
+            }}
+            onClick={e => e.stopPropagation()}
+            className="ml-2 bg-[#2a2a2a] border border-[#3e3e3e] text-[10px] text-white rounded px-1 py-0.5 outline-none cursor-pointer"
+          >
+            {Object.keys(track.subtitleVariants).map(lang => (
+              <option key={lang} value={lang}>{lang}</option>
+            ))}
+          </select>
+        )}
+
         {linkedFxTrack && (
           <span
             className="ml-1.5 px-1 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-[3px] text-[8px] font-semibold uppercase tracking-wider scale-90"

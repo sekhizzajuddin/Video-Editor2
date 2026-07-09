@@ -292,6 +292,8 @@ export function PropertiesPanel() {
 
   const [isAnalyzingMotionGraphics, setIsAnalyzingMotionGraphics] = useState(false);
   const [motionGraphicsAnalyzeProgress, setMotionGraphicsAnalyzeProgress] = useState('');
+  const [isGeneratingKineticTypo, setIsGeneratingKineticTypo] = useState(false);
+  const [kineticTypoProgress, setKineticTypoProgress] = useState(0);
   const [motionGraphicsSuggestions, setMotionGraphicsSuggestions] = useState<AIMotionGraphicSuggestion[] | null>(null);
   const [showMotionGraphicsDesigner, setShowMotionGraphicsDesigner] = useState(false);
 
@@ -378,65 +380,51 @@ export function PropertiesPanel() {
     }
   };
 
-  const handleAiMotionGraphicsDesign = async () => {
-    if (!selectedClip) return;
-    const gKey = geminiApiKey || sessionStorage.getItem('procut_gemini_key') || envGeminiKey;
-    if (!gKey) {
-      toast.error('Please enter your Gemini API Key first (or configure VITE_GEMINI_API_KEY in your environment).');
-      return;
-    }
-
-    const videoEl = videoElements.get(selectedClip.id);
-    if (!videoEl) {
-      toast.error('Video player is not loaded yet. Try seeking or playing first.');
-      return;
-    }
-
-    setIsAnalyzingMotionGraphics(true);
-    setMotionGraphicsAnalyzeProgress('Compiling storyboard...');
-
+  const handleGenerateKineticTypography = async () => {
+    if (!selectedClip || !selectedTrack) return;
+    
+    setIsGeneratingKineticTypo(true);
+    setKineticTypoProgress(0);
+    
     try {
-      // 1. Compile storyboard chunks (10s intervals)
-      const chunks = await compileStoryboard(
-        videoEl,
-        selectedClip.trimStart,
-        selectedClip.duration,
-        (progress) => {
-          setMotionGraphicsAnalyzeProgress(`Compiling storyboard ${Math.round(progress * 100)}%`);
-        }
-      );
+      const { generateKineticTypography } = await import('@/utils/kineticTypography');
+      await generateKineticTypography(selectedClip, selectedTrack.id, (p) => setKineticTypoProgress(p));
+      toast.success("Kinetic Typography Generated!");
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Kinetic Typography failed: ${e.message || e}`);
+    } finally {
+      setIsGeneratingKineticTypo(false);
+    }
+  };
 
-      // 2. Analyze each chunk with Gemini 2.0 Flash Vision
-      setMotionGraphicsAnalyzeProgress('Gemini vision recommending motion graphics...');
-      const chunkPromises = chunks.map(async (chunk, i) => {
-        try {
-          const suggestions = await analyzeMotionGraphicsWithGemini(
-            chunk.base64Image,
-            chunk.duration,
-            gKey
-          );
-          return suggestions.map((s) => ({
-            ...s,
-            start: s.start + (i * 10),
-            end: s.end + (i * 10)
-          }));
-        } catch (err) {
-          console.warn('[AI Storyboard] Motion chunk failed to process, skipping:', err);
-          return [];
-        }
-      });
-
-      const suggestionsArrays = await Promise.all(chunkPromises);
-      const allSuggestions = suggestionsArrays.flat();
-
-      if (allSuggestions.length === 0) {
-        toast.info('No motion graphics suggested for this segment.');
-        return;
+  const handleAiMotionGraphicsDesign = async () => {
+    if (!selectedClip || !selectedTrack) return;
+    
+    setIsAnalyzingMotionGraphics(true);
+    setMotionGraphicsAnalyzeProgress('Extracting Frames...');
+    
+    try {
+      const { analyzeSceneForMotionGraphics } = await import('@/utils/aiClient');
+      const { extractFramesFromVideo } = await import('@/utils/frameExtractor');
+      
+      const media = mediaLibrary.find(m => m.id === selectedClip.mediaId);
+      if (!media || !media.url || media.url === 'PENDING_RESTORE') {
+        throw new Error('Media not available for analysis');
       }
 
-      setMotionGraphicsSuggestions(allSuggestions);
-      setShowMotionGraphicsDesigner(true);
+      const frames = await extractFramesFromVideo(media.url, 2, selectedClip.trimStart, selectedClip.trimStart + selectedClip.duration);
+      if (frames.length === 0) throw new Error('Could not extract frames');
+
+      setMotionGraphicsAnalyzeProgress('Analyzing Context (Gemini 2.0)...');
+      
+      const suggestions = await analyzeSceneForMotionGraphics(frames, 'Suggest 3 lower-thirds or motion graphic templates');
+      
+      console.log("Suggestions:", suggestions);
+      toast.success("Design suggestions logged to console (Demo)");
+      
     } catch (e: any) {
+      console.error(e);
       toast.error(`AI Motion Graphics Design failed: ${e.message || e}`);
     } finally {
       setIsAnalyzingMotionGraphics(false);
@@ -4613,15 +4601,15 @@ export function PropertiesPanel() {
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
             <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Effect Settings</h3>
 
-            {/* AI Motion Graphics Suggester */}
+            {/* AI Text & Motion Graphics */}
             {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
               <div className="bg-[#142323] border border-teal-500/30 rounded p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-teal-400" />
-                  <span className="text-xs text-white font-semibold">AI Motion Graphics Suggester</span>
+                  <span className="text-xs text-white font-semibold">AI Motion & Text Gen</span>
                 </div>
                 <p className="text-[11px] text-[#90b8b8]">
-                  Automatically suggest 3-4 professional motion graphics, kinetic typography, or lower-thirds overlay titles based on visual scene analysis.
+                  Automatically generate subtitles, kinetic typography, or motion graphics for this clip.
                 </p>
 
                 {/* API Keys Configuration Panel (Only if Gemini key is missing) */}
@@ -4643,21 +4631,48 @@ export function PropertiesPanel() {
                   </div>
                 )}
 
-                {isAnalyzingMotionGraphics ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e2828] rounded border border-teal-500/20">
-                    <Loader2 className="w-4 h-4 text-teal-500 animate-spin" />
-                    <span className="text-[10px] text-teal-400 font-medium">
-                      {motionGraphicsAnalyzeProgress}...
-                    </span>
-                  </div>
-                ) : (
+                <div className="flex flex-col gap-2">
                   <button
-                    onClick={handleAiMotionGraphicsDesign}
-                    className="w-full py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md"
+                    onClick={() => {
+                      toast.info("Use the Auto-Captions tool in the top toolbar for timeline translation.");
+                    }}
+                    className="w-full py-1.5 bg-[#2a2a2a] hover:bg-[#3e3e3e] text-white rounded text-[11px] font-medium transition-colors border border-[#3e3e3e]"
                   >
-                    <Sparkles className="w-3.5 h-3.5" /> Suggest Motion Graphics
+                    Translate Subtitles
                   </button>
-                )}
+                  
+                  {isGeneratingKineticTypo ? (
+                    <div className="flex flex-col items-center justify-center gap-2 py-1.5 bg-[#1e2828] rounded border border-teal-500/20">
+                      <Loader2 className="w-3 h-3 text-teal-500 animate-spin" />
+                      <span className="text-[10px] text-teal-400 font-medium">
+                        {kineticTypoProgress.toFixed(0)}%
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleGenerateKineticTypography}
+                      className="w-full py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded text-[11px] font-medium transition-colors shadow-md"
+                    >
+                      Generate Advance Kinetic Typography
+                    </button>
+                  )}
+                  
+                  {isAnalyzingMotionGraphics ? (
+                    <div className="flex flex-col items-center justify-center gap-2 py-1.5 bg-[#1e2828] rounded border border-teal-500/20">
+                      <Loader2 className="w-3 h-3 text-teal-500 animate-spin" />
+                      <span className="text-[10px] text-teal-400 font-medium">
+                        {motionGraphicsAnalyzeProgress}...
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleAiMotionGraphicsDesign}
+                      className="w-full py-1.5 bg-[#2a2a2a] hover:bg-[#3e3e3e] text-white rounded text-[11px] font-medium transition-colors border border-[#3e3e3e]"
+                    >
+                      Motion Graphics
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

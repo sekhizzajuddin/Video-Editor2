@@ -1,6 +1,4 @@
-function getGeminiKey(): string {
-  return sessionStorage.getItem('procut_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-}
+import { getGeminiKey } from './aiClient';
 
 // Configuration for the Gemini Multimodal Live API
 const HOST = 'generativelanguage.googleapis.com';

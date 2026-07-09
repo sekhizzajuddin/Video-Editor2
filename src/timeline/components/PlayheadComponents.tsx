@@ -30,14 +30,13 @@ export function WorkspacePlayhead({ zoomLevel }: { zoomLevel: number }) {
 
 export function FloatingScrubTooltip({
   zoomLevel,
-  scrollLeft,
   isScrubbing,
 }: {
   zoomLevel: number;
-  scrollLeft: number;
   isScrubbing: boolean;
 }) {
   const currentTime = useEditorStore((state) => state.currentTime);
+  const scrollLeft = useEditorStore((state) => state.scrollLeft);
   if (!isScrubbing) return null;
   return (
     <div
@@ -59,12 +58,10 @@ export function PlaybackAutoScroller({
   zoomLevel,
   totalDuration,
   trackContainerRef,
-  setScrollLeftThrottled,
 }: {
   zoomLevel: number;
   totalDuration: number;
   trackContainerRef: React.RefObject<HTMLDivElement | null>;
-  setScrollLeftThrottled: (scrollLeft: number) => void;
 }) {
   const currentTime = useEditorStore((state) => state.currentTime);
   const isPlaying = useEditorStore((state) => state.isPlaying);
@@ -87,13 +84,13 @@ export function PlaybackAutoScroller({
         playheadX - visibleWidth * 0.4
       );
       container.scrollLeft = targetScroll;
-      setScrollLeftThrottled(targetScroll);
+      useEditorStore.getState().setScrollLeft(targetScroll);
     } else if (playheadX < container.scrollLeft) {
       const targetScroll = Math.max(0, playheadX - visibleWidth * 0.1);
       container.scrollLeft = targetScroll;
-      setScrollLeftThrottled(targetScroll);
+      useEditorStore.getState().setScrollLeft(targetScroll);
     }
-  }, [currentTime, isPlaying, zoomLevel, totalDuration, trackContainerRef, setScrollLeftThrottled]);
+  }, [currentTime, isPlaying, zoomLevel, totalDuration, trackContainerRef]);
 
   return null;
 }

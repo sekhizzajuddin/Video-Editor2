@@ -373,6 +373,9 @@ export interface TimelineTrack {
   volume?: number; // 0.0 to 1.0
   pan?: number;    // -1.0 to 1.0 (left to right)
   solo?: boolean;
+  // Subtitle Language support
+  selectedSubtitleLanguage?: string; // current active language code (e.g., 'EN', 'HI')
+  subtitleVariants?: Record<string, TimelineClip[]>; // maps language code to array of clips
 }
 
 export interface TimelineMarker {

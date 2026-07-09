@@ -114,3 +114,74 @@ export function clearFrameCache(mediaId?: string): void {
     frameCache.clear();
   }
 }
+
+export async function extractFramesFromVideo(
+  videoUrl: string,
+  intervalSeconds: number,
+  startTime: number,
+  endTime: number,
+  height = 48
+): Promise<string[]> {
+  const video = document.createElement('video');
+  video.preload = 'auto';
+  video.muted = true;
+  video.crossOrigin = 'anonymous';
+
+  await new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error(`Video load timeout: ${videoUrl}`)), 5000);
+    video.onloadeddata = () => {
+      clearTimeout(timeoutId);
+      resolve();
+    };
+    video.onerror = () => {
+      clearTimeout(timeoutId);
+      reject(new Error(`Failed to load video: ${videoUrl}`));
+    };
+    video.src = videoUrl;
+  });
+
+  const w = video.videoWidth;
+  const h = video.videoHeight;
+  if (!w || !h) return [];
+
+  const aspect = w / h;
+  const frameWidth = Math.round(height * aspect);
+  const frameHeight = height;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = frameWidth;
+  canvas.height = frameHeight;
+  const ctx = canvas.getContext('2d')!;
+
+  const frames: string[] = [];
+  const duration = endTime - startTime;
+  const count = Math.max(1, Math.floor(duration / intervalSeconds));
+
+  for (let i = 0; i < count; i++) {
+    const seekTime = startTime + i * intervalSeconds;
+    if (seekTime > video.duration) break;
+
+    await new Promise<void>((resolve) => {
+      video.currentTime = seekTime;
+      let fallbackTimeout: any;
+      const onSeeked = () => {
+        clearTimeout(fallbackTimeout);
+        video.removeEventListener('seeked', onSeeked);
+        resolve();
+      };
+      video.addEventListener('seeked', onSeeked);
+      fallbackTimeout = setTimeout(() => {
+        video.removeEventListener('seeked', onSeeked);
+        resolve();
+      }, 1000);
+    });
+
+    ctx.drawImage(video, 0, 0, frameWidth, frameHeight);
+    frames.push(canvas.toDataURL('image/jpeg', 0.5));
+  }
+
+  video.src = '';
+  video.load();
+
+  return frames;
+}
