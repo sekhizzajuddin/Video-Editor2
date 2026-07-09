@@ -360,6 +360,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
         el.addEventListener('canplay', stableTriggerRedraw);
 
         getMediaContainer().appendChild(el);
+        el.load(); // Force the browser to start fetching the video
+        
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
         initAudioGraph(entry);
         pool.set(clipId, entry);
@@ -371,6 +373,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
         el.src = media.url;
         el.style.display = 'none';
         getMediaContainer().appendChild(el);
+        el.load(); // Force the browser to start fetching the audio
+        
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'audio' };
         initAudioGraph(entry);
         pool.set(clipId, entry);
@@ -393,8 +397,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
           URL.revokeObjectURL(entry.el.src);
         }
         entry.el.src = '';
-        if (entry.audioCtx) {
-          entry.audioCtx.close().catch(() => {});
+        if (entry.sourceNode) {
+          try { entry.sourceNode.disconnect(); } catch (e) {}
         }
         entry.el.remove();
         pool.delete(clipId);
@@ -923,8 +927,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
           URL.revokeObjectURL(entry.el.src);
         }
         entry.el.src = '';
-        if (entry.audioCtx) {
-          entry.audioCtx.close().catch(() => {});
+        if (entry.sourceNode) {
+          try { entry.sourceNode.disconnect(); } catch (e) {}
         }
         entry.el.remove();
       }

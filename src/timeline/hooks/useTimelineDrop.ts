@@ -38,7 +38,8 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       if (transitionName && track && track.type === 'video') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
-        const dropTime = x / zoomLevel;
+        const scrollLeft = timelineState?.trackContainerRef.current?.scrollLeft || 0;
+        const dropTime = (x + scrollLeft) / zoomLevel;
         // Find the clip at the drop position
         const hitClip = track.clips.find(
           (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
