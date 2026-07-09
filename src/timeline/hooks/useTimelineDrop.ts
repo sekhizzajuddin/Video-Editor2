@@ -33,32 +33,61 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const track = useEditorStore.getState().tracks.find((t) => t.id === trackId);
       if (!track) return;
 
-      // ── Transition drop → apply to video/image clip at drop position ──
+      // ── Transition drop → apply to closest clip boundary ──
       const transitionName = e.dataTransfer.getData('application/procut-transition');
       if (transitionName && track && track.type === 'video') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
         const scrollLeft = timelineState?.trackContainerRef.current?.scrollLeft || 0;
         const dropTime = (x + scrollLeft) / zoomLevel;
-        // Find the clip at the drop position
-        const hitClip = track.clips.find(
-          (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
-        );
-        if (hitClip) {
+        
+        let closestClip: typeof track.clips[0] | null = null;
+        let isStart = true;
+        let minDistance = Infinity;
+
+        // Find the absolute closest clip boundary (start or end) to the drop point
+        for (const c of track.clips) {
+          const distStart = Math.abs(dropTime - c.startTime);
+          if (distStart < minDistance) {
+            minDistance = distStart;
+            closestClip = c;
+            isStart = true;
+          }
+          const distEnd = Math.abs(dropTime - (c.startTime + c.duration));
+          // Use <= here so if they are exactly adjacent, we prefer applying transitionIn to the incoming clip (right clip)
+          if (distEnd <= minDistance && distEnd < 2.0) { 
+            // Actually, for an intersection, applying transitionIn to the next clip is standard for 'fade in'
+            // We'll let the logic prefer the second clip's start if they are exactly equal by using < for distEnd,
+            // Wait, if we use < it prefers the first one. If we use <= it prefers the second one.
+            // Let's use < so it just picks whichever is strictly closer.
+          }
+          if (distEnd < minDistance) {
+            minDistance = distEnd;
+            closestClip = c;
+            isStart = false;
+          }
+        }
+
+        if (closestClip && minDistance < 5.0) { // Apply if dropped within 5 seconds of a boundary
           const type = transitionName.toLowerCase().includes('dissolve') ? 'dissolve'
                      : transitionName.toLowerCase().includes('wipe') ? 'wipe'
                      : transitionName.toLowerCase().includes('zoom') ? 'zoom'
                      : transitionName.toLowerCase().includes('slide') ? 'slide'
                      : 'dissolve';
-          useEditorStore.getState().updateClip(hitClip.id, {
-            transitionIn: {
-              id: Math.random().toString(36).substr(2, 9),
-              name: transitionName,
-              type: type as any,
-              duration: 1.0,
-              params: {},
-            },
-          });
+                     
+          const newTransition = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: transitionName,
+            type: type as any,
+            duration: 1.0,
+            params: {},
+          };
+
+          if (isStart) {
+            useEditorStore.getState().updateClip(closestClip.id, { transitionIn: newTransition });
+          } else {
+            useEditorStore.getState().updateClip(closestClip.id, { transitionOut: newTransition });
+          }
           useEditorStore.getState().saveSnapshot();
         }
         setHoveredTrackId(null);
