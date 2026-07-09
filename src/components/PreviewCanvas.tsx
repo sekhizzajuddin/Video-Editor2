@@ -626,17 +626,22 @@ export function PreviewCanvas() {
             let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity']);
       
       const localTime = currentTime - clip.startTime;
-      if (clip.transitionIn?.type === 'dissolve' && localTime < 1 && localTime >= 0) {
-        aOpacity *= (localTime / 1);
-      } else if (clip.transitionOut?.type === 'dissolve' && localTime > clip.duration - 1 && localTime <= clip.duration) {
-        aOpacity *= ((clip.duration - localTime) / 1);
+      // FIX: Use the actual configured transition duration instead of hardcoded 1s
+      if (clip.transitionIn?.type === 'dissolve') {
+        const tDur = clip.transitionIn.duration || 1;
+        if (localTime >= 0 && localTime < tDur) aOpacity *= (localTime / tDur);
+      } else if (clip.transitionOut?.type === 'dissolve') {
+        const tDur = clip.transitionOut.duration || 1;
+        if (localTime > clip.duration - tDur && localTime <= clip.duration) aOpacity *= ((clip.duration - localTime) / tDur);
       }
       
       let slideX = 0;
-      if (clip.transitionIn?.type === 'slide' && localTime < 1 && localTime >= 0) {
-        slideX = (1 - (localTime / 1)) * -1000;
-      } else if (clip.transitionOut?.type === 'slide' && localTime > clip.duration - 1 && localTime <= clip.duration) {
-        slideX = ((localTime - (clip.duration - 1)) / 1) * 1000;
+      if (clip.transitionIn?.type === 'slide') {
+        const tDur = clip.transitionIn.duration || 1;
+        if (localTime >= 0 && localTime < tDur) slideX = (1 - (localTime / tDur)) * -1000;
+      } else if (clip.transitionOut?.type === 'slide') {
+        const tDur = clip.transitionOut.duration || 1;
+        if (localTime > clip.duration - tDur && localTime <= clip.duration) slideX = ((localTime - (clip.duration - tDur)) / tDur) * 1000;
       }
 
       const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
@@ -1299,8 +1304,13 @@ export function PreviewCanvas() {
           frameSource = videoEl;
           sourceW = videoEl.videoWidth || W;
           sourceH = videoEl.videoHeight || H;
-        } else if (!isPlaying) {
-          // Try frame cache for smooth scrubbing
+        } else {
+          // FIX: Fallback chain for split clips or newly created elements not yet ready:
+          // 1. Try this clip's own frame cache
+          // 2. Try any OTHER video element with the same mediaId (e.g. sibling split clips)
+          // 3. Try any OTHER clip's frame cache with the same mediaId
+
+          // 1. Own frame cache
           const clipCache = frameCache.get(clip.id);
           if (clipCache && clipCache.length > 0) {
             const mediaTime = getMediaTimeForClip({
@@ -1309,20 +1319,66 @@ export function PreviewCanvas() {
               speed: clip.speed, speedRamp: (clip as any).speedRamp
             }, currentTime);
             const roundedTime = Math.round(mediaTime * 30) / 30;
-            // Find nearest cached frame (binary search for efficiency)
             let bestIdx = 0;
             let bestDist = Infinity;
             for (let i = 0; i < clipCache.length; i++) {
               const dist = Math.abs(clipCache[i].time - roundedTime);
-              if (dist < bestDist) {
-                bestDist = dist;
-                bestIdx = i;
-              }
+              if (dist < bestDist) { bestDist = dist; bestIdx = i; }
             }
-            if (bestDist < 0.2) { // Accept frames within ~6 frames distance
+            if (bestDist < 0.5) {
               frameSource = clipCache[bestIdx].bitmap;
               sourceW = clipCache[bestIdx].bitmap.width;
               sourceH = clipCache[bestIdx].bitmap.height;
+            }
+          }
+
+          // 2. Try sibling video element with same mediaId
+          if (!frameSource) {
+            const targetMediaTime = getMediaTimeForClip({
+              id: clip.id, startTime: clip.startTime,
+              duration: clip.duration, trimStart: clip.trimStart,
+              speed: clip.speed, speedRamp: (clip as any).speedRamp
+            }, currentTime);
+            for (const [otherId, otherEl] of videoElements) {
+              if (otherId === clip.id) continue;
+              // Find the clip that owns this element to check mediaId
+              const ownerClip = tracks.flatMap((t: any) => t.clips).find((c: any) => c.id === otherId);
+              if (ownerClip?.mediaId === clip.mediaId && otherEl.readyState >= 2 && otherEl.videoWidth > 0) {
+                // Seek this sibling to the correct time if needed
+                const siblingDrift = Math.abs(otherEl.currentTime - targetMediaTime);
+                if (siblingDrift < 2.0) { // Only use if reasonably close
+                  frameSource = otherEl;
+                  sourceW = otherEl.videoWidth || W;
+                  sourceH = otherEl.videoHeight || H;
+                  break;
+                }
+              }
+            }
+          }
+
+          // 3. Try another clip's frame cache with same mediaId
+          if (!frameSource) {
+            const targetMediaTime = getMediaTimeForClip({
+              id: clip.id, startTime: clip.startTime,
+              duration: clip.duration, trimStart: clip.trimStart,
+              speed: clip.speed, speedRamp: (clip as any).speedRamp
+            }, currentTime);
+            for (const [cacheId, cachedFrames] of frameCache) {
+              if (cacheId === clip.id || !cachedFrames || cachedFrames.length === 0) continue;
+              const ownerClip = tracks.flatMap((t: any) => t.clips).find((c: any) => c.id === cacheId);
+              if (ownerClip?.mediaId !== clip.mediaId) continue;
+              const roundedTime = Math.round(targetMediaTime * 30) / 30;
+              let bestIdx = 0, bestDist = Infinity;
+              for (let i = 0; i < cachedFrames.length; i++) {
+                const dist = Math.abs(cachedFrames[i].time - roundedTime);
+                if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+              }
+              if (bestDist < 0.5) {
+                frameSource = cachedFrames[bestIdx].bitmap;
+                sourceW = cachedFrames[bestIdx].bitmap.width;
+                sourceH = cachedFrames[bestIdx].bitmap.height;
+                break;
+              }
             }
           }
         }
@@ -2218,6 +2274,11 @@ export function PreviewCanvas() {
 
     let isRendering = false;
     const tick = async () => {
+      // FIX: During playback, always mark a new frame as pending so the render loop
+      // never skips a frame even if the previous render took >16ms.
+      if (useEditorStore.getState().isPlaying) {
+        framePendingRef.current = true;
+      }
       if (tabVisible && framePendingRef.current && !isRendering) {
         framePendingRef.current = false;
         isRendering = true;

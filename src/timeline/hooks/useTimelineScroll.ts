@@ -40,9 +40,14 @@ export function useTimelineScroll({
 
   // Sync scroll positions when store's scrollLeft changes externally
   useEffect(() => {
+    // FIX: Track previous value so we only sync DOM when scrollLeft actually changed,
+    // not on every unrelated store mutation (prevents unnecessary DOM writes).
+    let prevScrollLeft = useEditorStore.getState().scrollLeft;
     const unsubscribe = useEditorStore.subscribe(
       (state) => {
         const scrollLeft = state.scrollLeft;
+        if (scrollLeft === prevScrollLeft) return; // skip if unchanged
+        prevScrollLeft = scrollLeft;
         if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== scrollLeft) {
           rulerContainerRef.current.scrollLeft = scrollLeft;
         }
@@ -54,6 +59,7 @@ export function useTimelineScroll({
     return unsubscribe;
   }, [rulerContainerRef, trackContainerRef]);
 
+
   // Native wheel pinch-to-zoom gesture listener
   useEffect(() => {
     const el = trackContainerRef.current;
@@ -61,11 +67,16 @@ export function useTimelineScroll({
 
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
-        // Pinch-to-zoom
+        // Pinch-to-zoom / Ctrl+Scroll → zoom timeline
         e.preventDefault();
         const store = useEditorStore.getState();
         const currentZoom = store.zoomLevel;
-        const zoomDelta = e.deltaY > 0 ? -10 : 10;
+        // FIX: Make zoom delta proportional to the wheel speed for smooth trackpad support.
+        // Use a small sensitivity factor so trackpad deltas (typically 1-10) feel gradual,
+        // and mouse wheel clicks (typically 100-120) feel snappy.
+        const rawDelta = Math.abs(e.deltaY);
+        const sensitivity = rawDelta < 20 ? 0.08 : 0.12; // trackpad vs mouse wheel
+        const zoomDelta = e.deltaY > 0 ? -(rawDelta * sensitivity) : (rawDelta * sensitivity);
         const newZoom = Math.min(Math.max(currentZoom + zoomDelta, 20), 400);
 
         const rect = el.getBoundingClientRect();
