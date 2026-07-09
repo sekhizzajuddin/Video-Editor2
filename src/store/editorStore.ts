@@ -2082,16 +2082,26 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Clipboard
   copyClip: (copyType = 'whole') => {
-    const { tracks, selectedClipIds, selectedClipId } = get();
-    // Default to the single selected clip if array is empty (for fallback)
-    const targetIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
+    const { tracks, selectedClipIds, selectedClipId, selectedOverLayerId } = get();
+    // Default to the single selected clip/overlayer if array is empty (for fallback)
+    let targetIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
+    
+    if (targetIds.length === 0 && selectedOverLayerId) {
+      targetIds = [selectedOverLayerId];
+    }
+    
     if (targetIds.length === 0) return;
 
     const clipsToCopy = [];
     for (const track of tracks) {
       for (const clip of track.clips) {
         if (targetIds.includes(clip.id)) {
-          clipsToCopy.push({ ...clip, effects: [...clip.effects] });
+          clipsToCopy.push({ ...clip, effects: [...clip.effects], trackType: track.type, isOverLayer: false });
+        }
+      }
+      for (const ol of track.overLayers || []) {
+        if (targetIds.includes(ol.id)) {
+          clipsToCopy.push({ ...ol, effects: [...(ol.effects || [])], trackType: track.type, isOverLayer: true });
         }
       }
     }
@@ -2139,7 +2149,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     let targetTrackId = selectedTrackId;
     if (!targetTrackId) {
       if (tracks.length === 0) return;
-      const matchTrack = tracks.find(t => t.type === (firstCopiedClip.mediaId ? 'video' : 'text')); // simplified fallback
+      const preferredType = firstCopiedClip.trackType || (firstCopiedClip.mediaId ? 'video' : 'text');
+      const matchTrack = tracks.find(t => t.type === preferredType);
       targetTrackId = matchTrack ? matchTrack.id : tracks[0].id;
     }
     
@@ -2169,12 +2180,49 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         delete pastedClip.mask;
       }
       
-      return pastedClip as import("@/types").TimelineClip;
+      return pastedClip;
     });
 
-    newClips.forEach(c => get().addClip(c));
-    // Select newly pasted clips
-    set({ selectedClipIds: newClips.map(c => c.id), selectedClipId: newClips[newClips.length - 1].id });
+    const regularClipsToPaste: any[] = [];
+    
+    newClips.forEach(c => {
+      if (c.isOverLayer) {
+        set((state) => {
+          const newTracks = state.tracks.map((t) => {
+            if (t.id === c.trackId) {
+              const cleanClip = { ...c };
+              delete cleanClip.isOverLayer;
+              delete cleanClip.trackType;
+              return {
+                ...t,
+                overLayers: [...(t.overLayers || []), cleanClip],
+              };
+            }
+            return t;
+          });
+          return {
+            tracks: newTracks,
+            selectedOverLayerId: c.id,
+            selectedClipId: null,
+            selectedClipIds: [],
+          };
+        });
+      } else {
+        const cleanClip = { ...c };
+        delete cleanClip.isOverLayer;
+        delete cleanClip.trackType;
+        regularClipsToPaste.push(cleanClip);
+      }
+    });
+
+    if (regularClipsToPaste.length > 0) {
+      regularClipsToPaste.forEach(c => get().addClip(c));
+      set({
+        selectedClipIds: regularClipsToPaste.map(c => c.id),
+        selectedClipId: regularClipsToPaste[regularClipsToPaste.length - 1].id,
+        selectedOverLayerId: null,
+      });
+    }
   },
   cutClip: () => {
     const { selectedClipId } = get();

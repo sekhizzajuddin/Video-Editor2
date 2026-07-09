@@ -457,7 +457,7 @@ export interface EditorState {
   masterAudioStream: MediaStream | null;
 
   // Clipboard
-  clipboardData: { type: 'clip' | 'style' | 'whole'; clips: TimelineClip[] } | null;
+  clipboardData: { type: 'clip' | 'style' | 'whole'; clips: (TimelineClip | OverLayerClip)[] } | null;
   clipboardClip: TimelineClip | null;
 
   // History for undo/redo

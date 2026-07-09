@@ -488,61 +488,13 @@ Return your response ONLY as a JSON array of objects:
         throw new Error('No words detected in this clip. Ensure the clip has clear audible speech.');
       }
 
-      const hasNonLatin = result.words.some((w: any) => /[\u0600-\u06FF\u0900-\u097F]/.test(w.word));
-      if (hasNonLatin) {
-        try {
-          const wordsToTransliterate = result.words.map((w: any, idx: number) => ({ idx, word: w.word }));
-          const chunkSize = 60;
-          for (let c = 0; c < wordsToTransliterate.length; c += chunkSize) {
-            const chunk = wordsToTransliterate.slice(c, c + chunkSize);
-            const translitPrompt2 = `You are a transliteration engine. Convert the following Urdu/Hindi words to Hinglish (Roman/Latin script). Return ONLY a raw JSON array, no markdown, no explanation.
-
-Input: ${JSON.stringify(chunk)}
-
-Rules:
-- Output ONLY: [{"idx":0,"word":"roman_word"},...]
-- Same length as input (${chunk.length} items)
-- Transliterate sound, don't translate meaning (بہت → bahut, نہیں → nahi, کیا → kya, হ্যাঁ → haan)
-- Keep numbers/punctuation unchanged
-- Use lowercase Latin letters only`;
-
-            const rawResponse = await puter.ai.chat(translitPrompt2);
-            let responseText = '';
-            if (typeof rawResponse === 'string') {
-              responseText = rawResponse;
-            } else if (rawResponse?.message?.content) {
-              responseText = String(rawResponse.message.content);
-            } else if (rawResponse?.content) {
-              responseText = String(rawResponse.content);
-            } else if (rawResponse?.text) {
-              responseText = String(rawResponse.text);
-            } else {
-              responseText = String(rawResponse);
-            }
-            
-            const parsedWords = parseTransliteratedResponse(responseText);
-            if (parsedWords && Array.isArray(parsedWords)) {
-              for (const item of parsedWords) {
-                if (item && typeof item === 'object' && 'idx' in item && 'word' in item) {
-                  if (result.words[item.idx]) {
-                    result.words[item.idx].word = String(item.word);
-                  }
-                }
-              }
-            }
-          }
-        } catch (translitErr) {
-          console.error('Failed to transliterate to Hinglish:', translitErr);
-        }
-      }
-
       let textTrack = useEditorStore.getState().tracks.find(t => t.type === 'text');
       if (!textTrack) {
         useEditorStore.getState().addTrack('text');
         const freshTracks = useEditorStore.getState().tracks;
-        textTrack = freshTracks.find(t => t.type === 'text') || freshTracks.find(t => t.type === 'video');
+        textTrack = freshTracks.find(t => t.type === 'text');
         if (!textTrack) {
-          throw new Error('No text or video track is available to place subtitles.');
+          throw new Error('Could not create a text track to place subtitles.');
         }
       }
 

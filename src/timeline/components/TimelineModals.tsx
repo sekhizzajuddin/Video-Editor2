@@ -81,6 +81,7 @@ export function TimelineModals({
     removeMarker,
     updateClip,
     updateOverLayer,
+    addOverLayer,
   } = useEditorStore();
 
   const handleEditMarker = (markerId: string) => {
@@ -129,20 +130,35 @@ export function TimelineModals({
         >
           {contextMenu.clipId === '' ? (
             // Clicked track background empty options
-            <button
-              className="w-full text-left px-3 py-2 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              onClick={() => {
-                if (useEditorStore.getState().clipboardClip) {
-                  useEditorStore.getState().pasteClip();
-                } else {
-                  alert('Clipboard is empty.');
-                }
-                setContextMenu(null);
-              }}
-            >
-              <Box className="w-3.5 h-3.5" />
-              Paste Clip Here
-            </button>
+            <>
+              {contextMenu.trackId && (
+                <button
+                  className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
+                  onClick={() => {
+                    addOverLayer(contextMenu.trackId!);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                  Add Over Layer
+                </button>
+              )}
+              <button
+                className="w-full text-left px-3 py-2 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                onClick={() => {
+                  const state = useEditorStore.getState();
+                  if (state.clipboardData || state.clipboardClip) {
+                    state.pasteClip();
+                  } else {
+                    alert('Clipboard is empty.');
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <Box className="w-3.5 h-3.5" />
+                Paste Clip Here
+              </button>
+            </>
           ) : (
             // Clicked a clip
             <>
@@ -196,6 +212,18 @@ export function TimelineModals({
                 </>
               ) : (
                 <>
+                  {contextMenu.trackId && (
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
+                      onClick={() => {
+                        addOverLayer(contextMenu.trackId!);
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                      Add Over Layer
+                    </button>
+                  )}
                   <div className="px-3 pb-1 text-[10px] text-[#a0a0a0] font-semibold border-b border-[#3e3e3e] mb-1 uppercase tracking-wider">
                     Clip Options
                   </div>
