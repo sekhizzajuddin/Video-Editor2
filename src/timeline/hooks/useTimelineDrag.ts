@@ -23,6 +23,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     moveClip,
     moveClips,
     updateClip,
+    setDraggingClipId,
     resolveOverlaps,
     selectClip,
     selectClips,
@@ -37,6 +38,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     hoveredOverLayerRegion,
     pinnedOverLayerTrackId,
   } = useEditorStore();
+
+  const dragRafIdRef = useRef<number | null>(null);
+  const resizeRafIdRef = useRef<number | null>(null);
+  const resizeOverLayerRafIdRef = useRef<number | null>(null);
 
   const {
     trackContainerRef,
@@ -373,6 +378,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
         });
 
+        setDraggingClipId(clip.id);
         setDragState({
           clipId: clip.id,
           startX: e.clientX,
@@ -411,6 +417,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
         });
 
+        setDraggingClipId(clip.id);
         setDragState({
           clipId: clip.id,
           startX: e.clientX,
@@ -456,6 +463,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       }
 
       startTransactionSafe();
+      setDraggingClipId(clip.id);
       setDragState({
         clipId: clip.id,
         startX: e.clientX,
@@ -469,7 +477,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       e.stopPropagation();
     },
-    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, scrollLeft, startTransactionSafe, startResize, setDragState],
+    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, scrollLeft, startTransactionSafe, startResize, setDragState, setDraggingClipId],
   );
 
   const handleTimelineClick = useCallback(
@@ -540,13 +548,23 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     if (dragState && dragState.draggedClips && dragState.draggedClips.length > 0) {
       dragMouseXRef.current = e.clientX;
       dragMouseYRef.current = e.clientY;
-      updateDragPosition(e.clientX, e.clientY, scrollLeft);
+      if (dragRafIdRef.current !== null) {
+        cancelAnimationFrame(dragRafIdRef.current);
+      }
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+      dragRafIdRef.current = requestAnimationFrame(() => {
+        dragRafIdRef.current = null;
+        updateDragPosition(clientX, clientY, scrollLeft);
+      });
     }
 
     if (dragOverLayerState) {
+      const clientX = e.clientX;
+      const clientY = e.clientY;
       if (!(window as any).__olDragRaf) {
         (window as any).__olDragRaf = requestAnimationFrame(() => {
-          const dx = e.clientX - dragOverLayerState.startX;
+          const dx = clientX - dragOverLayerState.startX;
           const dt = dx / zoomLevel;
           let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
           
@@ -563,7 +581,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
           if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
             const trackRect = trackEl.getBoundingClientRect();
-            const relY = e.clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
+            const relY = clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
             const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
             reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
           }
@@ -573,215 +591,229 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     }
 
     if (resizeOverLayerState) {
-      const dx = e.clientX - resizeOverLayerState.startX;
-      const dt = dx / zoomLevel;
-      
-      const track = tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
-      const ol = track?.overLayers.find((ol) => ol.id === resizeOverLayerState.overLayerId);
-      if (ol) {
-        if (resizeOverLayerState.edge === 'right') {
-          const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration + dt);
-          updateOverLayer(ol.id, { duration: newDuration });
-        } else {
-          const newStartTime = Math.max(0, resizeOverLayerState.originalStartTime + dt);
-          const delta = newStartTime - resizeOverLayerState.originalStartTime;
-          const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration - delta);
-          if (newDuration > 0.1) {
-            updateOverLayer(ol.id, { startTime: newStartTime, duration: newDuration });
+      const clientX = e.clientX;
+      if (resizeOverLayerRafIdRef.current !== null) {
+        cancelAnimationFrame(resizeOverLayerRafIdRef.current);
+      }
+      resizeOverLayerRafIdRef.current = requestAnimationFrame(() => {
+        resizeOverLayerRafIdRef.current = null;
+        const dx = clientX - resizeOverLayerState.startX;
+        const dt = dx / zoomLevel;
+        
+        const track = tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
+        const ol = track?.overLayers.find((ol) => ol.id === resizeOverLayerState.overLayerId);
+        if (ol) {
+          if (resizeOverLayerState.edge === 'right') {
+            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration + dt);
+            updateOverLayer(ol.id, { duration: newDuration });
+          } else {
+            const newStartTime = Math.max(0, resizeOverLayerState.originalStartTime + dt);
+            const delta = newStartTime - resizeOverLayerState.originalStartTime;
+            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration - delta);
+            if (newDuration > 0.1) {
+              updateOverLayer(ol.id, { startTime: newStartTime, duration: newDuration });
+            }
           }
         }
-      }
+      });
     }
 
     if (resizeState) {
-      const dx = e.clientX - resizeState.startX;
-      const dt = dx / zoomLevel;
-      const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === resizeState.clipId);
-      if (!clip) return;
-
-      const media = getMediaSafe(clip);
-      const sourceDuration = media.duration || 30;
-
-      if (activeTool === 'rateStretch') {
-        const originalSpeed = resizeState.originalSpeed || 1.0;
-        const sourceContentDuration = resizeState.originalDuration * originalSpeed;
-
-        if (resizeState.edge === 'right') {
-          const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-          const newSpeed = sourceContentDuration / newDuration;
-          const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
-          const clampedDuration = sourceContentDuration / clampedSpeed;
-          const delta = clampedDuration - resizeState.originalDuration;
-
-          updateClip(resizeState.clipId, {
-            duration: clampedDuration,
-            speed: clampedSpeed,
-            trimStart: resizeState.originalTrimStart,
-            trimEnd: resizeState.originalTrimEnd,
-          });
-
-          if (resizeState.rippleClips) {
-            resizeState.rippleClips.forEach((c) => {
-              updateClip(c.id, {
-                startTime: c.originalStartTime + delta,
-              });
-            });
-          }
-        } else {
-          const shrink = -dt;
-          const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
-          const newSpeed = sourceContentDuration / newDuration;
-          const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
-          let clampedDuration = sourceContentDuration / clampedSpeed;
-          let shift = resizeState.originalDuration - clampedDuration;
-          shift = Math.max(-resizeState.originalStartTime, shift);
-          clampedDuration = resizeState.originalDuration - shift;
-          const finalSpeed = Math.min(20, Math.max(0.1, sourceContentDuration / clampedDuration));
-
-          updateClip(resizeState.clipId, {
-            startTime: resizeState.originalStartTime + shift,
-            duration: clampedDuration,
-            speed: finalSpeed,
-            trimStart: resizeState.originalTrimStart,
-            trimEnd: resizeState.originalTrimEnd,
-          });
-
-          if (resizeState.rippleClips) {
-            resizeState.rippleClips.forEach((c) => {
-              updateClip(c.id, {
-                startTime: c.originalStartTime + shift,
-              });
-            });
-          }
-        }
-        return;
+      const clientX = e.clientX;
+      if (resizeRafIdRef.current !== null) {
+        cancelAnimationFrame(resizeRafIdRef.current);
       }
+      resizeRafIdRef.current = requestAnimationFrame(() => {
+        resizeRafIdRef.current = null;
+        const dx = clientX - resizeState.startX;
+        const dt = dx / zoomLevel;
+        const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === resizeState.clipId);
+        if (!clip) return;
 
-      if (activeTool === 'ripple') {
+        const media = getMediaSafe(clip);
+        const sourceDuration = media.duration || 30;
+
+        if (activeTool === 'rateStretch') {
+          const originalSpeed = resizeState.originalSpeed || 1.0;
+          const sourceContentDuration = resizeState.originalDuration * originalSpeed;
+
+          if (resizeState.edge === 'right') {
+            const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+            const newSpeed = sourceContentDuration / newDuration;
+            const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
+            const clampedDuration = sourceContentDuration / clampedSpeed;
+            const delta = clampedDuration - resizeState.originalDuration;
+
+            updateClip(resizeState.clipId, {
+              duration: clampedDuration,
+              speed: clampedSpeed,
+              trimStart: resizeState.originalTrimStart,
+              trimEnd: resizeState.originalTrimEnd,
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + delta,
+                });
+              });
+            }
+          } else {
+            const shrink = -dt;
+            const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
+            const newSpeed = sourceContentDuration / newDuration;
+            const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
+            let clampedDuration = sourceContentDuration / clampedSpeed;
+            let shift = resizeState.originalDuration - clampedDuration;
+            shift = Math.max(-resizeState.originalStartTime, shift);
+            clampedDuration = resizeState.originalDuration - shift;
+            const finalSpeed = Math.min(20, Math.max(0.1, sourceContentDuration / clampedDuration));
+
+            updateClip(resizeState.clipId, {
+              startTime: resizeState.originalStartTime + shift,
+              duration: clampedDuration,
+              speed: finalSpeed,
+              trimStart: resizeState.originalTrimStart,
+              trimEnd: resizeState.originalTrimEnd,
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + shift,
+                });
+              });
+            }
+          }
+          return;
+        }
+
+        if (activeTool === 'ripple') {
+          if (resizeState.edge === 'right') {
+            const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+            const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+            const clamped = Math.min(newDuration, maxDuration);
+            const delta = clamped - resizeState.originalDuration;
+
+            const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
+            updateClip(resizeState.clipId, {
+              duration: clamped,
+              trimEnd: Math.max(0, newTrimEnd),
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + delta,
+                });
+              });
+            }
+          } else {
+            const shrink = -dt;
+            const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
+            const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
+            let clamped = Math.min(newDuration, maxDuration);
+            let shift = resizeState.originalDuration - clamped;
+            shift = Math.max(-resizeState.originalStartTime, shift);
+            clamped = resizeState.originalDuration - shift;
+
+            updateClip(resizeState.clipId, {
+              startTime: resizeState.originalStartTime + shift,
+              duration: clamped,
+              trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
+            });
+
+            if (resizeState.rippleClips) {
+              resizeState.rippleClips.forEach((c) => {
+                updateClip(c.id, {
+                  startTime: c.originalStartTime + shift,
+                });
+              });
+            }
+          }
+          return;
+        }
+
         if (resizeState.edge === 'right') {
-          const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
+          let newDuration = Math.max(0.1, resizeState.originalDuration + dt);
           const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
-          const clamped = Math.min(newDuration, maxDuration);
-          const delta = clamped - resizeState.originalDuration;
+          let clamped = Math.min(newDuration, maxDuration);
+
+          if (resizeState.siblingClip) {
+            const sib = resizeState.siblingClip;
+            const newAEnd = clip.trimStart + clamped * clip.speed;
+            if (newAEnd > sib.originalTrimStart) {
+              let deltaSource = newAEnd - sib.originalTrimStart;
+              let delta = deltaSource / sib.speed;
+              
+              const maxDelta = sib.originalDuration - 0.1;
+              if (delta > maxDelta) {
+                delta = Math.max(0, maxDelta);
+                deltaSource = delta * sib.speed;
+                clamped = (sib.originalTrimStart + deltaSource - clip.trimStart) / clip.speed;
+              }
+
+              updateClip(sib.id, {
+                trimStart: sib.originalTrimStart + deltaSource,
+                duration: sib.originalDuration - delta,
+                startTime: sib.originalStartTime + delta,
+              });
+            } else {
+              updateClip(sib.id, {
+                trimStart: sib.originalTrimStart,
+                duration: sib.originalDuration,
+                startTime: sib.originalStartTime,
+              });
+            }
+          }
 
           const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
           updateClip(resizeState.clipId, {
             duration: clamped,
             trimEnd: Math.max(0, newTrimEnd),
           });
-
-          if (resizeState.rippleClips) {
-            resizeState.rippleClips.forEach((c) => {
-              updateClip(c.id, {
-                startTime: c.originalStartTime + delta,
-              });
-            });
-          }
         } else {
           const shrink = -dt;
           const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
           const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
           let clamped = Math.min(newDuration, maxDuration);
           let shift = resizeState.originalDuration - clamped;
-          shift = Math.max(-resizeState.originalStartTime, shift);
-          clamped = resizeState.originalDuration - shift;
+
+          if (resizeState.siblingClip) {
+            const sib = resizeState.siblingClip;
+            const newBStart = resizeState.originalTrimStart + shift * clip.speed;
+            if (newBStart < sib.originalTrimStart + sib.originalDuration * sib.speed) {
+              let deltaSource = (sib.originalTrimStart + sib.originalDuration * sib.speed) - newBStart;
+              let delta = deltaSource / sib.speed;
+              
+              const maxDelta = sib.originalDuration - 0.1;
+              if (delta > maxDelta) {
+                delta = Math.max(0, maxDelta);
+                deltaSource = delta * sib.speed;
+                const allowedNewBStart = sib.originalTrimStart + sib.originalDuration * sib.speed - deltaSource;
+                shift = (allowedNewBStart - resizeState.originalTrimStart) / clip.speed;
+                clamped = resizeState.originalDuration - shift;
+              }
+
+              updateClip(sib.id, {
+                trimEnd: sib.originalTrimEnd + deltaSource,
+                duration: sib.originalDuration - delta,
+              });
+            } else {
+              updateClip(sib.id, {
+                trimEnd: sib.originalTrimEnd,
+                duration: sib.originalDuration,
+              });
+            }
+          }
 
           updateClip(resizeState.clipId, {
             startTime: resizeState.originalStartTime + shift,
             duration: clamped,
             trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
           });
-
-          if (resizeState.rippleClips) {
-            resizeState.rippleClips.forEach((c) => {
-              updateClip(c.id, {
-                startTime: c.originalStartTime + shift,
-              });
-            });
-          }
         }
-        return;
-      }
-
-      if (resizeState.edge === 'right') {
-        let newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-        const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
-        let clamped = Math.min(newDuration, maxDuration);
-
-        if (resizeState.siblingClip) {
-          const sib = resizeState.siblingClip;
-          const newAEnd = clip.trimStart + clamped * clip.speed;
-          if (newAEnd > sib.originalTrimStart) {
-            let deltaSource = newAEnd - sib.originalTrimStart;
-            let delta = deltaSource / sib.speed;
-            
-            const maxDelta = sib.originalDuration - 0.1;
-            if (delta > maxDelta) {
-              delta = Math.max(0, maxDelta);
-              deltaSource = delta * sib.speed;
-              clamped = (sib.originalTrimStart + deltaSource - clip.trimStart) / clip.speed;
-            }
-
-            updateClip(sib.id, {
-              trimStart: sib.originalTrimStart + deltaSource,
-              duration: sib.originalDuration - delta,
-              startTime: sib.originalStartTime + delta,
-            });
-          } else {
-            updateClip(sib.id, {
-              trimStart: sib.originalTrimStart,
-              duration: sib.originalDuration,
-              startTime: sib.originalStartTime,
-            });
-          }
-        }
-
-        const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
-        updateClip(resizeState.clipId, {
-          duration: clamped,
-          trimEnd: Math.max(0, newTrimEnd),
-        });
-      } else {
-        const shrink = -dt;
-        const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
-        const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
-        let clamped = Math.min(newDuration, maxDuration);
-        let shift = resizeState.originalDuration - clamped;
-
-        if (resizeState.siblingClip) {
-          const sib = resizeState.siblingClip;
-          const newBStart = resizeState.originalTrimStart + shift * clip.speed;
-          if (newBStart < sib.originalTrimStart + sib.originalDuration * sib.speed) {
-            let deltaSource = (sib.originalTrimStart + sib.originalDuration * sib.speed) - newBStart;
-            let delta = deltaSource / sib.speed;
-            
-            const maxDelta = sib.originalDuration - 0.1;
-            if (delta > maxDelta) {
-              delta = Math.max(0, maxDelta);
-              deltaSource = delta * sib.speed;
-              const allowedNewBStart = sib.originalTrimStart + sib.originalDuration * sib.speed - deltaSource;
-              shift = (allowedNewBStart - resizeState.originalTrimStart) / clip.speed;
-              clamped = resizeState.originalDuration - shift;
-            }
-
-            updateClip(sib.id, {
-              trimEnd: sib.originalTrimEnd + deltaSource,
-              duration: sib.originalDuration - delta,
-            });
-          } else {
-            updateClip(sib.id, {
-              trimEnd: sib.originalTrimEnd,
-              duration: sib.originalDuration,
-            });
-          }
-        }
-
-        updateClip(resizeState.clipId, {
-          startTime: resizeState.originalStartTime + shift,
-          duration: clamped,
-          trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
-        });
-      }
+      });
     }
   };
 
@@ -789,6 +821,18 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     if (scrubRafIdRef.current !== null) {
       cancelAnimationFrame(scrubRafIdRef.current);
       scrubRafIdRef.current = null;
+    }
+    if (dragRafIdRef.current !== null) {
+      cancelAnimationFrame(dragRafIdRef.current);
+      dragRafIdRef.current = null;
+    }
+    if (resizeRafIdRef.current !== null) {
+      cancelAnimationFrame(resizeRafIdRef.current);
+      resizeRafIdRef.current = null;
+    }
+    if (resizeOverLayerRafIdRef.current !== null) {
+      cancelAnimationFrame(resizeOverLayerRafIdRef.current);
+      resizeOverLayerRafIdRef.current = null;
     }
     if (isScrubbing) {
       setIsScrubbing(false);
@@ -799,6 +843,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (draggedIds.length > 0) {
         useEditorStore.getState().resolveOverlaps(draggedIds);
       }
+      setDraggingClipId(null);
       setDragState(null);
       setSnapLine(null);
       setDropPreview(null);

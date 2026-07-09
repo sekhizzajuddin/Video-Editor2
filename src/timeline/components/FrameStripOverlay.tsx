@@ -9,7 +9,7 @@ interface FrameStripOverlayProps {
   height: number;
 }
 
-export function FrameStripOverlay({
+export const FrameStripOverlay = React.memo(function FrameStripOverlay({
   media,
   clipId,
   width,
@@ -55,4 +55,4 @@ export function FrameStripOverlay({
       ))}
     </div>
   );
-}
+});

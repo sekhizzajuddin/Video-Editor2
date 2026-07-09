@@ -269,7 +269,7 @@ export function MediaPanel() {
   const [ttsLanguage, setTtsLanguage] = useState('en');
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsPitch, setTtsPitch] = useState(1);
-  const [ttsEngine, setTtsEngine] = useState<'standard' | 'neural' | 'edge'>('edge');
+  const [ttsEngine, setTtsEngine] = useState<'standard' | 'neural' | 'edge' | 'gemini'>('edge');
   const [ttsVoice, setTtsVoice] = useState('en-US-AriaNeural');
   const [isGeneratingTTS, setIsGeneratingTTS] = useState(false);
 
@@ -661,6 +661,67 @@ export function MediaPanel() {
   const previewTTS = async () => {
     if (!ttsText.trim()) return;
 
+    if (ttsEngine === 'gemini') {
+      try {
+        setIsGeneratingTTS(true);
+        const { GeminiLiveClient } = await import('@/utils/geminiLiveClient');
+        const client = new GeminiLiveClient();
+        
+        let previewChunks: Int16Array[] = [];
+        
+        client.onAudioData = (pcmData) => {
+          previewChunks.push(pcmData);
+        };
+        
+        client.onTurnComplete = () => {
+          setIsGeneratingTTS(false);
+          if (previewChunks.length > 0) {
+            // Play back the PCM chunks
+            const totalLen = previewChunks.reduce((acc, chunk) => acc + chunk.length, 0);
+            const combined = new Int16Array(totalLen);
+            let offset = 0;
+            for (const chunk of previewChunks) {
+              combined.set(chunk, offset);
+              offset += chunk.length;
+            }
+            
+            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+            const buffer = audioCtx.createBuffer(1, combined.length, 24000);
+            const channelData = buffer.getChannelData(0);
+            for (let i = 0; i < combined.length; i++) {
+              channelData[i] = combined[i] / 32768.0;
+            }
+            
+            const source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioCtx.destination);
+            source.start(0);
+          }
+          client.disconnect();
+        };
+
+        client.onError = (err) => {
+          console.error('Gemini TTS preview error:', err);
+          alert('Failed to preview Gemini voice.');
+          setIsGeneratingTTS(false);
+          client.disconnect();
+        };
+
+        await client.connect({
+          model: 'models/gemini-2.5-flash',
+          voiceName: ttsVoice,
+          systemInstruction: 'Read the text provided by the user naturally.'
+        });
+        
+        client.sendText(ttsText);
+        
+      } catch (err) {
+        console.error('Gemini TTS preview setup error:', err);
+        setIsGeneratingTTS(false);
+      }
+      return;
+    }
+
     // Cancel any running speech synthesis or custom audio element preview to prevent overlapping voices
     if (ttsAudioRef.current) {
       try {
@@ -772,7 +833,68 @@ export function MediaPanel() {
       let blob: Blob;
       let mimeType = 'audio/mp3';
       
-      if (ttsEngine === 'edge') {
+      if (ttsEngine === 'gemini') {
+        const { GeminiLiveClient } = await import('@/utils/geminiLiveClient');
+        const client = new GeminiLiveClient();
+        
+        let pcmChunks: Int16Array[] = [];
+        
+        client.onAudioData = (pcmData) => {
+          pcmChunks.push(pcmData);
+        };
+        
+        await new Promise<void>((resolve, reject) => {
+          client.onTurnComplete = () => { resolve(); };
+          client.onError = (err) => { reject(err); };
+          
+          client.connect({
+            model: 'models/gemini-2.5-flash',
+            voiceName: ttsVoice,
+            systemInstruction: 'Read the text provided by the user naturally. Generate only audio, no text.'
+          }).then(() => {
+            client.sendText(ttsText);
+          }).catch(reject);
+        });
+        
+        client.disconnect();
+        
+        if (pcmChunks.length === 0) throw new Error('No audio data received from Gemini.');
+        
+        // Combine PCM chunks
+        const totalLen = pcmChunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const combined = new Int16Array(totalLen);
+        let offset = 0;
+        for (const chunk of pcmChunks) {
+          combined.set(chunk, offset);
+          offset += chunk.length;
+        }
+        
+        // Create simple WAV blob from PCM (16-bit, 24000Hz, Mono)
+        const wavHeader = new ArrayBuffer(44);
+        const view = new DataView(wavHeader);
+        const writeString = (view: DataView, offset: number, string: string) => {
+          for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+          }
+        };
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + combined.byteLength, true);
+        writeString(view, 8, 'WAVE');
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); // PCM format
+        view.setUint16(22, 1, true); // Mono
+        view.setUint32(24, 24000, true); // Sample rate
+        view.setUint32(28, 24000 * 2, true); // Byte rate
+        view.setUint16(32, 2, true); // Block align
+        view.setUint16(34, 16, true); // Bits per sample
+        writeString(view, 36, 'data');
+        view.setUint32(40, combined.byteLength, true);
+        
+        blob = new Blob([wavHeader, combined], { type: 'audio/wav' });
+        mimeType = 'audio/wav';
+        
+      } else if (ttsEngine === 'edge') {
         const ttsUrl = `/api/tts?text=${encodeURIComponent(ttsText)}&voice=${ttsVoice}&rate=${ttsRate}&pitch=${ttsPitch}`;
         const response = await fetch(ttsUrl);
         if (!response.ok) throw new Error('Failed to generate audio from Edge TTS proxy.');
@@ -805,9 +927,10 @@ export function MediaPanel() {
       
       const audioUrl = URL.createObjectURL(blob);
       const mediaId = `tts_${Date.now()}`;
+      const engineName = ttsEngine === 'edge' ? 'Edge' : (ttsEngine === 'neural' ? 'Neural' : (ttsEngine === 'gemini' ? 'Gemini' : 'TTS'));
       const mediaItem = {
         id: mediaId,
-        name: `${ttsEngine === 'edge' ? 'Edge' : (ttsEngine === 'neural' ? 'Neural' : 'TTS')}: ${ttsText.slice(0, 25)}...`,
+        name: `${engineName}: ${ttsText.slice(0, 25)}...`,
         type: 'audio' as const,
         duration: 5,
         url: audioUrl,
@@ -1285,46 +1408,64 @@ export function MediaPanel() {
               {/* Engine Toggle */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">TTS Voice Quality</label>
-                <div className="flex gap-1 bg-[#141414] p-1 border border-[#3e3e3e] rounded-lg">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTtsEngine('edge');
-                      setTtsVoice('en-US-AriaNeural');
-                    }}
-                    className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
-                      ttsEngine === 'edge'
-                        ? 'bg-amber-500 text-black font-bold shadow'
-                        : 'text-[#a0a0a0] hover:text-white'
-                    }`}
-                  >
-                    🚀 Natural (Edge)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTtsEngine('neural');
-                      setTtsVoice('alloy');
-                    }}
-                    className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
-                      ttsEngine === 'neural'
-                        ? 'bg-amber-500 text-black font-bold shadow'
-                        : 'text-[#a0a0a0] hover:text-white'
-                    }`}
-                  >
-                    🔥 Neural (Cloud)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTtsEngine('standard')}
-                    className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
-                      ttsEngine === 'standard'
-                        ? 'bg-amber-500 text-black font-bold shadow'
-                        : 'text-[#a0a0a0] hover:text-white'
-                    }`}
-                  >
-                    Standard
-                  </button>
+                <div className="flex flex-col gap-1 bg-[#141414] p-1 border border-[#3e3e3e] rounded-lg">
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTtsEngine('gemini');
+                        setTtsVoice('Aoede');
+                      }}
+                      className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
+                        ttsEngine === 'gemini'
+                          ? 'bg-amber-500 text-black font-bold shadow'
+                          : 'text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      ✨ Gemini 2.5 Flash
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTtsEngine('edge');
+                        setTtsVoice('en-US-AriaNeural');
+                      }}
+                      className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
+                        ttsEngine === 'edge'
+                          ? 'bg-[#3e3e3e] text-white font-bold shadow'
+                          : 'text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      🚀 Edge
+                    </button>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTtsEngine('neural');
+                        setTtsVoice('alloy');
+                      }}
+                      className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
+                        ttsEngine === 'neural'
+                          ? 'bg-[#3e3e3e] text-white font-bold shadow'
+                          : 'text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      🔥 Cloud
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTtsEngine('standard')}
+                      className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
+                        ttsEngine === 'standard'
+                          ? 'bg-[#3e3e3e] text-white font-bold shadow'
+                          : 'text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      Standard
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1365,6 +1506,22 @@ export function MediaPanel() {
                     <option value="onyx">Onyx (Deep, Professional)</option>
                     <option value="nova">Nova (Energetic, Clear)</option>
                     <option value="shimmer">Shimmer (Professional, Friendly)</option>
+                  </select>
+                </div>
+              ) : ttsEngine === 'gemini' ? (
+                /* Gemini Voices selector */
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">AI Voice Profile (Gemini 2.5)</label>
+                  <select
+                    value={ttsVoice}
+                    onChange={(e) => setTtsVoice(e.target.value)}
+                    className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                  >
+                    <option value="Aoede">Aoede (Warm, Engaging)</option>
+                    <option value="Charon">Charon (Deep, Authoritative)</option>
+                    <option value="Fenrir">Fenrir (Dynamic, Energetic)</option>
+                    <option value="Kore">Kore (Clear, Professional)</option>
+                    <option value="Puck">Puck (Friendly, Expressive)</option>
                   </select>
                 </div>
               ) : (

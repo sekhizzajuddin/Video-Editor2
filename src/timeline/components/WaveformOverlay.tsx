@@ -10,7 +10,7 @@ interface WaveformOverlayProps {
   small?: boolean;
 }
 
-export function WaveformOverlay({
+export const WaveformOverlay = React.memo(function WaveformOverlay({
   media,
   clipId,
   width,
@@ -54,4 +54,5 @@ export function WaveformOverlay({
       ))}
     </div>
   );
-}
+});
+

@@ -55,6 +55,332 @@ interface TimelineClipRowProps {
   dragOverLayerState: any;
 }
 
+interface TimelineClipItemProps {
+  clip: TimelineClip;
+  media: MediaItem;
+  trackType: string;
+  trackLocked: boolean;
+  zoomLevel: number;
+  isSelected: boolean;
+  isDragging: boolean;
+  selectedTransitionClipId: string | null;
+  activeTool: string;
+  hoverCutClipId: string | null;
+  hoverCutX: number | null;
+  selectedKeyframeLines: { clipId: string; time: number }[];
+  hasOverLayerOverlap: boolean;
+  hasOverlap: boolean;
+  
+  // Handlers
+  handleClipMouseDown: (e: React.MouseEvent, clip: TimelineClip) => void;
+  selectClip: (id: string | null) => void;
+  selectTransition: (id: string | null) => void;
+  setContextMenu: (val: any) => void;
+  setHoverCutX: (val: number | null) => void;
+  setHoverCutClipId: (val: string | null) => void;
+  enterCompoundClip: (clipId: string) => void;
+  toggleKeyframeLineSelection: (clipId: string, time: number, isMulti: boolean) => void;
+}
+
+const TimelineClipItem = React.memo(function TimelineClipItem({
+  clip,
+  media,
+  trackType,
+  trackLocked,
+  zoomLevel,
+  isSelected,
+  isDragging,
+  selectedTransitionClipId,
+  activeTool,
+  hoverCutClipId,
+  hoverCutX,
+  selectedKeyframeLines,
+  hasOverLayerOverlap,
+  hasOverlap,
+  
+  handleClipMouseDown,
+  selectClip,
+  selectTransition,
+  setContextMenu,
+  setHoverCutX,
+  setHoverCutClipId,
+  enterCompoundClip,
+  toggleKeyframeLineSelection,
+}: TimelineClipItemProps) {
+  const colors = trackType === 'audio' ? CLIP_COLORS.audio : (CLIP_COLORS[media.type] || CLIP_COLORS.video);
+  const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
+  const left = clip.startTime * zoomLevel;
+  const clipHeight = (trackType === 'text' || trackType === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8;
+  const isVideoWithAudio =
+    media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
+  const mainVisualHeight = isVideoWithAudio ? clipHeight - 12 : clipHeight;
+
+  const clipAnims = clip.animations?.['transform.x'] || [];
+  const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
+
+  return (
+    <div
+      className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${
+        hasOverLayerOverlap ? 'border-cyan-400 border-b-2 border-dashed shadow-[0_0_6px_rgba(34,211,238,0.6)] z-10' : colors.border
+      } ${colors.hover} transition-all duration-75 ${
+        isSelected
+          ? activeTool === 'rateStretch'
+            ? 'ring-2 ring-purple-500 shadow-lg z-20 rate-stretch-active'
+            : 'ring-2 ring-white shadow-lg z-20'
+          : 'hover:brightness-110'
+      } ${trackLocked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
+      style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
+      onMouseDown={(e) => handleClipMouseDown(e, clip)}
+      onMouseMove={(e) => {
+        if (activeTool === 'split') {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setHoverCutX(e.clientX - rect.left);
+          setHoverCutClipId(clip.id);
+        }
+      }}
+      onMouseLeave={() => {
+        if (activeTool === 'split') {
+          setHoverCutX(null);
+          setHoverCutClipId(null);
+        }
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.ctrlKey || e.metaKey) return;
+        selectClip(clip.id);
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        if (media.type === 'compound') {
+          enterCompoundClip(clip.id);
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        selectClip(clip.id);
+        setContextMenu({
+          x: e.clientX,
+          y: e.clientY,
+          clipId: clip.id,
+          trackType: trackType,
+          mediaType: trackType === 'audio' ? 'audio' : media.type,
+          trackId: clip.trackId,
+        });
+      }}
+    >
+      {/* ── Transition In Badge ────────────────────── */}
+      {clip.transitionIn && (
+        <div
+          className={`absolute left-0 top-0 bottom-0 bg-purple-600/70 border-r border-purple-400/80 hover:bg-purple-500 hover:border-purple-300 transition-colors z-30 cursor-pointer flex items-center justify-center overflow-hidden ${
+            selectedTransitionClipId === clip.id ? 'ring-2 ring-white bg-purple-500' : ''
+          }`}
+          style={{
+            width: `${Math.min(width, clip.transitionIn.duration * zoomLevel)}px`,
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            selectTransition(clip.id);
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+          title={`${clip.transitionIn.name} Transition (Click to edit)`}
+        >
+          <span className="text-[8px] text-white font-semibold rotate-90 whitespace-nowrap opacity-80 pointer-events-none">
+            {clip.transitionIn.name}
+          </span>
+        </div>
+      )}
+
+      {/* ── Visual content layer ──────────────────── */}
+      <div className="absolute inset-0 overflow-hidden rounded pointer-events-none">
+        {(trackType === 'audio' || media.type === 'audio') ? (
+          <WaveformOverlay
+            media={media}
+            clipId={clip.id}
+            width={width}
+            height={clipHeight}
+          />
+        ) : (
+          <>
+            {media.type === 'video' && (
+              <div style={{ height: mainVisualHeight }} className="relative">
+                <FrameStripOverlay
+                  media={media}
+                  clipId={clip.id}
+                  width={width}
+                  height={mainVisualHeight}
+                />
+              </div>
+            )}
+
+            {media.type === 'image' && (
+              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                {media.thumbnail ? (
+                  <img
+                    src={media.thumbnail}
+                    alt=""
+                    draggable={false}
+                    className="w-full h-full object-cover opacity-60"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-amber-700/30" />
+                )}
+              </div>
+            )}
+
+            {isVideoWithAudio && (
+              <div
+                className="relative overflow-hidden border-t border-blue-400/20"
+                style={{ height: 12 }}
+              >
+                <WaveformOverlay
+                  media={media}
+                  clipId={clip.id}
+                  width={width}
+                  height={12}
+                  small
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Master Keyframes ────────────────────────── */}
+      {keyframeTimes.length > 0 && (
+        <div className="absolute top-0 left-0 right-0 h-0 z-40 pointer-events-none">
+          {keyframeTimes.length > 1 && keyframeTimes.slice(0, -1).map((t: any, i: number) => {
+            const kf = clipAnims.find((k: any) => Math.abs(k.time - t) < 0.05);
+            if (kf?.holdNext) return null;
+            
+            const nextT = keyframeTimes[i + 1];
+            const width = (nextT - t) * zoomLevel;
+            
+            const isSelected = selectedKeyframeLines.some((l: any) => l.clipId === clip.id && l.time === t);
+            
+            return (
+              <div
+                key={`line-${t}`}
+                className={`absolute h-[2px] -top-[1px] pointer-events-auto cursor-pointer hover:h-[4px] hover:-top-[2px] transition-all ${isSelected ? 'bg-white h-[4px] -top-[2px] z-10 shadow-[0_0_8px_rgba(255,255,255,0.8)]' : 'bg-red-500/80 hover:bg-red-400'}`}
+                title="Click to select connection"
+                style={{
+                  left: `${t * zoomLevel}px`,
+                  width: `${width}px`
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleKeyframeLineSelection(clip.id, t, e.ctrlKey || e.metaKey);
+                }}
+              />
+            );
+          })}
+          
+          {keyframeTimes.map((t: any, i: number) => {
+            const kf = clipAnims.find((k: any) => Math.abs(k.time - t) < 0.05);
+            const prevKf = i > 0 ? clipAnims.find((k: any) => Math.abs(k.time - keyframeTimes[i - 1]) < 0.05) : null;
+            const isStartEnd = i === 0 || i === keyframeTimes.length - 1 || kf?.holdNext || prevKf?.holdNext;
+            return (
+              <div
+                key={t}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  const startX = e.clientX;
+                  let currentTimeMark = t;
+                  const onMouseMove = (moveEvent: MouseEvent) => {
+                    const deltaX = moveEvent.clientX - startX;
+                    let newTime = t + deltaX / zoomLevel;
+                    newTime = Math.max(0, Math.min(newTime, clip.duration));
+                    if (Math.abs(newTime - currentTimeMark) > 0.01) {
+                      useEditorStore.getState().moveMasterKeyframe(clip.id, currentTimeMark, newTime);
+                      currentTimeMark = newTime;
+                    }
+                  };
+                  const onMouseUp = () => {
+                    window.removeEventListener('mousemove', onMouseMove);
+                    window.removeEventListener('mouseup', onMouseUp);
+                    useEditorStore.getState().saveSnapshot();
+                  };
+                  window.addEventListener('mousemove', onMouseMove);
+                  window.addEventListener('mouseup', onMouseUp);
+                }}
+                className="absolute w-4 h-4 -top-2 -ml-2 pointer-events-auto cursor-ew-resize flex items-center justify-center group"
+                style={{ left: `${t * zoomLevel}px` }}
+              >
+                {isStartEnd ? (
+                  <div className="w-2.5 h-2.5 rotate-45 bg-amber-500 border border-white group-hover:bg-amber-400 group-hover:scale-125 transition-transform shadow" />
+                ) : (
+                  <div className="w-[3px] h-3 bg-amber-500 border border-white group-hover:bg-amber-400 group-hover:scale-125 transition-transform shadow" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Resize handles ────────────────────────── */}
+      {!trackLocked && (
+        <>
+          <div
+            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+            className={`absolute left-0 top-0 bottom-0 w-2.5 cursor-w-resize z-20 transition-colors hover:bg-amber-500/80`}
+            title="Drag to trim start"
+          />
+          <div
+            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+            className={`absolute right-0 top-0 bottom-0 w-2.5 cursor-e-resize z-20 transition-colors hover:bg-amber-500/80`}
+            title="Drag to trim end"
+          />
+        </>
+      )}
+
+      {/* ── Clip label overlay ────────────────────── */}
+      <div className="absolute inset-0 flex flex-col px-1.5 py-0.5 overflow-hidden z-10 pointer-events-none">
+        <div className="flex items-center gap-1 min-w-0">
+          {media.type === 'video' && <Film className="w-2.5 h-2.5 shrink-0 opacity-70" />}
+          {media.type === 'audio' && <Music className="w-2.5 h-2.5 shrink-0 opacity-70" />}
+          {media.type === 'image' && <Image className="w-2.5 h-2.5 shrink-0 opacity-70" />}
+          {media.type === 'text' && <span className="text-[8px] shrink-0 opacity-70">T</span>}
+          {media.type === 'fx' && <Sparkles className="w-2.5 h-2.5 shrink-0 opacity-70" />}
+          <span
+            className={`text-[9px] font-medium drop-shadow-sm ${colors.text} ${media.type === 'text' ? 'animate-text-slide' : 'truncate'}`}
+            style={media.type === 'text' ? { '--marquee-width': `${width}px` } as any : undefined}
+            title={media.type === 'text' && (clip as any).textSettings?.text ? (clip as any).textSettings.text : media.name}
+          >
+            {media.type === 'text' && (clip as any).textSettings?.text
+              ? (clip as any).textSettings.text
+              : media.name}
+          </span>
+        </div>
+        <div className="absolute bottom-0.5 right-1 text-[8px] text-white/50 tabular-nums">
+          {clip.duration.toFixed(1)}s
+        </div>
+      </div>
+
+      {/* ── Razor preview cut line ────────────────── */}
+      {activeTool === 'split' && hoverCutClipId === clip.id && hoverCutX !== null && (
+        <div
+          className="absolute top-0 bottom-0 w-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none shadow"
+          style={{
+            left: `${hoverCutX}px`,
+            outline: '1px dashed white',
+            outlineOffset: '-1.5px',
+          }}
+        />
+      )}
+
+      {/* ── Overlap warning ────────────────────────── */}
+      {hasOverlap && (
+        <div
+          className="absolute top-0 left-0 w-full h-1 bg-red-500/80 animate-pulse"
+          title="Overlap detected"
+        />
+      )}
+    </div>
+  );
+});
+
 export function TimelineClipRow({
   track,
   tracks,
@@ -181,286 +507,43 @@ export function TimelineClipRow({
       {/* ── Clips ──────────────────────────────────────── */}
       {track.clips.map((clip) => {
         const media = getMediaSafe(clip);
-        const colors = track.type === 'audio' ? CLIP_COLORS.audio : (CLIP_COLORS[media.type] || CLIP_COLORS.video);
         const isSelected = selectedClipIds.includes(clip.id);
-        const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
-        const left = clip.startTime * zoomLevel;
         const isDragging = draggingClipId === clip.id;
-        const clipHeight = (track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8;
-        const isVideoWithAudio =
-          media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
-        const mainVisualHeight = isVideoWithAudio ? clipHeight - 12 : clipHeight;
 
-        const clipAnims = clip.animations?.['transform.x'] || [];
-        const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
         const overlappingOls = (track.overLayers || []).filter((ol) => {
           const olEnd = ol.startTime + ol.duration;
           const clipEnd = clip.startTime + clip.duration;
           return ol.startTime < clipEnd && olEnd > clip.startTime;
         });
         const hasOverLayerOverlap = overlappingOls.length > 0;
+        const hasOverlap = checkOverlapAt(track, clip.startTime, clip.duration, clip.id);
 
         return (
-          <div
+          <TimelineClipItem
             key={clip.id}
-            className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${
-              hasOverLayerOverlap ? 'border-cyan-400 border-b-2 border-dashed shadow-[0_0_6px_rgba(34,211,238,0.6)] z-10' : colors.border
-            } ${colors.hover} transition-all duration-75 ${
-              isSelected
-                ? activeTool === 'rateStretch'
-                  ? 'ring-2 ring-purple-500 shadow-lg z-20 rate-stretch-active'
-                  : 'ring-2 ring-white shadow-lg z-20'
-                : 'hover:brightness-110'
-            } ${track.locked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
-            style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
-            onMouseDown={(e) => handleClipMouseDown(e, clip)}
-            onMouseMove={(e) => {
-              if (activeTool === 'split') {
-                const rect = e.currentTarget.getBoundingClientRect();
-                setHoverCutX(e.clientX - rect.left);
-                setHoverCutClipId(clip.id);
-              }
-            }}
-            onMouseLeave={() => {
-              if (activeTool === 'split') {
-                setHoverCutX(null);
-                setHoverCutClipId(null);
-              }
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (e.ctrlKey || e.metaKey) return;
-              selectClip(clip.id);
-            }}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (media.type === 'compound') {
-                enterCompoundClip(clip.id);
-              }
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              selectClip(clip.id);
-              setContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                clipId: clip.id,
-                trackType: track.type,
-                mediaType: track.type === 'audio' ? 'audio' : media.type,
-                trackId: track.id,
-              });
-            }}
-          >
-            {/* ── Transition In Badge ────────────────────── */}
-            {clip.transitionIn && (
-              <div
-                className={`absolute left-0 top-0 bottom-0 bg-purple-600/70 border-r border-purple-400/80 hover:bg-purple-500 hover:border-purple-300 transition-colors z-30 cursor-pointer flex items-center justify-center overflow-hidden ${
-                  selectedTransitionClipId === clip.id ? 'ring-2 ring-white bg-purple-500' : ''
-                }`}
-                style={{
-                  width: `${Math.min(width, clip.transitionIn.duration * zoomLevel)}px`,
-                }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  selectTransition(clip.id);
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-                title={`${clip.transitionIn.name} Transition (Click to edit)`}
-              >
-                <span className="text-[8px] text-white font-semibold rotate-90 whitespace-nowrap opacity-80 pointer-events-none">
-                  {clip.transitionIn.name}
-                </span>
-              </div>
-            )}
-
-            {/* ── Visual content layer ──────────────────── */}
-            <div className="absolute inset-0 overflow-hidden rounded pointer-events-none">
-              {(track.type === 'audio' || media.type === 'audio') ? (
-                <WaveformOverlay
-                  media={media}
-                  clipId={clip.id}
-                  width={width}
-                  height={clipHeight}
-                />
-              ) : (
-                <>
-                  {media.type === 'video' && (
-                    <div style={{ height: mainVisualHeight }} className="relative">
-                      <FrameStripOverlay
-                        media={media}
-                        clipId={clip.id}
-                        width={width}
-                        height={mainVisualHeight}
-                      />
-                    </div>
-                  )}
-
-                  {media.type === 'image' && (
-                    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                      {media.thumbnail ? (
-                        <img
-                          src={media.thumbnail}
-                          alt=""
-                          draggable={false}
-                          className="w-full h-full object-cover opacity-60"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-amber-700/30" />
-                      )}
-                    </div>
-                  )}
-
-                  {isVideoWithAudio && (
-                    <div
-                      className="relative overflow-hidden border-t border-blue-400/20"
-                      style={{ height: 12 }}
-                    >
-                      <WaveformOverlay
-                        media={media}
-                        clipId={clip.id}
-                        width={width}
-                        height={12}
-                        small
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* ── Master Keyframes ────────────────────────── */}
-            {keyframeTimes.length > 0 && (
-              <div className="absolute top-0 left-0 right-0 h-0 z-40 pointer-events-none">
-                {keyframeTimes.length > 1 && keyframeTimes.slice(0, -1).map((t: any, i: number) => {
-                  const kf = clipAnims.find((k: any) => Math.abs(k.time - t) < 0.05);
-                  if (kf?.holdNext) return null;
-                  
-                  const nextT = keyframeTimes[i + 1];
-                  const width = (nextT - t) * zoomLevel;
-                  
-                  const isSelected = selectedKeyframeLines.some((l: any) => l.clipId === clip.id && l.time === t);
-                  
-                  return (
-                    <div
-                      key={`line-${t}`}
-                      className={`absolute h-[2px] -top-[1px] pointer-events-auto cursor-pointer hover:h-[4px] hover:-top-[2px] transition-all ${isSelected ? 'bg-white h-[4px] -top-[2px] z-10 shadow-[0_0_8px_rgba(255,255,255,0.8)]' : 'bg-red-500/80 hover:bg-red-400'}`}
-                      title="Click to select connection"
-                      style={{
-                        left: `${t * zoomLevel}px`,
-                        width: `${width}px`
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleKeyframeLineSelection(clip.id, t, e.ctrlKey || e.metaKey);
-                      }}
-                    />
-                  );
-                })}
-                
-                {keyframeTimes.map((t: any, i: number) => {
-                  const kf = clipAnims.find((k: any) => Math.abs(k.time - t) < 0.05);
-                  const prevKf = i > 0 ? clipAnims.find((k: any) => Math.abs(k.time - keyframeTimes[i - 1]) < 0.05) : null;
-                  const isStartEnd = i === 0 || i === keyframeTimes.length - 1 || kf?.holdNext || prevKf?.holdNext;
-                  return (
-                    <div
-                      key={t}
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        const startX = e.clientX;
-                        let currentTimeMark = t;
-                        const onMouseMove = (moveEvent: MouseEvent) => {
-                          const deltaX = moveEvent.clientX - startX;
-                          let newTime = t + deltaX / zoomLevel;
-                          newTime = Math.max(0, Math.min(newTime, clip.duration));
-                          if (Math.abs(newTime - currentTimeMark) > 0.01) {
-                            useEditorStore.getState().moveMasterKeyframe(clip.id, currentTimeMark, newTime);
-                            currentTimeMark = newTime;
-                          }
-                        };
-                        const onMouseUp = () => {
-                          window.removeEventListener('mousemove', onMouseMove);
-                          window.removeEventListener('mouseup', onMouseUp);
-                          useEditorStore.getState().saveSnapshot();
-                        };
-                        window.addEventListener('mousemove', onMouseMove);
-                        window.addEventListener('mouseup', onMouseUp);
-                      }}
-                      className="absolute w-4 h-4 -top-2 -ml-2 pointer-events-auto cursor-ew-resize flex items-center justify-center group"
-                      style={{ left: `${t * zoomLevel}px` }}
-                    >
-                      {isStartEnd ? (
-                        <div className="w-2.5 h-2.5 rotate-45 bg-amber-500 border border-white group-hover:bg-amber-400 group-hover:scale-125 transition-transform shadow" />
-                      ) : (
-                        <div className="w-[3px] h-3 bg-amber-500 border border-white group-hover:bg-amber-400 group-hover:scale-125 transition-transform shadow" />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ── Resize handles ────────────────────────── */}
-            {!track.locked && (
-              <>
-                <div
-                  onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
-                  className={`absolute left-0 top-0 bottom-0 w-2.5 cursor-w-resize z-20 transition-colors hover:bg-amber-500/80`}
-                  title="Drag to trim start"
-                />
-                <div
-                  onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
-                  className={`absolute right-0 top-0 bottom-0 w-2.5 cursor-e-resize z-20 transition-colors hover:bg-amber-500/80`}
-                  title="Drag to trim end"
-                />
-              </>
-            )}
-
-            {/* ── Clip label overlay ────────────────────── */}
-            <div className="absolute inset-0 flex flex-col px-1.5 py-0.5 overflow-hidden z-10 pointer-events-none">
-              <div className="flex items-center gap-1 min-w-0">
-                {media.type === 'video' && <Film className="w-2.5 h-2.5 shrink-0 opacity-70" />}
-                {media.type === 'audio' && <Music className="w-2.5 h-2.5 shrink-0 opacity-70" />}
-                {media.type === 'image' && <Image className="w-2.5 h-2.5 shrink-0 opacity-70" />}
-                {media.type === 'text' && <span className="text-[8px] shrink-0 opacity-70">T</span>}
-                {media.type === 'fx' && <Sparkles className="w-2.5 h-2.5 shrink-0 opacity-70" />}
-                <span
-                  className={`text-[9px] font-medium drop-shadow-sm ${colors.text} ${media.type === 'text' ? 'animate-text-slide' : 'truncate'}`}
-                  style={media.type === 'text' ? { '--marquee-width': `${width}px` } as any : undefined}
-                  title={media.type === 'text' && (clip as any).textSettings?.text ? (clip as any).textSettings.text : media.name}
-                >
-                  {media.type === 'text' && (clip as any).textSettings?.text
-                    ? (clip as any).textSettings.text
-                    : media.name}
-                </span>
-              </div>
-              <div className="absolute bottom-0.5 right-1 text-[8px] text-white/50 tabular-nums">
-                {clip.duration.toFixed(1)}s
-              </div>
-            </div>
-
-            {/* ── Razor preview cut line ────────────────── */}
-            {activeTool === 'split' && hoverCutClipId === clip.id && hoverCutX !== null && (
-              <div
-                className="absolute top-0 bottom-0 w-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none shadow"
-                style={{
-                  left: `${hoverCutX}px`,
-                  outline: '1px dashed white',
-                  outlineOffset: '-1.5px',
-                }}
-              />
-            )}
-
-            {/* ── Overlap warning ────────────────────────── */}
-            {checkOverlapAt(track, clip.startTime, clip.duration, clip.id) && (
-              <div
-                className="absolute top-0 left-0 w-full h-1 bg-red-500/80 animate-pulse"
-                title="Overlap detected"
-              />
-            )}
-          </div>
+            clip={clip}
+            media={media}
+            trackType={track.type}
+            trackLocked={track.locked}
+            zoomLevel={zoomLevel}
+            isSelected={isSelected}
+            isDragging={isDragging}
+            selectedTransitionClipId={selectedTransitionClipId}
+            activeTool={activeTool}
+            hoverCutClipId={hoverCutClipId}
+            hoverCutX={hoverCutX}
+            selectedKeyframeLines={selectedKeyframeLines}
+            hasOverLayerOverlap={hasOverLayerOverlap}
+            hasOverlap={hasOverlap}
+            handleClipMouseDown={handleClipMouseDown}
+            selectClip={selectClip}
+            selectTransition={selectTransition}
+            setContextMenu={setContextMenu}
+            setHoverCutX={setHoverCutX}
+            setHoverCutClipId={setHoverCutClipId}
+            enterCompoundClip={enterCompoundClip}
+            toggleKeyframeLineSelection={toggleKeyframeLineSelection}
+          />
         );
       })}
 
