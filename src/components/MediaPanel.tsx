@@ -841,7 +841,6 @@ export function MediaPanel() {
           useEditorStore.getState().addMedia(finalMediaItem);
         }
 
-        URL.revokeObjectURL(audioUrl);
         audioEl.src = '';
         audioEl.remove();
 
