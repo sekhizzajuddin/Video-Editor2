@@ -464,6 +464,9 @@ export function PreviewCanvas() {
     const H_target = 480;
     const canvas_scale = canvas.width / W_target;
 
+    // OPTIMIZATION: Dynamically scale down pixel-heavy effects by 50% during playback (unless exporting)
+    const DOWNSCALE = (isPlaying && !isExporting) ? 0.5 : 1.0;
+
     // ── Frame gate: during scrubbing, check if videos are ready or have cached frames ──
     // If a video is seeking AND we have no cached frame for it, retain the last frame.
     if (!isPlaying) {
@@ -1356,8 +1359,8 @@ export function PreviewCanvas() {
           const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg;
 
           if (hasPerspectiveWarp && corners) {
-            const offscreenWidth = Math.max(1, Math.round(sw));
-            const offscreenHeight = Math.max(1, Math.round(sh));
+            const offscreenWidth = Math.max(1, Math.round(dw * DOWNSCALE));
+            const offscreenHeight = Math.max(1, Math.round(dh * DOWNSCALE));
             const offscreen = getOrCreateCanvas('clip_' + clip.id, offscreenWidth, offscreenHeight);
             const oCtx = offscreen.getContext('2d');
             if (oCtx) {
@@ -1388,8 +1391,8 @@ export function PreviewCanvas() {
             }
           } else {
             if (needsOffscreen) {
-              const offscreenWidth = Math.max(1, Math.round(dw));
-              const offscreenHeight = Math.max(1, Math.round(dh));
+              const offscreenWidth = Math.max(1, Math.round(dw * DOWNSCALE));
+              const offscreenHeight = Math.max(1, Math.round(dh * DOWNSCALE));
               const offscreen = getOrCreateCanvas('clip_' + clip.id, offscreenWidth, offscreenHeight);
               const oCtx = offscreen.getContext('2d');
               if (oCtx) {
@@ -1490,8 +1493,8 @@ export function PreviewCanvas() {
           const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg;
 
           if (hasPerspectiveWarp && corners) {
-            const offscreenWidth = Math.max(1, Math.round(sw));
-            const offscreenHeight = Math.max(1, Math.round(sh));
+            const offscreenWidth = Math.max(1, Math.round(dw * DOWNSCALE));
+            const offscreenHeight = Math.max(1, Math.round(dh * DOWNSCALE));
             const offscreen = getOrCreateCanvas('clip_' + clip.id, offscreenWidth, offscreenHeight);
             const oCtx = offscreen.getContext('2d');
             if (oCtx) {
@@ -1522,8 +1525,8 @@ export function PreviewCanvas() {
             }
           } else {
             if (needsOffscreen) {
-              const offscreenWidth = Math.max(1, Math.round(dw));
-              const offscreenHeight = Math.max(1, Math.round(dh));
+              const offscreenWidth = Math.max(1, Math.round(dw * DOWNSCALE));
+              const offscreenHeight = Math.max(1, Math.round(dh * DOWNSCALE));
               const offscreen = getOrCreateCanvas('clip_' + clip.id, offscreenWidth, offscreenHeight);
               const oCtx = offscreen.getContext('2d');
               if (oCtx) {
