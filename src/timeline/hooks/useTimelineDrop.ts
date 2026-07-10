@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineClip, OverLayerClip, ParticleEffectType, ClipParticleSettings } from '@/types';
-import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
+import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
+import { toast } from 'sonner';
 import { generateId } from '../timelineUtils';
 import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT } from '../timelineConstants';
 import type { TimelineState } from './useTimelineState';
@@ -215,48 +216,74 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       // ── Animated Title Template drop ──
       const templateId = e.dataTransfer.getData('application/procut-template');
       if (templateId) {
-        const tmpl = TITLE_TEMPLATES.find((t) => t.id === templateId);
+        const tmpl = MOTION_TEMPLATES.find((t) => t.id === templateId);
         if (tmpl && track) {
-          let targetTrack = track;
-          if (track.type !== 'text') {
-            const existingTextTrack = useEditorStore.getState().tracks.find((t) => t.type === 'text');
-            if (existingTextTrack) {
-              targetTrack = existingTextTrack;
+          if (tmpl.type === 'video') {
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const dropTime = Math.max(0, x / zoomLevel);
+            const targetClip = track.clips.find(c => dropTime >= c.startTime && dropTime <= c.startTime + c.duration);
+            
+            if (targetClip) {
+              const updates: any = {};
+              if (tmpl.category === 'color-preset' && tmpl.colorFilters) {
+                updates.colorFilters = { ...tmpl.colorFilters };
+                toast.success(`Applied color preset "${tmpl.name}" to video clip`);
+              } else if (tmpl.category === 'particle' && tmpl.particleSettings) {
+                updates.particleSettings = { ...tmpl.particleSettings };
+                toast.success(`Applied particle preset "${tmpl.name}" to video clip`);
+              } else if (tmpl.category === 'fx-overlay' && tmpl.fxSettings) {
+                updates.fxSettings = { ...tmpl.fxSettings };
+                toast.success(`Applied effect "${tmpl.name}" to video clip`);
+              }
+              
+              useEditorStore.getState().updateClip(targetClip.id, updates);
+              useEditorStore.getState().saveSnapshot();
             } else {
-              useEditorStore.getState().addTrack('text');
-              targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'text') || track;
+              toast.error("Drop the video template directly onto a video clip on the timeline.");
             }
+          } else {
+            let targetTrack = track;
+            if (track.type !== 'text') {
+              const existingTextTrack = useEditorStore.getState().tracks.find((t) => t.type === 'text');
+              if (existingTextTrack) {
+                targetTrack = existingTextTrack;
+              } else {
+                useEditorStore.getState().addTrack('text');
+                targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'text') || track;
+              }
+            }
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const startTime = Math.max(0, x / zoomLevel);
+            const mediaId = `tmpl_media_${Math.random().toString(36).substr(2, 9)}`;
+            const clipId  = `tmpl_clip_${Math.random().toString(36).substr(2, 9)}`;
+            useEditorStore.getState().addMedia({
+              id: mediaId,
+              name: tmpl.name,
+              type: 'text',
+              duration: tmpl.defaultDuration,
+              url: '',
+              createdAt: Date.now(),
+            });
+            useEditorStore.getState().addClip({
+              id: clipId,
+              mediaId,
+              trackId: targetTrack.id,
+              startTime,
+              duration: tmpl.defaultDuration,
+              trimStart: 0,
+              trimEnd: 0,
+              transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+              opacity: 1,
+              speed: 1,
+              effects: [],
+              textSettings: { ...tmpl.textSettings },
+              animations: tmpl.animations ? { ...tmpl.animations } : undefined,
+            } as any);
+            useEditorStore.getState().selectClip(clipId);
+            useEditorStore.getState().saveSnapshot();
           }
-          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const startTime = Math.max(0, x / zoomLevel);
-          const mediaId = `tmpl_media_${Math.random().toString(36).substr(2, 9)}`;
-          const clipId  = `tmpl_clip_${Math.random().toString(36).substr(2, 9)}`;
-          useEditorStore.getState().addMedia({
-            id: mediaId,
-            name: tmpl.name,
-            type: 'text',
-            duration: tmpl.defaultDuration,
-            url: '',
-            createdAt: Date.now(),
-          });
-          useEditorStore.getState().addClip({
-            id: clipId,
-            mediaId,
-            trackId: targetTrack.id,
-            startTime,
-            duration: tmpl.defaultDuration,
-            trimStart: 0,
-            trimEnd: 0,
-            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-            opacity: 1,
-            speed: 1,
-            effects: [],
-            textSettings: { ...tmpl.textSettings },
-            animations: tmpl.animations ? { ...tmpl.animations } : undefined,
-          } as any);
-          useEditorStore.getState().selectClip(clipId);
-          useEditorStore.getState().saveSnapshot();
         }
         setHoveredTrackId(null);
         setDropPreview(null);

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sparkles, X, Loader2 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { AIMotionGraphicSuggestion } from '@/utils/aiClient';
-import { TITLE_TEMPLATES } from '@/utils/titleTemplates';
+import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
 
 interface AiMotionGraphicsProps {
   clip: any;
@@ -51,7 +51,7 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
         const suggestion = suggestions[i];
         const textVal = customTexts[i] || suggestion.suggestedText;
 
-        const tmpl = TITLE_TEMPLATES.find((t) => t.id === suggestion.templateId);
+        const tmpl = MOTION_TEMPLATES.find((t) => t.id === suggestion.templateId);
         if (!tmpl) continue;
 
         const mediaId = `tmpl_media_${Math.random().toString(36).substring(2, 11)}`;
@@ -118,7 +118,7 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
         {/* Content List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3.5 scrollbar-thin">
           {suggestions.map((suggestion, idx) => {
-            const tmpl = (TITLE_TEMPLATES.find((t) => t.id === suggestion.templateId) || {
+            const tmpl = (MOTION_TEMPLATES.find((t) => t.id === suggestion.templateId) || {
               id: suggestion.templateId,
               name: suggestion.templateId,
               description: 'Motion Graphic Template',

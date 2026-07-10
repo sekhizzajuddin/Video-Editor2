@@ -54,8 +54,7 @@ import demoB from '../assets/transition_demo_b.webp';
 import { toast } from 'sonner';
 import { parseCubeLut } from '@/utils/lutParser';
 import { detectBeats } from '@/utils/beatDetection';
-import { TITLE_TEMPLATES, TEMPLATE_CATEGORIES } from '@/utils/titleTemplates';
-import type { TemplateCategory } from '@/utils/titleTemplates';
+import { MOTION_TEMPLATES, MotionTemplate } from '@/utils/motionTemplates';
 
 const TRANSITIONS = [
   { name: 'Fade', color: 'from-amber-500/20 to-transparent', preview: 'Fade in/out between clips' },
@@ -241,6 +240,227 @@ const TEXT_TEMPLATES = [
   { name: 'Bubble Caption', style: 'px-2 py-0.5 bg-[#f8fafc] text-[#0f172a] rounded-lg border border-[#cbd5e1] text-[10px]', settings: { fontSize: 22, color: '#0f172a', backgroundColor: '#f8fafc', fontFamily: 'Inter' } }
 ];
 
+interface TemplatePreviewCardProps {
+  tmpl: MotionTemplate;
+  onDragStart: (e: React.DragEvent) => void;
+  onClick: () => void;
+}
+
+function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCardProps) {
+  const [isHovered, setIsHovered] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isHovered || !canvasRef.current) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let startTime = performance.now();
+    const duration = tmpl.defaultDuration > 0 ? tmpl.defaultDuration : 4;
+
+    const render = (now: number) => {
+      const elapsed = (now - startTime) / 1000;
+      const progress = (elapsed % duration) / duration;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#141414';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (tmpl.type === 'text' && tmpl.textSettings) {
+        ctx.save();
+        
+        let scale = 1;
+        let opacity = 1;
+        let x = canvas.width / 2;
+        let y = canvas.height / 2;
+        let rotation = 0;
+
+        const animPreset = tmpl.textSettings.animation?.in || 'none';
+        
+        if (progress < 0.2) {
+          const t = progress / 0.2;
+          if (animPreset === 'fadeIn') opacity = t;
+          else if (animPreset === 'zoom') { scale = 0.5 + t * 0.5; opacity = t; }
+          else if (animPreset === 'slideUp') y = canvas.height * 0.7 - t * (canvas.height * 0.2);
+          else if (animPreset === 'slideDown') y = canvas.height * 0.3 + t * (canvas.height * 0.2);
+          else if (animPreset === 'slideLeft') x = canvas.width * 0.2 + t * (canvas.width * 0.3);
+          else if (animPreset === 'slideRight') x = canvas.width * 0.8 - t * (canvas.width * 0.3);
+          else if (animPreset === 'bounce') {
+            scale = Math.sin(t * Math.PI) * 1.2;
+            if (scale > 1) scale = 1 + (scale - 1) * 0.3;
+          }
+          else if (animPreset === 'typewriter') opacity = 1;
+        } else if (progress > 0.8) {
+          const t = (1 - progress) / 0.2;
+          const outPreset = tmpl.textSettings.animation?.out || 'fadeOut';
+          if (outPreset === 'fadeOut') opacity = t;
+          else if (outPreset === 'zoom') { scale = 1.0 - (1 - t) * 0.5; opacity = t; }
+          else if (outPreset === 'slideUp') y = canvas.height * 0.5 - (1 - t) * (canvas.height * 0.3);
+          else if (outPreset === 'slideDown') y = canvas.height * 0.5 + (1 - t) * (canvas.height * 0.3);
+          else if (outPreset === 'slideLeft') x = canvas.width * 0.5 - (1 - t) * (canvas.width * 0.3);
+          else if (outPreset === 'slideRight') x = canvas.width * 0.5 + (1 - t) * (canvas.width * 0.3);
+        }
+
+        if (tmpl.animations) {
+          if (tmpl.animations['transform.scale']) {
+            const track = tmpl.animations['transform.scale'];
+            const time = progress * duration;
+            const kf = track.find(k => k.time >= time) || track[track.length - 1];
+            if (kf) scale = kf.value / 100;
+          }
+          if (tmpl.animations['transform.rotation']) {
+            const track = tmpl.animations['transform.rotation'];
+            const time = progress * duration;
+            const kf = track.find(k => k.time >= time) || track[track.length - 1];
+            if (kf) rotation = (kf.value * Math.PI) / 180;
+          }
+          if (tmpl.animations['opacity']) {
+            const track = tmpl.animations['opacity'];
+            const time = progress * duration;
+            const kf = track.find(k => k.time >= time) || track[track.length - 1];
+            if (kf) opacity = kf.value;
+          }
+        }
+
+        ctx.globalAlpha = opacity;
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+        ctx.scale(scale, scale);
+
+        let fontName = tmpl.textSettings.fontFamily || 'Inter';
+        ctx.font = `${tmpl.textSettings.bold ? 'bold ' : ''}10px "${fontName}", sans-serif`;
+        ctx.fillStyle = tmpl.textSettings.color || '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const textStr = tmpl.textSettings.text.split('\n')[0];
+        const previewText = animPreset === 'typewriter' && progress < 0.8
+          ? textStr.slice(0, Math.floor((progress / 0.8) * textStr.length))
+          : textStr;
+        ctx.fillText(previewText, 0, 0);
+
+        ctx.restore();
+      } else if (tmpl.type === 'video') {
+        if (tmpl.category === 'particle' && tmpl.particleSettings) {
+          ctx.fillStyle = tmpl.particleSettings.color === 'auto' ? '#ff4400' : (tmpl.particleSettings.color || '#ffffff');
+          const pType = tmpl.particleSettings.type;
+          const count = 12;
+          for (let pIdx = 0; pIdx < count; pIdx++) {
+            let px = (pIdx * 17 + elapsed * (tmpl.particleSettings.wind || 0) * 10) % canvas.width;
+            let py = (pIdx * 11 + elapsed * (tmpl.particleSettings.speed || 50) * 0.4) % canvas.height;
+            if (tmpl.particleSettings.gravity < 0) {
+              py = canvas.height - py;
+            }
+            ctx.beginPath();
+            if (pType === 'hearts') {
+              ctx.arc(px, py, 2, 0, 2 * Math.PI);
+            } else if (pType === 'rain') {
+              ctx.moveTo(px, py);
+              ctx.lineTo(px + 1, py + 4);
+              ctx.strokeStyle = ctx.fillStyle;
+              ctx.lineWidth = 1;
+              ctx.stroke();
+              continue;
+            } else {
+              ctx.arc(px, py, 1.5, 0, 2 * Math.PI);
+            }
+            ctx.fill();
+          }
+        } else if (tmpl.category === 'color-preset' && tmpl.colorFilters) {
+          ctx.fillStyle = '#ef4444';
+          ctx.fillRect(5, 5, canvas.width / 2 - 5, canvas.height - 10);
+          ctx.fillStyle = '#3b82f6';
+          ctx.fillRect(canvas.width / 2, 5, canvas.width / 2 - 5, canvas.height - 10);
+          
+          ctx.save();
+          ctx.globalCompositeOperation = 'hue';
+          ctx.fillStyle = tmpl.accentColor;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.restore();
+        } else if (tmpl.category === 'fx-overlay') {
+          ctx.fillStyle = '#27272a';
+          ctx.fillRect(10, 5, canvas.width - 20, canvas.height - 10);
+          if (tmpl.id === 'fx_cinematic_bars') {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, 4);
+            ctx.fillRect(0, canvas.height - 4, canvas.width, 4);
+          } else if (tmpl.id === 'fx_terminal_scanline') {
+            ctx.strokeStyle = '#22c55e';
+            ctx.lineWidth = 0.5;
+            for (let yL = 2; yL < canvas.height; yL += 3) {
+              ctx.beginPath();
+              ctx.moveTo(0, yL);
+              ctx.lineTo(canvas.width, yL);
+              ctx.stroke();
+            }
+          } else {
+            ctx.strokeStyle = tmpl.accentColor;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+          }
+        }
+      }
+
+      animationFrameRef.current = requestAnimationFrame(render);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(render);
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [isHovered, tmpl]);
+
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-pointer transition-all group"
+    >
+      <div className="w-16 h-10 bg-[#141414] rounded overflow-hidden shrink-0 flex items-center justify-center border border-[#3e3e3e]/40 relative">
+        {isHovered ? (
+          <canvas
+            ref={canvasRef}
+            width={64}
+            height={40}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div
+            className="w-full h-full flex items-center justify-center"
+            style={{ background: `${tmpl.accentColor}12` }}
+          >
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: tmpl.accentColor }} />
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-white font-medium truncate">{tmpl.name}</p>
+        <p className="text-[9px] text-[#6a6a6a] truncate">{tmpl.description}</p>
+        <p className="text-[8px] mt-0.5" style={{ color: tmpl.accentColor + 'cc' }}>
+          {tmpl.defaultDuration > 0 ? `${tmpl.defaultDuration}s` : 'Preset'} · {tmpl.category}
+        </p>
+      </div>
+      <span className="text-[8px] text-amber-400/40 group-hover:text-amber-400/80 transition-colors shrink-0">DRAG</span>
+    </div>
+  );
+}
+
 export function MediaPanel() {
   const {
     mediaLibrary,
@@ -267,6 +487,39 @@ export function MediaPanel() {
 
   // Click-to-apply fallback handlers
   const handleTemplateClick = (tmpl: any) => {
+    if (tmpl.type === 'video') {
+      const { selectedClipId, currentTime } = useEditorStore.getState();
+      let targetClip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+      
+      if (!targetClip) {
+        const videoTrack = tracks.find(t => t.type === 'video');
+        if (videoTrack) {
+          targetClip = videoTrack.clips.find(c => currentTime >= c.startTime && currentTime <= c.startTime + c.duration);
+        }
+      }
+
+      if (!targetClip) {
+        toast.error("Please select a video clip on the timeline first, or seek to a clip to apply the template.");
+        return;
+      }
+
+      const updates: any = {};
+      if (tmpl.category === 'color-preset' && tmpl.colorFilters) {
+        updates.colorFilters = { ...tmpl.colorFilters };
+        toast.success(`Applied color preset "${tmpl.name}" to selected clip`);
+      } else if (tmpl.category === 'particle' && tmpl.particleSettings) {
+        updates.particleSettings = { ...tmpl.particleSettings };
+        toast.success(`Applied particle preset "${tmpl.name}" to selected clip`);
+      } else if (tmpl.category === 'fx-overlay' && tmpl.fxSettings) {
+        updates.fxSettings = { ...tmpl.fxSettings };
+        toast.success(`Applied effect "${tmpl.name}" to selected clip`);
+      }
+
+      updateClip(targetClip.id, updates);
+      saveSnapshot();
+      return;
+    }
+
     let targetTrack = tracks.find((t) => t.type === 'text');
     if (!targetTrack) {
       addTrack('text');
@@ -499,9 +752,9 @@ export function MediaPanel() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openSection, setOpenSection] = useState<'fx' | 'color' | 'particles'>('fx');
   const [previewItem, setPreviewItem] = useState<any | null>(null);
-  const [templateCategory, setTemplateCategory] = useState<TemplateCategory>('all');
+  const [templateCategory, setTemplateCategory] = useState<string>('all');
   const [detectingBeatId, setDetectingBeatId] = useState<string | null>(null);
-  const [templateSubTab, setTemplateSubTab] = useState<'title' | 'project'>('title');
+  const [templateSubTab, setTemplateSubTab] = useState<'text' | 'video' | 'project'>('text');
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [templateDesc, setTemplateDesc] = useState('');
@@ -1874,23 +2127,58 @@ export function MediaPanel() {
 
         {/* ── Templates Tab ── */}
         {activeMediaTab === 'templates' && (() => {
-          const filtered = templateCategory === 'all'
-            ? TITLE_TEMPLATES
-            : TITLE_TEMPLATES.filter((t) => t.category === templateCategory);
+          let filtered = MOTION_TEMPLATES;
           
+          if (templateSubTab === 'text') {
+            filtered = MOTION_TEMPLATES.filter((t) => t.type === 'text');
+            if (templateCategory !== 'all') {
+              filtered = filtered.filter((t) => t.category === templateCategory);
+            }
+          } else if (templateSubTab === 'video') {
+            filtered = MOTION_TEMPLATES.filter((t) => t.type === 'video');
+            if (templateCategory !== 'all') {
+              filtered = filtered.filter((t) => t.category === templateCategory);
+            }
+          }
+
+          const categories = templateSubTab === 'text'
+            ? [
+                { id: 'all', label: 'All Text' },
+                { id: 'title', label: 'Titles' },
+                { id: 'lower-third', label: 'Lower Thirds' },
+                { id: 'social', label: 'Social Badges' },
+                { id: 'kinetic', label: 'Kinetic Texts' }
+              ]
+            : [
+                { id: 'all', label: 'All Video' },
+                { id: 'particle', label: 'Particles' },
+                { id: 'color-preset', label: 'Color Presets' },
+                { id: 'fx-overlay', label: 'FX Overlays' }
+              ];
+
           return (
             <div className="flex-1 flex flex-col min-h-0">
               {/* Sub-Tab Selector */}
               <div className="flex border-b border-[#3e3e3e] bg-[#222]">
                 <button
-                  onClick={() => setTemplateSubTab('title')}
+                  onClick={() => { setTemplateSubTab('text'); setTemplateCategory('all'); }}
                   className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
-                    templateSubTab === 'title'
+                    templateSubTab === 'text'
                       ? 'border-amber-500 text-amber-500 bg-[#2d2d2d]'
                       : 'border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#252525]'
                   }`}
                 >
-                  Text / Titles
+                  Text Templates
+                </button>
+                <button
+                  onClick={() => { setTemplateSubTab('video'); setTemplateCategory('all'); }}
+                  className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
+                    templateSubTab === 'video'
+                      ? 'border-amber-500 text-amber-500 bg-[#2d2d2d]'
+                      : 'border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#252525]'
+                  }`}
+                >
+                  Video Templates
                 </button>
                 <button
                   onClick={() => setTemplateSubTab('project')}
@@ -1904,11 +2192,11 @@ export function MediaPanel() {
                 </button>
               </div>
 
-              {templateSubTab === 'title' ? (
+              {templateSubTab !== 'project' ? (
                 <div className="flex-1 overflow-y-auto flex flex-col">
                   {/* Category filter pills */}
                   <div className="flex gap-1 p-2 flex-wrap border-b border-[#3e3e3e] bg-[#1e1e1e]">
-                    {TEMPLATE_CATEGORIES.map((cat) => (
+                    {categories.map((cat) => (
                       <button
                         key={cat.id}
                         onClick={() => setTemplateCategory(cat.id)}
@@ -1922,35 +2210,22 @@ export function MediaPanel() {
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-[#6a6a6a] px-3 py-1.5">Drag onto a Text track to apply</p>
-                  <div className="flex flex-col gap-1 p-2">
+                  <p className="text-[10px] text-[#6a6a6a] px-3 py-1.5 font-medium uppercase tracking-wider text-amber-400/80">
+                    {templateSubTab === 'text' 
+                      ? 'Drag to Text Track / Click to Insert' 
+                      : 'Drag to Video Clip / Click to Apply'}
+                  </p>
+                  <div className="flex flex-col gap-1.5 p-2">
                     {filtered.map((tmpl) => (
-                      <div
+                      <TemplatePreviewCard
                         key={tmpl.id}
-                        draggable
+                        tmpl={tmpl}
                         onDragStart={(e) => {
                           e.dataTransfer.setData('application/procut-template', tmpl.id);
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => handleTemplateClick(tmpl)}
-                        className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-pointer transition-all group"
-                      >
-                        {/* Color accent dot */}
-                        <div
-                          className="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center"
-                          style={{ background: `${tmpl.accentColor}22`, border: `1px solid ${tmpl.accentColor}44` }}
-                        >
-                          <div className="w-3 h-3 rounded-full" style={{ background: tmpl.accentColor }} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-white font-medium truncate">{tmpl.name}</p>
-                          <p className="text-[9px] text-[#6a6a6a] truncate">{tmpl.description}</p>
-                          <p className="text-[8px] mt-0.5" style={{ color: tmpl.accentColor + 'cc' }}>
-                            {tmpl.defaultDuration}s · {tmpl.category}
-                          </p>
-                        </div>
-                        <span className="text-[8px] text-amber-400/40 group-hover:text-amber-400/80 transition-colors shrink-0">DRAG</span>
-                      </div>
+                      />
                     ))}
                   </div>
                 </div>

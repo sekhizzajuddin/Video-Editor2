@@ -1,0 +1,2555 @@
+import type { ClipTextSettings, ClipAnimations, ClipParticleSettings } from '@/types';
+
+export interface MotionTemplate {
+  id: string;
+  name: string;
+  category: 'title' | 'lower-third' | 'social' | 'kinetic' | 'particle' | 'color-preset' | 'fx-overlay';
+  type: 'text' | 'video';
+  description: string;
+  accentColor: string;
+  defaultDuration: number;
+  textSettings?: ClipTextSettings;
+  animations?: ClipAnimations;
+  particleSettings?: ClipParticleSettings;
+  colorFilters?: any;
+  fxSettings?: any;
+}
+
+export const MOTION_TEMPLATES: MotionTemplate[] = [
+  // ==========================================
+  // 1. TEXT ANIMATION: TITLES (20 Presets)
+  // ==========================================
+  {
+    id: 'title_minimal_fade',
+    name: 'Minimal Clean Title',
+    category: 'title',
+    type: 'text',
+    description: 'Slow fade-in with a modern geometric look',
+    accentColor: '#38bdf8',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'CREATIVE DIRECTOR',
+      fontFamily: 'Inter',
+      fontSize: 54,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.8, outDuration: 0.8 }
+    }
+  },
+  {
+    id: 'title_cinematic_gold',
+    name: 'Cinematic Gold Intro',
+    category: 'title',
+    type: 'text',
+    description: 'Elegant golden letters fading in and slowly scaling',
+    accentColor: '#d97706',
+    defaultDuration: 6,
+    textSettings: {
+      text: 'THE JOURNEY BEGINS',
+      fontFamily: 'Georgia',
+      fontSize: 60,
+      color: '#fbbf24',
+      bold: false,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: true,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 1.5, outDuration: 1.2 }
+    },
+    animations: {
+      'transform.scale': [
+        { time: 0, value: 110, easing: 'linear' },
+        { time: 6, value: 95 }
+      ]
+    }
+  },
+  {
+    id: 'title_bold_neon',
+    name: 'Cyber Neon Title',
+    category: 'title',
+    type: 'text',
+    description: 'Hot pink neon text with a black glowing backdrop',
+    accentColor: '#ec4899',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'NEON METROPOLIS',
+      fontFamily: 'Impact',
+      fontSize: 72,
+      color: '#f472b6',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'title_slide_left',
+    name: 'Side Slide Intro',
+    category: 'title',
+    type: 'text',
+    description: 'Text slides in rapidly from the left edge',
+    accentColor: '#10b981',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'EXCLUSIVE REPORT',
+      fontFamily: 'Bebas Neue',
+      fontSize: 80,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideRight', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'title_corporate_bar',
+    name: 'Corporate Header',
+    category: 'title',
+    type: 'text',
+    description: 'Clean professional banner with border details',
+    accentColor: '#1e3a8a',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'ANNUAL SHAREHOLDER MEETING',
+      fontFamily: 'Inter',
+      fontSize: 40,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#1e3a8ad9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'title_retro_glitch',
+    name: 'Glitch Text Card',
+    category: 'title',
+    type: 'text',
+    description: 'Sci-fi typewriter with glitchy styling',
+    accentColor: '#a855f7',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'ERROR: SIGNAL LOST',
+      fontFamily: 'Courier New',
+      fontSize: 50,
+      color: '#a855f7',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'typewriter', out: 'fadeOut', inDuration: 0.6, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'title_elegant_serif',
+    name: 'Serif Classic Intro',
+    category: 'title',
+    type: 'text',
+    description: 'Elegant serif headline for documentaries',
+    accentColor: '#78716c',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'CHAPTER TWO: THE REVELATION',
+      fontFamily: 'Georgia',
+      fontSize: 44,
+      color: '#e7e5e4',
+      bold: false,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 1.0, outDuration: 1.0 }
+    }
+  },
+  {
+    id: 'title_sport_italic',
+    name: 'Athletic Speed Header',
+    category: 'title',
+    type: 'text',
+    description: 'Heavy bold italic for action and sports',
+    accentColor: '#ea580c',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'CHAMPIONSHIP SERIES',
+      fontFamily: 'Impact',
+      fontSize: 76,
+      color: '#ea580c',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: true,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'slideLeft', inDuration: 0.3, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'title_editorial_sub',
+    name: 'Editorial Intro',
+    category: 'title',
+    type: 'text',
+    description: 'Large title with offset subtext',
+    accentColor: '#111827',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'A PERSPECTIVE ON DESIGN',
+      fontFamily: 'Oswald',
+      fontSize: 56,
+      color: '#f3f4f6',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideDown', out: 'fadeOut', inDuration: 0.6, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'title_minimal_border',
+    name: 'Framed Typography',
+    category: 'title',
+    type: 'text',
+    description: 'Clean title with custom backdrop frame',
+    accentColor: '#d1d5db',
+    defaultDuration: 5.5,
+    textSettings: {
+      text: 'ARCHITECTURAL EXHIBITION',
+      fontFamily: 'Montserrat',
+      fontSize: 42,
+      color: '#111827',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#f3f4f6ee',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'zoom', out: 'zoom', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'title_split_text',
+    name: 'Top/Bottom Split',
+    category: 'title',
+    type: 'text',
+    description: 'Two lines of text sliding in opposite directions',
+    accentColor: '#f59e0b',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: 'DESIGN CONTEXT\nSUMMER 2026',
+      fontFamily: 'Bebas Neue',
+      fontSize: 64,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'title_glitch_vibe',
+    name: 'Hacker Terminal',
+    category: 'title',
+    type: 'text',
+    description: 'Green glow monospaced cyberpunk alert',
+    accentColor: '#22c55e',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'ACCESS GRANTED_/',
+      fontFamily: 'Courier New',
+      fontSize: 48,
+      color: '#22c55e',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'rgba(0,10,0,0.9)',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'typewriter', out: 'fadeOut', inDuration: 0.4, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'title_sunset_vibe',
+    name: 'Sunset Dream Title',
+    category: 'title',
+    type: 'text',
+    description: 'Soft pastel pink serif title with glow',
+    accentColor: '#f472b6',
+    defaultDuration: 6,
+    textSettings: {
+      text: 'golden hour stories',
+      fontFamily: 'Georgia',
+      fontSize: 58,
+      color: '#fbcfe8',
+      bold: false,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: true,
+      underline: false,
+      shadow: true,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 1.5, outDuration: 1.2 }
+    }
+  },
+  {
+    id: 'title_heavy_impact',
+    name: 'Bold Impact Block',
+    category: 'title',
+    type: 'text',
+    description: 'Massive heavy sans text filling the canvas',
+    accentColor: '#ef4444',
+    defaultDuration: 3.5,
+    textSettings: {
+      text: 'UNSTOPPABLE FORCE',
+      fontFamily: 'Impact',
+      fontSize: 84,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#ef4444',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'zoom', out: 'zoom', inDuration: 0.2, outDuration: 0.2 }
+    }
+  },
+  {
+    id: 'title_subtle_sub',
+    name: 'Sub-Header Left',
+    category: 'title',
+    type: 'text',
+    description: 'Small informational banner at top left',
+    accentColor: '#6b7280',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'DOCUMENTARY / FIELD FOOTAGE',
+      fontFamily: 'Oswald',
+      fontSize: 20,
+      color: '#d1d5db',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideLeft', out: 'fadeOut', inDuration: 0.5, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'title_luxury_serif',
+    name: 'Luxury Serif Intro',
+    category: 'title',
+    type: 'text',
+    description: 'Sleek luxury fashion brand typography',
+    accentColor: '#171717',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'V A L E N T I N A',
+      fontFamily: 'Georgia',
+      fontSize: 50,
+      color: '#e5e5e5',
+      bold: false,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 1.0, outDuration: 0.8 }
+    }
+  },
+  {
+    id: 'title_urban_tag',
+    name: 'Urban Gritty Card',
+    category: 'title',
+    type: 'text',
+    description: 'Grungy heavy title card with background block',
+    accentColor: '#facc15',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'STREET CULTURE',
+      fontFamily: 'Bebas Neue',
+      fontSize: 76,
+      color: '#000000',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#facc15',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideDown', out: 'slideUp', inDuration: 0.3, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'title_glowing_pulse',
+    name: 'Ethereal Pulsing Title',
+    category: 'title',
+    type: 'text',
+    description: 'Soft glowing sans-serif with keyframe scale pulse',
+    accentColor: '#a7f3d0',
+    defaultDuration: 6,
+    textSettings: {
+      text: 'ECOSYSTEM DYNAMICS',
+      fontFamily: 'Montserrat',
+      fontSize: 48,
+      color: '#d1fae5',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 1.2, outDuration: 1.0 }
+    },
+    animations: {
+      'transform.scale': [
+        { time: 0, value: 95, easing: 'linear' },
+        { time: 3, value: 105, easing: 'linear' },
+        { time: 6, value: 95 }
+      ]
+    }
+  },
+  {
+    id: 'title_news_ticker',
+    name: 'Top Alert Ticker',
+    category: 'title',
+    type: 'text',
+    description: 'Breaking news ticker bar at the top',
+    accentColor: '#dc2626',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'BREAKING NEWS // LIVE COVERAGE',
+      fontFamily: 'Inter',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#dc2626',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideDown', out: 'slideUp', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'title_playful_bounce',
+    name: 'Playful Kids Title',
+    category: 'title',
+    type: 'text',
+    description: 'Fun bold orange text bouncing in and out',
+    accentColor: '#f97316',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'ADVENTURE TIME!',
+      fontFamily: 'Outfit',
+      fontSize: 68,
+      color: '#f97316',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'bounce', out: 'zoom', inDuration: 0.6, outDuration: 0.4 }
+    }
+  },
+
+  // ==========================================
+  // 2. TEXT ANIMATION: LOWER THIRDS (20 Presets)
+  // ==========================================
+  {
+    id: 'lower_third_name',
+    name: 'Clean Name Card',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Professional name & job title card',
+    accentColor: '#3b82f6',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: 'DR. SARAH JENKINS\nSenior Research Fellow',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: 'rgba(15,23,42,0.85)',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'fadeOut', inDuration: 0.5, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_cyber',
+    name: 'Cyberpunk Badge',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Green neon cyberpunk lower third details',
+    accentColor: '#22c55e',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'SYS_ALERT: ENCRYPTED_CONNECTION\nPORT: 9028 // SECURE',
+      fontFamily: 'Courier New',
+      fontSize: 22,
+      color: '#22c55e',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: 'rgba(0,12,0,0.9)',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'typewriter', out: 'slideDown', inDuration: 0.6, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_minimal_dark',
+    name: 'Minimal Dark Strip',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Sleek thin black bar on the lower left',
+    accentColor: '#18181b',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'MARCUS VANCE | lead architectural engineer',
+      fontFamily: 'Montserrat',
+      fontSize: 24,
+      color: '#f4f4f5',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#18181be6',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideLeft', inDuration: 0.5, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_reporter',
+    name: 'Live News Banner',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Red and white news reporter style banner',
+    accentColor: '#e11d48',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'LIVE REPORT - DOWNTOWN SYDNEY\nTraffic delays expected after collision',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#e11d48e6',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_vlog_tag',
+    name: 'Vlogger Custom Badge',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Fun pastel purple badge for lifestyle videos',
+    accentColor: '#a855f7',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'COFFEE WITH ME // WEEKEND VLOG',
+      fontFamily: 'Outfit',
+      fontSize: 26,
+      color: '#faf5ff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#a855f7d9',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'bounce', out: 'fadeOut', inDuration: 0.6, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_elegant_split',
+    name: 'Elegant Serif Label',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Classy serif lower-third with italics',
+    accentColor: '#44403c',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'Genevieve Fontaine\nCreative Director, Paris',
+      fontFamily: 'Georgia',
+      fontSize: 28,
+      color: '#e7e5e4',
+      bold: false,
+      textAlign: 'left',
+      backgroundColor: 'transparent',
+      italic: true,
+      underline: false,
+      shadow: true,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 1.0, outDuration: 0.8 }
+    }
+  },
+  {
+    id: 'lower_third_location',
+    name: 'Location & Date Tag',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Simple clean tag indicating date and place',
+    accentColor: '#4b5563',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'Reykjavik, Iceland\nSeptember 24, 2026',
+      fontFamily: 'Inter',
+      fontSize: 22,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideLeft', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_accent_line',
+    name: 'Accent Line Third',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Text with a strong visual background block',
+    accentColor: '#f97316',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: 'SAMUEL CARTER\nLead Sound Designer',
+      fontFamily: 'Oswald',
+      fontSize: 28,
+      color: '#000000',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#f97316',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideLeft', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_podcast',
+    name: 'Podcast Co-Host Tag',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Heavy sans-serif name card for podcast clips',
+    accentColor: '#ef4444',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'EPISODE 98 // GUEST SPEAKING\nJane Doe - Author & Futurist',
+      fontFamily: 'Impact',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#ef4444e6',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.3, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'lower_third_interviewee',
+    name: 'Interviewee Double-line',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Modern standard interview name overlay',
+    accentColor: '#06b6d4',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: 'David Miller\nCo-Founder, BlueSpace AI',
+      fontFamily: 'Inter',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: 'rgba(15,118,110,0.8)',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideDown', inDuration: 0.5, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_ticker_minimal',
+    name: 'Single Line Ticker',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Sleek single line info strip on the bottom',
+    accentColor: '#374151',
+    defaultDuration: 6,
+    textSettings: {
+      text: 'UPCOMING CLIPS // STAY TUNED UNTIL THE END',
+      fontFamily: 'Montserrat',
+      fontSize: 22,
+      color: '#f9fafb',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#1f2937e6',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'lower_third_subtle_grey',
+    name: 'Subtle Grey Strip',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Semi-transparent grey name label',
+    accentColor: '#6b7280',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'PROF. ALBERT HOFFMAN\nResearch Director',
+      fontFamily: 'Inter',
+      fontSize: 24,
+      color: '#f3f4f6',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: 'rgba(55,65,81,0.7)',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.6, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'lower_third_yellow_pop',
+    name: 'Yellow Pop Third',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Vibrant yellow badge for high energy vlogs',
+    accentColor: '#eab308',
+    defaultDuration: 3.5,
+    textSettings: {
+      text: 'CHALLENGE ATTEMPT #3\nWill it hold?',
+      fontFamily: 'Bebas Neue',
+      fontSize: 30,
+      color: '#000000',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#eab308',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'bounce', out: 'slideLeft', inDuration: 0.5, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'lower_third_neon_pink',
+    name: 'Neon Pink Bar',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Glowing pink badge for beauty or music vlogs',
+    accentColor: '#db2777',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'MAKEUP TUTORIAL // HOLIDAY LOOK\nfeaturing Peach Glow palette',
+      fontFamily: 'Outfit',
+      fontSize: 24,
+      color: '#fdf2f8',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#db2777e0',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideLeft', out: 'zoom', inDuration: 0.5, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_italic_clean',
+    name: 'Clean Italic Strip',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Minimal italic name tag without backing',
+    accentColor: '#9ca3af',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: 'Robert Patterson // director of photography',
+      fontFamily: 'Inter',
+      fontSize: 24,
+      color: '#ffffff',
+      bold: false,
+      textAlign: 'left',
+      backgroundColor: 'transparent',
+      italic: true,
+      underline: false,
+      shadow: true,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.8, outDuration: 0.6 }
+    }
+  },
+  {
+    id: 'lower_third_bold_black',
+    name: 'Impact Black Block',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Heavy bold black bar on yellow text',
+    accentColor: '#1c1917',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'ALEX RIVERA\nSTREET RACER',
+      fontFamily: 'Impact',
+      fontSize: 32,
+      color: '#facc15',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#1c1917ee',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideDown', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_news_banner',
+    name: 'Standard News Ticker',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Classic double deck reporter banner',
+    accentColor: '#1d4ed8',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'BREAKING // METRO LINE SUSPENDED\nAlternative bus services running every 10 minutes',
+      fontFamily: 'Inter',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#1d4ed8ee',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'lower_third_tech_pill',
+    name: 'Tech Terminal Pill',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Clean console terminal name card',
+    accentColor: '#0ea5e9',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: '> CONSOLE: INITIALIZING PLAYBACK\nUSER: ANONYMOUS',
+      fontFamily: 'Courier New',
+      fontSize: 22,
+      color: '#38bdf8',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#0f172ae0',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'typewriter', out: 'fadeOut', inDuration: 0.5, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'lower_third_minimal_orange',
+    name: 'Minimal Orange Tag',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Thin orange accent banner',
+    accentColor: '#f97316',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'LOGISTICS UPDATE // Q3 SCHEDULE',
+      fontFamily: 'Oswald',
+      fontSize: 24,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'left',
+      backgroundColor: '#ea580cd9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideLeft', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'lower_third_serif_italic',
+    name: 'Serif Light Label',
+    category: 'lower-third',
+    type: 'text',
+    description: 'Soft documentary name overlay',
+    accentColor: '#a8a29e',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'William Shakespeare\nDocumentary Historian',
+      fontFamily: 'Georgia',
+      fontSize: 26,
+      color: '#f5f5f4',
+      bold: false,
+      textAlign: 'left',
+      backgroundColor: 'rgba(28,25,23,0.65)',
+      italic: true,
+      underline: false,
+      shadow: true,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.8, outDuration: 0.8 }
+    }
+  },
+
+  // ==========================================
+  // 3. TEXT ANIMATION: SOCIAL PLATES (20 Presets)
+  // ==========================================
+  {
+    id: 'social_youtube_sub',
+    name: 'YouTube Subscribe',
+    category: 'social',
+    type: 'text',
+    description: 'Animated YouTube Subscribe & Bell Notification',
+    accentColor: '#ff0000',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: 'SUBSCRIBE FOR MORE! // 🔔 Turn On Notifications',
+      fontFamily: 'Inter',
+      fontSize: 32,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#ff0000d9',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'bounce', out: 'zoom', inDuration: 0.6, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_instagram',
+    name: 'Instagram Follow Tag',
+    category: 'social',
+    type: 'text',
+    description: 'Instagram handle tag with gradient accent',
+    accentColor: '#ec4899',
+    defaultDuration: 4,
+    textSettings: {
+      text: '📸 FOLLOW US @PRO_EDIT_VLOG',
+      fontFamily: 'Outfit',
+      fontSize: 30,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#db2777e0',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideLeft', out: 'slideRight', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'social_twitter',
+    name: 'Twitter Handle Card',
+    category: 'social',
+    type: 'text',
+    description: 'Sleek Twitter/X handle tag',
+    accentColor: '#1d9bf0',
+    defaultDuration: 4,
+    textSettings: {
+      text: '🐦 JOIN THE CHAT: @ProCut_Editor',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#1d9bf0e6',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_tiktok',
+    name: 'TikTok Profile Tag',
+    category: 'social',
+    type: 'text',
+    description: 'TikTok badge with neon outline effects',
+    accentColor: '#00f2fe',
+    defaultDuration: 4,
+    textSettings: {
+      text: '🎵 TIKTOK: @creative_edits',
+      fontFamily: 'Bebas Neue',
+      fontSize: 34,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#010101f2',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.4, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'social_discord',
+    name: 'Discord Guild Invite',
+    category: 'social',
+    type: 'text',
+    description: 'Discord server invite overlay banner',
+    accentColor: '#5865f2',
+    defaultDuration: 5,
+    textSettings: {
+      text: '💬 JOIN OUR DISCORD SERVER\ndiscord.gg/procut-editor',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#5865f2d9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'social_twitch',
+    name: 'Twitch Live Stream',
+    category: 'social',
+    type: 'text',
+    description: 'Purple Twitch live notification banner',
+    accentColor: '#9146ff',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: '👾 STREAMING LIVE ON TWITCH\ntwitch.tv/procut_live',
+      fontFamily: 'Oswald',
+      fontSize: 30,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#9146ffe6',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideLeft', out: 'slideLeft', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'social_facebook',
+    name: 'Facebook Page Follow',
+    category: 'social',
+    type: 'text',
+    description: 'Facebook profile follow banner',
+    accentColor: '#1877f2',
+    defaultDuration: 4,
+    textSettings: {
+      text: '👍 LIKE OUR FACEBOOK PAGE: ProCut.Editor',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#1877f2d9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideRight', out: 'slideLeft', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_linkedin',
+    name: 'LinkedIn Professional',
+    category: 'social',
+    type: 'text',
+    description: 'LinkedIn handle for professional clips',
+    accentColor: '#0a66c2',
+    defaultDuration: 4,
+    textSettings: {
+      text: '👔 CONNECT: linkedin.com/in/procut',
+      fontFamily: 'Inter',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#0a66c2d9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.6, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_pinterest',
+    name: 'Pinterest Board',
+    category: 'social',
+    type: 'text',
+    description: 'Pinterest pin board share tag',
+    accentColor: '#bd081c',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: '📌 PIN OUR DESIGNS ON PINTEREST',
+      fontFamily: 'Outfit',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#bd081cd9',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'bounce', out: 'zoom', inDuration: 0.5, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_spotify',
+    name: 'Spotify Music Track',
+    category: 'social',
+    type: 'text',
+    description: 'Green Spotify audio track info card',
+    accentColor: '#1db954',
+    defaultDuration: 5,
+    textSettings: {
+      text: '🎵 NOW PLAYING ON SPOTIFY\nProCut Chill Beats Playlist',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#191414f0',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'social_generic_web',
+    name: 'Website Domain Card',
+    category: 'social',
+    type: 'text',
+    description: 'Universal URL overlay banner',
+    accentColor: '#0f172a',
+    defaultDuration: 5,
+    textSettings: {
+      text: '🌐 VISIT OUR WEBSITE: WWW.PROCUT-EDITOR.COM',
+      fontFamily: 'Oswald',
+      fontSize: 30,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#0f172ae6',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.6, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'social_github',
+    name: 'GitHub Repository',
+    category: 'social',
+    type: 'text',
+    description: 'Hacker theme GitHub link tag',
+    accentColor: '#24292f',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: '💻 SOURCE CODE: github.com/procut/editor',
+      fontFamily: 'Courier New',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#24292fd9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'typewriter', out: 'fadeOut', inDuration: 0.5, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'social_patreon',
+    name: 'Patreon Support Card',
+    category: 'social',
+    type: 'text',
+    description: 'Patreon support reminder popup',
+    accentColor: '#ff424d',
+    defaultDuration: 4,
+    textSettings: {
+      text: '🧡 SUPPORT US ON PATREON: /procut',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#ff424dd9',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'bounce', out: 'zoom', inDuration: 0.6, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_telegram',
+    name: 'Telegram Channel',
+    category: 'social',
+    type: 'text',
+    description: 'Telegram community channel tag',
+    accentColor: '#0088cc',
+    defaultDuration: 4,
+    textSettings: {
+      text: '📣 JOIN TELEGRAM CHANNEL: t.me/procut',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#0088ccd9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideRight', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_reddit',
+    name: 'Reddit Subreddit Tag',
+    category: 'social',
+    type: 'text',
+    description: 'Orange Reddit community card',
+    accentColor: '#ff4500',
+    defaultDuration: 4,
+    textSettings: {
+      text: '👽 DISCUSS: reddit.com/r/procut',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#ff4500d9',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'zoom', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_snapchat',
+    name: 'Snapchat Handle',
+    category: 'social',
+    type: 'text',
+    description: 'Yellow Snapchat username tag',
+    accentColor: '#fffc00',
+    defaultDuration: 3.5,
+    textSettings: {
+      text: '👻 ADD US: snapchat.com/add/procut',
+      fontFamily: 'Outfit',
+      fontSize: 28,
+      color: '#000000',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#fffc00d9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'bounce', out: 'fadeOut', inDuration: 0.5, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'social_whatsapp',
+    name: 'WhatsApp Community',
+    category: 'social',
+    type: 'text',
+    description: 'Green WhatsApp contact card',
+    accentColor: '#25d366',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: '📞 WHATSAPP GROUP CHAT: +1-202-555-0143',
+      fontFamily: 'Inter',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#25d366d9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideRight', out: 'slideLeft', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_medium',
+    name: 'Medium Blog Tag',
+    category: 'social',
+    type: 'text',
+    description: 'Black Medium blogging portal handle',
+    accentColor: '#121212',
+    defaultDuration: 4,
+    textSettings: {
+      text: '✍️ READ ARTICLES: medium.com/procut',
+      fontFamily: 'Georgia',
+      fontSize: 26,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#121212ee',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.6, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'social_newsletter',
+    name: 'Email Newsletter',
+    category: 'social',
+    type: 'text',
+    description: 'Newsletter email subscription popup',
+    accentColor: '#0f766e',
+    defaultDuration: 5,
+    textSettings: {
+      text: '📬 SUBSCRIBE TO NEWSLETTER\nupdates.procut-editor.com',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#0f766ed9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.5, outDuration: 0.5 }
+    }
+  },
+  {
+    id: 'social_vimeo',
+    name: 'Vimeo Channel Card',
+    category: 'social',
+    type: 'text',
+    description: 'Light blue Vimeo video library tag',
+    accentColor: '#1ab7ea',
+    defaultDuration: 4,
+    textSettings: {
+      text: '🎬 WATCH HQ VIDEOS: vimeo.com/procut',
+      fontFamily: 'Inter',
+      fontSize: 28,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: '#1ab7ead9',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideLeft', out: 'slideRight', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+
+  // ==========================================
+  // 4. TEXT ANIMATION: KINETIC POP (15 Presets)
+  // ==========================================
+  {
+    id: 'kinetic_slide_up',
+    name: 'Kinetic Slide Up',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Clean kinetic reveal with fast slide up',
+    accentColor: '#10b981',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'REVEALED',
+      fontFamily: 'Montserrat',
+      fontSize: 90,
+      color: '#10b981',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideUp', out: 'fadeOut', inDuration: 0.2, outDuration: 0.2 }
+    }
+  },
+  {
+    id: 'kinetic_typewriter_slow',
+    name: 'Retro Typewriter',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Types text letter by letter (monospaced)',
+    accentColor: '#f59e0b',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'TRANSMISSION RECEIVED...',
+      fontFamily: 'Courier New',
+      fontSize: 60,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'typewriter', out: 'fadeOut', inDuration: 1.2, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'kinetic_bounce_pop',
+    name: 'Elastic Bounce Pop',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Bouncy elastic scaling entrance effect',
+    accentColor: '#ec4899',
+    defaultDuration: 3.5,
+    textSettings: {
+      text: 'BOUNCE!',
+      fontFamily: 'Outfit',
+      fontSize: 110,
+      color: '#ec4899',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'bounce', out: 'zoom', inDuration: 0.5, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'kinetic_slide_left_right',
+    name: 'Split Slider',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Title slides left, subtitle slides right',
+    accentColor: '#3b82f6',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'SPLIT REVEAL\nFAST MOTION',
+      fontFamily: 'Bebas Neue',
+      fontSize: 80,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideLeft', out: 'slideRight', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'kinetic_zoom_punch',
+    name: 'Zoom Punch In',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Sudden high scale zoom entrance',
+    accentColor: '#ef4444',
+    defaultDuration: 2,
+    textSettings: {
+      text: 'POW!',
+      fontFamily: 'Impact',
+      fontSize: 130,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.15, outDuration: 0.2 }
+    }
+  },
+  {
+    id: 'kinetic_rotate_spin',
+    name: 'Spin Pop Entrance',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Rotates 180 degrees while scaling up',
+    accentColor: '#facc15',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'SPINNING OUT',
+      fontFamily: 'Inter',
+      fontSize: 70,
+      color: '#facc15',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.5, outDuration: 0.3 }
+    },
+    animations: {
+      'transform.rotation': [
+        { time: 0, value: -180, easing: 'easeOut' },
+        { time: 0.5, value: 0 }
+      ]
+    }
+  },
+  {
+    id: 'kinetic_flicker_light',
+    name: 'Flickering Bulb',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Simulates flickering neon lights',
+    accentColor: '#e0f2fe',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'DARK ROOM SESSIONS',
+      fontFamily: 'Oswald',
+      fontSize: 60,
+      color: '#bae6fd',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.3, outDuration: 0.3 }
+    },
+    animations: {
+      'opacity': [
+        { time: 0, value: 0.2 },
+        { time: 0.1, value: 1.0 },
+        { time: 0.2, value: 0.3 },
+        { time: 0.3, value: 1.0 },
+        { time: 0.4, value: 0.2 },
+        { time: 0.5, value: 1.0 }
+      ]
+    }
+  },
+  {
+    id: 'kinetic_slide_down_reveal',
+    name: 'Down Drop reveal',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Rapid drop down with bounce animation',
+    accentColor: '#4f46e5',
+    defaultDuration: 3.5,
+    textSettings: {
+      text: 'DROPPED IN',
+      fontFamily: 'Montserrat',
+      fontSize: 80,
+      color: '#818cf8',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'slideDown', out: 'slideUp', inDuration: 0.4, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'kinetic_elastic_zoom',
+    name: 'Elastic Scale Pulse',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Continual soft scale pulse back and forth',
+    accentColor: '#06b6d4',
+    defaultDuration: 5,
+    textSettings: {
+      text: 'PULSING ENERGY',
+      fontFamily: 'Inter',
+      fontSize: 66,
+      color: '#22d3ee',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.4, outDuration: 0.3 }
+    },
+    animations: {
+      'transform.scale': [
+        { time: 0, value: 100, easing: 'easeOut' },
+        { time: 1.2, value: 120, easing: 'easeIn' },
+        { time: 2.4, value: 100, easing: 'easeOut' },
+        { time: 3.6, value: 120, easing: 'easeIn' },
+        { time: 5, value: 100 }
+      ]
+    }
+  },
+  {
+    id: 'kinetic_glitch_shake',
+    name: 'Gritty Glitch Shake',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Fast back-and-forth position shake',
+    accentColor: '#f43f5e',
+    defaultDuration: 2.5,
+    textSettings: {
+      text: 'WARNING DETECTED',
+      fontFamily: 'Impact',
+      fontSize: 72,
+      color: '#f43f5e',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'fadeIn', out: 'fadeOut', inDuration: 0.2, outDuration: 0.2 }
+    },
+    animations: {
+      'transform.x': [
+        { time: 0, value: 0 },
+        { time: 0.05, value: -15 },
+        { time: 0.1, value: 15 },
+        { time: 0.15, value: -10 },
+        { time: 0.2, value: 10 },
+        { time: 0.25, value: 0 }
+      ]
+    }
+  },
+  {
+    id: 'kinetic_typewriter_fast',
+    name: 'Fast Terminal typing',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Monospaced quick typing for tech clips',
+    accentColor: '#10b981',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'LOG: LOADED_0918x',
+      fontFamily: 'Courier New',
+      fontSize: 54,
+      color: '#34d399',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'typewriter', out: 'fadeOut', inDuration: 0.5, outDuration: 0.2 }
+    }
+  },
+  {
+    id: 'kinetic_spin_reveal',
+    name: 'Elastic Rotator',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Text spins into orientation quickly',
+    accentColor: '#ec4899',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'DYNAMIC BALANCE',
+      fontFamily: 'Oswald',
+      fontSize: 62,
+      color: '#f472b6',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'fadeOut', inDuration: 0.4, outDuration: 0.3 }
+    },
+    animations: {
+      'transform.rotation': [
+        { time: 0, value: 90, easing: 'easeOut' },
+        { time: 0.6, value: 0 }
+      ]
+    }
+  },
+  {
+    id: 'kinetic_bounce_scale',
+    name: 'Bouncy Elastic Title',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Continual bounce scale back and forth',
+    accentColor: '#eab308',
+    defaultDuration: 4,
+    textSettings: {
+      text: 'ALERT STATE',
+      fontFamily: 'Outfit',
+      fontSize: 84,
+      color: '#eab308',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'bounce', out: 'zoom', inDuration: 0.5, outDuration: 0.3 }
+    }
+  },
+  {
+    id: 'kinetic_slide_up_down',
+    name: 'Slide In Drop Out',
+    category: 'kinetic',
+    type: 'text',
+    description: 'Slides up from bottom, slides down to exit',
+    accentColor: '#3b82f6',
+    defaultDuration: 4.5,
+    textSettings: {
+      text: 'TRAFFIC DENSITY',
+      fontFamily: 'Inter',
+      fontSize: 66,
+      color: '#ffffff',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: false,
+      animation: { in: 'slideUp', out: 'slideDown', inDuration: 0.4, outDuration: 0.4 }
+    }
+  },
+  {
+    id: 'kinetic_glitch_scale',
+    name: 'Glitch Zoom Alert',
+    category: 'kinetic',
+    type: 'text',
+    description: 'High intensity scale glitch pulsing',
+    accentColor: '#ea580c',
+    defaultDuration: 3,
+    textSettings: {
+      text: 'CRITICAL CRASH',
+      fontFamily: 'Impact',
+      fontSize: 78,
+      color: '#f97316',
+      bold: true,
+      textAlign: 'center',
+      backgroundColor: 'transparent',
+      italic: false,
+      underline: false,
+      shadow: true,
+      animation: { in: 'zoom', out: 'zoom', inDuration: 0.3, outDuration: 0.3 }
+    }
+  },
+
+  // ==========================================
+  // 5. VIDEO ANIMATION: PARTICLES (15 Presets)
+  // ==========================================
+  {
+    id: 'particle_snow',
+    name: 'Snowy Blizzard',
+    category: 'particle',
+    type: 'video',
+    description: 'Heavy winter snow storm overlay with gravity and wind',
+    accentColor: '#f8fafc',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'snow',
+      emitterX: 50,
+      emitterY: 0,
+      amount: 150,
+      speed: 45,
+      intensity: 85,
+      size: 110,
+      gravity: 25,
+      wind: 8,
+      spread: 180,
+      lifetime: 160,
+      color: '#ffffff',
+      colorVariance: 10,
+      glow: false,
+      turbulence: 15
+    }
+  },
+  {
+    id: 'particle_rain',
+    name: 'Heavy Downpour',
+    category: 'particle',
+    type: 'video',
+    description: 'Fast angled rain droplets overlaying the video track',
+    accentColor: '#38bdf8',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'rain',
+      emitterX: 50,
+      emitterY: 0,
+      amount: 250,
+      speed: 180,
+      intensity: 75,
+      size: 90,
+      gravity: 110,
+      wind: 20,
+      spread: 12,
+      lifetime: 50,
+      color: '#b3dbff',
+      colorVariance: 5,
+      glow: false,
+      turbulence: 5
+    }
+  },
+  {
+    id: 'particle_embers',
+    name: 'Volcanic Embers',
+    category: 'particle',
+    type: 'video',
+    description: 'Glow orange embers rising from bottom to top',
+    accentColor: '#ea580c',
+    defaultDuration: 8,
+    particleSettings: {
+      type: 'fire',
+      emitterX: 50,
+      emitterY: 100,
+      amount: 90,
+      speed: 75,
+      intensity: 90,
+      size: 140,
+      gravity: -55,
+      wind: 2,
+      spread: 75,
+      lifetime: 90,
+      color: '#ff5500',
+      colorVariance: 50,
+      glow: true,
+      turbulence: 50
+    }
+  },
+  {
+    id: 'particle_sparkles',
+    name: 'Dreamy Sparkles',
+    category: 'particle',
+    type: 'video',
+    description: 'Glittery stars floating around the center',
+    accentColor: '#eab308',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'sparkles',
+      emitterX: 50,
+      emitterY: 50,
+      amount: 70,
+      speed: 40,
+      intensity: 85,
+      size: 80,
+      gravity: -5,
+      wind: 0,
+      spread: 360,
+      lifetime: 110,
+      color: '#ffe55c',
+      colorVariance: 25,
+      glow: true,
+      turbulence: 20
+    }
+  },
+  {
+    id: 'particle_matrix',
+    name: 'Matrix Digital Rain',
+    category: 'particle',
+    type: 'video',
+    description: 'Sci-fi glowing green terminal stream drops',
+    accentColor: '#22c55e',
+    defaultDuration: 8,
+    particleSettings: {
+      type: 'matrix',
+      emitterX: 50,
+      emitterY: 0,
+      amount: 60,
+      speed: 95,
+      intensity: 95,
+      size: 100,
+      gravity: 90,
+      wind: 0,
+      spread: 0,
+      lifetime: 100,
+      color: '#00ff66',
+      colorVariance: 10,
+      glow: true,
+      turbulence: 0
+    }
+  },
+  {
+    id: 'particle_autumn',
+    name: 'Autumn Leaves',
+    category: 'particle',
+    type: 'video',
+    description: 'Beautiful orange leaves drifting across the frame',
+    accentColor: '#d97706',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'leaves',
+      emitterX: 0,
+      emitterY: 30,
+      amount: 45,
+      speed: 30,
+      intensity: 80,
+      size: 120,
+      gravity: 20,
+      wind: 25,
+      spread: 30,
+      lifetime: 210,
+      color: '#d97706',
+      colorVariance: 60,
+      glow: false,
+      turbulence: 40
+    }
+  },
+  {
+    id: 'particle_bubbles',
+    name: 'Floating Soap Bubbles',
+    category: 'particle',
+    type: 'video',
+    description: 'Pulsing round bubbles drifting upwards gently',
+    accentColor: '#06b6d4',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'bubbles',
+      emitterX: 50,
+      emitterY: 100,
+      amount: 35,
+      speed: 25,
+      intensity: 70,
+      size: 130,
+      gravity: -35,
+      wind: 3,
+      spread: 60,
+      lifetime: 200,
+      color: '#7ef6ff',
+      colorVariance: 15,
+      glow: true,
+      turbulence: 10
+    }
+  },
+  {
+    id: 'particle_smoke',
+    name: 'Mist & Smoke rising',
+    category: 'particle',
+    type: 'video',
+    description: 'Volumetric heavy grey clouds rising slowly',
+    accentColor: '#78716c',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'smoke',
+      emitterX: 50,
+      emitterY: 100,
+      amount: 25,
+      speed: 20,
+      intensity: 65,
+      size: 240,
+      gravity: -20,
+      wind: 6,
+      spread: 35,
+      lifetime: 220,
+      color: '#a8a29e',
+      colorVariance: 15,
+      glow: false,
+      turbulence: 60
+    }
+  },
+  {
+    id: 'particle_confetti',
+    name: 'Celebration Confetti',
+    category: 'particle',
+    type: 'video',
+    description: 'Colorful paper strips blasting downwards',
+    accentColor: '#a855f7',
+    defaultDuration: 6,
+    particleSettings: {
+      type: 'confetti',
+      emitterX: 50,
+      emitterY: 0,
+      amount: 120,
+      speed: 65,
+      intensity: 95,
+      size: 100,
+      gravity: 45,
+      wind: 5,
+      spread: 120,
+      lifetime: 180,
+      color: 'auto',
+      colorVariance: 100,
+      glow: false,
+      turbulence: 30
+    }
+  },
+  {
+    id: 'particle_hearts',
+    name: 'Floating Hearts',
+    category: 'particle',
+    type: 'video',
+    description: 'Dreamy pink heart vectors floating from the center',
+    accentColor: '#ec4899',
+    defaultDuration: 8,
+    particleSettings: {
+      type: 'hearts',
+      emitterX: 50,
+      emitterY: 50,
+      amount: 30,
+      speed: 25,
+      intensity: 85,
+      size: 110,
+      gravity: -15,
+      wind: 2,
+      spread: 360,
+      lifetime: 180,
+      color: '#f43f5e',
+      colorVariance: 20,
+      glow: true,
+      turbulence: 20
+    }
+  },
+  {
+    id: 'particle_stars',
+    name: 'Magic Pixie Dust',
+    category: 'particle',
+    type: 'video',
+    description: 'Golden glowing fairy dust particles',
+    accentColor: '#eab308',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'sparkles',
+      emitterX: 50,
+      emitterY: 30,
+      amount: 80,
+      speed: 35,
+      intensity: 90,
+      size: 70,
+      gravity: 10,
+      wind: -5,
+      spread: 180,
+      lifetime: 130,
+      color: '#fef08a',
+      colorVariance: 15,
+      glow: true,
+      turbulence: 25
+    }
+  },
+  {
+    id: 'particle_drizzle',
+    name: 'Light Foggy Drizzle',
+    category: 'particle',
+    type: 'video',
+    description: 'Slow vertical mist and rain lines',
+    accentColor: '#64748b',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'rain',
+      emitterX: 50,
+      emitterY: 0,
+      amount: 110,
+      speed: 90,
+      intensity: 60,
+      size: 75,
+      gravity: 60,
+      wind: -5,
+      spread: 5,
+      lifetime: 90,
+      color: '#cbd5e1',
+      colorVariance: 5,
+      glow: false,
+      turbulence: 10
+    }
+  },
+  {
+    id: 'particle_flames',
+    name: 'Raging Campfire',
+    category: 'particle',
+    type: 'video',
+    description: 'Intense red and yellow flame sparks',
+    accentColor: '#f97316',
+    defaultDuration: 7,
+    particleSettings: {
+      type: 'fire',
+      emitterX: 50,
+      emitterY: 95,
+      amount: 130,
+      speed: 95,
+      intensity: 95,
+      size: 160,
+      gravity: -70,
+      wind: 0,
+      spread: 45,
+      lifetime: 70,
+      color: '#ef4444',
+      colorVariance: 60,
+      glow: true,
+      turbulence: 70
+    }
+  },
+  {
+    id: 'particle_glitch_dots',
+    name: 'Digital Cyber Dust',
+    category: 'particle',
+    type: 'video',
+    description: 'Cyan and magenta blocky particles',
+    accentColor: '#06b6d4',
+    defaultDuration: 8,
+    particleSettings: {
+      type: 'matrix',
+      emitterX: 50,
+      emitterY: 50,
+      amount: 70,
+      speed: 40,
+      intensity: 90,
+      size: 80,
+      gravity: 5,
+      wind: 15,
+      spread: 360,
+      lifetime: 140,
+      color: '#06b6d4',
+      colorVariance: 80,
+      glow: true,
+      turbulence: 40
+    }
+  },
+  {
+    id: 'particle_slow_bubbles',
+    name: 'Deep Sea Drips',
+    category: 'particle',
+    type: 'video',
+    description: 'Slow translucent bubbles rising',
+    accentColor: '#0284c7',
+    defaultDuration: 10,
+    particleSettings: {
+      type: 'bubbles',
+      emitterX: 50,
+      emitterY: 100,
+      amount: 20,
+      speed: 15,
+      intensity: 60,
+      size: 150,
+      gravity: -15,
+      wind: -2,
+      spread: 45,
+      lifetime: 250,
+      color: '#e0f2fe',
+      colorVariance: 10,
+      glow: false,
+      turbulence: 8
+    }
+  },
+
+  // ==========================================
+  // 6. VIDEO ANIMATION: COLOR PRESETS (15 Presets)
+  // ==========================================
+  {
+    id: 'color_teal_orange',
+    name: 'Teal & Orange Hollywood',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Cinematic blockbuster color grading',
+    accentColor: '#f97316',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 25,
+      tint: -10,
+      exposure: 5,
+      contrast: 115,
+      saturation: 120,
+      blur: 0,
+      fadedFilm: 5,
+      vignette: 15
+    }
+  },
+  {
+    id: 'color_cyberpunk_neon',
+    name: 'Cyberpunk Purple Neon',
+    category: 'color-preset',
+    type: 'video',
+    description: 'High contrast neon purple/pink tone',
+    accentColor: '#d946ef',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: -20,
+      tint: 35,
+      exposure: 0,
+      contrast: 125,
+      saturation: 130,
+      blur: 0,
+      fadedFilm: 15,
+      vignette: 20
+    }
+  },
+  {
+    id: 'color_classic_monochrome',
+    name: 'Classic B&W Cinema',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Timeless high contrast black & white',
+    accentColor: '#ffffff',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 0,
+      tint: 0,
+      exposure: 10,
+      contrast: 135,
+      saturation: 0,
+      blur: 0,
+      fadedFilm: 8,
+      vignette: 15
+    }
+  },
+  {
+    id: 'color_warm_vintage',
+    name: '80s Vintage Polaroid',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Faded film warm retro look',
+    accentColor: '#d97706',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 30,
+      tint: 5,
+      exposure: -5,
+      contrast: 105,
+      saturation: 90,
+      blur: 0,
+      fadedFilm: 35,
+      vignette: 10
+    }
+  },
+  {
+    id: 'color_cold_nordic',
+    name: 'Nordic Bleak Cold',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Cool blue desaturated tones for drama',
+    accentColor: '#bae6fd',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: -35,
+      tint: -5,
+      exposure: -5,
+      contrast: 110,
+      saturation: 75,
+      blur: 0,
+      fadedFilm: 10,
+      vignette: 10
+    }
+  },
+  {
+    id: 'color_dreamy_pastel',
+    name: 'Dreamy Soft Pastel',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Bright low contrast soft glow coloring',
+    accentColor: '#fbcfe8',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 10,
+      tint: 15,
+      exposure: 20,
+      contrast: 85,
+      saturation: 110,
+      blur: 0,
+      fadedFilm: 20,
+      vignette: 0
+    }
+  },
+  {
+    id: 'color_gold_sunset',
+    name: 'Golden Hour Sunset',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Deep warm amber sunset tones',
+    accentColor: '#f59e0b',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 45,
+      tint: 0,
+      exposure: 5,
+      contrast: 110,
+      saturation: 125,
+      blur: 0,
+      fadedFilm: 5,
+      vignette: 8
+    }
+  },
+  {
+    id: 'color_cyber_green',
+    name: 'Matrix Code Green',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Desaturated toxic green hue tint',
+    accentColor: '#10b981',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: -10,
+      tint: -40,
+      exposure: 5,
+      contrast: 120,
+      saturation: 70,
+      blur: 0,
+      fadedFilm: 12,
+      vignette: 25
+    }
+  },
+  {
+    id: 'color_moody_noir',
+    name: 'Moody Noir Shadows',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Highly desaturated heavy dark shadow grading',
+    accentColor: '#374151',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: -15,
+      tint: 5,
+      exposure: -15,
+      contrast: 140,
+      saturation: 40,
+      blur: 0,
+      fadedFilm: 10,
+      vignette: 35
+    }
+  },
+  {
+    id: 'color_bleach_bypass',
+    name: 'Bleach Bypass Action',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Heavy contrast desaturated action style',
+    accentColor: '#6b7280',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: -5,
+      tint: 0,
+      exposure: 15,
+      contrast: 150,
+      saturation: 60,
+      blur: 0,
+      fadedFilm: 5,
+      vignette: 15
+    }
+  },
+  {
+    id: 'color_hot_sun',
+    name: 'Hot Desert Sun',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Extreme warm high exposure grade',
+    accentColor: '#f97316',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 55,
+      tint: -5,
+      exposure: 20,
+      contrast: 110,
+      saturation: 115,
+      blur: 0,
+      fadedFilm: 10,
+      vignette: 5
+    }
+  },
+  {
+    id: 'color_deep_ocean',
+    name: 'Deep Blue Water',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Rich blue grading with heavy vignette',
+    accentColor: '#1d4ed8',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: -45,
+      tint: -15,
+      exposure: -10,
+      contrast: 115,
+      saturation: 95,
+      blur: 0,
+      fadedFilm: 10,
+      vignette: 30
+    }
+  },
+  {
+    id: 'color_faded_retro',
+    name: 'Old Film Vibe',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Heavily faded film with vignette shadow',
+    accentColor: '#78350f',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 20,
+      tint: 10,
+      exposure: -5,
+      contrast: 95,
+      saturation: 85,
+      blur: 0,
+      fadedFilm: 55,
+      vignette: 25
+    }
+  },
+  {
+    id: 'color_dream_fog',
+    name: 'Dreamy Blur Edge',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Warm colors with subtle edge blur overlay',
+    accentColor: '#e9d5ff',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 15,
+      tint: 10,
+      exposure: 10,
+      contrast: 100,
+      saturation: 110,
+      blur: 2,
+      fadedFilm: 15,
+      vignette: 0
+    }
+  },
+  {
+    id: 'color_vhs_analog',
+    name: 'VHS Analog Signal',
+    category: 'color-preset',
+    type: 'video',
+    description: 'Analog VHS grading with contrast distortion',
+    accentColor: '#c084fc',
+    defaultDuration: 0,
+    colorFilters: {
+      temperature: 10,
+      tint: 15,
+      exposure: 5,
+      contrast: 125,
+      saturation: 105,
+      blur: 1,
+      fadedFilm: 25,
+      vignette: 15
+    }
+  },
+
+  // ==========================================
+  // 7. VIDEO ANIMATION: FX OVERLAYS (10 Presets)
+  // ==========================================
+  {
+    id: 'fx_cinematic_bars',
+    name: 'Cinematic Wide Bars',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Black cinematic letterbox bars at top/bottom',
+    accentColor: '#000000',
+    defaultDuration: 5,
+    fxSettings: {
+      type: 'cinematic_bars',
+      intensity: 100
+    }
+  },
+  {
+    id: 'fx_glitch_distort',
+    name: 'Visual Signal Glitch',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Heavy rgb split visual digital distortion',
+    accentColor: '#ef4444',
+    defaultDuration: 3,
+    fxSettings: {
+      type: 'glitch',
+      intensity: 85
+    }
+  },
+  {
+    id: 'fx_old_scratches',
+    name: 'Old Film Scratches',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Dust particle grain and vertical film scratches',
+    accentColor: '#78716c',
+    defaultDuration: 5,
+    fxSettings: {
+      type: 'old_film',
+      intensity: 75
+    }
+  },
+  {
+    id: 'fx_rgb_split',
+    name: 'RGB Color Drift',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Separates red/green/blue channels at boundaries',
+    accentColor: '#3b82f6',
+    defaultDuration: 4,
+    fxSettings: {
+      type: 'rgb_split',
+      intensity: 80
+    }
+  },
+  {
+    id: 'fx_terminal_scanline',
+    name: 'CRT Monitor Scanlines',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Analog video screen scanlines and vignette',
+    accentColor: '#10b981',
+    defaultDuration: 5,
+    fxSettings: {
+      type: 'vhs',
+      intensity: 60
+    }
+  },
+  {
+    id: 'fx_neon_glow',
+    name: 'Vibrant Neon Glow',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Boosts highlights with glowing pastel colors',
+    accentColor: '#ec4899',
+    defaultDuration: 4.5,
+    fxSettings: {
+      type: 'neon_glow',
+      intensity: 90
+    }
+  },
+  {
+    id: 'fx_pixelate_cyber',
+    name: 'Retro Pixelate Block',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Pixel block distortion for retro style',
+    accentColor: '#ea580c',
+    defaultDuration: 3,
+    fxSettings: {
+      type: 'pixelate',
+      intensity: 70
+    }
+  },
+  {
+    id: 'fx_mirror_scope',
+    name: 'Kaleidoscope Mirror',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Splits canvas vertically for mirrored preview',
+    accentColor: '#6366f1',
+    defaultDuration: 5,
+    fxSettings: {
+      type: 'mirror',
+      intensity: 100
+    }
+  },
+  {
+    id: 'fx_night_vision',
+    name: 'Hacker Night Vision',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Military night vision green camera view',
+    accentColor: '#22c55e',
+    defaultDuration: 6,
+    fxSettings: {
+      type: 'night_vision',
+      intensity: 100
+    }
+  },
+  {
+    id: 'fx_thermal_heat',
+    name: 'Thermal Infrared Cam',
+    category: 'fx-overlay',
+    type: 'video',
+    description: 'Infrared heat signature spectrum overlay',
+    accentColor: '#ef4444',
+    defaultDuration: 4,
+    fxSettings: {
+      type: 'thermal',
+      intensity: 100
+    }
+  }
+];
