@@ -1,9 +1,11 @@
 export function getGeminiKey(): string {
-  return sessionStorage.getItem('procut_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  // @ts-ignore
+  return sessionStorage.getItem('procut_gemini_key') || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY || '';
 }
 
 export function getGroqKey(): string {
-  return sessionStorage.getItem('procut_groq_key') || (import.meta as any).env?.VITE_GROQ_API_KEY || '';
+  // @ts-ignore
+  return sessionStorage.getItem('procut_groq_key') || import.meta.env.VITE_GROQ_API_KEY || import.meta.env.GROQ_API_KEY || '';
 }
 
 export interface AICueResult {

@@ -277,9 +277,12 @@ export function PropertiesPanel() {
   const { videoElements } = useMediaPlayback();
 
   // Environment variables fallbacks
-  const envGeminiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-  const envGroqKey = (import.meta as any).env?.VITE_GROQ_API_KEY || '';
-  const envFreesoundKey = (import.meta as any).env?.VITE_FREESOUND_API_KEY || '';
+  // @ts-ignore
+  const envGeminiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY || '';
+  // @ts-ignore
+  const envGroqKey = import.meta.env.VITE_GROQ_API_KEY || import.meta.env.GROQ_API_KEY || '';
+  // @ts-ignore
+  const envFreesoundKey = import.meta.env.VITE_FREESOUND_API_KEY || '';
 
   const [geminiApiKey, setGeminiApiKey] = useState(() => sessionStorage.getItem('procut_gemini_key') || '');
   const [groqApiKey, setGroqApiKey] = useState(() => sessionStorage.getItem('procut_groq_key') || '');
