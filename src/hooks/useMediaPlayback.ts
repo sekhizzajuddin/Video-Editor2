@@ -400,9 +400,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
           el.removeEventListener('timeupdate', stableTriggerRedraw);
           el.removeEventListener('canplay', stableTriggerRedraw);
         }
-        if (entry.el.src.startsWith('blob:')) {
-          URL.revokeObjectURL(entry.el.src);
-        }
         entry.el.src = '';
         if (entry.sourceNode) {
           try { entry.sourceNode.disconnect(); } catch (e) {}
@@ -994,9 +991,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
           }
           el.removeEventListener('timeupdate', stableTriggerRedraw);
           el.removeEventListener('canplay', stableTriggerRedraw);
-        }
-        if (entry.el.src.startsWith('blob:')) {
-          URL.revokeObjectURL(entry.el.src);
         }
         entry.el.src = '';
         if (entry.sourceNode) {
