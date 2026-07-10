@@ -1497,7 +1497,7 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     },
     animations: {
       'transform.rotation': [
-        { time: 0, value: -180, easing: 'easeOut' },
+        { time: 0, value: -180, easing: 'ease-out' },
         { time: 0.5, value: 0 }
       ]
     }
@@ -1579,10 +1579,10 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     },
     animations: {
       'transform.scale': [
-        { time: 0, value: 100, easing: 'easeOut' },
-        { time: 1.2, value: 120, easing: 'easeIn' },
-        { time: 2.4, value: 100, easing: 'easeOut' },
-        { time: 3.6, value: 120, easing: 'easeIn' },
+        { time: 0, value: 100, easing: 'ease-out' },
+        { time: 1.2, value: 120, easing: 'ease-in' },
+        { time: 2.4, value: 100, easing: 'ease-out' },
+        { time: 3.6, value: 120, easing: 'ease-in' },
         { time: 5, value: 100 }
       ]
     }
@@ -1664,7 +1664,7 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     },
     animations: {
       'transform.rotation': [
-        { time: 0, value: 90, easing: 'easeOut' },
+        { time: 0, value: 90, easing: 'ease-out' },
         { time: 0.6, value: 0 }
       ]
     }
