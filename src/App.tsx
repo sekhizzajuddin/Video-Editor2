@@ -52,6 +52,7 @@ function App() {
     showTeleprompter,
     setShowTeleprompter,
     projectId,
+    selectedClipIds,
   } = useEditorStore();
 
   const leftWidth = workspaceLayout.leftWidth;

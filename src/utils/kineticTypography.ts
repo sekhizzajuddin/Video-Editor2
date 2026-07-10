@@ -9,6 +9,9 @@ const uuidv4 = () => crypto.randomUUID();
 export interface KineticTypographyOptions {
   script: string;
   englishCasing?: 'all_caps' | 'first_letter_caps' | 'none';
+  casing?: 'all_caps' | 'first_letter_caps' | 'none';
+  styleSelection?: string;
+  animationSelection?: string;
 }
 
 export async function generateKineticTypography(
@@ -49,9 +52,9 @@ export async function generateKineticTypography(
   // Translate script code to readable instruction
   let scriptInstruction = "";
   if (options.script === 'roman_urdu_hindi') {
-    scriptInstruction = "Transcribe in Roman Urdu/Hindi (i.e. Urdu/Hindi written in English/Latin letters, e.g. 'aur all loving hai').";
+    scriptInstruction = "Transcribe in Roman Urdu/Hindi (i.e. Urdu/Hindi written in English/Latin letters, e.g. 'aur all loving hai', 'kya baat hai').";
   } else if (options.script === 'hindi') {
-    scriptInstruction = "Transcribe in Devanagari Hindi script (e.g. 'और ऑल लविंग है').";
+    scriptInstruction = "Transcribe in Devanagari Hindi script (e.g. 'और ऑल लविंग है', 'क्या बात है').";
   } else if (options.script === 'english') {
     scriptInstruction = "Transcribe in English script.";
   } else {
@@ -59,43 +62,57 @@ export async function generateKineticTypography(
   }
 
   // Casing requirement
+  const activeCasing = options.casing || options.englishCasing || 'none';
   let casingInstruction = "";
-  if (options.script === 'english') {
-    if (options.englishCasing === 'all_caps') {
-      casingInstruction = "Convert ALL words/letters to strictly UPPERCASE (e.g. 'HELLO', 'WORLD').";
-    } else if (options.englishCasing === 'first_letter_caps') {
-      casingInstruction = "Capitalize ONLY the first letter of each word (e.g. 'Hello', 'World').";
+  if (options.script === 'english' || options.script === 'roman_urdu_hindi') {
+    if (activeCasing === 'all_caps') {
+      casingInstruction = "Convert ALL words/letters to strictly UPPERCASE (e.g. 'HELLO', 'WORLD', 'AAJ', 'MERA').";
+    } else if (activeCasing === 'first_letter_caps') {
+      casingInstruction = "Capitalize ONLY the first letter of each word (e.g. 'Hello', 'World', 'Aaj', 'Mera').";
     }
   }
 
+  const userStyle = options.styleSelection || 'random';
+  const userAnim = options.animationSelection || 'random';
+
   // 3. Prepare Gemini API Request
-  const prompt = `You are an expert Kinetic Typography & Motion Graphics designer.
+  const prompt = `You are a premium, state-of-the-art Kinetic Typography & Motion Graphics designer.
 I am providing visual frames and audio for a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
-Analyze the speech/audio beats and the visual framing.
+Analyze the speech/audio beats, volume, emphasis, and the visual framing.
 
 YOUR PRIMARY TASK:
 Generate a JSON array of text animation clips, strictly **WORD-BY-WORD**.
-Each entry in the JSON must represent EXACTLY ONE word (e.g. "hello", not "hello there"). Do NOT combine words into sentences or phrases. Each word must have a short, precise duration.
+Each entry in the JSON must represent EXACTLY ONE word (e.g. "love", not "I love"). Do NOT combine words into phrases. Each word must have a short, precise duration.
 
 Script / Translation requirement:
 - ${scriptInstruction}
 - ${casingInstruction}
 
-For each word, choose different styles and effects that fit the tone of that specific word to make it visually engaging:
+DESIGNING A HIGHLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL):
+- **Semantic Hierarchy**: Identify key emotional or emphatic words (e.g., nouns, active verbs, adjectives like "NEVER", "EXPLODE", "FAST", "AWESOME", "ROKNA"). Give them massive "fontSize" (85 to 120), bold bright colors, and dramatic entry animations ("bounce", "zoom", "slideUp").
+- **Auxiliary Words**: For small fill-in words/conjunctions/prepositions (e.g., "is", "a", "the", "to", "and", "aur", "ki", "ka"), make them small in size (fontSize: 50 to 60), white or soft gray, and simple entry animation ("fadeIn").
+- **Kinetic Trail & Staggering**: Drift positions from word to word so they feel alive and pop in different places rather than sitting in one static spot. Stagger "x" between 35 and 65, and "y" between 40 and 60. Make them pop left, center, right, up, or down dynamically based on the speech rhythm!
+- **Color Palettes**: Use high-contrast vibrant colors (e.g., "#fbbf24" yellow, "#22d3ee" cyan, "#f43f5e" pink/rose, "#a855f7" purple, "#22c55e" emerald green).
+
+Style/Animation selection:
+- If Style Selection is requested as "${userStyle}", select style presets that match this target style if possible.
+- If Animation Selection is requested as "${userAnim}", prefer animation options close to this animation.
+
+For each word, define:
 - "text": The spoken word (single word).
 - "start": Start time relative to this clip (in seconds, between 0 and ${clip.duration.toFixed(2)}).
 - "end": End time relative to this clip (in seconds).
-- "fontSize": Font size between 50 and 120. Vary this to emphasize louder or important words!
-- "fontFamily": Dynamically choose from: 'Inter', 'Outfit', 'Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Montserrat', 'Georgia', 'Courier New'. Do not use just one font; vary them for style!
-- "color": A vibrant hex color that contrasts well with the video frames. Change colors between words for visual variety!
-- "x": X position (0 to 100, where 50 is center).
-- "y": Y position (0 to 100, where 50 is center, usually around 80 for lower thirds, 50 for center pop).
+- "fontSize": Font size (50 to 120).
+- "fontFamily": Choose expressively from: 'Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Outfit', 'Inter', 'Montserrat', 'Georgia'.
+- "color": A vibrant hex color.
+- "x": X position (30 to 70).
+- "y": Y position (35 to 65).
 - "animationIn": 'fadeIn', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'bounce', or 'typewriter'.
 - "animationOut": 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', or 'slideRight'.
-- "stylePreset": Select one of the following style presets that matches the tone/mood of the word: 'Cyber Neon' (for digital/excited words), 'Yellow Warning' (for cautious/alert words), 'Golden Glow' (for premium words), 'Bouncy Pop' (for energetic words), 'Neon Pink Glow' (for pop/vibrant words), 'Ruby Red' (for intense/angry words), 'Vibrant Pink' (for beautiful words), 'Sunset Orange' (for warm/creative words), 'Forest Emerald' (for organic/green words), 'Electric Indigo' (for tech/mysterious words), 'Typewriter Green' (for retro/code words), 'Chunky Shadow' (for heavy pop words), 'Glitch Cyber' (for tech/cyber words), 'Bubble Caption' (for general text).
+- "stylePreset": Select one of: 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
 
 Output ONLY valid JSON array format, no markdown wrapping. Example:
-[{"text":"Wow","start":0.5,"end":0.8,"fontSize":90,"fontFamily":"Anton","color":"#FFD700","x":50,"y":50,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
+[{"text":"Wow","start":0.5,"end":0.8,"fontSize":95,"fontFamily":"Anton","color":"#FFD700","x":50,"y":50,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
   const contentsParts: any[] = [{ text: prompt }];
 
@@ -144,30 +161,35 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
   resultJsonStr = resultJsonStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
   const typoResults = JSON.parse(resultJsonStr);
 
-  // Post-processing of text to guarantee casing constraints and word-by-word split if Gemini returned multiple words
+  // Post-processing of text to guarantee casing constraints and word-by-word split
   const processedClips: any[] = [];
   
   for (const item of typoResults) {
     const rawText = (item.text || '').trim();
     if (!rawText) continue;
 
-    // Split in case Gemini returned a phrase/sentence instead of a single word
     const words = rawText.split(/\s+/);
     const durationPerWord = (item.end - item.start) / Math.max(1, words.length);
 
     words.forEach((w: string, idx: number) => {
       let wordText = w;
-      if (options.script === 'english') {
-        if (options.englishCasing === 'all_caps') {
+      if (options.script === 'english' || options.script === 'roman_urdu_hindi') {
+        if (activeCasing === 'all_caps') {
           wordText = wordText.toUpperCase();
-        } else if (options.englishCasing === 'first_letter_caps') {
+        } else if (activeCasing === 'first_letter_caps') {
           wordText = wordText.charAt(0).toUpperCase() + wordText.slice(1).toLowerCase();
         }
       }
 
+      // Override with user choices if specified
+      const finalStyle = userStyle !== 'random' ? userStyle : (item.stylePreset || 'Bubble Caption');
+      const finalAnimIn = userAnim !== 'random' ? userAnim : (item.animationIn || 'slideUp');
+
       processedClips.push({
         ...item,
         text: wordText,
+        stylePreset: finalStyle,
+        animationIn: finalAnimIn,
         start: item.start + (idx * durationPerWord),
         end: item.start + ((idx + 1) * durationPerWord)
       });
@@ -175,7 +197,6 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
   }
 
   // 4. Create new text clips and insert them above the current video track
-  // Wait, if it's kinetic typography, we put it in a text track.
   const newClips: TimelineClip[] = processedClips.map((item: any) => {
     const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (item.stylePreset || '').toLowerCase());
     const fontSz = item.fontSize || 60;
@@ -217,7 +238,7 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
       trimStart: 0,
       trimEnd: Math.max(0.1, item.end - item.start),
       opacity: 1,
-      transform: { x: item.x - 50, y: item.y - 50, scale: 100, rotation: 0 },
+      transform: { x: Math.round((item.x - 50) * 8.54), y: Math.round((item.y - 50) * 4.8), scale: 100, rotation: 0 },
       speed: 1,
       effects: [],
       textSettings

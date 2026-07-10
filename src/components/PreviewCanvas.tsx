@@ -1665,8 +1665,8 @@ export function PreviewCanvas() {
         const clipDur = clip.duration;
         const inDur  = ts.animation?.inDuration ?? 0.5;
         const outDur = ts.animation?.outDuration ?? 0.5;
-        const inProgress  = inDur  > 0 ? Math.min(1, localTime / inDur)              : 1;
-        const outProgress = outDur > 0 ? Math.min(1, (clipDur - localTime) / outDur) : 1;
+        const inProgress  = (!isPlaying || inDur  <= 0) ? 1 : Math.min(1, localTime / inDur);
+        const outProgress = (!isPlaying || outDur <= 0) ? 1 : Math.min(1, (clipDur - localTime) / outDur);
 
         let textAlpha   = 1.0;
         let textScale   = 1.0;

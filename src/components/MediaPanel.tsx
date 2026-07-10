@@ -721,6 +721,8 @@ export function MediaPanel() {
   const [showKineticTypoModal, setShowKineticTypoModal] = useState(false);
   const [kineticTypoScript, setKineticTypoScript] = useState('english');
   const [englishCasing, setEnglishCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
+  const [kineticTypoStyle, setKineticTypoStyle] = useState<string>('random');
+  const [kineticTypoAnimation, setKineticTypoAnimation] = useState<string>('random');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
@@ -776,7 +778,13 @@ export function MediaPanel() {
       await generateKineticTypography(
         targetClip,
         targetClip.trackId,
-        { script: kineticTypoScript, englishCasing },
+        {
+          script: kineticTypoScript,
+          englishCasing,
+          casing: englishCasing,
+          styleSelection: kineticTypoStyle,
+          animationSelection: kineticTypoAnimation
+        },
         (p) => setKineticTypoProgress(p)
       );
       toast.success("Kinetic Typography Generated!");
@@ -2533,9 +2541,9 @@ export function MediaPanel() {
                       </select>
                     </div>
 
-                    {kineticTypoScript === 'english' && (
+                    {(kineticTypoScript === 'english' || kineticTypoScript === 'roman_urdu_hindi') && (
                       <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
-                        <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider block">Casing Constraints (English)</label>
+                        <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider block">Casing Constraints</label>
                         <div className="grid grid-cols-2 gap-2">
                           <label className="flex items-center gap-2 p-2 bg-[#151515] border border-[#2d2d2d] rounded cursor-pointer text-xs select-none">
                             <input
@@ -2558,6 +2566,39 @@ export function MediaPanel() {
                         </div>
                       </div>
                     )}
+
+                    <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
+                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">Style Selection</label>
+                      <select
+                        value={kineticTypoStyle}
+                        onChange={(e) => setKineticTypoStyle(e.target.value)}
+                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                      >
+                        <option value="random">AI / Random Style Presets</option>
+                        {TEXT_TEMPLATES.map((t) => (
+                          <option key={t.name} value={t.name}>Specific: {t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
+                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">Animation Selection</label>
+                      <select
+                        value={kineticTypoAnimation}
+                        onChange={(e) => setKineticTypoAnimation(e.target.value)}
+                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                      >
+                        <option value="random">AI / Random Animations</option>
+                        <option value="zoom">Specific: Pop / Zoom</option>
+                        <option value="bounce">Specific: Bounce</option>
+                        <option value="slideUp">Specific: Slide Up</option>
+                        <option value="slideDown">Specific: Slide Down</option>
+                        <option value="slideLeft">Specific: Slide Left</option>
+                        <option value="slideRight">Specific: Slide Right</option>
+                        <option value="fadeIn">Specific: Fade In</option>
+                        <option value="typewriter">Specific: Typewriter</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div className="flex justify-end gap-2.5 pt-2 border-t border-[#2d2d2d]">
