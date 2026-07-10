@@ -304,6 +304,26 @@ function App() {
 
   // Load project on mount is removed since WelcomeScreen handles it
 
+  // Fetch API keys from Vercel environment at runtime if available
+  useEffect(() => {
+    fetch('/api/keys')
+      .then((res) => {
+        if (res.ok) return res.json();
+        throw new Error('Failed to fetch keys');
+      })
+      .then((data) => {
+        if (data.geminiApiKey) {
+          sessionStorage.setItem('procut_gemini_key', data.geminiApiKey);
+        }
+        if (data.groqApiKey) {
+          sessionStorage.setItem('procut_groq_key', data.groqApiKey);
+        }
+      })
+      .catch((err) => {
+        console.warn('API keys fetch not available or failed:', err);
+      });
+  }, []);
+
   // Periodic Autosave Versioning (every 2 minutes)
   useEffect(() => {
     if (!settings.autosave) return;
