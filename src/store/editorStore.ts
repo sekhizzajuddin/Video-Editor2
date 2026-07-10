@@ -12,6 +12,7 @@ import type {
   ClipTextSettings,
   OverLayerClip,
   ProjectTemplate,
+  SubtitleItem,
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
@@ -172,6 +173,11 @@ interface EditorActions {
   addClip: (clip: TimelineClip) => void;
   insertTextClip: (settings: Partial<ClipTextSettings>) => void;
   importSubtitles: (parsedSubs: {startTime: number, duration: number, text: string}[]) => void;
+  setSubtitles: (subtitles: SubtitleItem[]) => void;
+  updateSubtitle: (id: string, updates: Partial<SubtitleItem>) => void;
+  deleteSubtitle: (id: string) => void;
+  addSubtitle: (sub: SubtitleItem) => void;
+  selectSubtitle: (id: string | null) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
@@ -409,10 +415,42 @@ const initialState: EditorState = {
   dragPreviewTime: 0,
   dragPreviewTrackId: null,
   showTransitionLayer: true,
+  subtitles: [],
+  selectedSubtitleId: null,
+  subtitleLanguage: 'en',
 };
 
 export const useEditorStore = create<EditorState & EditorActions>((set, get) => ({
   ...initialState,
+
+  setSubtitles: (subtitles: SubtitleItem[]) => {
+    set({ subtitles });
+    get().saveSnapshot('Set Subtitles');
+  },
+  updateSubtitle: (id: string, updates: Partial<SubtitleItem>) => {
+    set((state) => ({
+      subtitles: state.subtitles.map((sub) =>
+        sub.id === id ? { ...sub, ...updates } : sub
+      ),
+    }));
+    get().saveSnapshot('Update Subtitle');
+  },
+  deleteSubtitle: (id: string) => {
+    set((state) => ({
+      subtitles: state.subtitles.filter((sub) => sub.id !== id),
+      selectedSubtitleId: state.selectedSubtitleId === id ? null : state.selectedSubtitleId
+    }));
+    get().saveSnapshot('Delete Subtitle');
+  },
+  addSubtitle: (sub: SubtitleItem) => {
+    set((state) => ({
+      subtitles: [...state.subtitles, sub].sort((a, b) => a.startTime - b.startTime)
+    }));
+    get().saveSnapshot('Add Subtitle');
+  },
+  selectSubtitle: (id: string | null) => {
+    set({ selectedSubtitleId: id });
+  },
 
   // Media Library
   addMedia: (item, file) => {
@@ -528,83 +566,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   importSubtitles: (parsedSubs) => {
-    let targetTrack = get().tracks.find((t) => t.type === 'text' && t.name === 'Subtitles');
-    if (!targetTrack) {
-      get().addTrack('text');
-      const tracks = get().tracks;
-      const newTrack = tracks[tracks.length - 1];
-      set({
-        tracks: tracks.map((t) =>
-          t.id === newTrack.id ? { ...t, name: 'Subtitles' } : t
-        ),
-      });
-      targetTrack = get().tracks.find((t) => t.type === 'text' && t.name === 'Subtitles');
-    }
-    if (!targetTrack) return;
-
-    const trackId = targetTrack.id;
-    const newMediaItems: any[] = [];
-    const newClips: TimelineClip[] = [];
-
-    parsedSubs.forEach((sub, i) => {
-      const mediaId = generateId();
-      newMediaItems.push({
-        id: mediaId,
-        name: `Subtitle ${i + 1}`,
-        type: 'text',
-        duration: sub.duration,
-        url: '',
-        createdAt: Date.now(),
-        textContent: sub.text,
-      });
-
-      const clipId = generateId();
-      newClips.push({
-        id: clipId,
-        mediaId,
-        trackId,
-        startTime: sub.startTime,
-        duration: sub.duration,
-        trimStart: 0,
-        trimEnd: 0,
-        transform: {
-          x: 50,
-          y: 90, // Lower third position for subtitles
-          scale: 100,
-          rotation: 0,
-        },
-        opacity: 1,
-        speed: 1,
-        effects: [],
-        zIndex: 9999,
-        textSettings: {
-          text: sub.text,
-          fontFamily: 'Inter',
-          fontSize: 48,
-          color: '#ffffff',
-          backgroundColor: '#00000000',
-          bold: false,
-          italic: false,
-          underline: false,
-          shadow: true,
-          shadowColor: '#000000',
-          shadowBlur: 10,
-          threeD: false,
-          threeDDepth: 0,
-          textAlign: 'center',
-          strokeColor: '#000000',
-          strokeWidth: 4,
-        },
-      });
-    });
-
-    set((state) => ({
-      mediaLibrary: [...state.mediaLibrary, ...newMediaItems],
-      tracks: state.tracks.map((t) =>
-        t.id === trackId ? { ...t, clips: [...t.clips, ...newClips] } : t
-      ),
+    const newSubs = parsedSubs.map((sub) => ({
+      id: generateId(),
+      startTime: sub.startTime !== undefined ? sub.startTime : (sub as any).start !== undefined ? (sub as any).start : 0,
+      endTime: (sub.startTime !== undefined ? sub.startTime : (sub as any).start !== undefined ? (sub as any).start : 0) + sub.duration,
+      text: sub.text,
+      translations: { en: sub.text }
     }));
-    get().saveSnapshot();
+    set({ subtitles: newSubs, selectedSubtitleId: null });
+    get().saveSnapshot('Import Subtitles');
   },
 
   insertTextClip: (settings) => {
@@ -616,14 +586,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (!targetTrack) return;
 
     const mediaId = generateId();
+    const textVal = settings.text || 'New Text';
+    const name = textVal.length > 10 ? textVal.slice(0, 10) + '...' : textVal;
+
     get().addMedia({
       id: mediaId,
-      name: 'Text Layer',
+      name,
       type: 'text',
       duration: 3,
       url: '',
       createdAt: Date.now(),
-      textContent: settings.text || 'New Text',
+      textContent: textVal,
     });
 
     const { currentTime } = get();
@@ -651,7 +624,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       effects: [],
       zIndex: targetTrack.type === 'text' ? 9999 : undefined,
       textSettings: {
-        text: 'New Text',
+        text: textVal,
         fontFamily: 'Inter',
         fontSize: 48,
         color: '#ffffff',
@@ -764,7 +737,31 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           ol.id === clipId ? { ...ol, ...updates } : ol
         ),
       }));
-      return { tracks: newTracks };
+
+      let updatedMediaLibrary = state.mediaLibrary;
+      if (updates.textSettings && (updates.textSettings as any).text !== undefined) {
+        const textVal = (updates.textSettings as any).text;
+        const newName = textVal.length > 10 ? textVal.slice(0, 10) + '...' : textVal;
+        
+        let mediaId: string | undefined;
+        for (const track of state.tracks) {
+          const c = track.clips.find(clip => clip.id === clipId);
+          if (c) {
+            mediaId = c.mediaId || undefined;
+            break;
+          }
+          const ol = track.overLayers?.find(o => o.id === clipId);
+          if (ol) {
+            mediaId = ol.mediaId || undefined;
+            break;
+          }
+        }
+        if (mediaId) {
+          updatedMediaLibrary = state.mediaLibrary.map(m => m.id === mediaId ? { ...m, name: newName } : m);
+        }
+      }
+
+      return { tracks: newTracks, mediaLibrary: updatedMediaLibrary };
     });
     get().recalcTotalDuration();
     get().saveSnapshot();

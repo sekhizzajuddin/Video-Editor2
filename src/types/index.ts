@@ -386,6 +386,14 @@ export interface TimelineMarker {
   type?: 'standard' | 'sponsor' | 'chapter';
 }
 
+export interface SubtitleItem {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+  translations?: Record<string, string>;
+}
+
 // Editor State
 export interface EditorState {
   projectId: string;
@@ -495,6 +503,9 @@ export interface EditorState {
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];
   projectTemplates: ProjectTemplate[];
+  subtitles: SubtitleItem[];
+  selectedSubtitleId: string | null;
+  subtitleLanguage: string;
 }
 
 export interface EditorActions {
@@ -502,8 +513,11 @@ export interface EditorActions {
   setProjectInfo: (id: string, name: string) => void;
   resetProject: () => void;
   setTracks: (tracks: TimelineTrack[]) => void;
-  currentTime: number;
-  label?: string;
+  setSubtitles: (subtitles: SubtitleItem[]) => void;
+  updateSubtitle: (id: string, updates: Partial<SubtitleItem>) => void;
+  deleteSubtitle: (id: string) => void;
+  addSubtitle: (sub: SubtitleItem) => void;
+  selectSubtitle: (id: string | null) => void;
 }
 
 export interface EditorSnapshot {

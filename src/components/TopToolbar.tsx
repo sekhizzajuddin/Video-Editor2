@@ -92,32 +92,7 @@ export function TopToolbar() {
   const [showEditMenu, setShowEditMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
-  const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
-  const [captionProgress, setCaptionProgress] = useState(0);
-  const [showCaptionLanguageModal, setShowCaptionLanguageModal] = useState(false);
-  const [selectedCaptionLanguages, setSelectedCaptionLanguages] = useState<string[]>(['EN']);
 
-  const CAPTION_LANGUAGES = [
-    { code: 'EN', name: 'English' },
-    { code: 'HI', name: 'Hindi' },
-    { code: 'ES', name: 'Spanish' },
-    { code: 'FR', name: 'French' },
-    { code: 'DE', name: 'German' },
-    { code: 'JA', name: 'Japanese' }
-  ];
-
-  const handleGenerateCaptions = async (languages: string[]) => {
-    setShowCaptionLanguageModal(false);
-    setIsGeneratingCaptions(true);
-    setCaptionProgress(0);
-    try {
-      const { generateAutoCaptions } = await import('@/utils/autoCaptions');
-      await generateAutoCaptions(languages, (p) => setCaptionProgress(p));
-    } catch (err) {
-      console.error(err);
-    }
-    setIsGeneratingCaptions(false);
-  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canUndo = historyIndex > 0;
@@ -516,15 +491,6 @@ export function TopToolbar() {
         </button>
 
         <button
-          onClick={() => setShowCaptionLanguageModal(true)}
-          disabled={isGeneratingCaptions}
-          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium disabled:opacity-50"
-        >
-          <Type className="w-3.5 h-3.5" />
-          {isGeneratingCaptions ? `${captionProgress}%` : 'Auto-Captions'}
-        </button>
-
-        <button
           onClick={() => setShowExportModal(true)}
           className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
         >
@@ -555,51 +521,7 @@ export function TopToolbar() {
         onChange={handleOpenProjectFile}
         className="hidden"
       />
-      {/* Language Selection Modal */}
-      {showCaptionLanguageModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
-          <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl p-6 w-[400px]">
-            <h3 className="text-lg font-semibold text-white mb-4">Generate Auto-Captions</h3>
-            <p className="text-sm text-[#a0a0a0] mb-4">Select the languages you want to generate captions for. The system will analyze your timeline audio and create SRT tracks.</p>
-            
-            <div className="space-y-2 max-h-[200px] overflow-y-auto mb-6 pr-2 scrollbar-thin">
-              {CAPTION_LANGUAGES.map(lang => (
-                <label key={lang.code} className="flex items-center gap-3 p-2 rounded hover:bg-[#2d2d2d] cursor-pointer">
-                  <input 
-                    type="checkbox"
-                    checked={selectedCaptionLanguages.includes(lang.code)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedCaptionLanguages(prev => [...prev, lang.code]);
-                      } else {
-                        setSelectedCaptionLanguages(prev => prev.filter(c => c !== lang.code));
-                      }
-                    }}
-                    className="w-4 h-4 rounded border-[#3e3e3e] bg-[#2a2a2a] text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
-                  />
-                  <span className="text-white text-sm">{lang.name} ({lang.code})</span>
-                </label>
-              ))}
-            </div>
 
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowCaptionLanguageModal(false)}
-                className="px-4 py-2 text-sm text-[#a0a0a0] hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleGenerateCaptions(selectedCaptionLanguages)}
-                disabled={selectedCaptionLanguages.length === 0}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-sm transition-colors disabled:opacity-50"
-              >
-                Generate
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

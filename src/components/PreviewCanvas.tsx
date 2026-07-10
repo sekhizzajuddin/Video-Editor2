@@ -2083,6 +2083,63 @@ export function PreviewCanvas() {
 
     ctx.restore(); // Restore from viewport transform
 
+    // ── Render Subtitles (from store subtitles array) ─────────────────────
+    const storeState = useEditorStore.getState();
+    const subsList = (storeState as any).subtitles;
+    const activeSubLanguage = (storeState as any).subtitleLanguage || 'en';
+    if (subsList && subsList.length > 0) {
+      const activeSub = subsList.find(
+        (sub: any) => currentTime >= sub.startTime && currentTime <= sub.endTime
+      );
+      if (activeSub) {
+        ctx.save();
+        
+        const baseFontSize = Math.max(12, Math.round(W * 0.038));
+        ctx.font = `bold ${baseFontSize}px "Inter", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+
+        const textToDraw = activeSub.translations?.[activeSubLanguage] || activeSub.text || '';
+
+        if (textToDraw.trim()) {
+          const lines = textToDraw.split('\n');
+          const paddingX = baseFontSize * 0.7;
+          const paddingY = baseFontSize * 0.35;
+          const lineHeight = baseFontSize * 1.25;
+          
+          let maxLineWidth = 0;
+          lines.forEach((line: string) => {
+            const width = ctx.measureText(line).width;
+            if (width > maxLineWidth) maxLineWidth = width;
+          });
+
+          const boxW = maxLineWidth + paddingX * 2;
+          const boxH = (lineHeight * lines.length) + paddingY * 1.5;
+          
+          const x = W / 2;
+          const y = H - Math.max(25, H * 0.08);
+
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+          ctx.beginPath();
+          ctx.roundRect(x - boxW / 2, y - boxH, boxW, boxH, Math.max(4, baseFontSize * 0.25));
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = 'rgba(0,0,0,0.6)';
+          ctx.shadowBlur = 4;
+          ctx.shadowOffsetX = 1;
+          ctx.shadowOffsetY = 1;
+
+          lines.forEach((line: string, index: number) => {
+            const lineY = y - paddingY - (lines.length - 1 - index) * lineHeight;
+            ctx.fillText(line, x, lineY);
+          });
+        }
+        
+        ctx.restore();
+      }
+    }
+
     // ── Grid Overlay ────────────────────────────────────────────────────
     if (showGrid && !isExporting) {
       ctx.save();

@@ -529,47 +529,23 @@ Return your response ONLY as a JSON array of objects:
             subtitleGroups.push(currentGroup);
           }
 
-          for (const group of subtitleGroups) {
+          const newSubs = subtitleGroups.map((group) => {
             const firstWord = group[0];
             const lastWord = group[group.length - 1];
             const phraseText = group.map((w: any) => w.word).join(' ');
-
             const phraseStart = clipStart + firstWord.start;
-            const phraseDur = Math.max(0.4, lastWord.end - firstWord.start);
+            const phraseEnd = clipStart + lastWord.end;
 
-            const newSubClip = {
-              id: `clip_subtitle_${Math.random().toString(36).substr(2, 9)}`,
-              mediaId: 'text-placeholder',
-              trackId: textTrack.id,
+            return {
+              id: `sub_${Math.random().toString(36).substr(2, 9)}`,
               startTime: phraseStart,
-              duration: phraseDur,
-              trimStart: 0,
-              trimEnd: 0,
-              transform: { x: 0, y: 140, scale: 100, rotation: 0 },
-              opacity: 1,
-              speed: 1,
-              effects: [],
-              textSettings: {
-                text: phraseText,
-                fontSize: 26,
-                fontFamily: 'Inter',
-                color: '#ffffff',
-                strokeWidth: 4,
-                strokeColor: '#000000',
-                bold: true,
-                shadow: true,
-                textAlign: 'center' as CanvasTextAlign,
-                animation: {
-                  in: 'fadeIn',
-                  out: 'fadeOut',
-                  inDuration: 0.15,
-                  outDuration: 0.15
-                }
-              }
+              endTime: phraseEnd,
+              text: phraseText,
+              translations: { en: phraseText }
             };
+          });
 
-            addClip(newSubClip as any);
-          }
+          useEditorStore.getState().setSubtitles(newSubs);
         } else {
           const colors = ['#ffffff', '#fbbf24', '#22c55e', '#22d3ee', '#f43f5e', '#a855f7'];
           const animations = ['zoom', 'bounce', 'slideUp'];

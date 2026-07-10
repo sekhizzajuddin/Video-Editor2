@@ -87,91 +87,38 @@ Return ONLY a valid JSON object where the keys are the 2-character language code
   
   const srtResults = JSON.parse(resultJsonStr);
 
-  // 4. Create new subtitle track and parse SRTs
-  const subtitleVariants: Record<string, TimelineClip[]> = {};
-  
-  for (const lang of languages) {
-    if (srtResults[lang]) {
-      const parsedSrt = parseSRT(srtResults[lang]);
-      const clips: TimelineClip[] = parsedSrt.map((sub: any) => {
-        const duration = sub.duration ?? ((sub.end && sub.start) ? sub.end - sub.start : 2);
-        const startTime = sub.startTime ?? sub.start ?? 0;
-        return {
-          id: uuidv4(),
-          mediaId: `subtitle:${lang}`,
-          trackId: '', // Will be assigned when track is created
-          startTime: sub.start,
-          duration: duration,
-          trimStart: 0,
-          trimEnd: duration,
-          opacity: 1,
-          transform: { x: 0, y: 180, scale: 100, rotation: 0 },
-          speed: 1,
-          effects: [],
-          textSettings: {
-            text: sub.text,
-            fontSize: 42,
-            fontFamily: 'Inter',
-            color: '#ffffff',
-            backgroundColor: '#000000AA',
-            bold: true,
-            italic: false,
-            underline: false,
-            shadow: true,
-            textAlign: 'center'
-          }
-        };
-      });
-      subtitleVariants[lang] = clips;
-    }
+  // 4. Parse SRTs and construct merged SubtitleItems
+  const primaryLang = languages[0] || 'en';
+  if (!srtResults[primaryLang]) {
+    throw new Error(`Failed to generate subtitles in primary language (${primaryLang}).`);
   }
 
-  onProgress(95);
+  const primaryParsed = parseSRT(srtResults[primaryLang]);
 
-  // Find or create subtitle track
-  let targetTrack = store.tracks.find(t => t.type === 'text' && t.selectedSubtitleLanguage);
-  let newTracks = [...store.tracks];
-
-  if (targetTrack) {
-    // Update existing subtitle track
-    const updatedTrack = {
-      ...targetTrack,
-      subtitleVariants: subtitleVariants,
-      selectedSubtitleLanguage: languages[0],
-      clips: subtitleVariants[languages[0]] || []
-    };
-    // Update trackId in clips
-    updatedTrack.clips.forEach(c => c.trackId = updatedTrack.id);
-    for (const lang in updatedTrack.subtitleVariants) {
-      updatedTrack.subtitleVariants[lang].forEach(c => c.trackId = updatedTrack.id);
+  const newSubtitles = primaryParsed.map((sub: any, idx: number) => {
+    const translations: Record<string, string> = {};
+    for (const lang of languages) {
+      if (srtResults[lang]) {
+        const parsedLang = parseSRT(srtResults[lang]);
+        if (parsedLang[idx]) {
+          translations[lang] = parsedLang[idx].text;
+        }
+      }
     }
-    newTracks = newTracks.map(t => t.id === targetTrack!.id ? updatedTrack : t);
-  } else {
-    // Create new subtitle track
-    const newTrackId = uuidv4();
-    const activeClips = subtitleVariants[languages[0]] || [];
-    activeClips.forEach(c => c.trackId = newTrackId);
     
-    for (const lang in subtitleVariants) {
-      subtitleVariants[lang].forEach(c => c.trackId = newTrackId);
-    }
-
-    const newTrack = {
-      id: newTrackId,
-      name: 'Subtitles',
-      type: 'text' as const,
-      locked: false,
-      muted: false,
-      hidden: false,
-      clips: activeClips,
-      overLayers: [],
-      selectedSubtitleLanguage: languages[0],
-      subtitleVariants: subtitleVariants
+    const startTime = sub.start !== undefined ? sub.start : sub.startTime !== undefined ? sub.startTime : 0;
+    const endTime = sub.end !== undefined ? sub.end : sub.endTime !== undefined ? sub.endTime : startTime + 2;
+    
+    return {
+      id: uuidv4(),
+      startTime,
+      endTime,
+      text: sub.text,
+      translations
     };
-    newTracks.push(newTrack);
-  }
+  });
 
-  useEditorStore.setState({ tracks: newTracks });
+  store.setSubtitles(newSubtitles);
   onProgress(100);
 }
 

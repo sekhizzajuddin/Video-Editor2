@@ -41,6 +41,8 @@ import {
   ChevronDown,
   ChevronRight,
   Square,
+  Plus,
+  Globe,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment } from 'react';
 import { useEditorStore } from '@/store/editorStore';
@@ -176,69 +178,7 @@ export const PARTICLE_EFFECTS: Array<{
 
 
 
-const TEXT_TEMPLATES = [
-  // ── Headings & Subtitles (1-6) ──
-  { name: 'Heading Large', style: 'text-3xl font-bold text-white', settings: { fontSize: 56, bold: true, fontFamily: 'Inter', color: '#ffffff' } },
-  { name: 'Heading Medium', style: 'text-2xl font-bold text-white', settings: { fontSize: 40, bold: true, fontFamily: 'Inter', color: '#ffffff' } },
-  { name: 'Subtitle Large', style: 'text-xl font-medium text-gray-300', settings: { fontSize: 32, bold: false, fontFamily: 'Inter', color: '#cbd5e1' } },
-  { name: 'Subtitle Small', style: 'text-lg font-normal text-gray-400', settings: { fontSize: 24, bold: false, fontFamily: 'Inter', color: '#94a3b8' } },
-  { name: 'Body Text', style: 'text-sm font-normal text-white', settings: { fontSize: 18, bold: false, fontFamily: 'Inter', color: '#ffffff' } },
-  { name: 'Caption', style: 'text-xs text-gray-400 italic', settings: { fontSize: 14, italic: true, fontFamily: 'Inter', color: '#94a3b8' } },
-
-  // ── Vibrant Colors (7-16) ──
-  { name: 'Vibrant Pink', style: 'text-2xl font-extrabold text-pink-500', settings: { fontSize: 40, bold: true, color: '#ec4899', fontFamily: 'Inter' } },
-  { name: 'Sunset Orange', style: 'text-2xl font-extrabold text-orange-500', settings: { fontSize: 40, bold: true, color: '#f97316', fontFamily: 'Inter' } },
-  { name: 'Cyber Neon', style: 'text-2xl font-extrabold text-cyan-400 drop-shadow-[0_2px_8px_rgba(34,211,238,0.5)]', settings: { fontSize: 40, bold: true, color: '#22d3ee', shadow: true, shadowColor: '#22d3ee', shadowBlur: 10, fontFamily: 'Oswald' } },
-  { name: 'Forest Emerald', style: 'text-2xl font-extrabold text-emerald-400', settings: { fontSize: 40, bold: true, color: '#34d399', fontFamily: 'Inter' } },
-  { name: 'Royal Gold', style: 'text-2xl font-serif text-[#d4af37]', settings: { fontSize: 40, bold: false, color: '#d4af37', fontFamily: 'Times New Roman' } },
-  { name: 'Electric Indigo', style: 'text-2xl font-extrabold text-indigo-400', settings: { fontSize: 40, bold: true, color: '#818cf8', fontFamily: 'Inter' } },
-  { name: 'Hot Rose', style: 'text-2xl font-bold text-rose-500', settings: { fontSize: 40, bold: true, color: '#f43f5e', fontFamily: 'Inter' } },
-  { name: 'Lemon Lime', style: 'text-2xl font-bold text-lime-400', settings: { fontSize: 40, bold: true, color: '#a3e635', fontFamily: 'Inter' } },
-  { name: 'Ruby Red', style: 'text-2xl font-bold text-red-500', settings: { fontSize: 40, bold: true, color: '#ef4444', fontFamily: 'Inter' } },
-  { name: 'Violet Glow', style: 'text-2xl font-bold text-violet-400 drop-shadow-[0_2px_8px_rgba(167,139,250,0.5)]', settings: { fontSize: 40, bold: true, color: '#a78bfa', shadow: true, shadowColor: '#a78bfa', shadowBlur: 10, fontFamily: 'Inter' } },
-
-  // ── Backgrounds & Labels (17-26) ──
-  { name: 'Dark Label', style: 'px-2 py-0.5 bg-black text-white text-sm rounded', settings: { fontSize: 24, color: '#ffffff', backgroundColor: '#000000', fontFamily: 'Inter' } },
-  { name: 'Red Banner', style: 'px-3 py-1 bg-red-600 text-white font-bold rounded text-sm', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#dc2626', fontFamily: 'Inter' } },
-  { name: 'Blue Ribbon', style: 'px-3 py-0.5 bg-blue-600 text-white text-sm rounded-full', settings: { fontSize: 24, color: '#ffffff', backgroundColor: '#2563eb', fontFamily: 'Inter' } },
-  { name: 'Yellow Warning', style: 'px-2 py-0.5 bg-yellow-500 text-black font-extrabold rounded text-sm', settings: { fontSize: 24, bold: true, color: '#000000', backgroundColor: '#eab308', fontFamily: 'Inter' } },
-  { name: 'Green Success', style: 'px-2 py-0.5 bg-green-500 text-white font-bold rounded text-sm', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#22c55e', fontFamily: 'Inter' } },
-  { name: 'Semi-Trans Black', style: 'px-2 py-0.5 bg-black/60 text-white rounded text-sm', settings: { fontSize: 24, color: '#ffffff', backgroundColor: 'rgba(0,0,0,0.6)', fontFamily: 'Inter' } },
-  { name: 'White Box', style: 'px-2 py-0.5 bg-white text-black font-bold rounded text-sm', settings: { fontSize: 24, bold: true, color: '#000000', backgroundColor: '#ffffff', fontFamily: 'Inter' } },
-  { name: 'Purple Badge', style: 'px-2 py-0.5 bg-purple-600 text-white font-bold rounded-full text-sm', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#9333ea', fontFamily: 'Inter' } },
-  { name: 'Orange Tag', style: 'px-2 py-0.5 bg-orange-500 text-white font-bold rounded text-sm', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#f97316', fontFamily: 'Inter' } },
-  { name: 'Teal Bordered', style: 'px-2 py-0.5 border border-teal-400 text-teal-400 rounded bg-[#1e1e1e] text-sm', settings: { fontSize: 24, color: '#2dd4bf', backgroundColor: '#1e1e1e', strokeColor: '#2dd4bf', strokeWidth: 1, fontFamily: 'Inter' } },
-
-  // ── Shadows & Outlines (27-34) ──
-  { name: 'Deep Drop Shadow', style: 'text-xl font-bold text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.9)]', settings: { fontSize: 32, bold: true, color: '#ffffff', shadow: true, shadowColor: '#000000', shadowBlur: 12, fontFamily: 'Inter' } },
-  { name: 'Neon Pink Glow', style: 'text-xl font-bold text-pink-500 drop-shadow-[0_4px_10px_rgba(244,63,94,0.8)]', settings: { fontSize: 32, bold: true, color: '#ec4899', shadow: true, shadowColor: '#f43f5e', shadowBlur: 10, fontFamily: 'Inter' } },
-  { name: 'Cyan Glow', style: 'text-xl font-bold text-cyan-400 drop-shadow-[0_4px_10px_rgba(6,182,212,0.8)]', settings: { fontSize: 32, bold: true, color: '#22d3ee', shadow: true, shadowColor: '#06b6d4', shadowBlur: 10, fontFamily: 'Inter' } },
-  { name: 'Golden Glow', style: 'text-xl font-bold text-[#d4af37] drop-shadow-[0_4px_10px_rgba(212,175,55,0.8)]', settings: { fontSize: 32, bold: true, color: '#d4af37', shadow: true, shadowColor: '#d4af37', shadowBlur: 10, fontFamily: 'Inter' } },
-  { name: 'White Outline', style: 'text-xl font-black text-white stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#ffffff', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Inter' } },
-  { name: 'Outline Yellow', style: 'text-xl font-black text-yellow-400 stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#facc15', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Inter' } },
-  { name: 'Ghost White', style: 'text-lg font-bold text-white/40 border border-white/20 px-2 py-0.5 bg-transparent', settings: { fontSize: 24, bold: true, color: 'rgba(255,255,255,0.4)', fontFamily: 'Inter' } },
-  { name: 'Chunky Shadow', style: 'text-xl font-extrabold text-white [text-shadow:2px_2px_0_#000]', settings: { fontSize: 32, bold: true, color: '#ffffff', shadow: true, shadowColor: '#000000', shadowBlur: 1, fontFamily: 'Inter' } },
-
-  // ── Presets & Fonts (35-40) ──
-  { name: 'Typewriter Green', style: 'text-lg font-mono text-green-400', settings: { fontSize: 28, color: '#4ade80', fontFamily: 'Courier New', animationPreset: 'typewriter' } },
-  { name: 'Vintage Serif', style: 'text-xl font-serif text-amber-100 italic', settings: { fontSize: 32, italic: true, color: '#fef3c7', fontFamily: 'Georgia' } },
-  { name: 'Bouncy Pop', style: 'text-2xl font-extrabold text-amber-400 scale-105', settings: { fontSize: 40, bold: true, color: '#fbbf24', fontFamily: 'Inter', animationPreset: 'bounce' } },
-  { name: 'Cinematic Intro', style: 'text-2xl tracking-widest font-light text-slate-100 uppercase', settings: { fontSize: 36, color: '#f1f5f9', fontFamily: 'Montserrat' } },
-  { name: 'Retro VHS Play', style: 'text-base font-mono text-cyan-300 drop-shadow-[1px_1px_0_#e11d48]', settings: { fontSize: 24, color: '#67e8f9', shadow: true, shadowColor: '#be185d', shadowBlur: 1, fontFamily: 'Courier New' } },
-  { name: 'Terminal Prompt', style: 'text-base font-mono text-green-300', settings: { fontSize: 24, color: '#86efac', fontFamily: 'Courier New' } },
-
-  // ── Social Media (41-50) ──
-  { name: 'YouTube Subscribe', style: 'px-2 py-0.5 bg-red-600 text-white font-bold rounded-lg text-[10px] uppercase', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#dc2626', fontFamily: 'Roboto', animationPreset: 'subscribe' } },
-  { name: 'Instagram Follow', style: 'px-2 py-0.5 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white font-bold rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#ec4899', fontFamily: 'Inter' } },
-  { name: 'TikTok Handle', style: 'px-2 py-0.5 bg-black text-white font-bold border border-cyan-400 rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#000000', strokeColor: '#22d3ee', strokeWidth: 1, fontFamily: 'Oswald' } },
-  { name: 'Twitch Live', style: 'px-2 py-0.5 bg-[#9146ff] text-white font-bold uppercase rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#9146ff', fontFamily: 'Inter' } },
-  { name: 'Facebook Like', style: 'px-2 py-0.5 bg-[#1877f2] text-white font-bold rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#1877f2', fontFamily: 'Inter' } },
-  { name: 'LinkedIn Connect', style: 'px-2 py-0.5 bg-[#0a66c2] text-white font-bold rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#0a66c2', fontFamily: 'Inter' } },
-  { name: 'Meme Text Bottom', style: 'text-xl font-extrabold text-white uppercase stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#ffffff', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Impact' } },
-  { name: 'Comic Style', style: 'text-xl font-extrabold text-yellow-300 italic drop-shadow-[1px_1px_0_#000]', settings: { fontSize: 32, bold: true, color: '#fde047', italic: true, shadow: true, shadowColor: '#000000', shadowBlur: 1, fontFamily: 'Inter' } },
-  { name: 'Glitch Cyber', style: 'text-xl font-black text-cyan-300 tracking-wide', settings: { fontSize: 32, bold: true, color: '#67e8f9', fontFamily: 'Oswald' } },
-  { name: 'Bubble Caption', style: 'px-2 py-0.5 bg-[#f8fafc] text-[#0f172a] rounded-lg border border-[#cbd5e1] text-[10px]', settings: { fontSize: 22, color: '#0f172a', backgroundColor: '#f8fafc', fontFamily: 'Inter' } }
-];
+import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 
 interface TemplatePreviewCardProps {
   tmpl: MotionTemplate;
@@ -483,6 +423,9 @@ export function MediaPanel() {
     updateOverLayer,
     selectClip,
     saveSnapshot,
+    subtitles,
+    selectedSubtitleId,
+    selectSubtitle,
   } = useEditorStore();
 
   // Click-to-apply fallback handlers
@@ -759,9 +702,84 @@ export function MediaPanel() {
   const [templateName, setTemplateName] = useState('');
   const [templateDesc, setTemplateDesc] = useState('');
   const [confirmLoadTemplateId, setConfirmLoadTemplateId] = useState<string | null>(null);
+
+  // Subtab and generator states
+  const [textSubTab, setTextSubTab] = useState<'text' | 'subtitle'>('text');
+  const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
+  const [captionProgress, setCaptionProgress] = useState(0);
+  const [showCaptionLanguageModal, setShowCaptionLanguageModal] = useState(false);
+  const [selectedCaptionLanguages, setSelectedCaptionLanguages] = useState<string[]>(['EN']);
+  const [isGeneratingKineticTypo, setIsGeneratingKineticTypo] = useState(false);
+  const [kineticTypoProgress, setKineticTypoProgress] = useState(0);
+  const [showKineticTypoModal, setShowKineticTypoModal] = useState(false);
+  const [kineticTypoScript, setKineticTypoScript] = useState('english');
+  const [englishCasing, setEnglishCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
+
+  const CAPTION_LANGUAGES = [
+    { code: 'EN', name: 'English' },
+    { code: 'HI', name: 'Hindi' },
+    { code: 'ES', name: 'Spanish' },
+    { code: 'FR', name: 'French' },
+    { code: 'DE', name: 'German' },
+    { code: 'JA', name: 'Japanese' }
+  ];
+
+  const handleGenerateCaptions = async (languages: string[]) => {
+    setShowCaptionLanguageModal(false);
+    setIsGeneratingCaptions(true);
+    setCaptionProgress(0);
+    try {
+      const { generateAutoCaptions } = await import('@/utils/autoCaptions');
+      await generateAutoCaptions(languages, (p) => setCaptionProgress(p));
+      toast.success("Auto Captions generated!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Auto Captions failed: ${err.message || err}`);
+    } finally {
+      setIsGeneratingCaptions(false);
+    }
+  };
+
+  const handleGenerateKineticTypography = async () => {
+    const { selectedClipId, tracks } = useEditorStore.getState();
+    let targetClip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+    
+    if (!targetClip) {
+      const { currentTime } = useEditorStore.getState();
+      const videoTrack = tracks.find(t => t.type === 'video');
+      if (videoTrack) {
+        targetClip = videoTrack.clips.find(c => currentTime >= c.startTime && currentTime <= c.startTime + c.duration);
+      }
+    }
+    
+    if (!targetClip) {
+      toast.error('Please select a video or audio clip on the timeline first.');
+      return;
+    }
+    
+    setIsGeneratingKineticTypo(true);
+    setKineticTypoProgress(0);
+    setShowKineticTypoModal(false);
+    
+    try {
+      const { generateKineticTypography } = await import('@/utils/kineticTypography');
+      await generateKineticTypography(
+        targetClip,
+        targetClip.trackId,
+        { script: kineticTypoScript, englishCasing },
+        (p) => setKineticTypoProgress(p)
+      );
+      toast.success("Kinetic Typography Generated!");
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Kinetic Typography failed: ${e.message || e}`);
+    } finally {
+      setIsGeneratingKineticTypo(false);
+    }
+  };
 
   const [isRecordingScreen, setIsRecordingScreen] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -2096,32 +2114,317 @@ export function MediaPanel() {
         )}
 
         {activeMediaTab === 'text' && (
-          <div className="flex-1 overflow-y-auto flex flex-col p-2">
-            <div className="mb-4">
+          <div className="flex-1 overflow-hidden flex flex-col p-2 min-h-0 bg-[#1e1e1e]/20">
+            {/* Sub-tabs header */}
+            <div className="flex border-b border-[#3e3e3e] shrink-0 mb-3 bg-[#1e1e1e]/40 rounded-t overflow-hidden">
               <button
-                onClick={() => srtInputRef.current?.click()}
-                disabled={importing}
-                className="w-full py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-purple-500 text-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                title="Import Subtitles (.srt file) and auto-sync"
+                onClick={() => setTextSubTab('text')}
+                className={`flex-1 py-2 text-xs font-semibold border-b-2 transition-all ${
+                  textSubTab === 'text'
+                    ? 'text-white border-amber-500 bg-[#2d2d2d]/30'
+                    : 'text-[#a0a0a0] border-transparent hover:text-white hover:bg-[#2d2d2d]/10'
+                }`}
               >
-                <Type className="w-4 h-4 text-purple-400" />
-                Import .SRT Subtitles
+                Text Clips
+              </button>
+              <button
+                onClick={() => setTextSubTab('subtitle')}
+                className={`flex-1 py-2 text-xs font-semibold border-b-2 transition-all ${
+                  textSubTab === 'subtitle'
+                    ? 'text-white border-amber-500 bg-[#2d2d2d]/30'
+                    : 'text-[#a0a0a0] border-transparent hover:text-white hover:bg-[#2d2d2d]/10'
+                }`}
+              >
+                Subtitles
               </button>
             </div>
-            <p className="text-xs text-[#a0a0a0] mb-3">Click to add text at playhead</p>
-            <div className="flex flex-col gap-2">
-              {TEXT_TEMPLATES.map((template) => (
-                <div
-                  key={template.name}
-                  onClick={() => insertTextClip({ text: template.name, ...(template.settings as any) })}
-                  className="p-4 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] hover:border-[#5e5e5e] rounded cursor-pointer transition-all flex items-center justify-center text-center group"
+
+            {textSubTab === 'text' ? (
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                <button
+                  onClick={() => {
+                    const txt = prompt("Enter text content:", "New Text");
+                    if (txt) {
+                      insertTextClip({ text: txt });
+                    }
+                  }}
+                  className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors mb-3 shrink-0 shadow"
                 >
-                  <span className={`${template.style} transition-transform group-hover:scale-105`}>
-                    {template.name}
-                  </span>
+                  <Plus className="w-3.5 h-3.5" /> Add Text Clip
+                </button>
+
+                <p className="text-[10px] text-[#a0a0a0] mb-2 shrink-0">Drag items below to the timeline:</p>
+                
+                <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-2 min-h-0 scrollbar-thin pr-1 pb-4">
+                  {mediaLibrary.filter(m => m.type === 'text').map((item) => (
+                    <div
+                      key={item.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/json', JSON.stringify({
+                          type: 'text',
+                          mediaId: item.id
+                        }));
+                      }}
+                      className="p-3 bg-[#2a2a2a] border border-[#3e3e3e] hover:border-amber-500/50 rounded flex flex-col justify-between h-[82px] cursor-grab active:cursor-grabbing relative group select-none transition-all shadow-sm"
+                    >
+                      <div className="flex items-center gap-1.5 overflow-hidden">
+                        <Type className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span className="text-[10px] text-white font-medium truncate pr-4">{item.name}</span>
+                      </div>
+                      <div className="text-[9px] text-[#a0a0a0] truncate bg-[#1a1a1a] p-1 rounded border border-[#343434] max-h-[36px] overflow-hidden leading-tight font-mono">
+                        {item.textContent || 'Text'}
+                      </div>
+                      
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeMedia(item.id);
+                        }}
+                        className="absolute top-1.5 right-1.5 p-1 bg-black/40 hover:bg-red-600/20 text-[#8a8a8a] hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Delete Text Media"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {mediaLibrary.filter(m => m.type === 'text').length === 0 && (
+                    <div className="col-span-2 flex flex-col items-center justify-center py-10 text-center text-[#6a6a6a]">
+                      <Type className="w-8 h-8 mb-2 opacity-30" />
+                      <span className="text-[10px] font-medium">No text media in project library</span>
+                      <span className="text-[9px] opacity-60 mt-0.5">Click "Add Text Clip" to create one</span>
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+
+                {/* Kinetic Typography Trigger Section */}
+                <div className="mt-2 p-3 bg-[#172323] border border-teal-500/20 rounded flex flex-col gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-teal-400 animate-pulse" />
+                    <span className="text-xs font-semibold text-teal-300">Kinetic Typography AI</span>
+                  </div>
+                  <p className="text-[10px] text-teal-400/80 leading-relaxed">
+                    Automatically transcribe and animate any timeline clip word-by-word with premium style matching. Select a clip to start.
+                  </p>
+                  {isGeneratingKineticTypo ? (
+                    <div className="flex items-center justify-between py-1.5 px-3 bg-[#111a1a] border border-teal-500/20 rounded mt-1">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-3.5 h-3.5 text-teal-400 animate-spin" />
+                        <span className="text-[10px] text-teal-300">Generating kinetic words...</span>
+                      </div>
+                      <span className="text-xs font-bold text-teal-400 font-mono">{kineticTypoProgress.toFixed(0)}%</span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowKineticTypoModal(true)}
+                      className="w-full py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded text-[11px] font-semibold transition-colors mt-1 flex items-center justify-center gap-1.5 shadow"
+                    >
+                      <Sparkles className="w-3 h-3" /> Generate Kinetic Typography
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                <div className="flex gap-2 mb-3 shrink-0">
+                  <button
+                    onClick={() => setShowCaptionLanguageModal(true)}
+                    disabled={isGeneratingCaptions}
+                    className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 shadow"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    {isGeneratingCaptions ? `${captionProgress}%` : 'Auto-Captions'}
+                  </button>
+                  <button
+                    onClick={() => srtInputRef.current?.click()}
+                    disabled={importing}
+                    className="flex-1 py-2 bg-[#2d2d2d] hover:bg-[#3e3e3e] text-white border border-[#3e3e3e] rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-purple-400" />
+                    SRT Import
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto flex flex-col gap-2 min-h-0 scrollbar-thin pr-1 pb-4">
+                  {subtitles.map((sub: any) => {
+                    const isSelected = selectedSubtitleId === sub.id;
+                    return (
+                      <div
+                        key={sub.id}
+                        onClick={() => {
+                          useEditorStore.setState({ currentTime: sub.startTime });
+                          selectSubtitle(sub.id);
+                        }}
+                        className={`p-3 bg-[#252525] border rounded cursor-pointer transition-all flex flex-col gap-2 hover:border-[#4e4e4e] shadow-sm ${
+                          isSelected ? 'border-amber-500 bg-[#2d271a]' : 'border-[#3e3e3e]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[9px] text-[#a0a0a0] font-mono border-b border-[#303030] pb-1.5">
+                          <span className="bg-[#1e1e1e] px-1.5 py-0.5 rounded border border-[#2e2e2e] text-amber-400 font-semibold">
+                            In: {sub.startTime.toFixed(2)}s
+                          </span>
+                          <span className="bg-[#1e1e1e] px-1.5 py-0.5 rounded border border-[#2e2e2e] text-amber-400 font-semibold">
+                            Out: {sub.endTime.toFixed(2)}s
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-1.5">
+                          <div className="text-[11px] text-white leading-relaxed font-semibold">
+                            {sub.text}
+                          </div>
+                          {sub.translations && Object.entries(sub.translations).map(([lang, val]) => {
+                            if (lang === 'en') return null;
+                            return (
+                              <div key={lang} className="text-[10px] text-teal-400 leading-relaxed flex gap-1 items-start bg-[#1c2323]/40 p-1.5 border border-teal-500/10 rounded">
+                                <span className="text-[8px] uppercase px-1 py-0.2 bg-teal-500/10 rounded border border-teal-500/20 text-teal-400 shrink-0 font-bold font-mono mt-0.5">
+                                  {lang}
+                                </span>
+                                <span>{val as string}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  {subtitles.length === 0 && (
+                    <div className="flex-1 flex flex-col items-center justify-center py-12 text-center text-[#6a6a6a]">
+                      <Globe className="w-8 h-8 mb-2 opacity-30 text-amber-500" />
+                      <span className="text-xs font-semibold">No Subtitles Generated</span>
+                      <span className="text-[10px] mt-1 opacity-60 max-w-[200px] leading-normal">
+                        Click "Auto-Captions" or "SRT Import" to create subtitles for your project.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Language Selection Modal */}
+            {showCaptionLanguageModal && (
+              <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+                <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl p-5 w-full max-w-[380px]">
+                  <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    Generate Auto-Captions
+                  </h3>
+                  <p className="text-[11px] text-[#a0a0a0] mb-4 leading-normal">
+                    Select target transcription languages. The AI will analyze timeline speech and create multi-lingual captions.
+                  </p>
+                  
+                  <div className="space-y-1.5 max-h-[180px] overflow-y-auto mb-5 pr-1 border border-[#2d2d2d] rounded p-2 bg-[#151515] scrollbar-thin">
+                    {CAPTION_LANGUAGES.map(lang => (
+                      <label key={lang.code} className="flex items-center gap-2.5 p-2 rounded hover:bg-[#252525] cursor-pointer transition-colors select-none text-xs">
+                        <input 
+                          type="checkbox"
+                          checked={selectedCaptionLanguages.includes(lang.code)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedCaptionLanguages(prev => [...prev, lang.code]);
+                            } else {
+                              setSelectedCaptionLanguages(prev => prev.filter(c => c !== lang.code));
+                            }
+                          }}
+                          className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
+                        />
+                        <span className="text-white font-medium">{lang.name} ({lang.code})</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end gap-2.5 pt-2 border-t border-[#2d2d2d]">
+                    <button
+                      onClick={() => setShowCaptionLanguageModal(false)}
+                      className="px-3.5 py-1.5 text-xs text-[#a0a0a0] hover:text-white transition-colors font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleGenerateCaptions(selectedCaptionLanguages)}
+                      disabled={selectedCaptionLanguages.length === 0}
+                      className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold transition-colors disabled:opacity-50"
+                    >
+                      Generate
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Kinetic Typography Customization Modal */}
+            {showKineticTypoModal && (
+              <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 animate-fadeIn">
+                <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl p-5 w-full max-w-[380px]">
+                  <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-teal-400" />
+                    Kinetic Typography Config
+                  </h3>
+                  <p className="text-[11px] text-[#a0a0a0] mb-4 leading-normal">
+                    Generate highly stylized, word-by-word visual animations synced with speech.
+                  </p>
+                  
+                  <div className="space-y-4 mb-5">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">Select Script / Language</label>
+                      <select
+                        value={kineticTypoScript}
+                        onChange={(e) => setKineticTypoScript(e.target.value)}
+                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                      >
+                        <option value="english">English Script</option>
+                        <option value="roman_urdu_hindi">Roman Urdu/Hindi (English text)</option>
+                        <option value="hindi">Devanagari Hindi Script (हिंदी)</option>
+                        <option value="spanish">Spanish</option>
+                        <option value="french">French</option>
+                        <option value="german">German</option>
+                      </select>
+                    </div>
+
+                    {kineticTypoScript === 'english' && (
+                      <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
+                        <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider block">Casing Constraints (English)</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="flex items-center gap-2 p-2 bg-[#151515] border border-[#2d2d2d] rounded cursor-pointer text-xs select-none">
+                            <input
+                              type="checkbox"
+                              checked={englishCasing === 'all_caps'}
+                              onChange={(e) => setEnglishCasing(e.target.checked ? 'all_caps' : 'none')}
+                              className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
+                            />
+                            <span className="text-white text-[10px]">ALL CAPS</span>
+                          </label>
+                          <label className="flex items-center gap-2 p-2 bg-[#151515] border border-[#2d2d2d] rounded cursor-pointer text-xs select-none">
+                            <input
+                              type="checkbox"
+                              checked={englishCasing === 'first_letter_caps'}
+                              onChange={(e) => setEnglishCasing(e.target.checked ? 'first_letter_caps' : 'none')}
+                              className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
+                            />
+                            <span className="text-white text-[10px]">First Letter Caps</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2.5 pt-2 border-t border-[#2d2d2d]">
+                    <button
+                      onClick={() => setShowKineticTypoModal(false)}
+                      className="px-3.5 py-1.5 text-xs text-[#a0a0a0] hover:text-white transition-colors font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleGenerateKineticTypography}
+                      className="px-4 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded text-xs font-semibold transition-colors"
+                    >
+                      Generate
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -2,6 +2,7 @@ import { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { getGeminiKey } from './aiClient';
 import { extractFramesFromVideo } from './frameExtractor';
+import { TEXT_TEMPLATES } from './textTemplates';
 
 const uuidv4 = () => crypto.randomUUID();
 
@@ -91,9 +92,10 @@ For each word, choose different styles and effects that fit the tone of that spe
 - "y": Y position (0 to 100, where 50 is center, usually around 80 for lower thirds, 50 for center pop).
 - "animationIn": 'fadeIn', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'bounce', or 'typewriter'.
 - "animationOut": 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', or 'slideRight'.
+- "stylePreset": Select one of the following style presets that matches the tone/mood of the word: 'Cyber Neon' (for digital/excited words), 'Yellow Warning' (for cautious/alert words), 'Golden Glow' (for premium words), 'Bouncy Pop' (for energetic words), 'Neon Pink Glow' (for pop/vibrant words), 'Ruby Red' (for intense/angry words), 'Vibrant Pink' (for beautiful words), 'Sunset Orange' (for warm/creative words), 'Forest Emerald' (for organic/green words), 'Electric Indigo' (for tech/mysterious words), 'Typewriter Green' (for retro/code words), 'Chunky Shadow' (for heavy pop words), 'Glitch Cyber' (for tech/cyber words), 'Bubble Caption' (for general text).
 
 Output ONLY valid JSON array format, no markdown wrapping. Example:
-[{"text":"Wow","start":0.5,"end":0.8,"fontSize":90,"fontFamily":"Anton","color":"#FFD700","x":50,"y":50,"animationIn":"zoom","animationOut":"fadeOut"}]`;
+[{"text":"Wow","start":0.5,"end":0.8,"fontSize":90,"fontFamily":"Anton","color":"#FFD700","x":50,"y":50,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
   const contentsParts: any[] = [{ text: prompt }];
 
@@ -175,6 +177,37 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
   // 4. Create new text clips and insert them above the current video track
   // Wait, if it's kinetic typography, we put it in a text track.
   const newClips: TimelineClip[] = processedClips.map((item: any) => {
+    const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (item.stylePreset || '').toLowerCase());
+    const fontSz = item.fontSize || 60;
+    const fontFam = item.fontFamily || 'Anton';
+    const clr = item.color || '#ffffff';
+
+    const textSettings: any = {
+      text: item.text,
+      fontSize: preset ? (preset.settings.fontSize ? Math.round(preset.settings.fontSize * 0.9) : fontSz) : fontSz,
+      fontFamily: preset?.settings.fontFamily || fontFam,
+      color: preset?.settings.color || clr,
+      backgroundColor: preset?.settings.backgroundColor || 'transparent',
+      bold: preset ? (preset.settings.bold !== undefined ? preset.settings.bold : true) : true,
+      italic: preset ? (preset.settings.italic || false) : false,
+      underline: preset ? (preset.settings.underline || false) : false,
+      shadow: preset ? (preset.settings.shadow !== undefined ? preset.settings.shadow : true) : true,
+      shadowColor: preset?.settings.shadowColor || '#000000',
+      shadowBlur: preset?.settings.shadowBlur || 10,
+      textAlign: 'center',
+      animation: {
+        in: item.animationIn === 'pop' ? 'zoom' : (item.animationIn || 'slideUp'),
+        out: item.animationOut || 'fadeOut',
+        inDuration: 0.1,
+        outDuration: 0.1
+      }
+    };
+
+    if (preset?.settings.strokeColor) {
+      textSettings.strokeColor = preset.settings.strokeColor;
+      textSettings.strokeWidth = preset.settings.strokeWidth || 2;
+    }
+
     return {
       id: uuidv4(),
       mediaId: 'generator:kinetic',
@@ -187,24 +220,7 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
       transform: { x: item.x - 50, y: item.y - 50, scale: 100, rotation: 0 },
       speed: 1,
       effects: [],
-      textSettings: {
-        text: item.text,
-        fontSize: item.fontSize || 60,
-        fontFamily: item.fontFamily || 'Anton',
-        color: item.color || '#ffffff',
-        backgroundColor: 'transparent',
-        bold: true,
-        italic: false,
-        underline: false,
-        shadow: true,
-        textAlign: 'center',
-        animation: {
-          in: item.animationIn === 'pop' ? 'zoom' : (item.animationIn || 'slideUp'),
-          out: item.animationOut || 'fadeOut',
-          inDuration: 0.1,
-          outDuration: 0.1
-        }
-      }
+      textSettings
     };
   });
 

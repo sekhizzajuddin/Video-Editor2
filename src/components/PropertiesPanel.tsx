@@ -26,6 +26,7 @@ import {
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
 import { toast } from 'sonner';
+import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
@@ -264,9 +265,14 @@ export function PropertiesPanel() {
     historyIndex,
     jumpToHistoryIndex,
     addMedia,
-    addClip,
     addTrack,
+    addClip,
     mediaLibrary,
+    subtitles,
+    selectedSubtitleId,
+    updateSubtitle,
+    deleteSubtitle,
+    selectSubtitle,
   } = useEditorStore();
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
@@ -295,11 +301,7 @@ export function PropertiesPanel() {
 
   const [isAnalyzingMotionGraphics, setIsAnalyzingMotionGraphics] = useState(false);
   const [motionGraphicsAnalyzeProgress, setMotionGraphicsAnalyzeProgress] = useState('');
-  const [isGeneratingKineticTypo, setIsGeneratingKineticTypo] = useState(false);
-  const [kineticTypoProgress, setKineticTypoProgress] = useState(0);
-  const [showKineticTypoModal, setShowKineticTypoModal] = useState(false);
-  const [kineticTypoScript, setKineticTypoScript] = useState('english');
-  const [englishCasing, setEnglishCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
+
   const [motionGraphicsSuggestions, setMotionGraphicsSuggestions] = useState<AIMotionGraphicSuggestion[] | null>(null);
   const [showMotionGraphicsDesigner, setShowMotionGraphicsDesigner] = useState(false);
 
@@ -386,29 +388,7 @@ export function PropertiesPanel() {
     }
   };
 
-  const handleGenerateKineticTypography = async () => {
-    if (!selectedClip || !selectedTrack) return;
-    
-    setIsGeneratingKineticTypo(true);
-    setKineticTypoProgress(0);
-    setShowKineticTypoModal(false);
-    
-    try {
-      const { generateKineticTypography } = await import('@/utils/kineticTypography');
-      await generateKineticTypography(
-        selectedClip,
-        selectedTrack.id,
-        { script: kineticTypoScript, englishCasing },
-        (p) => setKineticTypoProgress(p)
-      );
-      toast.success("Kinetic Typography Generated!");
-    } catch (e: any) {
-      console.error(e);
-      toast.error(`Kinetic Typography failed: ${e.message || e}`);
-    } finally {
-      setIsGeneratingKineticTypo(false);
-    }
-  };
+
 
   const handleAiMotionGraphicsDesign = async () => {
     if (!selectedClip || !selectedTrack) return;
@@ -964,6 +944,110 @@ export function PropertiesPanel() {
             className="w-full py-2 bg-red-600/10 hover:bg-red-600 border border-red-500/20 hover:border-red-500 text-red-400 hover:text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 mt-4"
           >
             <Trash2 className="w-3.5 h-3.5" /> Remove Transition
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const selectedSubtitle = subtitles.find(s => s.id === selectedSubtitleId);
+
+  if (selectedSubtitle) {
+    return (
+      <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
+        {/* Header */}
+        <div className="p-4 border-b border-[#3e3e3e] flex items-center justify-between bg-[#1e1e1e]/30 shrink-0">
+          <div className="flex items-center gap-2">
+            <Type className="w-4 h-4 text-amber-500" />
+            <h3 className="text-sm font-semibold text-white">Subtitle Editor</h3>
+          </div>
+          <button
+            onClick={() => deleteSubtitle(selectedSubtitle.id)}
+            className="p-1 hover:bg-[#3e3e3e] rounded text-red-400 hover:text-red-300 transition-colors"
+            title="Delete Subtitle"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 p-4 space-y-4 overflow-y-auto scrollbar-thin min-h-0">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] text-[#a0a0a0] uppercase font-semibold">Start Time (sec)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={selectedSubtitle.startTime}
+                onChange={(e) => updateSubtitle(selectedSubtitle.id, { startTime: Number(e.target.value) })}
+                className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] text-[#a0a0a0] uppercase font-semibold">End Time (sec)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={selectedSubtitle.endTime}
+                onChange={(e) => updateSubtitle(selectedSubtitle.id, { endTime: Number(e.target.value) })}
+                className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] text-[#a0a0a0] uppercase font-semibold">Primary Text (English / Default)</label>
+            <textarea
+              value={selectedSubtitle.text}
+              onChange={(e) => {
+                const val = e.target.value;
+                updateSubtitle(selectedSubtitle.id, { 
+                  text: val,
+                  translations: {
+                    ...selectedSubtitle.translations,
+                    en: val
+                  }
+                });
+              }}
+              className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
+            />
+          </div>
+
+          {/* Translations list */}
+          <div className="border-t border-[#3e3e3e]/40 pt-3 space-y-3">
+            <span className="text-[10px] text-amber-500 font-bold uppercase tracking-wider block">Translations</span>
+            {selectedSubtitle.translations && Object.entries(selectedSubtitle.translations).map(([lang, val]) => {
+              if (lang === 'en') return null;
+              return (
+                <div key={lang} className="flex flex-col gap-1.5">
+                  <span className="text-[10px] text-[#a0a0a0] uppercase font-semibold">Language: {lang.toUpperCase()}</span>
+                  <textarea
+                    value={val}
+                    onChange={(e) => {
+                      const newVal = e.target.value;
+                      updateSubtitle(selectedSubtitle.id, {
+                        translations: {
+                          ...selectedSubtitle.translations,
+                          [lang]: newVal
+                        }
+                      });
+                    }}
+                    className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[50px] resize-none focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        
+        <div className="p-3 border-t border-[#3e3e3e] bg-[#1e1e1e]/20 flex justify-end shrink-0">
+          <button
+            onClick={() => selectSubtitle(null)}
+            className="px-4 py-1.5 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-white rounded text-xs transition-colors"
+          >
+            Close Subtitle Editor
           </button>
         </div>
       </div>
@@ -4259,6 +4343,41 @@ export function PropertiesPanel() {
               </div>
 
               <div className="flex flex-col gap-2">
+                <label className="text-xs text-[#a0a0a0]">Style Presets</label>
+                <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto p-1.5 border border-[#3e3e3e]/40 rounded bg-[#181818] scrollbar-thin">
+                  {TEXT_TEMPLATES.map((tmpl) => (
+                    <button
+                      key={tmpl.name}
+                      onClick={() => {
+                        updateClip(selectedClip.id, {
+                          textSettings: {
+                            ...selectedClip.textSettings!,
+                            fontSize: tmpl.settings.fontSize,
+                            fontFamily: tmpl.settings.fontFamily,
+                            color: tmpl.settings.color,
+                            bold: tmpl.settings.bold || false,
+                            italic: tmpl.settings.italic || false,
+                            underline: tmpl.settings.underline || false,
+                            shadow: tmpl.settings.shadow || false,
+                            backgroundColor: tmpl.settings.backgroundColor || 'transparent',
+                            strokeColor: tmpl.settings.strokeColor || undefined,
+                            strokeWidth: tmpl.settings.strokeWidth || undefined,
+                            animationPreset: tmpl.settings.animationPreset || undefined,
+                          }
+                        });
+                        useEditorStore.getState().saveSnapshot();
+                        toast.success(`Applied style "${tmpl.name}"`);
+                      }}
+                      className="p-2 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-left truncate transition-colors text-[10px] text-white flex items-center justify-center font-semibold"
+                      title={tmpl.name}
+                    >
+                      <span className={tmpl.style} style={{ fontSize: '10px' }}>{tmpl.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
                 <label className="text-xs text-[#a0a0a0]">Font Family</label>
                 <select
                   value={selectedClip.textSettings.fontFamily || 'Inter'}
@@ -4644,31 +4763,7 @@ export function PropertiesPanel() {
                 )}
 
                 <div className="flex flex-col gap-2">
-                  <button
-                    onClick={() => {
-                      toast.info("Use the Auto-Captions tool in the top toolbar for timeline translation.");
-                    }}
-                    className="w-full py-1.5 bg-[#2a2a2a] hover:bg-[#3e3e3e] text-white rounded text-[11px] font-medium transition-colors border border-[#3e3e3e]"
-                  >
-                    Translate Subtitles
-                  </button>
-                  
-                  {isGeneratingKineticTypo ? (
-                    <div className="flex flex-col items-center justify-center gap-2 py-1.5 bg-[#1e2828] rounded border border-teal-500/20">
-                      <Loader2 className="w-3 h-3 text-teal-500 animate-spin" />
-                      <span className="text-[10px] text-teal-400 font-medium">
-                        {kineticTypoProgress.toFixed(0)}%
-                      </span>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowKineticTypoModal(true)}
-                      className="w-full py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded text-[11px] font-medium transition-colors shadow-md"
-                    >
-                      Generate Advance Kinetic Typography
-                    </button>
-                  )}
-                  
+
                   {isAnalyzingMotionGraphics ? (
                     <div className="flex flex-col items-center justify-center gap-2 py-1.5 bg-[#1e2828] rounded border border-teal-500/20">
                       <Loader2 className="w-3 h-3 text-teal-500 animate-spin" />
@@ -5036,80 +5131,7 @@ export function PropertiesPanel() {
         />
       )}
 
-      {/* Kinetic Typography Customization Modal */}
-      {showKineticTypoModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm" onClick={() => setShowKineticTypoModal(false)}>
-          <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl p-6 w-[400px]" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-white mb-4">Advance Kinetic Typography</h3>
-            <p className="text-sm text-[#a0a0a0] mb-4">Select script/language options for word-by-word generation.</p>
-            
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs text-[#a0a0a0]">Script / Language</label>
-                <select
-                  value={kineticTypoScript}
-                  onChange={(e) => setKineticTypoScript(e.target.value)}
-                  className="w-full bg-[#2a2a2a] text-white text-sm border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer"
-                >
-                  <option value="english">English</option>
-                  <option value="roman_urdu_hindi">Roman Urdu / Hindi</option>
-                  <option value="hindi">Hindi (Devanagari)</option>
-                  <option value="spanish">Spanish</option>
-                  <option value="french">French</option>
-                  <option value="german">German</option>
-                  <option value="arabic">Arabic</option>
-                  <option value="bengali">Bengali</option>
-                </select>
-              </div>
 
-              {kineticTypoScript === 'english' && (
-                <div className="space-y-3 mt-4 border-t border-[#3e3e3e]/40 pt-4">
-                  <h4 className="text-xs font-semibold text-white">English Casing Options</h4>
-                  <div className="flex flex-col gap-2">
-                    <label className="flex items-center gap-3 p-2 rounded hover:bg-[#2d2d2d] cursor-pointer">
-                      <input 
-                        type="checkbox"
-                        checked={englishCasing === 'all_caps'}
-                        onChange={(e) => {
-                          setEnglishCasing(e.target.checked ? 'all_caps' : 'none');
-                        }}
-                        className="w-4 h-4 rounded border-[#3e3e3e] bg-[#2a2a2a] text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
-                      />
-                      <span className="text-white text-xs">Generate all words in CAPITAL</span>
-                    </label>
-                    <label className="flex items-center gap-3 p-2 rounded hover:bg-[#2d2d2d] cursor-pointer">
-                      <input 
-                        type="checkbox"
-                        checked={englishCasing === 'first_letter_caps'}
-                        onChange={(e) => {
-                          setEnglishCasing(e.target.checked ? 'first_letter_caps' : 'none');
-                        }}
-                        className="w-4 h-4 rounded border-[#3e3e3e] bg-[#2a2a2a] text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
-                      />
-                      <span className="text-white text-xs">Generate with first letter in Capital</span>
-                    </label>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowKineticTypoModal(false)}
-                className="px-4 py-2 text-sm text-[#a0a0a0] hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleGenerateKineticTypography}
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded text-sm transition-colors"
-              >
-                Generate
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
