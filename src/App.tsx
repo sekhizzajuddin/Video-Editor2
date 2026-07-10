@@ -434,12 +434,29 @@ function App() {
                 <div className="flex items-center bg-[#252525] rounded border border-[#3e3e3e] p-0.5">
                   {tools.map((tool) => {
                     const Icon = tool.icon;
-                    const isActive = activeTool === tool.id;
+                    const isActive = tool.id !== 'split' && activeTool === tool.id;
                     return (
                       <button
                         key={tool.id}
-                        onClick={() => setActiveTool(tool.id)}
-                        title={`${tool.label} (${tool.shortcut})`}
+                        onClick={() => {
+                          if (tool.id === 'split') {
+                            const t = useEditorStore.getState().currentTime;
+                            if (selectedClipId) {
+                              splitClip(selectedClipId, t);
+                            } else {
+                              tracks.forEach((track) => {
+                                track.clips.forEach((clip) => {
+                                  if (t > clip.startTime && t < clip.startTime + clip.duration) {
+                                    splitClip(clip.id, t);
+                                  }
+                                });
+                              });
+                            }
+                          } else {
+                            setActiveTool(tool.id);
+                          }
+                        }}
+                        title={tool.id === 'split' ? "Split Clip at Playhead" : `${tool.label} (${tool.shortcut})`}
                         className={`relative p-1.5 rounded transition-all duration-150 group ${
                           isActive
                             ? 'bg-[#3e3e3e] text-white'
@@ -448,7 +465,7 @@ function App() {
                       >
                         <Icon className="w-3.5 h-3.5" />
                         <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-black text-white text-[9px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-                          {tool.label} ({tool.shortcut})
+                          {tool.id === 'split' ? 'Split Clip at Playhead' : `${tool.label} (${tool.shortcut})`}
                         </span>
                       </button>
                     );

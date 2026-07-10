@@ -130,6 +130,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const volume = useEditorStore((s) => s.volume);
   const isMuted = useEditorStore((s) => s.isMuted);
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
+  const isExporting = useEditorStore((s) => s.isExporting);
 
   // Keep track of expected playback time to detect manual user seeks
   const lastTimeRef = useRef<number>(currentTime);
@@ -296,20 +297,17 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
       const existing = pool.get(clipId);
       if (existing) {
-        const currentSrc = existing.el.src;
-        const isPendingRestore = media.url === 'PENDING_RESTORE';
-        
-        // Only update source if it actually changed
-        // Use exact comparison and endsWith to handle absolute resolution
-        const isUrlActuallyDifferent = currentSrc !== media.url && !currentSrc.endsWith(media.url);
-        
-        if (!isPendingRestore && isUrlActuallyDifferent) {
-          existing.el.src = media.url;
-          if (existing.type === 'video') {
+        if (existing.type === 'audio') {
+          const currentSrc = existing.el.src;
+          const isPendingRestore = media.url === 'PENDING_RESTORE';
+          const isUrlActuallyDifferent = currentSrc !== media.url && !currentSrc.endsWith(media.url);
+          
+          if (!isPendingRestore && isUrlActuallyDifferent) {
+            existing.el.src = media.url;
             existing.el.load();
+          } else if (isPendingRestore && !currentSrc.includes('PENDING_RESTORE')) {
+            existing.el.src = media.url;
           }
-        } else if (isPendingRestore && !currentSrc.includes('PENDING_RESTORE')) {
-          existing.el.src = media.url;
         }
         continue;
       }
@@ -320,7 +318,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         el.muted = false; // Muted = false so we can hear video audio
         el.playsInline = true;
         el.crossOrigin = 'anonymous';
-        el.src = media.url;
+        // el.src is not set on creation — loaded dynamically based on proximity
         el.style.display = 'none';
 
         // Seeked handler that checks for subsequent pending seeks before triggering redraw
@@ -328,20 +326,20 @@ export function useMediaPlayback(): MediaPlaybackResult {
           // Cache this decoded frame as ImageBitmap for instant scrubbing
           if (el.videoWidth > 0 && el.readyState >= 2) {
             createImageBitmap(el).then(bitmap => {
-          if (!poolRef.current.has(clipId) && !pendingSeeksRef.current.has(clipId)) {
-            bitmap.close();
-            return;
-          }
-          let clipCache = frameCacheRef.current.get(clipId);
-          if (!clipCache) {
+              if (!poolRef.current.has(clipId) && !pendingSeeksRef.current.has(clipId)) {
+                bitmap.close();
+                return;
+              }
+              let clipCache = frameCacheRef.current.get(clipId);
+              if (!clipCache) {
                 clipCache = [];
                 frameCacheRef.current.set(clipId, clipCache);
               }
               const roundedTime = Math.round(el.currentTime * 30) / 30;
-              const existing = clipCache.findIndex(f => Math.abs(f.time - roundedTime) < 0.015);
-              if (existing >= 0) {
-                clipCache[existing].bitmap.close();
-                clipCache[existing] = { time: roundedTime, bitmap };
+              const existingKf = clipCache.findIndex(f => Math.abs(f.time - roundedTime) < 0.015);
+              if (existingKf >= 0) {
+                clipCache[existingKf].bitmap.close();
+                clipCache[existingKf] = { time: roundedTime, bitmap };
               } else {
                 clipCache.push({ time: roundedTime, bitmap });
                 clipCache.sort((a, b) => a.time - b.time);
@@ -369,7 +367,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         el.addEventListener('canplay', stableTriggerRedraw);
 
         getMediaContainer().appendChild(el);
-        el.load(); // Force the browser to start fetching the video
+        // el.load() not called here — proximity preloader will manage it
         
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
         initAudioGraph(entry);
@@ -921,6 +919,67 @@ export function useMediaPlayback(): MediaPlaybackResult {
       }
     }
   }, [currentTime, isPlaying, activeClips, mediaLibrary]);
+
+  // Dynamically load/unload video sources based on proximity to currentTime to prevent decoder starvation
+  useEffect(() => {
+    const pool = poolRef.current;
+    if (isExporting) {
+      // During export, load all video elements to ensure frame-accurate rendering
+      for (const [clipId, entry] of pool) {
+        if (entry.type !== 'video') continue;
+        const el = entry.el as HTMLVideoElement;
+        const media = mediaLibrary.find((m) => m.id === entry.mediaId);
+        if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
+        const targetSrc = media.url;
+        if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
+          el.src = targetSrc;
+          el.load();
+        }
+      }
+      return;
+    }
+
+    for (const [clipId, entry] of pool) {
+      if (entry.type !== 'video') continue;
+      const el = entry.el as HTMLVideoElement;
+      
+      // Find the clip to get its track and timing
+      let clipTrack: any = null;
+      let clipObj: any = null;
+      for (const track of tracks) {
+        const found = track.clips.find((c) => c.id === clipId) || (track.overLayers || []).find((c) => c.id === clipId);
+        if (found) {
+          clipTrack = track;
+          clipObj = found;
+          break;
+        }
+      }
+      
+      if (!clipObj || !clipTrack) continue;
+      
+      const media = mediaLibrary.find((m) => m.id === entry.mediaId);
+      if (!media || !media.url) continue;
+      
+      const isPendingRestore = media.url === 'PENDING_RESTORE';
+      // Load if within 8 seconds of playhead, otherwise unload
+      const isNear = !clipTrack.hidden && currentTime >= clipObj.startTime - 8 && currentTime < clipObj.startTime + clipObj.duration + 8;
+      
+      if (isNear && !isPendingRestore) {
+        const targetSrc = media.url;
+        if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
+          el.src = targetSrc;
+          el.load();
+        }
+      } else {
+        if (el.src !== '') {
+          el.removeAttribute('src');
+          try {
+            el.load(); // releases decoder and network resources
+          } catch (e) {}
+        }
+      }
+    }
+  }, [currentTime, tracks, mediaLibrary, isExporting]);
 
   // Cleanup all on unmount
   useEffect(() => {
