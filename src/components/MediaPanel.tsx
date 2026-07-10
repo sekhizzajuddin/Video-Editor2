@@ -255,7 +255,229 @@ export function MediaPanel() {
     saveProjectAsTemplate,
     deleteProjectTemplate,
     loadProjectTemplate,
+    // Click-to-apply store helpers
+    tracks,
+    addTrack,
+    addClip,
+    updateClip,
+    updateOverLayer,
+    selectClip,
+    saveSnapshot,
   } = useEditorStore();
+
+  // Click-to-apply fallback handlers
+  const handleTemplateClick = (tmpl: any) => {
+    let targetTrack = tracks.find((t) => t.type === 'text');
+    if (!targetTrack) {
+      addTrack('text');
+      targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'text');
+    }
+    if (!targetTrack) return;
+
+    const { currentTime } = useEditorStore.getState();
+    let startTime = currentTime;
+    let attempts = 0;
+    const maxAttempts = 100;
+    while (attempts < maxAttempts && targetTrack.clips.some((c) => Math.max(0, Math.min(startTime + tmpl.defaultDuration, c.startTime + c.duration) - Math.max(startTime, c.startTime)) > 0)) {
+       startTime += tmpl.defaultDuration + 0.1;
+       attempts++;
+    }
+
+    const mediaId = `tmpl_media_${Math.random().toString(36).substr(2, 9)}`;
+    const clipId  = `tmpl_clip_${Math.random().toString(36).substr(2, 9)}`;
+    addMedia({
+      id: mediaId,
+      name: tmpl.name,
+      type: 'text',
+      duration: tmpl.defaultDuration,
+      url: '',
+      createdAt: Date.now(),
+    });
+    addClip({
+      id: clipId,
+      mediaId,
+      trackId: targetTrack.id,
+      startTime,
+      duration: tmpl.defaultDuration,
+      trimStart: 0,
+      trimEnd: 0,
+      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+      opacity: 1,
+      speed: 1,
+      effects: [],
+      textSettings: { ...tmpl.textSettings },
+      animations: tmpl.animations ? { ...tmpl.animations } : undefined,
+    } as any);
+    selectClip(clipId);
+    saveSnapshot();
+    toast.success(`Added text template "${tmpl.name}" to timeline`);
+  };
+
+  const handleEffectClick = (effect: any) => {
+    let targetTrack = tracks.find((t) => t.type === 'fx');
+    if (!targetTrack) {
+      addTrack('fx');
+      targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'fx');
+    }
+    if (!targetTrack) return;
+
+    const { currentTime } = useEditorStore.getState();
+    let startTime = currentTime;
+    let attempts = 0;
+    const maxAttempts = 100;
+    const defaultDuration = 5;
+    while (attempts < maxAttempts && targetTrack.clips.some((c) => Math.max(0, Math.min(startTime + defaultDuration, c.startTime + c.duration) - Math.max(startTime, c.startTime)) > 0)) {
+       startTime += defaultDuration + 0.1;
+       attempts++;
+    }
+
+    const FX_TYPE_MAP: Record<string, string> = {
+      'VFX Breakdown':     'vfx_breakdown',
+      'B&W to Color':      'bw_to_color',
+      'Glitch':            'glitch',
+      'Old Film':          'old_film',
+      'VHS':               'vhs',
+      'Cinematic Bars':    'cinematic_bars',
+      'Neon Glow':         'neon_glow',
+      'RGB Split':         'rgb_split',
+      'Pixelate':          'pixelate',
+      'Mirror':            'mirror',
+      'Zoom Blur':         'zoom_blur',
+      'Lens Flare':        'lens_flare',
+      'Night Vision':      'night_vision',
+      'Thermal':           'thermal',
+    };
+    const fxType = FX_TYPE_MAP[effect.name] ?? effect.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const fxMediaId = `fx_media_${Math.random().toString(36).substr(2, 9)}`;
+    const fxClipId = `fx_clip_${Math.random().toString(36).substr(2, 9)}`;
+    
+    addMedia({
+      id: fxMediaId,
+      name: effect.name,
+      type: 'fx',
+      duration: defaultDuration,
+      url: '',
+      createdAt: Date.now(),
+      fxType,
+    });
+    
+    const fxClip: any = {
+      id: fxClipId,
+      mediaId: fxMediaId,
+      trackId: targetTrack.id,
+      startTime,
+      duration: defaultDuration,
+      trimStart: 0,
+      trimEnd: 0,
+      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+      opacity: 1,
+      speed: 1,
+      effects: [],
+      fxSettings: {
+        type: fxType as any,
+        intensity: 100,
+      },
+    };
+    addClip(fxClip);
+    selectClip(fxClipId);
+    saveSnapshot();
+    toast.success(`Added effect "${effect.name}" to FX track`);
+  };
+
+  const handleColorPresetClick = (effect: any) => {
+    const { selectedClipId, selectedOverLayerId, tracks } = useEditorStore.getState();
+    
+    if (selectedOverLayerId) {
+      let foundOl: any = null;
+      for (const t of tracks) {
+        foundOl = (t.overLayers ?? []).find(ol => ol.id === selectedOverLayerId);
+        if (foundOl) break;
+      }
+      if (foundOl) {
+        const existing = foundOl.colorFilters ?? {
+          temperature: 0, tint: 0, exposure: 0, contrast: 100,
+          saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
+        };
+        updateOverLayer(foundOl.id, {
+          colorFilters: { ...existing, ...effect.preset },
+        });
+        saveSnapshot();
+        toast.success(`Applied color preset "${effect.name}" to selected overlay`);
+        return;
+      }
+    }
+
+    if (selectedClipId) {
+      let foundClip: any = null;
+      for (const t of tracks) {
+        foundClip = t.clips.find(c => c.id === selectedClipId);
+        if (foundClip) break;
+      }
+      if (foundClip) {
+        const existing = foundClip.colorFilters ?? {
+          temperature: 0, tint: 0, exposure: 0, contrast: 100,
+          saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
+        };
+        updateClip(foundClip.id, {
+          colorFilters: { ...existing, ...effect.preset },
+        });
+        saveSnapshot();
+        toast.success(`Applied color preset "${effect.name}" to selected clip`);
+        return;
+      }
+    }
+
+    toast.error('Select a clip or overlay on the timeline first to apply this color preset');
+  };
+
+  const handleParticleClick = (effect: any) => {
+    const { selectedClipId, selectedOverLayerId, tracks } = useEditorStore.getState();
+    const defaults = effect.defaultSettings;
+
+    if (selectedOverLayerId) {
+      let foundOl: any = null;
+      for (const t of tracks) {
+        foundOl = (t.overLayers ?? []).find(ol => ol.id === selectedOverLayerId);
+        if (foundOl) break;
+      }
+      if (foundOl) {
+        updateOverLayer(foundOl.id, {
+          particleSettings: {
+            type: effect.type,
+            emitterX: 50,
+            emitterY: 100,
+            ...defaults,
+          },
+        });
+        saveSnapshot();
+        toast.success(`Applied particle effect "${effect.name}" to selected overlay`);
+        return;
+      }
+    }
+
+    if (selectedClipId) {
+      let foundClip: any = null;
+      for (const t of tracks) {
+        foundClip = t.clips.find(c => c.id === selectedClipId);
+        if (foundClip) break;
+      }
+      if (foundClip) {
+        updateClip(foundClip.id, {
+          particleSettings: {
+            type: effect.type,
+            emitterX: 50,
+            emitterY: 100,
+            ...defaults,
+          },
+        });
+        saveSnapshot();
+        toast.success(`Applied particle effect "${effect.name}" to selected clip`);
+        return;
+      }
+    }
+
+    toast.error('Select a clip or overlay on the timeline first to apply this particle effect');
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -708,7 +930,7 @@ export function MediaPanel() {
         };
 
         await client.connect({
-          model: 'models/gemini-2.5-flash',
+          model: 'models/gemini-2.0-flash-live-001',
           voiceName: ttsVoice,
           systemInstruction: 'Read the text provided by the user naturally.'
         });
@@ -848,7 +1070,7 @@ export function MediaPanel() {
           client.onError = (err) => { reject(err); };
           
           client.connect({
-            model: 'models/gemini-2.5-flash',
+            model: 'models/gemini-2.0-flash-live-001',
             voiceName: ttsVoice,
             systemInstruction: 'Read the text provided by the user naturally. Generate only audio, no text.'
           }).then(() => {
@@ -1710,7 +1932,8 @@ export function MediaPanel() {
                           e.dataTransfer.setData('application/procut-template', tmpl.id);
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
-                        className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-grab transition-all group"
+                        onClick={() => handleTemplateClick(tmpl)}
+                        className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-pointer transition-all group"
                       >
                         {/* Color accent dot */}
                         <div
@@ -1851,9 +2074,10 @@ export function MediaPanel() {
                           e.dataTransfer.setData('application/procut-effect', effect.name);
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
+                        onClick={() => handleEffectClick(effect)}
                         onMouseEnter={() => setHoveredItem(effect.name)}
                         onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-pointer transition-colors group"
                       >
                         <div className="w-7 h-7 rounded bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
                           <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
@@ -1886,9 +2110,10 @@ export function MediaPanel() {
                           e.dataTransfer.setData('application/procut-effect', effect.name);
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
+                        onClick={() => handleColorPresetClick(effect)}
                         onMouseEnter={() => setHoveredItem(effect.name)}
                         onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-pointer transition-colors group"
                       >
                         <div className="w-7 h-7 rounded bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
                           <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
@@ -1920,9 +2145,10 @@ export function MediaPanel() {
                           e.dataTransfer.setData('application/procut-particle', effect.type);
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
+                        onClick={() => handleParticleClick(effect)}
                         onMouseEnter={() => setHoveredItem(effect.name)}
                         onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-grab transition-colors group"
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-pointer transition-colors group"
                       >
                         <div className={`w-7 h-7 rounded ${effect.bgColor} border flex items-center justify-center shrink-0`}>
                           <Icon className={`w-3.5 h-3.5 ${effect.color}`} />

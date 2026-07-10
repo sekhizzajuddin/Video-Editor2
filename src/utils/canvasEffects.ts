@@ -361,7 +361,11 @@ export function drawParticleShape(ctx: CanvasRenderingContext2D, p: Particle, al
       for (let pt = 0; pt < 8; pt++) {
         const a = (pt * Math.PI) / 4;
         const dist = pt % 2 === 0 ? r : r * 0.4;
-        pt === 0 ? ctx.moveTo(Math.cos(a)*dist, Math.sin(a)*dist) : ctx.lineTo(Math.cos(a)*dist, Math.sin(a)*dist);
+        if (pt === 0) {
+          ctx.moveTo(Math.cos(a) * dist, Math.sin(a) * dist);
+        } else {
+          ctx.lineTo(Math.cos(a) * dist, Math.sin(a) * dist);
+        }
       }
       ctx.closePath();
       ctx.fill();

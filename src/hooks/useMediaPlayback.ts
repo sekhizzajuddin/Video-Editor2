@@ -218,17 +218,26 @@ export function useMediaPlayback(): MediaPlaybackResult {
         }
 
         // 2. Check transition at this clip's start (if idx > 0)
+        // A transition can be defined as transitionIn on this clip (incoming) OR transitionOut on prevClip (outgoing)
         if (idx > 0) {
           const prevClip = sortedClips[idx - 1];
           const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
-          if (Math.abs(gap) < 0.1 && clip.transitionIn) {
-            const duration = clip.transitionIn.duration;
-            const alignment = clip.transitionIn.params?.alignment || 'center';
-            let leftSec = clip.startTime - duration / 2;
+          // Pick the transition definition from whichever side has it
+          const trans = (Math.abs(gap) < 0.1 && clip.transitionIn)
+            ? clip.transitionIn
+            : (Math.abs(gap) < 0.1 && prevClip.transitionOut)
+              ? prevClip.transitionOut
+              : null;
+
+          if (trans) {
+            const duration = trans.duration;
+            const alignment = trans.params?.alignment || 'center';
+            const boundary = clip.startTime;
+            let leftSec = boundary - duration / 2;
             if (alignment === 'left') {
-              leftSec = clip.startTime;
+              leftSec = boundary;
             } else if (alignment === 'right') {
-              leftSec = clip.startTime - duration;
+              leftSec = boundary - duration;
             }
             const rightSec = leftSec + duration;
 
@@ -780,20 +789,24 @@ export function useMediaPlayback(): MediaPlaybackResult {
         }
       }
       
-      // Check if this clip is the outgoing clip in a transition (by checking the next clip)
+      // Check if this clip is the outgoing clip in a transition (by checking the next clip OR own transitionOut)
       if (targetTrack) {
         const sortedClips = [...targetTrack.clips].sort((a, b) => a.startTime - b.startTime);
         const clipIdx = sortedClips.findIndex((c) => c.id === clipId);
         if (clipIdx !== -1 && clipIdx < sortedClips.length - 1) {
           const nextClip = sortedClips[clipIdx + 1];
-          if (nextClip.transitionIn) {
-            const transDur = nextClip.transitionIn.duration;
-            const alignment = nextClip.transitionIn.params?.alignment || 'center';
-            let leftSec = nextClip.startTime - transDur / 2;
+          // Use transitionIn from the next clip, or transitionOut from the current clip as fallback
+          const activeTrans = nextClip.transitionIn || (fullClip as any).transitionOut || null;
+          if (activeTrans) {
+            const transDur = activeTrans.duration;
+            const alignment = activeTrans.params?.alignment || 'center';
+            // Both transitionIn on next and transitionOut on current use the boundary at nextClip.startTime
+            const boundary = nextClip.startTime;
+            let leftSec = boundary - transDur / 2;
             if (alignment === 'left') {
-              leftSec = nextClip.startTime;
+              leftSec = boundary;
             } else if (alignment === 'right') {
-              leftSec = nextClip.startTime - transDur;
+              leftSec = boundary - transDur;
             }
             const rightSec = leftSec + transDur;
             if (currentTime >= leftSec && currentTime < rightSec) {

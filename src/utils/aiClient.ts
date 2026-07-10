@@ -2,6 +2,10 @@ export function getGeminiKey(): string {
   return sessionStorage.getItem('procut_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
 }
 
+export function getGroqKey(): string {
+  return sessionStorage.getItem('procut_groq_key') || (import.meta as any).env?.VITE_GROQ_API_KEY || '';
+}
+
 export interface AICueResult {
   start: number;
   end: number;
@@ -18,7 +22,7 @@ export async function analyzeStoryboardWithGemini(
   segmentDuration: number,
   geminiKey: string
 ): Promise<AICueResult[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
 
   const prompt = `You are a professional film sound designer.
 This image is a chronological storyboard grid of a video clip segment (columns left-to-right, rows top-to-bottom, total duration ${segmentDuration} seconds). Each thumbnail represents a second of time.
@@ -191,7 +195,7 @@ export async function analyzeMotionGraphicsWithGemini(
   segmentDuration: number,
   geminiKey: string
 ): Promise<AIMotionGraphicSuggestion[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
 
   const prompt = `You are a professional video editor and motion graphics designer.
 This image is a chronological storyboard grid of a video clip segment (columns left-to-right, rows top-to-bottom, total duration ${segmentDuration} seconds). Each thumbnail represents a second of time.
@@ -298,7 +302,7 @@ export async function analyzeSceneForMotionGraphics(
     throw new Error('Gemini API Key is not set.');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
 
   const prompt = `You are a professional video editor and motion graphics designer.
 Analyze these chronological video frames (extracted from a clip).

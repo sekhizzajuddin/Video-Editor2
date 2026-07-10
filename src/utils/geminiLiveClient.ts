@@ -31,7 +31,7 @@ export class GeminiLiveClient {
       throw new Error('Gemini API Key is not set.');
     }
 
-    const modelName = config.model || 'models/gemini-2.0-flash-exp';
+    const modelName = config.model || 'models/gemini-2.0-flash-live-001';
     const url = `${WS_URL}?key=${apiKey}`;
 
     return new Promise((resolve, reject) => {

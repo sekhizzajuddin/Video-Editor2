@@ -1824,21 +1824,31 @@ export function PreviewCanvas() {
         let activeTransition: { clipA: any; clipB: any; trans: any; t: number } | null = null;
 
         // Check if currentTime falls into any active transition zone
+        // A transition can be defined as transitionIn on clipB (incoming clip) OR
+        // transitionOut on clipA (outgoing clip) — check both so dropped transitions work regardless
         for (let idx = 1; idx < sortedClips.length; idx++) {
           const clipB = sortedClips[idx];
           const clipA = sortedClips[idx - 1];
           const gap = clipB.startTime - (clipA.startTime + clipA.duration);
 
-          if (Math.abs(gap) < 0.1 && clipB.transitionIn) {
-            const trans = clipB.transitionIn;
+          // Determine which transition definition to use: prefer transitionIn on B, fallback to transitionOut on A
+          const trans = (Math.abs(gap) < 0.1 && clipB.transitionIn)
+            ? clipB.transitionIn
+            : (Math.abs(gap) < 0.1 && clipA.transitionOut)
+              ? clipA.transitionOut
+              : null;
+
+          if (trans) {
             const duration = Math.max(0.01, trans.duration);
             const alignment = trans.params?.alignment || 'center';
 
-            let leftSec = clipB.startTime - duration / 2;
+            // Determine the transition window around the boundary (clipB.startTime)
+            const boundary = clipB.startTime;
+            let leftSec = boundary - duration / 2;
             if (alignment === 'left') {
-              leftSec = clipB.startTime;
+              leftSec = boundary;
             } else if (alignment === 'right') {
-              leftSec = clipB.startTime - duration;
+              leftSec = boundary - duration;
             }
             const rightSec = leftSec + duration;
 
@@ -1947,8 +1957,8 @@ export function PreviewCanvas() {
                   }
                 }
                 
-                // Handle single-clip transition Out
-                if (clip.transitionOut && opacityMultiplier === 1) {
+                // Handle single-clip transition Out (applied when NOT in a 2-clip cross-fade zone)
+                if (clip.transitionOut) {
                   const trans = clip.transitionOut;
                   const duration = trans.duration || 1.0;
                   const alignment = trans.params?.alignment || 'center';
@@ -1960,7 +1970,7 @@ export function PreviewCanvas() {
                   if (currentTime >= leftSec && currentTime < rightSec) {
                     const t = (currentTime - leftSec) / duration;
                     if (trans.name.toLowerCase().includes('fade') || trans.name.toLowerCase().includes('dissolve')) {
-                      opacityMultiplier = 1 - t;
+                      opacityMultiplier *= (1 - t);
                     }
                   }
                 }
@@ -2530,7 +2540,7 @@ export function PreviewCanvas() {
               : 'w-full h-full object-contain'
           }`}
         />
-        <InteractiveCanvasOverlay viewport={viewport} />
+        <InteractiveCanvasOverlay viewport={viewport} videoElements={videoElements} />
 
         {/* Overlay: canvas controls (top-left) */}
         <div className="absolute top-3 left-3 flex gap-1.5" onPointerDown={(e) => e.stopPropagation()}>
@@ -2773,7 +2783,7 @@ export function PreviewCanvas() {
 // ---------------------------------------------------------------------------
 // Interactive Canvas Overlay Component
 // ---------------------------------------------------------------------------
-function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: number, zoom: number } }) {
+function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: number, y: number, zoom: number }, videoElements: Map<string, HTMLVideoElement> }) {
   const {
     tracks,
     selectedClipId,
@@ -2796,8 +2806,6 @@ function InteractiveCanvasOverlay({ viewport }: { viewport: { x: number, y: numb
       storeUpdateClip(clipId, updates);
     }
   }, [tracks, storeUpdateClip, updateOverLayer]);
-
-  const { videoElements } = useMediaPlayback();
 
   const [dragState, setDragState] = useState<{
     type: string;

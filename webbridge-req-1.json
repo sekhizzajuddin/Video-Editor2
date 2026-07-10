@@ -1,0 +1,9 @@
+{
+  "action": "navigate",
+  "args": {
+    "url": "https://video-editor2-theta.vercel.app/",
+    "newTab": true,
+    "group_title": "Video Editor Audit"
+  },
+  "session": "video-editor-audit"
+}
