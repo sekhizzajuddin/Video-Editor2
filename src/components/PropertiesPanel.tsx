@@ -297,6 +297,9 @@ export function PropertiesPanel() {
   const [motionGraphicsAnalyzeProgress, setMotionGraphicsAnalyzeProgress] = useState('');
   const [isGeneratingKineticTypo, setIsGeneratingKineticTypo] = useState(false);
   const [kineticTypoProgress, setKineticTypoProgress] = useState(0);
+  const [showKineticTypoModal, setShowKineticTypoModal] = useState(false);
+  const [kineticTypoScript, setKineticTypoScript] = useState('english');
+  const [englishCasing, setEnglishCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
   const [motionGraphicsSuggestions, setMotionGraphicsSuggestions] = useState<AIMotionGraphicSuggestion[] | null>(null);
   const [showMotionGraphicsDesigner, setShowMotionGraphicsDesigner] = useState(false);
 
@@ -388,10 +391,16 @@ export function PropertiesPanel() {
     
     setIsGeneratingKineticTypo(true);
     setKineticTypoProgress(0);
+    setShowKineticTypoModal(false);
     
     try {
       const { generateKineticTypography } = await import('@/utils/kineticTypography');
-      await generateKineticTypography(selectedClip, selectedTrack.id, (p) => setKineticTypoProgress(p));
+      await generateKineticTypography(
+        selectedClip,
+        selectedTrack.id,
+        { script: kineticTypoScript, englishCasing },
+        (p) => setKineticTypoProgress(p)
+      );
       toast.success("Kinetic Typography Generated!");
     } catch (e: any) {
       console.error(e);
@@ -4653,7 +4662,7 @@ export function PropertiesPanel() {
                     </div>
                   ) : (
                     <button
-                      onClick={handleGenerateKineticTypography}
+                      onClick={() => setShowKineticTypoModal(true)}
                       className="w-full py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded text-[11px] font-medium transition-colors shadow-md"
                     >
                       Generate Advance Kinetic Typography
@@ -5025,6 +5034,81 @@ export function PropertiesPanel() {
           suggestions={motionGraphicsSuggestions}
           onClose={() => setShowMotionGraphicsDesigner(false)}
         />
+      )}
+
+      {/* Kinetic Typography Customization Modal */}
+      {showKineticTypoModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm" onClick={() => setShowKineticTypoModal(false)}>
+          <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl p-6 w-[400px]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white mb-4">Advance Kinetic Typography</h3>
+            <p className="text-sm text-[#a0a0a0] mb-4">Select script/language options for word-by-word generation.</p>
+            
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-[#a0a0a0]">Script / Language</label>
+                <select
+                  value={kineticTypoScript}
+                  onChange={(e) => setKineticTypoScript(e.target.value)}
+                  className="w-full bg-[#2a2a2a] text-white text-sm border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer"
+                >
+                  <option value="english">English</option>
+                  <option value="roman_urdu_hindi">Roman Urdu / Hindi</option>
+                  <option value="hindi">Hindi (Devanagari)</option>
+                  <option value="spanish">Spanish</option>
+                  <option value="french">French</option>
+                  <option value="german">German</option>
+                  <option value="arabic">Arabic</option>
+                  <option value="bengali">Bengali</option>
+                </select>
+              </div>
+
+              {kineticTypoScript === 'english' && (
+                <div className="space-y-3 mt-4 border-t border-[#3e3e3e]/40 pt-4">
+                  <h4 className="text-xs font-semibold text-white">English Casing Options</h4>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-3 p-2 rounded hover:bg-[#2d2d2d] cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        checked={englishCasing === 'all_caps'}
+                        onChange={(e) => {
+                          setEnglishCasing(e.target.checked ? 'all_caps' : 'none');
+                        }}
+                        className="w-4 h-4 rounded border-[#3e3e3e] bg-[#2a2a2a] text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
+                      />
+                      <span className="text-white text-xs">Generate all words in CAPITAL</span>
+                    </label>
+                    <label className="flex items-center gap-3 p-2 rounded hover:bg-[#2d2d2d] cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        checked={englishCasing === 'first_letter_caps'}
+                        onChange={(e) => {
+                          setEnglishCasing(e.target.checked ? 'first_letter_caps' : 'none');
+                        }}
+                        className="w-4 h-4 rounded border-[#3e3e3e] bg-[#2a2a2a] text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
+                      />
+                      <span className="text-white text-xs">Generate with first letter in Capital</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowKineticTypoModal(false)}
+                className="px-4 py-2 text-sm text-[#a0a0a0] hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGenerateKineticTypography}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded text-sm transition-colors"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

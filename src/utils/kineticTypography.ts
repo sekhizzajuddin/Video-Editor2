@@ -5,9 +5,15 @@ import { extractFramesFromVideo } from './frameExtractor';
 
 const uuidv4 = () => crypto.randomUUID();
 
+export interface KineticTypographyOptions {
+  script: string;
+  englishCasing?: 'all_caps' | 'first_letter_caps' | 'none';
+}
+
 export async function generateKineticTypography(
   clip: TimelineClip,
   trackId: string,
+  options: KineticTypographyOptions,
   onProgress: (p: number) => void
 ): Promise<void> {
   const store = useEditorStore.getState();
@@ -39,25 +45,55 @@ export async function generateKineticTypography(
   
   onProgress(50);
 
+  // Translate script code to readable instruction
+  let scriptInstruction = "";
+  if (options.script === 'roman_urdu_hindi') {
+    scriptInstruction = "Transcribe in Roman Urdu/Hindi (i.e. Urdu/Hindi written in English/Latin letters, e.g. 'aur all loving hai').";
+  } else if (options.script === 'hindi') {
+    scriptInstruction = "Transcribe in Devanagari Hindi script (e.g. 'और ऑल लविंग है').";
+  } else if (options.script === 'english') {
+    scriptInstruction = "Transcribe in English script.";
+  } else {
+    scriptInstruction = `Translate and transcribe the spoken words into the ${options.script.toUpperCase()} script/language.`;
+  }
+
+  // Casing requirement
+  let casingInstruction = "";
+  if (options.script === 'english') {
+    if (options.englishCasing === 'all_caps') {
+      casingInstruction = "Convert ALL words/letters to strictly UPPERCASE (e.g. 'HELLO', 'WORLD').";
+    } else if (options.englishCasing === 'first_letter_caps') {
+      casingInstruction = "Capitalize ONLY the first letter of each word (e.g. 'Hello', 'World').";
+    }
+  }
+
   // 3. Prepare Gemini API Request
   const prompt = `You are an expert Kinetic Typography & Motion Graphics designer.
 I am providing visual frames and audio for a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
 Analyze the speech/audio beats and the visual framing.
-Generate a JSON array of text animation clips. 
-For each clip, provide:
-- "text": The spoken phrase or word.
+
+YOUR PRIMARY TASK:
+Generate a JSON array of text animation clips, strictly **WORD-BY-WORD**.
+Each entry in the JSON must represent EXACTLY ONE word (e.g. "hello", not "hello there"). Do NOT combine words into sentences or phrases. Each word must have a short, precise duration.
+
+Script / Translation requirement:
+- ${scriptInstruction}
+- ${casingInstruction}
+
+For each word, choose different styles and effects that fit the tone of that specific word to make it visually engaging:
+- "text": The spoken word (single word).
 - "start": Start time relative to this clip (in seconds, between 0 and ${clip.duration.toFixed(2)}).
 - "end": End time relative to this clip (in seconds).
-- "fontSize": Font size between 40 and 120.
-- "fontFamily": Choose from 'Inter', 'Outfit', 'Anton', 'Oswald'.
-- "color": A vibrant hex color that contrasts well with the video frames.
+- "fontSize": Font size between 50 and 120. Vary this to emphasize louder or important words!
+- "fontFamily": Dynamically choose from: 'Inter', 'Outfit', 'Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Montserrat', 'Georgia', 'Courier New'. Do not use just one font; vary them for style!
+- "color": A vibrant hex color that contrasts well with the video frames. Change colors between words for visual variety!
 - "x": X position (0 to 100, where 50 is center).
 - "y": Y position (0 to 100, where 50 is center, usually around 80 for lower thirds, 50 for center pop).
-- "animationIn": 'pop', 'slideUp', or 'typewriter'.
-- "animationOut": 'fadeOut' or 'slideDown'.
+- "animationIn": 'fadeIn', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'bounce', or 'typewriter'.
+- "animationOut": 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', or 'slideRight'.
 
 Output ONLY valid JSON array format, no markdown wrapping. Example:
-[{"text":"Wow!","start":0.5,"end":1.2,"fontSize":80,"fontFamily":"Anton","color":"#FFD700","x":50,"y":50,"animationIn":"pop","animationOut":"fadeOut"}]`;
+[{"text":"Wow","start":0.5,"end":0.8,"fontSize":90,"fontFamily":"Anton","color":"#FFD700","x":50,"y":50,"animationIn":"zoom","animationOut":"fadeOut"}]`;
 
   const contentsParts: any[] = [{ text: prompt }];
 
@@ -79,7 +115,7 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
   const requestBody = {
     contents: [{ parts: contentsParts }],
     generationConfig: {
-      temperature: 0.4,
+      temperature: 0.3,
       responseMimeType: "application/json"
     }
   };
@@ -106,17 +142,47 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
   resultJsonStr = resultJsonStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
   const typoResults = JSON.parse(resultJsonStr);
 
+  // Post-processing of text to guarantee casing constraints and word-by-word split if Gemini returned multiple words
+  const processedClips: any[] = [];
+  
+  for (const item of typoResults) {
+    const rawText = (item.text || '').trim();
+    if (!rawText) continue;
+
+    // Split in case Gemini returned a phrase/sentence instead of a single word
+    const words = rawText.split(/\s+/);
+    const durationPerWord = (item.end - item.start) / Math.max(1, words.length);
+
+    words.forEach((w: string, idx: number) => {
+      let wordText = w;
+      if (options.script === 'english') {
+        if (options.englishCasing === 'all_caps') {
+          wordText = wordText.toUpperCase();
+        } else if (options.englishCasing === 'first_letter_caps') {
+          wordText = wordText.charAt(0).toUpperCase() + wordText.slice(1).toLowerCase();
+        }
+      }
+
+      processedClips.push({
+        ...item,
+        text: wordText,
+        start: item.start + (idx * durationPerWord),
+        end: item.start + ((idx + 1) * durationPerWord)
+      });
+    });
+  }
+
   // 4. Create new text clips and insert them above the current video track
   // Wait, if it's kinetic typography, we put it in a text track.
-  const newClips: TimelineClip[] = typoResults.map((item: any) => {
+  const newClips: TimelineClip[] = processedClips.map((item: any) => {
     return {
       id: uuidv4(),
       mediaId: 'generator:kinetic',
       trackId: '',
       startTime: clip.startTime + item.start,
-      duration: item.end - item.start,
+      duration: Math.max(0.1, item.end - item.start),
       trimStart: 0,
-      trimEnd: item.end - item.start,
+      trimEnd: Math.max(0.1, item.end - item.start),
       opacity: 1,
       transform: { x: item.x - 50, y: item.y - 50, scale: 100, rotation: 0 },
       speed: 1,
@@ -135,8 +201,8 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
         animation: {
           in: item.animationIn === 'pop' ? 'zoom' : (item.animationIn || 'slideUp'),
           out: item.animationOut || 'fadeOut',
-          inDuration: 0.2,
-          outDuration: 0.2
+          inDuration: 0.1,
+          outDuration: 0.1
         }
       }
     };
