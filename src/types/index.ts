@@ -518,6 +518,8 @@ export interface EditorActions {
   deleteSubtitle: (id: string) => void;
   addSubtitle: (sub: SubtitleItem) => void;
   selectSubtitle: (id: string | null) => void;
+  addTextMedia: (text: string) => void;
+  rippleDeleteClip: (clipId: string) => void;
 }
 
 export interface EditorSnapshot {
@@ -530,7 +532,7 @@ export interface EditorSnapshot {
 export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch';
 
 // Media Tab Types
-export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates' | 'transcript';
+export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
 
 // Properties Tab Types
 export type PropertiesTab = 'transform' | 'color' | 'mask' | 'speed' | 'audio' | 'text' | 'effects' | 'history' | 'thumbnail';

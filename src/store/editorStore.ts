@@ -178,6 +178,8 @@ interface EditorActions {
   deleteSubtitle: (id: string) => void;
   addSubtitle: (sub: SubtitleItem) => void;
   selectSubtitle: (id: string | null) => void;
+  addTextMedia: (text: string) => void;
+  rippleDeleteClip: (clipId: string) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
@@ -451,6 +453,151 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   selectSubtitle: (id: string | null) => {
     set({ selectedSubtitleId: id });
   },
+  addTextMedia: (text: string) => {
+    const mediaId = generateId();
+    const name = text.length > 10 ? text.slice(0, 10) + '...' : text;
+    get().addMedia({
+      id: mediaId,
+      name,
+      type: 'text',
+      duration: 3,
+      url: '',
+      createdAt: Date.now(),
+      textContent: text,
+    });
+  },
+  rippleDeleteClip: (clipId: string) => {
+    let start = 0;
+    set((state) => {
+      const allClips = state.tracks.flatMap(t => t.clips);
+      const targetClip = allClips.find(c => c.id === clipId);
+      if (!targetClip) return {};
+
+      start = targetClip.startTime;
+      const end = targetClip.startTime + targetClip.duration;
+      const durationToCut = end - start;
+
+      const newTracks = state.tracks.map(track => {
+        // 1. Remove clips that are entirely inside the cut region
+        let newClips = track.clips.filter(c => {
+          const cEnd = c.startTime + c.duration;
+          return !(c.startTime >= start && cEnd <= end);
+        });
+
+        newClips = newClips.map(c => {
+          const cEnd = c.startTime + c.duration;
+          
+          // 2. Shift clips that are completely AFTER the cut region
+          if (c.startTime >= end) {
+            return { ...c, startTime: c.startTime - durationToCut };
+          }
+          
+          // 3. Trim clips that overlap the START of the cut region
+          if (c.startTime < start && cEnd > start && cEnd <= end) {
+            const newDur = start - c.startTime;
+            return { ...c, duration: newDur, trimEnd: c.trimStart + newDur * c.speed };
+          }
+          
+          // 4. Trim clips that overlap the END of the cut region
+          if (c.startTime >= start && c.startTime < end && cEnd > end) {
+            const newDur = cEnd - end;
+            const shiftAmount = end - c.startTime;
+            return { 
+              ...c, 
+              startTime: start,
+              duration: newDur,
+              trimStart: c.trimStart + shiftAmount * c.speed
+            };
+          }
+          
+          // 5. Split clips that encompass the ENTIRE cut region
+          if (c.startTime < start && cEnd > end) {
+            const leftClip = { 
+              ...c, 
+              duration: start - c.startTime 
+            };
+            
+            const rightClip = {
+              ...c,
+              id: c.id + '_split_' + Math.random().toString(36).slice(2, 7),
+              startTime: start,
+              duration: cEnd - end,
+              trimStart: c.trimStart + (end - c.startTime) * c.speed
+            };
+            
+            return [leftClip, rightClip];
+          }
+
+          return c;
+        }).flat();
+
+        // Do the same for overLayers if they exist
+        let newOls = (track.overLayers || []).filter(ol => {
+          const olEnd = ol.startTime + ol.duration;
+          return !(ol.startTime >= start && olEnd <= end);
+        });
+
+        newOls = newOls.map(ol => {
+          const olEnd = ol.startTime + ol.duration;
+          if (ol.startTime >= end) {
+            return { ...ol, startTime: ol.startTime - durationToCut };
+          }
+          if (ol.startTime < start && olEnd > start && olEnd <= end) {
+            const newDur = start - ol.startTime;
+            return { ...ol, duration: newDur };
+          }
+          if (ol.startTime >= start && ol.startTime < end && olEnd > end) {
+            const newDur = olEnd - end;
+            return {
+              ...ol,
+              startTime: start,
+              duration: newDur
+            };
+          }
+          if (ol.startTime < start && olEnd > end) {
+            const leftOl = {
+              ...ol,
+              duration: start - ol.startTime
+            };
+            const rightOl = {
+              ...ol,
+              id: ol.id + '_split_' + Math.random().toString(36).slice(2, 7),
+              startTime: start,
+              duration: olEnd - end
+            };
+            return [leftOl, rightOl];
+          }
+          return ol;
+        }).flat();
+
+        return {
+          ...track,
+          clips: newClips,
+          overLayers: newOls
+        };
+      });
+
+      // Clear selection if the target clip was selected
+      const isSelected = state.selectedClipId === clipId || state.selectedClipIds.includes(clipId);
+      const newSelectedClipId = isSelected ? null : state.selectedClipId;
+      const newSelectedClipIds = isSelected ? [] : state.selectedClipIds;
+
+      return {
+        tracks: newTracks,
+        selectedClipId: newSelectedClipId,
+        selectedClipIds: newSelectedClipIds
+      };
+    });
+
+    get().recalcTotalDuration();
+    get().saveSnapshot('Ripple Delete (Text)');
+    
+    // Seek playhead if it was past the cut start
+    const { currentTime, seek } = get();
+    if (currentTime > start) {
+      seek(Math.max(0, start));
+    }
+  },
 
   // Media Library
   addMedia: (item, file) => {
@@ -482,6 +629,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       tracks: state.tracks.map((track) => ({
         ...track,
         clips: track.clips.filter((c) => c.mediaId !== id),
+        overLayers: (track.overLayers || []).filter((ol) => ol.mediaId !== id),
       })),
     }));
     // Delete file from IndexedDB

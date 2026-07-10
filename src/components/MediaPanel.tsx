@@ -43,10 +43,10 @@ import {
   Square,
   Plus,
   Globe,
+  Scissors,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment } from 'react';
 import { useEditorStore } from '@/store/editorStore';
-import { TranscriptPanel } from './TranscriptPanel';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
@@ -401,6 +401,8 @@ function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCard
   );
 }
 
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
 export function MediaPanel() {
   const {
     mediaLibrary,
@@ -426,6 +428,11 @@ export function MediaPanel() {
     subtitles,
     selectedSubtitleId,
     selectSubtitle,
+    addTextMedia,
+    rippleDeleteClip,
+    removeClip,
+    currentTime,
+    seek,
   } = useEditorStore();
 
   // Click-to-apply fallback handlers
@@ -854,7 +861,6 @@ export function MediaPanel() {
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Project', icon: Folder },
     { id: 'text', label: 'Text', icon: Type },
-    { id: 'transcript', label: 'Transcript', icon: List as any },
     { id: 'audio', label: 'Audio', icon: Music },
     { id: 'templates', label: 'Templates', icon: Clapperboard },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
@@ -1859,9 +1865,6 @@ export function MediaPanel() {
         )}
 
 
-        {activeMediaTab === 'transcript' && (
-          <TranscriptPanel />
-        )}
 
         {activeMediaTab === 'audio' && (
           <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin">
@@ -2139,92 +2142,238 @@ export function MediaPanel() {
               </button>
             </div>
 
-            {textSubTab === 'text' ? (
-              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                <button
-                  onClick={() => {
-                    const txt = prompt("Enter text content:", "New Text");
-                    if (txt) {
-                      insertTextClip({ text: txt });
-                    }
-                  }}
-                  className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors mb-3 shrink-0 shadow"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Text Clip
-                </button>
+            {textSubTab === 'text' ? (() => {
+              const textLibraryItems = mediaLibrary.filter(m => m.type === 'text');
+              const clips = tracks.flatMap(t => t.clips);
+              const unusedTextItems = textLibraryItems.filter(item => !clips.some(c => c.mediaId === item.id));
+              
+              const timelineTextClips = clips
+                .filter(c => c.textSettings !== undefined && c.textSettings !== null)
+                .sort((a, b) => a.startTime - b.startTime);
 
-                <p className="text-[10px] text-[#a0a0a0] mb-2 shrink-0">Drag items below to the timeline:</p>
-                
-                <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-2 min-h-0 scrollbar-thin pr-1 pb-4">
-                  {mediaLibrary.filter(m => m.type === 'text').map((item) => (
-                    <div
-                      key={item.id}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('application/json', JSON.stringify({
-                          type: 'text',
-                          mediaId: item.id
-                        }));
-                      }}
-                      className="p-3 bg-[#2a2a2a] border border-[#3e3e3e] hover:border-amber-500/50 rounded flex flex-col justify-between h-[82px] cursor-grab active:cursor-grabbing relative group select-none transition-all shadow-sm"
-                    >
-                      <div className="flex items-center gap-1.5 overflow-hidden">
-                        <Type className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                        <span className="text-[10px] text-white font-medium truncate pr-4">{item.name}</span>
-                      </div>
-                      <div className="text-[9px] text-[#a0a0a0] truncate bg-[#1a1a1a] p-1 rounded border border-[#343434] max-h-[36px] overflow-hidden leading-tight font-mono">
-                        {item.textContent || 'Text'}
+              return (
+                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                  <button
+                    onClick={() => {
+                      const txt = prompt("Enter text content:", "New Text");
+                      if (txt) {
+                        addTextMedia(txt);
+                        toast.success("Text asset created! Drag it to timeline or click '+' to add.");
+                      }
+                    }}
+                    className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors mb-3 shrink-0 shadow"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Text Clip
+                  </button>
+
+                  <div className="flex-1 overflow-y-auto space-y-4 scrollbar-thin pr-1 pb-4 min-h-0">
+                    {/* Group 1: Text Assets (Not on Timeline) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-amber-500">Text Library (Not on Timeline)</span>
+                        <span className="text-[9px] text-[#666] font-mono">{unusedTextItems.length} items</span>
                       </div>
                       
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeMedia(item.id);
-                        }}
-                        className="absolute top-1.5 right-1.5 p-1 bg-black/40 hover:bg-red-600/20 text-[#8a8a8a] hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Delete Text Media"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                  {mediaLibrary.filter(m => m.type === 'text').length === 0 && (
-                    <div className="col-span-2 flex flex-col items-center justify-center py-10 text-center text-[#6a6a6a]">
-                      <Type className="w-8 h-8 mb-2 opacity-30" />
-                      <span className="text-[10px] font-medium">No text media in project library</span>
-                      <span className="text-[9px] opacity-60 mt-0.5">Click "Add Text Clip" to create one</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Kinetic Typography Trigger Section */}
-                <div className="mt-2 p-3 bg-[#172323] border border-teal-500/20 rounded flex flex-col gap-2 shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-teal-400 animate-pulse" />
-                    <span className="text-xs font-semibold text-teal-300">Kinetic Typography AI</span>
-                  </div>
-                  <p className="text-[10px] text-teal-400/80 leading-relaxed">
-                    Automatically transcribe and animate any timeline clip word-by-word with premium style matching. Select a clip to start.
-                  </p>
-                  {isGeneratingKineticTypo ? (
-                    <div className="flex items-center justify-between py-1.5 px-3 bg-[#111a1a] border border-teal-500/20 rounded mt-1">
-                      <div className="flex items-center gap-2">
-                        <Loader2 className="w-3.5 h-3.5 text-teal-400 animate-spin" />
-                        <span className="text-[10px] text-teal-300">Generating kinetic words...</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        {unusedTextItems.map((item) => (
+                          <div
+                            key={item.id}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/procut-media', item.id);
+                              (window as any).__procutDraggingMediaId = item.id;
+                            }}
+                            className="p-2.5 bg-[#252525] border border-[#383838] hover:border-amber-500/50 rounded flex flex-col justify-between h-[82px] cursor-grab active:cursor-grabbing relative group select-none transition-all shadow-sm"
+                          >
+                            <div className="flex items-center gap-1.5 overflow-hidden">
+                              <Type className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                              <span className="text-[10px] text-white font-medium truncate pr-6">{item.name}</span>
+                            </div>
+                            <div className="text-[9px] text-[#a0a0a0] truncate bg-[#161616] p-1 rounded border border-[#2e2e2e] max-h-[36px] overflow-hidden leading-tight font-mono">
+                              {item.textContent || 'Text'}
+                            </div>
+                            
+                            <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  let targetTrack = tracks.find(t => t.type === 'text');
+                                  if (!targetTrack) {
+                                    addTrack('text');
+                                    const freshTracks = useEditorStore.getState().tracks;
+                                    targetTrack = freshTracks.find(t => t.type === 'text');
+                                  }
+                                  if (targetTrack) {
+                                    const clipId = generateId();
+                                    let startTime = currentTime;
+                                    let attempts = 0;
+                                    const maxAttempts = 100;
+                                    while (attempts < maxAttempts && targetTrack.clips.some((c) => Math.max(0, Math.min(startTime + 3, c.startTime + c.duration) - Math.max(startTime, c.startTime)) > 0)) {
+                                       startTime += 3.1;
+                                       attempts++;
+                                    }
+                                    
+                                    addClip({
+                                      id: clipId,
+                                      mediaId: item.id,
+                                      trackId: targetTrack.id,
+                                      startTime,
+                                      duration: 3,
+                                      trimStart: 0,
+                                      trimEnd: 0,
+                                      transform: { x: 0, y: 140, scale: 100, rotation: 0 },
+                                      opacity: 1,
+                                      speed: 1,
+                                      effects: [],
+                                      zIndex: 9999,
+                                      textSettings: {
+                                        text: item.textContent || 'Text',
+                                        fontSize: 26,
+                                        fontFamily: 'Inter',
+                                        color: '#ffffff',
+                                        strokeWidth: 4,
+                                        strokeColor: '#000000',
+                                        bold: true,
+                                        shadow: true,
+                                        textAlign: 'center',
+                                        backgroundColor: 'transparent',
+                                        italic: false,
+                                        underline: false
+                                      }
+                                    });
+                                    toast.success("Added text to timeline!");
+                                  }
+                                }}
+                                className="p-0.5 bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded transition-colors"
+                                title="Add to Timeline at Playhead"
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeMedia(item.id);
+                                }}
+                                className="p-0.5 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded transition-colors"
+                                title="Delete from Library"
+                              >
+                                <Trash2 className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {unusedTextItems.length === 0 && (
+                          <div className="col-span-2 flex flex-col items-center justify-center py-6 text-center text-[#555] border border-[#2e2e2e]/40 border-dashed rounded bg-[#1e1e1e]/20">
+                            <span className="text-[10px]">No unassigned text assets</span>
+                          </div>
+                        )}
                       </div>
-                      <span className="text-xs font-bold text-teal-400 font-mono">{kineticTypoProgress.toFixed(0)}%</span>
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowKineticTypoModal(true)}
-                      className="w-full py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded text-[11px] font-semibold transition-colors mt-1 flex items-center justify-center gap-1.5 shadow"
-                    >
-                      <Sparkles className="w-3 h-3" /> Generate Kinetic Typography
-                    </button>
-                  )}
+
+                    {/* Group 2: Timeline Text Clips (On Timeline) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2 border-t border-[#3e3e3e]/40 pt-3">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-teal-400">Timeline Clips (Sorted by Time)</span>
+                        <span className="text-[9px] text-[#666] font-mono">{timelineTextClips.length} clips</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {timelineTextClips.map((c) => {
+                          const isActive = currentTime >= c.startTime && currentTime <= (c.startTime + c.duration);
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => {
+                                seek(c.startTime);
+                                selectClip(c.id);
+                              }}
+                              className={`group relative p-2.5 rounded border transition-all cursor-pointer ${
+                                isActive ? 'bg-amber-500/10 border-amber-500/50' : 'bg-[#1b1b1b] border-[#2c2c2c] hover:border-[#444]'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-center gap-1.5 overflow-hidden">
+                                  <Type className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+                                  <span className="text-[11px] text-[#d0d0d0] font-medium truncate pr-8">
+                                    {c.textSettings?.text || 'Text Clip'}
+                                  </span>
+                                </div>
+
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      rippleDeleteClip(c.id);
+                                    }}
+                                    className="p-1 bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded transition-colors"
+                                    title="Ripple Delete (Cuts segment & shifts tracks)"
+                                  >
+                                    <Scissors className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeClip(c.id);
+                                    }}
+                                    className="p-1 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded transition-colors"
+                                    title="Delete from Timeline only"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="mt-1 flex items-center gap-2">
+                                <span className="text-[9px] font-mono text-[#5a5a5a]">
+                                  {formatSimpleTime(c.startTime)} - {formatSimpleTime(c.startTime + c.duration)}
+                                </span>
+                                {isActive && (
+                                  <span className="text-[8px] uppercase tracking-wider text-amber-500 font-semibold bg-amber-500/10 px-1 rounded border border-amber-500/20">
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {timelineTextClips.length === 0 && (
+                          <div className="flex flex-col items-center justify-center py-6 text-center text-[#555] border border-[#2e2e2e]/40 border-dashed rounded bg-[#1e1e1e]/20">
+                            <span className="text-[10px]">No active text clips on timeline</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Kinetic Typography Trigger Section */}
+                  <div className="mt-2 p-3 bg-[#172323] border border-teal-500/20 rounded flex flex-col gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-teal-400 animate-pulse" />
+                      <span className="text-xs font-semibold text-teal-300">Kinetic Typography AI</span>
+                    </div>
+                    <p className="text-[10px] text-teal-400/80 leading-relaxed">
+                      Automatically transcribe and animate any timeline clip word-by-word with premium style matching. Select a clip to start.
+                    </p>
+                    {isGeneratingKineticTypo ? (
+                      <div className="flex items-center justify-between py-1.5 px-3 bg-[#111a1a] border border-teal-500/20 rounded mt-1">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="w-3.5 h-3.5 text-teal-400 animate-spin" />
+                          <span className="text-[10px] text-teal-300">Generating kinetic words...</span>
+                        </div>
+                        <span className="text-xs font-bold text-teal-400 font-mono">{kineticTypoProgress.toFixed(0)}%</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setShowKineticTypoModal(true)}
+                        className="w-full py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded text-[11px] font-semibold transition-colors mt-1 flex items-center justify-center gap-1.5 shadow"
+                      >
+                        <Sparkles className="w-3 h-3" /> Generate Kinetic Typography
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : (
+              );
+            })() : (
               <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                 <div className="flex gap-2 mb-3 shrink-0">
                   <button
@@ -3049,4 +3198,11 @@ function TransitionCard({ transition }: TransitionCardProps) {
       </div>
     </div>
   );
+}
+
+function formatSimpleTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 10);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms}`;
 }

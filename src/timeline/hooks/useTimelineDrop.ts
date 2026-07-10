@@ -403,18 +403,34 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         }
       }
 
+      const isText = media.type === 'text';
       const newClip: TimelineClip = {
         id: generateId(),
         mediaId,
         trackId,
         startTime,
-        duration: media.type === 'image' ? 5 : Math.min(10, media.duration),
+        duration: isText ? 3 : (media.type === 'image' ? 5 : Math.min(10, media.duration)),
         trimStart: 0,
         trimEnd: 0,
-        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        transform: { x: 0, y: isText ? 140 : 0, scale: 100, rotation: 0 },
         opacity: 1,
         speed: 1,
         effects: [],
+        zIndex: isText ? 9999 : undefined,
+        textSettings: isText ? {
+          text: media.textContent || 'Text',
+          fontSize: 26,
+          fontFamily: 'Inter',
+          color: '#ffffff',
+          strokeWidth: 4,
+          strokeColor: '#000000',
+          bold: true,
+          shadow: true,
+          textAlign: 'center' as 'left' | 'center' | 'right',
+          backgroundColor: 'transparent',
+          italic: false,
+          underline: false
+        } : undefined
       };
 
       useEditorStore.getState().addClip(newClip);
