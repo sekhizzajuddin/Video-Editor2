@@ -407,6 +407,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         entry.el.remove();
         pool.delete(clipId);
         videoMap.delete(clipId);
+        frameCacheRef.current.delete(clipId);
         pendingSeeksRef.current.delete(clipId);
       }
     }
@@ -414,8 +415,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
   // Sync playback state — play / pause / seek
   useEffect(() => {
-    const pool = poolRef.current;
-    const clips = activeClips();
+    const syncPlayback = async () => {
+      const pool = poolRef.current;
+      const clips = activeClips();
     const playingIds = new Set(clips.map((c) => c.clipId));
 
     const now = performance.now();
@@ -450,9 +452,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         // Resume Audio Context if suspended (browser user interaction gesture unlock)
         if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
           try {
-            entry.audioCtx.resume().catch((e) => {
-              console.warn("Failed to resume audio context:", e);
-            });
+            await entry.audioCtx.resume();
           } catch (err) {
             console.warn("Exception during audioCtx.resume:", err);
           }
@@ -560,6 +560,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
     // Update active clip IDs ref
     lastActiveClipIdsRef.current = playingIds;
+    };
+    syncPlayback();
   }, [isPlaying, currentTime, playbackSpeed, activeClips, mediaLibrary, tracks]);
 
   // Cleanup orphaned track analysers

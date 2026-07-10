@@ -122,7 +122,9 @@ export function ExportModal() {
     }
 
     try {
-      ffmpeg.terminate();
+      if (ffmpeg.loaded) {
+        ffmpeg.terminate();
+      }
     } catch (_) {}
 
     abortControllerRef.current?.abort();

@@ -1007,6 +1007,9 @@ export function MediaPanel() {
       if (match) {
         setImportProgress(`Linking ${file.name}...`);
         try {
+          if (match.url && match.url.startsWith('blob:')) {
+            URL.revokeObjectURL(match.url);
+          }
           const objectUrl = URL.createObjectURL(file);
           
           // Save file to IndexedDB

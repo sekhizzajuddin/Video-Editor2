@@ -6,6 +6,7 @@ import { MediaPanel } from '@/components/MediaPanel';
 import { PreviewCanvas } from '@/components/PreviewCanvas';
 import { PropertiesPanel } from '@/components/PropertiesPanel';
 import { Timeline } from '@/components/Timeline';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AudioMixer } from '@/components/AudioMixer';
 import { ExportModal } from '@/components/ExportModal';
 import { SettingsModal } from '@/components/SettingsModal';
@@ -294,6 +295,7 @@ function App() {
       selectOverLayer,
       cutClip,
       selectClips,
+      selectedClipIds,
     ]
   );
 
@@ -515,7 +517,9 @@ function App() {
 
             <div className="flex-1 overflow-hidden relative">
               {bottomTab === 'timeline' ? (
-                <Timeline />
+                <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-[#1a1a1a] font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
+                  <Timeline />
+                </ErrorBoundary>
               ) : (
                 <AudioMixer />
               )}

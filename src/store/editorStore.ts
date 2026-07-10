@@ -34,7 +34,7 @@ const debouncedSaveProject = (state: any) => {
       console.error('Failed to auto-save project:', err)
     );
     saveTimeoutId = null;
-  }, 1000);
+  }, 5000);
 };
 
 
