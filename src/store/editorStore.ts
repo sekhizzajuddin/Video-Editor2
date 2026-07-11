@@ -360,6 +360,7 @@ const initialState: EditorState = {
     keyboardShortcuts: {},
     geminiApiKey: '',
     groqApiKey: '',
+    freesoundApiKey: '',
   },
   hasUnsavedChanges: false,
   currentTime: 0,

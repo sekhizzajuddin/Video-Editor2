@@ -77,7 +77,8 @@ export async function generateKineticTypography(
 I am providing audio and visual frames of a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
 
 PRIMARY TASK: Generate a JSON array of text animation clips, STRICTLY WORD-BY-WORD.
-- Each JSON entry = EXACTLY ONE word. Do NOT combine multiple words.
+- CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE SPOKEN WORD.
+- Do NOT skip any words. Do NOT group multiple words into one object. Missing words will break the video sync.
 - Every word must have a precise, short duration matching the real audio timing.
 
 SCRIPT & LANGUAGE:
@@ -145,6 +146,7 @@ Output ONLY a valid JSON array, no markdown, no explanation:
 You have precise word-level timestamps from Whisper transcription. Your job is to create stunning, emotionally expressive typography animations.
 Rules:
 - Use the Whisper timestamps as the SOURCE OF TRUTH for word timing.
+- CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE WORD present in the Whisper transcription. Do NOT skip any words. Do NOT group words. Missing words will break the video sync.
 - Return ONLY a valid JSON array of word typography objects.
 - Each object MUST have all required fields: text, start, end, fontSize, fontFamily, color, x, y, animationIn, animationOut, stylePreset.
 - Do NOT include any text, explanation, or markdown outside the JSON array.

@@ -510,6 +510,7 @@ export interface EditorState {
     keyboardShortcuts?: Record<string, string>;
     geminiApiKey?: string;
     groqApiKey?: string;
+    freesoundApiKey?: string;
   };
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];

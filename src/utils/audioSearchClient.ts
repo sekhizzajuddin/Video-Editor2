@@ -1,3 +1,5 @@
+import { useEditorStore } from '@/store/editorStore';
+
 export interface AudioOption {
   id: string;
   name: string;
@@ -14,16 +16,19 @@ export const DEFAULT_FREESOUND_TOKEN = 'V44W0kixpW9mD75yB8iR1e2D3h8P6Q8w';
  */
 export async function searchFreesound(
   query: string,
-  token: string = DEFAULT_FREESOUND_TOKEN
+  token?: string
 ): Promise<AudioOption[]> {
+  const envToken = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_FREESOUND_API_KEY : undefined;
+  const actualToken = token || envToken || useEditorStore.getState().settings.freesoundApiKey || DEFAULT_FREESOUND_TOKEN;
   const cleanQuery = query.trim();
   if (!cleanQuery) return [];
 
   // Filter out tracks that are too long (>15s) for standard SFX, unless query suggests background music (BGM)
   const isBgm = query.toLowerCase().includes('music') || query.toLowerCase().includes('bgm') || query.toLowerCase().includes('ambient');
   const durationFilter = isBgm ? 'duration:[10.0 TO 300.0]' : 'duration:[0.5 TO 15.0]';
-
-  const url = `https://freesound.org/apiv2/search/text/?query=${encodeURIComponent(cleanQuery)}&token=${token}&fields=id,name,previews,duration,tags&filter=${durationFilter}&page_size=5`;
+  
+  // Use our serverless function proxy to bypass CORS and properly handle Env vars
+  const url = `/api/freesound?query=${encodeURIComponent(cleanQuery)}&token=${actualToken}&durationFilter=${encodeURIComponent(durationFilter)}&pageSize=5`;
 
   const response = await fetch(url);
   if (!response.ok) {

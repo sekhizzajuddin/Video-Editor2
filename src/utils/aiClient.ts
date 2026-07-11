@@ -10,7 +10,7 @@ export function getGroqKey(): string {
 
 // ─── Model constants ─────────────────────────────────────────────────────────
 const GEMINI_VISION_MODEL = 'gemini-3.1-flash-lite';          // current stable GA model, good free tier
-const GROQ_VISION_MODEL   = 'llama-4-scout-17b-16e-instruct'; // Llama 4 Scout (replaces deprecated llama-3.2-90b)
+const GROQ_VISION_MODEL   = 'meta-llama/llama-4-scout-17b-16e-instruct'; // Valid Groq vision model
 const GROQ_TEXT_MODEL     = 'llama-3.3-70b-versatile';        // Best Groq reasoning / text model
 
 /** Safely strip a data-URI prefix (e.g. "data:image/jpeg;base64,") from a base64 string. */
