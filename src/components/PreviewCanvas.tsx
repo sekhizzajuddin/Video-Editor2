@@ -1694,6 +1694,80 @@ export function PreviewCanvas() {
               displayText = ts.text.slice(0, Math.floor(inProgress * totalChars));
               break;
             }
+
+            // ─── CINEMATIC ANIMATIONS (IN) ───────────────────────────────────────────
+
+            case 'elastic': {
+              // Spring overshoot: ease-out-elastic curve
+              const c4 = (2 * Math.PI) / 3;
+              const elasticOut = inProgress === 0 ? 0
+                : inProgress === 1 ? 1
+                : Math.pow(2, -10 * inProgress) * Math.sin((inProgress * 10 - 0.75) * c4) + 1;
+              textScale *= (0.05 + 0.95 * elasticOut);
+              textAlpha *= Math.min(1, inProgress * 3); // quick alpha snap on entry
+              break;
+            }
+
+            case 'revealWipe': {
+              // Text slides in and alpha clips: simulates a wipe-reveal curtain
+              // We move from left + fade in — canvas clip-path is approximated with offset
+              textXOffset += (1 - inProgress) * -200;
+              textAlpha   *= Math.min(1, inProgress * 2); // fast alpha so it feels like a wipe
+              break;
+            }
+
+            case 'splitReveal': {
+              // Scales up from near-zero with fade — classic cinematic title reveal
+              const ease = 1 - Math.pow(1 - inProgress, 3); // cubic ease-out
+              textScale *= (0.05 + 0.95 * ease);
+              textAlpha *= ease;
+              break;
+            }
+
+            case 'glitch': {
+              // Rapid random XY jitter that settles as inProgress → 1
+              const glitchIntensity = Math.max(0, 1 - inProgress * 2); // stops halfway
+              const time = performance.now() / 1000;
+              textXOffset += glitchIntensity * 20 * (Math.sin(time * 80)  > 0 ? 1 : -1);
+              textYOffset += glitchIntensity * 10 * (Math.sin(time * 130) > 0 ? 1 : -1);
+              textAlpha   *= (inProgress < 0.1 ? 0 : 1); // flash-on after first frame
+              break;
+            }
+
+            case 'letterSpacing': {
+              // Simulated letter-spacing compress: characters start very close (squished scale X)
+              // We fake it with horizontal scale + slight alpha
+              const ease = 1 - Math.pow(1 - inProgress, 2); // quad ease-out
+              textScale   *= (0.4 + 0.6 * ease);   // scale X from 0.4 → 1.0
+              textAlpha   *= ease;
+              break;
+            }
+
+            case 'rollUp': {
+              // Film-credit hard roll: text comes from far below very fast
+              const ease = 1 - Math.pow(1 - inProgress, 4); // quart ease-out — fast then eases
+              textYOffset += (1 - ease) * 180;
+              textAlpha   *= Math.min(1, inProgress * 4); // opacity snaps on early
+              break;
+            }
+
+            case 'scaleFlip': {
+              // Y-axis squeeze (scaleY 0 → 1) then pops open — dramatic reveal
+              const ease = inProgress < 0.5
+                ? 4 * inProgress * inProgress * inProgress            // cubic ease-in for first half
+                : 1 - Math.pow(-2 * inProgress + 2, 3) / 2;          // cubic ease-out for second half
+              textScale   *= Math.max(0.01, ease);   // scaleY approximated via uniform scale
+              textAlpha   *= Math.min(1, inProgress * 3);
+              break;
+            }
+
+            case 'zoomBlur': {
+              // Blockbuster zoom: starts very large and slams down to 1×, heavy alpha ramp
+              const ease = 1 - Math.pow(1 - inProgress, 3); // cubic ease-out
+              textScale *= (3.0 - 2.0 * ease);     // 3× → 1× zoom in
+              textAlpha *= ease * ease;             // quadratic alpha so it "appears" through blur
+              break;
+            }
           }
         }
 
@@ -1705,6 +1779,59 @@ export function PreviewCanvas() {
             case 'slideDown': textYOffset += (1 - outProgress) * 80; break;
             case 'slideLeft': textXOffset -= (1 - outProgress) * 160; break;
             case 'slideRight':textXOffset += (1 - outProgress) * 160; break;
+
+            // ─── CINEMATIC OUT animations ──────────────────────────────────────
+
+            case 'elastic': {
+              // Reverse elastic: snap away then spring back slightly before exiting
+              textScale *= Math.max(0.01, outProgress);
+              textAlpha *= outProgress;
+              break;
+            }
+            case 'revealWipe': {
+              // Wipe out to the right
+              textXOffset += (1 - outProgress) * 200;
+              textAlpha   *= outProgress * 2 < 1 ? outProgress * 2 : 1;
+              break;
+            }
+            case 'splitReveal': {
+              // Collapse back to center
+              textScale *= outProgress;
+              textAlpha *= outProgress;
+              break;
+            }
+            case 'glitch': {
+              // Glitch out: jitter increases as it exits
+              const glitchIntensity = 1 - outProgress;
+              const time = performance.now() / 1000;
+              textXOffset += glitchIntensity * 25 * (Math.sin(time * 90) > 0 ? 1 : -1);
+              textYOffset += glitchIntensity * 12 * (Math.sin(time * 140) > 0 ? 1 : -1);
+              textAlpha   *= outProgress;
+              break;
+            }
+            case 'rollUp': {
+              // Roll off upward fast
+              const ease = Math.pow(1 - outProgress, 4);
+              textYOffset -= ease * 200;
+              textAlpha   *= outProgress;
+              break;
+            }
+            case 'scaleFlip': {
+              textScale *= Math.max(0.01, outProgress);
+              textAlpha *= outProgress;
+              break;
+            }
+            case 'zoomBlur': {
+              // Zoom out fast while fading
+              textScale *= (0.1 + 0.9 * outProgress);
+              textAlpha *= outProgress * outProgress;
+              break;
+            }
+            case 'letterSpacing': {
+              textScale *= outProgress;
+              textAlpha *= outProgress;
+              break;
+            }
           }
         }
 

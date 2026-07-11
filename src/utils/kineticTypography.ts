@@ -114,8 +114,12 @@ For each word, define:
 - "color": A vibrant hex color string.
 - "x": X position (30–70, as percentage of screen width).
 - "y": Y position (35–65, as percentage of screen height).
-- "animationIn": 'fadeIn', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'bounce', or 'typewriter'.
-- "animationOut": 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', or 'slideRight'.
+- "animationIn": Choose from:
+  Basic: 'fadeIn', 'zoom', 'bounce', 'typewriter', 'slideUp', 'slideDown', 'slideLeft', 'slideRight'
+  Cinematic (prefer these for KEY words): 'elastic' (spring pop - best for hype/energy words), 'splitReveal' (cinematic title reveal - best for dramatic statements), 'revealWipe' (curtain wipe - best for reveals/announcements), 'rollUp' (film credit roll - best for lists/credits), 'scaleFlip' (dramatic snap - best for shocking words), 'zoomBlur' (blockbuster zoom - best for openers/big moments), 'glitch' (cyber jitter - best for tech/error/intensity words), 'letterSpacing' (expand in - best for brand names/titles)
+- "animationOut": Choose from:
+  Basic: 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight'
+  Cinematic: 'elastic', 'splitReveal', 'revealWipe', 'rollUp', 'scaleFlip', 'zoomBlur', 'glitch', 'letterSpacing'
 - "stylePreset": Choose from: 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
 
 Output ONLY a valid JSON array, no markdown, no explanation:
@@ -143,7 +147,20 @@ Rules:
 - Use the Whisper timestamps as the SOURCE OF TRUTH for word timing.
 - Return ONLY a valid JSON array of word typography objects.
 - Each object MUST have all required fields: text, start, end, fontSize, fontFamily, color, x, y, animationIn, animationOut, stylePreset.
-- Do NOT include any text, explanation, or markdown outside the JSON array.`;
+- Do NOT include any text, explanation, or markdown outside the JSON array.
+
+ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
+  Basic IN:  fadeIn, zoom, bounce, typewriter, slideUp, slideDown, slideLeft, slideRight
+  Cinematic IN (PREFER for KEY/EMOTIONAL words):
+    elastic      = spring overshoot pop (hype, energy, excitement words)
+    splitReveal  = cinematic title scale-reveal (dramatic statements, main subjects)
+    revealWipe   = curtain wipe left-to-right (announcements, reveals)
+    rollUp       = hard film-credit roll from below (list items, credits)
+    scaleFlip    = dramatic Y-snap pop (shock, surprise words)
+    zoomBlur     = blockbuster zoom slam (openers, powerful verbs)
+    glitch       = cyber XY jitter (tech, error, intensity, danger words)
+    letterSpacing= letters expand from compressed (brand names, titles)
+  OUT: fadeOut, zoom, slideUp/Down/Left/Right, elastic, splitReveal, revealWipe, rollUp, scaleFlip, zoomBlur, glitch, letterSpacing`;
 
       const groqUserPrompt = `${prompt}\n\n---\nWHISPER WORD TIMESTAMPS (use these for precise timing):\n${wordTimestamps}\n\nGenerate the kinetic typography JSON array now:`;
 

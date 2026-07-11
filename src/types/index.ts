@@ -140,8 +140,17 @@ export type TextAnimationPreset =
   | 'slideDown' 
   | 'slideLeft' 
   | 'slideRight' 
-  | 'bounce' 
-  | 'zoom';
+  | 'bounce'
+  | 'zoom'
+  // ─── Cinematic additions ────────────────────────────────────────────
+  | 'elastic'        // spring overshoot — bouncy kinetic pop
+  | 'revealWipe'     // clip-path wipe from left → right (reveal curtain)
+  | 'splitReveal'    // scale from 0.1 outward with fade — cinematic title
+  | 'glitch'         // rapid XY jitter on entry — cyberpunk / sci-fi
+  | 'letterSpacing'  // characters compress-in then expand to final spacing
+  | 'rollUp'         // fast hard roll from below (film-credit style)
+  | 'scaleFlip'      // Y-axis squeeze then snap to full height — dramatic pop
+  | 'zoomBlur';      // zoom in with motion-blur alpha ramp — blockbuster intro
 
 export interface ClipTextAnimation {
   in: TextAnimationPreset;

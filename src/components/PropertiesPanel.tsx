@@ -4651,14 +4651,26 @@ export function PropertiesPanel() {
                       className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
                     >
                       <option value="none">None</option>
-                      <option value="fadeIn">Fade In</option>
-                      <option value="zoom">Zoom</option>
-                      <option value="slideUp">Slide Up</option>
-                      <option value="slideDown">Slide Down</option>
-                      <option value="slideLeft">Slide Left</option>
-                      <option value="slideRight">Slide Right</option>
-                      <option value="bounce">Bounce</option>
-                      <option value="typewriter">Typewriter</option>
+                      <optgroup label="── Basic ──">
+                        <option value="fadeIn">Fade In</option>
+                        <option value="zoom">Zoom In</option>
+                        <option value="bounce">Bounce</option>
+                        <option value="typewriter">Typewriter</option>
+                        <option value="slideUp">Slide Up</option>
+                        <option value="slideDown">Slide Down</option>
+                        <option value="slideLeft">Slide Left</option>
+                        <option value="slideRight">Slide Right</option>
+                      </optgroup>
+                      <optgroup label="── Cinematic ──">
+                        <option value="elastic">⚡ Elastic Spring</option>
+                        <option value="splitReveal">🎬 Split Reveal</option>
+                        <option value="revealWipe">▶ Reveal Wipe</option>
+                        <option value="rollUp">🎞 Roll Up</option>
+                        <option value="scaleFlip">💥 Scale Flip</option>
+                        <option value="zoomBlur">🔥 Zoom Blur</option>
+                        <option value="glitch">⚠ Glitch</option>
+                        <option value="letterSpacing">✦ Letter Expand</option>
+                      </optgroup>
                     </select>
                     
                     {selectedClip.textSettings.animation?.in && selectedClip.textSettings.animation.in !== 'none' && (
@@ -4706,12 +4718,24 @@ export function PropertiesPanel() {
                       className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
                     >
                       <option value="none">None</option>
-                      <option value="fadeOut">Fade Out</option>
-                      <option value="zoom">Zoom</option>
-                      <option value="slideUp">Slide Up</option>
-                      <option value="slideDown">Slide Down</option>
-                      <option value="slideLeft">Slide Left</option>
-                      <option value="slideRight">Slide Right</option>
+                      <optgroup label="── Basic ──">
+                        <option value="fadeOut">Fade Out</option>
+                        <option value="zoom">Zoom Out</option>
+                        <option value="slideUp">Slide Up</option>
+                        <option value="slideDown">Slide Down</option>
+                        <option value="slideLeft">Slide Left</option>
+                        <option value="slideRight">Slide Right</option>
+                      </optgroup>
+                      <optgroup label="── Cinematic ──">
+                        <option value="elastic">⚡ Elastic Snap</option>
+                        <option value="splitReveal">🎬 Collapse Center</option>
+                        <option value="revealWipe">▶ Wipe Out</option>
+                        <option value="rollUp">🎞 Roll Off</option>
+                        <option value="scaleFlip">💥 Scale Flip</option>
+                        <option value="zoomBlur">🔥 Zoom Blur Out</option>
+                        <option value="glitch">⚠ Glitch Out</option>
+                        <option value="letterSpacing">✦ Letter Compress</option>
+                      </optgroup>
                     </select>
                     
                     {selectedClip.textSettings.animation?.out && selectedClip.textSettings.animation.out !== 'none' && (
