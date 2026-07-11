@@ -646,31 +646,37 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const S = sep.strength / 100;
 
         if (sep.enabled) {
-          graph.bypassGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
+          const updateGain = (node: GainNode, val: number) => {
+            if (Math.abs(node.gain.value - val) > 0.005) node.gain.setTargetAtTime(val, ctxTime, rampTime);
+          };
+          updateGain(graph.bypassGain, 0.0);
           if (sep.mode === 'removeVocals') {
-            graph.lowGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
-            graph.highGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
-            graph.sideGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
-            graph.midOutputGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
+            updateGain(graph.lowGain, 1.0);
+            updateGain(graph.highGain, 1.0);
+            updateGain(graph.sideGain, 1.0);
+            updateGain(graph.midOutputGain, 1.0 - S);
           } else if (sep.mode === 'removeBgm') {
-            graph.lowGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
-            graph.highGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
-            graph.sideGain.gain.setTargetAtTime(1.0 - S, ctxTime, rampTime);
-            graph.midOutputGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
+            updateGain(graph.lowGain, 1.0 - S);
+            updateGain(graph.highGain, 1.0 - S);
+            updateGain(graph.sideGain, 1.0 - S);
+            updateGain(graph.midOutputGain, 1.0);
           } else {
             // Creative blend
             const mix = 1.0 - S * 0.5;
-            graph.lowGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
-            graph.highGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
-            graph.sideGain.gain.setTargetAtTime(mix, ctxTime, rampTime);
-            graph.midOutputGain.gain.setTargetAtTime(S, ctxTime, rampTime);
+            updateGain(graph.lowGain, 1.0);
+            updateGain(graph.highGain, 1.0);
+            updateGain(graph.sideGain, mix);
+            updateGain(graph.midOutputGain, S);
           }
         } else {
-          graph.bypassGain.gain.setTargetAtTime(1.0, ctxTime, rampTime);
-          graph.lowGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
-          graph.highGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
-          graph.sideGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
-          graph.midOutputGain.gain.setTargetAtTime(0.0, ctxTime, rampTime);
+          const updateGain = (node: GainNode, val: number) => {
+            if (Math.abs(node.gain.value - val) > 0.005) node.gain.setTargetAtTime(val, ctxTime, rampTime);
+          };
+          updateGain(graph.bypassGain, 1.0);
+          updateGain(graph.lowGain, 0.0);
+          updateGain(graph.highGain, 0.0);
+          updateGain(graph.sideGain, 0.0);
+          updateGain(graph.midOutputGain, 0.0);
         }
       }
 
@@ -690,8 +696,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
       // Update Vocal Filter (notch metallic resonance or manual formant)
       if (entry.vocalFilter) {
-        const targetGain = audioSettings.humanize ? -5.0 : audioSettings.voiceFormant * -0.05;
-        entry.vocalFilter.gain.setTargetAtTime(targetGain, ctxTime, rampTime);
+        const targetGain = audioSettings.humanize ? -5.0 : (audioSettings.voiceFormant || 0) * -0.05;
+        if (Math.abs(entry.vocalFilter.gain.value - targetGain) > 0.1) entry.vocalFilter.gain.setTargetAtTime(targetGain, ctxTime, rampTime);
       }
 
       // Update Bass / Treble Equalizers and Denoise
@@ -699,27 +705,31 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const denoiseVal = audioSettings.denoise ?? 0;
         // Denoise 0-100 reduces high frequencies above 4000Hz up to -30dB
         const denoiseGain = -(denoiseVal / 100) * 30;
-        entry.denoiseFilter.gain.setTargetAtTime(denoiseGain, ctxTime, rampTime);
+        if (Math.abs(entry.denoiseFilter.gain.value - denoiseGain) > 0.1) entry.denoiseFilter.gain.setTargetAtTime(denoiseGain, ctxTime, rampTime);
       }
       if (entry.bassFilter) {
-        const baseBass = audioSettings.bass + (audioSettings.humanize ? 1.5 : 0);
-        entry.bassFilter.gain.setTargetAtTime(Math.max(-15, Math.min(15, baseBass)), ctxTime, rampTime);
+        const baseBass = (audioSettings.bass || 0) + (audioSettings.humanize ? 1.5 : 0);
+        const targetBass = Math.max(-15, Math.min(15, baseBass));
+        if (Math.abs(entry.bassFilter.gain.value - targetBass) > 0.1) entry.bassFilter.gain.setTargetAtTime(targetBass, ctxTime, rampTime);
       }
       if (entry.trebleFilter) {
-        const baseTreble = audioSettings.treble + (audioSettings.humanize ? 1.0 : 0);
-        entry.trebleFilter.gain.setTargetAtTime(Math.max(-15, Math.min(15, baseTreble)), ctxTime, rampTime);
+        const baseTreble = (audioSettings.treble || 0) + (audioSettings.humanize ? 1.0 : 0);
+        const targetTreble = Math.max(-15, Math.min(15, baseTreble));
+        if (Math.abs(entry.trebleFilter.gain.value - targetTreble) > 0.1) entry.trebleFilter.gain.setTargetAtTime(targetTreble, ctxTime, rampTime);
       }
 
       // Update Stereo Panning combining clip panning and track-level panning
       if (entry.pannerNode) {
         const trackPan = targetTrack?.pan ?? 0;
         const combinedPan = (animatedPan / 100) + trackPan;
-        entry.pannerNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, combinedPan)), ctxTime, rampTime);
+        const targetPan = Math.max(-1, Math.min(1, combinedPan));
+        if (Math.abs(entry.pannerNode.pan.value - targetPan) > 0.01) entry.pannerNode.pan.setTargetAtTime(targetPan, ctxTime, rampTime);
       }
 
       // Update Room Ambience feedback wet volume
       if (entry.delayGain) {
-        entry.delayGain.gain.setTargetAtTime(audioSettings.humanize ? 0.20 : 0.0, ctxTime, rampTime);
+        const targetDelay = audioSettings.humanize ? 0.20 : 0.0;
+        if (Math.abs(entry.delayGain.gain.value - targetDelay) > 0.01) entry.delayGain.gain.setTargetAtTime(targetDelay, ctxTime, rampTime);
       }
 
       // Update volume & mute state supporting track Solo / Mute logic
@@ -838,7 +848,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
       const finalVolume = (globalMuted || isTransitionMuted || !playingIds.has(clipId)) ? 0 : linearGain * volume * trackVolume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
 
       if (entry.gainNode) {
-        entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
+        if (Math.abs(entry.gainNode.gain.value - finalVolume) > 0.005) {
+          entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
+        }
         // Force base element unmuted and full volume so output goes to Web Audio
         if (entry.el.volume !== 1) entry.el.volume = 1;
         if (entry.el.muted !== false) entry.el.muted = false;

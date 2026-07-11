@@ -70,7 +70,7 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
   const timelineRef = useRef<HTMLDivElement>(null);
 
   // ── Trim drag ─────────────────────────────────────────────
-  const trimDragRef = useRef<{ cueIdx: number; side: 'left' | 'right'; startX: number; startVal: number } | null>(null);
+  const trimDragRef = useRef<{ cueIdx: number; side: 'left' | 'right'; startX: number; startVal: number; startValTimeline?: number } | null>(null);
   const moveDragRef = useRef<{ cueIdx: number; startX: number; startValStart: number; startValEnd: number } | null>(null);
 
   // ── Audio/video refs ──────────────────────────────────────
@@ -168,13 +168,17 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
   // Play / Pause
   // ─────────────────────────────────────────────────────────────
   const handlePlayPause = () => {
-    if (!videoRef.current) return;
     if (isPlaying) {
-      videoRef.current.pause();
+      videoRef.current?.pause();
+      cues.forEach((_, i) => {
+        if (audioPlayersRef.current[i]) {
+          audioPlayersRef.current[i]?.pause();
+        }
+      });
       setIsPlaying(false);
     } else {
       if (currentTime >= clip.duration - 0.05) seekTo(0);
-      videoRef.current.play().catch(console.error);
+      videoRef.current?.play().catch(console.error);
       setIsPlaying(true);
     }
   };
@@ -237,7 +241,8 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
     const cue = cues[cueIdx];
     trimDragRef.current = {
       cueIdx, side, startX: e.clientX,
-      startVal: side === 'left' ? cue.trimOffset : cue.trimDuration
+      startVal: side === 'left' ? (cue.trimOffset || 0) : (cue.trimDuration || (cue.end - cue.start)),
+      startValTimeline: side === 'left' ? cue.start : cue.end
     };
   };
 
@@ -264,7 +269,7 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
         return;
       }
 
-      const drag = trimDragRef.current;
+      const drag = trimDragRef.current as any;
       if (!drag || !timelineRef.current) return;
       const rect = timelineRef.current.getBoundingClientRect();
       const pxPerSec = rect.width / clip.duration;
@@ -272,15 +277,19 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
 
       setCues((prev) => prev.map((c, i) => {
         if (i !== drag.cueIdx) return c;
-        // Read option from prev state to avoid stale closure
         const opt = c.options[selectedOptions[drag.cueIdx] ?? 0];
         const maxAudioDur = opt?.duration ?? (c.end - c.start);
+        
         if (drag.side === 'left') {
-          const newOffset = Math.max(0, Math.min(drag.startVal + deltaSec, maxAudioDur - 0.5));
-          return { ...c, trimOffset: newOffset };
+          const newOffset = drag.startVal + deltaSec;
+          const clampedOffset = Math.max(0, Math.min(newOffset, maxAudioDur - 0.5));
+          const actualDelta = clampedOffset - drag.startVal;
+          return { ...c, trimOffset: clampedOffset, start: drag.startValTimeline + actualDelta };
         } else {
-          const newDur = Math.max(0.5, Math.min(drag.startVal + deltaSec, maxAudioDur - c.trimOffset));
-          return { ...c, trimDuration: newDur };
+          const newDur = drag.startVal + deltaSec;
+          const clampedDur = Math.max(0.5, Math.min(newDur, maxAudioDur - (c.trimOffset || 0)));
+          const actualDelta = clampedDur - drag.startVal;
+          return { ...c, trimDuration: clampedDur, end: drag.startValTimeline + actualDelta };
         }
       }));
     };
