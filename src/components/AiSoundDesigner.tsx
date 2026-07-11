@@ -243,6 +243,27 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      if (moveDragRef.current && timelineRef.current) {
+        const drag = moveDragRef.current;
+        const rect = timelineRef.current.getBoundingClientRect();
+        const pxPerSec = rect.width / clip.duration;
+        const deltaSec = (e.clientX - drag.startX) / pxPerSec;
+
+        setCues((prev) => prev.map((c, i) => {
+          if (i !== drag.cueIdx) return c;
+          const dur = drag.startValEnd - drag.startValStart;
+          let newStart = drag.startValStart + deltaSec;
+          if (newStart < 0) newStart = 0;
+          let newEnd = newStart + dur;
+          if (newEnd > clip.duration) {
+            newEnd = clip.duration;
+            newStart = newEnd - dur;
+          }
+          return { ...c, start: newStart, end: newEnd };
+        }));
+        return;
+      }
+
       const drag = trimDragRef.current;
       if (!drag || !timelineRef.current) return;
       const rect = timelineRef.current.getBoundingClientRect();
@@ -263,7 +284,7 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
         }
       }));
     };
-    const onUp = () => { trimDragRef.current = null; };
+    const onUp = () => { trimDragRef.current = null; moveDragRef.current = null; };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => {
