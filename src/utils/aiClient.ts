@@ -49,42 +49,62 @@ export async function analyzeStoryboardWithGemini(
   const timePerFrame = 1 / fps;
   const totalFrames = Math.round(segmentDuration * fps);
 
-  const prompt = `You are a world-class professional film Sound Designer and Music Supervisor.
+  // Shared vision prompt — used by both Gemini and Groq
+  const visionPrompt = `You are a Hollywood-level Sound Supervisor and Music Supervisor creating a full audio brief for a ${segmentDuration.toFixed(1)}-second video clip.
 
-CONTEXT: You are looking at a chronological storyboard grid extracted from a ${segmentDuration.toFixed(1)}-second video clip.
-- Grid layout: frames go LEFT-TO-RIGHT then TOP-TO-BOTTOM.
-- Total frames in this grid: ${totalFrames}.
-- Each frame represents exactly ${timePerFrame.toFixed(3)} seconds of video time.
-- Use the yellow timestamps burned into each thumbnail corner to identify exact timing.
+STORYBOARD: Chronological grid of ${totalFrames} frames. Frames go LEFT→RIGHT then TOP→BOTTOM. Each frame = ${timePerFrame.toFixed(3)} seconds. Yellow timestamps in corners show exact timing.
 
-YOUR MISSION: Identify every moment that needs a sound effect (SFX) or background music (BGM).
-Be specific, creative, and cinematically accurate. Consider:
-• Physical actions visible (footsteps, door slams, claps, explosions, vehicles, tools)
-• Ambient environment (indoor/outdoor, urban/nature, quiet/busy)
-• Emotional tone of the scene (tense, calm, joyful, dramatic)
-• Transitions or cuts that may need a musical sting or whoosh
-• Any absence of sound that needs atmosphere fill
+═══════════════════════════════════
+YOUR JOB: Generate a COMPLETE audio design with BOTH BGM and SFX.
+═══════════════════════════════════
 
-RULES:
-1. ALL timestamps must be between 0 and ${segmentDuration.toFixed(2)} seconds.
-2. BGM cues should span longer periods (3\u2013${segmentDuration.toFixed(0)}s) and describe mood/genre.
-3. SFX cues should be short and precise (<3s) and match the exact visible action.
-4. Search queries must be optimized for Freesound.org (2\u20135 descriptive keywords, no punctuation).
-5. Include at least one BGM suggestion per segment if it is more than 3 seconds long.
-6. Do NOT invent sound cues that don't match visible content.
+MANDATORY RULES:
+1. You MUST include at least 1 BGM cue that covers the majority of the clip (e.g., start=0, end=${segmentDuration.toFixed(1)}).
+2. You MUST include SFX for every visible physical action (footsteps, impacts, doors, vehicles, crowds, water, fire, etc.).
+3. You MUST add ambient atmosphere SFX if the scene has an identifiable environment (city, nature, room, street).
+4. If the clip is longer than 5 seconds, include at least 3 cues total.
+5. ALL timestamps must be between 0.0 and ${segmentDuration.toFixed(2)}.
 
-Return ONLY this exact JSON format with no markdown wrapping:
+BGM SEARCH QUERY RULES (for music):
+- Include genre + mood + tempo keywords
+- Good examples: "cinematic epic orchestral tense" / "dark electronic ambient drone" / "upbeat hip hop energetic" / "lofi chill study calm" / "suspense thriller strings building"
+- BAD examples: "music" / "background" / "sound" (too vague — will return nothing)
+
+SFX SEARCH QUERY RULES (for effects):
+- Use 2–4 specific descriptive words for the exact sound
+- Good examples: "heavy rain thunder storm" / "crowd cheering stadium" / "door slam wooden" / "car engine rev"
+- BAD: "noise" / "effect" / "audio"
+
+SCENE ANALYSIS APPROACH:
+1. What is the overall emotional tone? (tense, joyful, dramatic, calm, mysterious) → use for BGM
+2. What environment is it? (urban, nature, indoor, outdoor, studio) → use for ambient SFX
+3. What physical actions are visible? → use for specific SFX
+4. Are there any cuts, transitions or emotional peaks that need a sting/impact?
+
+Return ONLY this exact JSON (no markdown, no explanation):
 {
   "cues": [
     {
-      "start": <number 0 to ${segmentDuration.toFixed(2)}>,
-      "end": <number 0 to ${segmentDuration.toFixed(2)}>,
-      "query": "<freesound search keywords>",
+      "start": <number 0–${segmentDuration.toFixed(2)}>,
+      "end": <number 0–${segmentDuration.toFixed(2)}>,
+      "query": "<Freesound.org search keywords>",
       "type": "sfx" | "bgm",
-      "reason": "<one sentence: what you saw and why this sound fits>"
+      "reason": "<one sentence: exactly what you saw and why this sound fits>"
     }
   ]
 }`;
+
+  // Groq-specific stronger system prompt
+  const groqSystemPrompt = `You are a world-class Hollywood Sound Supervisor and Music Supervisor with 20+ years experience.
+You analyze video storyboards and produce a COMPLETE audio brief including BOTH background music (BGM) and sound effects (SFX).
+
+CRITICAL OUTPUT RULES:
+- Return ONLY valid JSON in the exact format requested. No markdown. No explanation. No commentary.
+- ALWAYS include at least 1 BGM cue with music genre keywords (e.g. "cinematic orchestral epic tension", "dark ambient electronic drone", "upbeat funk groove")
+- ALWAYS include SFX for any visible actions, environments, or transitions
+- BGM queries must be music-specific: include genre words like orchestral, electronic, hip-hop, ambient, jazz, rock, cinematic, lo-fi
+- SFX queries must be action-specific: footsteps wood, rain heavy, crowd cheer, explosion debris, etc.
+- If you return an empty cues array or omit BGM, you have FAILED your job`;
 
   const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
   let requestBody: any = {};
@@ -94,15 +114,15 @@ Return ONLY this exact JSON format with no markdown wrapping:
       contents: [
         {
           parts: [
-            { text: prompt },
+            { text: visionPrompt },
             { inlineData: { mimeType: 'image/jpeg', data: base64Image } }
           ]
         }
       ],
       generationConfig: {
         responseMimeType: 'application/json',
-        temperature: 0.4,
-        maxOutputTokens: 2048
+        temperature: 0.5,
+        maxOutputTokens: 3000
       }
     };
   } else {
@@ -111,19 +131,19 @@ Return ONLY this exact JSON format with no markdown wrapping:
       messages: [
         {
           role: 'system',
-          content: 'You are a professional film Sound Designer. Analyze storyboard grids and return sound cue data as strict JSON only. No markdown, no commentary.'
+          content: groqSystemPrompt
         },
         {
           role: 'user',
           content: [
-            { type: 'text', text: prompt },
+            { type: 'text', text: visionPrompt },
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
           ]
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 2048
+      temperature: 0.4,
+      max_tokens: 3000
     };
   }
 
@@ -170,6 +190,19 @@ Return ONLY this exact JSON format with no markdown wrapping:
     const parsed = JSON.parse(clean);
     const cues = Array.isArray(parsed) ? parsed : (parsed.cues ?? []);
     if (!Array.isArray(cues)) throw new Error('Response cues is not an array');
+
+    // Ensure at least one BGM exists — inject a default if AI forgot
+    const hasBgm = cues.some((c: any) => c.type === 'bgm');
+    if (!hasBgm && segmentDuration > 3) {
+      cues.unshift({
+        start: 0,
+        end: segmentDuration,
+        query: 'cinematic ambient background atmospheric',
+        type: 'bgm',
+        reason: 'Background music layer auto-added to fill the full clip duration.'
+      });
+    }
+
     return cues as AICueResult[];
   } catch (e) {
     throw new Error(`Failed to parse ${provider.toUpperCase()} storyboard response as JSON. Raw: ${text.slice(0, 300)}`);
@@ -179,30 +212,39 @@ Return ONLY this exact JSON format with no markdown wrapping:
 /**
  * Refines a raw scene description into optimized Freesound.org search keywords using Groq LLaMA 3.3.
  */
-export async function refineAudioQueryWithGroq(query: string): Promise<string> {
+export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm' = 'sfx'): Promise<string> {
   const payload = {
     model: GROQ_TEXT_MODEL,
     messages: [
       {
         role: 'system',
         content: `You are an expert audio library search optimizer for Freesound.org.
-Your ONLY job is to convert a sound description into the best 2-5 search keywords.
-Rules:
+Your ONLY job is to convert a sound description into the best 2-5 Freesound.org search keywords.
+
+RULES:
 - Return ONLY keywords separated by spaces. No punctuation. No explanation. No quotes. No extra text.
 - Prioritize the most distinctive sonic characteristics.
 - Order keywords from most to least specific.
+
+${type === 'bgm' ? `MUSIC (BGM) KEYWORDS — must include musical genre/style/mood terms:
+- Include at least one genre word: orchestral, electronic, ambient, hip-hop, jazz, rock, folk, cinematic, lofi, synthwave, trap
+- Include at least one mood word: dramatic, upbeat, calm, tense, dark, energetic, emotional, mysterious, epic, chill
+- Examples:
+  Input: "dramatic background music for a city montage" → Output: cinematic orchestral dramatic urban epic
+  Input: "calm relaxing background" → Output: ambient lofi calm relaxing atmospheric
+  Input: "intense action scene music" → Output: epic orchestral intense action cinematic` : `SFX KEYWORDS — must describe the specific sound action:
 - Examples:
   Input: "ocean waves crashing on sandy beach" → Output: waves ocean beach shore splash
   Input: "busy city traffic noise" → Output: city traffic urban cars busy
-  Input: "dramatic orchestral tension music" → Output: orchestral tension dramatic strings epic`
+  Input: "door slam" → Output: door slam wooden thud close`}`,
       },
       {
         role: 'user',
-        content: `Convert this sound description to Freesound.org search keywords:\n"${query}"`
+        content: `Convert this ${type === 'bgm' ? 'music/BGM' : 'sound effect/SFX'} description to Freesound.org search keywords:\n"${query}"`
       }
     ],
     temperature: 0.1,
-    max_tokens: 50
+    max_tokens: 60
   };
 
   const controller = new AbortController();

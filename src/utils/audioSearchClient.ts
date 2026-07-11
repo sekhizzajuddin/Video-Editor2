@@ -16,15 +16,16 @@ export const DEFAULT_FREESOUND_TOKEN = 'V44W0kixpW9mD75yB8iR1e2D3h8P6Q8w';
  */
 export async function searchFreesound(
   query: string,
-  token?: string
+  token?: string,
+  type?: 'sfx' | 'bgm'
 ): Promise<AudioOption[]> {
   const envToken = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_FREESOUND_API_KEY : undefined;
   const actualToken = token || envToken || useEditorStore.getState().settings.freesoundApiKey || DEFAULT_FREESOUND_TOKEN;
   const cleanQuery = query.trim();
   if (!cleanQuery) return [];
 
-  // Filter out tracks that are too long (>15s) for standard SFX, unless query suggests background music (BGM)
-  const isBgm = query.toLowerCase().includes('music') || query.toLowerCase().includes('bgm') || query.toLowerCase().includes('ambient');
+  // Use explicit type if provided; fallback to keyword-based heuristic
+  const isBgm = type === 'bgm' || (!type && (query.toLowerCase().includes('music') || query.toLowerCase().includes('bgm') || query.toLowerCase().includes('ambient') || query.toLowerCase().includes('orchestral') || query.toLowerCase().includes('cinematic') || query.toLowerCase().includes('lofi') || query.toLowerCase().includes('electronic')));
   const durationFilter = isBgm ? 'duration:[10.0 TO 300.0]' : 'duration:[0.5 TO 15.0]';
   
   // Use our serverless function proxy to bypass CORS and properly handle Env vars

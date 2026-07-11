@@ -1,5 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Play, Square, Sparkles, Check, X, Loader2, Volume2, Info, RefreshCw } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Play, Pause, Square, Sparkles, X, Loader2, Volume2, VolumeX, Music, Zap,
+  ChevronLeft, ChevronRight, SkipBack, SkipForward
+} from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { AICueResult } from '@/utils/aiClient';
 import { AudioOption } from '@/utils/audioSearchClient';
@@ -7,6 +10,9 @@ import { toast } from 'sonner';
 
 interface CueWithOptions extends AICueResult {
   options: AudioOption[];
+  // trimStart/trimEnd are offsets within the cue's audio (0 = use full cue)
+  trimOffset: number;  // how many seconds into the audio to start playing
+  trimDuration: number; // how many seconds to play
 }
 
 interface AiSoundDesignerProps {
@@ -15,588 +21,727 @@ interface AiSoundDesignerProps {
   onClose: () => void;
 }
 
-export function AiSoundDesigner({ clip, cues, onClose }: AiSoundDesignerProps) {
-  const { tracks, addMedia, addClip, addTrack, mediaLibrary } = useEditorStore();
-  
-  // Find video media URL
-  const media = mediaLibrary.find((m) => m.id === clip.mediaId);
+// ─────────────────────────────────────────────────────────────
+// Utility: format seconds as M:SS.f
+// ─────────────────────────────────────────────────────────────
+function fmt(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toFixed(1).padStart(4, '0')}`;
+}
+
+export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDesignerProps) {
+  const { tracks, addMedia, addClip, addTrack } = useEditorStore();
+
+  // ── Find video source ──────────────────────────────────────
+  const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId);
   const videoUrl = media?.url;
 
-  // Selected option indices for each cue
-  const [selectedOptions, setSelectedOptions] = useState<Record<number, number>>({});
-  const [activeCueIndex, setActiveCueIndex] = useState<number>(0);
-  
-  // Audition playback states
+  // ── Local state ────────────────────────────────────────────
+  // Cues with mutable selection + trim state
+  const [cues, setCues] = useState<CueWithOptions[]>(() =>
+    initialCues.map((c) => ({
+      ...c,
+      trimOffset: 0,
+      trimDuration: Math.min(c.options[0]?.duration ?? (c.end - c.start), c.end - c.start),
+    }))
+  );
+  const [selectedOptions, setSelectedOptions] = useState<Record<number, number>>(() => {
+    const init: Record<number, number> = {};
+    initialCues.forEach((_, i) => { init[i] = 0; });
+    return init;
+  });
+
+  const [activeCueIndex, setActiveCueIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0); // relative to clip: 0 to clip.duration
+  const [currentTime, setCurrentTime] = useState(0);
+  const [volume, setVolume] = useState(80);
+  const [videoMuted, setVideoMuted] = useState(true);
   const [isApplying, setIsApplying] = useState(false);
   const [applyProgress, setApplyProgress] = useState(0);
 
-  // References
+  // ── Audition (inspector) single track ─────────────────────
+  const [playingOptionKey, setPlayingOptionKey] = useState<string | null>(null);
+  const inspectorAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // ── Playhead drag ──────────────────────────────────────────
+  const isDraggingPlayhead = useRef(false);
+  const timelineRef = useRef<HTMLDivElement>(null);
+
+  // ── Trim drag ─────────────────────────────────────────────
+  const trimDragRef = useRef<{ cueIdx: number; side: 'left' | 'right'; startX: number; startVal: number } | null>(null);
+
+  // ── Audio/video refs ──────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioPlayersRef = useRef<Record<number, HTMLAudioElement>>({});
-  const playheadIntervalRef = useRef<number | null>(null);
+  const audioSrcMapRef = useRef<Record<number, string>>({}); // track the URL we loaded
+  const syncIntervalRef = useRef<number | null>(null);
 
-  // Initialize selections to first Freesound option
-  useEffect(() => {
-    const defaults: Record<number, number> = {};
-    cues.forEach((cue, index) => {
-      if (cue.options && cue.options.length > 0) {
-        defaults[index] = 0;
+  // ─────────────────────────────────────────────────────────────
+  // Sync engine — runs every 50ms while playing
+  // ─────────────────────────────────────────────────────────────
+  const syncAudio = useCallback(() => {
+    if (!videoRef.current) return;
+    const v = videoRef.current;
+    const relTime = Math.max(0, v.currentTime - clip.trimStart);
+    setCurrentTime(relTime);
+
+    if (relTime >= clip.duration) {
+      v.pause();
+      v.currentTime = clip.trimStart;
+      setIsPlaying(false);
+      Object.values(audioPlayersRef.current).forEach((a) => { a.pause(); a.currentTime = 0; });
+      return;
+    }
+
+    cues.forEach((cue, idx) => {
+      const optIdx = selectedOptions[idx] ?? 0;
+      const option = cue.options[optIdx];
+      if (!option) return;
+
+      let audio = audioPlayersRef.current[idx];
+      if (!audio || audioSrcMapRef.current[idx] !== option.previewUrl) {
+        if (audio) audio.pause();
+        audio = new Audio(option.previewUrl);
+        audio.crossOrigin = 'anonymous';
+        audio.volume = volume / 100;
+        audioPlayersRef.current[idx] = audio;
+        audioSrcMapRef.current[idx] = option.previewUrl;
+      }
+      audio.volume = volume / 100;
+
+      const isWithin = relTime >= cue.start && relTime < cue.end;
+      if (isWithin) {
+        if (audio.paused) audio.play().catch(() => {});
+        const expected = relTime - cue.start + cue.trimOffset;
+        if (Math.abs(audio.currentTime - expected) > 0.2) audio.currentTime = expected;
+      } else {
+        if (!audio.paused) { audio.pause(); audio.currentTime = cue.trimOffset; }
       }
     });
-    setSelectedOptions(defaults);
-    if (cues.length > 0) {
-      setActiveCueIndex(0);
-    }
-  }, [cues]);
+  }, [cues, selectedOptions, clip, volume]);
 
-  // Sync / Playback Engine loop
   useEffect(() => {
-    const syncAudioEngine = () => {
-      if (!videoRef.current) return;
-      const v = videoRef.current;
-      const relTime = Math.max(0, v.currentTime - clip.trimStart);
-      setCurrentTime(relTime);
-
-      // Enforce duration boundary
-      if (relTime >= clip.duration) {
-        v.pause();
-        v.currentTime = clip.trimStart;
-        setIsPlaying(false);
-        // Pause all audios
-        Object.values(audioPlayersRef.current).forEach((aud) => {
-          aud.pause();
-          aud.currentTime = 0;
-        });
-        return;
-      }
-
-      // Sync each cue's audio player
-      cues.forEach((cue, cueIdx) => {
-        const optionIdx = selectedOptions[cueIdx];
-        if (optionIdx === undefined) return;
-        const option = cue.options[optionIdx];
-        if (!option) return;
-
-        // Ensure audio instance exists in cache
-        let audio = audioPlayersRef.current[cueIdx];
-        if (!audio || audio.src !== option.previewUrl) {
-          if (audio) {
-            audio.pause();
-          }
-          audio = new Audio(option.previewUrl);
-          audio.crossOrigin = 'anonymous';
-          audioPlayersRef.current[cueIdx] = audio;
-        }
-
-        const isWithinRange = relTime >= cue.start && relTime < cue.end;
-
-        if (isWithinRange && isPlaying) {
-          if (audio.paused) {
-            audio.play().catch((err) => console.warn('Preview audio failed to play:', err));
-          }
-          // Synchronize timing if drifting by > 0.15s
-          const expectedAudioTime = relTime - cue.start;
-          if (Math.abs(audio.currentTime - expectedAudioTime) > 0.15) {
-            audio.currentTime = expectedAudioTime;
-          }
-        } else {
-          if (!audio.paused) {
-            audio.pause();
-            audio.currentTime = 0;
-          }
-        }
-      });
-    };
-
     if (isPlaying) {
-      playheadIntervalRef.current = window.setInterval(syncAudioEngine, 50);
+      syncIntervalRef.current = window.setInterval(syncAudio, 50);
     } else {
-      if (playheadIntervalRef.current) {
-        clearInterval(playheadIntervalRef.current);
-        playheadIntervalRef.current = null;
-      }
-      // Pause all audios when paused
-      Object.values(audioPlayersRef.current).forEach((aud) => {
-        aud.pause();
-      });
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      Object.values(audioPlayersRef.current).forEach((a) => a.pause());
     }
+    return () => { if (syncIntervalRef.current) clearInterval(syncIntervalRef.current); };
+  }, [isPlaying, syncAudio]);
 
-    return () => {
-      if (playheadIntervalRef.current) {
-        clearInterval(playheadIntervalRef.current);
-      }
-    };
-  }, [isPlaying, cues, selectedOptions, clip]);
-
-  // Clean up players on unmount
   useEffect(() => {
     return () => {
-      Object.values(audioPlayersRef.current).forEach((aud) => {
-        aud.pause();
-      });
-      audioPlayersRef.current = {};
+      Object.values(audioPlayersRef.current).forEach((a) => a.pause());
+      if (inspectorAudioRef.current) inspectorAudioRef.current.pause();
     };
   }, []);
 
+  // ─────────────────────────────────────────────────────────────
+  // Seek to a relative time (0 → clip.duration)
+  // ─────────────────────────────────────────────────────────────
+  const seekTo = useCallback((relTime: number) => {
+    const clamped = Math.max(0, Math.min(clip.duration, relTime));
+    if (videoRef.current) {
+      videoRef.current.currentTime = clip.trimStart + clamped;
+    }
+    setCurrentTime(clamped);
+    // Sync audio heads
+    cues.forEach((cue, idx) => {
+      const audio = audioPlayersRef.current[idx];
+      if (!audio) return;
+      const isWithin = clamped >= cue.start && clamped < cue.end;
+      if (isWithin) {
+        audio.currentTime = clamped - cue.start + cue.trimOffset;
+        if (isPlaying && audio.paused) audio.play().catch(() => {});
+      } else {
+        audio.pause();
+        audio.currentTime = cue.trimOffset;
+      }
+    });
+  }, [clip, cues, isPlaying]);
+
+  // ─────────────────────────────────────────────────────────────
+  // Play / Pause
+  // ─────────────────────────────────────────────────────────────
   const handlePlayPause = () => {
     if (!videoRef.current) return;
     if (isPlaying) {
       videoRef.current.pause();
       setIsPlaying(false);
     } else {
-      // Seek back if we are near the end
-      const relTime = videoRef.current.currentTime - clip.trimStart;
-      if (relTime >= clip.duration - 0.05) {
-        videoRef.current.currentTime = clip.trimStart;
-      }
-      videoRef.current.play().catch((err) => console.error('Video preview play failed:', err));
+      if (currentTime >= clip.duration - 0.05) seekTo(0);
+      videoRef.current.play().catch(console.error);
       setIsPlaying(true);
     }
   };
 
-  // Timeline seeking click handler
-  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percentage = clickX / rect.width;
-    const relativeSeek = percentage * clip.duration;
-    
-    if (videoRef.current) {
-      videoRef.current.currentTime = clip.trimStart + relativeSeek;
-      setCurrentTime(relativeSeek);
-      
-      // Update audio playheads
-      cues.forEach((cue, cueIdx) => {
-        const audio = audioPlayersRef.current[cueIdx];
-        if (audio) {
-          const isWithin = relativeSeek >= cue.start && relativeSeek < cue.end;
-          if (isWithin) {
-            audio.currentTime = relativeSeek - cue.start;
-            if (isPlaying && audio.paused) {
-              audio.play().catch(() => {});
-            }
-          } else {
-            audio.pause();
-            audio.currentTime = 0;
-          }
-        }
-      });
-    }
+  const handleStop = () => {
+    if (videoRef.current) { videoRef.current.pause(); }
+    setIsPlaying(false);
+    seekTo(0);
   };
 
-  // Play/pause a single option in the inspector pane
-  const [playingOptionKey, setPlayingOptionKey] = useState<string | null>(null);
-  const inspectorAudioRef = useRef<HTMLAudioElement | null>(null);
+  // ─────────────────────────────────────────────────────────────
+  // Timeline click → seek
+  // ─────────────────────────────────────────────────────────────
+  const getTimeFromEvent = useCallback((e: React.MouseEvent | MouseEvent): number => {
+    if (!timelineRef.current) return 0;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    return pct * clip.duration;
+  }, [clip.duration]);
 
+  const handleTimelineMouseDown = (e: React.MouseEvent) => {
+    // Don't start playhead drag if clicking on a cue block or its children
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-role="cue-block"]')) return;
+    isDraggingPlayhead.current = true;
+    seekTo(getTimeFromEvent(e));
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (isDraggingPlayhead.current) seekTo(getTimeFromEvent(e));
+    };
+    const onUp = () => { isDraggingPlayhead.current = false; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [seekTo, getTimeFromEvent]);
+
+  // ─────────────────────────────────────────────────────────────
+  // Trim drag
+  // ─────────────────────────────────────────────────────────────
+  const startTrimDrag = (e: React.MouseEvent, cueIdx: number, side: 'left' | 'right') => {
+    e.stopPropagation();
+    e.preventDefault();
+    const cue = cues[cueIdx];
+    trimDragRef.current = {
+      cueIdx, side, startX: e.clientX,
+      startVal: side === 'left' ? cue.trimOffset : cue.trimDuration
+    };
+  };
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = trimDragRef.current;
+      if (!drag || !timelineRef.current) return;
+      const rect = timelineRef.current.getBoundingClientRect();
+      const pxPerSec = rect.width / clip.duration;
+      const deltaSec = (e.clientX - drag.startX) / pxPerSec;
+
+      setCues((prev) => prev.map((c, i) => {
+        if (i !== drag.cueIdx) return c;
+        // Read option from prev state to avoid stale closure
+        const opt = c.options[selectedOptions[drag.cueIdx] ?? 0];
+        const maxAudioDur = opt?.duration ?? (c.end - c.start);
+        if (drag.side === 'left') {
+          const newOffset = Math.max(0, Math.min(drag.startVal + deltaSec, maxAudioDur - 0.5));
+          return { ...c, trimOffset: newOffset };
+        } else {
+          const newDur = Math.max(0.5, Math.min(drag.startVal + deltaSec, maxAudioDur - c.trimOffset));
+          return { ...c, trimDuration: newDur };
+        }
+      }));
+    };
+    const onUp = () => { trimDragRef.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [selectedOptions, clip.duration]);
+
+  // ─────────────────────────────────────────────────────────────
+  // Inspector: audition single option
+  // ─────────────────────────────────────────────────────────────
   const handleAuditionOption = (option: AudioOption, key: string) => {
     if (playingOptionKey === key) {
-      if (inspectorAudioRef.current) {
-        inspectorAudioRef.current.pause();
-      }
+      inspectorAudioRef.current?.pause();
       setPlayingOptionKey(null);
       return;
     }
-
-    if (inspectorAudioRef.current) {
-      inspectorAudioRef.current.pause();
-    }
-
-    // Stop main preview while auditioning individual track
-    if (isPlaying && videoRef.current) {
-      videoRef.current.pause();
-      setIsPlaying(false);
-    }
+    inspectorAudioRef.current?.pause();
+    if (isPlaying && videoRef.current) { videoRef.current.pause(); setIsPlaying(false); }
 
     const aud = new Audio(option.previewUrl);
     aud.crossOrigin = 'anonymous';
+    aud.volume = volume / 100;
     inspectorAudioRef.current = aud;
     setPlayingOptionKey(key);
-    
-    aud.play().catch((err) => {
-      console.error('Audition sound failed:', err);
-      setPlayingOptionKey(null);
-    });
-
-    aud.onended = () => {
-      setPlayingOptionKey(null);
-    };
+    aud.play().catch(() => setPlayingOptionKey(null));
+    aud.onended = () => setPlayingOptionKey(null);
   };
 
-  // Cleanup inspector audio
-  useEffect(() => {
-    return () => {
-      if (inspectorAudioRef.current) {
-        inspectorAudioRef.current.pause();
-      }
-    };
-  }, []);
+  // Select an alternate option for a cue
+  const selectOption = (cueIdx: number, optIdx: number) => {
+    setSelectedOptions((prev) => ({ ...prev, [cueIdx]: optIdx }));
+    const cue = cues[cueIdx];
+    const option = cue.options[optIdx];
+    if (option) {
+      setCues((prev) => prev.map((c, i) =>
+        i === cueIdx
+          ? { ...c, trimOffset: 0, trimDuration: Math.min(option.duration, c.end - c.start) }
+          : c
+      ));
+    }
+  };
 
+  // ─────────────────────────────────────────────────────────────
+  // Import to timeline
+  // ─────────────────────────────────────────────────────────────
   const handleApply = async () => {
     setIsApplying(true);
     setApplyProgress(0);
-
-    // Stop playback
-    if (videoRef.current) {
-      videoRef.current.pause();
-    }
+    if (videoRef.current) videoRef.current.pause();
     setIsPlaying(false);
-    Object.values(audioPlayersRef.current).forEach((aud) => aud.pause());
-    if (inspectorAudioRef.current) {
-      inspectorAudioRef.current.pause();
-    }
+    Object.values(audioPlayersRef.current).forEach((a) => a.pause());
+    inspectorAudioRef.current?.pause();
 
-    // Get (or create) the target audio track
-    let audioTrack = tracks.find((t) => t.type === 'audio');
-    if (!audioTrack) {
-      addTrack('audio');
-      const updatedTracks = useEditorStore.getState().tracks;
-      audioTrack = updatedTracks.find((t) => t.type === 'audio');
-    }
+    // Ensure we have at least two audio tracks (one for BGM, one for SFX)
+    const existingAudioTracks = useEditorStore.getState().tracks.filter((t) => t.type === 'audio');
+    if (existingAudioTracks.length < 1) addTrack('audio');
+    if (useEditorStore.getState().tracks.filter((t) => t.type === 'audio').length < 2) addTrack('audio');
 
-    if (!audioTrack) {
-      toast.error('Could not find or create an audio track on the timeline.');
-      setIsApplying(false);
-      return;
-    }
+    const audioTracks = useEditorStore.getState().tracks.filter((t) => t.type === 'audio');
+    const bgmTrack = audioTracks[0]!;
+    const sfxTrack = audioTracks[1] ?? audioTracks[0]!;
 
-    const totalCues = Object.keys(selectedOptions).length;
-    let completed = 0;
+    const total = Object.keys(selectedOptions).length;
+    let done = 0;
 
-    useEditorStore.getState().startTransaction();
+    useEditorStore.getState().startTransaction?.();
     try {
-      for (const [cueIdxStr, optionIdx] of Object.entries(selectedOptions)) {
-        const cueIdx = parseInt(cueIdxStr);
+      for (const [idxStr, optIdx] of Object.entries(selectedOptions)) {
+        const cueIdx = parseInt(idxStr);
         const cue = cues[cueIdx];
-        const option = cue.options[optionIdx];
-
+        const option = cue.options[optIdx];
         if (!option) continue;
 
         try {
-          // Download audio preview
           const res = await fetch(option.previewUrl);
-          if (!res.ok) throw new Error(`Status ${res.status}`);
-
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();
           const filename = `${cue.query.replace(/\s+/g, '_')}_${option.id}.mp3`;
           const file = new File([blob], filename, { type: 'audio/mp3', lastModified: Date.now() });
-
-          const mediaId = `ai_audio_${option.id}_${Date.now()}`;
+          const now = Date.now();
+          const mediaId = `ai_audio_${option.id}_${now}_${cueIdx}`;
           const mediaItem = {
             id: mediaId,
-            name: option.name.length > 25 ? option.name.substring(0, 25) + '...' : option.name,
+            name: option.name.length > 28 ? option.name.substring(0, 28) + '…' : option.name,
             type: 'audio' as const,
             duration: option.duration,
             url: URL.createObjectURL(blob),
-            createdAt: Date.now()
+            createdAt: now
           };
-
           addMedia(mediaItem, file);
 
-          // Add to audio track
+          const targetTrack = cue.type === 'bgm' ? bgmTrack : sfxTrack;
           const globalStart = clip.startTime + cue.start;
-          const clipId = `clip_ai_audio_${option.id}_${Date.now()}`;
-          
-          const audioClip = {
-            id: clipId,
-            mediaId: mediaId,
-            trackId: audioTrack.id,
+          const playDuration = Math.min(cue.trimDuration, cue.end - cue.start, option.duration - cue.trimOffset);
+
+          addClip({
+            id: `clip_ai_audio_${option.id}_${now}_${cueIdx}`,
+            mediaId,
+            trackId: targetTrack.id,
             startTime: globalStart,
-            duration: Math.min(option.duration, cue.end - cue.start),
-            trimStart: 0,
+            duration: playDuration,
+            trimStart: cue.trimOffset,
             trimEnd: 0,
             opacity: 1,
             speed: 1,
             effects: [],
             transform: { x: 0, y: 0, scale: 100, rotation: 0 },
             audioSettings: {
-              volume: 80,
+              volume: cue.type === 'bgm' ? 60 : 85,
               pan: 0,
-              fadeIn: 0.2,
-              fadeOut: 0.2,
-              bass: 0,
-              treble: 0,
-              muted: false,
-              preservePitch: true,
-              pitch: 0,
-              voiceFormant: 0,
-              humanize: false,
+              fadeIn: cue.type === 'bgm' ? 1.0 : 0.05,
+              fadeOut: cue.type === 'bgm' ? 1.5 : 0.1,
+              bass: 0, treble: 0, muted: false,
+              preservePitch: true, pitch: 0, voiceFormant: 0, humanize: false,
             }
-          };
-
-          addClip(audioClip);
+          });
         } catch (err) {
-          console.error(`Failed to import SFX ${option.name}:`, err);
+          console.error(`Failed to import ${option.name}:`, err);
         }
 
-        completed++;
-        setApplyProgress(Math.round((completed / totalCues) * 100));
+        done++;
+        setApplyProgress(Math.round((done / total) * 100));
       }
-      toast.success('AI Sound Design successfully imported to track!');
+      toast.success('AI Sound Design imported to timeline!');
     } catch (err: any) {
       toast.error(`Import failed: ${err.message}`);
     } finally {
-      useEditorStore.getState().endTransaction();
+      useEditorStore.getState().endTransaction?.();
     }
 
     setIsApplying(false);
     onClose();
   };
 
-  const activeCue = cues[activeCueIndex];
+  // ─────────────────────────────────────────────────────────────
+  // Group cues by type for multi-track display
+  // ─────────────────────────────────────────────────────────────
+  const bgmCues = cues.map((c, i) => ({ cue: c, idx: i })).filter(({ cue }) => cue.type === 'bgm');
+  const sfxCues = cues.map((c, i) => ({ cue: c, idx: i })).filter(({ cue }) => cue.type === 'sfx');
 
+  // ─────────────────────────────────────────────────────────────
+  // Selected cue data for inspector panel
+  // ─────────────────────────────────────────────────────────────
+  const activeCue = activeCueIndex !== null ? cues[activeCueIndex] : null;
+
+  // ─────────────────────────────────────────────────────────────
+  // Render a single cue block on the timeline
+  // ─────────────────────────────────────────────────────────────
+  const renderCueBlock = (cue: CueWithOptions, idx: number, colorClass: string) => {
+    const optIdx = selectedOptions[idx] ?? 0;
+    const option = cue.options[optIdx];
+    const isActive = activeCueIndex === idx;
+    const leftPct = (cue.start / clip.duration) * 100;
+    const widthPct = ((cue.end - cue.start) / clip.duration) * 100;
+
+    return (
+      <div
+        key={idx}
+        data-role="cue-block"
+        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+        className={`absolute top-1 bottom-1 rounded-md flex items-center overflow-hidden cursor-pointer select-none transition-all
+          ${isActive
+            ? 'ring-2 ring-white z-20'
+            : 'z-10'
+          }
+          ${colorClass}
+        `}
+        onClick={(e) => { e.stopPropagation(); setActiveCueIndex(idx); }}
+      >
+        {/* Left trim handle */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-2 bg-white/20 hover:bg-white/50 cursor-ew-resize z-30 flex items-center justify-center"
+          onMouseDown={(e) => startTrimDrag(e, idx, 'left')}
+        >
+          <div className="w-px h-3 bg-white/70" />
+        </div>
+
+        {/* Label */}
+        <div className="flex-1 px-4 flex items-center justify-between min-w-0">
+          <span className="text-[9px] font-semibold truncate">
+            {option ? option.name : cue.query}
+          </span>
+          <span className="text-[8px] font-mono opacity-70 ml-1 shrink-0">
+            {option ? `${option.duration.toFixed(0)}s` : 'N/A'}
+          </span>
+        </div>
+
+        {/* Right trim handle */}
+        <div
+          className="absolute right-0 top-0 bottom-0 w-2 bg-white/20 hover:bg-white/50 cursor-ew-resize z-30 flex items-center justify-center"
+          onMouseDown={(e) => startTrimDrag(e, idx, 'right')}
+        >
+          <div className="w-px h-3 bg-white/70" />
+        </div>
+      </div>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // JSX
+  // ─────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/75 backdrop-blur-md">
-      <div className="w-full max-w-5xl h-[82vh] flex flex-col bg-[#141414] border border-[#2d2d2d] rounded-2xl shadow-2xl overflow-hidden text-white">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2d2d2d] bg-[#1a1a1a]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="w-full max-w-6xl h-[90vh] flex flex-col bg-[#111] border border-[#2a2a2a] rounded-2xl shadow-2xl overflow-hidden text-white">
+
+        {/* ── Header ──────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2a] bg-[#161616] shrink-0">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-amber-400" />
+            <Sparkles className="w-4 h-4 text-amber-400" />
             <div>
-              <h2 className="font-semibold text-sm">AI Sound Designer Workspace</h2>
-              <p className="text-[10px] text-[#a0a0a0]">Preview, select and layout sound effects dynamically synced with video</p>
+              <h2 className="font-bold text-sm tracking-wide">AI Sound Designer</h2>
+              <p className="text-[9px] text-[#707070]">Epidemic-style multi-track preview with BGM + SFX design</p>
             </div>
           </div>
-          <button 
-            onClick={onClose} 
-            disabled={isApplying}
-            className="p-1 hover:bg-[#2d2d2d] rounded-lg text-[#a0a0a0] hover:text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
+          <button onClick={onClose} disabled={isApplying} className="p-1 hover:bg-[#2a2a2a] rounded-lg text-[#707070] hover:text-white transition-colors">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Workspace Body */}
-        <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-          
-          {/* Left Column: Video Preview */}
-          <div className="w-full lg:w-3/5 border-r border-[#2d2d2d] flex flex-col bg-[#0b0b0b]">
-            <div className="flex-1 flex items-center justify-center p-4 relative">
+        {/* ── Main body (canvas + inspector) ────────────────────── */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+
+          {/* Left: Video Canvas */}
+          <div className="flex flex-col border-r border-[#2a2a2a] bg-black" style={{ width: '58%' }}>
+            {/* Video */}
+            <div className="flex-1 flex items-center justify-center bg-black min-h-0 overflow-hidden">
               {videoUrl ? (
                 <video
                   ref={videoRef}
                   src={videoUrl}
-                  className="max-w-full max-h-[35vh] rounded-lg bg-black border border-[#2d2d2d] shadow-lg"
-                  muted
+                  className="max-w-full max-h-full object-contain"
+                  muted={videoMuted}
                   playsInline
                 />
               ) : (
-                <div className="text-xs text-[#606060]">No video source available</div>
+                <div className="text-xs text-[#606060] text-center">
+                  <Volume2 className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  No video source
+                </div>
               )}
             </div>
-            
-            {/* Player Controls Bar */}
-            <div className="px-6 py-3 border-t border-[#2d2d2d] bg-[#141414] flex items-center justify-between gap-4">
-              <button
-                onClick={handlePlayPause}
-                className="px-4 py-1.5 bg-[#202020] hover:bg-[#2e2e2e] rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-[#303030]"
-              >
-                {isPlaying ? <Square className="w-3.5 h-3.5 fill-white text-white" /> : <Play className="w-3.5 h-3.5 fill-white text-white" />}
-                <span>{isPlaying ? 'Pause' : 'Play'}</span>
-              </button>
 
-              <div className="flex items-center gap-3 text-xs font-mono text-[#a0a0a0]">
-                <span className="text-white font-bold">{currentTime.toFixed(2)}s</span>
-                <span>/</span>
-                <span>{clip.duration.toFixed(2)}s</span>
+            {/* Player Controls */}
+            <div className="shrink-0 px-4 py-3 bg-[#141414] border-t border-[#2a2a2a] space-y-2">
+              {/* Progress bar */}
+              <div
+                className="relative h-1.5 bg-[#2a2a2a] rounded-full cursor-pointer group"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  seekTo(((e.clientX - rect.left) / rect.width) * clip.duration);
+                }}
+              >
+                <div
+                  className="absolute left-0 top-0 h-full bg-amber-500 rounded-full transition-all"
+                  style={{ width: `${(currentTime / Math.max(clip.duration, 0.01)) * 100}%` }}
+                />
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ left: `${(currentTime / Math.max(clip.duration, 0.01)) * 100}%` }}
+                />
+              </div>
+
+              {/* Controls row */}
+              <div className="flex items-center gap-2">
+                <button onClick={() => seekTo(0)} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                  <SkipBack className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => seekTo(Math.max(0, currentTime - 5))} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={handlePlayPause}
+                  className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-black rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow"
+                >
+                  {isPlaying ? <Pause className="w-3.5 h-3.5 fill-black" /> : <Play className="w-3.5 h-3.5 fill-black" />}
+                  {isPlaying ? 'Pause' : 'Play'}
+                </button>
+                <button onClick={handleStop} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                  <Square className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => seekTo(Math.min(clip.duration, currentTime + 5))} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => seekTo(clip.duration)} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                  <SkipForward className="w-3.5 h-3.5" />
+                </button>
+
+                <div className="ml-auto flex items-center gap-2 text-[#a0a0a0]">
+                  <span className="text-[10px] font-mono text-white">{fmt(currentTime)}</span>
+                  <span className="text-[10px] font-mono">/</span>
+                  <span className="text-[10px] font-mono">{fmt(clip.duration)}</span>
+                  <button
+                    onClick={() => setVideoMuted(!videoMuted)}
+                    className={`p-1 ml-2 rounded transition-colors ${videoMuted ? 'text-red-400 hover:text-red-300' : 'text-[#a0a0a0] hover:text-white'}`}
+                    title={videoMuted ? 'Unmute original audio' : 'Mute original audio'}
+                  >
+                    {videoMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                  </button>
+                  <Volume2 className="w-3 h-3" />
+                  <input
+                    type="range" min={0} max={100} value={volume}
+                    onChange={(e) => setVolume(Number(e.target.value))}
+                    className="w-16 h-1 accent-amber-500"
+                  />
+                  <span className="text-[9px]">{volume}%</span>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Audio Cue Selector / Inspector */}
-          <div className="w-full lg:w-2/5 flex flex-col bg-[#111] overflow-y-auto">
+          {/* Right: Inspector / Alternates Panel */}
+          <div className="flex flex-col overflow-y-auto bg-[#111]" style={{ width: '42%' }}>
             {activeCue ? (
-              <div className="p-5 flex-1 flex flex-col gap-5">
-                {/* Selected Cue Details */}
-                <div className="p-4 bg-[#1a1a1a] border border-[#2d2d2d] rounded-xl space-y-2">
+              <div className="p-4 space-y-4">
+                {/* Cue info */}
+                <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] px-2 py-0.5 bg-amber-500/20 text-amber-400 font-bold uppercase rounded tracking-wider">
-                      {activeCue.type}
+                    <span className={`text-[8px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${activeCue.type === 'bgm' ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                      {activeCue.type === 'bgm' ? '🎵 BGM' : '⚡ SFX'}
                     </span>
-                    <span className="text-[10px] text-[#a0a0a0] font-mono">
-                      {activeCue.start.toFixed(1)}s - {activeCue.end.toFixed(1)}s
+                    <span className="text-[9px] font-mono text-[#707070]">
+                      {activeCue.start.toFixed(2)}s → {activeCue.end.toFixed(2)}s
                     </span>
                   </div>
-                  <h3 className="text-sm font-semibold capitalize text-white">{activeCue.query}</h3>
-                  <p className="text-[10px] text-[#a0a0a0] leading-relaxed italic">
-                    <Info className="w-3 h-3 inline mr-1 text-amber-500" />
-                    <strong>Trigger context:</strong> {activeCue.reason}
-                  </p>
-                </div>
+                  <h3 className="text-xs font-bold text-white capitalize">{activeCue.query}</h3>
+                  <p className="text-[9px] text-[#707070] italic leading-relaxed">{activeCue.reason}</p>
 
-                {/* Option List */}
-                <div className="space-y-2">
-                  <h4 className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider mb-2">Alternate Sound Options (Freesound)</h4>
-                  
-                  {activeCue.options && activeCue.options.length > 0 ? (
-                    activeCue.options.map((option, optIdx) => {
-                      const isSelected = selectedOptions[activeCueIndex] === optIdx;
-                      const isOptionPlaying = playingOptionKey === `${activeCueIndex}-${optIdx}`;
-
-                      return (
-                        <div
-                          key={option.id}
-                          onClick={() => setSelectedOptions({ ...selectedOptions, [activeCueIndex]: optIdx })}
-                          className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                            isSelected
-                              ? 'bg-amber-500/10 border-amber-500 text-white'
-                              : 'bg-[#1a1a1a] border-[#222] text-[#808080] hover:text-[#fff] hover:border-[#444]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <input
-                              type="radio"
-                              name={`active-cue-opt-${activeCueIndex}`}
-                              checked={isSelected}
-                              onChange={() => setSelectedOptions({ ...selectedOptions, [activeCueIndex]: optIdx })}
-                              className="w-3.5 h-3.5 text-amber-500 bg-black border-[#3a3a3a] focus:ring-0 focus:ring-offset-0"
-                            />
-                            <div className="min-w-0">
-                              <span className="text-xs font-semibold block truncate text-white">
-                                {option.name}
-                              </span>
-                              <span className="text-[9px] text-[#808080]">
-                                Duration: {option.duration.toFixed(1)}s | Tags: {option.tags.slice(0, 3).join(', ')}
-                              </span>
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAuditionOption(option, `${activeCueIndex}-${optIdx}`);
-                            }}
-                            className={`p-1.5 rounded-full transition-colors flex items-center justify-center ${
-                              isOptionPlaying ? 'bg-red-600 text-white animate-pulse' : 'bg-[#282828] text-[#a0a0a0] hover:text-white'
-                            }`}
-                          >
-                            {isOptionPlaying ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="text-xs text-red-400 py-3 text-center bg-red-950/20 rounded-xl border border-red-900/30">
-                      No sound assets found on Freesound for this query.
+                  {/* Trim controls */}
+                  {activeCue.options[selectedOptions[activeCueIndex!] ?? 0] && (
+                    <div className="pt-2 border-t border-[#2a2a2a]">
+                      <p className="text-[9px] text-[#707070] mb-1">Trim (drag handles on timeline block):</p>
+                      <div className="flex items-center gap-3 text-[9px] font-mono">
+                        <span>Start: <span className="text-white">{activeCue.trimOffset.toFixed(2)}s</span></span>
+                        <span>Duration: <span className="text-white">{activeCue.trimDuration.toFixed(2)}s</span></span>
+                      </div>
                     </div>
                   )}
                 </div>
+
+                {/* Alternate options */}
+                <div>
+                  <h4 className="text-[9px] text-[#707070] uppercase font-bold tracking-wider mb-2">
+                    Alternate Sounds — click to select, ▶ to audition
+                  </h4>
+                  <div className="space-y-2">
+                    {activeCue.options && activeCue.options.length > 0 ? (
+                      activeCue.options.map((option, optIdx) => {
+                        const isSelected = (selectedOptions[activeCueIndex!] ?? 0) === optIdx;
+                        const audKey = `${activeCueIndex}-${optIdx}`;
+                        const isAuditioning = playingOptionKey === audKey;
+                        return (
+                          <div
+                            key={option.id}
+                            onClick={() => selectOption(activeCueIndex!, optIdx)}
+                            className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-amber-500/10 border-amber-500'
+                                : 'bg-[#191919] border-[#252525] hover:border-[#404040]'
+                            }`}
+                          >
+                            <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                              isSelected ? 'border-amber-500 bg-amber-500' : 'border-[#505050]'
+                            }`}>
+                              {isSelected && <div className="w-1.5 h-1.5 bg-black rounded-full" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[10px] font-semibold text-white truncate">{option.name}</div>
+                              <div className="text-[8px] text-[#707070]">{option.duration.toFixed(1)}s · {option.tags.slice(0, 3).join(', ')}</div>
+                            </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleAuditionOption(option, audKey); }}
+                              className={`p-1.5 rounded-full shrink-0 transition-colors ${
+                                isAuditioning ? 'bg-red-500 text-white animate-pulse' : 'bg-[#252525] text-[#a0a0a0] hover:text-white hover:bg-[#303030]'
+                              }`}
+                            >
+                              {isAuditioning ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-[10px] text-red-400 py-4 text-center bg-red-950/20 rounded-xl border border-red-900/30">
+                        No sounds found for this query on Freesound.
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-xs text-[#606060]">
-                Select a sound block in the timeline below to inspect and customize.
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[#505050] p-6">
+                <Music className="w-10 h-10 opacity-20" />
+                <p className="text-xs text-center">Click a sound block on the timeline<br/>to inspect and swap alternates</p>
               </div>
             )}
           </div>
-
         </div>
 
-        {/* Bottom Timeline Preview Panel */}
-        <div className="border-t border-[#2d2d2d] bg-[#0c0c0c] p-6 space-y-3">
-          <div className="flex items-center justify-between text-xs text-[#a0a0a0]">
-            <span className="font-semibold text-[10px] uppercase tracking-wider">Workspace Preview Timeline</span>
-            <span className="text-[9px]">Click blocks to audition alternates. Click empty track to seek.</span>
+        {/* ── Multi-track Timeline ──────────────────────────────── */}
+        <div className="shrink-0 border-t border-[#2a2a2a] bg-[#0c0c0c]">
+          {/* Timeline header */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e1e1e]">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-[#707070]">Timeline</span>
+            <span className="text-[8px] text-[#505050]">Drag playhead to scrub · Click block to select · Drag handles to trim</span>
           </div>
 
-          <div className="relative border border-[#222] rounded-xl overflow-hidden bg-[#111]">
-            {/* Timeline Ruler */}
-            <div className="h-6 border-b border-[#222] bg-[#141414] relative flex items-center text-[9px] text-[#606060] select-none font-mono">
-              {Array.from({ length: Math.ceil(clip.duration) + 1 }).map((_, sec) => (
+          {/* Ruler + tracks */}
+          <div className="px-0">
+            {/* Ruler row */}
+            <div className="flex">
+              <div className="w-16 shrink-0 border-r border-[#1e1e1e] bg-[#111]" />
+              <div
+                ref={timelineRef}
+                className="flex-1 relative h-6 border-b border-[#1e1e1e] bg-[#111] cursor-crosshair select-none"
+                onMouseDown={handleTimelineMouseDown}
+              >
+                {/* Tick marks */}
+                {Array.from({ length: Math.ceil(clip.duration) + 1 }).map((_, sec) => (
+                  <div
+                    key={sec}
+                    style={{ left: `${(sec / clip.duration) * 100}%` }}
+                    className="absolute top-0 bottom-0 flex flex-col items-center"
+                  >
+                    <div className="w-px h-2 bg-[#333]" />
+                    <span className="text-[7px] text-[#555] mt-0.5 font-mono">{sec}s</span>
+                  </div>
+                ))}
+                {/* Playhead on ruler */}
                 <div
-                  key={sec}
-                  style={{ left: `${(sec / clip.duration) * 100}%` }}
-                  className="absolute transform -translate-x-1/2 flex flex-col items-center"
+                  style={{ left: `${(currentTime / Math.max(clip.duration, 0.01)) * 100}%` }}
+                  className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30"
                 >
-                  <span className="h-1.5 w-0.5 bg-[#333] mb-0.5"></span>
-                  <span>{sec}s</span>
+                  <div className="w-2 h-2 bg-red-500 rotate-45 absolute -top-0.5 -left-[3px]" />
                 </div>
-              ))}
+              </div>
             </div>
 
-            {/* Tracks View */}
-            <div 
-              onClick={handleTimelineClick}
-              className="h-20 relative overflow-hidden cursor-crosshair select-none"
-            >
-              {/* Cue Blocks */}
-              {cues.map((cue, idx) => {
-                const selectedOptIdx = selectedOptions[idx];
-                const option = cue.options[selectedOptIdx];
-                const isActive = activeCueIndex === idx;
+            {/* BGM track row */}
+            <div className="flex border-b border-[#1e1e1e]" style={{ height: '40px' }}>
+              <div className="w-16 shrink-0 flex items-center justify-center border-r border-[#1e1e1e] bg-[#111] gap-1">
+                <Music className="w-3 h-3 text-purple-400" />
+                <span className="text-[8px] font-bold text-purple-400">BGM</span>
+              </div>
+              <div className="flex-1 relative bg-[#0e0e0e] overflow-hidden" onMouseDown={handleTimelineMouseDown}>
+                {bgmCues.map(({ cue, idx }) => renderCueBlock(cue, idx, 'bg-purple-600/70 border border-purple-500/50 text-purple-100'))}
+                {/* Playhead line on track */}
+                <div
+                  style={{ left: `${(currentTime / Math.max(clip.duration, 0.01)) * 100}%` }}
+                  className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30"
+                />
+              </div>
+            </div>
 
-                const leftPos = (cue.start / clip.duration) * 100;
-                const widthPos = ((cue.end - cue.start) / clip.duration) * 100;
-
-                return (
-                  <div
-                    key={idx}
-                    style={{
-                      left: `${leftPos}%`,
-                      width: `${widthPos}%`,
-                      top: `${(idx % 2) * 36 + 6}px`,
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveCueIndex(idx);
-                    }}
-                    className={`absolute h-7 rounded-lg px-2 flex items-center justify-between text-[9px] font-semibold border shadow transition-all cursor-pointer select-none ${
-                      isActive
-                        ? 'bg-amber-500 border-amber-600 text-black z-10'
-                        : 'bg-[#202020] border-[#303030] text-[#a0a0a0] hover:border-[#505050] hover:text-white'
-                    }`}
-                  >
-                    <span className="truncate block max-w-[80%] capitalize">
-                      {cue.query}
-                    </span>
-                    <span className="text-[8px] font-mono opacity-80 shrink-0">
-                      {option ? `${option.duration.toFixed(0)}s` : 'N/A'}
-                    </span>
-                  </div>
-                );
-              })}
-
-              {/* Sweeping Vertical Playhead */}
-              <div
-                style={{ left: `${(currentTime / clip.duration) * 100}%` }}
-                className="absolute top-0 bottom-0 w-0.5 bg-red-500 shadow-md pointer-events-none"
-              >
-                <div className="w-1.5 h-1.5 bg-red-500 rounded-full absolute -top-1 -left-[2px]" />
+            {/* SFX track row */}
+            <div className="flex" style={{ height: '40px' }}>
+              <div className="w-16 shrink-0 flex items-center justify-center border-r border-[#1e1e1e] bg-[#111] gap-1">
+                <Zap className="w-3 h-3 text-amber-400" />
+                <span className="text-[8px] font-bold text-amber-400">SFX</span>
+              </div>
+              <div className="flex-1 relative bg-[#0e0e0e] overflow-hidden" onMouseDown={handleTimelineMouseDown}>
+                {sfxCues.map(({ cue, idx }) => renderCueBlock(cue, idx, 'bg-amber-600/70 border border-amber-500/50 text-amber-100'))}
+                {/* Playhead line on track */}
+                <div
+                  style={{ left: `${(currentTime / Math.max(clip.duration, 0.01)) * 100}%` }}
+                  className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30"
+                />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-[#2d2d2d] bg-[#1a1a1a]">
-          <span className="text-[10px] text-[#a0a0a0]">
-            Ready to import {cues.length} audio tracks to timeline
-          </span>
-
+        {/* ── Footer ────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-5 py-3 border-t border-[#2a2a2a] bg-[#161616] shrink-0">
+          <div className="text-[9px] text-[#707070]">
+            <span className="text-purple-400 font-bold">{bgmCues.length}</span> BGM ·{' '}
+            <span className="text-amber-400 font-bold">{sfxCues.length}</span> SFX ·{' '}
+            <span className="text-white font-bold">{cues.length}</span> total tracks ready to import
+          </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={onClose}
-              disabled={isApplying}
-              className="px-4 py-2 text-xs font-semibold text-white bg-[#202020] hover:bg-[#2c2c2c] rounded-lg border border-[#303030] transition-colors"
-            >
+            <button onClick={onClose} disabled={isApplying} className="px-4 py-1.5 text-xs font-semibold text-[#a0a0a0] bg-[#1e1e1e] hover:bg-[#2a2a2a] rounded-lg border border-[#2a2a2a] transition-colors">
               Cancel
             </button>
             <button
               onClick={handleApply}
-              disabled={isApplying || Object.keys(selectedOptions).length === 0}
-              className="px-5 py-2 text-xs font-bold text-black bg-amber-400 hover:bg-amber-500 active:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-lg flex items-center gap-1.5 transition-colors"
+              disabled={isApplying || cues.length === 0}
+              className="px-5 py-1.5 text-xs font-bold text-black bg-amber-400 hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow flex items-center gap-1.5 transition-colors"
             >
               {isApplying ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Importing ({applyProgress}%)</span>
-                </>
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Importing {applyProgress}%</span></>
               ) : (
-                <>
-                  <Volume2 className="w-3.5 h-3.5 fill-black" />
-                  <span>Import Sound Design</span>
-                </>
+                <><Volume2 className="w-3.5 h-3.5 fill-black" /><span>Import Sound Design</span></>
               )}
             </button>
           </div>

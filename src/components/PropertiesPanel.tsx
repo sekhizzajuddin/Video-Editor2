@@ -361,12 +361,12 @@ export function PropertiesPanel() {
       const optionsPromises = allCues.map(async (cue) => {
         let refinedQuery = cue.query;
         try {
-          refinedQuery = await refineAudioQueryWithGroq(cue.query);
+          refinedQuery = await refineAudioQueryWithGroq(cue.query, cue.type as 'sfx' | 'bgm');
         } catch (groqErr) {
           console.warn('Groq query refinement failed, falling back to original query:', groqErr);
         }
 
-        const options = await searchFreesound(refinedQuery, freesoundToken);
+        const options = await searchFreesound(refinedQuery, freesoundToken, cue.type as 'sfx' | 'bgm');
         return {
           ...cue,
           options
