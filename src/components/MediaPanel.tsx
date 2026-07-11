@@ -1674,7 +1674,7 @@ export function MediaPanel() {
               {previewItem && (
                 <div className="mx-2 mb-2 p-2 bg-[#252525] border border-[#3e3e3e] rounded flex flex-col gap-2 relative">
                   <div className="relative aspect-video bg-black flex items-center justify-center rounded overflow-hidden">
-                    {previewItem.type === 'video' && (
+                    {previewItem.type === 'video' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
                       <video
                         key={previewItem.id}
                         src={previewItem.url}
@@ -1683,13 +1683,13 @@ export function MediaPanel() {
                         autoPlay={false}
                       />
                     )}
-                    {previewItem.type === 'audio' && (
+                    {previewItem.type === 'audio' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
                       <div className="p-3 w-full flex flex-col items-center justify-center">
                         <Music className="w-8 h-8 text-emerald-400 mb-2" />
                         <audio src={previewItem.url} controls className="w-full h-8" />
                       </div>
                     )}
-                    {previewItem.type === 'image' && (
+                    {previewItem.type === 'image' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
                       <img src={previewItem.url} className="w-full h-full object-contain" alt="" />
                     )}
                     <button

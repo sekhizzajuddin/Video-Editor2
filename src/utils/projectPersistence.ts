@@ -369,23 +369,20 @@ export async function saveAutosaveToDB(data: {
     const store = transaction.objectStore('autosaves');
     store.put(snapshot, timestamp.toString());
 
-    transaction.oncomplete = () => {
-      // Clean up old autosaves (keep only last 10)
-      const cleanupTx = db.transaction('autosaves', 'readwrite');
-      const cleanupStore = cleanupTx.objectStore('autosaves');
-      const keysReq = cleanupStore.getAllKeys();
-      keysReq.onsuccess = () => {
-        const keys = keysReq.result as string[];
-        if (keys.length > 10) {
-          keys.sort((a, b) => Number(a) - Number(b));
-          const numToDelete = keys.length - 10;
-          for (let i = 0; i < numToDelete; i++) {
-            cleanupStore.delete(keys[i]);
-          }
+    // Clean up old autosaves (keep only last 10)
+    const keysReq = store.getAllKeys();
+    keysReq.onsuccess = () => {
+      const keys = keysReq.result as string[];
+      if (keys.length > 10) {
+        keys.sort((a, b) => Number(a) - Number(b));
+        const numToDelete = keys.length - 10;
+        for (let i = 0; i < numToDelete; i++) {
+          store.delete(keys[i]);
         }
-      };
-      resolve();
+      }
     };
+
+    transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
 }
