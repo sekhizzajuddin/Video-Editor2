@@ -623,25 +623,20 @@ export function PreviewCanvas() {
       if (!mediaItem) return;
 
       // Get animated values
-            let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity']);
+      let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity']);
       
+      // FIX: Remove per-clip transition opacity handling - transitions are now handled at the queue level
+      // to prevent double-application when both single-clip and cross-fade transitions are active
       const localTime = currentTime - clip.startTime;
-      // FIX: Use the actual configured transition duration instead of hardcoded 1s
-      if (clip.transitionIn?.type === 'dissolve') {
-        const tDur = clip.transitionIn.duration || 1;
-        if (localTime >= 0 && localTime < tDur) aOpacity *= (localTime / tDur);
-      } else if (clip.transitionOut?.type === 'dissolve') {
-        const tDur = clip.transitionOut.duration || 1;
-        if (localTime > clip.duration - tDur && localTime <= clip.duration) aOpacity *= ((clip.duration - localTime) / tDur);
-      }
       
+      // Only apply slide effect (visual transform, not opacity)
       let slideX = 0;
-      if (clip.transitionIn?.type === 'slide') {
+      if (clip.transitionIn?.type === 'slide' && localTime >= 0 && localTime < (clip.transitionIn.duration || 1)) {
         const tDur = clip.transitionIn.duration || 1;
-        if (localTime >= 0 && localTime < tDur) slideX = (1 - (localTime / tDur)) * -1000;
-      } else if (clip.transitionOut?.type === 'slide') {
+        slideX = (1 - (localTime / tDur)) * -1000;
+      } else if (clip.transitionOut?.type === 'slide' && localTime > clip.duration - (clip.transitionOut.duration || 1) && localTime <= clip.duration) {
         const tDur = clip.transitionOut.duration || 1;
-        if (localTime > clip.duration - tDur && localTime <= clip.duration) slideX = ((localTime - (clip.duration - tDur)) / tDur) * 1000;
+        slideX = ((localTime - (clip.duration - tDur)) / tDur) * 1000;
       }
 
       const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
@@ -1959,14 +1954,14 @@ export function PreviewCanvas() {
           const gap = clipB.startTime - (clipA.startTime + clipA.duration);
 
           // Determine which transition definition to use: prefer transitionIn on B, fallback to transitionOut on A
-          const trans = (Math.abs(gap) < 0.1 && clipB.transitionIn)
+          const trans = (Math.abs(gap) < 0.5 && clipB.transitionIn)
             ? clipB.transitionIn
-            : (Math.abs(gap) < 0.1 && clipA.transitionOut)
+            : (Math.abs(gap) < 0.5 && clipA.transitionOut)
               ? clipA.transitionOut
               : null;
 
           if (trans) {
-            const duration = Math.max(0.01, trans.duration);
+            const duration = Math.max(0.01, trans.duration || 1.0);
             const alignment = trans.params?.alignment || 'center';
 
             // Determine the transition window around the boundary (clipB.startTime)
@@ -2064,45 +2059,9 @@ export function PreviewCanvas() {
             zIndex: z,
             fn: async () => {
               try {
-                let opacityMultiplier = 1;
-                
-                // Handle single-clip transition In (fade, etc)
-                if (clip.transitionIn) {
-                  const trans = clip.transitionIn;
-                  const duration = trans.duration || 1.0;
-                  const alignment = trans.params?.alignment || 'center';
-                  let leftSec = clip.startTime - duration / 2;
-                  if (alignment === 'left') leftSec = clip.startTime;
-                  else if (alignment === 'right') leftSec = clip.startTime - duration;
-                  const rightSec = leftSec + duration;
-                  
-                  if (currentTime >= leftSec && currentTime < rightSec) {
-                    const t = (currentTime - leftSec) / duration;
-                    if (trans.name.toLowerCase().includes('fade') || trans.name.toLowerCase().includes('dissolve')) {
-                      opacityMultiplier = t;
-                    }
-                  }
-                }
-                
-                // Handle single-clip transition Out (applied when NOT in a 2-clip cross-fade zone)
-                if (clip.transitionOut) {
-                  const trans = clip.transitionOut;
-                  const duration = trans.duration || 1.0;
-                  const alignment = trans.params?.alignment || 'center';
-                  let leftSec = (clip.startTime + clip.duration) - duration / 2;
-                  if (alignment === 'left') leftSec = (clip.startTime + clip.duration);
-                  else if (alignment === 'right') leftSec = (clip.startTime + clip.duration) - duration;
-                  const rightSec = leftSec + duration;
-                  
-                  if (currentTime >= leftSec && currentTime < rightSec) {
-                    const t = (currentTime - leftSec) / duration;
-                    if (trans.name.toLowerCase().includes('fade') || trans.name.toLowerCase().includes('dissolve')) {
-                      opacityMultiplier *= (1 - t);
-                    }
-                  }
-                }
-
-                await drawSingleClip(clip, opacityMultiplier);
+                // FIX: Remove per-clip transition opacity handling - it's now handled in drawSingleClip
+                // to prevent conflicts between single-clip and cross-fade transitions
+                await drawSingleClip(clip, 1);
               } catch (err) {
                 console.error('[CanvasRenderError] Failed to draw clip:', clip.id, err);
                 try { ctx.restore(); } catch (_) {}

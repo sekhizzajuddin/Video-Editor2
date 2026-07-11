@@ -186,37 +186,58 @@ export async function saveProjectToDB(data: {
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
 }): Promise<void> {
-  const db = await getDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction('project', 'readwrite');
-    const store = transaction.objectStore('project');
-
-    // Remove any actual Blob URLs from the persistent metadata as they will be re-generated
-    const cleanMediaLibrary = data.mediaLibrary.map(item => ({
-      ...item,
-      url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
-      thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
-      frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
-    }));
-
-    const cleanTracks = data.tracks.map(track => ({
-      ...track,
-      clips: track.clips.map(clip => ({
-        ...clip,
-        isPreview: false
-      }))
-    }));
-
-    store.put(cleanTracks, 'tracks');
-    store.put(cleanMediaLibrary, 'mediaLibrary');
-    store.put(data.currentTime, 'currentTime');
-    if (data.aspectRatio) {
-      store.put(data.aspectRatio, 'aspectRatio');
+  try {
+    const db = await getDB();
+    
+    // Check if DB connection is still valid
+    if (db.readyState === 'closing' || db.readyState === 'closed') {
+      console.warn('[projectPersistence] DB connection is closing, skipping save');
+      return;
     }
+    
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('project', 'readwrite');
+      const store = transaction.objectStore('project');
 
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
+      // Remove any actual Blob URLs from the persistent metadata as they will be re-generated
+      const cleanMediaLibrary = data.mediaLibrary.map(item => ({
+        ...item,
+        url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
+        thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
+        frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+      }));
+
+      const cleanTracks = data.tracks.map(track => ({
+        ...track,
+        clips: track.clips.map(clip => ({
+          ...clip,
+          isPreview: false
+        }))
+      }));
+
+      store.put(cleanTracks, 'tracks');
+      store.put(cleanMediaLibrary, 'mediaLibrary');
+      store.put(data.currentTime, 'currentTime');
+      if (data.aspectRatio) {
+        store.put(data.aspectRatio, 'aspectRatio');
+      }
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => {
+        console.warn('[projectPersistence] Transaction aborted, likely due to DB closing');
+        resolve(); // Don't reject, just resolve silently
+      };
+    });
+  } catch (error: any) {
+    // Handle InvalidStateError gracefully
+    if (error.name === 'InvalidStateError') {
+      console.warn('[projectPersistence] DB connection closing, skipping save');
+      return;
+    }
+    console.error('[projectPersistence] Failed to save project:', error);
+    throw error;
+  }
 }
 
 /**
