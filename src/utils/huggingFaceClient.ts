@@ -15,21 +15,22 @@ export async function generateAudioHuggingFace(
   const localKey = getLocalHuggingFaceKey();
   const hfKey = localKey || envKey;
 
-  if (!hfKey) {
-    throw new Error('HuggingFace API key is missing. Please add it in Settings.');
-  }
-
   // Default to audioldm2 for SFX (high quality)
   const model = options?.model || 'cvssp/audioldm2';
   const url = `https://api-inference.huggingface.co/models/${model}`;
   const maxRetries = options?.maxRetries ?? 5;
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  
+  if (hfKey) {
+    headers['Authorization'] = `Bearer ${hfKey}`;
+  }
+
   const fetchOptions: RequestInit = {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${hfKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       inputs: prompt,
     }),
