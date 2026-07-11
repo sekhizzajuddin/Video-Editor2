@@ -224,6 +224,60 @@ const audioSeparatorPlugin = () => ({
           }
           return;
         }
+      } else if (req.url && req.url.startsWith('/api/huggingface')) {
+        try {
+          const urlObj = new URL(req.url, `http://${req.headers.host}`);
+          const model = urlObj.searchParams.get('model') || 'cvssp/audioldm2';
+          
+          const envKey = process.env.VITE_HUGGINGFACE_API_KEY || process.env.HUGGINGFACE_API_KEY;
+          const authHeader = req.headers.authorization;
+          
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          };
+          if (envKey) {
+            headers['Authorization'] = `Bearer ${envKey}`;
+          } else if (authHeader) {
+            headers['Authorization'] = authHeader;
+          }
+
+          const chunks: any[] = [];
+          req.on('data', (chunk: any) => {
+            chunks.push(chunk);
+          });
+
+          req.on('end', async () => {
+            try {
+              const bodyBuffer = Buffer.concat(chunks);
+              const targetUrl = `https://api-inference.huggingface.co/models/${model}`;
+              
+              const hfRes = await fetch(targetUrl, {
+                method: 'POST',
+                headers,
+                body: bodyBuffer
+              });
+
+              res.writeHead(hfRes.status, {
+                'Content-Type': hfRes.headers.get('content-type') || 'application/json'
+              });
+
+              const arrayBuffer = await hfRes.arrayBuffer();
+              res.end(Buffer.from(arrayBuffer));
+            } catch (err: any) {
+              console.error('[HuggingFace Proxy Dev] fetch error:', err);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
+          return;
+        } catch (err: any) {
+          console.error('[HuggingFace Proxy Dev] Middleware error:', err);
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
       }
       next();
     });
@@ -244,26 +298,12 @@ export default defineConfig({
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
-    proxy: {
-      '/huggingface-proxy': {
-        target: 'https://api-inference.huggingface.co/models',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/huggingface-proxy/, ''),
-      }
-    }
   },
   preview: {
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
-    proxy: {
-      '/huggingface-proxy': {
-        target: 'https://api-inference.huggingface.co/models',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/huggingface-proxy/, ''),
-      }
-    }
   },
   resolve: {
     alias: {

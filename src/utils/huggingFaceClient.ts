@@ -17,8 +17,8 @@ export async function generateAudioHuggingFace(
 
   // Default to audioldm2 for SFX (high quality)
   const model = options?.model || 'cvssp/audioldm2';
-  // Point to same-origin proxy endpoint which resolves DNS on Vercel/Vite server side, bypassing client CORS & DNS blocks.
-  const url = `/huggingface-proxy/${model}`;
+  // Point to the serverless Edge API proxy endpoint which resolves DNS on Vercel/Vite server side, bypassing client CORS & DNS blocks.
+  const url = `/api/huggingface?model=${encodeURIComponent(model)}`;
   const maxRetries = options?.maxRetries ?? 5;
 
   const headers: Record<string, string> = {
