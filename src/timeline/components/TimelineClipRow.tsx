@@ -724,9 +724,11 @@ export function TimelineClipRow({
           
           if (Math.abs(gap) < 0.1) {
             const intersectionTime = clip.startTime;
-            const hasTransition = !!clip.transitionIn;
+            const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
             
-            const transition = clip.transitionIn;
+            const transition = clip.transitionIn || prevClip.transitionOut;
+            const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
+            const activePosition = clip.transitionIn ? 'in' : 'out';
             const duration = transition?.duration ?? 1.0;
             const alignment = transition?.params?.alignment as 'center' | 'left' | 'right' || 'center';
             
@@ -741,12 +743,13 @@ export function TimelineClipRow({
             }
             const leftPx = leftSec * zoomLevel;
             
-            const isSelected = selectedTransitionClipId === clip.id;
+            const isSelected = selectedTransitionClipId === activeClipId;
             
             return (
               <TransitionTarget
                 key={`trans-${clip.id}`}
-                clipId={clip.id}
+                clipId={activeClipId}
+                position={activePosition}
                 trackId={track.id}
                 left={leftPx}
                 width={widthPx}
