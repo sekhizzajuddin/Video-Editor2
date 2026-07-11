@@ -34,7 +34,7 @@ describe('aiClient tests', () => {
       });
       vi.stubGlobal('fetch', globalFetchMock);
 
-      const result = await analyzeStoryboardWithGemini('base64String', 10, 'mockKey');
+      const result = await analyzeStoryboardWithGemini('base64String', 10);
       expect(result).toEqual(mockResult);
       expect(globalFetchMock).toHaveBeenCalledTimes(1);
     });
@@ -72,7 +72,7 @@ Hope this helps!`;
       });
       vi.stubGlobal('fetch', globalFetchMock);
 
-      const result = await analyzeStoryboardWithGemini('base64String', 10, 'mockKey');
+      const result = await analyzeStoryboardWithGemini('base64String', 10);
       expect(result).toEqual(mockResult);
     });
 
@@ -85,7 +85,7 @@ Hope this helps!`;
       vi.stubGlobal('fetch', globalFetchMock);
 
       await expect(
-        analyzeStoryboardWithGemini('base64String', 10, 'mockKey')
+        analyzeStoryboardWithGemini('base64String', 10)
       ).rejects.toThrow('Gemini API error: 500 - Internal Server Error');
     });
   });
@@ -106,7 +106,7 @@ Hope this helps!`;
       });
       vi.stubGlobal('fetch', globalFetchMock);
 
-      const result = await refineAudioQueryWithGroq('ocean waves crashing on sand', 'mockKey');
+      const result = await refineAudioQueryWithGroq('ocean waves crashing on sand');
       expect(result).toBe('ocean waves shoreline splash');
 
       const expectedPayload = {
@@ -139,7 +139,7 @@ Hope this helps!`;
 
       const originalQuery = 'crashing thunder storm';
       await expect(
-        refineAudioQueryWithGroq(originalQuery, 'mockKey')
+        refineAudioQueryWithGroq(originalQuery)
       ).rejects.toThrow('Groq API error: 401 - Unauthorized');
     });
   });
@@ -172,7 +172,7 @@ Hope this helps!`;
       });
       vi.stubGlobal('fetch', globalFetchMock);
 
-      const result = await analyzeMotionGraphicsWithGemini('base64String', 10, 'mockKey');
+      const result = await analyzeMotionGraphicsWithGemini('base64String', 10);
       expect(result).toEqual(mockSuggestions);
       expect(globalFetchMock).toHaveBeenCalledTimes(1);
     });
@@ -186,7 +186,7 @@ Hope this helps!`;
       vi.stubGlobal('fetch', globalFetchMock);
 
       await expect(
-        analyzeMotionGraphicsWithGemini('base64String', 10, 'mockKey')
+        analyzeMotionGraphicsWithGemini('base64String', 10)
       ).rejects.toThrow('Gemini API error: 400 - Bad Request');
     });
   });
