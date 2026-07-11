@@ -91,6 +91,7 @@ interface MediaElement {
   gainNode?: GainNode;
   delayNode?: DelayNode;
   delayGain?: GainNode;
+  feedbackInputGain?: GainNode;
   feedbackNode?: GainNode;
   separationGraph?: SeparationGraph;
   _fxConnected?: boolean;
@@ -726,7 +727,13 @@ export function useMediaPlayback(): MediaPlaybackResult {
         if (Math.abs(entry.pannerNode.pan.value - targetPan) > 0.01) entry.pannerNode.pan.setTargetAtTime(targetPan, ctxTime, rampTime);
       }
 
-      // Update Room Ambience feedback wet volume
+      // Update Room Ambience: open feedbackInputGain gate only when humanize is active.
+      // This prevents ANY audio energy from entering the feedback loop during normal playback.
+      if (entry.feedbackInputGain) {
+        const targetInputGate = audioSettings.humanize ? 0.20 : 0.0;
+        if (Math.abs(entry.feedbackInputGain.gain.value - targetInputGate) > 0.01)
+          entry.feedbackInputGain.gain.setTargetAtTime(targetInputGate, ctxTime, rampTime);
+      }
       if (entry.delayGain) {
         const targetDelay = audioSettings.humanize ? 0.20 : 0.0;
         if (Math.abs(entry.delayGain.gain.value - targetDelay) > 0.01) entry.delayGain.gain.setTargetAtTime(targetDelay, ctxTime, rampTime);
@@ -1296,11 +1303,15 @@ function initAudioGraph(entry: MediaElement) {
     trebleFilter.gain.value = 0;
 
     // 5. Room Ambience feedback delay loop
+    //    feedbackInputGain gates audio INTO the delay chain (0.0 = fully bypassed, no energy accumulation)
+    const feedbackInputGain = audioCtx.createGain();
+    feedbackInputGain.gain.value = 0.0; // Bypassed by default — NO audio enters delay chain
+
     const delayNode = audioCtx.createDelay(1.0);
     delayNode.delayTime.value = 0.022; // 22ms room reflection
 
     const delayGain = audioCtx.createGain();
-    delayGain.gain.value = 0.0; // Bypassed by default
+    delayGain.gain.value = 0.0; // Output wet level (bypassed by default)
 
     const feedbackNode = audioCtx.createGain();
     feedbackNode.gain.value = 0.15; // 15% decay feedback
@@ -1319,13 +1330,13 @@ function initAudioGraph(entry: MediaElement) {
     denoiseFilter.connect(bassFilter);
     bassFilter.connect(trebleFilter);
 
-    // Split treble output into direct path and room ambience loop
-    trebleFilter.connect(delayNode);
+    // Room Ambience: treble → feedbackInputGain (GATE) → delayNode → delayGain → panner/gain
+    // The feedback loop is fully isolated behind feedbackInputGain — zero energy enters when gate is 0
+    trebleFilter.connect(feedbackInputGain);
+    feedbackInputGain.connect(delayNode);
     delayNode.connect(delayGain);
-
-    // Feedback loop
     delayNode.connect(feedbackNode);
-    feedbackNode.connect(delayNode);
+    feedbackNode.connect(delayNode); // feedback loop (safe — gated at entry)
 
     // Panning & output destination routing
     if (pannerNode) {
@@ -1350,6 +1361,7 @@ function initAudioGraph(entry: MediaElement) {
     entry.trebleFilter = trebleFilter;
     entry.delayNode = delayNode;
     entry.delayGain = delayGain;
+    entry.feedbackInputGain = feedbackInputGain;
     entry.feedbackNode = feedbackNode;
     entry.pannerNode = pannerNode;
     entry.gainNode = gainNode;
