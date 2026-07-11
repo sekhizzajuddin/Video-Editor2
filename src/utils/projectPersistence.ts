@@ -97,8 +97,14 @@ function getDB(): Promise<IDBDatabase> {
 
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
-      dbInstance = request.result;
-      resolve(request.result);
+      const db = request.result;
+      dbInstance = db;
+      
+      db.onclose = () => { dbInstance = null; };
+      db.onversionchange = () => { db.close(); dbInstance = null; };
+      db.onerror = () => { dbInstance = null; };
+
+      resolve(db);
     };
 
     request.onupgradeneeded = (event) => {
@@ -189,14 +195,16 @@ export async function saveProjectToDB(data: {
   try {
     const db = await getDB();
     
-    // Check if DB connection is still valid
-    if (db.readyState === 'closing' || db.readyState === 'closed') {
-      console.warn('[projectPersistence] DB connection is closing, skipping save');
-      return;
-    }
-    
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction('project', 'readwrite');
+      let transaction: IDBTransaction;
+      try {
+        transaction = db.transaction('project', 'readwrite');
+      } catch (err: any) {
+        if (err.name === 'InvalidStateError') {
+          dbInstance = null;
+        }
+        return reject(err);
+      }
       const store = transaction.objectStore('project');
 
       // Remove any actual Blob URLs from the persistent metadata as they will be re-generated
@@ -386,7 +394,15 @@ export async function saveAutosaveToDB(data: {
   };
 
   return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction('autosaves', 'readwrite');
+    let transaction: IDBTransaction;
+    try {
+      transaction = db.transaction('autosaves', 'readwrite');
+    } catch (err: any) {
+      if (err.name === 'InvalidStateError') {
+        dbInstance = null;
+      }
+      return reject(err);
+    }
     const store = transaction.objectStore('autosaves');
     store.put(snapshot, timestamp.toString());
 
