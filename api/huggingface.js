@@ -1,74 +1,53 @@
-export const config = {
-  runtime: 'edge',
-};
-
-export default async function handler(req) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const urlObj = new URL(req.url);
-  const model = urlObj.searchParams.get('model');
+  const model = req.query.model;
   if (!model) {
-    return new Response(JSON.stringify({ error: 'Missing model query parameter' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(400).json({ error: 'Missing model query parameter' });
   }
 
   const envKey = process.env.VITE_HUGGINGFACE_API_KEY || process.env.HUGGINGFACE_API_KEY;
-  const authHeader = req.headers.get('authorization');
-  
+  const authHeader = req.headers.authorization;
+
   const headers = {
     'Content-Type': 'application/json',
   };
-  
+
   if (envKey) {
     headers['Authorization'] = `Bearer ${envKey}`;
   } else if (authHeader) {
     headers['Authorization'] = authHeader;
   }
 
-  let requestBody;
-  try {
-    requestBody = await req.text();
-  } catch (e) {
-    requestBody = '';
-  }
-
   const targetUrl = `https://api-inference.huggingface.co/models/${model}`;
 
   try {
+    // Read request body
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = Buffer.concat(chunks);
+
     const hfResponse = await fetch(targetUrl, {
       method: 'POST',
       headers,
-      body: requestBody,
+      body,
     });
 
-    const responseHeaders = new Headers();
-    const contentType = hfResponse.headers.get('content-type');
-    if (contentType) {
-      responseHeaders.set('content-type', contentType);
-    }
+    const contentType = hfResponse.headers.get('content-type') || 'application/json';
+    const buffer = Buffer.from(await hfResponse.arrayBuffer());
 
-    return new Response(hfResponse.body, {
-      status: hfResponse.status,
-      headers: responseHeaders,
-    });
+    res.setHeader('Content-Type', contentType);
+    res.status(hfResponse.status).send(buffer);
   } catch (error) {
-    console.error('HuggingFace Edge proxy error:', error);
+    console.error('HuggingFace proxy error:', error);
     const errMsg = error instanceof Error ? error.message : String(error);
-    const errStack = error instanceof Error ? error.stack : '';
-    return new Response(JSON.stringify({ 
-      error: 'Failed to fetch from HuggingFace API proxy', 
+    res.status(500).json({
+      error: 'Failed to fetch from HuggingFace API proxy',
       details: errMsg,
-      stack: errStack
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
     });
   }
 }
