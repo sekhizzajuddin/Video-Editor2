@@ -39,7 +39,21 @@ export async function generateAudioHuggingFace(
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const response = await fetch(url, fetchOptions);
+    let response: Response;
+    
+    try {
+      // First try direct connection
+      response = await fetch(url, fetchOptions);
+    } catch (networkErr: any) {
+      // If direct connection fails (e.g., ERR_NAME_NOT_RESOLVED, AdBlocker), try via proxy
+      console.warn(`[HuggingFace] Direct connection failed, trying proxy...`, networkErr);
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        response = await fetch(proxyUrl, fetchOptions);
+      } catch (proxyErr: any) {
+        throw new Error(`Network Error: Cannot reach HuggingFace API or proxy. Check your internet connection or ad-blocker.`);
+      }
+    }
 
     if (response.ok) {
       const blob = await response.blob();
