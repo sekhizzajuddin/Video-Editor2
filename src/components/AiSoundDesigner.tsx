@@ -405,7 +405,7 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
             effects: [],
             transform: { x: 0, y: 0, scale: 100, rotation: 0 },
             audioSettings: {
-              volume: cue.type === 'bgm' ? 60 : 85,
+              volume: cue.type === 'bgm' ? -6 : 0,  // dB: BGM slightly quieter, SFX at unity
               pan: 0,
               fadeIn: cue.type === 'bgm' ? 1.0 : 0.05,
               fadeOut: cue.type === 'bgm' ? 1.5 : 0.1,
