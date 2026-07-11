@@ -31,14 +31,25 @@ export async function searchFreesound(
   // Use our serverless function proxy to bypass CORS and properly handle Env vars
   const url = `/api/freesound?query=${encodeURIComponent(cleanQuery)}&token=${actualToken}&durationFilter=${encodeURIComponent(durationFilter)}&pageSize=5`;
 
-  const response = await fetch(url);
+  let response = await fetch(url);
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Freesound API error: ${response.status} - ${errorText}`);
   }
 
-  const data = await response.json();
-  const results = data?.results || [];
+  let data = await response.json();
+  let results = data?.results || [];
+
+  // Fallback: If 0 results, try an OR search (e.g., "city traffic" -> "city OR traffic")
+  if (results.length === 0 && cleanQuery.includes(' ')) {
+    const orQuery = cleanQuery.split(/\s+/).join(' OR ');
+    const orUrl = `/api/freesound?query=${encodeURIComponent(orQuery)}&token=${actualToken}&durationFilter=${encodeURIComponent(durationFilter)}&pageSize=5`;
+    const orResponse = await fetch(orUrl);
+    if (orResponse.ok) {
+      const orData = await orResponse.json();
+      results = orData?.results || [];
+    }
+  }
 
   return results
     .map((item: any) => ({

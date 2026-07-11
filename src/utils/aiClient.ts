@@ -66,14 +66,14 @@ MANDATORY RULES:
 5. ALL timestamps must be between 0.0 and ${segmentDuration.toFixed(2)}.
 
 BGM SEARCH QUERY RULES (for music):
-- Include genre + mood + tempo keywords
-- Good examples: "cinematic epic orchestral tense" / "dark electronic ambient drone" / "upbeat hip hop energetic" / "lofi chill study calm" / "suspense thriller strings building"
-- BAD examples: "music" / "background" / "sound" (too vague — will return nothing)
+- Use ONLY 1 or 2 generic genre/mood tags. Freesound will return 0 results if you use full sentences or too many words.
+- Good examples: "cinematic", "ambient chill", "orchestral", "lofi", "upbeat funk"
+- BAD examples: "dramatic background music for city", "epic orchestral tense"
 
 SFX SEARCH QUERY RULES (for effects):
-- Use 2–4 specific descriptive words for the exact sound
-- Good examples: "heavy rain thunder storm" / "crowd cheering stadium" / "door slam wooden" / "car engine rev"
-- BAD: "noise" / "effect" / "audio"
+- Use ONLY 1 or 2 generic nouns for the physical sound.
+- Good examples: "rain", "crowd", "door", "car engine", "footsteps"
+- BAD examples: "heavy rain thunder storm urban", "loud door slam wooden"
 
 SCENE ANALYSIS APPROACH:
 1. What is the overall emotional tone? (tense, joyful, dramatic, calm, mysterious) → use for BGM
@@ -219,24 +219,23 @@ export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm
       {
         role: 'system',
         content: `You are an expert audio library search optimizer for Freesound.org.
-Your ONLY job is to convert a sound description into the best 2-5 Freesound.org search keywords.
+Your ONLY job is to convert a sound description into the best 1-3 Freesound.org search keywords.
 
-RULES:
-- Return ONLY keywords separated by spaces. No punctuation. No explanation. No quotes. No extra text.
-- Prioritize the most distinctive sonic characteristics.
-- Order keywords from most to least specific.
+CRITICAL RULES FOR FREESOUND:
+1. Freesound uses exact text matching. Using long specific phrases (like "Cityscape Nighttime Ambiance") will return ZERO results because it requires ALL words to match perfectly.
+2. You MUST use 1 to 3 broad, generic nouns/tags max (e.g., "city night", "rain", "footsteps", "orchestral tension").
+3. NEVER use full sentences or highly descriptive adjectives.
+4. Return ONLY the keywords separated by spaces. No punctuation. No explanation. No quotes.
 
-${type === 'bgm' ? `MUSIC (BGM) KEYWORDS — must include musical genre/style/mood terms:
-- Include at least one genre word: orchestral, electronic, ambient, hip-hop, jazz, rock, folk, cinematic, lofi, synthwave, trap
-- Include at least one mood word: dramatic, upbeat, calm, tense, dark, energetic, emotional, mysterious, epic, chill
-- Examples:
-  Input: "dramatic background music for a city montage" → Output: cinematic orchestral dramatic urban epic
-  Input: "calm relaxing background" → Output: ambient lofi calm relaxing atmospheric
-  Input: "intense action scene music" → Output: epic orchestral intense action cinematic` : `SFX KEYWORDS — must describe the specific sound action:
-- Examples:
-  Input: "ocean waves crashing on sandy beach" → Output: waves ocean beach shore splash
-  Input: "busy city traffic noise" → Output: city traffic urban cars busy
-  Input: "door slam" → Output: door slam wooden thud close`}`,
+${type === 'bgm' ? `MUSIC (BGM) KEYWORDS:
+- Use 1 broad genre and optionally 1 mood (e.g. "orchestral dark", "ambient chill", "lofi").
+- Bad: "dramatic background music for a city montage"
+- Good: "cinematic urban"` : `SFX KEYWORDS:
+- Use 1 or 2 generic nouns for the physical sound.
+- Bad: "busy city traffic noise at night"
+- Good: "city traffic"
+- Bad: "ocean waves crashing on sandy beach"
+- Good: "waves beach"`}`,
       },
       {
         role: 'user',
