@@ -244,12 +244,26 @@ export default defineConfig({
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
+    proxy: {
+      '/huggingface-proxy': {
+        target: 'https://api-inference.huggingface.co/models',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/huggingface-proxy/, ''),
+      }
+    }
   },
   preview: {
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
+    proxy: {
+      '/huggingface-proxy': {
+        target: 'https://api-inference.huggingface.co/models',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/huggingface-proxy/, ''),
+      }
+    }
   },
   resolve: {
     alias: {

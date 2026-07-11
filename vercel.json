@@ -2,6 +2,10 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/huggingface-proxy/:model*",
+      "destination": "https://api-inference.huggingface.co/models/:model*"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
