@@ -39,8 +39,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       if (transitionName && track && track.type === 'video') {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
-        const scrollLeft = timelineState?.trackContainerRef.current?.scrollLeft || 0;
-        const dropTime = (x + scrollLeft) / zoomLevel;
+        const dropTime = Math.max(0, x / zoomLevel);
         
         let closestClip: typeof track.clips[0] | null = null;
         let isStart = true;
