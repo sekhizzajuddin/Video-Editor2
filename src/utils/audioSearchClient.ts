@@ -56,7 +56,7 @@ export async function searchFreesound(
       id: String(item.id),
       name: item.name,
       duration: item.duration,
-      previewUrl: item.previews?.['preview-hq-mp3'] || item.previews?.['preview-lq-mp3'] || '',
+      previewUrl: item.previews?.['preview-hq-ogg'] || item.previews?.['preview-hq-mp3'] || item.previews?.['preview-lq-ogg'] || item.previews?.['preview-lq-mp3'] || '',
       tags: item.tags || []
     }))
     .filter((item: any) => !!item.previewUrl); // Ensure preview mp3 exists

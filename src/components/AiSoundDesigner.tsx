@@ -372,8 +372,10 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
           const res = await fetch(option.previewUrl);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();
-          const filename = `${cue.query.replace(/\s+/g, '_')}_${option.id}.mp3`;
-          const file = new File([blob], filename, { type: 'audio/mp3', lastModified: Date.now() });
+          const ext = option.previewUrl.includes('.ogg') ? 'ogg' : 'mp3';
+          const mime = ext === 'ogg' ? 'audio/ogg' : 'audio/mp3';
+          const filename = `${cue.query.replace(/\s+/g, '_')}_${option.id}.${ext}`;
+          const file = new File([blob], filename, { type: mime, lastModified: Date.now() });
           const now = Date.now();
           const mediaId = `ai_audio_${option.id}_${now}_${cueIdx}`;
           const mediaItem = {
