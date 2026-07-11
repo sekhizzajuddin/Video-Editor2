@@ -95,7 +95,9 @@ export async function generateAudioHuggingFace(
     let errorDetail = '';
     try {
       const errorJson = await response.json();
-      errorDetail = errorJson.error || JSON.stringify(errorJson);
+      errorDetail = errorJson.details 
+        ? `${errorJson.error || 'Proxy Error'}: ${errorJson.details}`
+        : (errorJson.error || JSON.stringify(errorJson));
     } catch {
       errorDetail = response.statusText;
     }

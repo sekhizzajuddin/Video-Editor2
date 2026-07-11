@@ -60,7 +60,13 @@ export default async function handler(req) {
     });
   } catch (error) {
     console.error('HuggingFace Edge proxy error:', error);
-    return new Response(JSON.stringify({ error: 'Failed to fetch from HuggingFace API proxy' }), {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errStack = error instanceof Error ? error.stack : '';
+    return new Response(JSON.stringify({ 
+      error: 'Failed to fetch from HuggingFace API proxy', 
+      details: errMsg,
+      stack: errStack
+    }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
