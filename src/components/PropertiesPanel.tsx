@@ -360,8 +360,11 @@ export function PropertiesPanel() {
       
       const optionsPromises = allCues.map(async (cue) => {
         let refinedQuery = cue.query;
+        let alternatives: string[] = [];
         try {
-          refinedQuery = await refineAudioQueryWithGroq(cue.query, cue.type as 'sfx' | 'bgm');
+          const refinedObj = await refineAudioQueryWithGroq(cue.query, cue.type as 'sfx' | 'bgm');
+          refinedQuery = refinedObj.keywords;
+          alternatives = refinedObj.alternatives;
         } catch (groqErr) {
           console.warn('Groq query refinement failed, falling back to original query:', groqErr);
         }
@@ -369,6 +372,8 @@ export function PropertiesPanel() {
         const options = await searchFreesound(refinedQuery, freesoundToken, cue.type as 'sfx' | 'bgm');
         return {
           ...cue,
+          query: refinedQuery,
+          alternatives,
           options
         };
       });

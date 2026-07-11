@@ -4,8 +4,9 @@ import {
   ChevronLeft, ChevronRight, SkipBack, SkipForward
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import { AICueResult } from '@/utils/aiClient';
-import { AudioOption } from '@/utils/audioSearchClient';
+import { AICueResult, analyzeAudioWithGemini } from '@/utils/aiClient';
+import { AudioOption, searchFreesound } from '@/utils/audioSearchClient';
+import { WaveformViewer } from './WaveformViewer';
 import { toast } from 'sonner';
 
 interface CueWithOptions extends AICueResult {
@@ -70,6 +71,7 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
 
   // ── Trim drag ─────────────────────────────────────────────
   const trimDragRef = useRef<{ cueIdx: number; side: 'left' | 'right'; startX: number; startVal: number } | null>(null);
+  const moveDragRef = useRef<{ cueIdx: number; startX: number; startValStart: number; startValEnd: number } | null>(null);
 
   // ── Audio/video refs ──────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -216,8 +218,19 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
   }, [seekTo, getTimeFromEvent]);
 
   // ─────────────────────────────────────────────────────────────
-  // Trim drag
+  // Move / Trim drag
   // ─────────────────────────────────────────────────────────────
+  const startMoveDrag = (e: React.MouseEvent, cueIdx: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const cue = cues[cueIdx];
+    moveDragRef.current = {
+      cueIdx, startX: e.clientX,
+      startValStart: cue.start,
+      startValEnd: cue.end
+    };
+  };
+
   const startTrimDrag = (e: React.MouseEvent, cueIdx: number, side: 'left' | 'right') => {
     e.stopPropagation();
     e.preventDefault();
@@ -390,7 +403,19 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
   // Group cues by type for multi-track display
   // ─────────────────────────────────────────────────────────────
   const bgmCues = cues.map((c, i) => ({ cue: c, idx: i })).filter(({ cue }) => cue.type === 'bgm');
-  const sfxCues = cues.map((c, i) => ({ cue: c, idx: i })).filter(({ cue }) => cue.type === 'sfx');
+  const sfxTracks: Array<Array<{ cue: CueWithOptions; idx: number }>> = [];
+  cues.forEach((c, i) => {
+    if (c.type !== 'sfx') return;
+    let placed = false;
+    for (const track of sfxTracks) {
+      if (!track.some(tc => (c.start < tc.cue.end && c.end > tc.cue.start))) {
+        track.push({ cue: c, idx: i });
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) sfxTracks.push([{ cue: c, idx: i }]);
+  });
 
   // ─────────────────────────────────────────────────────────────
   // Selected cue data for inspector panel
@@ -420,10 +445,12 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
           ${colorClass}
         `}
         onClick={(e) => { e.stopPropagation(); setActiveCueIndex(idx); }}
+        onMouseDown={(e) => { setActiveCueIndex(idx); startMoveDrag(e, idx); }}
       >
         {/* Left trim handle */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-2 bg-white/20 hover:bg-white/50 cursor-ew-resize z-30 flex items-center justify-center"
+          data-role="trim-handle"
+          className="absolute left-0 top-0 bottom-0 w-2 bg-white/20 hover:bg-white/50 cursor-ew-resize z-30 block flex items-center justify-center"
           onMouseDown={(e) => startTrimDrag(e, idx, 'left')}
         >
           <div className="w-px h-3 bg-white/70" />
@@ -441,7 +468,8 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
 
         {/* Right trim handle */}
         <div
-          className="absolute right-0 top-0 bottom-0 w-2 bg-white/20 hover:bg-white/50 cursor-ew-resize z-30 flex items-center justify-center"
+          data-role="trim-handle"
+          className="absolute right-0 top-0 bottom-0 w-2 bg-white/20 hover:bg-white/50 cursor-ew-resize z-30 block flex items-center justify-center"
           onMouseDown={(e) => startTrimDrag(e, idx, 'right')}
         >
           <div className="w-px h-3 bg-white/70" />
@@ -579,23 +607,94 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
                   <h3 className="text-xs font-bold text-white capitalize">{activeCue.query}</h3>
                   <p className="text-[9px] text-[#707070] italic leading-relaxed">{activeCue.reason}</p>
 
-                  {/* Trim controls */}
-                  {activeCue.options[selectedOptions[activeCueIndex!] ?? 0] && (
+                  {/* Trim controls & Waveform */}
+                  {activeCue.options[selectedOptions[activeCueIndex!] ?? 0] && (() => {
+                    const option = activeCue.options[selectedOptions[activeCueIndex!] ?? 0];
+                    return (
                     <div className="pt-2 border-t border-[#2a2a2a]">
-                      <p className="text-[9px] text-[#707070] mb-1">Trim (drag handles on timeline block):</p>
-                      <div className="flex items-center gap-3 text-[9px] font-mono">
-                        <span>Start: <span className="text-white">{activeCue.trimOffset.toFixed(2)}s</span></span>
-                        <span>Duration: <span className="text-white">{activeCue.trimDuration.toFixed(2)}s</span></span>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[9px] text-[#707070] mb-1">Trim Selection (drag waveform):</p>
+                        <div className="flex items-center gap-3 text-[9px] font-mono">
+                          <span>Start: <span className="text-white">{activeCue.trimOffset.toFixed(2)}s</span></span>
+                          <span>Duration: <span className="text-white">{activeCue.trimDuration.toFixed(2)}s</span></span>
+                        </div>
                       </div>
+                      <WaveformViewer
+                        key={option.id}
+                        audioUrl={option.previewUrl}
+                        trimOffset={activeCue.trimOffset}
+                        trimDuration={activeCue.trimDuration}
+                        totalDuration={option.duration}
+                        onChange={(offset, dur) => {
+                          setCues((prev) => prev.map((c, i) => 
+                            i === activeCueIndex ? { ...c, trimOffset: offset, trimDuration: dur } : c
+                          ));
+                        }}
+                      />
                     </div>
-                  )}
+                  )})()}
                 </div>
 
-                {/* Alternate options */}
+                {/* Alternate Options */}
                 <div>
-                  <h4 className="text-[9px] text-[#707070] uppercase font-bold tracking-wider mb-2">
-                    Alternate Sounds — click to select, ▶ to audition
-                  </h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-[9px] text-[#707070] uppercase font-bold tracking-wider">
+                      Alternate Sounds
+                    </h4>
+                    <button
+                      onClick={async () => {
+                        if (!activeCue.options.length) return;
+                        const toastId = toast.loading('Double Automation: AI is listening to sounds...');
+                        try {
+                          const base64s = await Promise.all(activeCue.options.map(async opt => {
+                            const res = await fetch(opt.previewUrl);
+                            const blob = await res.blob();
+                            return new Promise<string>((resolve) => {
+                              const reader = new FileReader();
+                              reader.onloadend = () => resolve(reader.result as string);
+                              reader.readAsDataURL(blob);
+                            });
+                          }));
+                          const result = await analyzeAudioWithGemini(base64s, activeCue.reason, activeCue.type);
+                          toast.success('AI picked the best sound: ' + result.reason, { id: toastId });
+                          selectOption(activeCueIndex!, result.selectedIndex);
+                          setCues(prev => prev.map((c, i) => i === activeCueIndex ? { ...c, trimOffset: result.trimOffset } : c));
+                        } catch (err: any) {
+                          toast.error('AI Analysis failed: ' + err.message, { id: toastId });
+                        }
+                      }}
+                      className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-[9px] font-bold rounded flex items-center gap-1 transition-colors"
+                    >
+                      <Sparkles className="w-3 h-3" /> Auto-Pick & Trim
+                    </button>
+                  </div>
+                  
+                  {/* Clickable Alternative Keywords */}
+                  {activeCue.alternatives && activeCue.alternatives.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {activeCue.alternatives.map((alt) => (
+                        <button
+                          key={alt}
+                          onClick={async () => {
+                            const toastId = toast.loading(`Searching: ${alt}`);
+                            try {
+                              const token = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_FREESOUND_API_KEY : undefined;
+                              const newOpts = await searchFreesound(alt, token, activeCue.type);
+                              setCues(prev => prev.map((c, i) => i === activeCueIndex ? { ...c, query: alt, options: newOpts, trimOffset: 0, trimDuration: Math.min(newOpts[0]?.duration ?? c.trimDuration, c.end - c.start) } : c));
+                              setSelectedOptions(prev => ({ ...prev, [activeCueIndex!]: 0 }));
+                              toast.success('Search updated', { id: toastId });
+                            } catch(e: any) {
+                              toast.error('Search failed: ' + e.message, { id: toastId });
+                            }
+                          }}
+                          className="px-2 py-0.5 bg-[#252525] hover:bg-[#353535] text-[#909090] hover:text-white text-[9px] rounded-full transition-colors"
+                        >
+                          {alt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     {activeCue.options && activeCue.options.length > 0 ? (
                       activeCue.options.map((option, optIdx) => {
@@ -704,21 +803,23 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
               </div>
             </div>
 
-            {/* SFX track row */}
-            <div className="flex" style={{ height: '40px' }}>
-              <div className="w-16 shrink-0 flex items-center justify-center border-r border-[#1e1e1e] bg-[#111] gap-1">
-                <Zap className="w-3 h-3 text-amber-400" />
-                <span className="text-[8px] font-bold text-amber-400">SFX</span>
+            {/* SFX track rows dynamically packed */}
+            {sfxTracks.map((track, trackIdx) => (
+              <div key={`sfx-${trackIdx}`} className="flex" style={{ height: '40px', borderTop: trackIdx > 0 ? '1px solid #1e1e1e' : 'none' }}>
+                <div className="w-16 shrink-0 flex items-center justify-center border-r border-[#1e1e1e] bg-[#111] gap-1">
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  <span className="text-[8px] font-bold text-amber-400">SFX {trackIdx + 1}</span>
+                </div>
+                <div className="flex-1 relative bg-[#0e0e0e] overflow-hidden" onMouseDown={handleTimelineMouseDown}>
+                  {track.map(({ cue, idx }) => renderCueBlock(cue, idx, 'bg-amber-600/70 border border-amber-500/50 text-amber-100'))}
+                  {/* Playhead line on track */}
+                  <div
+                    style={{ left: `${(currentTime / Math.max(clip.duration, 0.01)) * 100}%` }}
+                    className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30"
+                  />
+                </div>
               </div>
-              <div className="flex-1 relative bg-[#0e0e0e] overflow-hidden" onMouseDown={handleTimelineMouseDown}>
-                {sfxCues.map(({ cue, idx }) => renderCueBlock(cue, idx, 'bg-amber-600/70 border border-amber-500/50 text-amber-100'))}
-                {/* Playhead line on track */}
-                <div
-                  style={{ left: `${(currentTime / Math.max(clip.duration, 0.01)) * 100}%` }}
-                  className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30"
-                />
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
@@ -726,7 +827,7 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
         <div className="flex items-center justify-between px-5 py-3 border-t border-[#2a2a2a] bg-[#161616] shrink-0">
           <div className="text-[9px] text-[#707070]">
             <span className="text-purple-400 font-bold">{bgmCues.length}</span> BGM ·{' '}
-            <span className="text-amber-400 font-bold">{sfxCues.length}</span> SFX ·{' '}
+            <span className="text-amber-400 font-bold">{cues.filter(c => c.type === 'sfx').length}</span> SFX ·{' '}
             <span className="text-white font-bold">{cues.length}</span> total tracks ready to import
           </div>
           <div className="flex items-center gap-3">

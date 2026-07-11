@@ -33,6 +33,7 @@ export interface AICueResult {
   query: string;
   type: 'sfx' | 'bgm';
   reason: string;
+  alternatives?: string[];
 }
 
 /**
@@ -209,41 +210,47 @@ CRITICAL OUTPUT RULES:
   }
 }
 
+export interface AudioQueryRefinement {
+  keywords: string;
+  alternatives: string[];
+}
+
 /**
  * Refines a raw scene description into optimized Freesound.org search keywords using Groq LLaMA 3.3.
  */
-export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm' = 'sfx'): Promise<string> {
+export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm' = 'sfx'): Promise<AudioQueryRefinement> {
   const payload = {
     model: GROQ_TEXT_MODEL,
     messages: [
       {
         role: 'system',
         content: `You are an expert audio library search optimizer for Freesound.org.
-Your ONLY job is to convert a sound description into the best 1-3 Freesound.org search keywords.
+Your ONLY job is to convert a sound description into a primary query (1-3 words) and 3 alternative queries.
 
 CRITICAL RULES FOR FREESOUND:
-1. Freesound uses exact text matching. Using long specific phrases (like "Cityscape Nighttime Ambiance") will return ZERO results because it requires ALL words to match perfectly.
-2. You MUST use 1 to 3 broad, generic nouns/tags max (e.g., "city night", "rain", "footsteps", "orchestral tension").
+1. Freesound uses exact text matching. Using long specific phrases will return ZERO results.
+2. You MUST use 1 to 3 broad, generic nouns/tags max per query (e.g., "city night", "rain").
 3. NEVER use full sentences or highly descriptive adjectives.
-4. Return ONLY the keywords separated by spaces. No punctuation. No explanation. No quotes.
 
 ${type === 'bgm' ? `MUSIC (BGM) KEYWORDS:
 - Use 1 broad genre and optionally 1 mood (e.g. "orchestral dark", "ambient chill", "lofi").
-- Bad: "dramatic background music for a city montage"
-- Good: "cinematic urban"` : `SFX KEYWORDS:
-- Use 1 or 2 generic nouns for the physical sound.
-- Bad: "busy city traffic noise at night"
-- Good: "city traffic"
-- Bad: "ocean waves crashing on sandy beach"
-- Good: "waves beach"`}`,
+- Must be musical instruments, melody, rhythm. NEVER ambient noise.` : `SFX KEYWORDS:
+- Use 1 or 2 generic nouns for the physical sound.`}
+
+Return ONLY valid JSON (no markdown):
+{
+  "keywords": "primary 1-3 words",
+  "alternatives": ["alt1", "alt2", "alt3"]
+}`
       },
       {
         role: 'user',
         content: `Convert this ${type === 'bgm' ? 'music/BGM' : 'sound effect/SFX'} description to Freesound.org search keywords:\n"${query}"`
       }
     ],
+    response_format: { type: 'json_object' },
     temperature: 0.1,
-    max_tokens: 60
+    max_tokens: 150
   };
 
   const controller = new AbortController();
@@ -261,22 +268,95 @@ ${type === 'bgm' ? `MUSIC (BGM) KEYWORDS:
   );
   clearTimeout(timeoutId);
 
+  const fallback = { keywords: query, alternatives: [] };
+
   if (!response.ok) {
     console.warn(`[Groq Query Refine] HTTP ${response.status}. Using original query as fallback.`);
-    return query;
+    return fallback;
   }
 
   const resultData = await response.json();
   const refined = resultData?.choices?.[0]?.message?.content?.trim();
-  if (!refined) return query;
+  if (!refined) return fallback;
 
-  // Sanitize: strip quotes, markdown, newlines
-  return refined
-    .replace(/^["\u201c\u2018']/g, '')
-    .replace(/["\u201d\u2019']$/g, '')
-    .replace(/[`*_]/g, '')
-    .replace(/[\r\n]+/g, ' ')
-    .trim();
+  try {
+    const clean = refined.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
+    const parsed = JSON.parse(clean);
+    return {
+      keywords: parsed.keywords || query,
+      alternatives: parsed.alternatives || []
+    };
+  } catch (e) {
+    return fallback;
+  }
+}
+
+/**
+ * DOUBLE AUTOMATION:
+ * Sends an array of base64 audio mp3s to Gemini 1.5/3.1 Flash along with the video scene context.
+ * Asks Gemini to listen to them and pick the most realistic one, and identify the exact trimOffset.
+ */
+export async function analyzeAudioWithGemini(
+  base64Audios: string[],
+  sceneContext: string,
+  cueType: 'sfx' | 'bgm'
+): Promise<{ selectedIndex: number; trimOffset: number; reason: string }> {
+  const prompt = `You are a professional Sound Editor (Double Automation).
+I have provided ${base64Audios.length} alternate audio clips for a video scene.
+SCENE CONTEXT: "${sceneContext}" (Audio type needed: ${cueType.toUpperCase()})
+
+Listen to all provided audio clips.
+YOUR JOB:
+1. Pick the ONE audio clip that sounds the most realistic and best fits the scene context.
+2. Identify the exact timestamp (in seconds) where the primary action/music actually begins (skipping any dead air or silence at the start).
+
+Return ONLY valid JSON (no markdown):
+{
+  "selectedIndex": <number 0 to ${base64Audios.length - 1}>,
+  "trimOffset": <number in seconds (e.g. 0.5, 2.1)>,
+  "reason": "<short explanation why this clip is best>"
+}`;
+
+  const audioParts = base64Audios.map((b64) => ({
+    inlineData: { mimeType: 'audio/mp3', data: stripDataUri(b64) }
+  }));
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          { text: prompt },
+          ...audioParts
+        ]
+      }
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+    }
+  };
+
+  const response = await fetchWithKeyFailover(
+    (key) => `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    },
+    'gemini'
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`[Gemini Audio Analysis] HTTP ${response.status}: ${errorText}`);
+  }
+
+  const resultData = await response.json();
+  const text = resultData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  if (!text) throw new Error('Empty response from Gemini Audio Analysis');
+
+  const clean = text.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
+  return JSON.parse(clean);
 }
 
 export interface AIMotionGraphicSuggestion {
