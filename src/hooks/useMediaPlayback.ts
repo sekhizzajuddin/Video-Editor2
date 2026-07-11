@@ -681,13 +681,22 @@ export function useMediaPlayback(): MediaPlaybackResult {
         }
       }
 
-      // Reactive FX Routing to bypass ScriptProcessorNodes (pitch) when not in use
+      // Reactive FX Routing: lazily create ScriptProcessorNode only when pitch/humanize is first needed.
+      // For normal playback (pitch=0, humanize=false), NO ScriptProcessorNode is ever created.
       const needsFx = Math.abs(audioSettings.pitch) > 0.01 || audioSettings.humanize;
-      if (needsFx && !entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationGraph) {
-        entry.sourceNode.disconnect();
-        entry.sourceNode.connect(entry.pitchNode);
-        entry.pitchNode.connect(entry.separationGraph.input);
-        entry._fxConnected = true;
+      const audioCtxForFx = entry.audioCtx;
+      if (needsFx && audioCtxForFx) {
+        // Lazily create the pitchNode if it doesn't exist yet
+        if (!entry.pitchNode) {
+          const newPitchNode = createPitchNode(audioCtxForFx);
+          entry.pitchNode = newPitchNode;
+        }
+        if (!entry._fxConnected && entry.sourceNode && entry.separationGraph) {
+          entry.sourceNode.disconnect();
+          entry.sourceNode.connect(entry.pitchNode);
+          entry.pitchNode.connect(entry.separationGraph.input);
+          entry._fxConnected = true;
+        }
       } else if (!needsFx && entry._fxConnected && entry.sourceNode && entry.pitchNode && entry.separationGraph) {
         entry.sourceNode.disconnect();
         entry.pitchNode.disconnect();
@@ -1105,7 +1114,109 @@ function disconnectAudioNode(entry: MediaElement) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: initialize Web Audio graph for real-time panning, pitch, humanizer, and EQ
+// Helper: create pitch-shifter ScriptProcessorNode on demand (lazy, only when needed)
+// ---------------------------------------------------------------------------
+function createPitchNode(audioCtx: AudioContext): ScriptProcessorNode {
+  const bufferSize = 4096;
+  const pitchNode = audioCtx.createScriptProcessor(bufferSize, 2, 2);
+  (pitchNode as any).pitch = 0;
+  (pitchNode as any).humanize = false;
+
+  const grainSize = 1024;
+  const overlap = grainSize / 2;
+  const bufferLen = 65536;
+  const writeBufL = new Float32Array(bufferLen);
+  const writeBufR = new Float32Array(bufferLen);
+  let writePos = 0;
+  let readPosA = 0;
+  let readPosB = overlap;
+  let grainCounterA = 0;
+  let grainCounterB = overlap;
+
+  const hannWindow = new Float32Array(grainSize);
+  for (let i = 0; i < grainSize; i++) {
+    hannWindow[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / grainSize));
+  }
+
+  pitchNode.onaudioprocess = (e) => {
+    const inputL = e.inputBuffer.getChannelData(0);
+    const inputR = e.inputBuffer.getChannelData(1);
+    const outputL = e.outputBuffer.getChannelData(0);
+    const outputR = e.outputBuffer.getChannelData(1);
+
+    const pitch = (pitchNode as any).pitch || 0;
+    const isHumanize = (pitchNode as any).humanize || false;
+
+    let jitter = 0;
+    if (isHumanize) {
+      const time = e.playbackTime || (Date.now() / 1000);
+      jitter = Math.sin(time * 2 * Math.PI * 5.5) * 0.06;
+    }
+
+    const semitones = pitch + jitter;
+    if (Math.abs(semitones) < 0.01) {
+      outputL.set(inputL);
+      outputR.set(inputR);
+      return;
+    }
+
+    const ratio = Math.pow(2, semitones / 12);
+
+    for (let i = 0; i < inputL.length; i++) {
+      writeBufL[writePos] = inputL[i];
+      writeBufR[writePos] = inputR[i];
+
+      const winA = hannWindow[grainCounterA % grainSize];
+      const rA = readPosA;
+      const iA0 = ((Math.floor(rA) - 1) + bufferLen) % bufferLen;
+      const iA1 = Math.floor(rA) % bufferLen;
+      const iA2 = (iA1 + 1) % bufferLen;
+      const iA3 = (iA1 + 2) % bufferLen;
+      const fA = rA - Math.floor(rA);
+      const cubicL_A = cubicInterp(writeBufL[iA0], writeBufL[iA1], writeBufL[iA2], writeBufL[iA3], fA);
+      const cubicR_A = cubicInterp(writeBufR[iA0], writeBufR[iA1], writeBufR[iA2], writeBufR[iA3], fA);
+
+      const winB = hannWindow[grainCounterB % grainSize];
+      const rB = readPosB;
+      const iB0 = ((Math.floor(rB) - 1) + bufferLen) % bufferLen;
+      const iB1 = Math.floor(rB) % bufferLen;
+      const iB2 = (iB1 + 1) % bufferLen;
+      const iB3 = (iB1 + 2) % bufferLen;
+      const fB = rB - Math.floor(rB);
+      const cubicL_B = cubicInterp(writeBufL[iB0], writeBufL[iB1], writeBufL[iB2], writeBufL[iB3], fB);
+      const cubicR_B = cubicInterp(writeBufR[iB0], writeBufR[iB1], writeBufR[iB2], writeBufR[iB3], fB);
+
+      outputL[i] = cubicL_A * winA + cubicL_B * winB;
+      outputR[i] = cubicR_A * winA + cubicR_B * winB;
+
+      writePos = (writePos + 1) % bufferLen;
+      readPosA = (readPosA + ratio + bufferLen) % bufferLen;
+      readPosB = (readPosB + ratio + bufferLen) % bufferLen;
+      grainCounterA++;
+      grainCounterB++;
+
+      if (grainCounterA >= grainSize) {
+        grainCounterA = 0;
+        const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
+        const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
+        readPosA = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
+      }
+      if (grainCounterB >= grainSize) {
+        grainCounterB = 0;
+        const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
+        const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
+        readPosB = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
+      }
+    }
+  };
+
+  return pitchNode;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: initialize Web Audio graph for real-time panning, EQ, and routing
+// NOTE: ScriptProcessorNode (pitchNode) is NOT created here — it is created
+// lazily only when pitch != 0 or humanize is enabled (see reactive sync effect).
 // ---------------------------------------------------------------------------
 function initAudioGraph(entry: MediaElement) {
   const audioCtx = getMasterAudioCtx();
@@ -1113,169 +1224,6 @@ function initAudioGraph(entry: MediaElement) {
 
   try {
     const sourceNode = audioCtx.createMediaElementSource(entry.el);
-
-    // Look up the parent track of this clip
-    const track = useEditorStore.getState().tracks.find(t => t.clips.some(c => c.id === entry.clipId) || (t.overLayers || []).some(c => c.id === entry.clipId));
-    const trackAnalyser = track ? getOrCreateTrackAnalyser(track.id, audioCtx) : null;
-
-    // 1. Overlap-Add Hann-windowed granular pitch shifter (Stereo)
-    //    Uses two overlapping grains with 50% overlap and Hann windows
-    //    for artifact-free, smooth pitch shifting.
-    const bufferSize = 4096;
-    const pitchNode = audioCtx.createScriptProcessor(bufferSize, 2, 2);
-    (pitchNode as any).pitch = 0;
-    (pitchNode as any).humanize = false;
-
-    const grainSize = 1024; // Grain length in samples (reduced from 2048 for smooth vocal pitch)
-    const overlap = grainSize / 2; // 50% overlap
-    const bufferLen = 65536;
-    const writeBufL = new Float32Array(bufferLen);
-    const writeBufR = new Float32Array(bufferLen);
-    let writePos = 0;
-    let readPosA = 0; // Grain A read head
-    let readPosB = overlap; // Grain B read head (offset by 50%)
-    let grainCounterA = 0; // Sample counter within grain A
-    let grainCounterB = overlap; // Sample counter within grain B
-
-    // Precompute Hann window
-    const hannWindow = new Float32Array(grainSize);
-    for (let i = 0; i < grainSize; i++) {
-      hannWindow[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / grainSize));
-    }
-
-    pitchNode.onaudioprocess = (e) => {
-      const inputL = e.inputBuffer.getChannelData(0);
-      const inputR = e.inputBuffer.getChannelData(1);
-      const outputL = e.outputBuffer.getChannelData(0);
-      const outputR = e.outputBuffer.getChannelData(1);
-
-      const pitch = (pitchNode as any).pitch || 0;
-      const isHumanize = (pitchNode as any).humanize || false;
-
-      const sepEnabled = false;
-      const sepMode = 'removeVocals';
-      const sepStrength = 80;
-
-      let jitter = 0;
-      if (isHumanize) {
-        // Subtle 5.5 Hz micro-vibrato simulating human throat variation
-        const time = e.playbackTime || (Date.now() / 1000);
-        jitter = Math.sin(time * 2 * Math.PI * 5.5) * 0.06;
-      }
-
-      const semitones = pitch + jitter;
-      if (Math.abs(semitones) < 0.01) {
-        // Pitch is neutral; just pass through (after separation if needed)
-        if (!sepEnabled) {
-          outputL.set(inputL);
-          outputR.set(inputR);
-          return;
-        }
-        // If separation enabled with no pitch shift, process only separation
-        for (let i = 0; i < inputL.length; i++) {
-          let l = inputL[i], r = inputR[i];
-          const mid = (l + r) * 0.5;
-          const side = (l - r) * 0.5;
-          const strength = sepStrength / 100;
-          if (sepMode === 'removeVocals') {
-            const midAtten = 1.0 - strength;
-            outputL[i] = side * 2.0 + mid * midAtten;
-            outputR[i] = -side * 2.0 + mid * midAtten;
-          } else if (sepMode === 'removeBgm') {
-            const sideAtten = 1.0 - strength;
-            outputL[i] = mid + side * sideAtten;
-            outputR[i] = mid - side * sideAtten;
-          } else {
-            const mix = 1.0 - strength * 0.5;
-            outputL[i] = mid * strength + side * mix;
-            outputR[i] = mid * strength - side * mix;
-          }
-        }
-        return;
-      }
-
-      const ratio = Math.pow(2, semitones / 12);
-
-      for (let i = 0; i < inputL.length; i++) {
-        // Write input into circular buffer
-        writeBufL[writePos] = inputL[i];
-        writeBufR[writePos] = inputR[i];
-
-        // Grain A: windowed read with cubic interpolation
-        const winA = hannWindow[grainCounterA % grainSize];
-        const rA = readPosA;
-        const iA0 = ((Math.floor(rA) - 1) + bufferLen) % bufferLen;
-        const iA1 = Math.floor(rA) % bufferLen;
-        const iA2 = (iA1 + 1) % bufferLen;
-        const iA3 = (iA1 + 2) % bufferLen;
-        const fA = rA - Math.floor(rA);
-        // Cubic Hermite interpolation for smooth resampling
-        const cubicL_A = cubicInterp(writeBufL[iA0], writeBufL[iA1], writeBufL[iA2], writeBufL[iA3], fA);
-        const cubicR_A = cubicInterp(writeBufR[iA0], writeBufR[iA1], writeBufR[iA2], writeBufR[iA3], fA);
-
-        // Grain B: windowed read with cubic interpolation
-        const winB = hannWindow[grainCounterB % grainSize];
-        const rB = readPosB;
-        const iB0 = ((Math.floor(rB) - 1) + bufferLen) % bufferLen;
-        const iB1 = Math.floor(rB) % bufferLen;
-        const iB2 = (iB1 + 1) % bufferLen;
-        const iB3 = (iB1 + 2) % bufferLen;
-        const fB = rB - Math.floor(rB);
-        const cubicL_B = cubicInterp(writeBufL[iB0], writeBufL[iB1], writeBufL[iB2], writeBufL[iB3], fB);
-        const cubicR_B = cubicInterp(writeBufR[iB0], writeBufR[iB1], writeBufR[iB2], writeBufR[iB3], fB);
-
-        // Overlap-add the two windowed grains
-        let grainL = cubicL_A * winA + cubicL_B * winB;
-        let grainR = cubicR_A * winA + cubicR_B * winB;
-
-        // Apply vocal separation after pitch shifting
-        if (sepEnabled) {
-          const mid = (grainL + grainR) * 0.5;
-          const side = (grainL - grainR) * 0.5;
-          const strength = sepStrength / 100;
-          if (sepMode === 'removeVocals') {
-            const midAtten = 1.0 - strength;
-            grainL = side * 2.0 + mid * midAtten;
-            grainR = -side * 2.0 + mid * midAtten;
-          } else if (sepMode === 'removeBgm') {
-            const sideAtten = 1.0 - strength;
-            grainL = mid + side * sideAtten;
-            grainR = mid - side * sideAtten;
-          } else {
-            const mix = 1.0 - strength * 0.5;
-            grainL = mid * strength + side * mix;
-            grainR = mid * strength - side * mix;
-          }
-        }
-
-        outputL[i] = grainL;
-        outputR[i] = grainR;
-
-        writePos = (writePos + 1) % bufferLen;
-        readPosA = (readPosA + ratio + bufferLen) % bufferLen;
-        readPosB = (readPosB + ratio + bufferLen) % bufferLen;
-        grainCounterA++;
-        grainCounterB++;
-
-        // Reset grain A when it completes a cycle
-        if (grainCounterA >= grainSize) {
-          grainCounterA = 0;
-          // Snap grain A read head near the write head to stay in sync
-          // Add a tiny random jitter (up to ±4ms / 180 samples) to break up periodic phase cancellation
-          const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
-            const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
-          readPosA = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
-        }
-        // Reset grain B when it completes a cycle
-        if (grainCounterB >= grainSize) {
-          grainCounterB = 0;
-          // Add a tiny random jitter (up to ±4ms / 180 samples) to break up periodic phase cancellation
-          const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
-            const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
-          readPosB = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
-        }
-      }
-    };
 
     // 0.5. Vocal Filter
     const vocalFilter = audioCtx.createBiquadFilter();
@@ -1354,7 +1302,7 @@ function initAudioGraph(entry: MediaElement) {
     // Attach to element pool entry
     entry.audioCtx = audioCtx;
     entry.sourceNode = sourceNode;
-    entry.pitchNode = pitchNode;
+    // entry.pitchNode is intentionally NOT set here — created lazily when pitch/humanize is first needed
     entry.vocalFilter = vocalFilter;
     entry.denoiseFilter = denoiseFilter;
     entry.bassFilter = bassFilter;
