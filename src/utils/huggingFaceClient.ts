@@ -19,7 +19,7 @@ export async function generateAudioHuggingFace(
   const model = options?.model || 'cvssp/audioldm2';
   // Point to the serverless Edge API proxy endpoint which resolves DNS on Vercel/Vite server side, bypassing client CORS & DNS blocks.
   const url = `/api/huggingface?model=${encodeURIComponent(model)}`;
-  const maxRetries = options?.maxRetries ?? 5;
+  const maxRetries = options?.maxRetries ?? 8;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -34,6 +34,7 @@ export async function generateAudioHuggingFace(
     headers,
     body: JSON.stringify({
       inputs: prompt,
+      options: { wait_for_model: false },
     }),
   };
 
@@ -60,8 +61,8 @@ export async function generateAudioHuggingFace(
       return new Blob([blob], { type: blob.type || 'audio/flac' });
     }
 
-    // Handle 503 — model is loading / cold start
-    if (response.status === 503) {
+    // Handle 503 (model loading) or 502 (proxy upstream error) — retry with backoff
+    if (response.status === 503 || response.status === 502) {
       let waitTime = 20; // default 20s backoff
       try {
         const errorJson = await response.json();
@@ -73,7 +74,7 @@ export async function generateAudioHuggingFace(
       }
 
       if (attempt < maxRetries) {
-        console.log(`[HuggingFace] Model loading, retrying in ${waitTime}s (attempt ${attempt + 1}/${maxRetries})...`);
+        console.log(`[HuggingFace] Model loading/upstream error (${response.status}), retrying in ${waitTime}s (attempt ${attempt + 1}/${maxRetries})...`);
         await wait(waitTime * 1000);
         continue;
       }
