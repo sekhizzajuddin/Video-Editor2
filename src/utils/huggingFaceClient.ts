@@ -5,6 +5,15 @@ export interface HFGenerateOptions {
   maxRetries?: number;
 }
 
+// Available models for SFX generation — ordered by reliability on the free tier
+export const HF_AUDIO_MODELS = [
+  { id: 'facebook/musicgen-small', name: 'MusicGen Small (Recommended)', description: 'Fast & reliable, good for SFX and ambient' },
+  { id: 'facebook/musicgen-medium', name: 'MusicGen Medium', description: 'Higher quality, slower cold start' },
+  { id: 'cvssp/audioldm2', name: 'AudioLDM2 (Requires API Key)', description: 'Best quality but needs HuggingFace API key' },
+];
+
+export const DEFAULT_HF_MODEL = 'facebook/musicgen-small';
+
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function generateAudioHuggingFace(
@@ -15,8 +24,7 @@ export async function generateAudioHuggingFace(
   const localKey = getLocalHuggingFaceKey();
   const hfKey = localKey || envKey;
 
-  // Default to audioldm2 for SFX (high quality)
-  const model = options?.model || 'cvssp/audioldm2';
+  const model = options?.model || DEFAULT_HF_MODEL;
   // Point to the serverless Edge API proxy endpoint which resolves DNS on Vercel/Vite server side, bypassing client CORS & DNS blocks.
   const url = `/api/huggingface?model=${encodeURIComponent(model)}`;
   const maxRetries = options?.maxRetries ?? 8;

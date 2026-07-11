@@ -59,7 +59,7 @@ import { detectBeats } from '@/utils/beatDetection';
 import { MOTION_TEMPLATES, MotionTemplate } from '@/utils/motionTemplates';
 import { captureCanvasChunk } from '@/utils/canvasCapture';
 import { analyzeCanvasChunkWithGemini } from '@/utils/aiClient';
-import { generateAudioHuggingFace } from '@/utils/huggingFaceClient';
+import { generateAudioHuggingFace, HF_AUDIO_MODELS, DEFAULT_HF_MODEL } from '@/utils/huggingFaceClient';
 import { AiSoundDesigner } from './AiSoundDesigner';
 
 const TRANSITIONS = [
@@ -731,6 +731,7 @@ export function MediaPanel() {
 
   // AI SFX Generator States
   const [sfxVisionProvider, setSfxVisionProvider] = useState<'gemini' | 'groq'>('gemini');
+  const [sfxHfModel, setSfxHfModel] = useState<string>(DEFAULT_HF_MODEL);
   const [isAnalyzingSfx, setIsAnalyzingSfx] = useState(false);
   const [sfxAnalysisCues, setSfxAnalysisCues] = useState<any[] | null>(null);
   const [sfxChunkStartTime, setSfxChunkStartTime] = useState(0);
@@ -1581,7 +1582,7 @@ export function MediaPanel() {
         toast.loading(`Generating SFX ${i + 1}/${sfxAnalysisCues.length}... (may retry if model is cold)`, { id: 'sfx-gen' });
         
         try {
-          const audioBlob = await generateAudioHuggingFace(cue.query);
+          const audioBlob = await generateAudioHuggingFace(cue.query, { model: sfxHfModel });
           const blobUrl = URL.createObjectURL(audioBlob);
           sfxBlobUrlsRef.current.push(blobUrl);
           
@@ -2334,8 +2335,23 @@ export function MediaPanel() {
                   </div>
                   
                   {!sfxGeneratedCues ? (
-                    <button
-                      type="button"
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-medium text-[#a0a0a0]">
+                          Audio Generation Model
+                        </label>
+                        <select
+                          value={sfxHfModel}
+                          onChange={(e) => setSfxHfModel(e.target.value)}
+                          className="w-full bg-[#141414] text-xs text-white border border-[#3e3e3e] rounded-lg px-3 py-2 outline-none focus:border-amber-500 transition-colors appearance-none"
+                        >
+                          {HF_AUDIO_MODELS.map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="button"
                       onClick={handleGenerateSfxBackground}
                       disabled={isGeneratingSfxBackground}
                       className="w-full py-2 text-xs bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-lg shadow-lg hover:shadow-amber-500/10 transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 disabled:pointer-events-none"
@@ -2359,7 +2375,8 @@ export function MediaPanel() {
                           <span>Generate Audio (Background)</span>
                         </div>
                       )}
-                    </button>
+                      </button>
+                    </div>
                   ) : (
                     <button
                       type="button"
