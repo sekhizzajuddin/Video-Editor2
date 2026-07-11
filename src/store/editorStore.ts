@@ -358,6 +358,8 @@ const initialState: EditorState = {
     showThumbnails: true,
     hardwareAcceleration: true,
     keyboardShortcuts: {},
+    geminiApiKey: '',
+    groqApiKey: '',
   },
   hasUnsavedChanges: false,
   currentTime: 0,

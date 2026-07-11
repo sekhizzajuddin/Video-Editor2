@@ -1,8 +1,8 @@
 import { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
-import { getGeminiKey } from './aiClient';
 import { extractFramesFromVideo } from './frameExtractor';
 import { TEXT_TEMPLATES } from './textTemplates';
+import { transcribeAudioWithGroq, analyzeReasoningWithGroq } from './groqClient';
 
 const uuidv4 = () => crypto.randomUUID();
 
@@ -12,6 +12,7 @@ export interface KineticTypographyOptions {
   casing?: 'all_caps' | 'first_letter_caps' | 'none';
   styleSelection?: string;
   animationSelection?: string;
+  provider?: 'gemini' | 'groq';
 }
 
 export async function generateKineticTypography(
@@ -21,11 +22,7 @@ export async function generateKineticTypography(
   onProgress: (p: number) => void
 ): Promise<void> {
   const store = useEditorStore.getState();
-  const apiKey = getGeminiKey();
-  
-  if (!apiKey) {
-    throw new Error('Gemini API Key is missing. Please configure it.');
-  }
+  const provider = options.provider || 'gemini';
 
   const media = store.mediaLibrary.find(m => m.id === clip.mediaId);
   if (!media || !media.url || media.url === 'PENDING_RESTORE') {
@@ -52,13 +49,13 @@ export async function generateKineticTypography(
   // Translate script code to readable instruction
   let scriptInstruction = "";
   if (options.script === 'roman_urdu_hindi') {
-    scriptInstruction = "Transcribe in Roman Urdu/Hindi (i.e. Urdu/Hindi written in English/Latin letters, e.g. 'aur all loving hai', 'kya baat hai').";
+    scriptInstruction = "Transcribe in Roman Urdu/Hindi (i.e. Urdu/Hindi written in English/Latin letters, e.g. 'aur all loving hai', 'kya baat hai'). Preserve the spoken language's rhythm and emphasis.";
   } else if (options.script === 'hindi') {
-    scriptInstruction = "Transcribe in Devanagari Hindi script (e.g. 'और ऑल लविंग है', 'क्या बात है').";
+    scriptInstruction = "Transcribe in Devanagari Hindi script (e.g. 'और ऑल लविंग है', 'क्या बात है'). Preserve emphasis and spoken rhythm.";
   } else if (options.script === 'english') {
-    scriptInstruction = "Transcribe in English script.";
+    scriptInstruction = "Transcribe in English. Preserve natural spoken rhythms and contractions (e.g., don't, I'm, we're).";
   } else {
-    scriptInstruction = `Translate and transcribe the spoken words into the ${options.script.toUpperCase()} script/language.`;
+    scriptInstruction = `Translate and transcribe the spoken words into the ${options.script.toUpperCase()} script/language. Preserve emphasis and rhythm.`;
   }
 
   // Casing requirement
@@ -66,7 +63,7 @@ export async function generateKineticTypography(
   let casingInstruction = "";
   if (options.script === 'english' || options.script === 'roman_urdu_hindi') {
     if (activeCasing === 'all_caps') {
-      casingInstruction = "Convert ALL words/letters to strictly UPPERCASE (e.g. 'HELLO', 'WORLD', 'AAJ', 'MERA').";
+      casingInstruction = "Convert ALL words to strictly UPPERCASE (e.g. 'HELLO', 'WORLD', 'AAJ', 'MERA').";
     } else if (activeCasing === 'first_letter_caps') {
       casingInstruction = "Capitalize ONLY the first letter of each word (e.g. 'Hello', 'World', 'Aaj', 'Mera').";
     }
@@ -75,91 +72,142 @@ export async function generateKineticTypography(
   const userStyle = options.styleSelection || 'random';
   const userAnim = options.animationSelection || 'random';
 
-  // 3. Prepare Gemini API Request
-  const prompt = `You are a premium, state-of-the-art Kinetic Typography & Motion Graphics designer.
-I am providing visual frames and audio for a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
-Analyze the speech/audio beats, volume, emphasis, and the visual framing.
+  // ─── Shared high-quality prompt for typography generation ──────────────────
+  const prompt = `You are a world-class Kinetic Typography Director and Motion Graphics Designer.
+I am providing audio and visual frames of a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
 
-YOUR PRIMARY TASK:
-Generate a JSON array of text animation clips, strictly **WORD-BY-WORD**.
-Each entry in the JSON must represent EXACTLY ONE word (e.g. "love", not "I love"). Do NOT combine words into phrases. Each word must have a short, precise duration.
+PRIMARY TASK: Generate a JSON array of text animation clips, STRICTLY WORD-BY-WORD.
+- Each JSON entry = EXACTLY ONE word. Do NOT combine multiple words.
+- Every word must have a precise, short duration matching the real audio timing.
 
-Script / Translation requirement:
+SCRIPT & LANGUAGE:
 - ${scriptInstruction}
-- ${casingInstruction}
+${casingInstruction ? `- ${casingInstruction}` : ''}
 
-DESIGNING A HIGHLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL):
-- **Semantic Hierarchy**: Identify key emotional or emphatic words (e.g., nouns, active verbs, adjectives like "NEVER", "EXPLODE", "FAST", "AWESOME", "ROKNA"). Give them massive "fontSize" (85 to 120), bold bright colors, and dramatic entry animations ("bounce", "zoom", "slideUp").
-- **Auxiliary Words**: For small fill-in words/conjunctions/prepositions (e.g., "is", "a", "the", "to", "and", "aur", "ki", "ka"), make them small in size (fontSize: 50 to 60), white or soft gray, and simple entry animation ("fadeIn").
-- **Kinetic Trail & Staggering**: Drift positions from word to word so they feel alive and pop in different places rather than sitting in one static spot. Stagger "x" between 35 and 65, and "y" between 40 and 60. Make them pop left, center, right, up, or down dynamically based on the speech rhythm!
-- **Color Palettes**: Use high-contrast vibrant colors (e.g., "#fbbf24" yellow, "#22d3ee" cyan, "#f43f5e" pink/rose, "#a855f7" purple, "#22c55e" emerald green).
+DESIGNING AN EMOTIONALLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL RULES):
+1. SEMANTIC WEIGHT: Identify KEY emotional/emphatic words (nouns, verbs like 'NEVER', 'EXPLODE', 'LOVE', 'ROKNA').
+   - Key words: fontSize 85–120, bold vibrant color, dramatic animation (bounce, zoom, slideUp).
+   - Filler words (is, a, the, to, and, aur, ki, ka): fontSize 45–60, muted/white color, simple fadeIn.
+2. KINETIC DRIFT: Stagger positions word-by-word so they POP in different screen locations.
+   - x: between 30 and 70 (center screen, vary left/right)
+   - y: between 35 and 65 (vary upper/lower)
+   - Never place two consecutive words at the same x,y position.
+3. VIBRANT COLORS: Use high-contrast palette:
+   - Key words: '#fbbf24' yellow, '#22d3ee' cyan, '#f43f5e' rose-pink, '#a855f7' purple, '#22c55e' emerald.
+   - Filler words: '#ffffff' white or '#94a3b8' slate gray.
+4. TIMING PRECISION:
+   - Each word's start/end should be tight (0.05–0.4s max for normal speech; 0.4–0.8s for slow/dramatic speech).
+   - Do not leave gaps between words unless there is a genuine silence in audio.
+5. FONT HIERARCHY:
+   - Key words: 'Anton', 'Bebas Neue', 'Impact', 'Oswald'.
+   - Filler words: 'Inter', 'Outfit', 'Montserrat'.
 
-Style/Animation selection:
-- If Style Selection is requested as "${userStyle}", select style presets that match this target style if possible.
-- If Animation Selection is requested as "${userAnim}", prefer animation options close to this animation.
+${userStyle !== 'random' ? `STYLE PRESET PREFERENCE: Lean towards "${userStyle}" style where possible.` : ''}
+${userAnim !== 'random' ? `ANIMATION PREFERENCE: Prefer "${userAnim}" for animation where applicable.` : ''}
 
 For each word, define:
-- "text": The spoken word (single word).
-- "start": Start time relative to this clip (in seconds, between 0 and ${clip.duration.toFixed(2)}).
-- "end": End time relative to this clip (in seconds).
-- "fontSize": Font size (50 to 120).
-- "fontFamily": Choose expressively from: 'Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Outfit', 'Inter', 'Montserrat', 'Georgia'.
-- "color": A vibrant hex color.
-- "x": X position (30 to 70).
-- "y": Y position (35 to 65).
+- "text": The single spoken word.
+- "start": Start time (seconds, 0–${clip.duration.toFixed(2)}).
+- "end": End time (seconds, 0–${clip.duration.toFixed(2)}).
+- "fontSize": 45–120.
+- "fontFamily": 'Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Outfit', 'Inter', 'Montserrat', or 'Georgia'.
+- "color": A vibrant hex color string.
+- "x": X position (30–70, as percentage of screen width).
+- "y": Y position (35–65, as percentage of screen height).
 - "animationIn": 'fadeIn', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'bounce', or 'typewriter'.
 - "animationOut": 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', or 'slideRight'.
-- "stylePreset": Select one of: 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
+- "stylePreset": Choose from: 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
 
-Output ONLY valid JSON array format, no markdown wrapping. Example:
-[{"text":"Wow","start":0.5,"end":0.8,"fontSize":95,"fontFamily":"Anton","color":"#FFD700","x":50,"y":50,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
+Output ONLY a valid JSON array, no markdown, no explanation:
+[{"text":"Wow","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":52,"y":48,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
-  const contentsParts: any[] = [{ text: prompt }];
+  let resultJsonStr = '';
 
-  // Add audio if extracted
-  if (audioDataPart) {
-    contentsParts.push({
-      inlineData: { mimeType: 'audio/wav', data: audioDataPart }
-    });
-  }
+  if (provider === 'groq') {
+    // Groq path: Use Whisper for precise word-level timestamps, then feed to LLaMA 3.3 for layout
+    if (!wavBlob) {
+      console.warn('[Kinetic Typography] Audio extraction failed. Groq path requires audio; falling back to basic timestamp estimation.');
+      // Generate evenly-spaced timestamps as a fallback instead of crashing
+      resultJsonStr = JSON.stringify(generateFallbackTypography(clip.duration, prompt));
+    } else {
+      const transcription = await transcribeAudioWithGroq(wavBlob);
+      onProgress(65);
 
-  // Add frames
-  for (const frame of frames) {
-    const b64 = frame.replace(/^data:image\/(png|jpeg|webp);base64,/, '');
-    contentsParts.push({
-      inlineData: { mimeType: 'image/jpeg', data: b64 }
-    });
-  }
+      const wordTimestamps = transcription.words
+        ? JSON.stringify(transcription.words, null, 2)
+        : JSON.stringify(transcription.segments || transcription.text, null, 2);
 
-  const requestBody = {
-    contents: [{ parts: contentsParts }],
-    generationConfig: {
-      temperature: 0.3,
-      responseMimeType: "application/json"
+      const groqSystemPrompt = `You are a world-class Kinetic Typography Director.
+You have precise word-level timestamps from Whisper transcription. Your job is to create stunning, emotionally expressive typography animations.
+Rules:
+- Use the Whisper timestamps as the SOURCE OF TRUTH for word timing.
+- Return ONLY a valid JSON array of word typography objects.
+- Each object MUST have all required fields: text, start, end, fontSize, fontFamily, color, x, y, animationIn, animationOut, stylePreset.
+- Do NOT include any text, explanation, or markdown outside the JSON array.`;
+
+      const groqUserPrompt = `${prompt}\n\n---\nWHISPER WORD TIMESTAMPS (use these for precise timing):\n${wordTimestamps}\n\nGenerate the kinetic typography JSON array now:`;
+
+      resultJsonStr = await analyzeReasoningWithGroq(groqUserPrompt, groqSystemPrompt);
     }
-  };
+    onProgress(85);
+  } else {
+    // Gemini path
+    const { getLocalGeminiKey, getEnvGeminiKey } = await import('./apiKeyManager');
+    const gKey = getLocalGeminiKey() || getEnvGeminiKey();
+    if (!gKey) throw new Error('Gemini API Key is missing.');
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody)
-  });
+    const contentsParts: any[] = [{ text: prompt }];
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API Error: ${response.status} - ${errText}`);
-  }
+    // Add audio if extracted
+    if (audioDataPart) {
+      contentsParts.push({
+        inlineData: { mimeType: 'audio/wav', data: audioDataPart }
+      });
+    }
 
-  const data = await response.json();
-  onProgress(85);
+    // Add frames
+    for (const frame of frames) {
+      const b64 = frame.replace(/^data:image\/(png|jpeg|webp);base64,/, '');
+      contentsParts.push({
+        inlineData: { mimeType: 'image/jpeg', data: b64 }
+      });
+    }
 
-  let resultJsonStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!resultJsonStr) {
-    throw new Error('No valid response from Gemini.');
+    const requestBody = {
+      contents: [{ parts: contentsParts }],
+      generationConfig: {
+        temperature: 0.3,
+        responseMimeType: "application/json"
+      }
+    };
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${gKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini API Error: ${response.status} - ${errText}`);
+    }
+
+    const data = await response.json();
+    onProgress(85);
+
+    resultJsonStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!resultJsonStr) {
+      throw new Error('No valid response from Gemini.');
+    }
   }
 
   resultJsonStr = resultJsonStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
-  const typoResults = JSON.parse(resultJsonStr);
+  let typoResults = [];
+  try {
+    typoResults = JSON.parse(resultJsonStr);
+  } catch(e) {
+    throw new Error(`Failed to parse AI typography response: ${resultJsonStr}`);
+  }
 
   // Post-processing of text to guarantee casing constraints and word-by-word split
   const processedClips: any[] = [];
@@ -272,6 +320,34 @@ Output ONLY valid JSON array format, no markdown wrapping. Example:
 
   useEditorStore.setState({ tracks: newTracks });
   onProgress(100);
+}
+
+/**
+ * Generates evenly-spaced placeholder word entries as a fallback when audio is unavailable.
+ * This prevents the Groq path from hard-crashing when audio extraction fails (e.g. video-only files).
+ */
+function generateFallbackTypography(duration: number, _prompt: string): any[] {
+  // Estimate ~3 words per second for a typical speaker
+  const estimatedWords = Math.max(3, Math.round(duration * 2.5));
+  const wordDuration = duration / estimatedWords;
+  const placeholderStyles = ['Bouncy Pop', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bubble Caption'];
+  const animations = ['zoom', 'slideUp', 'bounce', 'fadeIn', 'slideRight'];
+  const colors = ['#fbbf24', '#22d3ee', '#f43f5e', '#a855f7', '#22c55e'];
+  const fonts = ['Anton', 'Bebas Neue', 'Impact', 'Inter', 'Outfit'];
+
+  return Array.from({ length: estimatedWords }, (_, i) => ({
+    text: '...',
+    start: i * wordDuration,
+    end: (i + 1) * wordDuration,
+    fontSize: 70,
+    fontFamily: fonts[i % fonts.length],
+    color: colors[i % colors.length],
+    x: 35 + (i % 5) * 8,
+    y: 45 + (i % 3) * 8,
+    animationIn: animations[i % animations.length],
+    animationOut: 'fadeOut',
+    stylePreset: placeholderStyles[i % placeholderStyles.length]
+  }));
 }
 
 async function extractClipAudio(mediaUrl: string, trimStart: number, duration: number): Promise<Blob | null> {

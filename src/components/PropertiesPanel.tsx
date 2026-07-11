@@ -290,8 +290,8 @@ export function PropertiesPanel() {
   // @ts-ignore
   const envFreesoundKey = import.meta.env.VITE_FREESOUND_API_KEY || '';
 
-  const [geminiApiKey, setGeminiApiKey] = useState(() => sessionStorage.getItem('procut_gemini_key') || '');
-  const [groqApiKey, setGroqApiKey] = useState(() => sessionStorage.getItem('procut_groq_key') || '');
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'groq'>('gemini');
+  const [soundDesignFps, setSoundDesignFps] = useState<number>(1);
   const [freesoundApiKey, setFreesoundApiKey] = useState(() => sessionStorage.getItem('procut_freesound_key') || '');
 
   const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
@@ -307,12 +307,6 @@ export function PropertiesPanel() {
 
   const handleAiSoundDesign = async () => {
     if (!selectedClip) return;
-    const gKey = geminiApiKey || sessionStorage.getItem('procut_gemini_key') || envGeminiKey;
-    const grKey = groqApiKey || sessionStorage.getItem('procut_groq_key') || envGroqKey;
-    if (!gKey || !grKey) {
-      toast.error('Please enter both your Gemini API Key and Groq API Key first (or configure them as VITE_GEMINI_API_KEY and VITE_GROQ_API_KEY in your environment).');
-      return;
-    }
 
     const videoEl = videoElements.get(selectedClip.id);
     if (!videoEl) {
@@ -331,7 +325,8 @@ export function PropertiesPanel() {
         selectedClip.duration,
         (progress) => {
           setAudioAnalyzeProgress(`Compiling storyboard ${Math.round(progress * 100)}%`);
-        }
+        },
+        soundDesignFps
       );
 
       // 2. Analyze each chunk with Gemini 2.0 Flash Vision
@@ -343,7 +338,8 @@ export function PropertiesPanel() {
           const segmentCues = await analyzeStoryboardWithGemini(
             chunk.base64Image,
             chunk.duration,
-            gKey
+            aiProvider,
+            soundDesignFps
           );
           return segmentCues.map((cue: any) => ({
             ...cue,
@@ -365,7 +361,7 @@ export function PropertiesPanel() {
       const optionsPromises = allCues.map(async (cue) => {
         let refinedQuery = cue.query;
         try {
-          refinedQuery = await refineAudioQueryWithGroq(cue.query, grKey);
+          refinedQuery = await refineAudioQueryWithGroq(cue.query);
         } catch (groqErr) {
           console.warn('Groq query refinement failed, falling back to original query:', groqErr);
         }
@@ -393,27 +389,51 @@ export function PropertiesPanel() {
   const handleAiMotionGraphicsDesign = async () => {
     if (!selectedClip || !selectedTrack) return;
     
+    const videoEl = videoElements.get(selectedClip.id);
+    if (!videoEl) {
+      toast.error('Video player is not loaded yet. Try seeking or playing first.');
+      return;
+    }
+
     setIsAnalyzingMotionGraphics(true);
-    setMotionGraphicsAnalyzeProgress('Extracting Frames...');
+    setMotionGraphicsAnalyzeProgress('Compiling storyboard...');
     
     try {
-      const { analyzeSceneForMotionGraphics } = await import('@/utils/aiClient');
-      const { extractFramesFromVideo } = await import('@/utils/frameExtractor');
-      
-      const media = mediaLibrary.find(m => m.id === selectedClip.mediaId);
-      if (!media || !media.url || media.url === 'PENDING_RESTORE') {
-        throw new Error('Media not available for analysis');
-      }
+      const chunks = await compileStoryboard(
+        videoEl,
+        selectedClip.trimStart,
+        selectedClip.duration,
+        (progress) => {
+          setMotionGraphicsAnalyzeProgress(`Compiling storyboard ${Math.round(progress * 100)}%`);
+        }
+      );
 
-      const frames = await extractFramesFromVideo(media.url, 2, selectedClip.trimStart, selectedClip.trimStart + selectedClip.duration);
-      if (frames.length === 0) throw new Error('Could not extract frames');
+      setMotionGraphicsAnalyzeProgress('AI Vision analyzing scene...');
+      
+      const chunkPromises = chunks.map(async (chunk) => {
+        try {
+          const suggestions = await analyzeMotionGraphicsWithGemini(
+            chunk.base64Image,
+            chunk.duration,
+            aiProvider
+          );
+          return suggestions.map((sug: any) => ({
+            ...sug,
+            start: chunk.startTime + sug.start,
+            end: chunk.startTime + sug.end
+          }));
+        } catch (e) {
+          console.error('Error analyzing chunk:', e);
+          return [];
+        }
+      });
 
-      setMotionGraphicsAnalyzeProgress('Analyzing Context (Gemini 2.0)...');
-      
-      const suggestions = await analyzeSceneForMotionGraphics(frames, 'Suggest 3 lower-thirds or motion graphic templates');
-      
-      console.log("Suggestions:", suggestions);
-      toast.success("Design suggestions logged to console (Demo)");
+      const allCuesArrays = await Promise.all(chunkPromises);
+      const allCues = allCuesArrays.flat().sort((a, b) => a.start - b.start);
+
+      setMotionGraphicsSuggestions(allCues);
+      setShowMotionGraphicsDesigner(true);
+      toast.success("Motion graphics suggested successfully!");
       
     } catch (e: any) {
       console.error(e);
@@ -3650,33 +3670,30 @@ export function PropertiesPanel() {
                   Analyze scene storyboard using Gemini 2.0 Vision and suggest optimized SFX options using Groq.
                 </p>
 
-                {/* API Keys Configuration Panel */}
+                {/* AI Provider Configuration */}
                 <div className="space-y-2 pt-1 border-t border-[#3e3e3e]/40">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] text-[#a0a0a0]">Gemini API Key</label>
-                    <input
-                      type="password"
-                      placeholder="Paste Gemini API Key"
-                      value={geminiApiKey}
-                      onChange={(e) => {
-                        setGeminiApiKey(e.target.value);
-                        sessionStorage.setItem('procut_gemini_key', e.target.value);
-                      }}
-                      className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
-                    />
+                  <div className="flex items-center gap-2">
+                     <label className="text-[10px] text-white">AI Provider:</label>
+                     <select 
+                       value={aiProvider}
+                       onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'groq')}
+                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                     >
+                       <option value="gemini">Gemini (Default)</option>
+                       <option value="groq">Groq (Llama 3 Vision)</option>
+                     </select>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] text-[#a0a0a0]">Groq API Key</label>
-                    <input
-                      type="password"
-                      placeholder="Paste Groq API Key"
-                      value={groqApiKey}
-                      onChange={(e) => {
-                        setGroqApiKey(e.target.value);
-                        sessionStorage.setItem('procut_groq_key', e.target.value);
-                      }}
-                      className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
-                    />
+                  <div className="flex items-center gap-2">
+                     <label className="text-[10px] text-white">Precision:</label>
+                     <select 
+                       value={soundDesignFps}
+                       onChange={(e) => setSoundDesignFps(Number(e.target.value))}
+                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                     >
+                       <option value={1}>1 FPS (Standard)</option>
+                       <option value={5}>5 FPS (High)</option>
+                       <option value={10}>10 FPS (Ultra, Millisecond precise)</option>
+                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-[9px] text-[#a0a0a0]">Freesound Key (Optional)</label>
@@ -4743,24 +4760,20 @@ export function PropertiesPanel() {
                   Automatically generate subtitles, kinetic typography, or motion graphics for this clip.
                 </p>
 
-                {/* API Keys Configuration Panel (Only if Gemini key is missing) */}
-                {!geminiApiKey && !sessionStorage.getItem('procut_gemini_key') && !envGeminiKey && (
-                  <div className="pt-2 border-t border-[#3e3e3e]/40 space-y-2">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[9px] text-[#a0a0a0]">Gemini API Key</label>
-                      <input
-                        type="password"
-                        placeholder="Paste Gemini API Key"
-                        value={geminiApiKey}
-                        onChange={(e) => {
-                          setGeminiApiKey(e.target.value);
-                          sessionStorage.setItem('procut_gemini_key', e.target.value);
-                        }}
-                        className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-teal-500"
-                      />
-                    </div>
+                {/* AI Provider Configuration */}
+                <div className="pt-2 border-t border-[#3e3e3e]/40">
+                  <div className="flex items-center gap-2">
+                     <label className="text-[10px] text-white">AI Provider:</label>
+                     <select 
+                       value={aiProvider}
+                       onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'groq')}
+                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-teal-500"
+                     >
+                       <option value="gemini">Gemini</option>
+                       <option value="groq">Groq</option>
+                     </select>
                   </div>
-                )}
+                </div>
 
                 <div className="flex flex-col gap-2">
 

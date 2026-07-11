@@ -723,6 +723,7 @@ export function MediaPanel() {
   const [englishCasing, setEnglishCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
   const [kineticTypoStyle, setKineticTypoStyle] = useState<string>('random');
   const [kineticTypoAnimation, setKineticTypoAnimation] = useState<string>('random');
+  const [kineticTypoProvider, setKineticTypoProvider] = useState<'gemini' | 'groq'>('groq');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
@@ -783,7 +784,8 @@ export function MediaPanel() {
           englishCasing,
           casing: englishCasing,
           styleSelection: kineticTypoStyle,
-          animationSelection: kineticTypoAnimation
+          animationSelection: kineticTypoAnimation,
+          provider: kineticTypoProvider
         },
         (p) => setKineticTypoProgress(p)
       );
@@ -1218,7 +1220,7 @@ export function MediaPanel() {
         };
 
         await client.connect({
-          model: 'models/gemini-2.0-flash-live-001',
+          model: 'models/gemini-3.1-flash-live-preview',
           voiceName: ttsVoice,
           systemInstruction: 'Read the text provided by the user naturally.'
         });
@@ -1358,7 +1360,7 @@ export function MediaPanel() {
           client.onError = (err) => { reject(err); };
           
           client.connect({
-            model: 'models/gemini-2.0-flash-live-001',
+            model: 'models/gemini-3.1-flash-live-preview',
             voiceName: ttsVoice,
             systemInstruction: 'Read the text provided by the user naturally. Generate only audio, no text.'
           }).then(() => {
@@ -2538,6 +2540,22 @@ export function MediaPanel() {
                         <option value="spanish">Spanish</option>
                         <option value="french">French</option>
                         <option value="german">German</option>
+                      </select>
+                    </div>
+                    
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center">
+                        AI Reasoning Provider
+                        {kineticTypoProvider === 'groq' && <span className="px-1.5 py-0.5 rounded text-[8px] bg-purple-500/20 text-purple-400 font-bold border border-purple-500/30">LLaMA 3.3 (Text)</span>}
+                        {kineticTypoProvider === 'gemini' && <span className="px-1.5 py-0.5 rounded text-[8px] bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30">Flash 2.0 (Vision)</span>}
+                      </label>
+                      <select
+                        value={kineticTypoProvider}
+                        onChange={(e) => setKineticTypoProvider(e.target.value as 'gemini'|'groq')}
+                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                      >
+                        <option value="groq">Groq (Faster, Advanced NLP & Timing)</option>
+                        <option value="gemini">Gemini (Analyzes Scene Video Frames)</option>
                       </select>
                     </div>
 

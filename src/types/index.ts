@@ -499,6 +499,8 @@ export interface EditorState {
     hardwareAcceleration: boolean;
     showSafeZones?: boolean;
     keyboardShortcuts?: Record<string, string>;
+    geminiApiKey?: string;
+    groqApiKey?: string;
   };
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];

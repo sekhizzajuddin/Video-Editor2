@@ -11,23 +11,30 @@ export interface StoryboardChunk {
 async function compileGridForSegment(
   videoEl: HTMLVideoElement,
   segmentStart: number,
-  segmentDuration: number
+  segmentDuration: number,
+  fps: number = 1
 ): Promise<string> {
-  const numFrames = 10;
-  const step = segmentDuration / numFrames;
+  const numFrames = Math.max(1, Math.floor(segmentDuration * fps));
+  const step = 1 / fps;
+
+  // For high FPS, we need a larger grid. 
+  // Let's dynamically calculate cols and rows to form a rough square.
+  const cols = Math.ceil(Math.sqrt(numFrames));
+  const rows = Math.ceil(numFrames / cols);
+  
+  // Downscale frame sizes if we have a lot of frames so the grid isn't massive
+  const frameWidth = numFrames > 20 ? 160 : 480;
+  const frameHeight = numFrames > 20 ? 90 : 270;
 
   const canvas = document.createElement('canvas');
-  canvas.width = 2400; // 5 columns * 480px
-  canvas.height = 540; // 2 rows * 270px
+  canvas.width = cols * frameWidth;
+  canvas.height = rows * frameHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not create 2D canvas context');
 
   // Clear background
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const frameWidth = 480;
-  const frameHeight = 270;
 
   // Seek video and wait for seeked event, with a 1000ms safeguard timeout
   const seekVideo = (time: number): Promise<void> => {
@@ -64,8 +71,8 @@ async function compileGridForSegment(
 
     await seekVideo(targetTime);
 
-    const col = i % 5;
-    const row = Math.floor(i / 5);
+    const col = i % cols;
+    const row = Math.floor(i / cols);
     const dx = col * frameWidth;
     const dy = row * frameHeight;
 
@@ -73,11 +80,12 @@ async function compileGridForSegment(
     ctx.drawImage(videoEl, 0, 0, videoEl.videoWidth || 854, videoEl.videoHeight || 480, dx, dy, frameWidth, frameHeight);
 
     // Draw a small timestamp indicator on each thumbnail
+    const isSmall = frameWidth === 160;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(dx + 10, dy + 10, 75, 24);
+    ctx.fillRect(dx + 5, dy + 5, isSmall ? 40 : 75, isSmall ? 15 : 24);
     ctx.fillStyle = '#fbbf24';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText(`${targetTime.toFixed(1)}s`, dx + 18, dy + 27);
+    ctx.font = `bold ${isSmall ? 9 : 13}px sans-serif`;
+    ctx.fillText(`${targetTime.toFixed(1)}s`, dx + (isSmall ? 8 : 18), dy + (isSmall ? 16 : 27));
   }
 
   return canvas.toDataURL('image/jpeg', 0.85);
@@ -90,7 +98,8 @@ export async function compileStoryboard(
   videoEl: HTMLVideoElement,
   startTime: number,
   duration: number,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  fps: number = 1
 ): Promise<StoryboardChunk[]> {
   const chunkSize = 10; // seconds
   const numChunks = Math.ceil(duration / chunkSize);

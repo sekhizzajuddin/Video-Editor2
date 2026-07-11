@@ -31,7 +31,7 @@ export class GeminiLiveClient {
       throw new Error('Gemini API Key is not set.');
     }
 
-    const modelName = config.model || 'models/gemini-2.0-flash-live-001';
+    const modelName = config.model || 'models/gemini-3.1-flash-live-preview';
     const url = `${WS_URL}?key=${apiKey}`;
 
     return new Promise((resolve, reject) => {
@@ -80,7 +80,7 @@ export class GeminiLiveClient {
       setup: {
         model: modelName,
         generationConfig: {
-          responseModalities: ["AUDIO", "TEXT"],
+          responseModalities: ["AUDIO"],
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {

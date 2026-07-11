@@ -330,6 +330,35 @@ export function SettingsModal() {
                 </div>
 
                 <div className="border-t border-[#3e3e3e] pt-4">
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">AI API Keys</h3>
+                  <p className="text-[10px] text-[#a0a0a0] mb-3">
+                    These local keys act as a fallback if the Vercel environment variables hit a rate limit (429) or connection error.
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[10px] text-white block mb-1">Gemini API Key</label>
+                      <input
+                        type="password"
+                        placeholder="AIzaSy..."
+                        value={settings.geminiApiKey || ''}
+                        onChange={(e) => updateSettings({ geminiApiKey: e.target.value })}
+                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-white block mb-1">Groq API Key</label>
+                      <input
+                        type="password"
+                        placeholder="gsk_..."
+                        value={settings.groqApiKey || ''}
+                        onChange={(e) => updateSettings({ groqApiKey: e.target.value })}
+                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-[#3e3e3e] pt-4">
                   <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Project Actions</h3>
                   <div className="space-y-2">
                     <button
