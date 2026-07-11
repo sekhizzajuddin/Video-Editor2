@@ -583,3 +583,139 @@ Return ONLY a valid JSON array, no markdown:
     throw new Error(`Failed to parse Gemini scene analysis response: ${text.slice(0, 300)}`);
   }
 }
+
+import { ChunkAnalysisResult } from './canvasCapture';
+
+/**
+ * Analyzes a chunk of canvas frames and metadata for SFX generation.
+ * Specifically generates descriptive prompts for HuggingFace AudioLDM.
+ */
+export async function analyzeCanvasChunkWithGemini(
+  chunk: ChunkAnalysisResult,
+  chunkDuration: number,
+  provider: 'gemini' | 'groq' = 'gemini'
+): Promise<AICueResult[]> {
+  const apiKey = provider === 'gemini' ? getGeminiKey() : getGroqKey();
+  if (!apiKey) {
+    throw new Error(`${provider.toUpperCase()} API key is required. Please set it in Settings.`);
+  }
+
+  // We are creating a prompt for HuggingFace (AudioLDM).
+  const systemPrompt = `You are an expert Foley Artist and Sound Designer.
+Your job is to analyze ${chunk.frames.length} frames (representing a ${chunkDuration}s chunk at 5fps) along with timeline metadata, and generate precise Sound Effects (SFX).
+
+RULES:
+1. Generate SFX for visual actions, transitions, text appearance, and environments.
+2. DO NOT GENERATE BGM (Background Music). ONLY SFX.
+3. Your "query" must be a highly descriptive, detailed prompt suitable for a Text-to-Audio AI model (like AudioLDM). 
+   - Good: "A heavy metallic door slamming shut with a loud echo in a large hall."
+   - Good: "Digital futuristic glitch and static burst."
+   - Good: "Soft cinematic woosh as text appears, smooth and airy."
+4. Timestamps must be relative to the chunk (0 to ${chunkDuration}).
+5. Only return the JSON. No markdown wrappers, no explanations.
+
+METADATA (Timeline Events):
+${chunk.metadata.map(m => `[${(m.time - chunk.metadata[0]?.time || 0).toFixed(2)}s] ${m.description}`).join('\n')}
+
+Output format MUST exactly match this JSON schema:
+{
+  "cues": [
+    {
+      "start": <number>,
+      "end": <number>,
+      "query": "<descriptive prompt for text-to-audio model>",
+      "type": "sfx",
+      "reason": "<why this sound fits>"
+    }
+  ]
+}`;
+
+  let requestBody: any = {};
+  const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  if (provider === 'gemini') {
+    const frameParts = chunk.frames.map(frame => ({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: stripDataUri(frame)
+      }
+    }));
+    requestBody = {
+      contents: [
+        {
+          parts: [
+            { text: systemPrompt },
+            ...frameParts
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.4,
+        maxOutputTokens: 3000
+      }
+    };
+  } else {
+    // Groq LLaMA Scout Vision format
+    const imageUrls = chunk.frames.map(frame => ({
+      type: 'image_url',
+      image_url: { url: `data:image/jpeg;base64,${stripDataUri(frame)}` }
+    }));
+    requestBody = {
+      model: GROQ_VISION_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert Foley Artist and Sound Designer. You return only valid JSON.'
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: systemPrompt },
+            ...imageUrls
+          ]
+        }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.4,
+      max_tokens: 3000
+    };
+  }
+
+  const response = await fetchWithKeyFailover(
+    (key) => {
+      if (provider === 'groq') {
+        requestHeaders['Authorization'] = `Bearer ${key}`;
+        return 'https://api.groq.com/openai/v1/chat/completions';
+      }
+      return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`;
+    },
+    {
+      method: 'POST',
+      headers: requestHeaders,
+      body: JSON.stringify(requestBody)
+    },
+    provider
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`[${provider.toUpperCase()} API Error] ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  let text = '';
+  if (provider === 'gemini') {
+    text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  } else {
+    text = data.choices?.[0]?.message?.content || '';
+  }
+
+  try {
+    const cleanedText = text.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
+    const result = JSON.parse(cleanedText);
+    return result.cues || [];
+  } catch (e) {
+    throw new Error(`Failed to parse ${provider.toUpperCase()} response: ${text.substring(0, 200)}`);
+  }
+}

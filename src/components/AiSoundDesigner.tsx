@@ -17,9 +17,10 @@ interface CueWithOptions extends AICueResult {
 }
 
 interface AiSoundDesignerProps {
-  clip: any;
+  clip?: any;
   cues: CueWithOptions[];
   onClose: () => void;
+  mode?: 'search' | 'generate';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -31,11 +32,18 @@ function fmt(s: number): string {
   return `${m}:${sec.toFixed(1).padStart(4, '0')}`;
 }
 
-export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDesignerProps) {
+export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mode = 'search' }: AiSoundDesignerProps) {
   const { tracks, addMedia, addClip, addTrack } = useEditorStore();
 
+  const clip = clipProp || {
+    duration: 10,
+    trimStart: 0,
+    startTime: useEditorStore.getState().currentTime || 0,
+    mediaId: null
+  };
+
   // ── Find video source ──────────────────────────────────────
-  const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId);
+  const media = clip.mediaId ? useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId) : null;
   const videoUrl = media?.url;
 
   // ── Local state ────────────────────────────────────────────
@@ -369,12 +377,25 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
         if (!option) continue;
 
         try {
-          const res = await fetch(option.previewUrl);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const blob = await res.blob();
-          const ext = option.previewUrl.includes('.ogg') ? 'ogg' : 'mp3';
-          const mime = ext === 'ogg' ? 'audio/ogg' : 'audio/mp3';
-          const filename = `${cue.query.replace(/\s+/g, '_')}_${option.id}.${ext}`;
+          // Use the blob directly if available (HuggingFace generated audio),
+          // otherwise fetch from previewUrl (FreeSound)
+          let blob: Blob;
+          if ((option as any).blob instanceof Blob) {
+            blob = (option as any).blob;
+          } else {
+            const res = await fetch(option.previewUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            blob = await res.blob();
+          }
+          
+          // Detect extension and mime from the blob type or URL
+          let ext = 'mp3';
+          let mime = 'audio/mpeg';
+          if (blob.type.includes('flac')) { ext = 'flac'; mime = 'audio/flac'; }
+          else if (blob.type.includes('wav')) { ext = 'wav'; mime = 'audio/wav'; }
+          else if (blob.type.includes('ogg') || option.previewUrl?.includes('.ogg')) { ext = 'ogg'; mime = 'audio/ogg'; }
+          
+          const filename = `${cue.query.replace(/\s+/g, '_').substring(0, 40)}_${option.id}.${ext}`;
           const file = new File([blob], filename, { type: mime, lastModified: Date.now() });
           const now = Date.now();
           const mediaId = `ai_audio_${option.id}_${now}_${cueIdx}`;
@@ -405,7 +426,7 @@ export function AiSoundDesigner({ clip, cues: initialCues, onClose }: AiSoundDes
             effects: [],
             transform: { x: 0, y: 0, scale: 100, rotation: 0 },
             audioSettings: {
-              volume: cue.type === 'bgm' ? -6 : 0,  // dB: BGM slightly quieter, SFX at unity
+              volume: cue.type === 'bgm' ? -6 : 0,
               pan: 0,
               fadeIn: cue.type === 'bgm' ? 1.0 : 0.05,
               fadeOut: cue.type === 'bgm' ? 1.5 : 0.1,

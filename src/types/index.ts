@@ -509,6 +509,7 @@ export interface EditorState {
     showSafeZones?: boolean;
     keyboardShortcuts?: Record<string, string>;
     geminiApiKey?: string;
+    huggingFaceApiKey?: string;
     groqApiKey?: string;
     freesoundApiKey?: string;
   };

@@ -57,6 +57,10 @@ import { toast } from 'sonner';
 import { parseCubeLut } from '@/utils/lutParser';
 import { detectBeats } from '@/utils/beatDetection';
 import { MOTION_TEMPLATES, MotionTemplate } from '@/utils/motionTemplates';
+import { captureCanvasChunk } from '@/utils/canvasCapture';
+import { analyzeCanvasChunkWithGemini } from '@/utils/aiClient';
+import { generateAudioHuggingFace } from '@/utils/huggingFaceClient';
+import { AiSoundDesigner } from './AiSoundDesigner';
 
 const TRANSITIONS = [
   { name: 'Fade', color: 'from-amber-500/20 to-transparent', preview: 'Fade in/out between clips' },
@@ -724,6 +728,17 @@ export function MediaPanel() {
   const [kineticTypoStyle, setKineticTypoStyle] = useState<string>('random');
   const [kineticTypoAnimation, setKineticTypoAnimation] = useState<string>('random');
   const [kineticTypoProvider, setKineticTypoProvider] = useState<'gemini' | 'groq'>('groq');
+
+  // AI SFX Generator States
+  const [sfxVisionProvider, setSfxVisionProvider] = useState<'gemini' | 'groq'>('gemini');
+  const [isAnalyzingSfx, setIsAnalyzingSfx] = useState(false);
+  const [sfxAnalysisCues, setSfxAnalysisCues] = useState<any[] | null>(null);
+  const [sfxChunkStartTime, setSfxChunkStartTime] = useState(0);
+  const [isGeneratingSfxBackground, setIsGeneratingSfxBackground] = useState(false);
+  const [sfxGenerationProgress, setSfxGenerationProgress] = useState(0);
+  const [sfxGeneratedCues, setSfxGeneratedCues] = useState<any[] | null>(null);
+  const sfxBlobUrlsRef = useRef<string[]>([]);
+  const [showAiSfxModal, setShowAiSfxModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
@@ -1494,6 +1509,113 @@ export function MediaPanel() {
     }
   };
 
+  const handleAnalyzeSfx = async () => {
+    setIsAnalyzingSfx(true);
+    setSfxAnalysisCues(null);
+    setSfxGeneratedCues(null);
+    sfxBlobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+    sfxBlobUrlsRef.current = [];
+    
+    try {
+      const { totalDuration } = useEditorStore.getState();
+      const chunkDuration = 10;
+      const allCues: any[] = [];
+      let requestCount = 0;
+      
+      // Calculate total chunks for progress tracking
+      const totalChunks = Math.ceil(totalDuration / chunkDuration);
+      
+      for (let t = 0; t < totalDuration; t += chunkDuration) {
+        const chunkIndex = Math.floor(t / chunkDuration) + 1;
+        
+        // Rate limit: Max 14 requests per minute
+        if (requestCount >= 14) {
+          toast.loading(`Rate limit reached (14 req/min). Pausing for 90 seconds before continuing...`, { id: 'sfx-analyze', duration: 90000 });
+          await new Promise(resolve => setTimeout(resolve, 90000));
+          requestCount = 0;
+        }
+        
+        toast.loading(`Analyzing timeline chunk ${chunkIndex}/${totalChunks}...`, { id: 'sfx-analyze' });
+        
+        const chunkData = await captureCanvasChunk(t, chunkDuration, 5);
+        const cues = await analyzeCanvasChunkWithGemini(chunkData, chunkDuration, sfxVisionProvider);
+        
+        // Shift cues to their absolute position on the timeline
+        const absoluteCues = cues.map(cue => ({
+          ...cue,
+          start: t + cue.start,
+          end: t + cue.end
+        }));
+        
+        allCues.push(...absoluteCues);
+        requestCount++;
+      }
+      
+      // Set the start time to 0 since we analyzed the whole timeline
+      setSfxChunkStartTime(0);
+      setSfxAnalysisCues(allCues);
+      
+      toast.success('Full timeline analyzed successfully!', { id: 'sfx-analyze' });
+    } catch (err: any) {
+      console.error('SFX Analysis failed:', err);
+      toast.error(`SFX Analysis failed: ${err.message || String(err)}`, { id: 'sfx-analyze' });
+    } finally {
+      setIsAnalyzingSfx(false);
+    }
+  };
+
+  const handleGenerateSfxBackground = async () => {
+    if (!sfxAnalysisCues || sfxAnalysisCues.length === 0) return;
+    
+    setIsGeneratingSfxBackground(true);
+    setSfxGenerationProgress(0);
+    // Revoke any previous blob URLs before generating new ones
+    sfxBlobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+    sfxBlobUrlsRef.current = [];
+    const generated: any[] = [];
+    
+    try {
+      for (let i = 0; i < sfxAnalysisCues.length; i++) {
+        const cue = sfxAnalysisCues[i];
+        
+        toast.loading(`Generating SFX ${i + 1}/${sfxAnalysisCues.length}... (may retry if model is cold)`, { id: 'sfx-gen' });
+        
+        try {
+          const audioBlob = await generateAudioHuggingFace(cue.query);
+          const blobUrl = URL.createObjectURL(audioBlob);
+          sfxBlobUrlsRef.current.push(blobUrl);
+          
+          generated.push({
+            ...cue,
+            options: [
+              {
+                id: `hf_${Date.now()}_${i}`,
+                name: `AI: ${cue.query.slice(0, 30)}`,
+                duration: cue.end - cue.start,
+                previewUrl: blobUrl, // AiSoundDesigner reads this field
+                blob: audioBlob,
+                tags: ['ai-generated', 'sfx']
+              }
+            ]
+          });
+        } catch (genErr: any) {
+          console.error(`Failed to generate cue ${i}:`, genErr);
+          toast.error(`Cue ${i + 1} failed: ${genErr.message}`);
+          generated.push({ ...cue, options: [] });
+        }
+        
+        setSfxGenerationProgress(((i + 1) / sfxAnalysisCues.length) * 100);
+      }
+      
+      setSfxGeneratedCues(generated);
+      toast.success('SFX generation complete!', { id: 'sfx-gen' });
+    } catch (err: any) {
+      toast.error(`Generation error: ${err.message}`, { id: 'sfx-gen' });
+    } finally {
+      setIsGeneratingSfxBackground(false);
+    }
+  };
+
   return (
     <div
       data-help-id="media-panel"
@@ -2126,6 +2248,132 @@ export function MediaPanel() {
                 </button>
               </div>
             </div>
+
+            {/* AI SFX Generator */}
+            <div className="p-3 bg-[#1e1e1e]/60 border border-[#3e3e3e] rounded-lg space-y-3.5 mt-4">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Waves className="w-3.5 h-3.5" />
+                  AI SFX Generator (HuggingFace)
+                </p>
+              </div>
+              <p className="text-xs text-[#a0a0a0] leading-relaxed">
+                Analyze a 10-second chunk of your timeline starting from the current playhead. The AI will generate custom Sound Effects based on the visuals and transitions.
+              </p>
+              
+              {!sfxAnalysisCues ? (
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-medium text-[#a0a0a0] flex justify-between">
+                      <span>Vision Model</span>
+                    </label>
+                    <select
+                      value={sfxVisionProvider}
+                      onChange={(e) => setSfxVisionProvider(e.target.value as 'gemini' | 'groq')}
+                      className="w-full bg-[#141414] text-xs text-white border border-[#3e3e3e] rounded-lg px-3 py-2 outline-none focus:border-teal-500 transition-colors appearance-none"
+                    >
+                      <option value="gemini">Gemini 3.1 Flash Lite (High Speed)</option>
+                      <option value="groq">Groq LLaMA-4 Scout (Reasoning)</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAnalyzeSfx}
+                    disabled={isAnalyzingSfx}
+                    className="w-full py-2 text-xs bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 rounded-lg transition-all flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:pointer-events-none"
+                  >
+                    {isAnalyzingSfx ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Analyzing Timeline...
+                      </>
+                    ) : (
+                      <>
+                        <ScanLine className="w-3.5 h-3.5" />
+                        Analyze 10s Chunk
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3 border-t border-[#3e3e3e] pt-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-white">Found {sfxAnalysisCues.length} SFX cues</p>
+                    <button 
+                      onClick={() => {
+                        setSfxAnalysisCues(null);
+                        setSfxGeneratedCues(null);
+                        sfxBlobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+                        sfxBlobUrlsRef.current = [];
+                      }}
+                      className="text-[10px] text-red-400 hover:text-red-300"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="max-h-32 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                    {sfxAnalysisCues.map((cue, idx) => (
+                      <div key={idx} className="bg-[#141414] p-2 rounded border border-[#3e3e3e]">
+                        <div className="flex justify-between text-[10px] text-teal-400 mb-1 font-mono">
+                          <span>{cue.start.toFixed(1)}s – {cue.end.toFixed(1)}s</span>
+                          <span className="text-[#6a6a6a]">@{(sfxChunkStartTime + cue.start).toFixed(1)}s</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={cue.query}
+                          onChange={(e) => {
+                            const newCues = [...sfxAnalysisCues];
+                            newCues[idx].query = e.target.value;
+                            setSfxAnalysisCues(newCues);
+                          }}
+                          className="w-full bg-transparent text-xs text-white border-b border-[#3e3e3e] focus:border-teal-500 focus:outline-none py-1"
+                        />
+                        <p className="text-[9px] text-[#6a6a6a] mt-1 italic">{cue.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {!sfxGeneratedCues ? (
+                    <button
+                      type="button"
+                      onClick={handleGenerateSfxBackground}
+                      disabled={isGeneratingSfxBackground}
+                      className="w-full py-2 text-xs bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-lg shadow-lg hover:shadow-amber-500/10 transition-all flex flex-col items-center justify-center gap-1 disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      {isGeneratingSfxBackground ? (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Generating...</span>
+                          </div>
+                          <div className="w-3/4 h-1 bg-black/20 rounded-full mt-1 overflow-hidden">
+                            <div 
+                              className="h-full bg-white transition-all duration-300"
+                              style={{ width: `${sfxGenerationProgress}%` }}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Generate Audio (Background)</span>
+                        </div>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowAiSfxModal(true)}
+                      className="w-full py-2 text-xs bg-teal-500 hover:bg-teal-600 text-black font-semibold rounded-lg shadow-lg hover:shadow-teal-500/10 transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      Start Preview
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            
           </div>
         )}
 
@@ -3085,6 +3333,21 @@ export function MediaPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI SFX Designer Modal */}
+      {showAiSfxModal && sfxGeneratedCues && (
+        <AiSoundDesigner
+          onClose={() => setShowAiSfxModal(false)}
+          mode="generate"
+          clip={{
+            duration: useEditorStore.getState().totalDuration || 10,
+            trimStart: 0,
+            startTime: sfxChunkStartTime,
+            mediaId: null
+          }}
+          cues={sfxGeneratedCues}
+        />
       )}
     </div>
   );

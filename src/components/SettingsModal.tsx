@@ -356,6 +356,16 @@ export function SettingsModal() {
                       />
                     </div>
                     <div>
+                      <label className="text-[10px] text-white block mb-1">HuggingFace API Key</label>
+                      <input
+                        type="password"
+                        placeholder="hf_..."
+                        value={settings.huggingFaceApiKey || ''}
+                        onChange={(e) => updateSettings({ huggingFaceApiKey: e.target.value })}
+                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
                       <label className="text-[10px] text-white block mb-1">Freesound API Key</label>
                       <input
                         type="password"

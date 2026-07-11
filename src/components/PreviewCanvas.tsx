@@ -2715,6 +2715,7 @@ export function PreviewCanvas() {
         style={{ cursor: activeTool === 'hand' ? (isPanning.current ? 'grabbing' : 'grab') : (activeTool === 'zoom' ? 'zoom-in' : (() => { const sc = tracks.flatMap(t=>t.clips).find(c=>c.id===selectedClipId); return sc?.particleSettings ? 'crosshair' : 'default'; })()) }}
       >
         <canvas
+          id="preview-canvas"
           ref={canvasRef}
           width={isExporting ? (exportWidth || 854) : previewWidth}
           height={isExporting ? (exportHeight || 480) : previewHeight}

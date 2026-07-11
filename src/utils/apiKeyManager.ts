@@ -17,6 +17,14 @@ export function getEnvGroqKey(): string {
 }
 
 /**
+ * Gets the primary HuggingFace key from the environment variables.
+ */
+export function getEnvHuggingFaceKey(): string {
+  // @ts-ignore
+  return import.meta.env.VITE_HUGGINGFACE_API_KEY || import.meta.env.HUGGINGFACE_API_KEY || '';
+}
+
+/**
  * Gets the local fallback Gemini key provided by the user in settings.
  */
 export function getLocalGeminiKey(): string {
@@ -28,6 +36,13 @@ export function getLocalGeminiKey(): string {
  */
 export function getLocalGroqKey(): string {
   return useEditorStore.getState().settings.groqApiKey || '';
+}
+
+/**
+ * Gets the local fallback HuggingFace key provided by the user in settings.
+ */
+export function getLocalHuggingFaceKey(): string {
+  return useEditorStore.getState().settings.huggingFaceApiKey || '';
 }
 
 /**
