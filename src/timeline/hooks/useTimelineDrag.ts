@@ -165,9 +165,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     newTime = snappedTime;
     setSnapLine(snapPos);
 
-    const finalDt = newTime - dragState.originalStartTime;
+    const minOriginalStart = Math.min(...dragState.draggedClips.map(c => c.originalStartTime));
+    const clampedFinalDt = Math.max(-minOriginalStart, newTime - dragState.originalStartTime);
 
-    if (dragState.draggedClips.length > 1) {
+    if (dragState.draggedClips.length >= 1) {
       setDragPreview(0, null);
 
       const sourceTrackIdx = tracks.findIndex((t) => t.id === dragState.trackId);
@@ -175,7 +176,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const trackDelta = targetTrackIdx - sourceTrackIdx;
 
       const updates = dragState.draggedClips.map((c) => {
-        const clipNewTime = Math.max(0, c.originalStartTime + finalDt);
+        const clipNewTime = c.originalStartTime + clampedFinalDt;
         
         const clipTrackIdx = tracks.findIndex((t) => t.id === c.trackId);
         const newTrackIdx = clipTrackIdx + trackDelta;
@@ -201,7 +202,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return true;
       });
 
-      // Strict collision boundary logic for multi-clip drag
+      // Strict collision boundary logic for drag
       let hasOverlap = false;
       const draggedIds = new Set(uniqueUpdates.map(u => u.clipId));
 
@@ -230,11 +231,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (!hasOverlap) {
         moveClips(uniqueUpdates, false);
       }
-    } else if (dragState.draggedClips.length === 1) {
-      setDragPreview(newTime, targetTrackId);
-      moveClip(dragState.clipId, newTime, targetTrackId);
     }
-  }, [dragState, tracks, zoomLevel, getTrackFromMouseY, computeSnap, moveClips, moveClip, setDragPreview, setSnapLine]);
+  }, [dragState, tracks, zoomLevel, getTrackFromMouseY, computeSnap, moveClips, setDragPreview, setSnapLine]);
 
   const updateDragPositionRef = useRef(updateDragPosition);
   useEffect(() => {
