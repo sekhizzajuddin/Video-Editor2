@@ -1,5 +1,5 @@
 import { getEnvElevenLabsKey, getLocalElevenLabsKey } from './apiKeyManager';
-import { splitAudioBySilence } from './audioSplitter';
+import { splitAudioByTime } from './audioSplitter';
 
 export interface SfxCue {
   id?: string;
@@ -129,8 +129,11 @@ export async function generateCombinedSfx(
       // Generate the composite audio
       const compositeBlob = await callElevenLabsProxy(chunk.prompt, chunk.duration);
 
-      // Split the composite audio back into individual cues
-      const splitBlobs = await splitAudioBySilence(compositeBlob, chunk.cues.length);
+      // Extract the cue durations for this chunk to split proportionally
+      const cueDurations = chunk.cues.map(c => Math.max(1, Math.min(29, Math.round(c.end - c.start))));
+
+      // Split the composite audio based on requested timing
+      const splitBlobs = await splitAudioByTime(compositeBlob, cueDurations);
 
       // Place them in finalAudioBlobs
       for (let i = 0; i < chunk.cues.length; i++) {

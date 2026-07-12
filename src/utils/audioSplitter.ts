@@ -90,6 +90,64 @@ function extractBufferRegion(buffer: AudioBuffer, context: AudioContext, startSe
 }
 
 /**
+ * Splits a composite audio Blob into individual Blobs based on the requested cue durations,
+ * scaling dynamically to match the actual duration of the generated audio buffer.
+ */
+export async function splitAudioByTime(
+  audioBlob: Blob,
+  cueDurations: number[]
+): Promise<Blob[]> {
+  if (cueDurations.length <= 1) {
+    return [audioBlob];
+  }
+
+  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  
+  try {
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const actualDuration = audioBuffer.duration;
+    
+    // Calculate the requested intervals
+    // Each cue has cueDurations[i] seconds. Between cues there is 1 second of silence.
+    let requestedTotal = 0;
+    const requestedIntervals: { start: number; end: number }[] = [];
+    
+    for (let i = 0; i < cueDurations.length; i++) {
+      const dur = cueDurations[i];
+      const start = requestedTotal;
+      const end = start + dur;
+      requestedIntervals.push({ start, end });
+      requestedTotal = end + 1; // add 1s silence after this cue
+    }
+    
+    // Subtract the last trailing silence we added
+    requestedTotal -= 1;
+    if (requestedTotal <= 0) requestedTotal = 1;
+
+    // Scale factor to adjust to actual returned duration
+    const scale = actualDuration / requestedTotal;
+    
+    const clips: Blob[] = [];
+    
+    for (let i = 0; i < cueDurations.length; i++) {
+      const startSec = requestedIntervals[i].start * scale;
+      const endSec = requestedIntervals[i].end * scale;
+      
+      const extractedBuffer = extractBufferRegion(audioBuffer, audioContext, startSec, endSec);
+      const clipBlob = audioBufferToWavBlob(extractedBuffer);
+      clips.push(clipBlob);
+    }
+    
+    return clips;
+  } finally {
+    if (audioContext.state !== 'closed') {
+      audioContext.close();
+    }
+  }
+}
+
+/**
  * Main function to split a single audio Blob containing multiple SFX separated by silence.
  * 
  * @param audioBlob The audio blob to split
