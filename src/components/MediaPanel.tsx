@@ -1268,7 +1268,7 @@ export function MediaPanel() {
         ttsAudioRef.current = audio;
         
         audio.oncanplaythrough = () => {
-          audio.play();
+          audio.play().catch(() => {});
           setIsGeneratingTTS(false);
         };
         audio.onended = () => {
@@ -1309,7 +1309,7 @@ export function MediaPanel() {
           const audioEl = new Audio(audio.src);
           ttsAudioRef.current = audioEl;
           audioEl.oncanplaythrough = () => {
-            audioEl.play();
+            audioEl.play().catch(() => {});
             setIsGeneratingTTS(false);
           };
           audioEl.onended = () => {

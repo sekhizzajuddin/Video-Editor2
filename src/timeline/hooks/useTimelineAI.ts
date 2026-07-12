@@ -222,7 +222,7 @@ Return your response ONLY as a JSON object with these two fields:
       const blob = await synthesizeProceduralSFX(sfxCategory, sfxDuration);
       const audioUrl = URL.createObjectURL(blob);
       const audio = new Audio(audioUrl);
-      audio.play();
+      audio.play().catch(() => {});
     } catch (err) {
       console.error('Failed to audition SFX:', err);
     }

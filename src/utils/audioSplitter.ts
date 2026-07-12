@@ -7,41 +7,12 @@
 function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
   const numOfChan = buffer.numberOfChannels;
   const length = buffer.length * numOfChan * 2 + 44;
-  const bufferArray = new ArrayBuffer(length);
-  const view = new DataView(bufferArray);
+  const bufferWav = new ArrayBuffer(length);
+  const view = new DataView(bufferWav);
   const channels = [];
-  let sample;
+  let sample = 0;
   let offset = 0;
   let pos = 0;
-
-  // write WAVE header
-  setUint32(0x46464952); // "RIFF"
-  setUint32(length - 8); // file length - 8
-  setUint32(0x45564157); // "WAVE"
-  setUint32(0x20746d66); // "fmt " chunk
-  setUint32(16); // length = 16
-  setUint16(1); // PCM (uncompressed)
-  setUint16(numOfChan);
-  setUint32(buffer.sampleRate);
-  setUint32(buffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-  setUint16(numOfChan * 2); // block-align
-  setUint16(16); // 16-bit
-  setUint32(0x61746164); // "data" - chunk
-  setUint32(length - pos - 4); // chunk length
-
-  for (let i = 0; i < buffer.numberOfChannels; i++) {
-    channels.push(buffer.getChannelData(i));
-  }
-
-  while (offset < buffer.length) {
-    for (let i = 0; i < numOfChan; i++) {
-      sample = Math.max(-1, Math.min(1, channels[i][offset])); // clamp
-      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0; // scale to 16-bit signed int
-      view.setInt16(pos, sample, true); // write 16-bit sample
-      pos += 2;
-    }
-    offset++; // next source sample
-  }
 
   function setUint16(data: number) {
     view.setUint16(pos, data, true);
@@ -53,7 +24,48 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
     pos += 4;
   }
 
-  return new Blob([bufferArray], { type: 'audio/wav' });
+  // RIFF
+  setUint32(0x46464952);
+  // file length - 8
+  setUint32(length - 8);
+  // WAVE
+  setUint32(0x45564157);
+  // fmt chunk
+  setUint32(0x20746d66);
+  // chunk length
+  setUint32(16);
+  // sample format
+  setUint16(1);
+  // channel count
+  setUint16(numOfChan);
+  // sample rate
+  setUint32(buffer.sampleRate);
+  // byte rate
+  setUint32(buffer.sampleRate * numOfChan * 2);
+  // block align
+  setUint16(numOfChan * 2);
+  // bits per sample
+  setUint16(16);
+  // data chunk
+  setUint32(0x61746164);
+  // chunk length
+  setUint32(length - pos - 4);
+
+  for (let i = 0; i < buffer.numberOfChannels; i++) {
+    channels.push(buffer.getChannelData(i));
+  }
+
+  while (pos < length) {
+    for (let i = 0; i < numOfChan; i++) {
+      sample = Math.max(-1, Math.min(1, channels[i][offset]));
+      sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(pos, sample, true);
+      pos += 2;
+    }
+    offset++;
+  }
+
+  return new Blob([bufferWav], { type: 'audio/wav' });
 }
 
 /**
