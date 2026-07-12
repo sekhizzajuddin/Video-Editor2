@@ -155,6 +155,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         }
       }}
       onContextMenu={(e) => {
+        if (isDragging) return;
         e.preventDefault();
         e.stopPropagation();
         selectClip(clip.id);
@@ -171,7 +172,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       {/* ── Transition In Badge ────────────────────── */}
       {clip.transitionIn && (
         <div
-          className={`absolute left-0 top-0 bottom-0 bg-purple-600/70 border-r border-purple-400/80 hover:bg-purple-500 hover:border-purple-300 transition-colors z-30 cursor-pointer flex items-center justify-center overflow-hidden ${
+          className={`absolute left-0 top-0 bottom-0 bg-purple-600/70 border-r border-purple-400/80 hover:bg-purple-500 hover:border-purple-300 transition-colors z-50 cursor-pointer flex items-center justify-center overflow-hidden ${
             selectedTransitionClipId === clip.id ? 'ring-2 ring-white bg-purple-500' : ''
           }`}
           style={{
@@ -353,7 +354,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
           </span>
         </div>
         <div className="absolute bottom-0.5 right-1 text-[8px] text-white/50 tabular-nums">
-          {clip.duration.toFixed(1)}s
+          {Math.max(0.1, clip.duration).toFixed(1)}s
         </div>
       </div>
 
@@ -722,7 +723,7 @@ export function TimelineClipRow({
           const prevClip = sortedClips[idx - 1];
           const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
           
-          if (Math.abs(gap) < 0.1) {
+          if (Math.abs(gap) < 0.034) {
             const intersectionTime = clip.startTime;
             const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
             

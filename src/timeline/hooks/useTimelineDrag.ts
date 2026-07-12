@@ -41,6 +41,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const dragRafIdRef = useRef<number | null>(null);
   const resizeRafIdRef = useRef<number | null>(null);
   const resizeOverLayerRafIdRef = useRef<number | null>(null);
+  const dragOverLayerRafIdRef = useRef<number | null>(null);
 
   const {
     trackContainerRef,
@@ -565,8 +566,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     if (dragOverLayerState) {
       const clientX = e.clientX;
       const clientY = e.clientY;
-      if (!(window as any).__olDragRaf) {
-        (window as any).__olDragRaf = requestAnimationFrame(() => {
+      if (!dragOverLayerRafIdRef.current) {
+        dragOverLayerRafIdRef.current = requestAnimationFrame(() => {
           const dx = clientX - dragOverLayerState.startX;
           const dt = dx / zoomLevel;
           let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
@@ -580,7 +581,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           }
           
           moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
-
+ 
           const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
           if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
             const trackRect = trackEl.getBoundingClientRect();
@@ -588,7 +589,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
             reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
           }
-          (window as any).__olDragRaf = null;
+          dragOverLayerRafIdRef.current = null;
         });
       }
     }
@@ -857,9 +858,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       endTransactionSafe();
     }
     if (dragOverLayerState) {
-      if ((window as any).__olDragRaf) {
-        cancelAnimationFrame((window as any).__olDragRaf);
-        (window as any).__olDragRaf = null;
+      if (dragOverLayerRafIdRef.current) {
+        cancelAnimationFrame(dragOverLayerRafIdRef.current);
+        dragOverLayerRafIdRef.current = null;
       }
       setSnapLine(null);
       setDragOverLayerState(null);

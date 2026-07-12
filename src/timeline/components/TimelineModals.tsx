@@ -116,6 +116,30 @@ export function TimelineModals({
     setContextMenu(null);
   };
 
+  React.useEffect(() => {
+    if (!contextMenu && !markerContextMenu) return;
+
+    const handleGlobalMouseDown = (e: MouseEvent) => {
+      // Close context menus on outside click.
+      setContextMenu(null);
+      setMarkerContextMenu(null);
+    };
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setContextMenu(null);
+        setMarkerContextMenu(null);
+      }
+    };
+
+    window.addEventListener('mousedown', handleGlobalMouseDown, true);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleGlobalMouseDown, true);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [contextMenu, markerContextMenu, setContextMenu, setMarkerContextMenu]);
+
   return (
     <>
       {/* ── Context Menu ──────────────────────────────────────────────── */}
@@ -124,7 +148,7 @@ export function TimelineModals({
           className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-1 min-w-[190px] text-white"
           style={{
             left: `${Math.min(contextMenu.x, window.innerWidth - 200)}px`,
-            top: `${Math.min(contextMenu.y, window.innerHeight - 300)}px`,
+            top: `${Math.min(contextMenu.y, window.innerHeight - (contextMenu.clipId === '' ? 100 : contextMenu.isOverLayer ? 180 : 380))}px`,
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -370,7 +394,7 @@ export function TimelineModals({
             className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-2 min-w-[200px] text-white max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             style={{
               left: `${Math.min(markerContextMenu.x, window.innerWidth - 220)}px`,
-              top: `${Math.min(markerContextMenu.y, window.innerHeight - 320)}px`,
+              top: `${Math.min(markerContextMenu.y, window.innerHeight - 360)}px`,
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -403,7 +427,7 @@ export function TimelineModals({
             </div>
 
             <div className="px-3 py-1 text-[10px] text-[#a0a0a0] mt-1">Marker Type</div>
-            .            <div className="px-1.5 pb-1.5 space-y-0.5">
+            <div className="px-1.5 pb-1.5 space-y-0.5">
               <button
                 className={`w-full text-left px-2 py-1 text-xs rounded flex items-center gap-2 transition-colors ${marker.type === 'standard' || !marker.type ? 'bg-amber-500/20 text-amber-400' : 'text-white hover:bg-[#3e3e3e]'}`}
                 onClick={() => { updateMarker(marker.id, { type: 'standard' }); setMarkerContextMenu(null); }}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, ArrowLeftRight, GripVertical, ZoomIn, Plus } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { toast } from 'sonner';
 
 interface TransitionTargetProps {
   position?: 'in' | 'out';
@@ -161,11 +162,16 @@ export function TransitionTarget({
     else if (name.toLowerCase().includes('zoom')) type = 'zoom';
     else if (name.toLowerCase().includes('slide')) type = 'slide';
 
+    const state = useEditorStore.getState();
+    const clip = state.tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+    const clipDuration = clip?.duration ?? 2.5;
+    const defaultDuration = Math.min(1.0, clipDuration * 0.4);
+
     const newTransition = {
       id: Math.random().toString(36).substr(2, 9),
       name,
       type,
-      duration: 1.0,
+      duration: Math.max(0.1, defaultDuration),
       params: { alignment: 'center' },
     };
 
@@ -228,18 +234,6 @@ export function TransitionTarget({
             <TransitionPreviewTooltipCanvas transitionName={transitionName} />
           </div>
         )}
-
-        {isHovered && transitionName && (
-          <div
-            className="absolute pointer-events-none bg-black/95 text-[9px] text-purple-200 px-1.5 py-0.5 rounded shadow-lg border border-purple-500/30 z-[100] whitespace-nowrap"
-            style={{
-              top: `${mousePos.y + 15}px`,
-              left: `${mousePos.x + 15}px`,
-            }}
-          >
-            {transitionName}
-          </div>
-        )}
       </div>
     );
   }
@@ -249,6 +243,10 @@ export function TransitionTarget({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onClick={(e) => {
+        e.stopPropagation();
+        toast.info("Drag a transition effect here from the Effects panel to apply it.");
+      }}
       className="absolute top-0 bottom-0 z-30 flex flex-col items-center justify-center pointer-events-auto group cursor-pointer"
       style={{
         left: `${left + width / 2 - 12}px`,

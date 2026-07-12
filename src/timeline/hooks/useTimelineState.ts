@@ -104,8 +104,18 @@ export function useTimelineState() {
   const [hoverCutX, setHoverCutX] = useState<number | null>(null);
 
   // Context menus
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [markerContextMenu, setMarkerContextMenu] = useState<MarkerContextMenuState | null>(null);
+  const [contextMenu, _setContextMenu] = useState<ContextMenuState | null>(null);
+  const [markerContextMenu, _setMarkerContextMenu] = useState<MarkerContextMenuState | null>(null);
+
+  const setContextMenu = useCallback((val: ContextMenuState | null) => {
+    _setContextMenu(val);
+    if (val) _setMarkerContextMenu(null);
+  }, []);
+
+  const setMarkerContextMenu = useCallback((val: MarkerContextMenuState | null) => {
+    _setMarkerContextMenu(val);
+    if (val) _setContextMenu(null);
+  }, []);
 
   // Transaction tracking refs
   const transactionActiveRef = useRef(false);

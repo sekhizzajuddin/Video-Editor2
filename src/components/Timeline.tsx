@@ -381,14 +381,16 @@ export function Timeline() {
                 {dropPreview && hoveredTrackId && (() => {
                   const mediaType = dropPreview.mediaType || 'video';
                   const colors = CLIP_COLORS[mediaType] || CLIP_COLORS.video;
+                  const hoveredTrackIdx = tracks.findIndex((t) => t.id === hoveredTrackId);
+                  const activeTrackIdx = hoveredTrackIdx >= 0 ? hoveredTrackIdx : dropPreview.trackIdx;
                   return (
                     <div
                       className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border}`}
                       style={{
-                        top: `${getTrackTop(tracks, dropPreview.trackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
+                        top: `${getTrackTop(tracks, activeTrackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
                         left: `${dropPreview.time * zoomLevel}px`,
                         width: `${Math.max(16, dropPreview.duration * zoomLevel)}px`,
-                        height: `${getTrackHeight(tracks[dropPreview.trackIdx], hoveredOverLayerRegion, pinnedOverLayerTrackId) - 8}px`,
+                        height: `${getTrackHeight(tracks[activeTrackIdx], hoveredOverLayerRegion, pinnedOverLayerTrackId) - 8}px`,
                       }}
                     >
                       <div className="absolute inset-0 flex items-center px-2 overflow-hidden pointer-events-none">
