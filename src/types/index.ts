@@ -437,6 +437,7 @@ export interface EditorState {
   playbackSpeed: number;
   playbackDirection?: number; // -1, 0, +1
   isMuted: boolean;
+  muteTimelineAudio?: boolean;
   volume: number;
   inPoint: number | null;
   outPoint: number | null;
@@ -523,6 +524,7 @@ export interface EditorState {
 }
 
 export interface EditorActions {
+  setMuteTimelineAudio: (mute: boolean) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
   setProjectInfo: (id: string, name: string) => void;
   resetProject: () => void;

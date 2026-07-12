@@ -161,6 +161,7 @@ function findNonOverlappingPosition(
 }
 
 interface EditorActions {
+  setMuteTimelineAudio: (mute: boolean) => void;
   // Media Library
   addMedia: (item: MediaItem, file?: File) => void;
   removeMedia: (id: string) => void;
@@ -370,6 +371,7 @@ const initialState: EditorState = {
   playbackSpeed: 1,
   playbackDirection: 1,
   isMuted: false,
+  muteTimelineAudio: false,
   volume: 1,
   inPoint: null,
   outPoint: null,
@@ -1823,6 +1825,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
   setVolume: (volume) => set({ volume, isMuted: volume === 0 }),
   toggleMute: () => set((state) => ({ isMuted: !state.isMuted })),
+  setMuteTimelineAudio: (mute: boolean) => set({ muteTimelineAudio: mute }),
   setTotalDuration: (duration) => set({ totalDuration: duration }),
   setInPoint: (time) => set({ inPoint: time }),
   setOutPoint: (time) => set({ outPoint: time }),

@@ -130,6 +130,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const currentTime = useEditorStore((s) => s.currentTime);
   const volume = useEditorStore((s) => s.volume);
   const isMuted = useEditorStore((s) => s.isMuted);
+  const muteTimelineAudio = useEditorStore((s) => s.muteTimelineAudio);
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
   const isExporting = useEditorStore((s) => s.isExporting);
 
@@ -751,7 +752,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
       // Update volume & mute state supporting track Solo / Mute logic
       const anyTrackSoloed = tracks.some(t => t.solo);
       const isMutedTrack = targetTrack ? (anyTrackSoloed ? !targetTrack.solo : targetTrack.muted) : false;
-      const isMutedGlobally = isMutedTrack || isMuted;
+      const isMutedGlobally = isMutedTrack || isMuted || !!muteTimelineAudio;
       const globalMuted = isMutedGlobally || audioSettings.muted || (fullClip as any).disabled;
 
       const clipElapsed = currentTime - fullClip.startTime;
@@ -910,7 +911,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         entry.el.playbackRate = targetSpeed;
       }
     }
-  }, [tracks, volume, isMuted, playbackSpeed, currentTime, isPlaying, mediaLibrary]);
+  }, [tracks, volume, isMuted, muteTimelineAudio, playbackSpeed, currentTime, isPlaying, mediaLibrary]);
 
   // On seek (when not playing), update video elements for frame display
   useEffect(() => {

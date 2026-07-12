@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Play, Pause, Square, Sparkles, X, Loader2, Volume2, VolumeX, Music, Zap,
-  ChevronLeft, ChevronRight, SkipBack, SkipForward
+  ChevronLeft, ChevronRight, SkipBack, SkipForward, Film
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { AICueResult, analyzeAudioWithGemini } from '@/utils/aiClient';
@@ -47,6 +47,17 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   const media = clip.mediaId ? useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId) : null;
   const videoUrl = media?.url;
 
+  // ── Store state for whole timeline preview ────────────────
+  const globalIsPlaying = useEditorStore((s) => s.isPlaying);
+  const globalCurrentTime = useEditorStore((s) => s.currentTime);
+  const seek = useEditorStore((s) => s.seek);
+  const togglePlayback = useEditorStore((s) => s.togglePlayback);
+  const previewCanvas = useEditorStore((s) => s.previewCanvas);
+  const muteTimelineAudio = useEditorStore((s) => s.muteTimelineAudio);
+  const setMuteTimelineAudio = useEditorStore((s) => s.setMuteTimelineAudio);
+
+  const isWholeTimelineMode = clip.mediaId === null;
+
   // ── Local state ────────────────────────────────────────────
   // Cues with mutable selection + trim state
   const [cues, setCues] = useState<CueWithOptions[]>(() =>
@@ -63,8 +74,8 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   });
 
   const [activeCueIndex, setActiveCueIndex] = useState<number | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [localIsPlaying, setLocalIsPlaying] = useState(false);
+  const [localCurrentTime, setLocalCurrentTime] = useState(0);
   const [volume, setVolume] = useState(80);
   const [videoMuted, setVideoMuted] = useState(true);
   const [isApplying, setIsApplying] = useState(false);
@@ -73,6 +84,29 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   // Prompt editing & selective regeneration
   const [editedCueIndices, setEditedCueIndices] = useState<Set<number>>(new Set());
   const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const isPlaying = isWholeTimelineMode ? globalIsPlaying : localIsPlaying;
+  const currentTime = isWholeTimelineMode ? globalCurrentTime : localCurrentTime;
+
+  const setIsPlaying = (val: boolean | ((prev: boolean) => boolean)) => {
+    if (isWholeTimelineMode) {
+      const target = typeof val === 'function' ? val(globalIsPlaying) : val;
+      if (target !== globalIsPlaying) {
+        togglePlayback();
+      }
+    } else {
+      setLocalIsPlaying(val);
+    }
+  };
+
+  const setCurrentTime = (val: number | ((prev: number) => number)) => {
+    if (isWholeTimelineMode) {
+      const target = typeof val === 'function' ? val(globalCurrentTime) : val;
+      seek(target);
+    } else {
+      setLocalCurrentTime(val);
+    }
+  };
 
   // ── Audition (inspector) single track ─────────────────────
   const [playingOptionKey, setPlayingOptionKey] = useState<string | null>(null);
@@ -98,20 +132,82 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
 
   // ── Audio/video refs ──────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const localCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioPlayersRef = useRef<Record<number, HTMLAudioElement>>({});
   const audioSrcMapRef = useRef<Record<number, string>>({}); // track the URL we loaded
   const syncIntervalRef = useRef<number | null>(null);
 
-  // ─────────────────────────────────────────────────────────────
-  // Sync engine — runs every 50ms while playing
-  // ─────────────────────────────────────────────────────────────
+  // ── Canvas Mirroring Effect (Whole Timeline Mode) ──────────
+  useEffect(() => {
+    if (!isWholeTimelineMode || !previewCanvas) return;
+
+    let animId: number;
+    const draw = () => {
+      const canvas = localCanvasRef.current;
+      if (canvas && previewCanvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          if (canvas.width !== previewCanvas.width || canvas.height !== previewCanvas.height) {
+            canvas.width = previewCanvas.width;
+            canvas.height = previewCanvas.height;
+          }
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(previewCanvas, 0, 0);
+        }
+      }
+      animId = requestAnimationFrame(draw);
+    };
+
+    animId = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animId);
+  }, [isWholeTimelineMode, previewCanvas]);
+
+  // ── Reactive Audio Sync (Whole Timeline Mode) ──────────────
+  useEffect(() => {
+    if (!isWholeTimelineMode) return;
+
+    cues.forEach((cue, idx) => {
+      const optIdx = selectedOptions[idx] ?? 0;
+      const option = cue.options[optIdx];
+      if (!option) return;
+
+      let audio = audioPlayersRef.current[idx];
+      if (!audio || audioSrcMapRef.current[idx] !== option.previewUrl) {
+        if (audio) audio.pause();
+        audio = new Audio(option.previewUrl);
+        audio.crossOrigin = 'anonymous';
+        audio.volume = volume / 100;
+        audioPlayersRef.current[idx] = audio;
+        audioSrcMapRef.current[idx] = option.previewUrl;
+      }
+      audio.volume = volume / 100;
+
+      const isWithin = globalCurrentTime >= cue.start && globalCurrentTime < cue.end;
+      if (isWithin) {
+        if (globalIsPlaying) {
+          if (audio.paused) audio.play().catch(() => {});
+        } else {
+          if (!audio.paused) audio.pause();
+        }
+        const expected = globalCurrentTime - cue.start + cue.trimOffset;
+        if (Math.abs(audio.currentTime - expected) > 0.2) audio.currentTime = expected;
+      } else {
+        if (!audio.paused) {
+          audio.pause();
+          audio.currentTime = cue.trimOffset;
+        }
+      }
+    });
+  }, [globalCurrentTime, globalIsPlaying, isWholeTimelineMode, cues, selectedOptions, volume]);
+
+  // ── Local sync engine (Single Clip Mode) ──────────────────
   const syncAudio = useCallback(() => {
+    if (isWholeTimelineMode) return;
     let relTime = currentTimeRef.current;
     if (videoRef.current) {
       const v = videoRef.current;
       relTime = Math.max(0, v.currentTime - clip.trimStart);
     } else {
-      // Procedural clock tick (video-free mode)
       const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
       relTime = playStartOffsetRef.current + elapsed;
     }
@@ -154,9 +250,10 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
         if (!audio.paused) { audio.pause(); audio.currentTime = cue.trimOffset; }
       }
     });
-  }, [cues, selectedOptions, clip, volume]);
+  }, [cues, selectedOptions, clip, volume, isWholeTimelineMode]);
 
   useEffect(() => {
+    if (isWholeTimelineMode) return;
     if (isPlaying) {
       syncIntervalRef.current = window.setInterval(syncAudio, 50);
     } else {
@@ -164,26 +261,30 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
       Object.values(audioPlayersRef.current).forEach((a) => a.pause());
     }
     return () => { if (syncIntervalRef.current) clearInterval(syncIntervalRef.current); };
-  }, [isPlaying, syncAudio]);
+  }, [isPlaying, syncAudio, isWholeTimelineMode]);
 
   useEffect(() => {
     return () => {
       Object.values(audioPlayersRef.current).forEach((a) => a.pause());
       if (inspectorAudioRef.current) inspectorAudioRef.current.pause();
+      // Safely restore timeline audio muting state on modal exit
+      useEditorStore.getState().setMuteTimelineAudio(false);
     };
   }, []);
 
-  // ─────────────────────────────────────────────────────────────
-  // Seek to a relative time (0 → clip.duration)
-  // ─────────────────────────────────────────────────────────────
+  // ── Seek to a relative time (0 → clip.duration) ─────────────
   const seekTo = useCallback((relTime: number) => {
     const clamped = Math.max(0, Math.min(clip.duration, relTime));
-    if (videoRef.current) {
-      videoRef.current.currentTime = clip.trimStart + clamped;
+    if (isWholeTimelineMode) {
+      seek(clamped);
+    } else {
+      if (videoRef.current) {
+        videoRef.current.currentTime = clip.trimStart + clamped;
+      }
+      playStartTimeRef.current = performance.now();
+      playStartOffsetRef.current = clamped;
+      updateCurrentTime(clamped);
     }
-    playStartTimeRef.current = performance.now();
-    playStartOffsetRef.current = clamped;
-    updateCurrentTime(clamped);
 
     // Sync audio heads
     cues.forEach((cue, idx) => {
@@ -198,36 +299,47 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
         audio.currentTime = cue.trimOffset;
       }
     });
-  }, [clip, cues, isPlaying]);
+  }, [clip, cues, isPlaying, isWholeTimelineMode, seek]);
 
   // ─────────────────────────────────────────────────────────────
   // Play / Pause
   // ─────────────────────────────────────────────────────────────
   const handlePlayPause = () => {
-    if (isPlaying) {
-      videoRef.current?.pause();
-      cues.forEach((_, i) => {
-        if (audioPlayersRef.current[i]) {
-          audioPlayersRef.current[i]?.pause();
-        }
-      });
-      setIsPlaying(false);
+    if (isWholeTimelineMode) {
+      togglePlayback();
     } else {
-      const currentVal = currentTimeRef.current;
-      if (currentVal >= clip.duration - 0.05) {
-        seekTo(0);
+      if (isPlaying) {
+        videoRef.current?.pause();
+        cues.forEach((_, i) => {
+          if (audioPlayersRef.current[i]) {
+            audioPlayersRef.current[i]?.pause();
+          }
+        });
+        setIsPlaying(false);
       } else {
-        seekTo(currentVal);
+        const currentVal = currentTimeRef.current;
+        if (currentVal >= clip.duration - 0.05) {
+          seekTo(0);
+        } else {
+          seekTo(currentVal);
+        }
+        videoRef.current?.play().catch(console.error);
+        setIsPlaying(true);
       }
-      videoRef.current?.play().catch(console.error);
-      setIsPlaying(true);
     }
   };
 
   const handleStop = () => {
-    if (videoRef.current) { videoRef.current.pause(); }
-    setIsPlaying(false);
-    seekTo(0);
+    if (isWholeTimelineMode) {
+      if (globalIsPlaying) {
+        togglePlayback();
+      }
+      seek(0);
+    } else {
+      if (videoRef.current) { videoRef.current.pause(); }
+      setIsPlaying(false);
+      seekTo(0);
+    }
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -655,7 +767,19 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
           <div className="flex flex-col border-r border-[#2a2a2a] bg-black" style={{ width: '58%' }}>
             {/* Video */}
             <div className="flex-1 flex items-center justify-center bg-black min-h-0 overflow-hidden">
-              {videoUrl ? (
+              {isWholeTimelineMode ? (
+                previewCanvas ? (
+                  <canvas
+                    ref={localCanvasRef}
+                    className="max-w-full max-h-full object-contain"
+                  />
+                ) : (
+                  <div className="text-xs text-[#606060] text-center">
+                    <Film className="w-8 h-8 mx-auto mb-2 opacity-30 animate-pulse" />
+                    Connecting to timeline canvas...
+                  </div>
+                )
+              ) : videoUrl ? (
                 <video
                   ref={videoRef}
                   src={videoUrl}
@@ -720,14 +844,26 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                   <span className="text-[10px] font-mono text-white">{fmt(currentTime)}</span>
                   <span className="text-[10px] font-mono">/</span>
                   <span className="text-[10px] font-mono">{fmt(clip.duration)}</span>
-                  <button
-                    onClick={() => setVideoMuted(!videoMuted)}
-                    className={`p-1 ml-2 rounded transition-colors ${videoMuted ? 'text-red-400 hover:text-red-300' : 'text-[#a0a0a0] hover:text-white'}`}
-                    title={videoMuted ? 'Unmute original audio' : 'Mute original audio'}
-                  >
-                    {videoMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                  </button>
-                  <Volume2 className="w-3 h-3" />
+                  
+                  {isWholeTimelineMode ? (
+                    <button
+                      onClick={() => setMuteTimelineAudio(!muteTimelineAudio)}
+                      className={`p-1 ml-2 rounded transition-colors ${muteTimelineAudio ? 'text-red-400 hover:text-red-300' : 'text-[#a0a0a0] hover:text-white'}`}
+                      title={muteTimelineAudio ? 'Unmute timeline audio' : 'Mute timeline audio'}
+                    >
+                      {muteTimelineAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setVideoMuted(!videoMuted)}
+                      className={`p-1 ml-2 rounded transition-colors ${videoMuted ? 'text-red-400 hover:text-red-300' : 'text-[#a0a0a0] hover:text-white'}`}
+                      title={videoMuted ? 'Unmute original audio' : 'Mute original audio'}
+                    >
+                      {videoMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
+
+                  <Volume2 className="w-3 h-3 ml-2" />
                   <input
                     type="range" min={0} max={100} value={volume}
                     onChange={(e) => setVolume(Number(e.target.value))}
