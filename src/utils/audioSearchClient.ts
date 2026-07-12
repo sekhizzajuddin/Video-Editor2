@@ -26,7 +26,9 @@ export async function searchFreesound(
 
   // Use explicit type if provided; fallback to keyword-based heuristic
   const isBgm = type === 'bgm' || (!type && (query.toLowerCase().includes('music') || query.toLowerCase().includes('bgm') || query.toLowerCase().includes('ambient') || query.toLowerCase().includes('orchestral') || query.toLowerCase().includes('cinematic') || query.toLowerCase().includes('lofi') || query.toLowerCase().includes('electronic')));
-  const durationFilter = isBgm ? 'duration:[10.0 TO 300.0]' : 'duration:[0.5 TO 15.0]';
+  // Filter out Non-Commercial (NC) licenses to ensure all search results are legally usable for commercial projects (e.g. monetized YouTube)
+  const baseFilter = isBgm ? 'duration:[10.0 TO 300.0]' : 'duration:[0.5 TO 15.0]';
+  const durationFilter = `${baseFilter} AND license:("Creative Commons 0" OR "Attribution")`;
   
   // Use our serverless function proxy to bypass CORS and properly handle Env vars
   const url = `/api/freesound?query=${encodeURIComponent(cleanQuery)}&token=${actualToken}&durationFilter=${encodeURIComponent(durationFilter)}&pageSize=5`;
