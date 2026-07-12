@@ -201,8 +201,35 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return true;
       });
 
-      // Enable strict overlap resolution for multi-clip drags
-      moveClips(uniqueUpdates, true);
+      // Strict collision boundary logic for multi-clip drag
+      let hasOverlap = false;
+      const draggedIds = new Set(uniqueUpdates.map(u => u.clipId));
+
+      for (const update of uniqueUpdates) {
+        const targetTrack = tracks.find(t => t.id === update.newTrackId);
+        if (!targetTrack) continue;
+        const originalClip = tracks.flatMap(t => t.clips).find(c => c.id === update.clipId);
+        if (!originalClip) continue;
+
+        const newStart = update.newStartTime;
+        const newEnd = newStart + originalClip.duration;
+        
+        for (const clip of targetTrack.clips) {
+          if (draggedIds.has(clip.id)) continue; // ignore clips that are also being dragged
+          const clipEnd = clip.startTime + clip.duration;
+          // Intersection check (StartA < EndB and StartB < EndA)
+          if (newStart < clipEnd - 0.001 && clip.startTime < newEnd - 0.001) {
+            hasOverlap = true;
+            break;
+          }
+        }
+        if (hasOverlap) break;
+      }
+
+      // If hitting a wall, block movement completely. Mouse can keep moving, but clips won't until space is clear.
+      if (!hasOverlap) {
+        moveClips(uniqueUpdates, false);
+      }
     } else if (dragState.draggedClips.length === 1) {
       setDragPreview(newTime, targetTrackId);
       moveClip(dragState.clipId, newTime, targetTrackId);
@@ -350,6 +377,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const relX = e.clientX - rect.left;
       const currentScrollLeft = useEditorStore.getState().scrollLeft;
+      
+      const clickTime = clip.startTime + relX / zoomLevel;
+      seek(Math.max(0, clickTime));
 
       if (relX < 6) {
         startTransactionSafe();
