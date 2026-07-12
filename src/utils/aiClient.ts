@@ -607,10 +607,12 @@ Your job is to analyze ${chunk.frames.length} frames (representing a ${chunkDura
 RULES:
 1. Generate SFX for visual actions, transitions, text appearance, and environments.
 2. DO NOT GENERATE BGM (Background Music). ONLY SFX.
-3. Your "query" must be a highly descriptive, detailed prompt suitable for a Text-to-Audio AI model (like AudioLDM). 
-   - Good: "A heavy metallic door slamming shut with a loud echo in a large hall."
-   - Good: "Digital futuristic glitch and static burst."
-   - Good: "Soft cinematic woosh as text appears, smooth and airy."
+3. Keep the "query" extremely concise, clear, and under 45 characters. 
+   - Formula: [Descriptor] + [Object/Material] + [Action/Sound-Type].
+   - DO NOT use filler words like "a", "the", "sound of", "effect of", "textures".
+   - Good: "heavy metallic door slamming"
+   - Good: "futuristic digital glitch static"
+   - Good: "soft cinematic whoosh"
 4. Timestamps must be relative to the chunk (0 to ${chunkDuration}).
 5. Only return the JSON. No markdown wrappers, no explanations.
 
