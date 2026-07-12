@@ -1418,7 +1418,14 @@ export function PreviewCanvas() {
               oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
                 if (hasAiBg) {
-                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource as any, clip.aiBackground?.edgeBlur);
+                  await applyAiBackgroundMask(
+                    oCtx,
+                    offscreen.width,
+                    offscreen.height,
+                    frameSource as any,
+                    clip.aiBackground?.edgeBlur ?? 0,
+                    clip.aiBackground?.modelSelection ?? 0
+                  );
                 }
                 if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
@@ -1450,7 +1457,14 @@ export function PreviewCanvas() {
                 oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
                 oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
                 if (hasAiBg) {
-                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, frameSource as any, clip.aiBackground?.edgeBlur);
+                  await applyAiBackgroundMask(
+                    oCtx,
+                    offscreen.width,
+                    offscreen.height,
+                    frameSource as any,
+                    clip.aiBackground?.edgeBlur ?? 0,
+                    clip.aiBackground?.modelSelection ?? 0
+                  );
                 }
                 if (hasChroma && clip.chromaKey) {
                   applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
@@ -1551,10 +1565,17 @@ export function PreviewCanvas() {
             if (oCtx) {
               oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
-                if (hasAiBg) {
-                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, img, clip.aiBackground?.edgeBlur);
-                }
-                if (hasChroma && clip.chromaKey) {
+              if (hasAiBg) {
+                await applyAiBackgroundMask(
+                  oCtx,
+                  offscreen.width,
+                  offscreen.height,
+                  img,
+                  clip.aiBackground?.edgeBlur ?? 0,
+                  clip.aiBackground?.modelSelection ?? 0
+                );
+              }
+              if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
               }
               if (hasLuma && clip.lumaKey) {
@@ -1584,7 +1605,14 @@ export function PreviewCanvas() {
                 oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
                 oCtx.drawImage(img, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
                 if (hasAiBg) {
-                  await applyAiBackgroundMask(oCtx, offscreen.width, offscreen.height, img, clip.aiBackground?.edgeBlur);
+                  await applyAiBackgroundMask(
+                    oCtx,
+                    offscreen.width,
+                    offscreen.height,
+                    img,
+                    clip.aiBackground?.edgeBlur ?? 0,
+                    clip.aiBackground?.modelSelection ?? 0
+                  );
                 }
                 if (hasChroma && clip.chromaKey) {
                   applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);

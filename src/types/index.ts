@@ -249,6 +249,7 @@ export interface ClipAnimations {
 export interface ClipAiBackgroundSettings {
   enabled: boolean;
   edgeBlur: number;
+  modelSelection?: 0 | 1; // 0 for general (high quality), 1 for landscape (fast)
 }
 
 export interface ClipChromaKeySettings {

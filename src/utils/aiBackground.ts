@@ -81,12 +81,20 @@ const onResults = (results: any) => {
  * Returns a segmentation mask for the given image/video frame.
  * If the library is not loaded yet, it will throw or return null.
  */
-export async function segmentFrame(imageElement: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap): Promise<ImageBitmap | HTMLCanvasElement | null> {
+export async function segmentFrame(
+  imageElement: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+  modelSelection: 0 | 1 = 0
+): Promise<ImageBitmap | HTMLCanvasElement | null> {
   if (!selfieSegmentationInstance) {
     await loadMediaPipe();
   }
 
   if (!selfieSegmentationInstance) return null;
+
+  // Update model selection dynamically based on request
+  selfieSegmentationInstance.setOptions({
+    modelSelection
+  });
 
   return new Promise((resolve) => {
     // MediaPipe processes the frame and fires the callback
@@ -110,10 +118,11 @@ export async function applyAiBackgroundMask(
   width: number,
   height: number,
   sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,
-  edgeBlur: number = 0
+  edgeBlur: number = 0,
+  modelSelection: 0 | 1 = 0
 ) {
   try {
-    const mask = await segmentFrame(sourceElement);
+    const mask = await segmentFrame(sourceElement, modelSelection);
     if (!mask) return;
 
     // Reuse the shared offscreen canvas to avoid GC thrashing in the rendering loop
@@ -143,8 +152,6 @@ export async function applyAiBackgroundMask(
     mCtx.filter = 'none'; // reset filter
 
     // Now apply the mask to the target context
-    // Target context currently has the FULL image drawn.
-    // We want to KEEP pixels where the mask is white.
     ctx.globalCompositeOperation = 'destination-in';
     ctx.drawImage(sharedMaskCanvas, 0, 0, width, height);
     ctx.globalCompositeOperation = 'source-over'; // reset

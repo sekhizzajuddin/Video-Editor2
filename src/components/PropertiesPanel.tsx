@@ -3048,7 +3048,7 @@ export function PropertiesPanel() {
                   checked={selectedClip.aiBackground?.enabled || false}
                   onChange={(e) => {
                     const enabled = e.target.checked;
-                    const existing = selectedClip.aiBackground ?? { enabled: false, edgeBlur: 0 };
+                    const existing = selectedClip.aiBackground ?? { enabled: false, edgeBlur: 0, modelSelection: 0 };
                     updateClip(selectedClip.id, {
                       aiBackground: { ...existing, enabled }
                     });
@@ -3058,6 +3058,54 @@ export function PropertiesPanel() {
                 />
                 <span className="text-[11px] text-[#d0d0d0]">Enable AI Background Removal</span>
               </label>
+
+              {selectedClip.aiBackground?.enabled && (
+                <div className="mt-3.5 pt-3 border-t border-[#2d2d2d] space-y-3">
+                  {/* Quality Mode */}
+                  <div>
+                    <label className="block text-[10px] text-[#a0a0a0] mb-1 font-medium">Segmentation Quality</label>
+                    <select
+                      value={selectedClip.aiBackground.modelSelection ?? 0}
+                      onChange={(e) => {
+                        const val = Number(e.target.value) as 0 | 1;
+                        const existing = selectedClip.aiBackground!;
+                        updateClip(selectedClip.id, {
+                          aiBackground: { ...existing, modelSelection: val }
+                        });
+                        useEditorStore.getState().saveSnapshot('Change AI Background Quality');
+                      }}
+                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value={0}>High Quality (Precise General Model)</option>
+                      <option value={1}>Standard / Fast (Landscape Model)</option>
+                    </select>
+                  </div>
+
+                  {/* Edge Feather */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Edge Feather (Soften)</label>
+                      <span className="text-[10px] text-cyan-400 font-mono">{(selectedClip.aiBackground.edgeBlur ?? 0)}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={20}
+                      step={0.5}
+                      value={selectedClip.aiBackground.edgeBlur ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        const existing = selectedClip.aiBackground!;
+                        updateClip(selectedClip.id, {
+                          aiBackground: { ...existing, edgeBlur: val }
+                        });
+                      }}
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot('Change AI Background Blur')}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Chroma Key / Green Screen */}
