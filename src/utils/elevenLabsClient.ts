@@ -15,21 +15,35 @@ export interface ChunkedGenerationRequest {
 }
 
 const MAX_DURATION_PER_CALL = 29; // max 29s per call to be safe (API max is 30)
+const MAX_CHARS_PER_CALL = 400;   // ElevenLabs API max is 450 characters
 
 /**
- * Groups a list of SFX cues into chunks that don't exceed the ElevenLabs duration limit.
+ * Groups a list of SFX cues into chunks that don't exceed the ElevenLabs duration or character limits.
  */
-function chunkCuesByDuration(cues: SfxCue[]): ChunkedGenerationRequest[] {
+function chunkCues(cues: SfxCue[]): ChunkedGenerationRequest[] {
+  // Pre-sanitize queries: truncate each query to max 150 chars so we can combine them easily
+  const sanitizedCues = cues.map(cue => {
+    let query = cue.query.trim();
+    if (query.length > 150) {
+      query = query.substring(0, 147) + "...";
+    }
+    return { ...cue, query };
+  });
+
   const chunks: ChunkedGenerationRequest[] = [];
   let currentChunkCues: SfxCue[] = [];
   let currentChunkDuration = 0;
 
-  for (const cue of cues) {
+  for (const cue of sanitizedCues) {
     // Add 1 second of silence buffer per clip
     const cueDuration = (cue.end - cue.start) + 1; 
 
-    // If adding this cue exceeds the chunk limit, finalize current chunk and start a new one
-    if (currentChunkDuration + cueDuration > MAX_DURATION_PER_CALL && currentChunkCues.length > 0) {
+    // Check if adding this cue exceeds either limit
+    const hypotheticalCues = [...currentChunkCues, cue];
+    const wouldExceedDuration = currentChunkDuration + cueDuration > MAX_DURATION_PER_CALL;
+    const wouldExceedChars = buildCombinedPrompt(hypotheticalCues).length > MAX_CHARS_PER_CALL;
+
+    if ((wouldExceedDuration || wouldExceedChars) && currentChunkCues.length > 0) {
       chunks.push({
         cues: [...currentChunkCues],
         totalExpectedDuration: currentChunkDuration,
@@ -109,10 +123,10 @@ export async function generateCombinedSfx(
 ): Promise<Blob[]> {
   if (allCues.length === 0) return [];
 
-  const chunks = chunkCuesByDuration(allCues);
+  const chunks = chunkCues(allCues);
   const finalAudioBlobs: Blob[] = [];
   
-  console.log(`[ElevenLabs] Split ${allCues.length} cues into ${chunks.length} chunks to optimize credits.`);
+  console.log(`[ElevenLabs] Split ${allCues.length} cues into ${chunks.length} chunks to optimize credits and prompt length.`);
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
