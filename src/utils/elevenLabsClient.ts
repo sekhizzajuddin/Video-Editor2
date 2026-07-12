@@ -2,7 +2,7 @@ import { getEnvElevenLabsKey, getLocalElevenLabsKey } from './apiKeyManager';
 import { splitAudioBySilence } from './audioSplitter';
 
 export interface SfxCue {
-  id: string;
+  id?: string;
   start: number;
   end: number;
   query: string;

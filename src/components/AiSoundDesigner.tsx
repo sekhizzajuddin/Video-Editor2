@@ -8,6 +8,7 @@ import { AICueResult, analyzeAudioWithGemini } from '@/utils/aiClient';
 import { AudioOption, searchFreesound } from '@/utils/audioSearchClient';
 import { WaveformViewer } from './WaveformViewer';
 import { toast } from 'sonner';
+import { generateCombinedSfx } from '@/utils/elevenLabsClient';
 
 interface CueWithOptions extends AICueResult {
   options: AudioOption[];
@@ -68,6 +69,10 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   const [videoMuted, setVideoMuted] = useState(true);
   const [isApplying, setIsApplying] = useState(false);
   const [applyProgress, setApplyProgress] = useState(0);
+  
+  // Prompt editing & selective regeneration
+  const [editedCueIndices, setEditedCueIndices] = useState<Set<number>>(new Set());
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   // ── Audition (inspector) single track ─────────────────────
   const [playingOptionKey, setPlayingOptionKey] = useState<string | null>(null);
@@ -76,6 +81,16 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   // ── Playhead drag ──────────────────────────────────────────
   const isDraggingPlayhead = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // ── Playhead clock refs (for video-free preview) ───────────
+  const playStartTimeRef = useRef<number>(0);
+  const playStartOffsetRef = useRef<number>(0);
+  const currentTimeRef = useRef<number>(0);
+
+  const updateCurrentTime = (val: number) => {
+    currentTimeRef.current = val;
+    setCurrentTime(val);
+  };
 
   // ── Trim drag ─────────────────────────────────────────────
   const trimDragRef = useRef<{ cueIdx: number; side: 'left' | 'right'; startX: number; startVal: number; startValTimeline?: number } | null>(null);
@@ -91,16 +106,26 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   // Sync engine — runs every 50ms while playing
   // ─────────────────────────────────────────────────────────────
   const syncAudio = useCallback(() => {
-    if (!videoRef.current) return;
-    const v = videoRef.current;
-    const relTime = Math.max(0, v.currentTime - clip.trimStart);
-    setCurrentTime(relTime);
+    let relTime = currentTimeRef.current;
+    if (videoRef.current) {
+      const v = videoRef.current;
+      relTime = Math.max(0, v.currentTime - clip.trimStart);
+    } else {
+      // Procedural clock tick (video-free mode)
+      const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
+      relTime = playStartOffsetRef.current + elapsed;
+    }
+    
+    updateCurrentTime(relTime);
 
     if (relTime >= clip.duration) {
-      v.pause();
-      v.currentTime = clip.trimStart;
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = clip.trimStart;
+      }
       setIsPlaying(false);
       Object.values(audioPlayersRef.current).forEach((a) => { a.pause(); a.currentTime = 0; });
+      updateCurrentTime(0);
       return;
     }
 
@@ -156,7 +181,10 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
     if (videoRef.current) {
       videoRef.current.currentTime = clip.trimStart + clamped;
     }
-    setCurrentTime(clamped);
+    playStartTimeRef.current = performance.now();
+    playStartOffsetRef.current = clamped;
+    updateCurrentTime(clamped);
+
     // Sync audio heads
     cues.forEach((cue, idx) => {
       const audio = audioPlayersRef.current[idx];
@@ -185,7 +213,12 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
       });
       setIsPlaying(false);
     } else {
-      if (currentTime >= clip.duration - 0.05) seekTo(0);
+      const currentVal = currentTimeRef.current;
+      if (currentVal >= clip.duration - 0.05) {
+        seekTo(0);
+      } else {
+        seekTo(currentVal);
+      }
       videoRef.current?.play().catch(console.error);
       setIsPlaying(true);
     }
@@ -195,6 +228,69 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
     if (videoRef.current) { videoRef.current.pause(); }
     setIsPlaying(false);
     seekTo(0);
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Selective Prompt Regeneration
+  // ─────────────────────────────────────────────────────────────
+  const handleRegenerateCues = async (indices: number[]) => {
+    if (indices.length === 0) return;
+    
+    setIsRegenerating(true);
+    const toastId = toast.loading(`Regenerating ${indices.length} sound(s) via ElevenLabs...`);
+    
+    try {
+      const cuesToRegen = indices.map(idx => cues[idx]);
+      const generatedBlobs = await generateCombinedSfx(cuesToRegen, () => {});
+      
+      setCues(prev => prev.map((c, idx) => {
+        const posInRegen = indices.indexOf(idx);
+        if (posInRegen === -1) return c;
+        
+        const audioBlob = generatedBlobs[posInRegen];
+        if (!audioBlob || audioBlob.size === 0) return c;
+        
+        const blobUrl = URL.createObjectURL(audioBlob);
+        
+        return {
+          ...c,
+          trimOffset: 0,
+          trimDuration: c.end - c.start,
+          options: [
+            {
+              id: `el_regen_${Date.now()}_${idx}`,
+              name: `AI (Regen): ${c.query.slice(0, 30)}`,
+              duration: c.end - c.start,
+              previewUrl: blobUrl,
+              blob: audioBlob,
+              tags: ['ai-generated', 'sfx']
+            }
+          ]
+        };
+      }));
+
+      // Reset selected alternate option index back to 0 for these cues
+      setSelectedOptions(prev => {
+        const next = { ...prev };
+        indices.forEach(idx => {
+          next[idx] = 0;
+        });
+        return next;
+      });
+      
+      // Remove these indices from edited set
+      setEditedCueIndices(prev => {
+        const next = new Set(prev);
+        indices.forEach(idx => next.delete(idx));
+        return next;
+      });
+      
+      toast.success('Sound effect(s) regenerated successfully!', { id: toastId });
+    } catch (err: any) {
+      toast.error(`Regeneration failed: ${err.message}`, { id: toastId });
+    } finally {
+      setIsRegenerating(false);
+    }
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -645,6 +741,22 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
 
           {/* Right: Inspector / Alternates Panel */}
           <div className="flex flex-col overflow-y-auto bg-[#111]" style={{ width: '42%' }}>
+            {editedCueIndices.size > 0 && (
+              <div className="p-4 border-b border-[#2a2a2a] bg-[#1a1a1a]/50 shrink-0">
+                <button
+                  onClick={() => handleRegenerateCues(Array.from(editedCueIndices))}
+                  disabled={isRegenerating}
+                  className="w-full py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 shadow"
+                >
+                  {isRegenerating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" />
+                  )}
+                  Regenerate All Modified Sounds ({editedCueIndices.size})
+                </button>
+              </div>
+            )}
             {activeCue ? (
               <div className="p-4 space-y-4">
                 {/* Cue info */}
@@ -657,8 +769,49 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                       {activeCue.start.toFixed(2)}s → {activeCue.end.toFixed(2)}s
                     </span>
                   </div>
-                  <h3 className="text-xs font-bold text-white capitalize">{activeCue.query}</h3>
-                  <p className="text-[9px] text-[#707070] italic leading-relaxed">{activeCue.reason}</p>
+                  <div className="space-y-1 my-1">
+                    <label className="text-[8px] font-bold text-[#707070] uppercase tracking-wider block">
+                      Edit Generation Prompt
+                    </label>
+                    <input
+                      type="text"
+                      value={activeCue.query}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCues((prev) => prev.map((c, i) => i === activeCueIndex ? { ...c, query: val } : c));
+                        setEditedCueIndices((prev) => {
+                          const next = new Set(prev);
+                          next.add(activeCueIndex!);
+                          return next;
+                        });
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-black border border-[#2a2a2a] rounded-lg text-xs text-white focus:outline-none focus:border-amber-500 transition-colors"
+                      placeholder="e.g. metallic door slam"
+                    />
+                  </div>
+                  {editedCueIndices.has(activeCueIndex!) && (
+                    <button
+                      onClick={() => handleRegenerateCues([activeCueIndex!])}
+                      disabled={isRegenerating}
+                      className="w-full mt-2 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black text-[10px] font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      {isRegenerating ? (
+                        <Loader2 className="w-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3 h-3" />
+                      )}
+                      Regenerate This Sound
+                    </button>
+                  )}
+                  {activeCue.scene && (
+                    <div className="mt-2 text-[10px] bg-black/40 p-2 rounded-lg border border-[#222]">
+                      <span className="text-[#a0a0a0] font-bold block mb-0.5 uppercase tracking-wide text-[8px]">Scene Context:</span>
+                      <p className="text-white leading-relaxed">{activeCue.scene}</p>
+                    </div>
+                  )}
+                  <p className="text-[9px] text-[#707070] italic leading-relaxed pt-1">
+                    <span className="font-bold text-[#808080]">AI Reason: </span>{activeCue.reason}
+                  </p>
 
                   {/* Trim controls & Waveform */}
                   {activeCue.options[selectedOptions[activeCueIndex!] ?? 0] && (() => {

@@ -34,6 +34,7 @@ export interface AICueResult {
   type: 'sfx' | 'bgm';
   reason: string;
   alternatives?: string[];
+  scene?: string;
 }
 
 /**
@@ -627,7 +628,8 @@ Output format MUST exactly match this JSON schema:
       "end": <number>,
       "query": "<descriptive prompt for text-to-audio model>",
       "type": "sfx",
-      "reason": "<why this sound fits>"
+      "scene": "<one sentence describing exactly what visual action or event is happening in the video at this time>",
+      "reason": "<why this sound fits this scene>"
     }
   ]
 }`;
