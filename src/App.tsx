@@ -257,17 +257,24 @@ function App() {
           break;
         }
         case 'split_clip': {
-          const t = useEditorStore.getState().currentTime;
-          if (selectedClipId) {
-            splitClip(selectedClipId, t);
+          const state = useEditorStore.getState();
+          const t = state.currentTime;
+          
+          if (state.selectedClipId) {
+            splitClip(state.selectedClipId, t);
+          } else if (state.selectedTrackId) {
+            const track = tracks.find(tr => tr.id === state.selectedTrackId);
+            if (track) {
+              const clip = track.clips.find((c) => t > c.startTime && t < c.startTime + c.duration);
+              if (clip) splitClip(clip.id, t);
+            }
           } else {
-            tracks.forEach((track) => {
-              track.clips.forEach((clip) => {
-                if (t > clip.startTime && t < clip.startTime + clip.duration) {
-                  splitClip(clip.id, t);
-                }
-              });
-            });
+            // Show toast using a simple alert or notification mechanism since no toast system is directly imported here.
+            // But we can dispatch a custom event or just console.warn
+            console.warn("Select a clip or track to split.");
+            // If the app has a toast/notification system, we could trigger it. For now, native alert as fallback if needed, or just ignore.
+            const evt = new CustomEvent('show-toast', { detail: { message: "Please select a clip or track to split.", type: 'warning' }});
+            window.dispatchEvent(evt);
           }
           break;
         }

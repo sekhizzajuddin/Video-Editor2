@@ -201,7 +201,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return true;
       });
 
-      moveClips(uniqueUpdates);
+      // Enable strict overlap resolution for multi-clip drags
+      moveClips(uniqueUpdates, true);
     } else if (dragState.draggedClips.length === 1) {
       setDragPreview(newTime, targetTrackId);
       moveClip(dragState.clipId, newTime, targetTrackId);
@@ -281,9 +282,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       let rippleClips: { id: string; originalStartTime: number }[] = [];
       if ((activeTool === 'ripple' || activeTool === 'rateStretch') && track) {
-        rippleClips = track.clips
-          .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
-          .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
+        if (edge === 'right') {
+          rippleClips = track.clips
+            .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
+            .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
+        } else {
+          rippleClips = track.clips
+            .filter((c) => c.id !== clip.id && c.startTime <= clip.startTime)
+            .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
+        }
       }
 
       let sibling: any = undefined;
@@ -359,16 +366,17 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (activeTool === 'trackSelect') {
         const clickTime = clip.startTime + relX / zoomLevel;
         let matchingIds: string[] = [];
+        const thresholdTime = clip.startTime; // Include the clicked clip
         if (e.shiftKey) {
           if (track) {
             matchingIds = track.clips
-              .filter((c) => c.startTime >= clickTime)
+              .filter((c) => c.startTime >= thresholdTime)
               .map((c) => c.id);
           }
         } else {
           matchingIds = tracks
             .flatMap((t) => t.clips)
-            .filter((c) => c.startTime >= clickTime)
+            .filter((c) => c.startTime >= thresholdTime)
             .map((c) => c.id);
         }
 
@@ -398,16 +406,17 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (activeTool === 'trackSelectBackward') {
         const clickTime = clip.startTime + relX / zoomLevel;
         let matchingIds: string[] = [];
+        const thresholdTime = clip.startTime + clip.duration; // Include the clicked clip
         if (e.shiftKey) {
           if (track) {
             matchingIds = track.clips
-              .filter((c) => c.startTime <= clickTime)
+              .filter((c) => c.startTime <= thresholdTime)
               .map((c) => c.id);
           }
         } else {
           matchingIds = tracks
             .flatMap((t) => t.clips)
-            .filter((c) => c.startTime <= clickTime)
+            .filter((c) => c.startTime <= thresholdTime)
             .map((c) => c.id);
         }
 

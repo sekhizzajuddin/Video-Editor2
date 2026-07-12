@@ -1831,7 +1831,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setOutPoint: (time) => set({ outPoint: time }),
 
   // Tools
-  setActiveTool: (tool) => set({ activeTool: tool }),
+  setActiveTool: (tool) => set((state) => {
+    if (tool === 'ripple') {
+      return { activeTool: tool, selectedClipIds: [], selectedTrackId: null, selectedClipId: null };
+    }
+    return { activeTool: tool };
+  }),
 
   // Timeline View
   setZoomLevel: (zoom) => set({ zoomLevel: zoom }),

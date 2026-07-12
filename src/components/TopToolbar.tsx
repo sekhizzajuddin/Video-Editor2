@@ -106,7 +106,6 @@ export function TopToolbar() {
     { id: 'rateStretch', icon: Timer, label: 'Rate Stretch', shortcut: 'R' },
     { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
     { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },
-    { id: 'zoom', icon: ZoomIn, label: 'Zoom', shortcut: 'Z' },
   ];
 
   const handleFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {

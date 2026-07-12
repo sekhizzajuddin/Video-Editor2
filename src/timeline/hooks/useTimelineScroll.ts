@@ -71,13 +71,15 @@ export function useTimelineScroll({
         e.preventDefault();
         const store = useEditorStore.getState();
         const currentZoom = store.zoomLevel;
-        // FIX: Make zoom delta proportional to the wheel speed for smooth trackpad support.
-        // Use a small sensitivity factor so trackpad deltas (typically 1-10) feel gradual,
-        // and mouse wheel clicks (typically 100-120) feel snappy.
-        const rawDelta = Math.abs(e.deltaY);
-        const sensitivity = rawDelta < 20 ? 0.08 : 0.12; // trackpad vs mouse wheel
-        const zoomDelta = e.deltaY > 0 ? -(rawDelta * sensitivity) : (rawDelta * sensitivity);
-        const newZoom = Math.min(Math.max(currentZoom + zoomDelta, 20), 400);
+        // FIX: Use exponential scaling for smooth proportional zoom without decimals
+        const zoomFactor = Math.exp(-e.deltaY * 0.005); // Smooth scaling factor
+        let newZoom = currentZoom * zoomFactor;
+        
+        // Remove decimal glitching
+        newZoom = Math.round(newZoom);
+        
+        // Clamp between 5 and 200 as requested
+        newZoom = Math.min(Math.max(newZoom, 5), 200);
 
         const rect = el.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
