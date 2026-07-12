@@ -1,5 +1,4 @@
 import { getEnvHuggingFaceKey, getLocalHuggingFaceKey } from './apiKeyManager';
-import { splitAudioBySilence } from './audioSplitter';
 
 export interface SfxCue {
   id?: string;
@@ -9,17 +8,11 @@ export interface SfxCue {
   options?: any[];
 }
 
-export interface ChunkedGenerationRequest {
-  cues: SfxCue[];
-  totalExpectedDuration: number;
-}
-
 // AudioLDM2 is specifically designed for sound effects generation
 const AUDIO_LDM2_MODEL = 'cvssp/audioldm2';
-const MAX_DURATION_PER_CALL = 15; // AudioLDM2 max is 15s for best quality
 
 /**
- * Groups cues for AudioLDM2 generation (one prompt per cue for best quality)
+ * Prepare generation requests for AudioLDM2 (one prompt per cue for best quality)
  */
 function prepareGenerationRequests(cues: SfxCue[]): { cue: SfxCue; prompt: string; duration: number }[] {
   return cues.map(cue => {
@@ -28,35 +21,6 @@ function prepareGenerationRequests(cues: SfxCue[]): { cue: SfxCue; prompt: strin
     const prompt = `Sound effect: ${cue.query}, high quality, professional audio, ${durationSecs} seconds`;
     return { cue, prompt, duration: durationSecs };
   });
-}
-
-/**
- * Main API call to the Vercel proxy for ElevenLabs
- */
-async function callElevenLabsProxy(text: string, duration: number): Promise<Blob> {
-  const token = getLocalElevenLabsKey() || getEnvElevenLabsKey();
-  
-  if (!token) {
-    throw new Error('ElevenLabs API key is missing. Please set it in Settings.');
-  }
-
-  const response = await fetch('/api/elevenlabs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text,
-      duration_seconds: duration,
-      prompt_influence: 0.3,
-      token
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`ElevenLabs generation failed: ${response.status} - ${errorText}`);
-  }
-
-  return await response.blob();
 }
 
 /**
