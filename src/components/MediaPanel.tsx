@@ -59,7 +59,7 @@ import { detectBeats } from '@/utils/beatDetection';
 import { MOTION_TEMPLATES, MotionTemplate } from '@/utils/motionTemplates';
 import { captureCanvasChunk } from '@/utils/canvasCapture';
 import { analyzeCanvasChunkWithGemini } from '@/utils/aiClient';
-import { generateAudioHuggingFace, HF_AUDIO_MODELS, DEFAULT_HF_MODEL } from '@/utils/huggingFaceClient';
+import { generateCombinedSfx } from '@/utils/elevenLabsClient';
 import { AiSoundDesigner } from './AiSoundDesigner';
 
 const TRANSITIONS = [
@@ -731,7 +731,7 @@ export function MediaPanel() {
 
   // AI SFX Generator States
   const [sfxVisionProvider, setSfxVisionProvider] = useState<'gemini' | 'groq'>('gemini');
-  const [sfxHfModel, setSfxHfModel] = useState<string>(DEFAULT_HF_MODEL);
+
   const [isAnalyzingSfx, setIsAnalyzingSfx] = useState(false);
   const [sfxAnalysisCues, setSfxAnalysisCues] = useState<any[] | null>(null);
   const [sfxChunkStartTime, setSfxChunkStartTime] = useState(0);
@@ -1573,40 +1573,38 @@ export function MediaPanel() {
     // Revoke any previous blob URLs before generating new ones
     sfxBlobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
     sfxBlobUrlsRef.current = [];
-    const generated: any[] = [];
     
     try {
-      for (let i = 0; i < sfxAnalysisCues.length; i++) {
-        const cue = sfxAnalysisCues[i];
-        
-        toast.loading(`Generating SFX ${i + 1}/${sfxAnalysisCues.length}... (may retry if model is cold)`, { id: 'sfx-gen' });
-        
-        try {
-          const audioBlob = await generateAudioHuggingFace(cue.query, { model: sfxHfModel });
-          const blobUrl = URL.createObjectURL(audioBlob);
-          sfxBlobUrlsRef.current.push(blobUrl);
-          
-          generated.push({
-            ...cue,
-            options: [
-              {
-                id: `hf_${Date.now()}_${i}`,
-                name: `AI: ${cue.query.slice(0, 30)}`,
-                duration: cue.end - cue.start,
-                previewUrl: blobUrl, // AiSoundDesigner reads this field
-                blob: audioBlob,
-                tags: ['ai-generated', 'sfx']
-              }
-            ]
-          });
-        } catch (genErr: any) {
-          console.error(`Failed to generate cue ${i}:`, genErr);
-          toast.error(`Cue ${i + 1} failed: ${genErr.message}`);
-          generated.push({ ...cue, options: [] });
+      toast.loading(`Generating SFX via ElevenLabs...`, { id: 'sfx-gen' });
+      
+      const generatedBlobs = await generateCombinedSfx(
+        sfxAnalysisCues,
+        (progress) => setSfxGenerationProgress(progress)
+      );
+      
+      const generated = sfxAnalysisCues.map((cue, i) => {
+        const audioBlob = generatedBlobs[i];
+        if (!audioBlob || audioBlob.size === 0) {
+          return { ...cue, options: [] };
         }
         
-        setSfxGenerationProgress(((i + 1) / sfxAnalysisCues.length) * 100);
-      }
+        const blobUrl = URL.createObjectURL(audioBlob);
+        sfxBlobUrlsRef.current.push(blobUrl);
+        
+        return {
+          ...cue,
+          options: [
+            {
+              id: `el_${Date.now()}_${i}`,
+              name: `AI: ${cue.query.slice(0, 30)}`,
+              duration: cue.end - cue.start,
+              previewUrl: blobUrl,
+              blob: audioBlob,
+              tags: ['ai-generated', 'sfx']
+            }
+          ]
+        };
+      });
       
       setSfxGeneratedCues(generated);
       toast.success('SFX generation complete!', { id: 'sfx-gen' });
@@ -2336,20 +2334,7 @@ export function MediaPanel() {
                   
                   {!sfxGeneratedCues ? (
                     <div className="space-y-3">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-medium text-[#a0a0a0]">
-                          Audio Generation Model
-                        </label>
-                        <select
-                          value={sfxHfModel}
-                          onChange={(e) => setSfxHfModel(e.target.value)}
-                          className="w-full bg-[#141414] text-xs text-white border border-[#3e3e3e] rounded-lg px-3 py-2 outline-none focus:border-amber-500 transition-colors appearance-none"
-                        >
-                          {HF_AUDIO_MODELS.map(m => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                          ))}
-                        </select>
-                      </div>
+
                       <button
                         type="button"
                       onClick={handleGenerateSfxBackground}

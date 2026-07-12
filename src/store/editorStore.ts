@@ -361,6 +361,7 @@ const initialState: EditorState = {
     geminiApiKey: '',
     groqApiKey: '',
     freesoundApiKey: '',
+    elevenLabsApiKey: '',
   },
   hasUnsavedChanges: false,
   currentTime: 0,

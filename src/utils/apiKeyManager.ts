@@ -25,6 +25,14 @@ export function getEnvHuggingFaceKey(): string {
 }
 
 /**
+ * Gets the primary ElevenLabs key from the environment variables.
+ */
+export function getEnvElevenLabsKey(): string {
+  // @ts-ignore
+  return import.meta.env.VITE_ELEVENLABS_API_KEY || import.meta.env.ELEVENLABS_API_KEY || '';
+}
+
+/**
  * Gets the local fallback Gemini key provided by the user in settings.
  */
 export function getLocalGeminiKey(): string {
@@ -43,6 +51,13 @@ export function getLocalGroqKey(): string {
  */
 export function getLocalHuggingFaceKey(): string {
   return useEditorStore.getState().settings.huggingFaceApiKey || '';
+}
+
+/**
+ * Gets the local fallback ElevenLabs key provided by the user in settings.
+ */
+export function getLocalElevenLabsKey(): string {
+  return useEditorStore.getState().settings.elevenLabsApiKey || '';
 }
 
 /**

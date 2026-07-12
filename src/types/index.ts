@@ -512,6 +512,7 @@ export interface EditorState {
     huggingFaceApiKey?: string;
     groqApiKey?: string;
     freesoundApiKey?: string;
+    elevenLabsApiKey?: string;
   };
   // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];
