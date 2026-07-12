@@ -706,7 +706,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
             let clampedDuration = sourceContentDuration / clampedSpeed;
             let shift = resizeState.originalDuration - clampedDuration;
-            shift = Math.max(-resizeState.originalStartTime, shift);
+            
+            let minStart = resizeState.originalStartTime;
+            if (resizeState.rippleClips && resizeState.rippleClips.length > 0) {
+              minStart = Math.min(...resizeState.rippleClips.map(c => c.originalStartTime));
+            }
+            shift = Math.max(-minStart, shift);
+            
             clampedDuration = resizeState.originalDuration - shift;
             const finalSpeed = Math.min(20, Math.max(0.1, sourceContentDuration / clampedDuration));
 
@@ -755,7 +761,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
             let clamped = Math.min(newDuration, maxDuration);
             let shift = resizeState.originalDuration - clamped;
-            shift = Math.max(-resizeState.originalStartTime, shift);
+
+            let minStart = resizeState.originalStartTime;
+            if (resizeState.rippleClips && resizeState.rippleClips.length > 0) {
+              minStart = Math.min(...resizeState.rippleClips.map(c => c.originalStartTime));
+            }
+            shift = Math.max(-minStart, shift);
+            
             clamped = resizeState.originalDuration - shift;
 
             updateClip(resizeState.clipId, {
