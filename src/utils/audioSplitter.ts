@@ -92,8 +92,8 @@ function extractBufferRegion(buffer: AudioBuffer, context: AudioContext, startSe
 /**
  * Main function to split a single audio Blob containing multiple SFX separated by silence.
  * 
- * @param audioBlob The downloaded audio blob from ElevenLabs
- * @param expectedCount How many clips we expect to get out of it
+ * @param audioBlob The audio blob to split
+ * @param expectedCount How many clips we expect to get
  * @returns Array of Blobs for each individual sound effect
  */
 export async function splitAudioBySilence(audioBlob: Blob, expectedCount: number): Promise<Blob[]> {
@@ -107,19 +107,18 @@ export async function splitAudioBySilence(audioBlob: Blob, expectedCount: number
     const arrayBuffer = await audioBlob.arrayBuffer();
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
     
-    // Convert to mono for easier volume analysis
     const channelData = audioBuffer.getChannelData(0); 
     const sampleRate = audioBuffer.sampleRate;
     
-    // Configuration for silence detection
-    const minSilenceDurationSec = 0.3; // minimum duration to be considered a split point
+    // Adaptive silence detection based on audio characteristics
+    const rms = calculateRMS(channelData);
+    const threshold = Math.max(0.01, rms * 0.1); // Dynamic threshold: 10% of RMS
+    const minSilenceDurationSec = 0.2; // Reduced from 0.3
     const minSilenceSamples = minSilenceDurationSec * sampleRate;
-    const threshold = 0.02; // amplitude threshold for silence (0.0 to 1.0)
     
-    const splitPoints: number[] = [0]; // Always start at 0
+    const splitPoints: number[] = [0];
     let silenceStart = -1;
     
-    // Pass 1: Find silences
     for (let i = 0; i < channelData.length; i++) {
       const amplitude = Math.abs(channelData[i]);
       
@@ -131,7 +130,6 @@ export async function splitAudioBySilence(audioBlob: Blob, expectedCount: number
         if (silenceStart !== -1) {
           const silenceDuration = i - silenceStart;
           if (silenceDuration >= minSilenceSamples) {
-            // Found a valid silence gap. The split point is the middle of the silence
             const splitSample = silenceStart + Math.floor(silenceDuration / 2);
             splitPoints.push(splitSample / sampleRate);
           }
@@ -140,11 +138,7 @@ export async function splitAudioBySilence(audioBlob: Blob, expectedCount: number
       }
     }
     
-    splitPoints.push(audioBuffer.duration); // Always end at the end
-    
-    // Pass 2: If we didn't find exactly the expected count, adjust threshold dynamically
-    // (A more advanced implementation would re-run with different thresholds, 
-    // but for now, if we found *at least* the expected count, we just take the first N clips)
+    splitPoints.push(audioBuffer.duration);
     
     const clips: Blob[] = [];
     
@@ -187,4 +181,16 @@ export async function splitAudioBySilence(audioBlob: Blob, expectedCount: number
       audioContext.close();
     }
   }
+}
+
+/**
+ * Calculate RMS (Root Mean Square) of audio signal
+ * Used for adaptive threshold calculation
+ */
+function calculateRMS(channelData: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < channelData.length; i++) {
+    sum += channelData[i] * channelData[i];
+  }
+  return Math.sqrt(sum / channelData.length);
 }

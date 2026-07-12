@@ -928,11 +928,17 @@ export function PropertiesPanel() {
                 max={5.0}
                 step={0.1}
                 value={selectedTransition.duration}
-                onChange={(e) =>
+                onChange={(e) => {
+                  let val = parseFloat(e.target.value);
+                  const maxDur = selectedTransitionClip.duration / 2;
+                  if (val > maxDur) {
+                    val = maxDur;
+                    toast.warning("Transition duration limited to 50% of clip length");
+                  }
                   updateTransition(selectedTransitionClip.id, {
-                    duration: parseFloat(e.target.value),
-                  })
-                }
+                    duration: val,
+                  });
+                }}
                 className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
               />
             </div>
@@ -1016,7 +1022,14 @@ export function PropertiesPanel() {
                 step="0.01"
                 min="0"
                 value={selectedSubtitle.endTime}
-                onChange={(e) => updateSubtitle(selectedSubtitle.id, { endTime: Number(e.target.value) })}
+                onChange={(e) => {
+                  const newEnd = Number(e.target.value);
+                  if (newEnd <= selectedSubtitle.startTime) {
+                    toast.error("End time must be after start time");
+                    return;
+                  }
+                  updateSubtitle(selectedSubtitle.id, { endTime: newEnd });
+                }}
                 className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -1236,7 +1249,10 @@ export function PropertiesPanel() {
 
       addMasterKeyframe(selectedClip.id, localTime, currentVals);
     } else {
-      updateClip(selectedClip.id, baseUpdateObj);
+      const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+      targetClipIds.forEach(id => {
+        updateClip(id, baseUpdateObj);
+      });
     }
   };
 
@@ -2332,7 +2348,17 @@ export function PropertiesPanel() {
                           step={0.1}
                           value={value}
                           title={`Double-click to reset ${edge} crop to 0%`}
-                          onChange={(e) => setPropVal(propKey, Number(e.target.value), { crop: { ...currentCrop, [edge]: Number(e.target.value) } })}
+                          onChange={(e) => {
+                            let newVal = Number(e.target.value);
+                            const proposedCrop = { ...currentCrop, [edge]: newVal };
+                            const horizontalCrop = (proposedCrop.left || 0) + (proposedCrop.right || 0);
+                            const verticalCrop = (proposedCrop.top || 0) + (proposedCrop.bottom || 0);
+                            if (horizontalCrop > 90 || verticalCrop > 90) {
+                              toast.error("Crop values exceed 90% total");
+                              return;
+                            }
+                            setPropVal(propKey, newVal, { crop: proposedCrop });
+                          }}
                           onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal(propKey, 0, { crop: { ...currentCrop, [edge]: 0 } });
@@ -2419,9 +2445,9 @@ export function PropertiesPanel() {
                         <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">Start Frame</p>
                         <KbSlider label="Scale" value={kbVal.startScale} min={100} max={300} step={1}
                           onChange={v => updateKb({ startScale: v })} />
-                        <KbSlider label="Pan X" value={kbVal.startPanX} min={-100} max={100} step={1}
+                        <KbSlider label="Pan X" value={kbVal.startPanX} min={-((kbVal.startScale - 100) / 2)} max={(kbVal.startScale - 100) / 2} step={1}
                           onChange={v => updateKb({ startPanX: v })} />
-                        <KbSlider label="Pan Y" value={kbVal.startPanY} min={-100} max={100} step={1}
+                        <KbSlider label="Pan Y" value={kbVal.startPanY} min={-((kbVal.startScale - 100) / 2)} max={(kbVal.startScale - 100) / 2} step={1}
                           onChange={v => updateKb({ startPanY: v })} />
                       </div>
 
@@ -2445,9 +2471,9 @@ export function PropertiesPanel() {
                         <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">End Frame</p>
                         <KbSlider label="Scale" value={kbVal.endScale} min={100} max={300} step={1}
                           onChange={v => updateKb({ endScale: v })} />
-                        <KbSlider label="Pan X" value={kbVal.endPanX} min={-100} max={100} step={1}
+                        <KbSlider label="Pan X" value={kbVal.endPanX} min={-((kbVal.endScale - 100) / 2)} max={(kbVal.endScale - 100) / 2} step={1}
                           onChange={v => updateKb({ endPanX: v })} />
-                        <KbSlider label="Pan Y" value={kbVal.endPanY} min={-100} max={100} step={1}
+                        <KbSlider label="Pan Y" value={kbVal.endPanY} min={-((kbVal.endScale - 100) / 2)} max={(kbVal.endScale - 100) / 2} step={1}
                           onChange={v => updateKb({ endPanY: v })} />
                       </div>
 
@@ -3264,6 +3290,10 @@ export function PropertiesPanel() {
                       speed: newSpeed,
                       duration: newDuration,
                     });
+                    const state = useEditorStore.getState();
+                    if (state.currentTime > selectedClip.startTime + newDuration) {
+                      state.seek(selectedClip.startTime + newDuration - 0.1);
+                    }
                   }}
                   onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                   onDoubleClick={() => {
@@ -3298,10 +3328,11 @@ export function PropertiesPanel() {
                   checked={isRamped}
                   onChange={(e) => {
                     if (e.target.checked) {
+                      const currentSpeed = selectedClip.speed || 1.0;
                       updateClip(selectedClip.id, {
                         speedRamp: [
-                          { position: 0.0, speed: selectedClip.speed },
-                          { position: 1.0, speed: selectedClip.speed },
+                          { position: 0.0, speed: currentSpeed },
+                          { position: 1.0, speed: currentSpeed },
                         ],
                       });
                     } else {

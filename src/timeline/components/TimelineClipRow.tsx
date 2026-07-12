@@ -715,7 +715,7 @@ export function TimelineClipRow({
       })()}
 
       {/* ── Transitions Layer ───────────────────────────── */}
-      {showTransitionLayer && !track.locked && (() => {
+      {!track.locked && (() => {
         const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
         return sortedClips.map((clip, idx) => {
           if (idx === 0) return null;
@@ -725,6 +725,8 @@ export function TimelineClipRow({
           if (Math.abs(gap) < 0.1) {
             const intersectionTime = clip.startTime;
             const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
+            
+            if (!hasTransition && !showTransitionLayer) return null;
             
             const transition = clip.transitionIn || prevClip.transitionOut;
             const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
