@@ -25,8 +25,8 @@ export async function generateAudioHuggingFace(
   const hfKey = localKey || envKey;
 
   const model = options?.model || DEFAULT_HF_MODEL;
-  // Point to the serverless Edge API proxy endpoint which resolves DNS on Vercel/Vite server side, bypassing client CORS & DNS blocks.
-  const url = `/api/huggingface?model=${encodeURIComponent(model)}`;
+  // FIX: Call HuggingFace Inference API directly instead of Vercel proxy (which returns 502)
+  const url = `https://api-inference.huggingface.co/models/${model}`;
   const maxRetries = options?.maxRetries ?? 8;
 
   const headers: Record<string, string> = {
@@ -35,6 +35,9 @@ export async function generateAudioHuggingFace(
   
   if (hfKey) {
     headers['Authorization'] = `Bearer ${hfKey}`;
+  } else {
+    // Without API key, HuggingFace free tier still works but slower
+    console.warn('[HuggingFace] No API key provided, using free tier (may be slower)');
   }
 
   const fetchOptions: RequestInit = {
@@ -74,11 +77,12 @@ export async function generateAudioHuggingFace(
       let waitTime = 20; // default 20s backoff
       try {
         const errorJson = await response.json();
+        console.error(`[HuggingFace] ${response.status} response from proxy/HF:`, errorJson);
         if (errorJson.estimated_time) {
           waitTime = Math.ceil(errorJson.estimated_time);
         }
-      } catch {
-        // response wasn't JSON; use default wait
+      } catch (err) {
+        console.error(`[HuggingFace] Failed to parse ${response.status} response JSON`, err);
       }
 
       if (attempt < maxRetries) {
