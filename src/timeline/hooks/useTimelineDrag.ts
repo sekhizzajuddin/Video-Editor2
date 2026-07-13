@@ -413,12 +413,20 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const track = tracks.find((t) => t.id === clip.trackId);
       if (track?.locked) return;
 
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const target = e.currentTarget as HTMLElement;
+      const rect = target.getBoundingClientRect();
       const relX = e.clientX - rect.left;
       const currentScrollLeft = useEditorStore.getState().scrollLeft;
       
       const clickTime = clip.startTime + relX / zoomLevel;
       seek(Math.max(0, clickTime));
+
+      const clickedEdge = (e.target as HTMLElement).getAttribute('data-edge');
+      if (clickedEdge === 'left' || clickedEdge === 'right') {
+        startTransactionSafe();
+        startResize(e, clip, clickedEdge as 'left' | 'right');
+        return;
+      }
 
       const distLeft = relX;
       const distRight = rect.width - relX;

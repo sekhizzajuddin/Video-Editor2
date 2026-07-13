@@ -248,6 +248,24 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         )}
       </div>
 
+      {/* ── Resize Handles (Visible on Hover) ──────────────── */}
+      <div 
+        className="absolute left-0 top-0 bottom-0 w-[8px] bg-white/0 hover:bg-white/50 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
+        data-edge="left"
+        onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+      >
+        <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
+      </div>
+      <div 
+        className="absolute right-0 top-0 bottom-0 w-[8px] bg-white/0 hover:bg-white/50 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
+        data-edge="right"
+        onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+      >
+        <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
+      </div>
+
+
+
       {/* ── Master Keyframes ────────────────────────── */}
       {keyframeTimes.length > 0 && (
         <div className="absolute top-0 left-0 right-0 h-0 z-40 pointer-events-none">
