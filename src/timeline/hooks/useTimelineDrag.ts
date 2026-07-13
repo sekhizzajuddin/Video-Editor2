@@ -118,19 +118,21 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     if (!container) return null;
     const rect = container.getBoundingClientRect();
     const relY = clientY - rect.top + container.scrollTop;
-    const idx = getTrackAtY(tracks, relY, hoveredOverLayerRegion, pinnedOverLayerTrackId);
-    return idx >= 0 && idx < tracks.length ? tracks[idx] : null;
-  }, [tracks, hoveredOverLayerRegion, pinnedOverLayerTrackId, trackContainerRef]);
+    const latestTracks = useEditorStore.getState().tracks;
+    const idx = getTrackAtY(latestTracks, relY, hoveredOverLayerRegion, pinnedOverLayerTrackId);
+    return idx >= 0 && idx < latestTracks.length ? latestTracks[idx] : null;
+  }, [hoveredOverLayerRegion, pinnedOverLayerTrackId, trackContainerRef]);
 
   const computeSnap = useCallback((rawTime: number, movingClipId: string, movingDuration: number) => {
     if (!settings.snapEnabled) {
       return { snappedTime: rawTime, snapPos: null };
     }
     const threshold = SNAP_THRESHOLD_PX / zoomLevel;
+    const latestTracks = useEditorStore.getState().tracks;
 
     // Collect snap targets: all other clip edges + the playhead
     const targets: number[] = [useEditorStore.getState().currentTime]; // snap to playhead
-    for (const track of tracks) {
+    for (const track of latestTracks) {
       for (const clip of track.clips) {
         if (clip.id === movingClipId) continue;
         targets.push(clip.startTime);
@@ -166,7 +168,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     }
 
     return { snappedTime: Math.max(0, snappedTime), snapPos };
-  }, [zoomLevel, tracks, settings.snapEnabled]);
+  }, [zoomLevel, settings.snapEnabled]);
 
   const updateDragPosition = useCallback((clientX: number, clientY: number, currScrollLeft: number) => {
     if (!dragState || !dragState.draggedClips || dragState.draggedClips.length === 0) return;
@@ -175,11 +177,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     const dt = dx / zoomLevel;
     let newTime = Math.max(0, dragState.originalStartTime + dt);
 
-    const hoverTrack = getTrackFromMouseY(clientY);
+    const hoverTrack = getTrackFromMouseY(clientX); // Note: getTrackFromMouseY uses Y coord, clientY is passed in correctly.
+    // Wait, let's keep getTrackFromMouseY(clientY) as it was.
+    const actualHoverTrack = getTrackFromMouseY(clientY);
     const targetTrackId =
-      hoverTrack && hoverTrack.type === dragState.trackType ? hoverTrack.id : dragState.trackId;
+      actualHoverTrack && actualHoverTrack.type === dragState.trackType ? actualHoverTrack.id : dragState.trackId;
 
-    const movingClip = tracks.flatMap((t) => t.clips).find((c) => c.id === dragState.clipId);
+    const latestTracks = useEditorStore.getState().tracks;
+    const movingClip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === dragState.clipId);
     const movingDuration = movingClip?.duration ?? 0;
 
     const { snappedTime, snapPos } = computeSnap(newTime, dragState.clipId, movingDuration);
@@ -190,15 +195,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     const clampedFinalDt = Math.max(-minOriginalStart, newTime - dragState.originalStartTime);
 
     if (dragState.draggedClips.length >= 1) {
-      // If multiple clips are selected but they have gaps in time (scattered), block movement completely.
-      if (!areClipsContiguousInTime(dragState.draggedClips, tracks)) {
-         return;
-      }
-
       setDragPreview(0, null);
 
-      const sourceTrackIdx = tracks.findIndex((t) => t.id === dragState.trackId);
-      const targetTrackIdx = tracks.findIndex((t) => t.id === targetTrackId);
+      const sourceTrackIdx = latestTracks.findIndex((t) => t.id === dragState.trackId);
+      const targetTrackIdx = latestTracks.findIndex((t) => t.id === targetTrackId);
       const trackDelta = targetTrackIdx - sourceTrackIdx;
 
       let finalUpdates = null;
@@ -213,10 +213,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
         for (const c of dragState.draggedClips) {
           const clipNewTime = c.originalStartTime + clampedFinalDt;
-          const clipTrackIdx = tracks.findIndex((t) => t.id === c.trackId);
+          const clipTrackIdx = latestTracks.findIndex((t) => t.id === c.trackId);
           const newTrackIdx = clipTrackIdx + trackDelta + bump;
-          const originalTrack = tracks.find((t) => t.id === c.trackId);
-          const targetTrack = tracks[newTrackIdx];
+          const originalTrack = latestTracks.find((t) => t.id === c.trackId);
+          const targetTrack = latestTracks[newTrackIdx];
 
           const targetTrackIdForClip =
             targetTrack && originalTrack && targetTrack.type === originalTrack.type
@@ -228,7 +228,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             break;
           }
 
-          const originalClip = tracks.flatMap(t => t.clips).find(x => x.id === c.id);
+          const originalClip = latestTracks.flatMap(t => t.clips).find(x => x.id === c.id);
           testUpdates.push({
             clipId: c.id,
             newStartTime: clipNewTime,
@@ -242,7 +242,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         // Check if testUpdates have physical overlaps on these tracks
         const draggedIds = new Set(testUpdates.map(u => u.clipId));
         for (const update of testUpdates) {
-          const targetTrack = tracks.find(t => t.id === update.newTrackId);
+          const targetTrack = latestTracks.find(t => t.id === update.newTrackId);
           if (!targetTrack) continue;
           const newStart = update.newStartTime;
           const newEnd = newStart + update.originalDuration;
@@ -278,7 +278,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         moveClips(uniqueUpdates, false);
       }
     }
-  }, [dragState, tracks, zoomLevel, getTrackFromMouseY, computeSnap, moveClips, setDragPreview, setSnapLine]);
+  }, [dragState, zoomLevel, getTrackFromMouseY, computeSnap, moveClips, setDragPreview, setSnapLine]);
 
   const updateDragPositionRef = useRef(updateDragPosition);
   useEffect(() => {
@@ -660,7 +660,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           const dt = dx / zoomLevel;
           let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
           
-          const track = tracks.find((t) => t.id === dragOverLayerState.trackId);
+          const latestTracks = useEditorStore.getState().tracks;
+          const track = latestTracks.find((t) => t.id === dragOverLayerState.trackId);
           const ol = track?.overLayers?.find(o => o.id === dragOverLayerState.overLayerId);
           if (ol) {
             const { snappedTime, snapPos } = computeSnap(newStartTime, ol.id, ol.duration);
@@ -692,7 +693,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const dx = clientX - resizeOverLayerState.startX;
         const dt = dx / zoomLevel;
         
-        const track = tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
+        const latestTracks = useEditorStore.getState().tracks;
+        const track = latestTracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
         const ol = track?.overLayers.find((ol) => ol.id === resizeOverLayerState.overLayerId);
         if (ol) {
           if (resizeOverLayerState.edge === 'right') {
@@ -719,7 +721,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         resizeRafIdRef.current = null;
         const dx = clientX - resizeState.startX;
         const dt = dx / zoomLevel;
-        const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === resizeState.clipId);
+        const latestTracks = useEditorStore.getState().tracks;
+        const clip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === resizeState.clipId);
         if (!clip) return;
 
         const media = getMediaSafe(clip);
@@ -755,7 +758,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             
             // Max duration is limited by the left-side adjacent clip
             let maxDuration = Infinity;
-            const originalTrack = tracks.find((t) => t.clips.some(c => c.id === resizeState.clipId));
+            const latestTracks = useEditorStore.getState().tracks;
+            const originalTrack = latestTracks.find((t) => t.clips.some(c => c.id === resizeState.clipId));
             if (originalTrack) {
                const prevClip = originalTrack.clips
                  .filter((c: TimelineClip) => c.id !== resizeState.clipId && c.startTime < resizeState.originalStartTime)

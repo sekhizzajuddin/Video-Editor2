@@ -114,7 +114,7 @@ function checkOverlap(
   return clips.some((clip) => {
     if (clip.id === excludeClipId) return false;
     const clipEnd = clip.startTime + clip.duration;
-    return startTime < clipEnd && endTime > clip.startTime;
+    return startTime < clipEnd - 0.001 && endTime > clip.startTime + 0.001;
   });
 }
 
@@ -1113,7 +1113,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         return clips.some((clip) => {
           if (clip.id === excludeClipId || clipIds.includes(clip.id)) return false;
           const clipEnd = clip.startTime + clip.duration;
-          return startTime < clipEnd && endTime > clip.startTime;
+          return startTime < clipEnd - 0.001 && endTime > clip.startTime + 0.001;
         });
       };
 
@@ -2510,9 +2510,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         console.error('Failed to clear database:', err);
       }
     }
+    const { previewCanvas, masterAudioStream } = get();
     const freshTracks = createEmptyTracks();
     set({
       ...initialState,
+      previewCanvas,
+      masterAudioStream,
       tracks: freshTracks,
       history: [
         {

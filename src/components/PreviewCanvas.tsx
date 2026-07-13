@@ -70,6 +70,7 @@ export function PreviewCanvas() {
     canvasTransformMode,
     setCanvasTransformMode,
     setPreviewCanvas,
+    previewCanvas,
     activeTool,
     settings,
     aspectRatio,
@@ -244,10 +245,10 @@ export function PreviewCanvas() {
 
   // Register canvas with store
   useEffect(() => {
-    if (canvasRef.current) {
+    if (canvasRef.current && !previewCanvas) {
       setPreviewCanvas(canvasRef.current);
     }
-  }, [setPreviewCanvas]);
+  }, [setPreviewCanvas, previewCanvas]);
 
   // Keep a mutable ref of currentTime so the playback loop effect doesn't tear down/setup on every frame
   const currentTimeRef = useRef(currentTime);
