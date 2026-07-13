@@ -352,7 +352,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       startTransactionSafe();
 
       let rippleClips: { id: string; originalStartTime: number }[] = [];
-      if (activeTool === 'ripple' && track) {
+      if ((activeTool === 'ripple' || activeTool === 'rateStretch') && track) {
         // ALWAYS ripple downstream (right-side) clips regardless of which edge is trimmed!
         rippleClips = track.clips
           .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
@@ -420,15 +420,17 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const clickTime = clip.startTime + relX / zoomLevel;
       seek(Math.max(0, clickTime));
 
-      if (relX < 6) {
-        startTransactionSafe();
-        startResize(e, clip, 'left');
-        return;
-      }
+      const distLeft = relX;
+      const distRight = rect.width - relX;
+      const grabArea = 8; // pixels
 
-      if (relX > rect.width - 6) {
+      if (distLeft <= grabArea || distRight <= grabArea) {
         startTransactionSafe();
-        startResize(e, clip, 'right');
+        if (distLeft <= distRight) {
+          startResize(e, clip, 'left');
+        } else {
+          startResize(e, clip, 'right');
+        }
         return;
       }
 
@@ -718,7 +720,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         if (activeTool === 'rateStretch') {
           const originalSpeed = resizeState.originalSpeed || 1.0;
           const sourceContentDuration = resizeState.originalDuration * originalSpeed;
-
           if (resizeState.edge === 'right') {
             const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
             const newSpeed = sourceContentDuration / newDuration;
@@ -729,8 +730,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             updateClip(resizeState.clipId, {
               duration: clampedDuration,
               speed: clampedSpeed,
-              trimStart: resizeState.originalTrimStart,
-              trimEnd: resizeState.originalTrimEnd,
             });
 
             if (resizeState.rippleClips) {
@@ -742,11 +741,25 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             }
           } else {
             const shrink = -dt; // dragging right (shrink) -> shrink > 0, dragging left (expand) -> shrink < 0
-            const newDuration = Math.max(0.1, resizeState.originalDuration - shrink); // wait, if shrink is -dt, we should just use dt
-            // Let's rewrite dt logic for Left Edge Rate Stretch:
+            
             // Dragging left means dt < 0. We want the box to grow, so newDuration = originalDuration - dt.
             const newDur = Math.max(0.1, resizeState.originalDuration - dt);
-            const newSpeed = sourceContentDuration / newDur;
+            
+            // Max duration is limited by the left-side adjacent clip
+            let maxDuration = Infinity;
+            const originalTrack = tracks.find((t) => t.clips.some(c => c.id === resizeState.clipId));
+            if (originalTrack) {
+               const prevClip = originalTrack.clips
+                 .filter((c: TimelineClip) => c.id !== resizeState.clipId && c.startTime < resizeState.originalStartTime)
+                 .sort((a: TimelineClip, b: TimelineClip) => b.startTime - a.startTime)[0];
+               if (prevClip) {
+                  const availableSpace = resizeState.originalStartTime - (prevClip.startTime + prevClip.duration);
+                  maxDuration = resizeState.originalDuration + Math.max(0, availableSpace);
+               }
+            }
+            const limitedDuration = Math.min(newDur, maxDuration);
+            
+            const newSpeed = sourceContentDuration / limitedDuration;
             const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
             const clampedDuration = sourceContentDuration / clampedSpeed;
             const shift = resizeState.originalDuration - clampedDuration;
