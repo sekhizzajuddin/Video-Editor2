@@ -13,6 +13,7 @@ import type {
   OverLayerClip,
   ProjectTemplate,
   SubtitleItem,
+  ScopeSettings,
 } from '@/types';
 import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
@@ -443,7 +444,7 @@ const initialState: EditorState = {
 export const useEditorStore = create<EditorState & EditorActions>((set, get) => ({
   ...initialState,
 
-  setScopeSettings: (settings) => set({ scopeSettings: settings }),
+  setScopeSettings: (settings: ScopeSettings) => set({ scopeSettings: settings }),
 
   setSubtitles: (subtitles: SubtitleItem[]) => {
     set({ subtitles });

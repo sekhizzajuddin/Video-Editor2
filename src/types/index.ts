@@ -460,7 +460,7 @@ export interface EditorState {
   scrollLeft: number;
 
   // Tools
-  activeTool: 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch';
+  activeTool: EditorTool;
 
   // UI State
   showProgressBar: boolean;

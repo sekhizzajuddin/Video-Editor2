@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
-import { getMediaSafe } from '@/utils/mediaHelpers';
 
 export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null) {
   const { tracks } = useEditorStore();
@@ -31,8 +30,9 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
       .filter((t) => !t.muted)
       .flatMap((t) => t.clips)
       .filter((c) => {
-        const media = getMediaSafe(c);
-        if (media.type !== 'audio' && media.type !== 'video') return false;
+        const mediaLibrary = useEditorStore.getState().mediaLibrary;
+        const media = mediaLibrary.find((m) => m.id === c.mediaId);
+        if (!media || (media.type !== 'audio' && media.type !== 'video')) return false;
         return scrubTime >= c.startTime && scrubTime <= c.startTime + c.duration;
       });
 
@@ -47,7 +47,9 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
 
     // Play active clips
     activeClips.forEach((clip) => {
-      const media = getMediaSafe(clip);
+      const mediaLibrary = useEditorStore.getState().mediaLibrary;
+      const media = mediaLibrary.find((m) => m.id === clip.mediaId);
+      if (!media) return;
       if (!media.url) return;
 
       let audio = audioPoolRef.current.get(clip.id);

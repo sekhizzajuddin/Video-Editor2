@@ -37,10 +37,6 @@ export interface ResizeState {
     id: string;
     originalStartTime: number;
   }[];
-  rippleClips?: {
-    id: string;
-    originalStartTime: number;
-  }[];
 }
 
 export interface SlipState {
