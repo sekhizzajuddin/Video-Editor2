@@ -131,6 +131,17 @@ export interface ClipAudioSettings {
   };
 }
 
+export interface ScopeSettings {
+  enabled: boolean;
+  type: 'waveform' | 'vectorscope' | 'rgb-parade';
+  opacity: number; // 0-1
+  size: 'small' | 'medium' | 'large';
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  showGrid: boolean;
+  showLimits: boolean; // Show safe zones (0-100 IRE)
+  intensity: number; // 0-100 (brightness of scope display)
+}
+
 export type TextAnimationPreset = 
   | 'none' 
   | 'fadeIn' 
@@ -516,15 +527,16 @@ export interface EditorState {
     freesoundApiKey?: string;
     elevenLabsApiKey?: string;
   };
-  // Beat detection markers (per audio clip)
   beatMarkers: { time: number; clipId: string }[];
   projectTemplates: ProjectTemplate[];
   subtitles: SubtitleItem[];
   selectedSubtitleId: string | null;
   subtitleLanguage: string;
+  scopeSettings: ScopeSettings;
 }
 
 export interface EditorActions {
+  setScopeSettings: (settings: ScopeSettings) => void;
   setMuteTimelineAudio: (mute: boolean) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
   setProjectInfo: (id: string, name: string) => void;

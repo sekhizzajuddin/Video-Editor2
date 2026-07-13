@@ -4,6 +4,7 @@ import type { EditorTool } from '@/types';
 import { TopToolbar } from '@/components/TopToolbar';
 import { MediaPanel } from '@/components/MediaPanel';
 import { PreviewCanvas } from '@/components/PreviewCanvas';
+import { ScopesPanel } from '@/components/ScopesPanel';
 import { PropertiesPanel } from '@/components/PropertiesPanel';
 import { Timeline } from '@/components/Timeline';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -432,8 +433,9 @@ function App() {
         {/* Center Panel */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Preview Canvas */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden relative">
             <PreviewCanvas />
+            <ScopesPanel />
           </div>
 
           {/* Timeline Resize Handle */}

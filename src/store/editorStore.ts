@@ -428,10 +428,22 @@ const initialState: EditorState = {
   subtitles: [],
   selectedSubtitleId: null,
   subtitleLanguage: 'en',
+  scopeSettings: {
+    enabled: false,
+    type: 'waveform',
+    opacity: 0.9,
+    size: 'medium',
+    position: 'bottom-right',
+    showGrid: true,
+    showLimits: true,
+    intensity: 100,
+  },
 };
 
 export const useEditorStore = create<EditorState & EditorActions>((set, get) => ({
   ...initialState,
+
+  setScopeSettings: (settings) => set({ scopeSettings: settings }),
 
   setSubtitles: (subtitles: SubtitleItem[]) => {
     set({ subtitles });

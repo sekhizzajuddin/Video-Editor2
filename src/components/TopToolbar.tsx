@@ -60,7 +60,10 @@ import {
   Type,
   MoveHorizontal,
   SlidersHorizontal,
-  MonitorPlay, Link } from 'lucide-react';
+  MonitorPlay,
+  Link,
+  Activity,
+} from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -88,6 +91,8 @@ export function TopToolbar() {
     setWorkspaceLayout,
     clipboardData,
     clearClipboard,
+    scopeSettings,
+    setScopeSettings,
   } = useEditorStore();
 
   const [showFileMenu, setShowFileMenu] = useState(false);
@@ -482,6 +487,22 @@ export function TopToolbar() {
         >
           <Link className="w-3.5 h-3.5" />
           Sync
+        </button>
+
+        <button
+          onClick={() => setScopeSettings({ 
+            ...scopeSettings, 
+            enabled: !scopeSettings.enabled 
+          })}
+          title={scopeSettings.enabled ? "Hide Scopes" : "Show Scopes"}
+          className={`px-3 py-1.5 text-xs rounded flex items-center gap-1.5 transition-colors font-medium ${
+            scopeSettings.enabled 
+              ? 'bg-blue-600/30 text-blue-300 border border-blue-500/30' 
+              : 'bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0]'
+          }`}
+        >
+          <Activity className="w-3.5 h-3.5" />
+          Scopes
         </button>
 
         <button
