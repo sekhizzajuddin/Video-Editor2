@@ -9,6 +9,27 @@ interface UseTimelineDragDeps {
   timelineState: TimelineState;
 }
 
+const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime: number }[], tracks: any[]) => {
+  if (draggedClips.length <= 1) return true;
+  
+  const clipsWithTime = draggedClips.map(dc => {
+     const c = tracks.flatMap(t => t.clips).find(x => x.id === dc.id);
+     return { start: dc.originalStartTime, end: dc.originalStartTime + (c?.duration || 0) };
+  });
+  
+  clipsWithTime.sort((a, b) => a.start - b.start);
+  
+  let currentEnd = clipsWithTime[0].end;
+  for (let i = 1; i < clipsWithTime.length; i++) {
+     // 0.05s tolerance for gaps
+     if (clipsWithTime[i].start > currentEnd + 0.05) {
+        return false;
+     }
+     currentEnd = Math.max(currentEnd, clipsWithTime[i].end);
+  }
+  return true;
+};
+
 export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const {
     tracks,
@@ -169,66 +190,91 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     const clampedFinalDt = Math.max(-minOriginalStart, newTime - dragState.originalStartTime);
 
     if (dragState.draggedClips.length >= 1) {
+      // If multiple clips are selected but they have gaps in time (scattered), block movement completely.
+      if (!areClipsContiguousInTime(dragState.draggedClips, tracks)) {
+         return;
+      }
+
       setDragPreview(0, null);
 
       const sourceTrackIdx = tracks.findIndex((t) => t.id === dragState.trackId);
       const targetTrackIdx = tracks.findIndex((t) => t.id === targetTrackId);
       const trackDelta = targetTrackIdx - sourceTrackIdx;
 
-      const updates = dragState.draggedClips.map((c) => {
-        const clipNewTime = c.originalStartTime + clampedFinalDt;
-        
-        const clipTrackIdx = tracks.findIndex((t) => t.id === c.trackId);
-        const newTrackIdx = clipTrackIdx + trackDelta;
-        const originalTrack = tracks.find((t) => t.id === c.trackId);
-        const targetTrack = tracks[newTrackIdx];
-
-        const targetTrackIdForClip =
-          targetTrack && originalTrack && targetTrack.type === originalTrack.type
-            ? targetTrack.id
-            : c.trackId;
-
-        return {
-          clipId: c.id,
-          newStartTime: clipNewTime,
-          newTrackId: targetTrackIdForClip,
-        };
-      });
-
-      const seen = new Set<string>();
-      const uniqueUpdates = updates.filter((u) => {
-        if (seen.has(u.clipId)) return false;
-        seen.add(u.clipId);
-        return true;
-      });
-
-      // Strict collision boundary logic for drag
+      let finalUpdates = null;
       let hasOverlap = false;
-      const draggedIds = new Set(uniqueUpdates.map(u => u.clipId));
 
-      for (const update of uniqueUpdates) {
-        const targetTrack = tracks.find(t => t.id === update.newTrackId);
-        if (!targetTrack) continue;
-        const originalClip = tracks.flatMap(t => t.clips).find(c => c.id === update.clipId);
-        if (!originalClip) continue;
+      // Try bumps to automatically hop tracks: 0, -1, 1, -2, 2, -3, 3, -4, 4
+      const bumpOffsets = [0, -1, 1, -2, 2, -3, 3, -4, 4];
 
-        const newStart = update.newStartTime;
-        const newEnd = newStart + originalClip.duration;
-        
-        for (const clip of targetTrack.clips) {
-          if (draggedIds.has(clip.id)) continue; // ignore clips that are also being dragged
-          const clipEnd = clip.startTime + clip.duration;
-          // Intersection check (StartA < EndB and StartB < EndA)
-          if (newStart < clipEnd - 0.001 && clip.startTime < newEnd - 0.001) {
-            hasOverlap = true;
+      for (const bump of bumpOffsets) {
+        hasOverlap = false;
+        const testUpdates = [];
+
+        for (const c of dragState.draggedClips) {
+          const clipNewTime = c.originalStartTime + clampedFinalDt;
+          const clipTrackIdx = tracks.findIndex((t) => t.id === c.trackId);
+          const newTrackIdx = clipTrackIdx + trackDelta + bump;
+          const originalTrack = tracks.find((t) => t.id === c.trackId);
+          const targetTrack = tracks[newTrackIdx];
+
+          const targetTrackIdForClip =
+            targetTrack && originalTrack && targetTrack.type === originalTrack.type
+              ? targetTrack.id
+              : null; // Out of bounds or type mismatch
+
+          if (!targetTrackIdForClip) {
+            hasOverlap = true; // Cannot bump here
             break;
           }
+
+          const originalClip = tracks.flatMap(t => t.clips).find(x => x.id === c.id);
+          testUpdates.push({
+            clipId: c.id,
+            newStartTime: clipNewTime,
+            newTrackId: targetTrackIdForClip,
+            originalDuration: originalClip?.duration || 0
+          });
         }
-        if (hasOverlap) break;
+
+        if (hasOverlap) continue;
+
+        // Check if testUpdates have physical overlaps on these tracks
+        const draggedIds = new Set(testUpdates.map(u => u.clipId));
+        for (const update of testUpdates) {
+          const targetTrack = tracks.find(t => t.id === update.newTrackId);
+          if (!targetTrack) continue;
+          const newStart = update.newStartTime;
+          const newEnd = newStart + update.originalDuration;
+          
+          for (const clip of targetTrack.clips) {
+            if (draggedIds.has(clip.id)) continue;
+            const clipEnd = clip.startTime + clip.duration;
+            // Intersection check
+            if (newStart < clipEnd - 0.001 && clip.startTime < newEnd - 0.001) {
+              hasOverlap = true;
+              break;
+            }
+          }
+          if (hasOverlap) break;
+        }
+
+        if (!hasOverlap) {
+          finalUpdates = testUpdates;
+          break; // Found a valid track placement!
+        }
       }
 
-      // If hitting a wall, block movement completely. Mouse can keep moving, but clips won't until space is clear.
-      if (!hasOverlap) {
+      // If a valid non-overlapping placement was found, apply it. Otherwise, block movement.
+      if (finalUpdates) {
+        // Filter out duplicate clip updates (just in case)
+        const seen = new Set<string>();
+        const uniqueUpdates = finalUpdates.filter((u) => {
+          if (seen.has(u.clipId)) return false;
+          seen.add(u.clipId);
+          return true;
+        }).map(u => ({ clipId: u.clipId, newStartTime: u.newStartTime, newTrackId: u.newTrackId }));
+
         moveClips(uniqueUpdates, false);
       }
     }
@@ -307,15 +353,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       let rippleClips: { id: string; originalStartTime: number }[] = [];
       if ((activeTool === 'ripple' || activeTool === 'rateStretch') && track) {
-        if (edge === 'right') {
-          rippleClips = track.clips
-            .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
-            .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
-        } else {
-          rippleClips = track.clips
-            .filter((c) => c.id !== clip.id && c.startTime <= clip.startTime)
-            .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
-        }
+        // ALWAYS ripple downstream (right-side) clips regardless of which edge is trimmed!
+        rippleClips = track.clips
+          .filter((c) => c.id !== clip.id && c.startTime >= clip.startTime)
+          .map((c) => ({ id: c.id, originalStartTime: c.startTime }));
       }
 
       let sibling: any = undefined;
@@ -756,30 +797,37 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               });
             }
           } else {
-            const shrink = -dt;
+            const shrink = -dt; // If we dragged right, dt > 0, shrink < 0
             const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
             const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
-            let clamped = Math.min(newDuration, maxDuration);
-            let shift = resizeState.originalDuration - clamped;
-
-            let minStart = resizeState.originalStartTime;
-            if (resizeState.rippleClips && resizeState.rippleClips.length > 0) {
-              minStart = Math.min(...resizeState.rippleClips.map(c => c.originalStartTime));
-            }
-            shift = Math.max(-minStart, shift);
             
-            clamped = resizeState.originalDuration - shift;
+            let clampedDuration = Math.min(newDuration, maxDuration);
+            // Limit expansion so it doesn't push downstream clips below 0
+            if (clampedDuration > resizeState.originalDuration) {
+              const expansion = clampedDuration - resizeState.originalDuration;
+              let maxAllowed = expansion;
+              if (resizeState.rippleClips && resizeState.rippleClips.length > 0) {
+                 const minStart = Math.min(...resizeState.rippleClips.map(c => c.originalStartTime));
+                 maxAllowed = Math.max(0, minStart);
+              }
+              clampedDuration = resizeState.originalDuration + Math.min(expansion, maxAllowed);
+            }
 
+            const deltaDuration = clampedDuration - resizeState.originalDuration; // negative if we shrink
+
+            // Left edge Ripple Edit:
+            // 1. startTime on timeline stays EXACTLY the same! (Visually anchored)
+            // 2. trimStart changes by the duration difference
+            // 3. Right-side (downstream) clips move left by the duration difference
             updateClip(resizeState.clipId, {
-              startTime: resizeState.originalStartTime + shift,
-              duration: clamped,
-              trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
+              duration: clampedDuration,
+              trimStart: Math.max(0, resizeState.originalTrimStart - deltaDuration * clip.speed),
             });
 
             if (resizeState.rippleClips) {
               resizeState.rippleClips.forEach((c) => {
                 updateClip(c.id, {
-                  startTime: c.originalStartTime + shift,
+                  startTime: c.originalStartTime + deltaDuration,
                 });
               });
             }
