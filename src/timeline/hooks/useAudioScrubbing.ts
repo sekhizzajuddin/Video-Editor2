@@ -62,7 +62,7 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
       const track = tracks.find(t => t.id === clip.trackId);
       const trackVolume = track?.volume ?? 1;
 
-      audio.volume = trackVolume * (media.volume ?? 1);
+      audio.volume = trackVolume;
       
       const localTime = clip.trimStart + (scrubTime - clip.startTime) * clip.speed;
       

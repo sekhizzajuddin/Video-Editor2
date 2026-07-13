@@ -162,6 +162,7 @@ function findNonOverlappingPosition(
 }
 
 interface EditorActions {
+  setScopeSettings: (settings: ScopeSettings) => void;
   setMuteTimelineAudio: (mute: boolean) => void;
   // Media Library
   addMedia: (item: MediaItem, file?: File) => void;
