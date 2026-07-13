@@ -12,6 +12,7 @@ import {
   useTimelineAI,
   useTimelineDrag,
   useTimelineDrop,
+  useAudioScrubbing,
   TimelineToolbar,
   TimelineTrackHeader,
   TimelineRuler,
@@ -107,6 +108,8 @@ export function Timeline() {
   const dragHandlers = useTimelineDrag({ timelineState });
 
   const dropHandlers = useTimelineDrop({ timelineState });
+
+  useAudioScrubbing(timelineState.isScrubbing, timelineState.scrubTime);
 
   // ── Ruler calculations ────────────────────────────────────────────────
   

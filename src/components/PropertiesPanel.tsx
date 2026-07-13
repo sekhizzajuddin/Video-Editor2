@@ -1663,6 +1663,29 @@ export function PropertiesPanel() {
           </div>
           <div className="flex gap-1.5">
             <button
+              onClick={() => {
+                const currentMuted = selectedClip.audioSettings?.muted || false;
+                const newSettings = {
+                  ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, humanize: false }),
+                  muted: !currentMuted
+                };
+                if (isOverLayer) {
+                  updateOverLayer(selectedClip.id, { audioSettings: newSettings });
+                } else {
+                  storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
+                }
+                useEditorStore.getState().saveSnapshot();
+              }}
+              title={selectedClip.audioSettings?.muted ? "Unmute Clip" : "Mute Clip"}
+              className={`p-1.5 rounded transition-colors ${
+                selectedClip.audioSettings?.muted
+                  ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                  : 'bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+              }`}
+            >
+              {selectedClip.audioSettings?.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+            </button>
+            <button
               onClick={() => copyClip()}
               title="Copy"
               className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"

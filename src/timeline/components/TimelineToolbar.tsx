@@ -1,6 +1,7 @@
 import React from 'react';
 import { ZoomIn, ZoomOut, Film, Music, Plus, Sparkles, Magnet } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { InsertOverwriteButtons } from './InsertOverwriteButtons';
 
 interface TimelineToolbarProps {
   zoomLevel: number;
@@ -79,6 +80,11 @@ export function TimelineToolbar({
           <Sparkles className="w-3 h-3" /> + FX
         </button>
       </div>
+
+      <div className="w-px h-4 bg-[#3e3e3e] mx-2" />
+      
+      {/* NLE Workflow Buttons */}
+      <InsertOverwriteButtons />
 
       <div className="w-px h-4 bg-[#3e3e3e] mx-2" />
 

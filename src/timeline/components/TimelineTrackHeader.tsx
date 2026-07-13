@@ -190,25 +190,32 @@ export function TimelineTrackHeader({
           </button>
         )}
 
+        {track.type !== 'audio' && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              useEditorStore.getState().toggleTrackHidden(track.id);
+            }}
+            title={track.hidden ? 'Show Track' : 'Hide Track'}
+            className={`p-0.5 rounded transition-colors ${
+              track.hidden ? 'text-red-400' : 'text-[#a0a0a0] hover:text-white'
+            }`}
+          >
+            {track.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+          </button>
+        )}
+
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (track.type === 'audio') {
-              toggleTrackMute(track.id);
-            } else {
-              useEditorStore.getState().toggleTrackHidden(track.id);
-            }
+            toggleTrackMute(track.id);
           }}
-          title={track.type === 'audio' ? (track.muted ? 'Unmute Track' : 'Mute Track') : (track.hidden ? 'Show Track' : 'Hide Track')}
+          title={track.muted ? 'Unmute Track' : 'Mute Track'}
           className={`p-0.5 rounded transition-colors ${
-            isMutedOrHidden ? 'text-red-400' : 'text-[#a0a0a0] hover:text-white'
+            track.muted ? 'text-red-400' : 'text-[#a0a0a0] hover:text-white'
           }`}
         >
-          {track.type === 'audio' ? (
-            track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />
-          ) : (
-            track.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />
-          )}
+          {track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
         </button>
 
         {tracks.length > 1 && (

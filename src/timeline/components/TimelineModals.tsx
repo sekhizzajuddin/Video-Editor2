@@ -113,6 +113,7 @@ export function TimelineModals({
     } else {
       updateClip(clipId, { zIndex: newZ });
     }
+    useEditorStore.getState().saveSnapshot('Change Layer Order');
     setContextMenu(null);
   };
 
@@ -250,6 +251,39 @@ export function TimelineModals({
                   )}
                   <div className="px-3 pb-1 text-[10px] text-[#a0a0a0] font-semibold border-b border-[#3e3e3e] mb-1 uppercase tracking-wider">
                     Clip Options
+                  </div>
+                  
+                  {/* Layer / Z-index Options */}
+                  <div className="px-3 py-1.5 text-[10px] text-[#a0a0a0] mt-0.5">Move Layer Order</div>
+                  <div className="grid grid-cols-4 gap-1 px-3 py-1 border-b border-[#3e3e3e] pb-2 mb-1">
+                    <button
+                      title="Bring to Front"
+                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
+                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'front')}
+                    >
+                      Top
+                    </button>
+                    <button
+                      title="Send to Back"
+                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
+                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'back')}
+                    >
+                      Bot
+                    </button>
+                    <button
+                      title="Move Up"
+                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
+                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'forward')}
+                    >
+                      Up
+                    </button>
+                    <button
+                      title="Move Down"
+                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
+                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'backward')}
+                    >
+                      Dn
+                    </button>
                   </div>
 
                   {/* AI Options (only for Video/Image clips, not audio/text) */}

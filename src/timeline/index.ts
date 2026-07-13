@@ -10,6 +10,7 @@ export * from './hooks/useTimelineDrop';
 export * from './hooks/useTimelineScroll';
 export * from './hooks/useVoiceoverRecording';
 export * from './hooks/useTimelineAI';
+export * from './hooks/useAudioScrubbing';
 
 // Components
 export * from './components/FrameStripOverlay';

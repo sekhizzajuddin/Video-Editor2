@@ -37,6 +37,27 @@ export interface ResizeState {
     id: string;
     originalStartTime: number;
   }[];
+  rippleClips?: {
+    id: string;
+    originalStartTime: number;
+  }[];
+}
+
+export interface SlipState {
+  clipId: string;
+  startX: number;
+  originalTrimStart: number;
+  originalTrimEnd: number;
+}
+
+export interface SlideState {
+  clipId: string;
+  startX: number;
+  originalStartTime: number;
+  adjacentClips: {
+    left?: { id: string; originalTrimEnd: number; originalDuration: number };
+    right?: { id: string; originalTrimStart: number; originalDuration: number; originalStartTime: number };
+  };
 }
 
 export interface DragOverLayerState {
@@ -90,6 +111,9 @@ export function useTimelineState() {
   // Drag and drop states
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+  const [slipState, setSlipState] = useState<SlipState | null>(null);
+  const [slideState, setSlideState] = useState<SlideState | null>(null);
+  
   const [dragOverLayerState, setDragOverLayerState] = useState<DragOverLayerState | null>(null);
   const [resizeOverLayerState, setResizeOverLayerState] = useState<ResizeOverLayerState | null>(null);
   const [snapLine, setSnapLine] = useState<number | null>(null);
@@ -173,6 +197,10 @@ export function useTimelineState() {
     setDragState,
     resizeState,
     setResizeState,
+    slipState,
+    setSlipState,
+    slideState,
+    setSlideState,
     dragOverLayerState,
     setDragOverLayerState,
     resizeOverLayerState,

@@ -58,6 +58,8 @@ import {
   FileUp,
   Layout,
   Type,
+  MoveHorizontal,
+  SlidersHorizontal,
   MonitorPlay, Link } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
@@ -104,6 +106,8 @@ export function TopToolbar() {
     { id: 'trackSelectBackward', icon: ArrowLeftToLine, label: 'Track Select Backward', shortcut: 'Shift+A' },
     { id: 'ripple', icon: ArrowLeftRight, label: 'Ripple Edit', shortcut: 'B' },
     { id: 'rateStretch', icon: Timer, label: 'Rate Stretch', shortcut: 'R' },
+    { id: 'slip', icon: SlidersHorizontal, label: 'Slip Tool', shortcut: 'Y' },
+    { id: 'slide', icon: MoveHorizontal, label: 'Slide Tool', shortcut: 'U' },
     { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
     { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },
   ];

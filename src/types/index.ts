@@ -546,7 +546,7 @@ export interface EditorSnapshot {
 }
 
 // Tool Types
-export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch';
+export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch' | 'slip' | 'slide';
 
 // Media Tab Types
 export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';

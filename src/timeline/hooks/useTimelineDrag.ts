@@ -21,8 +21,8 @@ const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime:
   
   let currentEnd = clipsWithTime[0].end;
   for (let i = 1; i < clipsWithTime.length; i++) {
-     // 0.05s tolerance for gaps
-     if (clipsWithTime[i].start > currentEnd + 0.05) {
+     // 0.1s tolerance for gaps
+     if (clipsWithTime[i].start > currentEnd + 0.1) {
         return false;
      }
      currentEnd = Math.max(currentEnd, clipsWithTime[i].end);
@@ -528,6 +528,38 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return;
       }
 
+      if (activeTool === 'slip') {
+        startTransactionSafe();
+        setSlipState({
+          clipId: clip.id,
+          startX: e.clientX,
+          originalTrimStart: clip.trimStart,
+          originalTrimEnd: clip.trimEnd,
+        });
+        e.stopPropagation();
+        return;
+      }
+
+      if (activeTool === 'slide') {
+        startTransactionSafe();
+        
+        // Find adjacent clips for slide tool constraints with 0.1s tolerance
+        const leftSib = track?.clips.find(c => Math.abs((c.startTime + c.duration) - clip.startTime) < 0.1);
+        const rightSib = track?.clips.find(c => Math.abs(c.startTime - (clip.startTime + clip.duration)) < 0.1);
+        
+        setSlideState({
+          clipId: clip.id,
+          startX: e.clientX,
+          originalStartTime: clip.startTime,
+          adjacentClips: {
+            left: leftSib ? { id: leftSib.id, originalTrimEnd: leftSib.trimEnd, originalDuration: leftSib.duration } : undefined,
+            right: rightSib ? { id: rightSib.id, originalTrimStart: rightSib.trimStart, originalDuration: rightSib.duration, originalStartTime: rightSib.startTime } : undefined,
+          },
+        });
+        e.stopPropagation();
+        return;
+      }
+
       let currentSelectedIds = selectedClipIds;
       if (e.ctrlKey || e.metaKey) {
         const isAlreadySel = selectedClipIds.includes(clip.id);
@@ -566,7 +598,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       e.stopPropagation();
     },
-    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, startTransactionSafe, startResize, setDragState, setDraggingClipId],
+    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, startTransactionSafe, startResize, setDragState, setDraggingClipId, setSlipState, setSlideState],
   );
 
   const handleTimelineClick = useCallback(
@@ -845,30 +877,27 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
           if (resizeState.siblingClip) {
             const sib = resizeState.siblingClip;
-            const newAEnd = clip.trimStart + clamped * clip.speed;
-            if (newAEnd > sib.originalTrimStart) {
-              let deltaSource = newAEnd - sib.originalTrimStart;
-              let delta = deltaSource / sib.speed;
-              
+            let delta = clamped - resizeState.originalDuration; // >0 if A expands, <0 if A shrinks
+            
+            if (delta > 0) {
               const maxDelta = sib.originalDuration - 0.1;
               if (delta > maxDelta) {
-                delta = Math.max(0, maxDelta);
-                deltaSource = delta * sib.speed;
-                clamped = (sib.originalTrimStart + deltaSource - clip.trimStart) / clip.speed;
+                delta = maxDelta;
+                clamped = resizeState.originalDuration + delta;
               }
-
-              updateClip(sib.id, {
-                trimStart: sib.originalTrimStart + deltaSource,
-                duration: sib.originalDuration - delta,
-                startTime: sib.originalStartTime + delta,
-              });
-            } else {
-              updateClip(sib.id, {
-                trimStart: sib.originalTrimStart,
-                duration: sib.originalDuration,
-                startTime: sib.originalStartTime,
-              });
+            } else if (delta < 0) {
+              const maxExpandB = sib.originalTrimStart / sib.speed;
+              if (-delta > maxExpandB) {
+                delta = -maxExpandB;
+                clamped = resizeState.originalDuration + delta;
+              }
             }
+            
+            updateClip(sib.id, {
+              startTime: sib.originalStartTime + delta,
+              duration: sib.originalDuration - delta,
+              trimStart: Math.max(0, sib.originalTrimStart + (delta * sib.speed)),
+            });
           }
 
           const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
@@ -885,36 +914,127 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
           if (resizeState.siblingClip) {
             const sib = resizeState.siblingClip;
-            const newBStart = resizeState.originalTrimStart + shift * clip.speed;
-            if (newBStart < sib.originalTrimStart + sib.originalDuration * sib.speed) {
-              let deltaSource = (sib.originalTrimStart + sib.originalDuration * sib.speed) - newBStart;
-              let delta = deltaSource / sib.speed;
-              
-              const maxDelta = sib.originalDuration - 0.1;
-              if (delta > maxDelta) {
-                delta = Math.max(0, maxDelta);
-                deltaSource = delta * sib.speed;
-                const allowedNewBStart = sib.originalTrimStart + sib.originalDuration * sib.speed - deltaSource;
-                shift = (allowedNewBStart - resizeState.originalTrimStart) / clip.speed;
+            // shift > 0 means B shrinks (moves right), A expands
+            // shift < 0 means B expands (moves left), A shrinks
+            
+            if (shift < 0) {
+              const maxShrinkA = sib.originalDuration - 0.1;
+              if (-shift > maxShrinkA) {
+                shift = -maxShrinkA;
                 clamped = resizeState.originalDuration - shift;
               }
-
-              updateClip(sib.id, {
-                trimEnd: sib.originalTrimEnd + deltaSource,
-                duration: sib.originalDuration - delta,
-              });
-            } else {
-              updateClip(sib.id, {
-                trimEnd: sib.originalTrimEnd,
-                duration: sib.originalDuration,
-              });
+            } else if (shift > 0) {
+              const maxExpandA = sib.originalTrimEnd / sib.speed;
+              if (shift > maxExpandA) {
+                shift = maxExpandA;
+                clamped = resizeState.originalDuration - shift;
+              }
             }
+
+            updateClip(sib.id, {
+              duration: sib.originalDuration + shift,
+              trimEnd: Math.max(0, sib.originalTrimEnd - (shift * sib.speed)),
+            });
           }
 
           updateClip(resizeState.clipId, {
             startTime: resizeState.originalStartTime + shift,
             duration: clamped,
             trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
+          });
+        }
+      });
+    }
+
+    if (slipState) {
+      const clientX = e.clientX;
+      if (resizeRafIdRef.current !== null) {
+        cancelAnimationFrame(resizeRafIdRef.current);
+      }
+      resizeRafIdRef.current = requestAnimationFrame(() => {
+        resizeRafIdRef.current = null;
+        const dx = clientX - slipState.startX;
+        const dt = dx / zoomLevel;
+        
+        const latestTracks = useEditorStore.getState().tracks;
+        const clip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === slipState.clipId);
+        if (!clip) return;
+        
+        const media = getMediaSafe(clip);
+        const sourceDuration = media.duration || 30;
+        
+        let newTrimStart = slipState.originalTrimStart - (dt * clip.speed);
+        let newTrimEnd = slipState.originalTrimEnd + (dt * clip.speed);
+        
+        if (newTrimStart < 0) {
+          newTrimStart = 0;
+          newTrimEnd = sourceDuration - clip.duration * clip.speed;
+        }
+        if (newTrimStart + (clip.duration * clip.speed) > sourceDuration) {
+          newTrimStart = sourceDuration - (clip.duration * clip.speed);
+          newTrimEnd = 0;
+        }
+        
+        updateClip(clip.id, {
+          trimStart: newTrimStart,
+          trimEnd: newTrimEnd,
+        });
+      });
+    }
+
+    if (slideState) {
+      const clientX = e.clientX;
+      if (resizeRafIdRef.current !== null) {
+        cancelAnimationFrame(resizeRafIdRef.current);
+      }
+      resizeRafIdRef.current = requestAnimationFrame(() => {
+        resizeRafIdRef.current = null;
+        const dx = clientX - slideState.startX;
+        const dt = dx / zoomLevel;
+        
+        const latestTracks = useEditorStore.getState().tracks;
+        const clip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === slideState.clipId);
+        if (!clip) return;
+        
+        let newStartTime = slideState.originalStartTime + dt;
+        
+        let minStartTime = slideState.originalStartTime;
+        let maxStartTime = slideState.originalStartTime;
+        
+        const leftSib = slideState.adjacentClips.left ? latestTracks.flatMap(t => t.clips).find(c => c.id === slideState.adjacentClips.left?.id) : null;
+        const rightSib = slideState.adjacentClips.right ? latestTracks.flatMap(t => t.clips).find(c => c.id === slideState.adjacentClips.right?.id) : null;
+        
+        if (leftSib && slideState.adjacentClips.left) {
+          minStartTime = slideState.originalStartTime - (slideState.adjacentClips.left.originalDuration - 0.1);
+        } else {
+          minStartTime = 0;
+        }
+        
+        if (rightSib && slideState.adjacentClips.right) {
+          maxStartTime = slideState.originalStartTime + (slideState.adjacentClips.right.originalDuration - 0.1);
+        } else {
+          maxStartTime = Infinity;
+        }
+        
+        newStartTime = Math.max(minStartTime, Math.min(newStartTime, maxStartTime));
+        const actualDt = newStartTime - slideState.originalStartTime;
+        
+        updateClip(clip.id, { startTime: newStartTime });
+        
+        if (leftSib && slideState.adjacentClips.left) {
+          const sibOriginal = slideState.adjacentClips.left;
+          updateClip(leftSib.id, {
+            duration: sibOriginal.originalDuration + actualDt,
+            trimEnd: sibOriginal.originalTrimEnd - (actualDt * leftSib.speed),
+          });
+        }
+        
+        if (rightSib && slideState.adjacentClips.right) {
+          const sibOriginal = slideState.adjacentClips.right;
+          updateClip(rightSib.id, {
+            startTime: sibOriginal.originalStartTime + actualDt,
+            duration: sibOriginal.originalDuration - actualDt,
+            trimStart: sibOriginal.originalTrimStart + (actualDt * rightSib.speed),
           });
         }
       });
@@ -970,12 +1090,20 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       setResizeOverLayerState(null);
       endTransactionSafe();
     }
+    if (slipState) {
+      setSlipState(null);
+      endTransactionSafe();
+    }
+    if (slideState) {
+      setSlideState(null);
+      endTransactionSafe();
+    }
   };
 
   handleMouseMoveRef.current = handleMouseMove;
   handleMouseUpRef.current = handleMouseUp;
 
-  const isDragging = dragState !== null || resizeState !== null || isScrubbing || dragOverLayerState !== null || resizeOverLayerState !== null;
+  const isDragging = dragState !== null || resizeState !== null || isScrubbing || dragOverLayerState !== null || resizeOverLayerState !== null || slipState !== null || slideState !== null;
 
   useEffect(() => {
     if (!isDragging) return;

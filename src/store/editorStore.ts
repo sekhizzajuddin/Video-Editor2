@@ -172,6 +172,8 @@ interface EditorActions {
 
   // Timeline Operations
   addClip: (clip: TimelineClip) => void;
+  insertClip: (clip: TimelineClip, atTime: number, trackId: string) => void;
+  overwriteClip: (clip: TimelineClip, atTime: number, trackId: string) => void;
   insertTextClip: (settings: Partial<ClipTextSettings>) => void;
   importSubtitles: (parsedSubs: {startTime: number, duration: number, text: string}[]) => void;
   setSubtitles: (subtitles: SubtitleItem[]) => void;
@@ -717,6 +719,104 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       get().resolveOverlaps([clip.id]);
     }
     get().saveSnapshot('Add Clip');
+  },
+
+  insertClip: (clip, atTime, trackId) => {
+    set((state) => {
+      const newTracks = state.tracks.map((track) => {
+        if (track.id !== trackId) {
+          // Ripple clips starting at or after atTime on other tracks too? No, usually insert edits only affect the target track or all linked tracks.
+          // The provided report suggested rippling all tracks if `track.id !== trackId`. Wait, standard NLE insert shifts ALL tracks if not locked.
+          // Let's shift clips on ALL unlocked tracks.
+          if (track.locked) return track;
+          return {
+            ...track,
+            clips: track.clips.map((c) => ({
+              ...c,
+              startTime: c.startTime >= atTime ? c.startTime + clip.duration : c.startTime,
+            })),
+          };
+        }
+        
+        // Insert the new clip on target track and ripple
+        return {
+          ...track,
+          clips: [
+            ...track.clips.map((c) => ({
+              ...c,
+              startTime: c.startTime >= atTime ? c.startTime + clip.duration : c.startTime,
+            })),
+            { ...clip, startTime: atTime, trackId },
+          ].sort((a, b) => a.startTime - b.startTime),
+        };
+      });
+      
+      return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
+    });
+    get().recalcTotalDuration();
+    get().saveSnapshot('Insert Edit');
+  },
+
+  overwriteClip: (clip, atTime, trackId) => {
+    set((state) => {
+      const newTracks = state.tracks.map((track) => {
+        if (track.id !== trackId) return track; // Overwrite only affects target track
+        if (track.locked) return track;
+        
+        const clipEnd = atTime + clip.duration;
+        
+        // Remove clips that overlap completely or partially with the insert region
+        let newClips = track.clips.filter((c) => {
+          const cEnd = c.startTime + c.duration;
+          // Keep clips that end before atTime or start after clipEnd
+          return cEnd <= atTime || c.startTime >= clipEnd;
+        });
+        
+        // Trim clips that overlap (we need to split/trim them actually)
+        // Wait, standard Overwrite Edit DESTROYS the content underneath.
+        // It's easier to just push the new clip and let `resolveOverlaps` handle it?
+        // No, `resolveOverlaps` pushes clips to new tracks. Overwrite deletes what's underneath.
+        
+        track.clips.forEach((c) => {
+          const cEnd = c.startTime + c.duration;
+          // Clip starts before overwrite, ends during overwrite (Trim End)
+          if (c.startTime < atTime && cEnd > atTime && cEnd <= clipEnd) {
+            newClips.push({ ...c, duration: atTime - c.startTime });
+          }
+          // Clip starts during overwrite, ends after (Trim Start)
+          else if (c.startTime >= atTime && c.startTime < clipEnd && cEnd > clipEnd) {
+            const cutAmount = clipEnd - c.startTime;
+            newClips.push({ 
+              ...c, 
+              startTime: clipEnd, 
+              duration: c.duration - cutAmount,
+              trimStart: c.trimStart + (cutAmount * c.speed)
+            });
+          }
+          // Clip completely encapsulates the overwrite (Split into two)
+          else if (c.startTime < atTime && cEnd > clipEnd) {
+            newClips.push({ ...c, duration: atTime - c.startTime });
+            const cutAmount = clipEnd - c.startTime;
+            newClips.push({ 
+              ...c, 
+              id: generateId(),
+              startTime: clipEnd, 
+              duration: c.duration - cutAmount,
+              trimStart: c.trimStart + (cutAmount * c.speed)
+            });
+          }
+        });
+        
+        // Add the new clip
+        newClips.push({ ...clip, startTime: atTime, trackId });
+        
+        return { ...track, clips: newClips.sort((a, b) => a.startTime - b.startTime) };
+      });
+      
+      return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
+    });
+    get().recalcTotalDuration();
+    get().saveSnapshot('Overwrite Edit');
   },
 
   importSubtitles: (parsedSubs) => {
@@ -2776,6 +2876,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         selectedClipId: null,
         selectedClipIds: [],
         selectedTrackId: null,
+        pinnedOverLayerTrackId: trackId,
       };
     });
     get().recalcTotalDuration();
