@@ -25,7 +25,18 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       e.preventDefault();
       // Clear the dragging media tracker set in MediaPanel's onDragStart
       (window as any).__procutDraggingMediaId = undefined;
-      const track = useEditorStore.getState().tracks.find((t) => t.id === trackId);
+      const state = useEditorStore.getState();
+      let track = state.tracks.find((t) => t.id === trackId);
+      if (!track && state.pipWindows) {
+        for (const pip of Object.values(state.pipWindows)) {
+          if (!pip) continue;
+          const pt = pip.tracks.find(t => t.id === trackId);
+          if (pt) {
+            track = pt;
+            break;
+          }
+        }
+      }
       if (!track) return;
 
       // ── Transition drop → apply to closest clip boundary ──
@@ -350,7 +361,18 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      const trackIdx = tracks.findIndex((t) => t.id === trackId);
+      const state = useEditorStore.getState();
+      let trackIdx = tracks.findIndex((t) => t.id === trackId);
+      if (trackIdx === -1 && state.pipWindows) {
+        for (const pip of Object.values(state.pipWindows)) {
+          if (!pip) continue;
+          const idx = pip.tracks.findIndex(t => t.id === trackId);
+          if (idx !== -1) {
+            trackIdx = idx;
+            break;
+          }
+        }
+      }
 
       const hasMedia = e.dataTransfer.types.includes('application/procut-media');
       const hasEffect = e.dataTransfer.types.includes('application/procut-effect');

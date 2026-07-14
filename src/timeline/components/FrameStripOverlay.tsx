@@ -4,24 +4,35 @@ import { seededRandom } from '../timelineUtils';
 
 interface FrameStripOverlayProps {
   media: MediaItem | null;
-  clipId: string;
+  clip: import('@/types').TimelineClip;
   width: number;
   height: number;
 }
 
 export const FrameStripOverlay = React.memo(function FrameStripOverlay({
   media,
-  clipId,
+  clip,
   width,
   height,
 }: FrameStripOverlayProps) {
   const frameStrip = media?.frameStrip;
 
-  if (frameStrip && frameStrip.length > 0) {
-    const frameWidth = width / frameStrip.length;
+  if (frameStrip && frameStrip.length > 0 && media) {
+    const totalDuration = media.duration || 1;
+    const trimStartRatio = Math.max(0, clip.trimStart / totalDuration);
+    const visibleDuration = clip.duration * clip.speed;
+    const trimEndRatio = Math.min(1, (clip.trimStart + visibleDuration) / totalDuration);
+    
+    const startIndex = Math.max(0, Math.floor(trimStartRatio * frameStrip.length));
+    const endIndex = Math.min(frameStrip.length, Math.ceil(trimEndRatio * frameStrip.length));
+    
+    const visibleFrames = frameStrip.slice(startIndex, endIndex);
+    const renderFrames = visibleFrames.length > 0 ? visibleFrames : [frameStrip[0]];
+    const frameWidth = width / renderFrames.length;
+
     return (
       <div className="absolute inset-0 flex overflow-hidden pointer-events-none">
-        {frameStrip.map((src, i) => (
+        {renderFrames.map((src, i) => (
           <img
             key={i}
             src={src}
@@ -36,7 +47,7 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
   }
 
   const count = Math.max(Math.floor(width / 28), 2);
-  const rng = seededRandom(clipId + '_frames');
+  const rng = seededRandom(clip.id + '_frames');
   const blocks: number[] = [];
   for (let i = 0; i < count; i++) blocks.push(rng());
   const blockW = width / count;

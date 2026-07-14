@@ -17,7 +17,7 @@ import {
   ExternalLink,
   X,
 } from 'lucide-react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useMediaPlayback, FrameCacheEntry } from '@/hooks/useMediaPlayback';
 import type { TimelineTrack, MediaItem } from '@/types';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
@@ -61,6 +61,7 @@ export function PreviewCanvas() {
     tracks,
     selectedClipId,
     selectedClipIds,
+    pipWindows,
     selectClip,
     playbackSpeed,
     setPlaybackSpeed,
@@ -695,6 +696,32 @@ export function PreviewCanvas() {
               y2: getAnimatedValue(pc.y2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y2']),
               x3: getAnimatedValue(pc.x3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x3']),
               y3: getAnimatedValue(pc.y3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y3']),
+            };
+          }
+
+          if (corners) {
+            const ccx = (corners.x0 + corners.x1 + corners.x2 + corners.x3) / 4;
+            const ccy = (corners.y0 + corners.y1 + corners.y2 + corners.y3) / 4;
+            const scale = aScale / 100;
+            const rotRad = (aRot * Math.PI) / 180;
+            const cos = Math.cos(rotRad);
+            const sin = Math.sin(rotRad);
+
+            const transformCorner = (x: number, y: number) => {
+              let dx = x - ccx;
+              let dy = y - ccy;
+              dx *= scale;
+              dy *= scale;
+              const rx = dx * cos - dy * sin;
+              const ry = dx * sin + dy * cos;
+              return { x: ccx + rx + aX, y: ccy + ry + aY };
+            };
+
+            corners = {
+              x0: transformCorner(corners.x0, corners.y0).x, y0: transformCorner(corners.x0, corners.y0).y,
+              x1: transformCorner(corners.x1, corners.y1).x, y1: transformCorner(corners.x1, corners.y1).y,
+              x2: transformCorner(corners.x2, corners.y2).x, y2: transformCorner(corners.x2, corners.y2).y,
+              x3: transformCorner(corners.x3, corners.y3).x, y3: transformCorner(corners.x3, corners.y3).y,
             };
           }
         } else {
@@ -2118,8 +2145,8 @@ export function PreviewCanvas() {
                 pipTrack.clips.forEach((pipClip) => {
                   const ptAbsStart = pipAbsStart + pipClip.startTime;
                   if (currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
-                    // Render this pip clip
-                    const z = (clip.zIndex ?? (trackIdx * 10 + (isText ? 1000 : 0))) + 1 + (pip.zIndex || 1) * 2 + ptIdx;
+                    // Render this pip clip, ensuring it always sits above all main timeline clips (+10000)
+                    const z = (clip.zIndex ?? (trackIdx * 10 + (isText ? 1000 : 0))) + 10000 + (pip.zIndex || 1) * 10 + ptIdx;
                     
                     const mockClip: any = {
                       ...pipClip,
@@ -3015,6 +3042,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   const {
     tracks,
     selectedClipId,
+    pipWindows,
     currentTime,
     mediaLibrary,
     updateClip: storeUpdateClip,
@@ -3045,6 +3073,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   let mediaItem = null;
 
   if (selectedClipId) {
+    let found = false;
     for (const track of tracks) {
       if (track.hidden) continue;
       const clip = track.clips.find((c) => c.id === selectedClipId);
@@ -3054,7 +3083,39 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
           (clip.textSettings || clip.mediaId === 'text-placeholder'
             ? { id: clip.mediaId, name: 'Text', type: 'text', duration: clip.duration, url: '', createdAt: Date.now() }
             : null);
+        found = true;
         break;
+      }
+    }
+    
+    // Also search inside PIP windows
+    if (!found && pipWindows) {
+      for (const [pipId, pip] of Object.entries(pipWindows)) {
+        // We need the parent clip to determine absolute time
+        let parentClip = null;
+        for (const t of tracks) {
+          parentClip = t.clips.find(c => c.id === (pip as any).parentClipId);
+          if (parentClip) break;
+        }
+        
+        if (!parentClip) continue;
+        const pipAbsStart = parentClip.startTime + (pip.relativeStartTime || 0);
+        
+        if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+          for (const track of pip.tracks) {
+            const clip = track.clips.find((c) => c.id === selectedClipId);
+            if (clip) {
+              const ptAbsStart = pipAbsStart + clip.startTime;
+              if (currentTime >= ptAbsStart && currentTime < ptAbsStart + clip.duration) {
+                activeClip = clip;
+                mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId) || null;
+                found = true;
+                break;
+              }
+            }
+          }
+        }
+        if (found) break;
       }
     }
   }
@@ -3085,7 +3146,26 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
       const baseH = dragState.baseH || 480;
 
       let animations = activeClip.animations || {};
-      const localTime = currentTime - activeClip.startTime;
+      const getActiveClipAbsoluteStartTime = (clipId: string): number => {
+        const state = useEditorStore.getState();
+        const found = findClipDeep(state, clipId);
+        if (found && found.isPip && found.pipId) {
+          const pip = (state.pipWindows || {})[found.pipId];
+          if (pip) {
+            let parentClip = null;
+            for (const t of state.tracks) {
+              parentClip = t.clips.find(c => c.id === pip.parentClipId);
+              if (parentClip) break;
+            }
+            if (parentClip) {
+              return parentClip.startTime + (pip.relativeStartTime || 0) + found.clip.startTime;
+            }
+          }
+        }
+        return found?.clip.startTime ?? 0;
+      };
+      const activeClipAbsStart = getActiveClipAbsoluteStartTime(activeClip.id);
+      const localTime = currentTime - activeClipAbsStart;
 
       // Helper to update base or keyframe
       const getNewAnimations = (prop: string, val: number) => {
@@ -3102,8 +3182,27 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
         const targetKeyX = `x${cornerIdx}` as keyof typeof initCorners;
         const targetKeyY = `y${cornerIdx}` as keyof typeof initCorners;
 
-        updatedCorners[targetKeyX] = initCorners[targetKeyX] + dx;
-        updatedCorners[targetKeyY] = initCorners[targetKeyY] + dy;
+        let deltaX = dx;
+        let deltaY = dy;
+        
+        if (activeClip.transform.perspectivePin) {
+          const invScale = 100 / aScale;
+          deltaX *= invScale;
+          deltaY *= invScale;
+          
+          const invRot = (-aRot * Math.PI) / 180;
+          const cos = Math.cos(invRot);
+          const sin = Math.sin(invRot);
+          
+          const rotDx = deltaX * cos - deltaY * sin;
+          const rotDy = deltaX * sin + deltaY * cos;
+          
+          deltaX = rotDx;
+          deltaY = rotDy;
+        }
+
+        updatedCorners[targetKeyX] = initCorners[targetKeyX] + deltaX;
+        updatedCorners[targetKeyY] = initCorners[targetKeyY] + deltaY;
 
         const hasKeyframes =
           (animations[`transform.perspectiveCorners.x0`]?.length || 0) > 0 ||
@@ -3357,6 +3456,33 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
     }
   }
 
+  let renderedPc = { ...pc };
+  if (activeClip.transform.perspectivePin) {
+    const ccx = (pc.x0 + pc.x1 + pc.x2 + pc.x3) / 4;
+    const ccy = (pc.y0 + pc.y1 + pc.y2 + pc.y3) / 4;
+    const scale = aScale / 100;
+    const rotRad = (aRot * Math.PI) / 180;
+    const cos = Math.cos(rotRad);
+    const sin = Math.sin(rotRad);
+
+    const transformCorner = (x: number, y: number) => {
+      let dx = x - ccx;
+      let dy = y - ccy;
+      dx *= scale;
+      dy *= scale;
+      const rx = dx * cos - dy * sin;
+      const ry = dx * sin + dy * cos;
+      return { x: ccx + rx + aX, y: ccy + ry + aY };
+    };
+
+    renderedPc = {
+      x0: transformCorner(pc.x0, pc.y0).x, y0: transformCorner(pc.x0, pc.y0).y,
+      x1: transformCorner(pc.x1, pc.y1).x, y1: transformCorner(pc.x1, pc.y1).y,
+      x2: transformCorner(pc.x2, pc.y2).x, y2: transformCorner(pc.x2, pc.y2).y,
+      x3: transformCorner(pc.x3, pc.y3).x, y3: transformCorner(pc.x3, pc.y3).y,
+    };
+  }
+
   const handleCornerKeyDown = (e: React.KeyboardEvent, idx: number) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
     e.preventDefault();
@@ -3476,16 +3602,20 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
               <g>
                 {/* Connected lines */}
                 <polygon
-                  points={`${pc.x0},${pc.y0} ${pc.x1},${pc.y1} ${pc.x2},${pc.y2} ${pc.x3},${pc.y3}`}
-                  fill="none"
+                  points={`${renderedPc.x0},${renderedPc.y0} ${renderedPc.x1},${renderedPc.y1} ${renderedPc.x2},${renderedPc.y2} ${renderedPc.x3},${renderedPc.y3}`}
+                  fill="transparent"
                   stroke="#fbbf24"
                   strokeWidth={1.5 / viewport.zoom}
+                  className="pointer-events-auto cursor-move focus:outline-none"
+                  onMouseDown={(e) => handleMouseDown(e, 'move')}
+                  role="button"
+                  aria-label="Move perspective pinned clip"
                 />
                 
                 {/* 4 corner circles */}
                 {([0, 1, 2, 3] as const).map((idx) => {
-                  const cx = pc[`x${idx}` as keyof typeof pc];
-                  const cy = pc[`y${idx}` as keyof typeof pc];
+                  const cx = renderedPc[`x${idx}` as keyof typeof renderedPc];
+                  const cy = renderedPc[`y${idx}` as keyof typeof renderedPc];
                   return (
                     <circle
                       key={`corner-${idx}`}

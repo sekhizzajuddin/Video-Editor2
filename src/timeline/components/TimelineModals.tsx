@@ -17,7 +17,7 @@ import {
   Loader2,
   Link,
 } from 'lucide-react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import type { TimelineTrack, TimelineMarker } from '@/types';
 import type { TimelineState } from '../hooks/useTimelineState';
 
@@ -114,6 +114,9 @@ export function TimelineModals({
     if (!contextMenu && !markerContextMenu) return;
 
     const handleGlobalMouseDown = (e: MouseEvent) => {
+      if (e.target instanceof Element && e.target.closest('.timeline-context-menu')) {
+        return;
+      }
       // Close context menus on outside click.
       setContextMenu(null);
       setMarkerContextMenu(null);
@@ -139,9 +142,9 @@ export function TimelineModals({
       {/* ── Context Menu ──────────────────────────────────────────────── */}
       {contextMenu && (
         <div
-          className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-1 min-w-[190px] text-white"
+          className="timeline-context-menu fixed z-[9999] bg-[#2a2a2a] border border-[#444] rounded shadow-2xl overflow-hidden min-w-[160px] py-1"
           style={{
-            left: `${Math.min(contextMenu.x, window.innerWidth - 200)}px`,
+            left: `${Math.min(contextMenu.x, window.innerWidth - 160)}px`,
             top: `${Math.min(contextMenu.y, window.innerHeight - (contextMenu.clipId === '' ? 100 : 380))}px`,
           }}
           onMouseDown={(e) => e.stopPropagation()}
@@ -169,13 +172,12 @@ export function TimelineModals({
           ) : (
             // Clicked a clip
             <>
-              {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'image') && contextMenu.trackId && (
+              {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'image') && contextMenu.trackId && contextMenu.clipId && (
                 <button
                   className="w-full text-left px-3 py-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
                   onClick={() => {
                     const state = useEditorStore.getState();
-                    const track = state.tracks.find(t => t.id === contextMenu.trackId);
-                    const clip = (track?.clips || []).find(c => c.id === contextMenu.clipId);
+                    const clip = state.tracks.flatMap(t => t.clips || []).find(c => c.id === contextMenu.clipId);
                     if (clip) {
                       const relativeStart = Math.max(0, state.currentTime - clip.startTime);
                       state.createPipWindow(contextMenu.clipId, relativeStart);
@@ -272,8 +274,8 @@ export function TimelineModals({
                     </>
                   )}
 
-                  {/* Extract Audio */}
-                  {contextMenu.mediaType === 'video' && !tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
+                   {/* Extract Audio */}
+                  {contextMenu.mediaType === 'video' && !findClipDeep(useEditorStore.getState(), contextMenu.clipId)?.clip?.linkedClipId && (
                     <button
                       className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                       onClick={() => {
@@ -286,7 +288,7 @@ export function TimelineModals({
                     </button>
                   )}
                   {/* Break Link Connection */}
-                  {tracks.flatMap(t => t.clips).find(c => c.id === contextMenu.clipId)?.linkedClipId && (
+                  {findClipDeep(useEditorStore.getState(), contextMenu.clipId)?.clip?.linkedClipId && (
                     <button
                       className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                       onClick={() => {
@@ -361,7 +363,7 @@ export function TimelineModals({
         if (!marker) return null;
         return (
           <div
-            className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-2 min-w-[200px] text-white max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+            className="timeline-context-menu fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-2 min-w-[200px] text-white max-h-[80vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             style={{
               left: `${Math.min(markerContextMenu.x, window.innerWidth - 220)}px`,
               top: `${Math.min(markerContextMenu.y, window.innerHeight - 360)}px`,

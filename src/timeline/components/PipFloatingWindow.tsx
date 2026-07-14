@@ -5,11 +5,31 @@ import { X, GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
 import { DEFAULT_TRACK_HEIGHT } from '../timelineConstants';
 import { getTrackTop, getTrackHeight } from '../trackGeometry';
 
+import { TimelineClipRow } from './TimelineClipRow';
+
 interface PipFloatingWindowProps {
   pipWindow: PipWindow;
   parentClip: TimelineClip;
   zoomLevel: number;
   onClose: () => void;
+  tracks: import('@/types').TimelineTrack[];
+  selectedClipIds: string[];
+  draggingClipId: string | null;
+  activeTool: string;
+  hoverCutClipId: string | null;
+  hoverCutX: number | null;
+  handleDragOver: (e: React.DragEvent, trackId: string) => void;
+  handleDrop: (e: React.DragEvent, trackId: string) => void;
+  setHoveredTrackId: (id: string | null) => void;
+  setDropPreview: (val: any) => void;
+  setContextMenu: (val: any) => void;
+  handleClipMouseDown: (e: React.MouseEvent, clip: TimelineClip) => void;
+  setHoverCutX: (val: number | null) => void;
+  setHoverCutClipId: (val: string | null) => void;
+
+  selectTrack: (id: string | null) => void;
+  selectClip: (id: string | null, multi?: boolean) => void;
+  selectTransition: (id: string | null) => void;
 }
 
 export function PipFloatingWindow({
@@ -17,6 +37,24 @@ export function PipFloatingWindow({
   parentClip,
   zoomLevel,
   onClose,
+  tracks,
+  selectedClipIds,
+  draggingClipId,
+  activeTool,
+  hoverCutClipId,
+  hoverCutX,
+  handleDragOver,
+  handleDrop,
+  setHoveredTrackId,
+  setDropPreview,
+  setContextMenu,
+  handleClipMouseDown,
+  setHoverCutX,
+  setHoverCutClipId,
+
+  selectTrack,
+  selectClip,
+  selectTransition,
 }: PipFloatingWindowProps) {
   const {
     updatePipWindowStartTime,
@@ -26,7 +64,6 @@ export function PipFloatingWindow({
     addTrackToPip,
     mediaLibrary,
     currentTime,
-    tracks,
     selectedClipId,
   } = useEditorStore();
 
@@ -34,9 +71,10 @@ export function PipFloatingWindow({
   const [isResizing, setIsResizing] = useState(false);
   const startXRef = useRef(0);
   const startDurationRef = useRef(0);
+  const startRelTimeRef = useRef(0);
   
-  const windowLeft = (parentClip.startTime + (pipWindow.relativeStartTime || 0)) * zoomLevel;
-  const windowWidth = Math.max(10, pipWindow.duration * zoomLevel);
+  const windowLeft = (parentClip.startTime + (pipWindow.relativeStartTime || 0)) * zoomLevel - 1;
+  const windowWidth = Math.max(200, pipWindow.duration * zoomLevel) + 2;
   const parentEnd = parentClip.startTime + parentClip.duration;
 
   const trackIdx = tracks.findIndex(t => t.id === parentClip.trackId);
@@ -49,6 +87,8 @@ export function PipFloatingWindow({
     e.stopPropagation();
     setIsDragging(true);
     startXRef.current = e.clientX;
+    startRelTimeRef.current = pipWindow.relativeStartTime || 0;
+    useEditorStore.getState().startTransaction();
   };
 
   useEffect(() => {
@@ -56,16 +96,18 @@ export function PipFloatingWindow({
       const handleMouseMove = (e: MouseEvent) => {
         const dx = e.clientX - startXRef.current;
         const dt = dx / zoomLevel;
-        const absoluteStartTime = parentClip.startTime + (pipWindow.relativeStartTime || 0);
-        let newAbsoluteStart = absoluteStartTime + dt;
-        // Limit start time to parent clip's range, ensuring the PIP duration doesn't exceed parent clip's end
-        newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd - pipWindow.duration, newAbsoluteStart));
+        const initialAbsoluteStart = parentClip.startTime + startRelTimeRef.current;
+        let newAbsoluteStart = initialAbsoluteStart + dt;
+        // Limit start time to parent clip's range, ensuring the PIP doesn't start before parent clip
+        newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd, newAbsoluteStart));
         const newRelativeStart = newAbsoluteStart - parentClip.startTime;
 
         updatePipWindowStartTime(pipWindow.id, newRelativeStart);
-        startXRef.current = e.clientX;
       };
-      const handleMouseUp = () => setIsDragging(false);
+      const handleMouseUp = () => {
+        setIsDragging(false);
+        useEditorStore.getState().endTransaction();
+      };
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
       return () => {
@@ -73,7 +115,7 @@ export function PipFloatingWindow({
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, pipWindow.id, pipWindow.relativeStartTime, pipWindow.duration, zoomLevel, parentClip.startTime, parentEnd]);
+  }, [isDragging, pipWindow.id, pipWindow.duration, zoomLevel, parentClip.startTime, parentEnd]);
 
   // Handles drag to resize PIP duration
   const handleResizeStart = (e: React.MouseEvent) => {
@@ -81,6 +123,7 @@ export function PipFloatingWindow({
     setIsResizing(true);
     startXRef.current = e.clientX;
     startDurationRef.current = pipWindow.duration;
+    useEditorStore.getState().startTransaction();
   };
 
   useEffect(() => {
@@ -96,7 +139,10 @@ export function PipFloatingWindow({
         
         updatePipWindowDuration(pipWindow.id, newDuration);
       };
-      const handleMouseUp = () => setIsResizing(false);
+      const handleMouseUp = () => {
+        setIsResizing(false);
+        useEditorStore.getState().endTransaction();
+      };
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
       return () => {
@@ -107,10 +153,10 @@ export function PipFloatingWindow({
   }, [isResizing, pipWindow.id, pipWindow.relativeStartTime, zoomLevel, parentClip.startTime, parentEnd]);
 
   // Handle drop media inside PIP
-  const handleDrop = (e: React.DragEvent) => {
+  const handlePipContainerDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const mediaId = e.dataTransfer.getData('application/x-media-id');
+    const mediaId = e.dataTransfer.getData('application/procut-media');
     if (!mediaId) return;
 
     const media = mediaLibrary.find(m => m.id === mediaId);
@@ -118,10 +164,8 @@ export function PipFloatingWindow({
 
     if (media.type !== 'video' && media.type !== 'image') return; // PIP only supports video/image
 
-    // Get drop time relative to window
-    const rect = e.currentTarget.getBoundingClientRect();
-    const dropX = e.clientX - rect.left;
-    const timeWithinPip = dropX / zoomLevel;
+    // Media ALWAYS drops at the very beginning of the PIP workspace
+    const timeWithinPip = 0;
 
     const trackType = media.type === 'image' ? 'video' : media.type;
     if (trackType !== 'video' && trackType !== 'audio' && trackType !== 'text' && trackType !== 'fx') return;
@@ -130,10 +174,10 @@ export function PipFloatingWindow({
     addTrackToPip(pipWindow.id, trackType, mediaId, timeWithinPip, dur);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handlePipContainerDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.dataTransfer.types.includes('application/x-media-id')) {
+    if (e.dataTransfer.types.includes('application/procut-media')) {
       e.dataTransfer.dropEffect = 'copy';
     }
   };
@@ -157,18 +201,61 @@ export function PipFloatingWindow({
           <GripHorizontal className="w-3.5 h-3.5" />
           <span className="text-[10px] font-medium tracking-wide">PIP WORKSPACE</span>
         </div>
-        <button 
-          onClick={onClose}
-          className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {(() => {
+            const selectedTrackIdx = pipWindow.tracks.findIndex(t => t.clips.some(c => c.id === selectedClipId));
+            if (selectedTrackIdx !== -1) {
+              return (
+                <>
+                  <button 
+                    disabled={selectedTrackIdx === 0}
+                    onClick={(e) => { e.stopPropagation(); reorderPipTrack(pipWindow.id, selectedTrackIdx, 'up'); }}
+                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                    title="Move Layer Up"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    disabled={selectedTrackIdx === pipWindow.tracks.length - 1}
+                    onClick={(e) => { e.stopPropagation(); reorderPipTrack(pipWindow.id, selectedTrackIdx, 'down'); }}
+                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                    title="Move Layer Down"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="w-px h-4 bg-gray-600 mx-1"></div>
+                </>
+              );
+            }
+            return null;
+          })()}
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              useEditorStore.getState().deletePipWindow(pipWindow.id);
+            }}
+            title="Delete PIP Layer"
+            className="p-1 hover:bg-red-500/20 rounded text-gray-400 hover:text-red-400 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+          </button>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            title="Close Window"
+            className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       <div 
-        className="flex-1 relative overflow-y-auto p-2 min-h-[60px]"
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
+        className="flex-1 relative overflow-y-auto py-2 min-h-[60px]"
+        onDrop={handlePipContainerDrop}
+        onDragOver={handlePipContainerDragOver}
       >
         {pipWindow.tracks.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -190,64 +277,37 @@ export function PipFloatingWindow({
               }
               return null;
             })()}
-            
              {(pipWindow.tracks || []).map((track, idx) => {
-               const clip = track.clips?.[0];
-               if (!clip) return null;
-               const left = clip.startTime * zoomLevel;
-               const width = clip.duration * zoomLevel;
-               const media = mediaLibrary.find(m => m.id === clip.mediaId);
-               
+               if (track.hidden) return null;
                return (
-                 <div key={track.id} className="relative group flex items-center h-[28px] w-full">
-                   <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-[#2a2a2a] px-1 rounded-l shadow">
-                     <button 
-                       disabled={idx === 0}
-                       onClick={() => reorderPipTrack(pipWindow.id, idx, 'up')}
-                       className="text-gray-400 hover:text-white disabled:opacity-30"
-                     >
-                       <ChevronUp className="w-3 h-3" />
-                     </button>
-                     <button 
-                       disabled={idx === pipWindow.tracks.length - 1}
-                       onClick={() => reorderPipTrack(pipWindow.id, idx, 'down')}
-                       className="text-gray-400 hover:text-white disabled:opacity-30"
-                     >
-                       <ChevronDown className="w-3 h-3" />
-                     </button>
-                   </div>
-                   
-                   <div 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        useEditorStore.setState({
-                          selectedClipId: clip.id,
-                          selectedClipIds: [clip.id],
-                          selectedTrackId: null
-                        });
-                      }}
-                      className={`absolute h-full rounded border overflow-hidden flex items-center justify-between cursor-pointer ${
-                        selectedClipId === clip.id 
-                          ? 'border-white bg-cyan-600/60 ring-2 ring-white z-20' 
-                          : 'border-cyan-500/50 bg-cyan-600/30 hover:bg-cyan-600/40'
-                      }`}
-                      style={{ left: `${left}px`, width: `${width}px` }}
-                    >
-                      {media && media.thumbnail && (
-                        <img src={media.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none" />
-                      )}
-                      <span className="text-[9px] text-white font-medium pl-1 truncate z-10">{media?.name}</span>
-                      <button 
-                        className="pr-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 text-red-400 hover:text-red-300"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeTrackFromPip(pipWindow.id, track.id);
-                        }}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                 </div>
+                 <TimelineClipRow
+                   key={track.id}
+                   track={track}
+                   tracks={pipWindow.tracks}
+                   zoomLevel={zoomLevel}
+                   selectedClipIds={selectedClipIds}
+                   draggingClipId={draggingClipId}
+                   activeTool={activeTool}
+                   hoverCutClipId={hoverCutClipId}
+                   hoverCutX={hoverCutX}
+                   handleDragOver={handleDragOver}
+                   handleDrop={handleDrop}
+                   setHoveredTrackId={setHoveredTrackId}
+                   setDropPreview={setDropPreview}
+                   setContextMenu={setContextMenu}
+                   handleClipMouseDown={handleClipMouseDown}
+                   setHoverCutX={setHoverCutX}
+                   setHoverCutClipId={setHoverCutClipId}
+                   enterCompoundClip={() => {}}
+                   toggleKeyframeLineSelection={() => {}}
+                   selectedKeyframeLines={[]}
+                   showTransitionLayer={false}
+                   selectedTransitionClipId={null}
+                   hoveredTrackId={null}
+                   selectTrack={selectTrack}
+                   selectClip={selectClip}
+                   selectTransition={selectTransition}
+                 />
                );
              })}
           </div>

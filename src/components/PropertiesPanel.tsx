@@ -23,7 +23,7 @@ import {
   Loader2,
   Crop,
 } from 'lucide-react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
 import { toast } from 'sonner';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
@@ -245,6 +245,7 @@ export function PropertiesPanel() {
     tracks,
     selectedClipId,
     selectedClipIds,
+    pipWindows,
     activePropertiesTab,
     setActivePropertiesTab,
     updateClip: storeUpdateClip,
@@ -448,15 +449,37 @@ export function PropertiesPanel() {
   // Find the selected clip (or the first selected clip in multi-selection)
   let selectedClip: any = null;
   let selectedTrack: any = null;
+  let isPipClip: boolean = false;
+  let parentPipWindowId: string | null = null;
 
   {
     const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
+    
+    // 1. Search main timeline tracks
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === primarySelectedId);
       if (clip) {
         selectedClip = clip;
         selectedTrack = track;
         break;
+      }
+    }
+    
+    // 2. Search PIP window tracks
+    if (!selectedClip && pipWindows) {
+      const pips = pipWindows || {};
+      for (const [pipId, pip] of Object.entries(pips)) {
+        for (const track of pip.tracks) {
+          const clip = track.clips.find((c) => c.id === primarySelectedId);
+          if (clip) {
+            selectedClip = clip;
+            selectedTrack = track;
+            isPipClip = true;
+            parentPipWindowId = pipId;
+            break;
+          }
+        }
+        if (selectedClip) break;
       }
     }
   }
@@ -1161,7 +1184,27 @@ export function PropertiesPanel() {
     );
   }
 
-  const localTime = currentTime - selectedClip.startTime;
+  const getClipAbsoluteStartTime = (clipId: string): number => {
+    const state = useEditorStore.getState();
+    const found = findClipDeep(state, clipId);
+    if (found && found.isPip && found.pipId) {
+      const pip = (state.pipWindows || {})[found.pipId];
+      if (pip) {
+        let parentClip = null;
+        for (const t of state.tracks) {
+          parentClip = t.clips.find(c => c.id === pip.parentClipId);
+          if (parentClip) break;
+        }
+        if (parentClip) {
+          return parentClip.startTime + (pip.relativeStartTime || 0) + found.clip.startTime;
+        }
+      }
+    }
+    return found?.clip.startTime ?? 0;
+  };
+
+  const absoluteStartTime = getClipAbsoluteStartTime(selectedClip.id);
+  const localTime = currentTime - absoluteStartTime;
   const animations = selectedClip.animations || {};
   const getMasterKeyframes = () => {
     if (!animations['transform.x']) return [];
@@ -1175,7 +1218,7 @@ export function PropertiesPanel() {
     return getAnimatedValue(
       base,
       currentTime,
-      selectedClip.startTime,
+      absoluteStartTime,
       animations[propKey]
     );
   };
@@ -1875,7 +1918,17 @@ export function PropertiesPanel() {
                       }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
-                    <span className="text-[11px] text-white w-10 text-right">
+                    <span 
+                      className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                      title="Click to cycle common values"
+                      onClick={() => {
+                        const steps = [10, 25, 50, 75, 100, 150, 200, 300, 400];
+                        const cur = getPropVal(selectedClip.transform.scale, 'transform.scale');
+                        let next = steps.find(s => s > cur) ?? steps[0];
+                        setPropVal('transform.scale', next, { transform: { ...selectedClip.transform, scale: next } });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                    >
                       {Math.round(getPropVal(selectedClip.transform.scale, 'transform.scale'))}%
                     </span>
                   </div>
@@ -1931,7 +1984,17 @@ export function PropertiesPanel() {
                         }}
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
-                      <span className="text-[11px] text-white w-10 text-right">
+                      <span 
+                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                        title="Click to step 45°"
+                        onClick={() => {
+                          const cur = getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX');
+                          let next = cur + 45;
+                          if (next > 180) next = -180;
+                          setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                      >
                         {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
                       </span>
                     </div>
@@ -1955,7 +2018,17 @@ export function PropertiesPanel() {
                         }}
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
-                      <span className="text-[11px] text-white w-10 text-right">
+                      <span 
+                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                        title="Click to step 45°"
+                        onClick={() => {
+                          const cur = getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY');
+                          let next = cur + 45;
+                          if (next > 180) next = -180;
+                          setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                      >
                         {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
                       </span>
                     </div>
@@ -1979,7 +2052,17 @@ export function PropertiesPanel() {
                         }}
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
-                      <span className="text-[11px] text-white w-10 text-right">
+                      <span 
+                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                        title="Click to step 45°"
+                        onClick={() => {
+                          const cur = getPropVal(selectedClip.transform.rotation ?? 0, 'transform.rotation');
+                          let next = cur + 45;
+                          if (next > 180) next = -180;
+                          setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                      >
                         {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
                       </span>
                     </div>
@@ -2032,8 +2115,18 @@ export function PropertiesPanel() {
                       }}
                       className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
-                    <span className="text-[11px] text-white w-10 text-right">
-                      {Math.round(getPropVal(selectedClip.opacity, 'opacity') * 100)}%
+                    <span 
+                      className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                      title="Click to cycle values"
+                      onClick={() => {
+                        const steps = [0, 25, 50, 75, 100];
+                        const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
+                        let next = steps.find(s => s > cur) ?? steps[0];
+                        setPropVal('opacity', next / 100, { opacity: next / 100 });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                    >
+                      {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%
                     </span>
                   </div>
                 </div>
@@ -2106,6 +2199,42 @@ export function PropertiesPanel() {
                       <p className="text-[10px] text-[#a0a0a0]">
                         Drag the 4 corner handles on the preview screen to adjust the perspective warp.
                       </p>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const newAnimations = { ...(selectedClip.animations || {}) };
+                          for (let i = 0; i < 4; i++) {
+                            delete newAnimations[`transform.perspectiveCorners.x${i}`];
+                            delete newAnimations[`transform.perspectiveCorners.y${i}`];
+                          }
+                          const aX = selectedClip.transform.x;
+                          const aY = selectedClip.transform.y;
+                          const w = (selectedClip as any).width || 854;
+                          const h = (selectedClip as any).height || 480;
+                          const scale = (selectedClip.transform.scale || 100) / 100;
+                          const cx = 854 / 2 + aX;
+                          const cy = 480 / 2 + aY;
+                          const w2 = w * scale / 2;
+                          const h2 = h * scale / 2;
+                          const defaultCorners = {
+                            x0: cx - w2, y0: cy - h2,
+                            x1: cx + w2, y1: cy - h2,
+                            x2: cx + w2, y2: cy + h2,
+                            x3: cx - w2, y3: cy + h2
+                          };
+                          updateClip(selectedClip.id, {
+                            transform: {
+                              ...selectedClip.transform,
+                              perspectiveCorners: defaultCorners
+                            },
+                            animations: newAnimations
+                          });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="w-full py-1 mt-1 text-[10px] text-amber-500 border border-amber-500/30 rounded hover:bg-amber-500/10 transition-colors"
+                      >
+                        Reset Corners / Clear Track
+                      </button>
 
                       <button
                         onClick={async () => {
@@ -2390,7 +2519,18 @@ export function PropertiesPanel() {
                 <div className="space-y-0.5">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] text-[#a0a0a0]">{label}</span>
-                    <span className="text-[10px] text-white font-mono w-10 text-right">{value > 0 && label !== 'Scale' ? `+${value}` : value}{label === 'Scale' ? '%' : '%'}</span>
+                    <span 
+                      className="text-[10px] text-white font-mono w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                      title="Click to cycle values"
+                      onClick={() => {
+                        const steps = label === 'Scale' ? [50, 100, 150, 200, 300, 400] : [0, 50, 100, 200, -200, -100, -50];
+                        let next = steps.find(s => s > value) ?? steps[0];
+                        onChange(next);
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                    >
+                      {value > 0 && label !== 'Scale' ? `+${value}` : value}{label === 'Scale' ? '%' : '%'}
+                    </span>
                   </div>
                   <input
                     type="range" min={min} max={max} step={step} value={value}

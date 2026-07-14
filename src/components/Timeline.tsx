@@ -407,6 +407,23 @@ export function Timeline() {
                       parentClip={parentClip}
                       zoomLevel={zoomLevel}
                       onClose={() => setActivePipWindow(null)}
+                      tracks={tracks}
+                      selectedClipIds={selectedClipIds}
+                      draggingClipId={draggingClipId}
+                      activeTool={activeTool}
+                      hoverCutClipId={hoverCutClipId}
+                      hoverCutX={hoverCutX}
+                      handleDragOver={dropHandlers.handleDragOver}
+                      handleDrop={dropHandlers.handleDrop}
+                      setHoveredTrackId={setHoveredTrackId}
+                      setDropPreview={setDropPreview}
+                      setContextMenu={setContextMenu}
+                      handleClipMouseDown={dragHandlers.handleClipMouseDown}
+                      setHoverCutX={setHoverCutX}
+                      setHoverCutClipId={setHoverCutClipId}
+                      selectTrack={selectTrack}
+                      selectClip={selectClip}
+                      selectTransition={selectTransition}
                     />
                   );
                 })()}

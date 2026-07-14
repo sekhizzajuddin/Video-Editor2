@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, ArrowLeftRight, GripVertical, ZoomIn, Plus } from 'lucide-react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { toast } from 'sonner';
 
 interface TransitionTargetProps {
@@ -163,7 +163,7 @@ export function TransitionTarget({
     else if (name.toLowerCase().includes('slide')) type = 'slide';
 
     const state = useEditorStore.getState();
-    const clip = state.tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+    const clip = findClipDeep(state, clipId)?.clip;
     const clipDuration = clip?.duration ?? 2.5;
     const defaultDuration = Math.min(1.0, clipDuration * 0.4);
 

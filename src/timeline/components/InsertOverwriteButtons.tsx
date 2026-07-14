@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowLeftToLine, ArrowRightToLine } from 'lucide-react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipDeep } from '@/store/editorStore';
 
 export function InsertOverwriteButtons() {
   const { insertClip, overwriteClip, selectedClipId, tracks, currentTime } = useEditorStore();
@@ -8,7 +8,7 @@ export function InsertOverwriteButtons() {
   const handleInsert = () => {
     if (!selectedClipId) return;
     
-    const clip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+    const clip = findClipDeep(useEditorStore.getState(), selectedClipId)?.clip;
     if (!clip) return;
     
     // Create a copy of the clip to insert
@@ -18,7 +18,7 @@ export function InsertOverwriteButtons() {
   const handleOverwrite = () => {
     if (!selectedClipId) return;
     
-    const clip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+    const clip = findClipDeep(useEditorStore.getState(), selectedClipId)?.clip;
     if (!clip) return;
     
     // Create a copy of the clip to overwrite

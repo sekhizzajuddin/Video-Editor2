@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { getTrackHeight, getTrackTop, getTrackAtY } from '../trackGeometry';
 import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT, SNAP_THRESHOLD_PX } from '../timelineConstants';
@@ -29,7 +29,16 @@ const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime:
   }
   return true;
 };
-
+const getLatestTracks = (clipId: string | null): TimelineTrack[] => {
+  const state = useEditorStore.getState();
+  if (!clipId) return state.tracks;
+  const found = findClipDeep(state, clipId);
+  if (found && found.isPip && found.pipId) {
+    const pip = (state.pipWindows || {})[found.pipId];
+    if (pip) return pip.tracks;
+  }
+  return state.tracks;
+};
 export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const {
     tracks,
@@ -108,12 +117,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     } as MediaItem);
   }, []);
 
-  const getTrackFromMouseY = useCallback((clientY: number): TimelineTrack | null => {
+  const getTrackFromMouseY = useCallback((clientY: number, clipId: string | null = null): TimelineTrack | null => {
     const container = trackContainerRef.current;
     if (!container) return null;
     const rect = container.getBoundingClientRect();
     const relY = clientY - rect.top + container.scrollTop;
-    const latestTracks = useEditorStore.getState().tracks;
+    const latestTracks = getLatestTracks(clipId);
     const idx = getTrackAtY(latestTracks, relY);
     return idx >= 0 && idx < latestTracks.length ? latestTracks[idx] : null;
   }, [trackContainerRef]);
@@ -123,7 +132,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       return { snappedTime: rawTime, snapPos: null };
     }
     const threshold = SNAP_THRESHOLD_PX / zoomLevel;
-    const latestTracks = useEditorStore.getState().tracks;
+    const latestTracks = getLatestTracks(movingClipId);
 
     // Collect snap targets: all other clip edges + the playhead
     const targets: number[] = [useEditorStore.getState().currentTime]; // snap to playhead
@@ -166,14 +175,17 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     const dt = dx / zoomLevel;
     let newTime = Math.max(0, dragState.originalStartTime + dt);
 
-    const hoverTrack = getTrackFromMouseY(clientX); // Note: getTrackFromMouseY uses Y coord, clientY is passed in correctly.
-    // Wait, let's keep getTrackFromMouseY(clientY) as it was.
-    const actualHoverTrack = getTrackFromMouseY(clientY);
-    const targetTrackId =
-      actualHoverTrack && actualHoverTrack.type === dragState.trackType ? actualHoverTrack.id : dragState.trackId;
+    const actualHoverTrack = getTrackFromMouseY(clientY, dragState.clipId);
+    const state = useEditorStore.getState();
+    const found = findClipDeep(state, dragState.clipId);
+    const isPip = !!(found && found.isPip);
 
-    const latestTracks = useEditorStore.getState().tracks;
-    const movingClip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === dragState.clipId);
+    const targetTrackId = isPip
+      ? dragState.trackId
+      : (actualHoverTrack && actualHoverTrack.type === dragState.trackType ? actualHoverTrack.id : dragState.trackId);
+
+    const latestTracks = getLatestTracks(dragState.clipId);
+    const movingClip = findClipDeep(state, dragState.clipId)?.clip;
     const movingDuration = movingClip?.duration ?? 0;
 
     const { snappedTime, snapPos } = computeSnap(newTime, dragState.clipId, movingDuration);
@@ -217,7 +229,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             break;
           }
 
-          const originalClip = latestTracks.flatMap(t => t.clips).find(x => x.id === c.id);
+          const originalClip = findClipDeep(state, c.id)?.clip;
           testUpdates.push({
             clipId: c.id,
             newStartTime: clipNewTime,
@@ -399,7 +411,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const handleClipMouseDown = useCallback(
     (e: React.MouseEvent, clip: TimelineClip) => {
       if (e.button !== 0) return;
-      const track = tracks.find((t) => t.id === clip.trackId);
+      let track = tracks.find((t) => t.id === clip.trackId);
+      if (!track) {
+        const pipWindows = useEditorStore.getState().pipWindows || {};
+        for (const pip of Object.values(pipWindows)) {
+          track = pip.tracks.find((t) => t.id === clip.trackId);
+          if (track) break;
+        }
+      }
       if (track?.locked) return;
 
       const target = e.currentTarget as HTMLElement;
@@ -407,7 +426,24 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const relX = e.clientX - rect.left;
       const currentScrollLeft = useEditorStore.getState().scrollLeft;
       
-      const clickTime = clip.startTime + relX / zoomLevel;
+      const state = useEditorStore.getState();
+      const found = findClipDeep(state, clip.id);
+      let absoluteStartTime = clip.startTime;
+      if (found && found.isPip && found.pipId) {
+        const pip = (state.pipWindows || {})[found.pipId];
+        if (pip) {
+          let parentClip = null;
+          for (const t of state.tracks) {
+            parentClip = t.clips.find((c) => c.id === pip.parentClipId);
+            if (parentClip) break;
+          }
+          if (parentClip) {
+            absoluteStartTime = parentClip.startTime + (pip.relativeStartTime || 0) + clip.startTime;
+          }
+        }
+      }
+
+      const clickTime = absoluteStartTime + relX / zoomLevel;
       seek(Math.max(0, clickTime));
 
       const clickedEdge = (e.target as HTMLElement).getAttribute('data-edge');
@@ -431,6 +467,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return;
       }
 
+      const latestTracks = getLatestTracks(clip.id);
+
       if (activeTool === 'trackSelect') {
         const clickTime = clip.startTime + relX / zoomLevel;
         let matchingIds: string[] = [];
@@ -442,7 +480,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               .map((c) => c.id);
           }
         } else {
-          matchingIds = tracks
+          matchingIds = latestTracks
             .flatMap((t) => t.clips)
             .filter((c) => c.startTime >= thresholdTime)
             .map((c) => c.id);
@@ -451,7 +489,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         selectClips(matchingIds);
 
         const draggedClips = matchingIds.map((id) => {
-          const c = tracks.flatMap((t) => t.clips).find((x) => x.id === id);
+          const c = findClipDeep(state, id)?.clip;
           return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
         });
 
@@ -482,7 +520,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               .map((c) => c.id);
           }
         } else {
-          matchingIds = tracks
+          matchingIds = latestTracks
             .flatMap((t) => t.clips)
             .filter((c) => c.startTime <= thresholdTime)
             .map((c) => c.id);
@@ -491,7 +529,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         selectClips(matchingIds);
 
         const draggedClips = matchingIds.map((id) => {
-          const c = tracks.flatMap((t) => t.clips).find((x) => x.id === id);
+          const c = findClipDeep(state, id)?.clip;
           return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
         });
 
@@ -567,7 +605,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       let draggedClips: { id: string; originalStartTime: number; trackId: string }[] = [];
       if (currentSelectedIds.includes(clip.id)) {
         draggedClips = currentSelectedIds.map((id) => {
-          const c = tracks.flatMap((t) => t.clips).find((x) => x.id === id);
+          const c = findClipDeep(useEditorStore.getState(), id)?.clip;
           return { id, originalStartTime: c?.startTime || 0, trackId: c?.trackId || '' };
         });
       }
@@ -681,8 +719,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         resizeRafIdRef.current = null;
         const dx = clientX - resizeState.startX;
         const dt = dx / zoomLevel;
-        const latestTracks = useEditorStore.getState().tracks;
-        const clip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === resizeState.clipId);
+        const latestTracks = getLatestTracks(resizeState.clipId);
+        const clip = findClipDeep(useEditorStore.getState(), resizeState.clipId)?.clip;
         if (!clip) return;
 
         const media = getMediaSafe(clip);
@@ -718,7 +756,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             
             // Max duration is limited by the left-side adjacent clip
             let maxDuration = Infinity;
-            const latestTracks = useEditorStore.getState().tracks;
+            const latestTracks = getLatestTracks(resizeState.clipId);
             const originalTrack = latestTracks.find((t) => t.clips.some(c => c.id === resizeState.clipId));
             if (originalTrack) {
                const prevClip = originalTrack.clips
@@ -884,8 +922,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const dx = clientX - slipState.startX;
         const dt = dx / zoomLevel;
         
-        const latestTracks = useEditorStore.getState().tracks;
-        const clip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === slipState.clipId);
+        const latestTracks = getLatestTracks(slipState.clipId);
+        const clip = findClipDeep(useEditorStore.getState(), slipState.clipId)?.clip;
         if (!clip) return;
         
         const media = getMediaSafe(clip);
@@ -920,8 +958,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const dx = clientX - slideState.startX;
         const dt = dx / zoomLevel;
         
-        const latestTracks = useEditorStore.getState().tracks;
-        const clip = latestTracks.flatMap((t) => t.clips).find((c) => c.id === slideState.clipId);
+        const latestTracks = getLatestTracks(slideState.clipId);
+        const clip = findClipDeep(useEditorStore.getState(), slideState.clipId)?.clip;
         if (!clip) return;
         
         let newStartTime = slideState.originalStartTime + dt;
@@ -929,8 +967,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         let minStartTime = slideState.originalStartTime;
         let maxStartTime = slideState.originalStartTime;
         
-        const leftSib = slideState.adjacentClips.left ? latestTracks.flatMap(t => t.clips).find(c => c.id === slideState.adjacentClips.left?.id) : null;
-        const rightSib = slideState.adjacentClips.right ? latestTracks.flatMap(t => t.clips).find(c => c.id === slideState.adjacentClips.right?.id) : null;
+        const leftSib = slideState.adjacentClips.left ? findClipDeep(useEditorStore.getState(), slideState.adjacentClips.left.id)?.clip : null;
+        const rightSib = slideState.adjacentClips.right ? findClipDeep(useEditorStore.getState(), slideState.adjacentClips.right.id)?.clip : null;
         
         if (leftSib && slideState.adjacentClips.left) {
           minStartTime = slideState.originalStartTime - (slideState.adjacentClips.left.originalDuration - 0.1);
