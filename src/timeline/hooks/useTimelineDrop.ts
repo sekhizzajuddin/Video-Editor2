@@ -503,32 +503,28 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         const track = tracks[trackIdx];
         if (track) {
           const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-          const isExpanded = pinnedOverLayerTrackId === trackId || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId);
-          const threshold = isExpanded ? baseHeight : (baseHeight - 24);
-          const isOverLayerArea = y > threshold;
+          const isOverLayerArea = y > (baseHeight - 24);
           
           if (isOverLayerArea) {
-            setHoveredOverLayerRegion({
-              trackId,
-              startTime: dropTime,
-              endTime: dropTime + approxDuration,
+            const time = dropTime;
+            const matchingOl = (track.overLayers || []).find((ol) => {
+              return time >= ol.startTime && time < ol.startTime + ol.duration;
             });
-          } else {
-            if ((track.overLayers || []).length > 0) {
-              const time = dropTime;
-              const matchingOl = track.overLayers.find((ol) => {
-                return time >= ol.startTime && time < ol.startTime + ol.duration;
+            if (matchingOl) {
+              setHoveredOverLayerRegion({
+                trackId,
+                startTime: matchingOl.startTime,
+                endTime: matchingOl.startTime + matchingOl.duration,
               });
-              if (matchingOl) {
-                setHoveredOverLayerRegion({
-                  trackId,
-                  startTime: matchingOl.startTime,
-                  endTime: matchingOl.startTime + matchingOl.duration,
-                });
-              } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
-                setHoveredOverLayerRegion(null);
-              }
-            } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+            } else {
+              setHoveredOverLayerRegion({
+                trackId,
+                startTime: dropTime,
+                endTime: dropTime + approxDuration,
+              });
+            }
+          } else {
+            if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
               setHoveredOverLayerRegion(null);
             }
           }
