@@ -359,7 +359,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const startTime = Math.max(0, x / zoomLevel);
 
       const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-      const isOverLayerArea = y > baseHeight;
+      const isExpanded = pinnedOverLayerTrackId === trackId || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId);
+      const threshold = isExpanded ? baseHeight : (baseHeight - 24);
+      const isOverLayerArea = y > threshold;
 
       if (isOverLayerArea) {
         let compatible = false;
@@ -442,7 +444,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       setHoveredTrackId(null);
       setDropPreview(null);
     },
-    [zoomLevel, hoveredOverLayerRegion, setHoveredTrackId, setDropPreview],
+    [zoomLevel, hoveredOverLayerRegion, pinnedOverLayerTrackId, setHoveredTrackId, setDropPreview],
   );
 
   const handleDragOver = useCallback(
@@ -501,7 +503,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         const track = tracks[trackIdx];
         if (track) {
           const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-          const isOverLayerArea = y > baseHeight;
+          const isExpanded = pinnedOverLayerTrackId === trackId || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId);
+          const threshold = isExpanded ? baseHeight : (baseHeight - 24);
+          const isOverLayerArea = y > threshold;
           
           if (isOverLayerArea) {
             setHoveredOverLayerRegion({
@@ -531,7 +535,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         }
       }
     },
-    [tracks, zoomLevel, hoveredOverLayerRegion, setDropPreview, setHoveredTrackId, setHoveredOverLayerRegion],
+    [tracks, zoomLevel, hoveredOverLayerRegion, pinnedOverLayerTrackId, setDropPreview, setHoveredTrackId, setHoveredOverLayerRegion],
   );
 
   return {
