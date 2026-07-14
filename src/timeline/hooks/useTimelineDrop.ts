@@ -155,13 +155,14 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         const dropTime = x / zoomLevel;
 
         const baseHeight = DEFAULT_TRACK_HEIGHT;
-        const isOverLayerArea = y > baseHeight;
+        const isPinned = pinnedOverLayerTrackId === trackId;
+        const isOverLayerArea = isPinned ? (y >= baseHeight) : (y >= baseHeight - 24);
         let targetOl: OverLayerClip | null = null;
         if (isOverLayerArea && hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
           const activeOverLayers = (track.overLayers || []).filter((ol) => {
             return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
           });
-          const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
+          const rowIdx = Math.max(0, Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT));
           targetOl = activeOverLayers[rowIdx] || null;
         }
 
@@ -359,9 +360,8 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const startTime = Math.max(0, x / zoomLevel);
 
       const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-      const isExpanded = pinnedOverLayerTrackId === trackId || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId);
-      const threshold = isExpanded ? baseHeight : (baseHeight - 24);
-      const isOverLayerArea = y > threshold;
+      const isPinned = pinnedOverLayerTrackId === trackId;
+      const isOverLayerArea = isPinned ? (y >= baseHeight) : (y >= baseHeight - 24);
 
       if (isOverLayerArea) {
         let compatible = false;
@@ -378,7 +378,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
             const activeOverLayers = (track.overLayers || []).filter((ol) => {
               return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
             });
-            const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
+            const rowIdx = Math.max(0, Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT));
             targetOl = activeOverLayers[rowIdx];
           }
 
@@ -503,7 +503,8 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         const track = tracks[trackIdx];
         if (track) {
           const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-          const isOverLayerArea = y > (baseHeight - 24);
+          const isPinned = pinnedOverLayerTrackId === trackId;
+          const isOverLayerArea = isPinned ? (y >= baseHeight) : (y >= baseHeight - 24);
           
           if (isOverLayerArea) {
             const time = dropTime;
