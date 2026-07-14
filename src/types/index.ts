@@ -549,6 +549,7 @@ export interface EditorActions {
   selectSubtitle: (id: string | null) => void;
   addTextMedia: (text: string) => void;
   rippleDeleteClip: (clipId: string) => void;
+  addOverLayer: (trackId: string, mediaId?: string | null, startTime?: number, duration?: number) => void;
 }
 
 export interface EditorSnapshot {

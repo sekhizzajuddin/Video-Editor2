@@ -361,25 +361,29 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
       const isOverLayerArea = y > baseHeight;
 
-      if (isOverLayerArea && hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
-        const activeOverLayers = (track.overLayers || []).filter((ol) => {
-          return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
-        });
-        
-        const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
-        const targetOl = activeOverLayers[rowIdx];
-        
-        if (targetOl) {
-          let compatible = false;
-          if (track.type === 'video' && (media.type === 'video' || media.type === 'image')) compatible = true;
-          if (track.type === 'audio' && media.type === 'audio') compatible = true;
-          if (track.type === 'text' && media.type === 'text') compatible = true;
-          if (track.type === 'fx' && media.type === 'fx') compatible = true;
+      if (isOverLayerArea) {
+        let compatible = false;
+        if (track.type === 'video' && (media.type === 'video' || media.type === 'image')) compatible = true;
+        if (track.type === 'audio' && media.type === 'audio') compatible = true;
+        if (track.type === 'text' && media.type === 'text') compatible = true;
+        if (track.type === 'fx' && media.type === 'fx') compatible = true;
+
+        if (compatible) {
+          const duration = media.type === 'image' ? 5 : Math.min(10, media.duration);
           
-          if (compatible) {
+          let targetOl: OverLayerClip | null = null;
+          if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+            const activeOverLayers = (track.overLayers || []).filter((ol) => {
+              return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
+            });
+            const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
+            targetOl = activeOverLayers[rowIdx];
+          }
+
+          if (targetOl) {
             useEditorStore.getState().updateOverLayer(targetOl.id, {
               mediaId,
-              duration: media.type === 'image' ? 5 : Math.min(10, media.duration),
+              duration,
               audioSettings: media.type === 'audio' || media.type === 'video' ? {
                 volume: 0,
                 pan: 0,
@@ -394,8 +398,10 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
                 humanize: false,
               } : undefined,
             });
-            useEditorStore.getState().saveSnapshot();
+          } else {
+            useEditorStore.getState().addOverLayer(trackId, mediaId, startTime, duration);
           }
+          useEditorStore.getState().saveSnapshot();
           setHoveredTrackId(null);
           setDropPreview(null);
           return;
@@ -446,6 +452,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
       const trackIdx = tracks.findIndex((t) => t.id === trackId);
 
       const hasMedia = e.dataTransfer.types.includes('application/procut-media');
@@ -492,19 +499,34 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         setHoveredTrackId(trackId);
 
         const track = tracks[trackIdx];
-        if (track && (track.overLayers || []).length > 0) {
-          const time = dropTime;
-          const matchingOl = track.overLayers.find((ol) => {
-            return time >= ol.startTime && time < ol.startTime + ol.duration;
-          });
-          if (matchingOl) {
+        if (track) {
+          const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
+          const isOverLayerArea = y > baseHeight;
+          
+          if (isOverLayerArea) {
             setHoveredOverLayerRegion({
               trackId,
-              startTime: matchingOl.startTime,
-              endTime: matchingOl.startTime + matchingOl.duration,
+              startTime: dropTime,
+              endTime: dropTime + approxDuration,
             });
-          } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
-            setHoveredOverLayerRegion(null);
+          } else {
+            if ((track.overLayers || []).length > 0) {
+              const time = dropTime;
+              const matchingOl = track.overLayers.find((ol) => {
+                return time >= ol.startTime && time < ol.startTime + ol.duration;
+              });
+              if (matchingOl) {
+                setHoveredOverLayerRegion({
+                  trackId,
+                  startTime: matchingOl.startTime,
+                  endTime: matchingOl.startTime + matchingOl.duration,
+                });
+              } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+                setHoveredOverLayerRegion(null);
+              }
+            } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
+              setHoveredOverLayerRegion(null);
+            }
           }
         }
       }

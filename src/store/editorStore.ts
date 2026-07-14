@@ -198,7 +198,7 @@ interface EditorActions {
   selectTrack: (trackId: string | null) => void;
 
   // Over Layer Operations
-  addOverLayer: (trackId: string) => void;
+  addOverLayer: (trackId: string, mediaId?: string | null, startTime?: number, duration?: number) => void;
   removeOverLayer: (overLayerId: string) => void;
   updateOverLayer: (overLayerId: string, updates: Partial<OverLayerClip>) => void;
   moveOverLayer: (overLayerId: string, newStartTime: number) => void;
@@ -2853,15 +2853,16 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   // Over Layer Operations
-  addOverLayer: (trackId) => {
+  addOverLayer: (trackId, mediaId = null, startTime, duration = 3) => {
     const { currentTime } = get();
+    const actualStartTime = startTime ?? currentTime;
     const id = generateId();
     const newOverLayer: OverLayerClip = {
       id,
-      mediaId: null,
+      mediaId,
       trackId,
-      startTime: currentTime,
-      duration: 3,
+      startTime: actualStartTime,
+      duration,
       trimStart: 0,
       trimEnd: 0,
       transform: {
