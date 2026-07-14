@@ -1,7 +1,7 @@
 import React from 'react';
 import { Film, Music, Image, Sparkles, Type, Plus } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import type { TimelineTrack, TimelineClip, MediaItem, EditorState } from '@/types';
+import type { TimelineTrack, TimelineClip, MediaItem, EditorState, PipWindow } from '@/types';
 import { getTrackHeight } from '../trackGeometry';
 import { checkOverlapAt } from '../timelineUtils';
 import {
@@ -21,12 +21,7 @@ interface TimelineClipRowProps {
   zoomLevel: number;
   selectedClipIds: string[];
   draggingClipId: string | null;
-  selectedOverLayerId: string | null;
-  showTransitionLayer: boolean;
-  selectedTransitionClipId: string | null;
-  hoveredTrackId: string | null;
-  hoveredOverLayerRegion: EditorState['hoveredOverLayerRegion'] | null;
-  pinnedOverLayerTrackId: string | null;
+
   activeTool: string;
   hoverCutClipId: string | null;
   hoverCutX: number | null;
@@ -36,12 +31,7 @@ interface TimelineClipRowProps {
   handleDrop: (e: React.DragEvent, trackId: string) => void;
   setHoveredTrackId: (id: string | null) => void;
   setDropPreview: (val: any) => void;
-  setHoveredOverLayerRegion: (region: any) => void;
-  selectTrack: (id: string) => void;
-  selectClip: (id: string | null) => void;
-  selectTransition: (id: string | null) => void;
-  selectOverLayer: (id: string | null) => void;
-  setPinnedOverLayerTrackId: (id: string | null) => void;
+
   setContextMenu: (val: any) => void;
   handleClipMouseDown: (e: React.MouseEvent, clip: TimelineClip) => void;
   setHoverCutX: (val: number | null) => void;
@@ -49,9 +39,13 @@ interface TimelineClipRowProps {
   enterCompoundClip: (clipId: string) => void;
   toggleKeyframeLineSelection: (clipId: string, time: number, isMulti: boolean) => void;
   selectedKeyframeLines: { clipId: string; time: number }[];
-  setResizeOverLayerState: (state: any) => void;
-  setDragOverLayerState: (state: any) => void;
-  dragOverLayerState: any;
+  showTransitionLayer: boolean;
+  selectedTransitionClipId: string | null;
+  hoveredTrackId: string | null;
+  selectTrack: (trackId: string | null) => void;
+  selectClip: (clipId: string | null) => void;
+  selectTransition: (clipId: string | null) => void;
+
 }
 
 interface TimelineClipItemProps {
@@ -67,8 +61,8 @@ interface TimelineClipItemProps {
   hoverCutClipId: string | null;
   hoverCutX: number | null;
   selectedKeyframeLines: { clipId: string; time: number }[];
-  hasOverLayerOverlap: boolean;
   hasOverlap: boolean;
+  clipPipWindows: PipWindow[];
   
   // Handlers
   handleClipMouseDown: (e: React.MouseEvent, clip: TimelineClip) => void;
@@ -94,8 +88,8 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   hoverCutClipId,
   hoverCutX,
   selectedKeyframeLines,
-  hasOverLayerOverlap,
   hasOverlap,
+  clipPipWindows,
   
   handleClipMouseDown,
   selectClip,
@@ -119,9 +113,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
   return (
     <div
-      className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${
-        hasOverLayerOverlap ? 'border-cyan-400 border-b-2 border-dashed shadow-[0_0_6px_rgba(34,211,238,0.6)] z-10' : colors.border
-      } ${colors.hover} transition-all duration-75 ${
+      className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hover} transition-all duration-75 ${
         isSelected
           ? activeTool === 'rateStretch'
             ? 'ring-2 ring-purple-500 shadow-lg z-20 rate-stretch-active'
@@ -395,6 +387,26 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
           title="Overlap detected"
         />
       )}
+      {/* ── Diamond Markers for PIP Windows ────────────────────────── */}
+      {trackType === 'video' && clipPipWindows && clipPipWindows.length > 0 && (
+        <div className="absolute -bottom-1.5 left-0 right-0 flex items-center gap-1 z-50 pointer-events-none">
+          {clipPipWindows.map(pip => {
+            const relX = pip.relativeStartTime * zoomLevel;
+            return (
+              <div 
+                key={pip.id}
+                className="absolute w-3 h-3 bg-cyan-400 border border-cyan-200 rotate-45 shadow-[0_0_8px_rgba(34,211,238,0.8)] pointer-events-auto cursor-pointer hover:bg-cyan-300 transition-colors"
+                style={{ left: `${relX - 6}px` }}
+                title="PIP Window (Click to open)"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  useEditorStore.getState().setActivePipWindow(pip.id);
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 });
@@ -405,12 +417,7 @@ export function TimelineClipRow({
   zoomLevel,
   selectedClipIds,
   draggingClipId,
-  selectedOverLayerId,
-  showTransitionLayer,
-  selectedTransitionClipId,
-  hoveredTrackId,
-  hoveredOverLayerRegion,
-  pinnedOverLayerTrackId,
+
   activeTool,
   hoverCutClipId,
   hoverCutX,
@@ -419,12 +426,7 @@ export function TimelineClipRow({
   handleDrop,
   setHoveredTrackId,
   setDropPreview,
-  setHoveredOverLayerRegion,
-  selectTrack,
-  selectClip,
-  selectTransition,
-  selectOverLayer,
-  setPinnedOverLayerTrackId,
+
   setContextMenu,
   handleClipMouseDown,
   setHoverCutX,
@@ -432,11 +434,15 @@ export function TimelineClipRow({
   enterCompoundClip,
   toggleKeyframeLineSelection,
   selectedKeyframeLines,
-  setResizeOverLayerState,
-  setDragOverLayerState,
-  dragOverLayerState,
+  showTransitionLayer,
+  selectedTransitionClipId,
+  hoveredTrackId,
+  selectTrack,
+  selectClip,
+  selectTransition,
 }: TimelineClipRowProps) {
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
+  const allPipWindows = useEditorStore((s) => s.pipWindows || {});
   
   const getMediaSafe = (clip: TimelineClip): MediaItem => {
     return mediaLibrary.find((m) => m.id === clip.mediaId) ?? ({
@@ -452,54 +458,27 @@ export function TimelineClipRow({
   return (
     <div
       data-track-id={track.id}
-      className={`relative border-b border-[#3e3e3e] transition-colors ${
+      className={`relative border-b border-[#3e3e3e] transition-colors group ${
         hoveredTrackId === track.id ? 'bg-[#3e3e3e]/30' : ''
       }`}
-      style={{ height: getTrackHeight(track, hoveredOverLayerRegion, pinnedOverLayerTrackId) }}
+      style={{ height: getTrackHeight(track) }}
       onDragOver={(e) => handleDragOver(e, track.id)}
       onDrop={(e) => handleDrop(e, track.id)}
       onDragEnter={() => setHoveredTrackId(track.id)}
       onDragLeave={() => {
         setHoveredTrackId(null);
         setDropPreview(null);
-        setHoveredOverLayerRegion(null);
       }}
-      onMouseMove={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        // rect.left is already offset by the scroll amount because the track row spans the entire timeline width
-        // Therefore, e.clientX - rect.left gives the absolute pixel position from time 0.
-        const mouseX = e.clientX - rect.left;
-        const hoverTime = mouseX / zoomLevel;
-        
-        const hoveredOl = (track.overLayers || []).find(
-          (ol) => hoverTime >= ol.startTime && hoverTime < ol.startTime + ol.duration
-        );
-        
-        if (hoveredOl) {
-          setHoveredOverLayerRegion({
-            trackId: track.id,
-            startTime: hoveredOl.startTime,
-            endTime: hoveredOl.startTime + hoveredOl.duration,
-          });
-        } else if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id) {
-          const inTimeRange = hoverTime >= hoveredOverLayerRegion.startTime && hoverTime < hoveredOverLayerRegion.endTime;
-          if (!inTimeRange) {
-            setHoveredOverLayerRegion(null);
-          }
-        }
-      }}
+
       onMouseLeave={() => {
         setHoveredTrackId(null);
         setDropPreview(null);
-        setHoveredOverLayerRegion(null);
       }}
       onClick={(e) => {
         e.stopPropagation();
         selectTrack(track.id);
         selectClip(null);
         selectTransition(null);
-        setPinnedOverLayerTrackId(null);
-        selectOverLayer(null);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -507,7 +486,6 @@ export function TimelineClipRow({
         selectTrack(track.id);
         selectClip(null);
         selectTransition(null);
-        selectOverLayer(null);
         setContextMenu({
           x: e.clientX,
           y: e.clientY,
@@ -523,22 +501,7 @@ export function TimelineClipRow({
         {track.type}
       </div>
 
-      {(track.overLayers || []).length === 0 && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            useEditorStore.getState().addOverLayer(track.id, '', 0, 5);
-            useEditorStore.getState().setPinnedOverLayerTrackId(track.id);
-          }}
-          className="absolute right-2 top-1 px-2 py-0.5 text-[9px] bg-cyan-600/30 hover:bg-cyan-500/50 
-                     text-cyan-300 border border-cyan-500/30 rounded flex items-center gap-1 
-                     transition-all opacity-0 group-hover:opacity-100 z-50"
-          title="Add Picture-in-Picture Layer"
-        >
-          <Sparkles className="w-2.5 h-2.5" />
-          Add PIP
-        </button>
-      )}
+
 
       {/* ── Clips ──────────────────────────────────────── */}
       {track.clips.map((clip) => {
@@ -546,13 +509,8 @@ export function TimelineClipRow({
         const isSelected = selectedClipIds.includes(clip.id);
         const isDragging = draggingClipId === clip.id;
 
-        const overlappingOls = (track.overLayers || []).filter((ol) => {
-          const olEnd = ol.startTime + ol.duration;
-          const clipEnd = clip.startTime + clip.duration;
-          return ol.startTime < clipEnd && olEnd > clip.startTime;
-        });
-        const hasOverLayerOverlap = overlappingOls.length > 0;
         const hasOverlap = checkOverlapAt(track, clip.startTime, clip.duration, clip.id);
+        const clipPipWindows = Object.values(allPipWindows || {}).filter(p => p.parentClipId === clip.id);
 
         return (
           <TimelineClipItem
@@ -569,8 +527,8 @@ export function TimelineClipRow({
             hoverCutClipId={hoverCutClipId}
             hoverCutX={hoverCutX}
             selectedKeyframeLines={selectedKeyframeLines}
-            hasOverLayerOverlap={hasOverLayerOverlap}
             hasOverlap={hasOverlap}
+            clipPipWindows={clipPipWindows}
             handleClipMouseDown={handleClipMouseDown}
             selectClip={selectClip}
             selectTransition={selectTransition}
@@ -583,199 +541,7 @@ export function TimelineClipRow({
         );
       })}
 
-      {/* Dotted border indicators */}
-      {!(pinnedOverLayerTrackId === track.id || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id)) && (track.overLayers || []).map((ol) => {
-        const left = ol.startTime * zoomLevel;
-        const width = ol.duration * zoomLevel;
-        const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-        return (
-          <div
-            key={`dotted-${ol.id}`}
-            className="absolute h-[2px] border-b-2 border-dotted border-cyan-400/80 pointer-events-none"
-            style={{
-              top: `${baseHeight - 2}px`,
-              left: `${left}px`,
-              width: `${width}px`,
-              zIndex: 45,
-            }}
-          />
-        );
-      })}
 
-      {/* ── Over Layers ─────────────────────────────────── */}
-      {/* ── Over Layers ─────────────────────────────────── */}
-      {(() => {
-        const shouldShowOverLayers = (track.overLayers || []).length > 0;
-        
-        if (!shouldShowOverLayers) return null;
-        
-        const region = hoveredOverLayerRegion || { trackId: track.id, startTime: 0, endTime: Infinity };
-        const activeOverLayers = (track.overLayers || []).filter((ol) => {
-          return ol.startTime < region.endTime && ol.startTime + ol.duration > region.startTime;
-        });
-        
-        const overLayersToRender = activeOverLayers.length > 0 ? activeOverLayers : (track.overLayers || []);
-        
-        return overLayersToRender.map((ol, index) => {
-          const width = Math.max(ol.duration * zoomLevel, MIN_CLIP_WIDTH);
-          const left = ol.startTime * zoomLevel;
-          const isSelected = selectedOverLayerId === ol.id;
-          const isDragging = dragOverLayerState?.overLayerId === ol.id;
-          const media = mediaLibrary.find((m) => m.id === ol.mediaId);
-          const isEmpty = !ol.mediaId;
-          
-          const allOverLayers = (track.overLayers || []);
-          const sortedOverLayers = [...allOverLayers].sort((a, b) => a.startTime - b.startTime);
-          const rowIndex = sortedOverLayers.findIndex(o => o.id === ol.id);
-          
-          const topOffset = (track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) + 
-                            rowIndex * OVER_LAYER_ROW_HEIGHT + 2;
-          
-          const bgClass = isEmpty
-            ? 'bg-gray-600/40 border-gray-500/60 hover:bg-gray-500/60 border-dashed'
-            : (track.type === 'audio' 
-              ? 'bg-emerald-600/70 border-emerald-500/80 hover:bg-emerald-500/80' 
-              : (media?.type === 'image' 
-                ? 'bg-amber-600/70 border-amber-500/80 hover:bg-amber-400/80' 
-                : 'bg-blue-600/70 border-blue-500/80 hover:bg-blue-400/80'));
-          
-          return (
-            <div
-              key={ol.id}
-              className={`absolute rounded cursor-pointer group select-none border overflow-hidden transition-all duration-75 flex items-center justify-between px-2 ${bgClass} ${
-                isSelected ? 'ring-2 ring-white shadow-lg z-30' : 'z-20'
-              } ${isDragging ? 'opacity-80 brightness-125' : ''} ${isEmpty ? 'animate-pulse' : ''}`}
-              style={{
-                left: `${left}px`,
-                width: `${width}px`,
-                top: `${topOffset}px`,
-                height: `${OVER_LAYER_ROW_HEIGHT - 4}px`,
-              }}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                if (ol.mediaId) {
-                   const olMedia = mediaLibrary.find(m => m.id === ol.mediaId);
-                   if (olMedia && olMedia.type === 'compound') {
-                     enterCompoundClip(ol.id);
-                   }
-                }
-              }}
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                if (e.button !== 0) return;
-                
-                const rect = e.currentTarget.getBoundingClientRect();
-                const relX = e.clientX - rect.left;
-                
-                if (relX < 6) {
-                  useEditorStore.getState().startTransaction();
-                  setResizeOverLayerState({
-                    overLayerId: ol.id,
-                    edge: 'left',
-                    startX: e.clientX,
-                    originalDuration: ol.duration,
-                    originalStartTime: ol.startTime,
-                  });
-                  return;
-                }
-                
-                if (relX > rect.width - 6) {
-                  useEditorStore.getState().startTransaction();
-                  setResizeOverLayerState({
-                    overLayerId: ol.id,
-                    edge: 'right',
-                    startX: e.clientX,
-                    originalDuration: ol.duration,
-                    originalStartTime: ol.startTime,
-                  });
-                  return;
-                }
-                
-                selectOverLayer(ol.id);
-                selectClip(null);
-                
-                useEditorStore.getState().startTransaction();
-                setDragOverLayerState({
-                  overLayerId: ol.id,
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  originalStartTime: ol.startTime,
-                  trackId: track.id,
-                });
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                selectOverLayer(ol.id);
-                selectClip(null);
-                setPinnedOverLayerTrackId(track.id);
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                selectOverLayer(ol.id);
-                selectClip(null);
-                setContextMenu({
-                  x: e.clientX,
-                  y: e.clientY,
-                  clipId: ol.id,
-                  trackType: track.type,
-                  mediaType: media?.type || (isEmpty ? 'empty' : (track.type === 'audio' ? 'audio' : 'video')),
-                  isOverLayer: true,
-                  trackId: track.id,
-                });
-              }}
-            >
-              {isEmpty ? (
-                <div className="relative z-10 flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
-                  <Plus className="w-3 h-3 text-gray-300 drop-shadow-md" />
-                  <span className="text-[10px] text-gray-300 font-medium italic">
-                    Drop media here for PIP
-                  </span>
-                </div>
-              ) : (
-                <>
-                  {media && (media.type === 'video' || media.type === 'image') && media.thumbnail && (
-                    <img 
-                      src={media.thumbnail} 
-                      alt="" 
-                      className="absolute inset-0 w-full h-full object-cover opacity-40 pointer-events-none" 
-                    />
-                  )}
-                  <div className="relative z-10 flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
-                    {track.type === 'audio' ? (
-                      <Music className="w-3 h-3 text-emerald-300 drop-shadow-md" />
-                    ) : media?.type === 'image' ? (
-                      <Image className="w-3 h-3 text-amber-300 drop-shadow-md" />
-                    ) : track.type === 'text' ? (
-                      <Type className="w-3 h-3 text-purple-300 drop-shadow-md" />
-                    ) : (
-                      <Film className="w-3 h-3 text-blue-300 drop-shadow-md" />
-                    )}
-                    <span 
-                      className={`text-[10px] text-white font-medium drop-shadow-md ${track.type === 'text' ? 'animate-text-slide' : 'truncate'}`}
-                      style={track.type === 'text' ? { '--marquee-width': `${width}px` } as any : undefined}
-                      title={media?.name || 'OverLayer'}
-                    >
-                      {media?.name || 'OverLayer'}
-                    </span>
-                  </div>
-                  
-                  <span className="text-[9px] text-white/50 select-none pointer-events-none">
-                    {ol.duration.toFixed(1)}s
-                  </span>
-                </>
-              )}
-
-              {!track.locked && (
-                <>
-                  <div className="absolute left-0 top-0 bottom-0 w-1 cursor-w-resize group-hover:bg-amber-400/40" />
-                  <div className="absolute right-0 top-0 bottom-0 w-1 cursor-e-resize group-hover:bg-amber-400/40" />
-                </>
-              )}
-            </div>
-          );
-        });
-      })()}
 
       {/* ── Transitions Layer ───────────────────────────── */}
       {!track.locked && (() => {

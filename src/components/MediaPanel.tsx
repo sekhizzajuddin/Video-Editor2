@@ -426,7 +426,6 @@ export function MediaPanel() {
     addTrack,
     addClip,
     updateClip,
-    updateOverLayer,
     selectClip,
     saveSnapshot,
     subtitles,
@@ -592,27 +591,7 @@ export function MediaPanel() {
   };
 
   const handleColorPresetClick = (effect: any) => {
-    const { selectedClipId, selectedOverLayerId, tracks } = useEditorStore.getState();
-    
-    if (selectedOverLayerId) {
-      let foundOl: any = null;
-      for (const t of tracks) {
-        foundOl = (t.overLayers ?? []).find(ol => ol.id === selectedOverLayerId);
-        if (foundOl) break;
-      }
-      if (foundOl) {
-        const existing = foundOl.colorFilters ?? {
-          temperature: 0, tint: 0, exposure: 0, contrast: 100,
-          saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
-        };
-        updateOverLayer(foundOl.id, {
-          colorFilters: { ...existing, ...effect.preset },
-        });
-        saveSnapshot();
-        toast.success(`Applied color preset "${effect.name}" to selected overlay`);
-        return;
-      }
-    }
+    const { selectedClipId, tracks } = useEditorStore.getState();
 
     if (selectedClipId) {
       let foundClip: any = null;
@@ -634,33 +613,12 @@ export function MediaPanel() {
       }
     }
 
-    toast.error('Select a clip or overlay on the timeline first to apply this color preset');
+    toast.error('Select a clip on the timeline first to apply this color preset');
   };
 
   const handleParticleClick = (effect: any) => {
-    const { selectedClipId, selectedOverLayerId, tracks } = useEditorStore.getState();
+    const { selectedClipId, tracks } = useEditorStore.getState();
     const defaults = effect.defaultSettings;
-
-    if (selectedOverLayerId) {
-      let foundOl: any = null;
-      for (const t of tracks) {
-        foundOl = (t.overLayers ?? []).find(ol => ol.id === selectedOverLayerId);
-        if (foundOl) break;
-      }
-      if (foundOl) {
-        updateOverLayer(foundOl.id, {
-          particleSettings: {
-            type: effect.type,
-            emitterX: 50,
-            emitterY: 100,
-            ...defaults,
-          },
-        });
-        saveSnapshot();
-        toast.success(`Applied particle effect "${effect.name}" to selected overlay`);
-        return;
-      }
-    }
 
     if (selectedClipId) {
       let foundClip: any = null;
@@ -683,7 +641,7 @@ export function MediaPanel() {
       }
     }
 
-    toast.error('Select a clip or overlay on the timeline first to apply this particle effect');
+    toast.error('Select a clip on the timeline first to apply this particle effect');
   };
   const [searchQuery, setSearchQuery] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);

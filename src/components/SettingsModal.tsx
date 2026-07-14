@@ -50,10 +50,7 @@ export function SettingsModal() {
 
     try {
       const restored = await restoreSnapshotMedia(as);
-      const loadedTracks = restored.tracks.map((t: any) => ({
-        ...t,
-        overLayers: t.overLayers || [],
-      }));
+      const loadedTracks = restored.tracks;
       
       useEditorStore.setState({
         tracks: loadedTracks,

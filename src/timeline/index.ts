@@ -22,3 +22,4 @@ export * from './components/TimelineClipRow';
 export * from './components/TimelineModals';
 export * from './components/TimelineToolbar';
 export * from './components/PlayheadComponents';
+export * from './components/PipFloatingWindow';

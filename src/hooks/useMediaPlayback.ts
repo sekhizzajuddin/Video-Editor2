@@ -117,6 +117,29 @@ export interface MediaPlaybackResult {
   frameCache: Map<string, FrameCacheEntry[]>;
 }
 
+function findClipById(clipId: string) {
+  const state = useEditorStore.getState();
+  const tracks = state.tracks;
+  const pipWindows = state.pipWindows || {};
+  for (const track of tracks) {
+    const found = track.clips.find((c) => c.id === clipId);
+    if (found) return { clip: found, track, absStartTime: found.startTime };
+    for (const clip of track.clips) {
+      const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
+      for (const pip of clipPips) {
+        for (const pipTrack of pip.tracks) {
+          const pipClip = pipTrack.clips.find(c => c.id === clipId);
+          if (pipClip) {
+            const absStartTime = clip.startTime + pip.relativeStartTime + pipClip.startTime;
+            return { clip: pipClip, track, absStartTime };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function useMediaPlayback(): MediaPlaybackResult {
   const poolRef = useRef<Map<string, MediaElement>>(new Map());
   const videoMapRef = useRef<Map<string, HTMLVideoElement>>(new Map());
@@ -133,6 +156,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const muteTimelineAudio = useEditorStore((s) => s.muteTimelineAudio);
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
   const isExporting = useEditorStore((s) => s.isExporting);
+
+
 
   // Keep track of expected playback time to detect manual user seeks
   const lastTimeRef = useRef<number>(currentTime);
@@ -189,13 +214,13 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
     const addedClipIds = new Set<string>();
 
-    const addIfNew = (clip: any, track: any) => {
+    const addIfNew = (clip: any, track: any, overrideStartTime?: number) => {
       if (addedClipIds.has(clip.id)) return;
       addedClipIds.add(clip.id);
       result.push({
         clipId: clip.id,
         mediaId: clip.mediaId,
-        clipStart: clip.startTime,
+        clipStart: overrideStartTime !== undefined ? overrideStartTime : clip.startTime,
         clipDuration: clip.duration,
         trimStart: clip.trimStart,
         trackMuted: track.muted,
@@ -218,6 +243,23 @@ export function useMediaPlayback(): MediaPlaybackResult {
           currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration;
         if (isNormallyActive) {
           addIfNew(clip, track);
+        }
+
+        // 3. PIP active clips
+        const pipWindows = useEditorStore.getState().pipWindows || {};
+        const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
+        for (const pip of clipPips) {
+          const pipAbsStart = clip.startTime + pip.relativeStartTime;
+          if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+            for (const pipTrack of pip.tracks) {
+              for (const pipClip of pipTrack.clips) {
+                const ptAbsStart = pipAbsStart + pipClip.startTime;
+                if (currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
+                  addIfNew(pipClip, track, ptAbsStart);
+                }
+              }
+            }
+          }
         }
 
         // 2. Check transition at this clip's start (if idx > 0)
@@ -252,13 +294,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
           }
         }
       }
-
-      // 3. Check active over layers
-      for (const ol of track.overLayers || []) {
-        if (ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
-          addIfNew(ol, track);
-        }
-      }
     }
     return result;
   }, [tracks, currentTime]);
@@ -276,14 +311,21 @@ export function useMediaPlayback(): MediaPlaybackResult {
           });
         }
       }
-      for (const ol of track.overLayers || []) {
-        if (ol.mediaId) {
-          const media = mediaLibrary.find((m) => m.id === ol.mediaId);
-          if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
-            neededClips.set(ol.id, {
-              mediaId: ol.mediaId,
-              type: media.type,
-            });
+      // 3. Collect nested PIP clips
+      const pipWindows = useEditorStore.getState().pipWindows || {};
+      for (const clip of track.clips) {
+        const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
+        for (const pip of clipPips) {
+          for (const pipTrack of pip.tracks) {
+            for (const pipClip of pipTrack.clips) {
+              const media = mediaLibrary.find((m) => m.id === pipClip.mediaId);
+              if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
+                neededClips.set(pipClip.id, {
+                  mediaId: pipClip.mediaId,
+                  type: media.type,
+                });
+              }
+            }
           }
         }
       }
@@ -515,14 +557,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
         }
         
         // Find the clip in tracks to get its trimStart or transition entry start time
-        let fullClip = null;
-        for (const track of tracks) {
-          const found = track.clips.find((c) => c.id === clipId) || (track.overLayers || []).find((c) => c.id === clipId);
-          if (found) {
-            fullClip = found;
-            break;
-          }
-        }
+        const foundNode = findClipById(clipId);
+        const fullClip = foundNode ? foundNode.clip : null;
         if (fullClip) {
           let targetTime = fullClip.trimStart;
           if ('transitionIn' in fullClip && (fullClip as any).transitionIn) {
@@ -585,16 +621,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
     for (const [clipId, entry] of pool) {
       // Find the clip in the tracks
-      let fullClip = null;
-      let targetTrack = null;
-      for (const track of tracks) {
-        const found = track.clips.find((c) => c.id === clipId) || (track.overLayers || []).find((c) => c.id === clipId);
-        if (found) {
-          fullClip = found;
-          targetTrack = track;
-          break;
-        }
-      }
+      const foundNode = findClipById(clipId);
+      const fullClip = foundNode ? foundNode.clip : null;
+      const targetTrack = foundNode ? foundNode.track : null;
 
       if (!fullClip) continue;
 
@@ -972,16 +1001,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
       const el = entry.el as HTMLVideoElement;
       
       // Find the clip to get its track and timing
-      let clipTrack: any = null;
-      let clipObj: any = null;
-      for (const track of tracks) {
-        const found = track.clips.find((c) => c.id === clipId) || (track.overLayers || []).find((c) => c.id === clipId);
-        if (found) {
-          clipTrack = track;
-          clipObj = found;
-          break;
-        }
-      }
+      const foundNode = findClipById(clipId);
+      const clipTrack = foundNode ? foundNode.track : null;
+      const clipObj = foundNode ? foundNode.clip : null;
       
       if (!clipObj || !clipTrack) continue;
       
@@ -989,8 +1011,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
       if (!media || !media.url) continue;
       
       const isPendingRestore = media.url === 'PENDING_RESTORE';
+      const absStart = foundNode ? foundNode.absStartTime : clipObj.startTime;
       // Load if within 8 seconds of playhead, otherwise unload
-      const isNear = !clipTrack.hidden && currentTime >= clipObj.startTime - 8 && currentTime < clipObj.startTime + clipObj.duration + 8;
+      const isNear = !clipTrack.hidden && currentTime >= absStart - 8 && currentTime < absStart + clipObj.duration + 8;
       
       if (isNear && !isPendingRestore) {
         const targetSrc = media.url;
@@ -1078,9 +1101,8 @@ function connectAudioNode(entry: MediaElement) {
   const audioCtx = getMasterAudioCtx();
   if (!audioCtx || !entry.gainNode) return;
 
-  const track = useEditorStore.getState().tracks.find(
-    (t) => t.clips.some((c) => c.id === entry.clipId) || (t.overLayers || []).some((c) => c.id === entry.clipId)
-  );
+  const foundNode = findClipById(entry.clipId);
+  const track = foundNode ? foundNode.track : null;
   const trackAnalyser = track ? getOrCreateTrackAnalyser(track.id, audioCtx) : null;
 
   try {

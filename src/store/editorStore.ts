@@ -10,7 +10,7 @@ import type {
   EditorSnapshot,
   Transition,
   ClipTextSettings,
-  OverLayerClip,
+  PipWindow,
   ProjectTemplate,
   SubtitleItem,
   ScopeSettings,
@@ -26,8 +26,8 @@ const debouncedSaveProject = (state: any) => {
     clearTimeout(saveTimeoutId);
   }
   saveTimeoutId = setTimeout(() => {
-    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = state;
-    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName, pipWindows } = state;
+    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, pipWindows } as any).then(() => {
       if (projectId !== 'default') {
         saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
       }
@@ -55,7 +55,6 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'V1',
     type: 'video',
     clips: [],
-    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -68,7 +67,6 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'V2',
     type: 'video',
     clips: [],
-    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -81,7 +79,6 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'A1',
     type: 'audio',
     clips: [],
-    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -94,7 +91,6 @@ const createEmptyTracks = (): TimelineTrack[] => [
     name: 'A2',
     type: 'audio',
     clips: [],
-    overLayers: [],
     locked: false,
     muted: false,
     hidden: false,
@@ -197,15 +193,15 @@ interface EditorActions {
   selectClips: (clipIds: string[]) => void;
   selectTrack: (trackId: string | null) => void;
 
-  // Over Layer Operations
-  addOverLayer: (trackId: string, mediaId?: string | null, startTime?: number, duration?: number) => void;
-  removeOverLayer: (overLayerId: string) => void;
-  updateOverLayer: (overLayerId: string, updates: Partial<OverLayerClip>) => void;
-  moveOverLayer: (overLayerId: string, newStartTime: number) => void;
-  reorderOverLayer: (overLayerId: string, targetRowIdx: number) => void;
-  selectOverLayer: (overLayerId: string | null) => void;
-  setHoveredOverLayerRegion: (region: EditorState['hoveredOverLayerRegion']) => void;
-  setPinnedOverLayerTrackId: (trackId: string | null) => void;
+  // PIP Window Operations
+  createPipWindow: (clipId: string, relativeStartTime: number) => void;
+  deletePipWindow: (pipId: string) => void;
+  updatePipWindowStartTime: (pipId: string, relativeStartTime: number) => void;
+  updatePipWindowDuration: (pipId: string, duration: number) => void;
+  setActivePipWindow: (pipId: string | null) => void;
+  addTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx', mediaId: string, startTime: number, duration: number) => void;
+  removeTrackFromPip: (pipId: string, trackId: string) => void;
+  reorderPipTrack: (pipId: string, trackIndex: number, direction: 'up' | 'down') => void;
 
   // Playback
   play: () => void;
@@ -346,9 +342,8 @@ const initialState: EditorState = {
   timelineStack: [],
   selectedClipId: null,
   selectedClipIds: [],
-  selectedOverLayerId: null,
-  hoveredOverLayerRegion: null,
-  pinnedOverLayerTrackId: null,
+  pipWindows: {},
+  activePipWindowId: null,
   selectedTransitionClipId: null,
   selectedKeyframeLines: [],
   selectedTrackId: null,
@@ -553,49 +548,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           return c;
         }).flat();
 
-        // Do the same for overLayers if they exist
-        let newOls = (track.overLayers || []).filter(ol => {
-          const olEnd = ol.startTime + ol.duration;
-          return !(ol.startTime >= start && olEnd <= end);
-        });
-
-        newOls = newOls.map(ol => {
-          const olEnd = ol.startTime + ol.duration;
-          if (ol.startTime >= end) {
-            return { ...ol, startTime: ol.startTime - durationToCut };
-          }
-          if (ol.startTime < start && olEnd > start && olEnd <= end) {
-            const newDur = start - ol.startTime;
-            return { ...ol, duration: newDur };
-          }
-          if (ol.startTime >= start && ol.startTime < end && olEnd > end) {
-            const newDur = olEnd - end;
-            return {
-              ...ol,
-              startTime: start,
-              duration: newDur
-            };
-          }
-          if (ol.startTime < start && olEnd > end) {
-            const leftOl = {
-              ...ol,
-              duration: start - ol.startTime
-            };
-            const rightOl = {
-              ...ol,
-              id: ol.id + '_split_' + Math.random().toString(36).slice(2, 7),
-              startTime: start,
-              duration: olEnd - end
-            };
-            return [leftOl, rightOl];
-          }
-          return ol;
-        }).flat();
-
         return {
           ...track,
           clips: newClips,
-          overLayers: newOls
         };
       });
 
@@ -651,7 +606,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       tracks: state.tracks.map((track) => ({
         ...track,
         clips: track.clips.filter((c) => c.mediaId !== id),
-        overLayers: (track.overLayers || []).filter((ol) => ol.mediaId !== id),
       })),
     }));
     // Delete file from IndexedDB
@@ -953,28 +907,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             return clip;
           });
 
-          const remainingOls = (track.overLayers || []).filter((ol) => !idsToRemove.includes(ol.id));
-          const shiftedOls = remainingOls.map((ol) => {
-            if (ol.startTime >= minStartTime) {
-              return {
-                ...ol,
-                startTime: Math.max(0, ol.startTime - shiftDuration),
-              };
-            }
-            return ol;
-          });
-
           return {
             ...track,
             clips: shiftedClips,
-            overLayers: shiftedOls,
           };
         });
       } else {
         newTracks = state.tracks.map((track) => ({
           ...track,
           clips: track.clips.filter((c) => !idsToRemove.includes(c.id)),
-          overLayers: (track.overLayers || []).filter((c) => !idsToRemove.includes(c.id)),
         }));
       }
 
@@ -1001,9 +942,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         clips: track.clips.map((clip) =>
           clip.id === clipId ? { ...clip, ...updates } : clip
         ),
-        overLayers: (track.overLayers || []).map((ol) =>
-          ol.id === clipId ? { ...ol, ...updates } : ol
-        ),
       }));
 
       let updatedMediaLibrary = state.mediaLibrary;
@@ -1016,11 +954,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           const c = track.clips.find(clip => clip.id === clipId);
           if (c) {
             mediaId = c.mediaId || undefined;
-            break;
-          }
-          const ol = track.overLayers?.find(o => o.id === clipId);
-          if (ol) {
-            mediaId = ol.mediaId || undefined;
             break;
           }
         }
@@ -1281,7 +1214,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
               name: newTrackName,
               type: currentTrack.type,
               clips: [],
-              overLayers: [],
               locked: false,
               muted: false,
               hidden: false,
@@ -1424,52 +1356,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   splitClip: (clipId, splitTime) => {
     set((state) => {
-      // Check if it's an over-layer
-      const isOl = state.tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
-      if (isOl) {
-        let leftClipId = '';
-        const newTracks = state.tracks.map((track) => {
-          const olIndex = (track.overLayers || []).findIndex((ol) => ol.id === clipId);
-          if (olIndex === -1) return track;
-
-          const ol = track.overLayers[olIndex];
-          const relativeSplitTime = splitTime - ol.startTime;
-
-          if (relativeSplitTime <= 0 || relativeSplitTime >= ol.duration) return track;
-
-          leftClipId = generateId();
-          const rightClipId = generateId();
-
-          const leftOl: OverLayerClip = {
-            ...ol,
-            id: leftClipId,
-            duration: relativeSplitTime,
-            trimEnd: ol.trimEnd + (ol.duration - relativeSplitTime) * ol.speed,
-            effects: [...ol.effects],
-          };
-
-          const rightOl: OverLayerClip = {
-            ...ol,
-            id: rightClipId,
-            startTime: splitTime,
-            duration: ol.duration - relativeSplitTime,
-            trimStart: ol.trimStart + relativeSplitTime * ol.speed,
-            effects: [...ol.effects],
-          };
-
-          const newOls = [...track.overLayers];
-          newOls.splice(olIndex, 1, leftOl, rightOl);
-
-          return { ...track, overLayers: newOls };
-        });
-
-        const isSelected = state.selectedOverLayerId === clipId;
-        return {
-          tracks: newTracks,
-          selectedOverLayerId: isSelected ? leftClipId : state.selectedOverLayerId,
-        };
-      }
-
       const isSelected = state.selectedClipIds.includes(clipId);
       let leftClipId = '';
 
@@ -1823,7 +1709,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           locked: false,
           muted: false,
           hidden: false,
-          overLayers: [],
         });
       }
 
@@ -2033,7 +1918,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         type,
         linkedTrackId,
         clips: [],
-        overLayers: [],
         locked: false,
         muted: false,
         hidden: false,
@@ -2199,7 +2083,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const newTracks = state.tracks.map((t) => ({
         ...t,
         clips: t.clips.map(updateClipKeyframes),
-        overLayers: (t.overLayers || []).map(updateClipKeyframes),
       }));
       return { tracks: newTracks };
     });
@@ -2250,7 +2133,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const newTracks = state.tracks.map((t) => ({
         ...t,
         clips: t.clips.map(deleteClipKeyframe),
-        overLayers: (t.overLayers || []).map(deleteClipKeyframe),
       }));
       return { tracks: newTracks };
     });
@@ -2278,7 +2160,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const newTracks = state.tracks.map((t) => ({
         ...t,
         clips: t.clips.map(moveClipKeyframe),
-        overLayers: (t.overLayers || []).map(moveClipKeyframe),
       }));
       return { tracks: newTracks };
     });
@@ -2305,7 +2186,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const newTracks = state.tracks.map((t) => ({
         ...t,
         clips: t.clips.map(breakClipKeyframe),
-        overLayers: (t.overLayers || []).map(breakClipKeyframe),
       }));
       return { tracks: newTracks };
     });
@@ -2353,13 +2233,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Clipboard
   copyClip: (copyType = 'whole') => {
-    const { tracks, selectedClipIds, selectedClipId, selectedOverLayerId } = get();
+    const { tracks, selectedClipIds, selectedClipId } = get();
     // Default to the single selected clip/overlayer if array is empty (for fallback)
     let targetIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
-    
-    if (targetIds.length === 0 && selectedOverLayerId) {
-      targetIds = [selectedOverLayerId];
-    }
     
     if (targetIds.length === 0) return;
 
@@ -2368,11 +2244,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       for (const clip of track.clips) {
         if (targetIds.includes(clip.id)) {
           clipsToCopy.push({ ...clip, effects: [...clip.effects], trackType: track.type, isOverLayer: false });
-        }
-      }
-      for (const ol of track.overLayers || []) {
-        if (targetIds.includes(ol.id)) {
-          clipsToCopy.push({ ...ol, effects: [...(ol.effects || [])], trackType: track.type, isOverLayer: true });
         }
       }
     }
@@ -2457,33 +2328,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const regularClipsToPaste: any[] = [];
     
     newClips.forEach(c => {
-      if (c.isOverLayer) {
-        set((state) => {
-          const newTracks = state.tracks.map((t) => {
-            if (t.id === c.trackId) {
-              const cleanClip = { ...c };
-              delete cleanClip.isOverLayer;
-              delete cleanClip.trackType;
-              return {
-                ...t,
-                overLayers: [...(t.overLayers || []), cleanClip],
-              };
-            }
-            return t;
-          });
-          return {
-            tracks: newTracks,
-            selectedOverLayerId: c.id,
-            selectedClipId: null,
-            selectedClipIds: [],
-          };
-        });
-      } else {
-        const cleanClip = { ...c };
-        delete cleanClip.isOverLayer;
-        delete cleanClip.trackType;
-        regularClipsToPaste.push(cleanClip);
-      }
+      const cleanClip = { ...c };
+      delete cleanClip.isOverLayer;
+      delete cleanClip.trackType;
+      regularClipsToPaste.push(cleanClip);
     });
 
     if (regularClipsToPaste.length > 0) {
@@ -2491,7 +2339,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       set({
         selectedClipIds: regularClipsToPaste.map(c => c.id),
         selectedClipId: regularClipsToPaste[regularClipsToPaste.length - 1].id,
-        selectedOverLayerId: null,
       });
     }
   },
@@ -2537,6 +2384,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const snapshot: EditorSnapshot = {
         tracks: JSON.parse(JSON.stringify(state.tracks)),
         currentTime: state.currentTime,
+        pipWindows: JSON.parse(JSON.stringify(state.pipWindows || {})),
         label: label || defaultLabel,
       };
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -2564,6 +2412,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return {
         tracks: JSON.parse(JSON.stringify(snap.tracks)),
         currentTime: snap.currentTime,
+        pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
         historyIndex: state.historyIndex - 1,
       };
     });
@@ -2576,6 +2425,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return {
         tracks: JSON.parse(JSON.stringify(snap.tracks)),
         currentTime: snap.currentTime,
+        pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
         historyIndex: state.historyIndex + 1,
       };
     });
@@ -2588,6 +2438,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return {
         tracks: JSON.parse(JSON.stringify(snap.tracks)),
         currentTime: snap.currentTime,
+        pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
         historyIndex: index,
         selectedClipId: null,
         selectedClipIds: [],
@@ -2647,21 +2498,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const data = await loadProjectFromDB();
       if (!data) return false;
       
-      const loadedTracks = data.tracks.map((t: any) => ({
-        ...t,
-        overLayers: t.overLayers || [],
-      }));
+      const loadedTracks = data.tracks;
 
+      const loadedPipWindows = (data as any).pipWindows || {};
       set({
         tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
         folders: data.folders || [],
         currentTime: data.currentTime,
         aspectRatio: data.aspectRatio || '16:9',
+        pipWindows: loadedPipWindows,
+        activePipWindowId: null,
         history: [
           {
             tracks: JSON.parse(JSON.stringify(loadedTracks)),
-            currentTime: data.currentTime
+            currentTime: data.currentTime,
+            pipWindows: JSON.parse(JSON.stringify(loadedPipWindows)),
           }
         ],
         historyIndex: 0
@@ -2754,7 +2606,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       currentTime: 0,
       selectedClipId: null,
       selectedClipIds: [],
-      selectedOverLayerId: null,
       selectedTransitionClipId: null,
     });
 
@@ -2831,17 +2682,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     // Only auto-remove tracks that are both dynamic AND have never had any clips/overLayers.
     // Keep all non-dynamic (user-created) tracks regardless of empty state.
     const cleanedTracks = tracks.filter(
-      (t) => !t.isDynamic || t.clips.length > 0 || (t.overLayers || []).length > 0
+      (t) => !t.isDynamic || t.clips.length > 0
     );
 
     let maxEnd = 0;
     for (const track of cleanedTracks) {
       for (const clip of track.clips) {
         const end = clip.startTime + clip.duration;
-        if (end > maxEnd) maxEnd = end;
-      }
-      for (const ol of track.overLayers || []) {
-        const end = ol.startTime + ol.duration;
         if (end > maxEnd) maxEnd = end;
       }
     }
@@ -2852,166 +2699,193 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
   },
 
-  // Over Layer Operations
-  addOverLayer: (trackId, mediaId = null, startTime, duration = 3) => {
-    const { currentTime } = get();
-    const actualStartTime = startTime ?? currentTime;
+  // PIP Window Operations
+  createPipWindow: (clipId, relativeStartTime) => {
     const id = generateId();
-    const newOverLayer: OverLayerClip = {
+    const newPip: PipWindow = {
       id,
-      mediaId,
-      trackId,
-      startTime: actualStartTime,
-      duration,
-      trimStart: 0,
-      trimEnd: 0,
-      transform: {
-        x: 0,
-        y: 0,
-        scale: 50, // default PIP scale 50%
-        rotation: 0,
-      },
-      opacity: 1,
-      speed: 1,
-      effects: [],
+      parentClipId: clipId,
+      relativeStartTime,
+      tracks: [],
+      duration: 5,
+      zIndex: Object.keys(get().pipWindows).length + 1,
     };
+    
     set((state) => {
-      const newTracks = state.tracks.map((t) => {
-        if (t.id === trackId) {
-          return {
-            ...t,
-            overLayers: [...(t.overLayers || []), newOverLayer],
-          };
-        }
-        return t;
+      const clip = state.tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+      if (!clip) return {};
+      
+      const newTracks = state.tracks.map(t => {
+        const hasClip = t.clips.some(c => c.id === clipId);
+        if (!hasClip) return t;
+        return {
+          ...t,
+          clips: t.clips.map(c => 
+            c.id === clipId ? { ...c, pipWindowIds: [...(c.pipWindowIds || []), id] } : c
+          )
+        };
       });
+
       return {
         tracks: newTracks,
-        selectedOverLayerId: id,
+        pipWindows: { ...state.pipWindows, [id]: newPip },
+        activePipWindowId: id,
         selectedClipId: null,
         selectedClipIds: [],
         selectedTrackId: null,
-        pinnedOverLayerTrackId: trackId,
       };
     });
-    get().recalcTotalDuration();
-    get().saveSnapshot('Add PIP Layer');
+    get().saveSnapshot('Create PIP Window');
   },
 
-  removeOverLayer: (overLayerId) => {
+  deletePipWindow: (pipId) => {
     set((state) => {
-      const newTracks = state.tracks.map((t) => ({
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+
+      const newPipWindows = { ...state.pipWindows };
+      delete newPipWindows[pipId];
+
+      const newTracks = state.tracks.map(t => ({
         ...t,
-        overLayers: (t.overLayers || []).filter((ol) => ol.id !== overLayerId),
+        clips: t.clips.map(c => 
+          c.id === pip.parentClipId 
+            ? { ...c, pipWindowIds: (c.pipWindowIds || []).filter(id => id !== pipId) } 
+            : c
+        )
       }));
-      const wasSelected = state.selectedOverLayerId === overLayerId;
+
       return {
+        pipWindows: newPipWindows,
         tracks: newTracks,
-        selectedOverLayerId: wasSelected ? null : state.selectedOverLayerId,
-        pinnedOverLayerTrackId: wasSelected ? null : state.pinnedOverLayerTrackId,
+        activePipWindowId: state.activePipWindowId === pipId ? null : state.activePipWindowId
       };
     });
-    get().recalcTotalDuration();
-    get().saveSnapshot('Delete PIP Layer');
+    get().saveSnapshot('Delete PIP Window');
   },
 
-  updateOverLayer: (overLayerId, updates) => {
+  updatePipWindowStartTime: (pipId, relativeStartTime) => {
     set((state) => {
-      const newTracks = state.tracks.map((t) => ({
-        ...t,
-        overLayers: (t.overLayers || []).map((ol) =>
-          ol.id === overLayerId ? { ...ol, ...updates } : ol
-        ),
-      }));
-      return { tracks: newTracks };
-    });
-    get().recalcTotalDuration();
-  },
-
-  moveOverLayer: (overLayerId, newStartTime) => {
-    const startTime = Math.max(0, newStartTime);
-    set((state) => {
-      const newTracks = state.tracks.map((t) => ({
-        ...t,
-        overLayers: (t.overLayers || []).map((ol) =>
-          ol.id === overLayerId ? { ...ol, startTime } : ol
-        ),
-      }));
-      return { tracks: newTracks };
-    });
-    get().recalcTotalDuration();
-  },
-
-  reorderOverLayer: (overLayerId, targetRowIdx) => {
-    set((state) => {
-      const track = state.tracks.find((t) => (t.overLayers || []).some((ol) => ol.id === overLayerId));
-      if (!track) return {};
-      
-      const hoveredOverLayerRegion = state.hoveredOverLayerRegion;
-      if (!hoveredOverLayerRegion) return {};
-      
-      const activeOverLayers = (track.overLayers || []).filter((ol) => {
-        return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
-      });
-      
-      const currentIdxInActive = activeOverLayers.findIndex((ol) => ol.id === overLayerId);
-      if (currentIdxInActive === -1 || targetRowIdx === currentIdxInActive || targetRowIdx >= activeOverLayers.length) return {};
-      
-      const reordered = [...track.overLayers];
-      const itemToMove = activeOverLayers[currentIdxInActive];
-      const targetItem = activeOverLayers[targetRowIdx];
-      
-      const originalIdx = reordered.findIndex((ol) => ol.id === itemToMove.id);
-      const targetOriginalIdx = reordered.findIndex((ol) => ol.id === targetItem.id);
-      
-      if (originalIdx !== -1 && targetOriginalIdx !== -1) {
-        reordered.splice(originalIdx, 1);
-        reordered.splice(targetOriginalIdx, 0, itemToMove);
-        
-        return {
-          tracks: state.tracks.map((t) =>
-            t.id === track.id ? { ...t, overLayers: reordered } : t
-          ),
-        };
-      }
-      return {};
-    });
-  },
-
-  selectOverLayer: (overLayerId) => {
-    // Find which track owns this over-layer so it stays pinned
-    let owningTrackId: string | null = null;
-    if (overLayerId) {
-      const state = get();
-      for (const t of state.tracks) {
-        if ((t.overLayers || []).some((ol) => ol.id === overLayerId)) {
-          owningTrackId = t.id;
-          break;
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: { ...pip, relativeStartTime: Math.max(0, relativeStartTime) }
         }
-      }
-    }
+      };
+    });
+    get().saveSnapshot('Move PIP Window');
+  },
+
+  updatePipWindowDuration: (pipId: string, duration: number) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: { ...pip, duration: Math.max(0.5, duration) }
+        }
+      };
+    });
+    get().saveSnapshot('Resize PIP Window');
+  },
+
+  setActivePipWindow: (pipId) => {
     set({
-      selectedOverLayerId: overLayerId,
+      activePipWindowId: pipId,
       selectedClipId: null,
       selectedClipIds: [],
       selectedTrackId: null,
-      pinnedOverLayerTrackId: owningTrackId,
     });
   },
 
-  setHoveredOverLayerRegion: (region) => {
-    set({ hoveredOverLayerRegion: region });
+  addTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx', mediaId: string, startTime: number, duration: number) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      
+      const newClip: TimelineClip = {
+        id: generateId(),
+        trackId: '',
+        mediaId,
+        startTime,
+        duration,
+        trimStart: 0,
+        trimEnd: 0,
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        opacity: 1,
+        speed: 1,
+        effects: []
+      };
+
+      const newTrack: TimelineTrack = {
+        id: generateId(),
+        name: `${type.toUpperCase()} Track ${pip.tracks.length + 1}`,
+        type,
+        clips: [newClip],
+        locked: false,
+        muted: false,
+        hidden: false,
+      };
+
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: { ...pip, tracks: [...pip.tracks, newTrack] }
+        }
+      };
+    });
+    get().saveSnapshot('Add PIP Clip');
   },
 
-  setPinnedOverLayerTrackId: (trackId) => {
-    set({ pinnedOverLayerTrackId: trackId });
+  removeTrackFromPip: (pipId: string, trackId: string) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: {
+            ...pip,
+            tracks: pip.tracks.filter(t => t.id !== trackId)
+          }
+        }
+      };
+    });
+    get().saveSnapshot('Remove PIP Clip');
   },
 
-  // Keyboard Delete — remove selected over-layer or clip
+  reorderPipTrack: (pipId, trackIndex, direction) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      
+      const newTracks = [...pip.tracks];
+      const targetIndex = direction === 'up' ? trackIndex - 1 : trackIndex + 1;
+      
+      if (targetIndex < 0 || targetIndex >= newTracks.length) return {};
+      
+      const temp = newTracks[trackIndex];
+      newTracks[trackIndex] = newTracks[targetIndex];
+      newTracks[targetIndex] = temp;
+
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: { ...pip, tracks: newTracks }
+        }
+      };
+    });
+  },
+
+  // Keyboard Delete — remove selected PIP window or clip
   removeSelected: () => {
     const state = get();
-    if (state.selectedOverLayerId) {
-      state.removeOverLayer(state.selectedOverLayerId);
+    if (state.activePipWindowId) {
+      state.deletePipWindow(state.activePipWindowId);
     } else if (state.selectedClipIds.length > 1) {
       // FIX C12: Check multi-select BEFORE single clip so all selected clips are deleted
       const ids = [...state.selectedClipIds];
@@ -3043,9 +2917,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Compound Clips
   enterCompoundClip: (clipId) => {
-    const { tracks, timelineStack, mediaLibrary } = get();
-    const clip = tracks.flatMap(t => t.clips).find(c => c.id === clipId) || 
-                 tracks.flatMap(t => t.overLayers).find(o => o.id === clipId);
+    const { tracks, timelineStack, mediaLibrary, pipWindows } = get();
+    let clip = tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+    
+    // Check PIP tracks if not found in main tracks
+    if (!clip) {
+      for (const pipId in (pipWindows || {})) {
+        clip = pipWindows[pipId].tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+        if (clip) break;
+      }
+    }
+    
     if (!clip || !clip.mediaId) return;
     
     const media = mediaLibrary.find(m => m.id === clip.mediaId);
@@ -3056,8 +2938,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       tracks: media.nestedTimeline ? JSON.parse(JSON.stringify(media.nestedTimeline)) : [],
       currentTime: 0,
       selectedClipId: null,
-      selectedClipIds: [],
-      selectedOverLayerId: null
+      selectedClipIds: []
     });
     get().recalcTotalDuration();
   },
@@ -3080,8 +2961,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       tracks: currentStackItem.tracks,
       currentTime: 0,
       selectedClipId: null,
-      selectedClipIds: [],
-      selectedOverLayerId: null
+      selectedClipIds: []
     });
     get().recalcTotalDuration();
   }

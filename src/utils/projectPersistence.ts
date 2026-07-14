@@ -191,6 +191,7 @@ export async function saveProjectToDB(data: {
   folders?: any[]; // Making it optional for backward compatibility
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
+  pipWindows?: Record<string, any>;
 }): Promise<void> {
   try {
     const db = await getDB();
@@ -226,6 +227,9 @@ export async function saveProjectToDB(data: {
       store.put(cleanTracks, 'tracks');
       store.put(cleanMediaLibrary, 'mediaLibrary');
       store.put(data.currentTime, 'currentTime');
+      if (data.pipWindows) {
+        store.put(data.pipWindows, 'pipWindows');
+      }
       if (data.aspectRatio) {
         store.put(data.aspectRatio, 'aspectRatio');
       }
@@ -325,6 +329,7 @@ export async function loadProjectFromDB(): Promise<{
   folders?: any[];
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
+  pipWindows?: Record<string, any>;
 } | null> {
   const db = await getDB();
 
@@ -343,15 +348,20 @@ export async function loadProjectFromDB(): Promise<{
     const rawMediaLibrary = await getValue('mediaLibrary') as MediaItem[];
     const currentTime = (await getValue('currentTime') as number) || 0;
     const aspectRatio = (await getValue('aspectRatio') as any) || '16:9';
+    const pipWindows = (await getValue('pipWindows')) || {};
 
     if (!rawTracks || !rawMediaLibrary) return null;
 
-    return restoreSnapshotMedia({
+    const restored = await restoreSnapshotMedia({
       tracks: rawTracks,
       mediaLibrary: rawMediaLibrary,
       currentTime,
       aspectRatio,
     });
+    return {
+      ...restored,
+      pipWindows,
+    };
   } catch (err) {
     console.error('Failed to load project from DB:', err);
     return null;

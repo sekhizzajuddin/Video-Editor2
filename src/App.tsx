@@ -44,8 +44,6 @@ function App() {
     selectedTransitionClipId,
     removeTransition,
     removeSelectedKeyframeLines,
-    removeOverLayer,
-    selectOverLayer,
     settings,
     workspaceLayout,
     setWorkspaceLayout,
@@ -170,9 +168,6 @@ function App() {
           const storeState = useEditorStore.getState();
           if (storeState.selectedKeyframeLines.length > 0) {
             removeSelectedKeyframeLines();
-          } else if (storeState.selectedOverLayerId) {
-            removeOverLayer(storeState.selectedOverLayerId);
-            selectOverLayer(null);
           } else if (storeState.selectedClipIds.length > 0) {
             removeClip(storeState.selectedClipIds[0]);
           } else if (selectedClipId) {
@@ -310,8 +305,6 @@ function App() {
       selectedTransitionClipId,
       removeTransition,
       removeSelectedKeyframeLines,
-      removeOverLayer,
-      selectOverLayer,
       cutClip,
       selectClips,
       selectedClipIds,

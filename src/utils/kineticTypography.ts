@@ -332,7 +332,6 @@ ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
       muted: false,
       hidden: false,
       clips: newClips.map(c => ({...c, trackId: newTrackId})),
-      overLayers: []
     };
     newTracks.push(newTrack);
   }

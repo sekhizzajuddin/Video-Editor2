@@ -81,8 +81,6 @@ export function TimelineModals({
     updateMarker,
     removeMarker,
     updateClip,
-    updateOverLayer,
-    addOverLayer,
   } = useEditorStore();
 
   const handleEditMarker = (markerId: string) => {
@@ -95,10 +93,8 @@ export function TimelineModals({
     setMarkerContextMenu(null);
   };
 
-  const handleZIndexChange = (clipId: string, isOverLayer: boolean, action: 'front' | 'back' | 'forward' | 'backward') => {
-    const clip = isOverLayer 
-      ? tracks.flatMap(t => t.overLayers || []).find(c => c.id === clipId)
-      : tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+  const handleZIndexChange = (clipId: string, action: 'front' | 'back' | 'forward' | 'backward') => {
+    const clip = tracks.flatMap(t => t.clips).find(c => c.id === clipId);
     
     if (!clip) return;
     const currentZ = clip.zIndex || 0;
@@ -109,11 +105,7 @@ export function TimelineModals({
     else if (action === 'front') newZ = 9999;
     else if (action === 'back') newZ = -9999;
 
-    if (isOverLayer) {
-      updateOverLayer(clipId, { zIndex: newZ });
-    } else {
-      updateClip(clipId, { zIndex: newZ });
-    }
+    updateClip(clipId, { zIndex: newZ });
     useEditorStore.getState().saveSnapshot('Change Layer Order');
     setContextMenu(null);
   };
@@ -150,25 +142,14 @@ export function TimelineModals({
           className="fixed z-[200] bg-[#2d2d2d] border border-[#4e4e4e] rounded-lg shadow-2xl py-1 min-w-[190px] text-white"
           style={{
             left: `${Math.min(contextMenu.x, window.innerWidth - 200)}px`,
-            top: `${Math.min(contextMenu.y, window.innerHeight - (contextMenu.clipId === '' ? 100 : contextMenu.isOverLayer ? 180 : 380))}px`,
+            top: `${Math.min(contextMenu.y, window.innerHeight - (contextMenu.clipId === '' ? 100 : 380))}px`,
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
           {contextMenu.clipId === '' ? (
             // Clicked track background empty options
             <>
-              {contextMenu.trackId && (
-                <button
-                  className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
-                  onClick={() => {
-                    addOverLayer(contextMenu.trackId!);
-                    setContextMenu(null);
-                  }}
-                >
-                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                  Add Over Layer
-                </button>
-              )}
+
               <button
                 className="w-full text-left px-3 py-2 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                 onClick={() => {
@@ -188,102 +169,24 @@ export function TimelineModals({
           ) : (
             // Clicked a clip
             <>
-              {contextMenu.isOverLayer ? (
-                <>
-                  <div className="px-3 pb-1 text-[10px] text-[#a0a0a0] font-semibold border-b border-[#3e3e3e] mb-1 uppercase tracking-wider">
-                    Over-Layer Options
-                  </div>
-                  <div className="px-3 py-1.5 text-[10px] text-[#a0a0a0] mt-0.5">Move Layer Row</div>
-                  <div className="grid grid-cols-4 gap-1 px-3 py-1">
-                    <button
-                      title="Bring to Front"
-                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, true, 'front')}
-                    >
-                      Top
-                    </button>
-                    <button
-                      title="Send to Back"
-                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, true, 'back')}
-                    >
-                      Bot
-                    </button>
-                    <button
-                      title="Move Up"
-                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, true, 'forward')}
-                    >
-                      Up
-                    </button>
-                    <button
-                      title="Move Down"
-                      className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, true, 'backward')}
-                    >
-                      Dn
-                    </button>
-                  </div>
-                  <div className="h-px bg-[#3e3e3e] my-1" />
-                  <button
-                    className="w-full text-left px-3 py-2 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-                    onClick={() => {
-                      const mediaId = prompt('Enter Media ID (or leave empty to remove):');
-                      if (mediaId !== null) {
-                        if (mediaId.trim() === '') {
-                          useEditorStore.getState().updateOverLayer(contextMenu.clipId, { mediaId: undefined });
-                        } else {
-                          useEditorStore.getState().updateOverLayer(contextMenu.clipId, { mediaId: mediaId.trim() });
-                        }
-                      }
-                      setContextMenu(null);
-                    }}
-                  >
-                    <Link className="w-3.5 h-3.5" />
-                    Change Media
-                  </button>
-                  <button
-                    className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-                    onClick={() => {
-                      useEditorStore.getState().removeOverLayer(contextMenu.clipId);
-                      setContextMenu(null);
-                    }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Delete Over-Layer
-                  </button>
-                </>
-              ) : (
-                <>
-                  {contextMenu.trackId && (
-                    <button
-                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
-                      onClick={() => {
-                        addOverLayer(contextMenu.trackId!);
-                        setContextMenu(null);
-                      }}
-                    >
-                      <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                      Add Over Layer
-                    </button>
-                  )}
-                  {contextMenu.mediaType === 'video' && contextMenu.trackId && (
-                    <button
-                      className="w-full text-left px-3 py-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
-                      onClick={() => {
-                        const state = useEditorStore.getState();
-                        const track = state.tracks.find(t => t.id === contextMenu.trackId);
-                        const clip = track?.clips.find(c => c.id === contextMenu.clipId);
-                        if (clip) {
-                          state.addOverLayer(contextMenu.trackId!, clip.mediaId, clip.startTime, clip.duration);
-                        }
-                        setContextMenu(null);
-                      }}
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      Create PIP from Clip
-                    </button>
-                  )}
+              {contextMenu.mediaType === 'video' && contextMenu.trackId && (
+                <button
+                  className="w-full text-left px-3 py-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
+                  onClick={() => {
+                    const state = useEditorStore.getState();
+                    const track = state.tracks.find(t => t.id === contextMenu.trackId);
+                    const clip = track?.clips.find(c => c.id === contextMenu.clipId);
+                    if (clip) {
+                      const relativeStart = Math.max(0, state.currentTime - clip.startTime);
+                      state.createPipWindow(contextMenu.clipId, relativeStart);
+                    }
+                    setContextMenu(null);
+                  }}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  Create PIP Layer
+                </button>
+              )}
                   <div className="px-3 pb-1 text-[10px] text-[#a0a0a0] font-semibold border-b border-[#3e3e3e] mb-1 uppercase tracking-wider">
                     Clip Options
                   </div>
@@ -294,28 +197,28 @@ export function TimelineModals({
                     <button
                       title="Bring to Front"
                       className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'front')}
+                      onClick={() => handleZIndexChange(contextMenu.clipId, 'front')}
                     >
                       Top
                     </button>
                     <button
                       title="Send to Back"
                       className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'back')}
+                      onClick={() => handleZIndexChange(contextMenu.clipId, 'back')}
                     >
                       Bot
                     </button>
                     <button
                       title="Move Up"
                       className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'forward')}
+                      onClick={() => handleZIndexChange(contextMenu.clipId, 'forward')}
                     >
                       Up
                     </button>
                     <button
                       title="Move Down"
                       className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] text-[10px] rounded transition-colors"
-                      onClick={() => handleZIndexChange(contextMenu.clipId, false, 'backward')}
+                      onClick={() => handleZIndexChange(contextMenu.clipId, 'backward')}
                     >
                       Dn
                     </button>
@@ -447,8 +350,6 @@ export function TimelineModals({
                     <Trash2 className="w-3.5 h-3.5" />
                     Delete Clip
                   </button>
-                </>
-              )}
             </>
           )}
         </div>

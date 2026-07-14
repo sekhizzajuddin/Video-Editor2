@@ -245,13 +245,10 @@ export function PropertiesPanel() {
     tracks,
     selectedClipId,
     selectedClipIds,
-    selectedOverLayerId,
     activePropertiesTab,
     setActivePropertiesTab,
     updateClip: storeUpdateClip,
-    updateOverLayer,
     removeClip: storeRemoveClip,
-    removeOverLayer,
     copyClip,
     duplicateClip,
     splitClip,
@@ -451,19 +448,8 @@ export function PropertiesPanel() {
   // Find the selected clip (or the first selected clip in multi-selection)
   let selectedClip: any = null;
   let selectedTrack: any = null;
-  let isOverLayer = false;
 
-  if (selectedOverLayerId) {
-    for (const track of tracks) {
-      const ol = (track.overLayers || []).find((c) => c.id === selectedOverLayerId);
-      if (ol) {
-        selectedClip = ol as any;
-        selectedTrack = track;
-        isOverLayer = true;
-        break;
-      }
-    }
-  } else {
+  {
     const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === primarySelectedId);
@@ -721,28 +707,15 @@ export function PropertiesPanel() {
       }
     }
   }
-
-
-
-  const primarySelectedId = selectedOverLayerId || selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
+  const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
 
   const updateClip = useCallback((clipId: string, updates: any) => {
-    const isOl = tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
-    if (isOl) {
-      updateOverLayer(clipId, updates);
-    } else {
-      storeUpdateClip(clipId, updates);
-    }
-  }, [tracks, storeUpdateClip, updateOverLayer]);
+    storeUpdateClip(clipId, updates);
+  }, [storeUpdateClip]);
 
   const removeClip = useCallback((clipId: string) => {
-    const isOl = tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
-    if (isOl) {
-      removeOverLayer(clipId);
-    } else {
-      storeRemoveClip(clipId);
-    }
-  }, [tracks, storeRemoveClip, removeOverLayer]);
+    storeRemoveClip(clipId);
+  }, [storeRemoveClip]);
 
   // Auto-switch properties panel tabs only when the clip selection CHANGES (not on property updates)
   const lastAutoSwitchedClip = useRef<string | null>(null);
@@ -1669,11 +1642,7 @@ export function PropertiesPanel() {
                   ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, humanize: false }),
                   muted: !currentMuted
                 };
-                if (isOverLayer) {
-                  updateOverLayer(selectedClip.id, { audioSettings: newSettings });
-                } else {
-                  storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
-                }
+                storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
                 useEditorStore.getState().saveSnapshot();
               }}
               title={selectedClip.audioSettings?.muted ? "Unmute Clip" : "Mute Clip"}

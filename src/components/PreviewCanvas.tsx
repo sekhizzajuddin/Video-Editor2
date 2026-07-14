@@ -2101,36 +2101,65 @@ export function PreviewCanvas() {
       });
     };
 
-    const queueOverLayersForTracks = (tracksList: any[], isText: boolean) => {
+    const queuePipWindowsForTracks = (tracksList: any[], isText: boolean) => {
+      const pipWindows = Object.values(useEditorStore.getState().pipWindows || {});
       tracksList.forEach((track, trackIdx) => {
-        const activeOverLayers = (track.overLayers || []).filter(
-          (ol: any) => !ol.disabled && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration
+        const activeClips = track.clips.filter(
+          (c: any) => !c.disabled && currentTime >= c.startTime && currentTime < c.startTime + c.duration
         );
 
-        for (const ol of activeOverLayers) {
-          const z = ol.zIndex ?? (trackIdx * 10 + 5 + (isText ? 1000 : 0));
-          drawQueue.push({
-            zIndex: z,
-            fn: async () => {
-              try {
-                await drawSingleClip(ol as any, 1);
-              } catch (err) {
-                console.error('[CanvasRenderError] Failed to draw over layer:', ol.id, err);
-                try { ctx.restore(); } catch (_) {}
-              }
+        for (const clip of activeClips) {
+          const clipPips = pipWindows.filter(p => p.parentClipId === clip.id);
+          for (const pip of clipPips) {
+            const pipAbsStart = clip.startTime + pip.relativeStartTime;
+            if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+              // Active PIP window. Render its tracks
+              pip.tracks.forEach((pipTrack, ptIdx) => {
+                pipTrack.clips.forEach((pipClip) => {
+                  const ptAbsStart = pipAbsStart + pipClip.startTime;
+                  if (currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
+                    // Render this pip clip
+                    const z = (clip.zIndex ?? (trackIdx * 10 + (isText ? 1000 : 0))) + 1 + ptIdx;
+                    
+                    const mockClip: any = {
+                      ...pipClip,
+                      startTime: ptAbsStart,
+                      zIndex: z,
+                      transform: pipClip.transform || {
+                        scale: 0.5,
+                        x: 25,
+                        y: 25,
+                        rotation: 0
+                      }
+                    };
+                    
+                    drawQueue.push({
+                      zIndex: z,
+                      fn: async () => {
+                        try {
+                          await drawSingleClip(mockClip as any, 1);
+                        } catch (err) {
+                          console.error('[CanvasRenderError] Failed to draw PIP layer:', pipClip.id, err);
+                          try { ctx.restore(); } catch (_) {}
+                        }
+                      }
+                    });
+                  }
+                });
+              });
             }
-          });
+          }
         }
       });
     };
 
     // Queue Video tracks
     queueMainClipsForTracks(videoTracks, false);
-    queueOverLayersForTracks(videoTracks, false);
+    queuePipWindowsForTracks(videoTracks, false);
 
     // Queue Text tracks (Default 1000+ zIndex)
     queueMainClipsForTracks(textTracks, true);
-    queueOverLayersForTracks(textTracks, true);
+    queuePipWindowsForTracks(textTracks, true);
 
     // Sort by Z-Index (ascending: lowest drawn first, highest drawn last)
     drawQueue.sort((a, b) => a.zIndex - b.zIndex);
@@ -2158,9 +2187,22 @@ export function PreviewCanvas() {
           renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
         }
       }
-      for (const ol of track.overLayers || []) {
-        if (!ol.disabled && ol.particleSettings && ol.mediaId && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
-          renderParticles(ctx, ol.id, ol.particleSettings, W, H, deltaMs, particlePoolsRef.current);
+      // PIP clips particles
+      const pipWindows = useEditorStore.getState().pipWindows || {};
+      for (const clip of track.clips) {
+        const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
+        for (const pip of clipPips) {
+          const pipAbsStart = clip.startTime + pip.relativeStartTime;
+          if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+            for (const pipTrack of pip.tracks) {
+              for (const pipClip of pipTrack.clips) {
+                const ptAbsStart = pipAbsStart + pipClip.startTime;
+                if (!pipClip.disabled && pipClip.particleSettings && currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
+                  renderParticles(ctx, pipClip.id, pipClip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -2181,16 +2223,29 @@ export function PreviewCanvas() {
           }
         }
       }
-      for (const ol of track.overLayers || []) {
-        if (
-          !ol.disabled &&
-          ol.lut?.mediaId &&
-          currentTime >= ol.startTime &&
-          currentTime < ol.startTime + ol.duration
-        ) {
-          const lutMedia = mediaLibrary.find((m) => m.id === ol.lut!.mediaId);
-          if (lutMedia?.lutData) {
-            applyLutToCanvas(ctx, W, H, lutMedia.lutData, ol.lut!.intensity ?? 100);
+      // PIP clips LUT
+      const pipWindows = useEditorStore.getState().pipWindows || {};
+      for (const clip of track.clips) {
+        const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
+        for (const pip of clipPips) {
+          const pipAbsStart = clip.startTime + pip.relativeStartTime;
+          if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+            for (const pipTrack of pip.tracks) {
+              for (const pipClip of pipTrack.clips) {
+                const ptAbsStart = pipAbsStart + pipClip.startTime;
+                if (
+                  !pipClip.disabled &&
+                  pipClip.lut?.mediaId &&
+                  currentTime >= ptAbsStart &&
+                  currentTime < ptAbsStart + pipClip.duration
+                ) {
+                  const lutMedia = mediaLibrary.find((m) => m.id === pipClip.lut!.mediaId);
+                  if (lutMedia?.lutData) {
+                    applyLutToCanvas(ctx, W, H, lutMedia.lutData, pipClip.lut!.intensity ?? 100);
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2960,11 +3015,9 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   const {
     tracks,
     selectedClipId,
-    selectedOverLayerId,
     currentTime,
     mediaLibrary,
     updateClip: storeUpdateClip,
-    updateOverLayer,
     canvasTransformMode,
     setCanvasTransformMode,
     aspectRatio,
@@ -2972,13 +3025,8 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   } = useEditorStore();
 
   const updateClip = useCallback((clipId: string, updates: any) => {
-    const isOl = tracks.some((t) => (t.overLayers || []).some((ol) => ol.id === clipId));
-    if (isOl) {
-      updateOverLayer(clipId, updates);
-    } else {
-      storeUpdateClip(clipId, updates);
-    }
-  }, [tracks, storeUpdateClip, updateOverLayer]);
+    storeUpdateClip(clipId, updates);
+  }, [storeUpdateClip]);
 
   const [dragState, setDragState] = useState<{
     type: string;
@@ -2996,20 +3044,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   let activeClip = null;
   let mediaItem = null;
 
-  if (selectedOverLayerId) {
-    for (const track of tracks) {
-      if (track.hidden) continue;
-      const ol = (track.overLayers || []).find((c) => c.id === selectedOverLayerId);
-      if (ol && currentTime >= ol.startTime && currentTime < ol.startTime + ol.duration) {
-        activeClip = ol;
-        mediaItem = mediaLibrary.find((m) => m.id === ol.mediaId) ||
-          (ol.textSettings || ol.mediaId === 'text-placeholder'
-            ? { id: ol.mediaId, name: 'Text', type: 'text', duration: ol.duration, url: '', createdAt: Date.now() }
-            : null);
-        break;
-      }
-    }
-  } else if (selectedClipId) {
+  if (selectedClipId) {
     for (const track of tracks) {
       if (track.hidden) continue;
       const clip = track.clips.find((c) => c.id === selectedClipId);

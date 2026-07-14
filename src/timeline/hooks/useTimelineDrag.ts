@@ -52,17 +52,11 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     seek,
     splitClip,
     setDragPreview,
-    moveOverLayer,
-    reorderOverLayer,
-    updateOverLayer,
-    hoveredOverLayerRegion,
-    pinnedOverLayerTrackId,
   } = useEditorStore();
 
   const dragRafIdRef = useRef<number | null>(null);
   const resizeRafIdRef = useRef<number | null>(null);
-  const resizeOverLayerRafIdRef = useRef<number | null>(null);
-  const dragOverLayerRafIdRef = useRef<number | null>(null);
+
 
   const {
     trackContainerRef,
@@ -70,10 +64,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     setDragState,
     resizeState,
     setResizeState,
-    dragOverLayerState,
-    setDragOverLayerState,
-    resizeOverLayerState,
-    setResizeOverLayerState,
+
     slipState,
     setSlipState,
     slideState,
@@ -123,9 +114,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     const rect = container.getBoundingClientRect();
     const relY = clientY - rect.top + container.scrollTop;
     const latestTracks = useEditorStore.getState().tracks;
-    const idx = getTrackAtY(latestTracks, relY, hoveredOverLayerRegion, pinnedOverLayerTrackId);
+    const idx = getTrackAtY(latestTracks, relY);
     return idx >= 0 && idx < latestTracks.length ? latestTracks[idx] : null;
-  }, [hoveredOverLayerRegion, pinnedOverLayerTrackId, trackContainerRef]);
+  }, [trackContainerRef]);
 
   const computeSnap = useCallback((rawTime: number, movingClipId: string, movingDuration: number) => {
     if (!settings.snapEnabled) {
@@ -142,13 +133,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         targets.push(clip.startTime);
         targets.push(clip.startTime + clip.duration);
       }
-      if (track.overLayers) {
-        for (const ol of track.overLayers) {
-          if (ol.id === movingClipId) continue;
-          targets.push(ol.startTime);
-          targets.push(ol.startTime + ol.duration);
-        }
-      }
+
     }
 
     const edges = [rawTime, rawTime + movingDuration];
@@ -687,77 +672,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       });
     }
 
-    if (dragOverLayerState) {
-      const clientX = e.clientX;
-      const clientY = e.clientY;
-      if (!dragOverLayerRafIdRef.current) {
-        dragOverLayerRafIdRef.current = requestAnimationFrame(() => {
-          const dx = clientX - dragOverLayerState.startX;
-          const dt = dx / zoomLevel;
-          let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
-          
-          // Get LATEST state for accurate snap calculation
-          const latestState = useEditorStore.getState();
-          const latestZoom = latestState.zoomLevel;
-          const latestTracks = latestState.tracks;
-          
-          const track = latestTracks.find((t) => t.id === dragOverLayerState.trackId);
-          const ol = track?.overLayers?.find(o => o.id === dragOverLayerState.overLayerId);
-          
-          if (ol) {
-            // Use current zoom level for snap
-            const { snappedTime, snapPos } = computeSnap(newStartTime, ol.id, ol.duration);
-            newStartTime = snappedTime;
-            setSnapLine(snapPos);
-          }
-          
-          // Update position
-          moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
-
-          // Calculate row index for reordering
-          const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
-          if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
-            const trackRect = trackEl.getBoundingClientRect();
-            const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-            const relY = clientY - trackRect.top - baseHeight;
-            const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
-            reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
-          }
-          
-          dragOverLayerRafIdRef.current = null;
-        });
-      }
-    }
-
-    if (resizeOverLayerState) {
-      const clientX = e.clientX;
-      if (resizeOverLayerRafIdRef.current !== null) {
-        cancelAnimationFrame(resizeOverLayerRafIdRef.current);
-      }
-      resizeOverLayerRafIdRef.current = requestAnimationFrame(() => {
-        resizeOverLayerRafIdRef.current = null;
-        const dx = clientX - resizeOverLayerState.startX;
-        const dt = dx / zoomLevel;
-        
-        const latestTracks = useEditorStore.getState().tracks;
-        const track = latestTracks.find((t) => (t.overLayers || []).some((ol) => ol.id === resizeOverLayerState.overLayerId));
-        const ol = track?.overLayers.find((ol) => ol.id === resizeOverLayerState.overLayerId);
-        if (ol) {
-          if (resizeOverLayerState.edge === 'right') {
-            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration + dt);
-            updateOverLayer(ol.id, { duration: newDuration });
-          } else {
-            const newStartTime = Math.max(0, resizeOverLayerState.originalStartTime + dt);
-            const delta = newStartTime - resizeOverLayerState.originalStartTime;
-            const newDuration = Math.max(0.1, resizeOverLayerState.originalDuration - delta);
-            if (newDuration > 0.1) {
-              updateOverLayer(ol.id, { startTime: newStartTime, duration: newDuration });
-            }
-          }
-        }
-      });
-    }
-
     if (resizeState) {
       const clientX = e.clientX;
       if (resizeRafIdRef.current !== null) {
@@ -1068,10 +982,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       cancelAnimationFrame(resizeRafIdRef.current);
       resizeRafIdRef.current = null;
     }
-    if (resizeOverLayerRafIdRef.current !== null) {
-      cancelAnimationFrame(resizeOverLayerRafIdRef.current);
-      resizeOverLayerRafIdRef.current = null;
-    }
+
     if (isScrubbing) {
       setIsScrubbing(false);
       setScrubTime(null);
@@ -1091,19 +1002,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       setResizeState(null);
       endTransactionSafe();
     }
-    if (dragOverLayerState) {
-      if (dragOverLayerRafIdRef.current) {
-        cancelAnimationFrame(dragOverLayerRafIdRef.current);
-        dragOverLayerRafIdRef.current = null;
-      }
-      setSnapLine(null);
-      setDragOverLayerState(null);
-      endTransactionSafe();
-    }
-    if (resizeOverLayerState) {
-      setResizeOverLayerState(null);
-      endTransactionSafe();
-    }
+
     if (slipState) {
       setSlipState(null);
       endTransactionSafe();
@@ -1117,7 +1016,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   handleMouseMoveRef.current = handleMouseMove;
   handleMouseUpRef.current = handleMouseUp;
 
-  const isDragging = dragState !== null || resizeState !== null || isScrubbing || dragOverLayerState !== null || resizeOverLayerState !== null || slipState !== null || slideState !== null;
+  const isDragging = dragState !== null || resizeState !== null || isScrubbing || slipState !== null || slideState !== null;
 
   useEffect(() => {
     if (!isDragging) return;

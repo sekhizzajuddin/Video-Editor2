@@ -20,8 +20,7 @@ interface TimelineTrackHeaderProps {
   track: TimelineTrack;
   tracks: TimelineTrack[];
   selectedTrackId: string | null;
-  hoveredOverLayerRegion: EditorState['hoveredOverLayerRegion'] | null;
-  pinnedOverLayerTrackId: string | null;
+
   isRecordingVoiceover: boolean;
   recordingTrackId: string | null;
   recordingSeconds?: number;
@@ -30,7 +29,7 @@ interface TimelineTrackHeaderProps {
   removeTrack: (id: string) => void;
   toggleTrackLock: (id: string) => void;
   toggleTrackMute: (id: string) => void;
-  setPinnedOverLayerTrackId: (id: string | null) => void;
+
   handleVoiceoverRecordingToggle: (id: string) => void;
 }
 
@@ -38,8 +37,7 @@ export function TimelineTrackHeader({
   track,
   tracks,
   selectedTrackId,
-  hoveredOverLayerRegion,
-  pinnedOverLayerTrackId,
+
   isRecordingVoiceover,
   recordingTrackId,
   recordingSeconds,
@@ -48,7 +46,7 @@ export function TimelineTrackHeader({
   removeTrack,
   toggleTrackLock,
   toggleTrackMute,
-  setPinnedOverLayerTrackId,
+
   handleVoiceoverRecordingToggle,
 }: TimelineTrackHeaderProps) {
   const linkedFxTrack = tracks.find(t => t.type === 'fx' && t.linkedTrackId === track.id);
@@ -86,7 +84,7 @@ export function TimelineTrackHeader({
       className={`flex items-center px-2 border-b border-[#3e3e3e] ${
         selectedTrackId === track.id ? 'bg-[#3e3e3e]' : ''
       }`}
-      style={{ height: getTrackHeight(track, hoveredOverLayerRegion, pinnedOverLayerTrackId) }}
+      style={{ height: getTrackHeight(track) }}
       onClick={() => selectTrack(track.id)}
     >
       <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -142,24 +140,6 @@ export function TimelineTrackHeader({
       </div>
 
       <div className="flex items-center gap-0.5 shrink-0">
-        {(track.overLayers || []).length > 0 && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setPinnedOverLayerTrackId(pinnedOverLayerTrackId === track.id ? null : track.id);
-            }}
-            title={pinnedOverLayerTrackId === track.id ? 'Unpin Over Layers' : 'Pin Over Layers Open'}
-            className={`p-0.5 rounded transition-colors ${
-              pinnedOverLayerTrackId === track.id ? 'text-cyan-400' : 'text-[#a0a0a0] hover:text-white'
-            }`}
-          >
-            <Pin
-              className="w-3 h-3"
-              style={{ transform: pinnedOverLayerTrackId === track.id ? 'none' : 'rotate(45deg)' }}
-            />
-          </button>
-        )}
-
         <button
           onClick={(e) => {
             e.stopPropagation();

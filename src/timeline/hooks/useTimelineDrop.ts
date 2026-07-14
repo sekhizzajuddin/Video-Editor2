@@ -1,10 +1,10 @@
 import { useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
-import type { TimelineClip, OverLayerClip, ParticleEffectType, ClipParticleSettings } from '@/types';
+import type { TimelineClip, ParticleEffectType, ClipParticleSettings } from '@/types';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
 import { toast } from 'sonner';
 import { generateId } from '../timelineUtils';
-import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT } from '../timelineConstants';
+import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT } from '../timelineConstants';
 import type { TimelineState } from './useTimelineState';
 
 interface UseTimelineDropDeps {
@@ -13,13 +13,12 @@ interface UseTimelineDropDeps {
 
 export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
   const {
-    tracks,
     zoomLevel,
-    hoveredOverLayerRegion,
-    pinnedOverLayerTrackId,
-    setHoveredOverLayerRegion,
-    setPinnedOverLayerTrackId,
-  } = useEditorStore();
+    tracks,
+  } = useEditorStore((state) => ({
+    zoomLevel: state.zoomLevel,
+    tracks: state.tracks,
+  }));
 
   const {
     setHoveredTrackId,
@@ -105,40 +104,18 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           const y = e.clientY - rect.top;
           const dropTime = x / zoomLevel;
           
-          const baseHeight = DEFAULT_TRACK_HEIGHT;
-          const isOverLayerArea = y > baseHeight;
-          let targetOl: OverLayerClip | null = null;
-          if (isOverLayerArea && hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
-            const activeOverLayers = (track.overLayers || []).filter((ol) => {
-              return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
-            });
-            const rowIdx = Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT);
-            targetOl = activeOverLayers[rowIdx] || null;
-          }
-
-          if (targetOl) {
-            const existing = targetOl.colorFilters ?? {
+          const hitClip = track.clips.find(
+            (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
+          );
+          if (hitClip) {
+            const existing = hitClip.colorFilters ?? {
               temperature: 0, tint: 0, exposure: 0, contrast: 100,
               saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
             };
-            useEditorStore.getState().updateOverLayer(targetOl.id, {
+            useEditorStore.getState().updateClip(hitClip.id, {
               colorFilters: { ...existing, ...preset },
             });
             useEditorStore.getState().saveSnapshot();
-          } else {
-            const hitClip = track.clips.find(
-              (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
-            );
-            if (hitClip) {
-              const existing = hitClip.colorFilters ?? {
-                temperature: 0, tint: 0, exposure: 0, contrast: 100,
-                saturation: 100, blur: 0, fadedFilm: 0, vignette: 0,
-              };
-              useEditorStore.getState().updateClip(hitClip.id, {
-                colorFilters: { ...existing, ...preset },
-              });
-              useEditorStore.getState().saveSnapshot();
-            }
           }
         } catch { /* ignore parse errors */ }
         setHoveredTrackId(null);
@@ -151,20 +128,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       if (particleType && track && (track.type === 'video')) {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
         const dropTime = x / zoomLevel;
-
-        const baseHeight = DEFAULT_TRACK_HEIGHT;
-        const isPinned = pinnedOverLayerTrackId === trackId;
-        const isOverLayerArea = isPinned ? (y >= baseHeight) : (y >= baseHeight - 24);
-        let targetOl: OverLayerClip | null = null;
-        if (isOverLayerArea && hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
-          const activeOverLayers = (track.overLayers || []).filter((ol) => {
-            return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
-          });
-          const rowIdx = Math.max(0, Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT));
-          targetOl = activeOverLayers[rowIdx] || null;
-        }
 
         const PARTICLE_DEFAULTS: Record<string, Omit<ClipParticleSettings, 'type'|'emitterX'|'emitterY'>> = {
           snow:      { amount: 120, speed: 40,  intensity: 80, size: 100, gravity: 20,  wind: 5,  spread: 180, lifetime: 150, color: '#ffffff', colorVariance: 15, glow: false, turbulence: 20 },
@@ -180,8 +144,11 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         };
         const defaults = PARTICLE_DEFAULTS[particleType] ?? PARTICLE_DEFAULTS.sparkles;
 
-        if (targetOl) {
-          useEditorStore.getState().updateOverLayer(targetOl.id, {
+        const hitClip = track.clips.find(
+          (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
+        );
+        if (hitClip) {
+          useEditorStore.getState().updateClip(hitClip.id, {
             particleSettings: {
               type: particleType as ParticleEffectType,
               emitterX: 50,
@@ -189,24 +156,8 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
               ...defaults,
             },
           });
-          useEditorStore.getState().selectOverLayer(targetOl.id);
+          useEditorStore.getState().selectClip(hitClip.id);
           useEditorStore.getState().saveSnapshot();
-        } else {
-          const hitClip = track.clips.find(
-            (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
-          );
-          if (hitClip) {
-            useEditorStore.getState().updateClip(hitClip.id, {
-              particleSettings: {
-                type: particleType as ParticleEffectType,
-                emitterX: 50,
-                emitterY: 100,
-                ...defaults,
-              },
-            });
-            useEditorStore.getState().selectClip(hitClip.id);
-            useEditorStore.getState().saveSnapshot();
-          }
         }
         setHoveredTrackId(null);
         setDropPreview(null);
@@ -359,57 +310,6 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const y = e.clientY - rect.top;
       const startTime = Math.max(0, x / zoomLevel);
 
-      const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-      const isPinned = pinnedOverLayerTrackId === trackId;
-      const isOverLayerArea = isPinned ? (y >= baseHeight) : (y >= baseHeight - 24);
-
-      if (isOverLayerArea) {
-        let compatible = false;
-        if (track.type === 'video' && (media.type === 'video' || media.type === 'image')) compatible = true;
-        if (track.type === 'audio' && media.type === 'audio') compatible = true;
-        if (track.type === 'text' && media.type === 'text') compatible = true;
-        if (track.type === 'fx' && media.type === 'fx') compatible = true;
-
-        if (compatible) {
-          const duration = media.type === 'image' ? 5 : Math.min(10, media.duration);
-          
-          let targetOl: OverLayerClip | null = null;
-          if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
-            const activeOverLayers = (track.overLayers || []).filter((ol) => {
-              return ol.startTime < hoveredOverLayerRegion.endTime && ol.startTime + ol.duration > hoveredOverLayerRegion.startTime;
-            });
-            const rowIdx = Math.max(0, Math.floor((y - baseHeight) / OVER_LAYER_ROW_HEIGHT));
-            targetOl = activeOverLayers[rowIdx];
-          }
-
-          if (targetOl) {
-            useEditorStore.getState().updateOverLayer(targetOl.id, {
-              mediaId,
-              duration,
-              audioSettings: media.type === 'audio' || media.type === 'video' ? {
-                volume: 0,
-                pan: 0,
-                fadeIn: 0,
-                fadeOut: 0,
-                bass: 0,
-                treble: 0,
-                muted: false,
-                preservePitch: true,
-                pitch: 0,
-                voiceFormant: 0,
-                humanize: false,
-              } : undefined,
-            });
-          } else {
-            useEditorStore.getState().addOverLayer(trackId, mediaId, startTime, duration);
-          }
-          useEditorStore.getState().saveSnapshot();
-          setHoveredTrackId(null);
-          setDropPreview(null);
-          return;
-        }
-      }
-
       const isText = media.type === 'text';
       const newClip: TimelineClip = {
         id: generateId(),
@@ -444,7 +344,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       setHoveredTrackId(null);
       setDropPreview(null);
     },
-    [zoomLevel, hoveredOverLayerRegion, pinnedOverLayerTrackId, setHoveredTrackId, setDropPreview],
+    [zoomLevel, setHoveredTrackId, setDropPreview],
   );
 
   const handleDragOver = useCallback(
@@ -498,41 +398,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         }
 
         setDropPreview({ time: dropTime, duration: approxDuration, trackIdx, mediaId, mediaType, mediaName });
-        setHoveredTrackId(trackId);
-
-        const track = tracks[trackIdx];
-        if (track) {
-          const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-          const isPinned = pinnedOverLayerTrackId === trackId;
-          const isOverLayerArea = isPinned ? (y >= baseHeight) : (y >= baseHeight - 24);
-          
-          if (isOverLayerArea) {
-            const time = dropTime;
-            const matchingOl = (track.overLayers || []).find((ol) => {
-              return time >= ol.startTime && time < ol.startTime + ol.duration;
-            });
-            if (matchingOl) {
-              setHoveredOverLayerRegion({
-                trackId,
-                startTime: matchingOl.startTime,
-                endTime: matchingOl.startTime + matchingOl.duration,
-              });
-            } else {
-              setHoveredOverLayerRegion({
-                trackId,
-                startTime: dropTime,
-                endTime: dropTime + approxDuration,
-              });
-            }
-          } else {
-            if (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === trackId) {
-              setHoveredOverLayerRegion(null);
-            }
-          }
-        }
-      }
+        setHoveredTrackId(trackId);      }
     },
-    [tracks, zoomLevel, hoveredOverLayerRegion, pinnedOverLayerTrackId, setDropPreview, setHoveredTrackId, setHoveredOverLayerRegion],
+    [tracks, zoomLevel, setDropPreview, setHoveredTrackId],
   );
 
   return {

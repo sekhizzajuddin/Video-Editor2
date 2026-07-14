@@ -345,38 +345,17 @@ export interface TimelineClip {
   kenBurns?: ClipKenBurnsSettings;
   lut?: ClipLutSettings;
   mask?: ClipMaskSettings;
+  pipWindowIds?: string[]; // Array of PIP window IDs attached to this clip
 }
 
-// NEW: Over Layer Clip — lightweight sub-clip living inside a track
-export interface OverLayerClip {
+// NEW: PIP Window - A nested mini-timeline attached to a specific clip
+export interface PipWindow {
   id: string;
-  mediaId: string | null;    // null = empty placeholder (awaiting media drop)
-  trackId: string;           // parent track ID
-  startTime: number;         // absolute timeline position (seconds)
-  duration: number;          // visible duration (seconds)
-  trimStart: number;         // seconds trimmed from beginning of source
-  trimEnd: number;           // seconds trimmed from end of source
-  transform: ClipTransform;  // PIP position, scale, rotation
-  zIndex?: number;           // custom layer ordering (higher = on top)
-  crop?: ClipCrop;           // crop bounding box in percentages (0-100)
-  opacity: number;           // 0-1
-  speed: number;             // playback speed multiplier
-  speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes
-  animations?: ClipAnimations; // timeline keyframes for properties
-  effects: string[];
-  isPreview?: boolean;
-  disabled?: boolean;
-  colorFilters?: ClipColorFilters;
-  audioSettings?: ClipAudioSettings;
-  textSettings?: ClipTextSettings;
-  fxSettings?: ClipFxSettings;
-  particleSettings?: ClipParticleSettings;
-  aiBackground?: ClipAiBackgroundSettings;
-  chromaKey?: ClipChromaKeySettings;
-  lumaKey?: ClipLumaKeySettings;
-  kenBurns?: ClipKenBurnsSettings;
-  lut?: ClipLutSettings;
-  mask?: ClipMaskSettings;
+  parentClipId: string;
+  relativeStartTime: number; // Offset from parent clip start (in seconds)
+  tracks: TimelineTrack[];   // Mini-timeline tracks
+  duration: number;          // Minimum visual duration is 5s
+  zIndex: number;            // Overall PIP z-index relative to other PIPs
 }
 
 // Timeline Track
@@ -386,7 +365,6 @@ export interface TimelineTrack {
   type: 'video' | 'audio' | 'text' | 'fx';
   linkedTrackId?: string; // used by FX tracks to link to a host track
   clips: TimelineClip[];
-  overLayers: OverLayerClip[]; // PIP sub-layers
   locked: boolean;
   muted: boolean;
   hidden: boolean;
@@ -432,13 +410,11 @@ export interface EditorState {
   timelineStack: { tracks: TimelineTrack[]; compoundMediaId: string }[]; // for compound clip nesting
   selectedClipId: string | null;
   selectedClipIds: string[];
-  selectedOverLayerId: string | null;      // currently selected over layer
-  hoveredOverLayerRegion: {                // which track region is hovered
-    trackId: string;
-    startTime: number;
-    endTime: number;
-  } | null;
-  pinnedOverLayerTrackId: string | null;    // track with over-layers pinned open
+  
+  // PIP Nested Timelines
+  pipWindows: Record<string, PipWindow>;
+  activePipWindowId: string | null;
+  
   selectedTrackId: string | null;
   markers: TimelineMarker[];
 
@@ -490,7 +466,7 @@ export interface EditorState {
   masterAudioStream: MediaStream | null;
 
   // Clipboard
-  clipboardData: { type: 'clip' | 'style' | 'whole'; clips: (TimelineClip | OverLayerClip)[] } | null;
+  clipboardData: { type: 'clip' | 'style' | 'whole'; clips: TimelineClip[] } | null;
   clipboardClip: TimelineClip | null;
 
   // History for undo/redo
@@ -549,12 +525,20 @@ export interface EditorActions {
   selectSubtitle: (id: string | null) => void;
   addTextMedia: (text: string) => void;
   rippleDeleteClip: (clipId: string) => void;
-  addOverLayer: (trackId: string, mediaId?: string | null, startTime?: number, duration?: number) => void;
+  createPipWindow: (clipId: string, relativeStartTime: number) => void;
+  deletePipWindow: (pipId: string) => void;
+  updatePipWindowStartTime: (pipId: string, relativeStartTime: number) => void;
+  updatePipWindowDuration: (pipId: string, duration: number) => void;
+  setActivePipWindow: (pipId: string | null) => void;
+  addTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx', mediaId: string, startTime: number, duration: number) => void;
+  removeTrackFromPip: (pipId: string, trackId: string) => void;
+  reorderPipTrack: (pipId: string, trackIndex: number, direction: 'up' | 'down') => void;
 }
 
 export interface EditorSnapshot {
   tracks: TimelineTrack[];
   currentTime: number;
+  pipWindows?: Record<string, PipWindow>;
   label?: string;
 }
 

@@ -22,6 +22,7 @@ import {
   WorkspacePlayhead,
   PlaybackAutoScroller,
   CLIP_COLORS,
+  PipFloatingWindow,
 } from '@/timeline';
 
 export function Timeline() {
@@ -30,7 +31,6 @@ export function Timeline() {
     zoomLevel,
     selectedClipId,
     selectedClipIds,
-    selectedOverLayerId,
     activeTool,
     selectedTrackId,
     draggingClipId,
@@ -59,14 +59,13 @@ export function Timeline() {
     outPoint,
     markers,
     beatMarkers,
-    selectOverLayer,
     settings,
     enterCompoundClip,
     setDragPreview,
-    hoveredOverLayerRegion,
-    setHoveredOverLayerRegion,
-    pinnedOverLayerTrackId,
-    setPinnedOverLayerTrackId,
+    pipWindows,
+    activePipWindowId,
+    setActivePipWindow,
+
   } = useEditorStore();
 
   // ── Hook composition ──────────────────────────────────────────────────
@@ -90,9 +89,7 @@ export function Timeline() {
     setHoverCutX,
     setMarkerContextMenu,
     setContextMenu,
-    setResizeOverLayerState,
-    setDragOverLayerState,
-    dragOverLayerState,
+
   } = timelineState;
 
   const scrollHandlers = useTimelineScroll({
@@ -221,8 +218,6 @@ export function Timeline() {
                   track={track}
                   tracks={tracks}
                   selectedTrackId={selectedTrackId}
-                  hoveredOverLayerRegion={hoveredOverLayerRegion}
-                  pinnedOverLayerTrackId={pinnedOverLayerTrackId}
                   isRecordingVoiceover={voiceover.isRecordingVoiceover}
                   recordingTrackId={voiceover.recordingTrackId}
                   recordingSeconds={voiceover.recordingSeconds}
@@ -231,7 +226,7 @@ export function Timeline() {
                   removeTrack={removeTrack}
                   toggleTrackLock={toggleTrackLock}
                   toggleTrackMute={toggleTrackMute}
-                  setPinnedOverLayerTrackId={setPinnedOverLayerTrackId}
+
                   handleVoiceoverRecordingToggle={voiceover.handleVoiceoverRecordingToggle}
                 />
               ))}
@@ -347,12 +342,6 @@ export function Timeline() {
                       zoomLevel={zoomLevel}
                       selectedClipIds={selectedClipIds}
                       draggingClipId={draggingClipId}
-                      selectedOverLayerId={selectedOverLayerId}
-                      showTransitionLayer={showTransitionLayer}
-                      selectedTransitionClipId={selectedTransitionClipId}
-                      hoveredTrackId={hoveredTrackId}
-                      hoveredOverLayerRegion={hoveredOverLayerRegion}
-                      pinnedOverLayerTrackId={pinnedOverLayerTrackId}
                       activeTool={activeTool}
                       hoverCutClipId={hoverCutClipId}
                       hoverCutX={hoverCutX}
@@ -360,12 +349,6 @@ export function Timeline() {
                       handleDrop={dropHandlers.handleDrop}
                       setHoveredTrackId={setHoveredTrackId}
                       setDropPreview={setDropPreview}
-                      setHoveredOverLayerRegion={setHoveredOverLayerRegion}
-                      selectTrack={selectTrack}
-                      selectClip={selectClip}
-                      selectTransition={selectTransition}
-                      selectOverLayer={selectOverLayer}
-                      setPinnedOverLayerTrackId={setPinnedOverLayerTrackId}
                       setContextMenu={setContextMenu}
                       handleClipMouseDown={dragHandlers.handleClipMouseDown}
                       setHoverCutX={setHoverCutX}
@@ -373,9 +356,12 @@ export function Timeline() {
                       enterCompoundClip={enterCompoundClip}
                       toggleKeyframeLineSelection={toggleKeyframeLineSelection}
                       selectedKeyframeLines={selectedKeyframeLines}
-                      setResizeOverLayerState={setResizeOverLayerState}
-                      setDragOverLayerState={setDragOverLayerState}
-                      dragOverLayerState={dragOverLayerState}
+                      showTransitionLayer={showTransitionLayer}
+                      selectedTransitionClipId={selectedTransitionClipId}
+                      hoveredTrackId={hoveredTrackId}
+                      selectTrack={selectTrack}
+                      selectClip={selectClip}
+                      selectTransition={selectTransition}
                     />
                   );
                 })}
@@ -390,10 +376,10 @@ export function Timeline() {
                     <div
                       className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border}`}
                       style={{
-                        top: `${getTrackTop(tracks, activeTrackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
+                        top: `${getTrackTop(tracks, activeTrackIdx) + 4}px`,
                         left: `${dropPreview.time * zoomLevel}px`,
                         width: `${Math.max(16, dropPreview.duration * zoomLevel)}px`,
-                        height: `${getTrackHeight(tracks[activeTrackIdx], hoveredOverLayerRegion, pinnedOverLayerTrackId) - 8}px`,
+                        height: `${getTrackHeight(tracks[activeTrackIdx]) - 8}px`,
                       }}
                     >
                       <div className="absolute inset-0 flex items-center px-2 overflow-hidden pointer-events-none">
@@ -402,6 +388,25 @@ export function Timeline() {
                         </span>
                       </div>
                     </div>
+                  );
+                })()}
+
+                {/* ── PIP Floating Window ──────────────────────── */}
+                {activePipWindowId && (() => {
+                  const activePip = (pipWindows || {})[activePipWindowId];
+                  if (!activePip) return null;
+                  const track = tracks.find(t => t.clips.some(c => c.id === activePip.parentClipId));
+                  if (!track) return null;
+                  const parentClip = track.clips.find(c => c.id === activePip.parentClipId);
+                  if (!parentClip) return null;
+                  return (
+                    <PipFloatingWindow
+                      key={activePip.id}
+                      pipWindow={activePip}
+                      parentClip={parentClip}
+                      zoomLevel={zoomLevel}
+                      onClose={() => setActivePipWindow(null)}
+                    />
                   );
                 })()}
 

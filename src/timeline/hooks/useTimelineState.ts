@@ -56,21 +56,6 @@ export interface SlideState {
   };
 }
 
-export interface DragOverLayerState {
-  overLayerId: string;
-  startX: number;
-  startY: number;
-  originalStartTime: number;
-  trackId: string;
-}
-
-export interface ResizeOverLayerState {
-  overLayerId: string;
-  edge: 'left' | 'right';
-  startX: number;
-  originalDuration: number;
-  originalStartTime: number;
-}
 
 export interface DropPreview {
   time: number;
@@ -87,7 +72,6 @@ export interface ContextMenuState {
   clipId: string;
   trackType: string;
   mediaType: string;
-  isOverLayer?: boolean;
   trackId?: string;
 }
 
@@ -110,8 +94,7 @@ export function useTimelineState() {
   const [slipState, setSlipState] = useState<SlipState | null>(null);
   const [slideState, setSlideState] = useState<SlideState | null>(null);
   
-  const [dragOverLayerState, setDragOverLayerState] = useState<DragOverLayerState | null>(null);
-  const [resizeOverLayerState, setResizeOverLayerState] = useState<ResizeOverLayerState | null>(null);
+
   const [snapLine, setSnapLine] = useState<number | null>(null);
   const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
@@ -197,16 +180,12 @@ export function useTimelineState() {
     setSlipState,
     slideState,
     setSlideState,
-    dragOverLayerState,
-    setDragOverLayerState,
-    resizeOverLayerState,
-    setResizeOverLayerState,
-    snapLine,
-    setSnapLine,
     hoveredTrackId,
     setHoveredTrackId,
     dropPreview,
     setDropPreview,
+    snapLine,
+    setSnapLine,
 
     isScrubbing,
     setIsScrubbing,

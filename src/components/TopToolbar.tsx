@@ -195,10 +195,7 @@ export function TopToolbar() {
           return;
         }
 
-        const loadedTracks = data.tracks.map((t: any) => ({
-          ...t,
-          overLayers: t.overLayers || [],
-        }));
+        const loadedTracks = data.tracks;
 
         useEditorStore.setState({
           tracks: loadedTracks,
