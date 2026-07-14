@@ -15,6 +15,7 @@ import {
   Layers,
   X,
   Loader2,
+  Link,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineMarker } from '@/types';
@@ -225,6 +226,23 @@ export function TimelineModals({
                   </div>
                   <div className="h-px bg-[#3e3e3e] my-1" />
                   <button
+                    className="w-full text-left px-3 py-2 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      const mediaId = prompt('Enter Media ID (or leave empty to remove):');
+                      if (mediaId !== null) {
+                        if (mediaId.trim() === '') {
+                          useEditorStore.getState().updateOverLayer(contextMenu.clipId, { mediaId: undefined });
+                        } else {
+                          useEditorStore.getState().updateOverLayer(contextMenu.clipId, { mediaId: mediaId.trim() });
+                        }
+                      }
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Link className="w-3.5 h-3.5" />
+                    Change Media
+                  </button>
+                  <button
                     className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                     onClick={() => {
                       useEditorStore.getState().removeOverLayer(contextMenu.clipId);
@@ -247,6 +265,23 @@ export function TimelineModals({
                     >
                       <Layers className="w-3.5 h-3.5 text-cyan-400" />
                       Add Over Layer
+                    </button>
+                  )}
+                  {contextMenu.mediaType === 'video' && contextMenu.trackId && (
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
+                      onClick={() => {
+                        const state = useEditorStore.getState();
+                        const track = state.tracks.find(t => t.id === contextMenu.trackId);
+                        const clip = track?.clips.find(c => c.id === contextMenu.clipId);
+                        if (clip) {
+                          state.addOverLayer(contextMenu.trackId!, clip.mediaId, clip.startTime, clip.duration);
+                        }
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Create PIP from Clip
                     </button>
                   )}
                   <div className="px-3 pb-1 text-[10px] text-[#a0a0a0] font-semibold border-b border-[#3e3e3e] mb-1 uppercase tracking-wider">

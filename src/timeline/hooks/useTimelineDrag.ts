@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { getTrackHeight, getTrackTop, getTrackAtY } from '../trackGeometry';
-import { DEFAULT_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT, SNAP_THRESHOLD_PX } from '../timelineConstants';
+import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT, SNAP_THRESHOLD_PX } from '../timelineConstants';
 import type { TimelineState } from './useTimelineState';
 
 interface UseTimelineDragDeps {
@@ -696,24 +696,34 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           const dt = dx / zoomLevel;
           let newStartTime = Math.max(0, dragOverLayerState.originalStartTime + dt);
           
-          const latestTracks = useEditorStore.getState().tracks;
+          // Get LATEST state for accurate snap calculation
+          const latestState = useEditorStore.getState();
+          const latestZoom = latestState.zoomLevel;
+          const latestTracks = latestState.tracks;
+          
           const track = latestTracks.find((t) => t.id === dragOverLayerState.trackId);
           const ol = track?.overLayers?.find(o => o.id === dragOverLayerState.overLayerId);
+          
           if (ol) {
+            // Use current zoom level for snap
             const { snappedTime, snapPos } = computeSnap(newStartTime, ol.id, ol.duration);
             newStartTime = snappedTime;
             setSnapLine(snapPos);
           }
           
+          // Update position
           moveOverLayer(dragOverLayerState.overLayerId, newStartTime);
- 
+
+          // Calculate row index for reordering
           const trackEl = document.querySelector(`[data-track-id="${dragOverLayerState.trackId}"]`);
           if (track && track.overLayers && trackEl && hoveredOverLayerRegion) {
             const trackRect = trackEl.getBoundingClientRect();
-            const relY = clientY - trackRect.top - DEFAULT_TRACK_HEIGHT;
+            const baseHeight = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
+            const relY = clientY - trackRect.top - baseHeight;
             const targetRowIdx = Math.max(0, Math.floor(relY / OVER_LAYER_ROW_HEIGHT));
             reorderOverLayer(dragOverLayerState.overLayerId, targetRowIdx);
           }
+          
           dragOverLayerRafIdRef.current = null;
         });
       }

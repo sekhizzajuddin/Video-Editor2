@@ -7,16 +7,31 @@ export const getTrackHeight = (
   pinnedTrackId: string | null = null
 ) => {
   const base = track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT;
-  const isOpen = pinnedTrackId === track.id || (hoveredRegion && hoveredRegion.trackId === track.id);
+  
+  const hasOverLayers = (track.overLayers || []).length > 0;
+  const isOpen = pinnedTrackId === track.id || 
+                 (hoveredRegion && hoveredRegion.trackId === track.id) ||
+                 hasOverLayers;
+  
   if (!isOpen) return base;
 
-  // Find active over-layers overlapping the hovered region
-  const region = hoveredRegion || { trackId: track.id, startTime: 0, endTime: Infinity };
-  const activeCount = (track.overLayers || []).filter((ol) => {
-    return ol.startTime < region.endTime && ol.startTime + ol.duration > region.startTime;
-  }).length;
+  // Simple lane calculation to find max rows needed
+  const sorted = [...(track.overLayers || [])].sort((a, b) => a.startTime - b.startTime);
+  const lanes: number[] = [];
+  for (const ol of sorted) {
+    let placed = false;
+    for (let i = 0; i < lanes.length; i++) {
+      if (lanes[i] <= ol.startTime) {
+        lanes[i] = ol.startTime + ol.duration;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) lanes.push(ol.startTime + ol.duration);
+  }
 
-  return base + activeCount * OVER_LAYER_ROW_HEIGHT;
+  const totalRows = Math.max(lanes.length, 1);
+  return base + totalRows * OVER_LAYER_ROW_HEIGHT;
 };
 
 export const getTrackTop = (

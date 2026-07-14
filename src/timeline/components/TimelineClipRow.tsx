@@ -1,5 +1,5 @@
 import React from 'react';
-import { Film, Music, Image, Sparkles, Type } from 'lucide-react';
+import { Film, Music, Image, Sparkles, Type, Plus } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem, EditorState } from '@/types';
 import { getTrackHeight } from '../trackGeometry';
@@ -523,6 +523,23 @@ export function TimelineClipRow({
         {track.type}
       </div>
 
+      {(track.overLayers || []).length === 0 && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            useEditorStore.getState().addOverLayer(track.id, '', 0, 5);
+            useEditorStore.getState().setPinnedOverLayerTrackId(track.id);
+          }}
+          className="absolute right-2 top-1 px-2 py-0.5 text-[9px] bg-cyan-600/30 hover:bg-cyan-500/50 
+                     text-cyan-300 border border-cyan-500/30 rounded flex items-center gap-1 
+                     transition-all opacity-0 group-hover:opacity-100 z-50"
+          title="Add Picture-in-Picture Layer"
+        >
+          <Sparkles className="w-2.5 h-2.5" />
+          Add PIP
+        </button>
+      )}
+
       {/* ── Clips ──────────────────────────────────────── */}
       {track.clips.map((clip) => {
         const media = getMediaSafe(clip);
@@ -586,32 +603,48 @@ export function TimelineClipRow({
       })}
 
       {/* ── Over Layers ─────────────────────────────────── */}
-      {(pinnedOverLayerTrackId === track.id || (hoveredOverLayerRegion && hoveredOverLayerRegion.trackId === track.id)) && (() => {
+      {/* ── Over Layers ─────────────────────────────────── */}
+      {(() => {
+        const shouldShowOverLayers = (track.overLayers || []).length > 0;
+        
+        if (!shouldShowOverLayers) return null;
+        
         const region = hoveredOverLayerRegion || { trackId: track.id, startTime: 0, endTime: Infinity };
         const activeOverLayers = (track.overLayers || []).filter((ol) => {
           return ol.startTime < region.endTime && ol.startTime + ol.duration > region.startTime;
         });
         
-        return activeOverLayers.map((ol, index) => {
+        const overLayersToRender = activeOverLayers.length > 0 ? activeOverLayers : (track.overLayers || []);
+        
+        return overLayersToRender.map((ol, index) => {
           const width = Math.max(ol.duration * zoomLevel, MIN_CLIP_WIDTH);
           const left = ol.startTime * zoomLevel;
           const isSelected = selectedOverLayerId === ol.id;
           const isDragging = dragOverLayerState?.overLayerId === ol.id;
-          
-          const topOffset = (track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) + index * OVER_LAYER_ROW_HEIGHT + 2;
           const media = mediaLibrary.find((m) => m.id === ol.mediaId);
-          const bgClass = track.type === 'audio' 
-            ? 'bg-emerald-600/70 border-emerald-500/80 hover:bg-emerald-500/80' 
-            : (media?.type === 'image' 
-              ? 'bg-amber-600/70 border-amber-500/80 hover:bg-amber-400/80' 
-              : 'bg-blue-600/70 border-blue-500/80 hover:bg-blue-400/80');
+          const isEmpty = !ol.mediaId;
+          
+          const allOverLayers = (track.overLayers || []);
+          const sortedOverLayers = [...allOverLayers].sort((a, b) => a.startTime - b.startTime);
+          const rowIndex = sortedOverLayers.findIndex(o => o.id === ol.id);
+          
+          const topOffset = (track.type === 'text' || track.type === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) + 
+                            rowIndex * OVER_LAYER_ROW_HEIGHT + 2;
+          
+          const bgClass = isEmpty
+            ? 'bg-gray-600/40 border-gray-500/60 hover:bg-gray-500/60 border-dashed'
+            : (track.type === 'audio' 
+              ? 'bg-emerald-600/70 border-emerald-500/80 hover:bg-emerald-500/80' 
+              : (media?.type === 'image' 
+                ? 'bg-amber-600/70 border-amber-500/80 hover:bg-amber-400/80' 
+                : 'bg-blue-600/70 border-blue-500/80 hover:bg-blue-400/80'));
           
           return (
             <div
               key={ol.id}
-              className={`absolute rounded cursor-pointer group select-none ${bgClass} border overflow-hidden transition-all duration-75 flex items-center justify-between px-2 ${
-                isSelected ? 'ring-2 ring-white shadow-lg z-20' : ''
-              } ${isDragging ? 'opacity-80 brightness-125' : ''}`}
+              className={`absolute rounded cursor-pointer group select-none border overflow-hidden transition-all duration-75 flex items-center justify-between px-2 ${bgClass} ${
+                isSelected ? 'ring-2 ring-white shadow-lg z-30' : 'z-20'
+              } ${isDragging ? 'opacity-80 brightness-125' : ''} ${isEmpty ? 'animate-pulse' : ''}`}
               style={{
                 left: `${left}px`,
                 width: `${width}px`,
@@ -686,41 +719,52 @@ export function TimelineClipRow({
                   y: e.clientY,
                   clipId: ol.id,
                   trackType: track.type,
-                  mediaType: media?.type || (track.type === 'audio' ? 'audio' : 'video'),
+                  mediaType: media?.type || (isEmpty ? 'empty' : (track.type === 'audio' ? 'audio' : 'video')),
                   isOverLayer: true,
                   trackId: track.id,
                 });
               }}
             >
-              {media && (media.type === 'video' || media.type === 'image') && media.thumbnail && (
-                <img 
-                  src={media.thumbnail} 
-                  alt="" 
-                  className="absolute inset-0 w-full h-full object-cover opacity-40 pointer-events-none" 
-                />
+              {isEmpty ? (
+                <div className="relative z-10 flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
+                  <Plus className="w-3 h-3 text-gray-300 drop-shadow-md" />
+                  <span className="text-[10px] text-gray-300 font-medium italic">
+                    Drop media here for PIP
+                  </span>
+                </div>
+              ) : (
+                <>
+                  {media && (media.type === 'video' || media.type === 'image') && media.thumbnail && (
+                    <img 
+                      src={media.thumbnail} 
+                      alt="" 
+                      className="absolute inset-0 w-full h-full object-cover opacity-40 pointer-events-none" 
+                    />
+                  )}
+                  <div className="relative z-10 flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
+                    {track.type === 'audio' ? (
+                      <Music className="w-3 h-3 text-emerald-300 drop-shadow-md" />
+                    ) : media?.type === 'image' ? (
+                      <Image className="w-3 h-3 text-amber-300 drop-shadow-md" />
+                    ) : track.type === 'text' ? (
+                      <Type className="w-3 h-3 text-purple-300 drop-shadow-md" />
+                    ) : (
+                      <Film className="w-3 h-3 text-blue-300 drop-shadow-md" />
+                    )}
+                    <span 
+                      className={`text-[10px] text-white font-medium drop-shadow-md ${track.type === 'text' ? 'animate-text-slide' : 'truncate'}`}
+                      style={track.type === 'text' ? { '--marquee-width': `${width}px` } as any : undefined}
+                      title={media?.name || 'OverLayer'}
+                    >
+                      {media?.name || 'OverLayer'}
+                    </span>
+                  </div>
+                  
+                  <span className="text-[9px] text-white/50 select-none pointer-events-none">
+                    {ol.duration.toFixed(1)}s
+                  </span>
+                </>
               )}
-              <div className="relative z-10 flex items-center gap-1.5 min-w-0 select-none pointer-events-none">
-                {track.type === 'audio' ? (
-                  <Music className="w-3 h-3 text-emerald-300 drop-shadow-md" />
-                ) : media?.type === 'image' ? (
-                  <Image className="w-3 h-3 text-amber-300 drop-shadow-md" />
-                ) : track.type === 'text' ? (
-                  <Type className="w-3 h-3 text-purple-300 drop-shadow-md" />
-                ) : (
-                  <Film className="w-3 h-3 text-blue-300 drop-shadow-md" />
-                )}
-                <span 
-                  className={`text-[10px] text-white font-medium drop-shadow-md ${track.type === 'text' ? 'animate-text-slide' : 'truncate'}`}
-                  style={track.type === 'text' ? { '--marquee-width': `${width}px` } as any : undefined}
-                  title={media ? media.name : (track.type === 'text' ? 'Text OverLayer' : '(Empty Over Layer)')}
-                >
-                  {media ? media.name : (track.type === 'text' ? 'Text OverLayer' : '(Empty Over Layer)')}
-                </span>
-              </div>
-              
-              <span className="text-[9px] text-white/50 select-none pointer-events-none">
-                {ol.duration.toFixed(1)}s
-              </span>
 
               {!track.locked && (
                 <>
