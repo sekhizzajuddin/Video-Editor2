@@ -486,7 +486,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   rippleDeleteClip: (clipId: string) => {
     let start = 0;
     set((state) => {
-      const allClips = state.tracks.flatMap(t => t.clips);
+      const allClips = state.tracks.flatMap(t => t.clips || []);
       const targetClip = allClips.find(c => c.id === clipId);
       if (!targetClip) return {};
 
@@ -871,7 +871,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ? state.selectedClipIds
         : [clipId];
 
-      const allClips = state.tracks.flatMap((t) => t.clips);
+      const allClips = state.tracks.flatMap((t) => t.clips || []);
       const idsToRemoveSet = new Set<string>(initialIds);
       initialIds.forEach((id) => {
         const c = allClips.find((clip) => clip.id === id);
@@ -886,7 +886,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       });
       const idsToRemove = Array.from(idsToRemoveSet);
 
-      const deletedClips = state.tracks.flatMap(t => t.clips).filter(c => idsToRemove.includes(c.id));
+      const deletedClips = state.tracks.flatMap(t => t.clips || []).filter(c => idsToRemove.includes(c.id));
 
       let newTracks;
       if (state.activeTool === 'ripple' && deletedClips.length > 0) {
@@ -1653,7 +1653,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // audio clip on the first available (or new) audio track, at the same position.
   unlinkAudio: (clipId) => {
     const { tracks, mediaLibrary } = get();
-    const videoClip = tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+    const videoClip = tracks.flatMap((t) => t.clips || []).find((c) => c.id === clipId);
     if (!videoClip) return;
 
     const media = mediaLibrary.find((m) => m.id === videoClip.mediaId);
@@ -1760,7 +1760,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   breakLinkConnection: (clipId) => {
     set((state) => {
-      const clip = state.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+      const clip = state.tracks.flatMap((t) => t.clips || []).find((c) => c.id === clipId);
       if (!clip) return {};
       const linkedClipId = clip.linkedClipId;
 
@@ -1808,7 +1808,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Playback
   play: () => {
     const { tracks, selectedClipIds, currentTime } = get();
-    const allClips = tracks.flatMap((t) => t.clips);
+    const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0) return;
 
     if (selectedClipIds.length > 0) {
@@ -1831,7 +1831,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   pause: () => set({ isPlaying: false, playbackDirection: 0 }),
   togglePlayback: () => {
     const { tracks, isPlaying, selectedClipIds, currentTime } = get();
-    const allClips = tracks.flatMap((t) => t.clips);
+    const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0 && !isPlaying) return;
 
     if (!isPlaying && selectedClipIds.length > 0) {
@@ -2055,8 +2055,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const selectedIds = state.selectedClipId ? [state.selectedClipId] : [];
       // If we had multiple selection it would be better, but we mock it:
       // Just find the first audio clip and first video clip, and sync them.
-      const videoClips = state.tracks.flatMap(t => t.clips.filter(c => c.mediaId && state.mediaLibrary.find(m => m.id === c.mediaId)?.type === 'video'));
-      const audioClips = state.tracks.flatMap(t => t.clips.filter(c => c.mediaId && state.mediaLibrary.find(m => m.id === c.mediaId)?.type === 'audio'));
+      const videoClips = state.tracks.flatMap(t => (t.clips || []).filter(c => c.mediaId && state.mediaLibrary.find(m => m.id === c.mediaId)?.type === 'video'));
+      const audioClips = state.tracks.flatMap(t => (t.clips || []).filter(c => c.mediaId && state.mediaLibrary.find(m => m.id === c.mediaId)?.type === 'audio'));
       
       if (videoClips.length > 0 && audioClips.length > 0) {
         const vClip = videoClips[0];
@@ -2753,7 +2753,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     };
     
     set((state) => {
-      const clip = state.tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+      const clip = state.tracks.flatMap(t => t.clips || []).find(c => c && c.id === clipId);
       if (!clip) return {};
       
       const newTracks = state.tracks.map(t => {
@@ -2796,7 +2796,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         )
       }));
 
-      const deletedClipIds = pip.tracks.flatMap(t => t.clips).map(c => c.id);
+      const deletedClipIds = pip.tracks.flatMap(t => t.clips || []).map(c => c.id);
       const newSelectedClipIds = state.selectedClipIds.filter(id => !deletedClipIds.includes(id));
       const newSelectedClipId = newSelectedClipIds.includes(state.selectedClipId || '') 
         ? state.selectedClipId 
@@ -2968,12 +2968,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Compound Clips
   enterCompoundClip: (clipId) => {
     const { tracks, timelineStack, mediaLibrary, pipWindows } = get();
-    let clip = tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+    let clip = tracks.flatMap(t => t.clips || []).find(c => c.id === clipId);
     
     // Check PIP tracks if not found in main tracks
     if (!clip) {
       for (const pipId in (pipWindows || {})) {
-        clip = pipWindows[pipId].tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+        clip = pipWindows[pipId].tracks.flatMap(t => t.clips || []).find(c => c.id === clipId);
         if (clip) break;
       }
     }

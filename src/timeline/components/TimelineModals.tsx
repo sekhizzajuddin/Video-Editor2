@@ -175,7 +175,7 @@ export function TimelineModals({
                   onClick={() => {
                     const state = useEditorStore.getState();
                     const track = state.tracks.find(t => t.id === contextMenu.trackId);
-                    const clip = track?.clips.find(c => c.id === contextMenu.clipId);
+                    const clip = (track?.clips || []).find(c => c.id === contextMenu.clipId);
                     if (clip) {
                       const relativeStart = Math.max(0, state.currentTime - clip.startTime);
                       state.createPipWindow(contextMenu.clipId, relativeStart);

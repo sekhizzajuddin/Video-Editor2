@@ -12,13 +12,8 @@ interface UseTimelineDropDeps {
 }
 
 export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
-  const {
-    zoomLevel,
-    tracks,
-  } = useEditorStore((state) => ({
-    zoomLevel: state.zoomLevel,
-    tracks: state.tracks,
-  }));
+  const zoomLevel = useEditorStore((state) => state.zoomLevel);
+  const tracks = useEditorStore((state) => state.tracks);
 
   const {
     setHoveredTrackId,

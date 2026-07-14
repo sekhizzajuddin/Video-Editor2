@@ -443,7 +443,7 @@ export function TimelineClipRow({
   selectTransition,
 }: TimelineClipRowProps) {
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
-  const allPipWindows = useEditorStore((s) => s.pipWindows || {});
+  const allPipWindows = useEditorStore((s) => s.pipWindows);
   
   const getMediaSafe = (clip: TimelineClip): MediaItem => {
     return mediaLibrary.find((m) => m.id === clip.mediaId) ?? ({
