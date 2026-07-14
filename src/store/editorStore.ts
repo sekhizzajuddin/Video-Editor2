@@ -925,10 +925,29 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           ? (newSelectedClipIds[0] || null)
           : state.selectedClipId;
 
+      // Also delete from pipWindows tracks
+      const newPipWindows = { ...state.pipWindows };
+      let pipUpdated = false;
+      for (const pipId in newPipWindows) {
+        const pip = newPipWindows[pipId];
+        const hasClip = pip.tracks.some(t => t.clips.some(c => idsToRemove.includes(c.id)));
+        if (hasClip) {
+          newPipWindows[pipId] = {
+            ...pip,
+            tracks: pip.tracks.map(t => ({
+              ...t,
+              clips: t.clips.filter(c => !idsToRemove.includes(c.id))
+            })).filter(t => t.clips.length > 0)
+          };
+          pipUpdated = true;
+        }
+      }
+
       return {
         tracks: newTracks,
         selectedClipId: newSelectedClipId,
         selectedClipIds: newSelectedClipIds,
+        ...(pipUpdated ? { pipWindows: newPipWindows } : {})
       };
     });
     get().recalcTotalDuration();
@@ -962,7 +981,29 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
-      return { tracks: newTracks, mediaLibrary: updatedMediaLibrary };
+      // Also update in pipWindows
+      const newPipWindows = { ...state.pipWindows };
+      let pipUpdated = false;
+      for (const pipId in newPipWindows) {
+        const pip = newPipWindows[pipId];
+        const hasClip = pip.tracks.some(t => t.clips.some(c => c.id === clipId));
+        if (hasClip) {
+          newPipWindows[pipId] = {
+            ...pip,
+            tracks: pip.tracks.map(t => ({
+              ...t,
+              clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c)
+            }))
+          };
+          pipUpdated = true;
+        }
+      }
+
+      return { 
+        tracks: newTracks, 
+        mediaLibrary: updatedMediaLibrary,
+        ...(pipUpdated ? { pipWindows: newPipWindows } : {})
+      };
     });
     get().recalcTotalDuration();
     get().saveSnapshot();
@@ -2755,10 +2796,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         )
       }));
 
+      const deletedClipIds = pip.tracks.flatMap(t => t.clips).map(c => c.id);
+      const newSelectedClipIds = state.selectedClipIds.filter(id => !deletedClipIds.includes(id));
+      const newSelectedClipId = newSelectedClipIds.includes(state.selectedClipId || '') 
+        ? state.selectedClipId 
+        : (newSelectedClipIds[0] || null);
+
       return {
         pipWindows: newPipWindows,
         tracks: newTracks,
-        activePipWindowId: state.activePipWindowId === pipId ? null : state.activePipWindowId
+        activePipWindowId: state.activePipWindowId === pipId ? null : state.activePipWindowId,
+        selectedClipId: newSelectedClipId,
+        selectedClipIds: newSelectedClipIds,
       };
     });
     get().saveSnapshot('Delete PIP Window');
@@ -2806,9 +2855,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const pip = state.pipWindows[pipId];
       if (!pip) return {};
       
+      const trackId = generateId();
       const newClip: TimelineClip = {
         id: generateId(),
-        trackId: '',
+        trackId,
         mediaId,
         startTime,
         duration,
@@ -2821,7 +2871,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
 
       const newTrack: TimelineTrack = {
-        id: generateId(),
+        id: trackId,
         name: `${type.toUpperCase()} Track ${pip.tracks.length + 1}`,
         type,
         clips: [newClip],
@@ -2934,9 +2984,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (!media || media.type !== 'compound') return;
 
     set({
-      timelineStack: [...timelineStack, { tracks: JSON.parse(JSON.stringify(tracks)), compoundMediaId: media.id }],
+      timelineStack: [...timelineStack, { tracks: JSON.parse(JSON.stringify(tracks)), compoundMediaId: media.id, activePipWindowId: get().activePipWindowId }],
       tracks: media.nestedTimeline ? JSON.parse(JSON.stringify(media.nestedTimeline)) : [],
       currentTime: 0,
+      activePipWindowId: null,
       selectedClipId: null,
       selectedClipIds: []
     });
@@ -2959,6 +3010,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set({
       timelineStack: newStack,
       tracks: currentStackItem.tracks,
+      activePipWindowId: currentStackItem.activePipWindowId || null,
       currentTime: 0,
       selectedClipId: null,
       selectedClipIds: []

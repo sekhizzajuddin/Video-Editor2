@@ -23,6 +23,7 @@ import {
   PlaybackAutoScroller,
   CLIP_COLORS,
   PipFloatingWindow,
+  DEFAULT_TRACK_HEIGHT,
 } from '@/timeline';
 
 export function Timeline() {
@@ -65,8 +66,9 @@ export function Timeline() {
     pipWindows,
     activePipWindowId,
     setActivePipWindow,
-
   } = useEditorStore();
+
+  const { hoveredOverLayerRegion, pinnedOverLayerTrackId } = useEditorStore() as any;
 
   // ── Hook composition ──────────────────────────────────────────────────
   
@@ -376,10 +378,10 @@ export function Timeline() {
                     <div
                       className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border}`}
                       style={{
-                        top: `${getTrackTop(tracks, activeTrackIdx) + 4}px`,
+                        top: `${getTrackTop(tracks, activeTrackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
                         left: `${dropPreview.time * zoomLevel}px`,
                         width: `${Math.max(16, dropPreview.duration * zoomLevel)}px`,
-                        height: `${getTrackHeight(tracks[activeTrackIdx]) - 8}px`,
+                        height: `${(activeTrackIdx < tracks.length ? getTrackHeight(tracks[activeTrackIdx], hoveredOverLayerRegion, pinnedOverLayerTrackId) : DEFAULT_TRACK_HEIGHT) - 8}px`,
                       }}
                     >
                       <div className="absolute inset-0 flex items-center px-2 overflow-hidden pointer-events-none">
@@ -395,9 +397,9 @@ export function Timeline() {
                 {activePipWindowId && (() => {
                   const activePip = (pipWindows || {})[activePipWindowId];
                   if (!activePip) return null;
-                  const track = tracks.find(t => t.clips.some(c => c.id === activePip.parentClipId));
+                  const track = tracks.find(t => t.clips?.some(c => c.id === activePip.parentClipId));
                   if (!track) return null;
-                  const parentClip = track.clips.find(c => c.id === activePip.parentClipId);
+                  const parentClip = track.clips?.find(c => c.id === activePip.parentClipId);
                   if (!parentClip) return null;
                   return (
                     <PipFloatingWindow

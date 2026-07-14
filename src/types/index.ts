@@ -407,7 +407,7 @@ export interface EditorState {
 
   // Timeline
   tracks: TimelineTrack[];
-  timelineStack: { tracks: TimelineTrack[]; compoundMediaId: string }[]; // for compound clip nesting
+  timelineStack: { tracks: TimelineTrack[]; compoundMediaId: string; activePipWindowId?: string | null }[]; // for compound clip nesting
   selectedClipId: string | null;
   selectedClipIds: string[];
   

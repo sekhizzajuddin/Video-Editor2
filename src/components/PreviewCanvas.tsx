@@ -125,7 +125,7 @@ export function PreviewCanvas() {
   const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
 
   // Memoized allClips to avoid flatMap inside the 60fps loop
-  const allClips = useMemo(() => tracks.flatMap((t) => t.clips), [tracks]);
+  const allClips = useMemo(() => tracks.flatMap((t) => t.clips || []), [tracks]);
   const allClipsRef = useRef(allClips);
   useEffect(() => {
     allClipsRef.current = allClips;
@@ -2109,9 +2109,9 @@ export function PreviewCanvas() {
         );
 
         for (const clip of activeClips) {
-          const clipPips = pipWindows.filter(p => p.parentClipId === clip.id);
+          const clipPips = pipWindows.filter(p => p && p.parentClipId === clip.id);
           for (const pip of clipPips) {
-            const pipAbsStart = clip.startTime + pip.relativeStartTime;
+            const pipAbsStart = clip.startTime + (pip.relativeStartTime || 0);
             if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
               // Active PIP window. Render its tracks
               pip.tracks.forEach((pipTrack, ptIdx) => {
@@ -2119,7 +2119,7 @@ export function PreviewCanvas() {
                   const ptAbsStart = pipAbsStart + pipClip.startTime;
                   if (currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
                     // Render this pip clip
-                    const z = (clip.zIndex ?? (trackIdx * 10 + (isText ? 1000 : 0))) + 1 + ptIdx;
+                    const z = (clip.zIndex ?? (trackIdx * 10 + (isText ? 1000 : 0))) + 1 + (pip.zIndex || 1) * 2 + ptIdx;
                     
                     const mockClip: any = {
                       ...pipClip,
@@ -2189,10 +2189,10 @@ export function PreviewCanvas() {
       }
       // PIP clips particles
       const pipWindows = useEditorStore.getState().pipWindows || {};
-      for (const clip of track.clips) {
-        const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
-        for (const pip of clipPips) {
-          const pipAbsStart = clip.startTime + pip.relativeStartTime;
+      for (const clip of (track.clips || [])) {
+        const clipPips = Object.values(pipWindows).filter(p => p && (p as any).parentClipId === clip.id);
+        for (const pip of (clipPips as any[])) {
+          const pipAbsStart = clip.startTime + (pip.relativeStartTime || 0);
           if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
             for (const pipTrack of pip.tracks) {
               for (const pipClip of pipTrack.clips) {
@@ -2225,10 +2225,10 @@ export function PreviewCanvas() {
       }
       // PIP clips LUT
       const pipWindows = useEditorStore.getState().pipWindows || {};
-      for (const clip of track.clips) {
-        const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
-        for (const pip of clipPips) {
-          const pipAbsStart = clip.startTime + pip.relativeStartTime;
+      for (const clip of (track.clips || [])) {
+        const clipPips = Object.values(pipWindows).filter(p => p && (p as any).parentClipId === clip.id);
+        for (const pip of (clipPips as any[])) {
+          const pipAbsStart = clip.startTime + (pip.relativeStartTime || 0);
           if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
             for (const pipTrack of pip.tracks) {
               for (const pipClip of pipTrack.clips) {

@@ -169,7 +169,7 @@ export function TimelineModals({
           ) : (
             // Clicked a clip
             <>
-              {contextMenu.mediaType === 'video' && contextMenu.trackId && (
+              {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'image') && contextMenu.trackId && (
                 <button
                   className="w-full text-left px-3 py-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
                   onClick={() => {

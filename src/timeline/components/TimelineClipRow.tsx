@@ -391,10 +391,11 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       {trackType === 'video' && clipPipWindows && clipPipWindows.length > 0 && (
         <div className="absolute -bottom-1.5 left-0 right-0 flex items-center gap-1 z-50 pointer-events-none">
           {clipPipWindows.map(pip => {
-            const relX = pip.relativeStartTime * zoomLevel;
+            if (!pip) return null;
+            const relX = (pip.relativeStartTime || 0) * zoomLevel;
             return (
               <div 
-                key={pip.id}
+                key={pip.id || Math.random().toString()}
                 className="absolute w-3 h-3 bg-cyan-400 border border-cyan-200 rotate-45 shadow-[0_0_8px_rgba(34,211,238,0.8)] pointer-events-auto cursor-pointer hover:bg-cyan-300 transition-colors"
                 style={{ left: `${relX - 6}px` }}
                 title="PIP Window (Click to open)"
@@ -504,13 +505,13 @@ export function TimelineClipRow({
 
 
       {/* ── Clips ──────────────────────────────────────── */}
-      {track.clips.map((clip) => {
+      {(track.clips || []).map((clip) => {
         const media = getMediaSafe(clip);
         const isSelected = selectedClipIds.includes(clip.id);
         const isDragging = draggingClipId === clip.id;
 
         const hasOverlap = checkOverlapAt(track, clip.startTime, clip.duration, clip.id);
-        const clipPipWindows = Object.values(allPipWindows || {}).filter(p => p.parentClipId === clip.id);
+        const clipPipWindows = Object.values(allPipWindows || {}).filter(p => p && (p as any).parentClipId === clip.id);
 
         return (
           <TimelineClipItem
@@ -545,7 +546,7 @@ export function TimelineClipRow({
 
       {/* ── Transitions Layer ───────────────────────────── */}
       {!track.locked && (() => {
-        const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+        const sortedClips = [...(track.clips || [])].sort((a, b) => a.startTime - b.startTime);
         return sortedClips.map((clip, idx) => {
           if (idx === 0) return null;
           const prevClip = sortedClips[idx - 1];

@@ -174,6 +174,8 @@ function App() {
             removeClip(selectedClipId);
           } else if (selectedTransitionClipId) {
             removeTransition(selectedTransitionClipId);
+          } else if (storeState.activePipWindowId) {
+            storeState.deletePipWindow(storeState.activePipWindowId);
           }
           break;
         }

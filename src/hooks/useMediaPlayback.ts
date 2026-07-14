@@ -641,17 +641,18 @@ export function useMediaPlayback(): MediaPlaybackResult {
         humanize: false,
       };
 
+      const clipStart = foundNode?.absStartTime ?? fullClip.startTime;
       // Evaluate animated volume and pan from keyframes
       const animatedVolume = getAnimatedValue(
         audioSettings.volume,
         currentTime,
-        fullClip.startTime,
+        clipStart,
         fullClip.animations?.['audio.volume']
       );
       const animatedPan = getAnimatedValue(
         audioSettings.pan,
         currentTime,
-        fullClip.startTime,
+        clipStart,
         fullClip.animations?.['audio.pan']
       );
 

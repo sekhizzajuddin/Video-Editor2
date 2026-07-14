@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { PipWindow, TimelineClip } from '@/types';
 import { X, GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
 import { DEFAULT_TRACK_HEIGHT } from '../timelineConstants';
+import { getTrackTop, getTrackHeight } from '../trackGeometry';
 
 interface PipFloatingWindowProps {
   pipWindow: PipWindow;
@@ -25,6 +26,8 @@ export function PipFloatingWindow({
     addTrackToPip,
     mediaLibrary,
     currentTime,
+    tracks,
+    selectedClipId,
   } = useEditorStore();
 
   const [isDragging, setIsDragging] = useState(false);
@@ -32,9 +35,14 @@ export function PipFloatingWindow({
   const startXRef = useRef(0);
   const startDurationRef = useRef(0);
   
-  const windowLeft = (parentClip.startTime + pipWindow.relativeStartTime) * zoomLevel;
+  const windowLeft = (parentClip.startTime + (pipWindow.relativeStartTime || 0)) * zoomLevel;
   const windowWidth = Math.max(10, pipWindow.duration * zoomLevel);
   const parentEnd = parentClip.startTime + parentClip.duration;
+
+  const trackIdx = tracks.findIndex(t => t.id === parentClip.trackId);
+  const trackTop = trackIdx >= 0 ? getTrackTop(tracks, trackIdx) : 0;
+  const trackHeight = trackIdx >= 0 ? getTrackHeight(tracks[trackIdx]) : DEFAULT_TRACK_HEIGHT;
+  const windowTop = trackTop + trackHeight;
 
   // Handles drag to move PIP start time
   const handleDragStart = (e: React.MouseEvent) => {
@@ -48,10 +56,10 @@ export function PipFloatingWindow({
       const handleMouseMove = (e: MouseEvent) => {
         const dx = e.clientX - startXRef.current;
         const dt = dx / zoomLevel;
-        const absoluteStartTime = parentClip.startTime + pipWindow.relativeStartTime;
+        const absoluteStartTime = parentClip.startTime + (pipWindow.relativeStartTime || 0);
         let newAbsoluteStart = absoluteStartTime + dt;
-        // Limit start time to parent clip's range
-        newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd - 0.5, newAbsoluteStart));
+        // Limit start time to parent clip's range, ensuring the PIP duration doesn't exceed parent clip's end
+        newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd - pipWindow.duration, newAbsoluteStart));
         const newRelativeStart = newAbsoluteStart - parentClip.startTime;
 
         updatePipWindowStartTime(pipWindow.id, newRelativeStart);
@@ -65,7 +73,7 @@ export function PipFloatingWindow({
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, pipWindow.id, pipWindow.relativeStartTime, zoomLevel, parentClip.startTime, parentEnd]);
+  }, [isDragging, pipWindow.id, pipWindow.relativeStartTime, pipWindow.duration, zoomLevel, parentClip.startTime, parentEnd]);
 
   // Handles drag to resize PIP duration
   const handleResizeStart = (e: React.MouseEvent) => {
@@ -81,8 +89,10 @@ export function PipFloatingWindow({
         const dx = e.clientX - startXRef.current;
         const dt = dx / zoomLevel;
         
+        const absoluteStartTime = parentClip.startTime + (pipWindow.relativeStartTime || 0);
+        const maxDuration = parentEnd - absoluteStartTime;
         let newDuration = Math.max(0.5, startDurationRef.current + dt);
-        if (newDuration > 600) newDuration = 600;
+        newDuration = Math.min(maxDuration, Math.min(600, newDuration));
         
         updatePipWindowDuration(pipWindow.id, newDuration);
       };
@@ -94,7 +104,7 @@ export function PipFloatingWindow({
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isResizing, pipWindow.id, zoomLevel]);
+  }, [isResizing, pipWindow.id, pipWindow.relativeStartTime, zoomLevel, parentClip.startTime, parentEnd]);
 
   // Handle drop media inside PIP
   const handleDrop = (e: React.DragEvent) => {
@@ -130,11 +140,11 @@ export function PipFloatingWindow({
 
   return (
     <div
-      className="absolute top-0 z-50 rounded-lg shadow-2xl bg-[#2a2a2a]/95 backdrop-blur-md border border-[#4a4a4a] overflow-hidden flex flex-col pointer-events-auto"
+      className="absolute z-50 rounded-lg shadow-2xl bg-[#2a2a2a]/95 backdrop-blur-md border border-[#4a4a4a] overflow-hidden flex flex-col pointer-events-auto"
       style={{
         left: `${windowLeft}px`,
+        top: `${windowTop}px`,
         width: `${windowWidth}px`,
-        marginTop: `${DEFAULT_TRACK_HEIGHT + 4}px`, // Below main track
         minHeight: '120px'
       }}
       onClick={(e) => e.stopPropagation()}
@@ -169,7 +179,7 @@ export function PipFloatingWindow({
         ) : (
           <div className="relative w-full h-full flex flex-col gap-1">
             {(() => {
-              const pipAbsStart = parentClip.startTime + pipWindow.relativeStartTime;
+              const pipAbsStart = parentClip.startTime + (pipWindow.relativeStartTime || 0);
               if (currentTime >= pipAbsStart && currentTime <= pipAbsStart + pipWindow.duration) {
                 return (
                   <div 
@@ -181,8 +191,8 @@ export function PipFloatingWindow({
               return null;
             })()}
             
-             {pipWindow.tracks.map((track, idx) => {
-               const clip = track.clips[0];
+             {(pipWindow.tracks || []).map((track, idx) => {
+               const clip = track.clips?.[0];
                if (!clip) return null;
                const left = clip.startTime * zoomLevel;
                const width = clip.duration * zoomLevel;
@@ -208,20 +218,35 @@ export function PipFloatingWindow({
                    </div>
                    
                    <div 
-                     className="absolute h-full rounded border border-cyan-500/50 bg-cyan-600/30 overflow-hidden flex items-center justify-between"
-                     style={{ left: `${left}px`, width: `${width}px` }}
-                   >
-                     {media && media.thumbnail && (
-                       <img src={media.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none" />
-                     )}
-                     <span className="text-[9px] text-white font-medium pl-1 truncate z-10">{media?.name}</span>
-                     <button 
-                       className="pr-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 text-red-400 hover:text-red-300"
-                       onClick={() => removeTrackFromPip(pipWindow.id, track.id)}
-                     >
-                       <X className="w-3 h-3" />
-                     </button>
-                   </div>
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        useEditorStore.setState({
+                          selectedClipId: clip.id,
+                          selectedClipIds: [clip.id],
+                          selectedTrackId: null
+                        });
+                      }}
+                      className={`absolute h-full rounded border overflow-hidden flex items-center justify-between cursor-pointer ${
+                        selectedClipId === clip.id 
+                          ? 'border-white bg-cyan-600/60 ring-2 ring-white z-20' 
+                          : 'border-cyan-500/50 bg-cyan-600/30 hover:bg-cyan-600/40'
+                      }`}
+                      style={{ left: `${left}px`, width: `${width}px` }}
+                    >
+                      {media && media.thumbnail && (
+                        <img src={media.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none" />
+                      )}
+                      <span className="text-[9px] text-white font-medium pl-1 truncate z-10">{media?.name}</span>
+                      <button 
+                        className="pr-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 text-red-400 hover:text-red-300"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeTrackFromPip(pipWindow.id, track.id);
+                        }}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                  </div>
                );
              })}

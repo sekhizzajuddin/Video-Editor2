@@ -1,7 +1,27 @@
+// Constants
 export * from './timelineConstants';
 export * from './timelineUtils';
 export * from './sfxSynth';
-export * from './trackGeometry';
+
+// FIXED: Re-export trackGeometry with all functions
+export { 
+  getTrackHeight, 
+  getTrackTop, 
+  getTrackAtY 
+} from './trackGeometry';
+
+// FIXED: Add missing utility exports
+export { 
+  formatCentisecondTime,
+  checkOverlapAt,
+  generateId
+} from './timelineUtils';
+
+// FIXED: Add missing constant exports
+export { 
+  TRACK_HEADER_WIDTH,
+  RULER_HEIGHT
+} from './timelineConstants';
 
 // Hooks
 export * from './hooks/useTimelineState';
