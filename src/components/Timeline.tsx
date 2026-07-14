@@ -68,7 +68,6 @@ export function Timeline() {
     setActivePipWindow,
   } = useEditorStore();
 
-  const { hoveredOverLayerRegion, pinnedOverLayerTrackId } = useEditorStore() as any;
 
   // ── Hook composition ──────────────────────────────────────────────────
   
@@ -378,10 +377,10 @@ export function Timeline() {
                     <div
                       className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border}`}
                       style={{
-                        top: `${getTrackTop(tracks, activeTrackIdx, hoveredOverLayerRegion, pinnedOverLayerTrackId) + 4}px`,
+                        top: `${getTrackTop(tracks, activeTrackIdx) + 4}px`,
                         left: `${dropPreview.time * zoomLevel}px`,
                         width: `${Math.max(16, dropPreview.duration * zoomLevel)}px`,
-                        height: `${(activeTrackIdx < tracks.length ? getTrackHeight(tracks[activeTrackIdx], hoveredOverLayerRegion, pinnedOverLayerTrackId) : DEFAULT_TRACK_HEIGHT) - 8}px`,
+                        height: `${(activeTrackIdx < tracks.length ? getTrackHeight(tracks[activeTrackIdx]) : DEFAULT_TRACK_HEIGHT) - 8}px`,
                       }}
                     >
                       <div className="absolute inset-0 flex items-center px-2 overflow-hidden pointer-events-none">
