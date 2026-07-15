@@ -117,16 +117,25 @@ export interface ClipAudioSettings {
   voiceFormant: number; // -100 to 100 (default 0)
   humanize: boolean;    // one-click AI humanizer toggle (default false)
   denoise?: number;     // 0 to 100 (default 0, noise reduction intensity)
-  // Vocal / BGM Separation
+  // AI Vocal / BGM Separation (Demucs)
+  aiVocalSeparation?: {
+    isProcessed: boolean;   // True if AI has generated the stems
+    isProcessing?: boolean; // True while AI is currently processing
+    mode: 'original' | 'vocals' | 'bgm' | 'both'; // Playback mode
+    vocalsMediaId?: string; // Generated vocals Blob URL / Media ID
+    bgmMediaId?: string;    // Generated background music Blob URL / Media ID
+    vocalsVolume: number;   // 0 to 100 (default 100)
+    bgmVolume: number;      // 0 to 100 (default 100)
+  };
+  // Vocal / BGM Separation (Legacy Phase Cancellation)
   vocalSeparation?: {
-    enabled: boolean;     // Enable vocal/BGM separation (default false)
-    mode: 'removeVocals' | 'removeBgm' | 'separateBoth'; // What to isolate/remove
-    strength: number;       // 0 to 100 — separation strength (default 80)
-    // Advanced: per-frequency band control for fine-tuning
-    frequencyBands?: {      // Optional per-band attenuation for manual fine-tuning
-      low: number;          // 0-100, 0 = full remove, 100 = full keep (default 100)
-      mid: number;          // 0-100 (default 100)
-      high: number;         // 0-100 (default 100)
+    enabled: boolean;
+    mode: 'removeVocals' | 'removeBgm' | 'separateBoth';
+    strength: number;
+    frequencyBands?: {
+      low: number;
+      mid: number;
+      high: number;
     };
   };
 }

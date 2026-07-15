@@ -34,6 +34,7 @@ import { trackMotion } from '@/utils/motionTracker';
 import { compileStoryboard } from '@/utils/storyboardCompiler';
 import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini, AIMotionGraphicSuggestion } from '@/utils/aiClient';
 import { searchFreesound } from '@/utils/audioSearchClient';
+import { aiVocalSeparator } from '@/utils/aiVocalSeparator';
 import { AiSoundDesigner } from '@/components/AiSoundDesigner';
 import { AiMotionGraphicsDesigner } from '@/components/AiMotionGraphicsDesigner';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints } from '@/types';
@@ -496,32 +497,6 @@ export function PropertiesPanel() {
 
     const cleanName = (mediaItem?.name || 'audio').replace(/[^a-zA-Z0-9_-]/g, '_');
 
-    // Temporarily monkeypatch fetch to fix Gradio credentials CORS issue on third-party domains (e.g. HF Space)
-    
-    const win = window as any;
-    if (!win._procutFetchMonkeyPatched) {
-      win._procutOriginalFetch = window.fetch;
-      window.fetch = function (input: any, init: any) {
-      let requestInput = input;
-      let requestInit = init;
-
-      if (input instanceof Request) {
-        if (input.credentials === 'include') {
-          requestInput = new Request(input, { ...init, credentials: 'same-origin' });
-          requestInit = undefined;
-        }
-      } else {
-        if (init && init.credentials === 'include') {
-          requestInit = { ...init, credentials: 'same-origin' };
-        }
-      }
-      return win._procutOriginalFetch(requestInput, requestInit);
-      };
-      win._procutFetchMonkeyPatched = true;
-      win._procutFetchCount = 0;
-    }
-    win._procutFetchCount++;
-
     try {
       setIsSeparating(true);
       
@@ -555,63 +530,23 @@ export function PropertiesPanel() {
         }
       }
 
-      let vocalsUrl = '';
-      let instrumentsUrl = '';
-      let vocalsName = '';
-      let instrumentsName = '';
-      let localSucceeded = false;
+      console.log('[AI Separation] Decoding audio buffer...');
+      const audioCtx = new AudioContext();
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-      // 2. Try local separator first if running on localhost
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (isLocalhost) {
-        try {
-          const response = await fetch(`/api/separate-audio?name=${encodeURIComponent(mediaItem?.name || 'audio')}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/octet-stream' },
-            body: audioBlob
-          });
+      console.log('[AI Separation] Running local Demucs AI separation (WASM/WebGPU)...');
+      const { vocals, backgroundMusic } = await aiVocalSeparator.separateAudioBuffer(audioBuffer, (progress) => {
+        // You could update a progress state here if you added one to editorStore
+        console.log(`[AI Separation Progress] ${(progress * 100).toFixed(1)}%`);
+      });
 
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success) {
-              vocalsUrl = data.vocalsUrl;
-              instrumentsUrl = data.instrumentsUrl;
-              vocalsName = data.vocalsName;
-              instrumentsName = data.instrumentsName;
-              localSucceeded = true;
-            }
-          }
-        } catch (localErr) {
-          console.warn('Local separation failed or unavailable. Falling back to Hugging Face AI...', localErr);
-        }
-      }
-
-      // 3. Fallback to Hugging Face Gradio client if local separation failed/not on localhost
-      if (!localSucceeded) {
-        console.log('Connecting to Hugging Face Space (abidlabs/music-separation)...');
-        const app = await Client.connect("abidlabs/music-separation");
-        
-        console.log('Uploading audio to HF Space for neural stem extraction...');
-        // Gradio predict endpoint /inference accepts the binary audioBlob
-        const result = await app.predict("/inference", [
-          audioBlob
-        ]);
-
-        console.log('HF Space separation result:', result);
-        
-        const resultData = result.data as any[];
-        const vocalsData = resultData[0];
-        const instData = resultData[1];
-
-        if (!vocalsData || !instData || !vocalsData.url || !instData.url) {
-          throw new Error('AI Space did not return valid separated files. Check Space availability.');
-        }
-
-        vocalsUrl = vocalsData.url;
-        instrumentsUrl = instData.url;
-        vocalsName = `${cleanName}_Vocals.wav`;
-        instrumentsName = `${cleanName}_Instrumental.wav`;
-      }
+      console.log('[AI Separation] Converting stems to Blobs...');
+      const vocalsUrl = await aiVocalSeparator.audioBufferToBlobUrl(vocals);
+      const instrumentsUrl = await aiVocalSeparator.audioBufferToBlobUrl(backgroundMusic);
+      
+      const vocalsName = `${cleanName}_Vocals.wav`;
+      const instrumentsName = `${cleanName}_Instrumental.wav`;
 
       // 4. Create new MediaItems for isolated stems
       const vocalsMedia: any = {
@@ -680,7 +615,7 @@ export function PropertiesPanel() {
       addClip(vocalsClip);
       addClip(instClip);
 
-      // 6. Mute original track
+      // 6. Update original clip state
       updateClip(selectedClip.id, {
         audioSettings: {
           ...(selectedClip.audioSettings || {
@@ -697,25 +632,27 @@ export function PropertiesPanel() {
             humanize: false,
           }),
           volume: -60,
-          muted: true
+          muted: true,
+          aiVocalSeparation: {
+            isProcessed: true,
+            isProcessing: false,
+            mode: 'original',
+            vocalsMediaId: vocalsMedia.id,
+            bgmMediaId: instMedia.id,
+            vocalsVolume: 100,
+            bgmVolume: 100
+          }
         }
       });
 
       useEditorStore.getState().saveSnapshot?.('AI Stem Separation');
-      alert('AI Vocal / BGM Separation complete! The isolated stems have been placed on your timeline.');
+      toast.success('AI Vocal Separation complete! Stems added to timeline.');
     } catch (err: any) {
       console.error('[AI Separation] Error:', err);
-      alert(`AI Separation failed: ${err.message}`);
+      toast.error(`AI Separation failed: ${err.message}`);
     } finally {
-        const win = window as any;
-        win._procutFetchCount--;
-        if (win._procutFetchCount <= 0) {
-          window.fetch = win._procutOriginalFetch;
-          win._procutFetchMonkeyPatched = false;
-          win._procutFetchCount = 0;
-        }
-        setIsSeparating(false);
-      }
+      setIsSeparating(false);
+    }
   };
 
   // Find the selected transition
@@ -4499,164 +4436,79 @@ export function PropertiesPanel() {
               )}
             </div>
 
-            {/* Vocal / BGM Separation */}
+            {/* AI Vocal / BGM Separation */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
-                onClick={() => toggleSection('vocalSeparation')}
+                onClick={() => toggleSection('aiVocalSeparation')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
               >
                 <div className="flex items-center gap-1.5 font-medium">
-                  <Sliders className="w-3.5 h-3.5" />
-                  <span>Vocal / BGM Separation</span>
-                  {clipAudio.vocalSeparation?.enabled && (
-                    <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded-full font-semibold">ON</span>
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>AI Vocal Separator</span>
+                  {clipAudio.aiVocalSeparation?.isProcessed && (
+                    <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded-full font-semibold">DONE</span>
                   )}
                 </div>
-                {collapsedSections['vocalSeparation'] ? (
+                {collapsedSections['aiVocalSeparation'] ? (
                   <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 ) : (
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['vocalSeparation'] && (
+              {!collapsedSections['aiVocalSeparation'] && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
-                  {/* Enable / Disable Toggle */}
-                  <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
-                    <div>
-                      <span className="text-[#d0d0d0] font-medium block">Enable Separation</span>
-                      <span className="text-[9px] text-[#a0a0a0] block">
-                        {clipAudio.vocalSeparation?.enabled
-                          ? 'Active — processing in real-time'
-                          : 'Toggle to enable vocal/BGM separation'}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const current = clipAudio.vocalSeparation;
-                        const newSettings = current
-                          ? { ...current, enabled: !current.enabled }
-                          : { enabled: true, mode: 'removeVocals' as const, strength: 80 };
-                        handleAudioChange('vocalSeparation', newSettings);
-                      }}
-                      className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-                        clipAudio.vocalSeparation?.enabled
-                          ? 'bg-cyan-600 hover:bg-cyan-500 text-white'
-                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
-                      }`}
-                    >
-                      {clipAudio.vocalSeparation?.enabled ? 'Active' : 'Enable'}
-                    </button>
-                  </div>
-
-                  {clipAudio.vocalSeparation?.enabled && (
-                    <>
-                      {/* Mode Selector */}
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] text-[#a0a0a0] block font-medium">Separation Mode</label>
-                        <div className="grid grid-cols-1 gap-1.5">
-                          {[
-                            { mode: 'removeVocals' as const, label: 'Remove Vocals (Keep BGM)', desc: 'Background music stays, vocals reduced' },
-                            { mode: 'removeBgm' as const, label: 'Remove BGM (Keep Vocals)', desc: 'Vocals stay, background music reduced' },
-                            { mode: 'separateBoth' as const, label: 'Creative Separation', desc: 'Blend of both channels' },
-                          ].map((item) => (
-                            <button
-                              key={item.mode}
-                              onClick={() => {
-                                const current = clipAudio.vocalSeparation || { enabled: true, mode: 'removeVocals' as const, strength: 80 };
-                                handleAudioChange('vocalSeparation', { ...current, mode: item.mode });
-                              }}
-                              className={`text-left px-3 py-2 rounded border text-xs transition-colors ${
-                                clipAudio.vocalSeparation.mode === item.mode
-                                  ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-300'
-                                  : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#5e5e5e]'
-                              }`}
-                            >
-                              <span className="font-medium block">{item.label}</span>
-                              <span className="text-[9px] opacity-70">{item.desc}</span>
-                            </button>
-                          ))}
-                        </div>
+                  <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-2">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <div>
+                        <span className="text-cyan-400 font-semibold block flex items-center gap-1">
+                          Demucs AI Model
+                        </span>
+                        <span className="text-[9px] text-[#a0a0a0] block">
+                          Extract vocals locally via WebGPU
+                        </span>
                       </div>
-
-                      {/* Strength Slider */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between items-center text-[11px]">
-                          <span className="text-[#d0d0d0]">Separation Strength</span>
-                          <span className="font-mono text-[#a0a0a0]">{clipAudio.vocalSeparation.strength}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={clipAudio.vocalSeparation.strength}
-                          onChange={(e) => {
-                            const current = clipAudio.vocalSeparation || { enabled: true, mode: 'removeVocals' as const, strength: 80 };
-                            handleAudioChange('vocalSeparation', { ...current, strength: Number(e.target.value) });
-                          }}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-webkit-slider-thumb]:rounded-full w-full"
-                        />
-                        <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-                          <span>Subtle</span>
-                          <span>Extreme</span>
-                        </div>
-                      </div>
-
-                      {/* AI separation (MDX-Net Offline) */}
-                      <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-2 mt-2">
-                        <div className="flex justify-between items-center text-[11px]">
-                          <div>
-                            <span className="text-cyan-400 font-semibold block flex items-center gap-1">
-                              <Sparkles className="w-3 h-3 animate-pulse" />
-                              AI Stem Extractor
-                            </span>
-                            <span className="text-[9px] text-[#a0a0a0] block">
-                              Split vocals & instrumental using MDX-Net AI
-                            </span>
-                          </div>
-                          <button
-                            onClick={handleAiSeparate}
-                            disabled={isSeparating}
-                            aria-disabled={isSeparating ? "true" : "false"}
-                            className={`px-2.5 py-1.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors flex items-center gap-1 ${
-                              isSeparating
-                                ? 'bg-[#2d2d2d] text-[#606060] cursor-not-allowed'
-                                : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold'
-                            }`}
-                          >
-                            {isSeparating ? (
-                              <>
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                Processing...
-                              </>
-                            ) : (
-                              'Extract (AI)'
-                            )}
-                          </button>
-                        </div>
-                        {isSeparating && (
-                          <div className="space-y-1 animate-pulse" role="status" aria-live="polite">
-                            <div className="h-1 bg-cyan-950 rounded-full overflow-hidden">
-                              <div className="h-full bg-cyan-500 rounded-full animate-[progress_15s_ease-out_infinite]" style={{ width: '80%' }}></div>
-                            </div>
-                            <span className="text-[8px] text-cyan-400/80 block text-center font-mono">
-                              Running neural network separation locally (MDX-Net)...
-                            </span>
-                          </div>
+                      <button
+                        onClick={handleAiSeparate}
+                        disabled={isSeparating || clipAudio.aiVocalSeparation?.isProcessed}
+                        className={`px-2.5 py-1.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors flex items-center gap-1 ${
+                          isSeparating || clipAudio.aiVocalSeparation?.isProcessed
+                            ? 'bg-[#2d2d2d] text-[#606060] cursor-not-allowed'
+                            : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold'
+                        }`}
+                      >
+                        {isSeparating ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Processing...
+                          </>
+                        ) : clipAudio.aiVocalSeparation?.isProcessed ? (
+                          'Extracted'
+                        ) : (
+                          'Extract (AI)'
                         )}
+                      </button>
+                    </div>
+                    {isSeparating && (
+                      <div className="space-y-1 animate-pulse" role="status" aria-live="polite">
+                        <div className="h-1 bg-cyan-950 rounded-full overflow-hidden">
+                          <div className="h-full bg-cyan-500 rounded-full animate-[progress_15s_ease-out_infinite]" style={{ width: '80%' }}></div>
+                        </div>
+                        <span className="text-[8px] text-cyan-400/80 block text-center font-mono">
+                          Running neural network separation...
+                        </span>
                       </div>
-
-                      {/* Info Note */}
-                      <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-1">
-                        <p className="text-[10px] text-[#a0a0a0]">
-                          <span className="text-cyan-400 font-medium">How it works:</span> Uses a native **Multi-band Crossover Mid/Side Matrix**. Bass (&lt; 180Hz) and treble (&gt; 6000Hz) are preserved untouched to keep instrument punch and clarity, while phase cancellation is applied selectively to the vocal frequency band.
-                        </p>
-                        <p className="text-[9px] text-[#6a6a6a]">
-                          Requires stereo audio files. High-performance native processing with zero main thread overhead.
-                        </p>
-                      </div>
-                    </>
-                  )}
+                    )}
+                  </div>
+                  
+                  {/* Info Note */}
+                  <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-1">
+                    <p className="text-[10px] text-[#a0a0a0]">
+                      <span className="text-cyan-400 font-medium">How it works:</span> Uses Demucs AI running entirely in your browser via WebGPU to separate vocals from background music.
+                    </p>
+                    <p className="text-[9px] text-[#6a6a6a]">
+                      Your audio is never sent to the cloud. The isolated stems will be automatically added to your timeline below.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
