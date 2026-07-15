@@ -347,7 +347,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
       {/* ── Clip label overlay ────────────────────── */}
       <div className="absolute inset-0 flex flex-col px-1.5 py-0.5 overflow-hidden z-10 pointer-events-none">
-        <div className="flex items-center gap-1 min-w-0">
+        <div className="flex items-center gap-1 min-w-0 pr-8">
           {media.type === 'video' && <Film className="w-2.5 h-2.5 shrink-0 opacity-70" />}
           {media.type === 'audio' && <Music className="w-2.5 h-2.5 shrink-0 opacity-70" />}
           {media.type === 'image' && <Image className="w-2.5 h-2.5 shrink-0 opacity-70" />}
@@ -363,8 +363,27 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
               : media.name}
           </span>
         </div>
-        <div className="absolute bottom-0.5 right-1 text-[8px] text-white/50 tabular-nums">
-          {Math.max(0.1, clip.duration).toFixed(1)}s
+        {clip.pipWindowIds && clip.pipWindowIds.length > 0 && (
+          <div
+            className="absolute top-0.5 right-0.5 bg-purple-600/90 text-white text-[8px]
+                       px-1 py-0.5 rounded-sm font-bold tracking-wider z-10 cursor-pointer
+                       hover:bg-purple-500 transition-colors pointer-events-auto shadow-md"
+            title={`${clip.pipWindowIds.length} PIP window(s) (Click to open)`}
+            onClick={(e) => {
+              e.stopPropagation();
+              useEditorStore.getState().setActivePipWindow(clip.pipWindowIds![0]);
+            }}
+          >
+            PIP
+          </div>
+        )}
+        <div className="absolute bottom-0.5 right-1 flex items-center gap-1 text-[8px] text-white/50 tabular-nums select-none">
+          {clip.speedRamp && clip.speedRamp.length >= 2 ? (
+            <span className="bg-amber-500/20 text-amber-300 px-1 py-px rounded-sm font-semibold">Ramped</span>
+          ) : clip.speed !== 1.0 ? (
+            <span className="bg-blue-500/20 text-blue-300 px-1 py-px rounded-sm font-semibold">{clip.speed.toFixed(1)}x</span>
+          ) : null}
+          <span>{Math.max(0.1, clip.duration).toFixed(1)}s</span>
         </div>
       </div>
 
@@ -501,6 +520,15 @@ export function TimelineClipRow({
       <div className="absolute left-1 top-1 text-[8px] text-[#a0a0a0] opacity-30 uppercase select-none">
         {track.type}
       </div>
+
+      {/* Styled drop target hint for empty PIP tracks */}
+      {track.id.includes('_pip') && (track.clips || []).length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <span className="text-[9px] font-medium text-gray-500/40 border border-dashed border-gray-700/40 px-2 py-0.5 rounded">
+            Drop media here
+          </span>
+        </div>
+      )}
 
 
 

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import type { SpeedRampKeyframe } from '@/types';
 
 export interface DragState {
   clipId: string;
@@ -32,6 +33,8 @@ export interface ResizeState {
     originalDuration: number;
     originalStartTime: number;
     speed: number;
+    speedRamp?: SpeedRampKeyframe[];
+    mediaId: string;
   };
   rippleClips?: {
     id: string;

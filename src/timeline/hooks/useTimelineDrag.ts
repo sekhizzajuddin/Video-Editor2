@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
+import { getRampedTrimEndForRightResize, getRampedTrimStartForLeftResize, getSpeedRampEngine } from '@/utils/speedRamp';
 import { getTrackHeight, getTrackTop, getTrackAtY } from '../trackGeometry';
 import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT, SNAP_THRESHOLD_PX } from '../timelineConstants';
 import type { TimelineState } from './useTimelineState';
@@ -375,6 +376,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               originalDuration: prev.duration,
               originalStartTime: prev.startTime,
               speed: prev.speed,
+              speedRamp: prev.speedRamp,
+              mediaId: prev.mediaId,
             };
           }
         } else {
@@ -387,6 +390,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               originalDuration: next.duration,
               originalStartTime: next.startTime,
               speed: next.speed,
+              speedRamp: next.speedRamp,
+              mediaId: next.mediaId,
             };
           }
         }
@@ -786,13 +791,25 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         }
 
         if (activeTool === 'ripple') {
+          const isRamped = clip.speedRamp && clip.speedRamp.length >= 2;
           if (resizeState.edge === 'right') {
             const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-            const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+            
+            let maxDuration = 0;
+            if (isRamped) {
+              const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+              const localTimelineStart = engine.sourceToTimeline(clip.trimStart);
+              maxDuration = engine.sourceToTimeline(sourceDuration) - localTimelineStart;
+            } else {
+              maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+            }
             const clamped = Math.min(newDuration, maxDuration);
             const delta = clamped - resizeState.originalDuration;
 
-            const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
+            const newTrimEnd = isRamped
+              ? getRampedTrimEndForRightResize(clip, clamped, sourceDuration)
+              : resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
+
             updateClip(resizeState.clipId, {
               duration: clamped,
               trimEnd: Math.max(0, newTrimEnd),
@@ -809,20 +826,26 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const shrink = dt; // dragging right (shrink) -> dt > 0, dragging left (expand) -> dt < 0
             const newDuration = Math.max(0.1, resizeState.originalDuration - shrink);
             
-            // For left edge, available media for expansion is limited by originalTrimStart
-            const maxExpansion = resizeState.originalTrimStart / clip.speed;
-            const maxDuration = resizeState.originalDuration + maxExpansion;
+            let maxDuration = 0;
+            if (isRamped) {
+              const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+              const maxExpansion = engine.sourceToTimeline(clip.trimStart);
+              maxDuration = resizeState.originalDuration + maxExpansion;
+            } else {
+              const maxExpansion = resizeState.originalTrimStart / clip.speed;
+              maxDuration = resizeState.originalDuration + maxExpansion;
+            }
             
             let clampedDuration = Math.min(newDuration, maxDuration);
             const deltaDuration = clampedDuration - resizeState.originalDuration; // positive if expand, negative if shrink
 
-            // Left edge Ripple Edit:
-            // 1. startTime on timeline stays EXACTLY the same! (Visually anchored)
-            // 2. trimStart changes by the duration difference
-            // 3. Right-side (downstream) clips move left/right by the duration difference
+            const newTrimStart = isRamped
+              ? getRampedTrimStartForLeftResize(clip, -deltaDuration)
+              : resizeState.originalTrimStart - deltaDuration * clip.speed;
+
             updateClip(resizeState.clipId, {
               duration: clampedDuration,
-              trimStart: Math.max(0, resizeState.originalTrimStart - deltaDuration * clip.speed),
+              trimStart: Math.max(0, newTrimStart),
             });
 
             if (resizeState.rippleClips) {
@@ -836,37 +859,59 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           return;
         }
 
+        const isRamped = clip.speedRamp && clip.speedRamp.length >= 2;
         if (resizeState.edge === 'right') {
           let newDuration = Math.max(0.1, resizeState.originalDuration + dt);
-          const maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+          
+          let maxDuration = 0;
+          if (isRamped) {
+            const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+            const localTimelineStart = engine.sourceToTimeline(clip.trimStart);
+            maxDuration = engine.sourceToTimeline(sourceDuration) - localTimelineStart;
+          } else {
+            maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+          }
           let clamped = Math.min(newDuration, maxDuration);
 
           if (resizeState.siblingClip) {
             const sib = resizeState.siblingClip;
             let delta = clamped - resizeState.originalDuration; // >0 if A expands, <0 if A shrinks
+            const isSibRamped = sib.speedRamp && sib.speedRamp.length >= 2;
             
             if (delta > 0) {
-              const maxDelta = sib.originalDuration - 0.1;
-              if (delta > maxDelta) {
-                delta = maxDelta;
-                clamped = resizeState.originalDuration + delta;
-              }
+               const maxDelta = sib.originalDuration - 0.1;
+               if (delta > maxDelta) {
+                 delta = maxDelta;
+                 clamped = resizeState.originalDuration + delta;
+               }
             } else if (delta < 0) {
-              const maxExpandB = sib.originalTrimStart / sib.speed;
-              if (-delta > maxExpandB) {
-                delta = -maxExpandB;
-                clamped = resizeState.originalDuration + delta;
-              }
+               let maxExpandB = 0;
+               if (isSibRamped) {
+                 const sibEngine = getSpeedRampEngine(sib.id, sib.speedRamp!);
+                 maxExpandB = sibEngine.sourceToTimeline(sib.originalTrimStart);
+               } else {
+                 maxExpandB = sib.originalTrimStart / sib.speed;
+               }
+               if (-delta > maxExpandB) {
+                 delta = -maxExpandB;
+                 clamped = resizeState.originalDuration + delta;
+               }
             }
             
+            const sibNewTrimStart = isSibRamped
+              ? getRampedTrimStartForLeftResize(sib as any, delta)
+              : sib.originalTrimStart + (delta * sib.speed);
+
             updateClip(sib.id, {
               startTime: sib.originalStartTime + delta,
               duration: sib.originalDuration - delta,
-              trimStart: Math.max(0, sib.originalTrimStart + (delta * sib.speed)),
+              trimStart: Math.max(0, sibNewTrimStart),
             });
           }
 
-          const newTrimEnd = resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
+          const newTrimEnd = isRamped
+            ? getRampedTrimEndForRightResize(clip, clamped, sourceDuration)
+            : resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
           updateClip(resizeState.clipId, {
             duration: clamped,
             trimEnd: Math.max(0, newTrimEnd),
@@ -874,39 +919,61 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         } else {
           const shrink = -dt;
           const newDuration = Math.max(0.1, resizeState.originalDuration + shrink);
-          const maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
+          
+          let maxDuration = 0;
+          if (isRamped) {
+            const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+            maxDuration = engine.sourceToTimeline(sourceDuration - clip.trimEnd);
+          } else {
+            maxDuration = (sourceDuration - clip.trimEnd) / clip.speed;
+          }
           let clamped = Math.min(newDuration, maxDuration);
           let shift = resizeState.originalDuration - clamped;
 
           if (resizeState.siblingClip) {
             const sib = resizeState.siblingClip;
-            // shift > 0 means B shrinks (moves right), A expands
-            // shift < 0 means B expands (moves left), A shrinks
+            const isSibRamped = sib.speedRamp && sib.speedRamp.length >= 2;
+            const sibMedia = getMediaSafe(sib as unknown as TimelineClip);
+            const sibSourceDuration = sibMedia.duration || 30;
             
             if (shift < 0) {
               const maxShrinkA = sib.originalDuration - 0.1;
               if (-shift > maxShrinkA) {
                 shift = -maxShrinkA;
                 clamped = resizeState.originalDuration - shift;
-              }
+               }
             } else if (shift > 0) {
-              const maxExpandA = sib.originalTrimEnd / sib.speed;
+              let maxExpandA = 0;
+              if (isSibRamped) {
+                const sibEngine = getSpeedRampEngine(sib.id, sib.speedRamp!);
+                maxExpandA = sibEngine.sourceToTimeline(sibSourceDuration) - sibEngine.sourceToTimeline(sibSourceDuration - sib.originalTrimEnd);
+              } else {
+                maxExpandA = sib.originalTrimEnd / sib.speed;
+              }
               if (shift > maxExpandA) {
                 shift = maxExpandA;
                 clamped = resizeState.originalDuration - shift;
               }
             }
 
+            const sibNewTrimEnd = isSibRamped
+              ? getRampedTrimEndForRightResize(sib as any, sib.originalDuration + shift, sibSourceDuration)
+              : sib.originalTrimEnd - (shift * sib.speed);
+
             updateClip(sib.id, {
               duration: sib.originalDuration + shift,
-              trimEnd: Math.max(0, sib.originalTrimEnd - (shift * sib.speed)),
+              trimEnd: Math.max(0, sibNewTrimEnd),
             });
           }
+
+          const newTrimStart = isRamped
+            ? getRampedTrimStartForLeftResize(clip, shift)
+            : resizeState.originalTrimStart + shift * clip.speed;
 
           updateClip(resizeState.clipId, {
             startTime: resizeState.originalStartTime + shift,
             duration: clamped,
-            trimStart: Math.max(0, resizeState.originalTrimStart + shift * clip.speed),
+            trimStart: Math.max(0, newTrimStart),
           });
         }
       });
@@ -929,16 +996,33 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const media = getMediaSafe(clip);
         const sourceDuration = media.duration || 30;
         
-        let newTrimStart = slipState.originalTrimStart - (dt * clip.speed);
-        let newTrimEnd = slipState.originalTrimEnd + (dt * clip.speed);
-        
-        if (newTrimStart < 0) {
-          newTrimStart = 0;
-          newTrimEnd = sourceDuration - clip.duration * clip.speed;
-        }
-        if (newTrimStart + (clip.duration * clip.speed) > sourceDuration) {
-          newTrimStart = sourceDuration - (clip.duration * clip.speed);
-          newTrimEnd = 0;
+        const isRamped = clip.speedRamp && clip.speedRamp.length >= 2;
+        let newTrimStart = 0;
+        let newTrimEnd = 0;
+
+        if (isRamped) {
+          const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+          const currentLocalTimelineStart = engine.sourceToTimeline(clip.trimStart);
+          let newLocalTimelineStart = currentLocalTimelineStart - dt;
+          
+          const minTimelineStart = 0;
+          const maxTimelineEnd = engine.sourceToTimeline(sourceDuration);
+          const maxTimelineStart = maxTimelineEnd - clip.duration;
+          newLocalTimelineStart = Math.max(minTimelineStart, Math.min(maxTimelineStart, newLocalTimelineStart));
+          
+          newTrimStart = engine.timelineToSource(newLocalTimelineStart);
+          newTrimEnd = sourceDuration - engine.timelineToSource(newLocalTimelineStart + clip.duration);
+        } else {
+          newTrimStart = slipState.originalTrimStart - (dt * clip.speed);
+          newTrimEnd = slipState.originalTrimEnd + (dt * clip.speed);
+          if (newTrimStart < 0) {
+            newTrimStart = 0;
+            newTrimEnd = sourceDuration - clip.duration * clip.speed;
+          }
+          if (newTrimStart + (clip.duration * clip.speed) > sourceDuration) {
+            newTrimStart = sourceDuration - (clip.duration * clip.speed);
+            newTrimEnd = 0;
+          }
         }
         
         updateClip(clip.id, {

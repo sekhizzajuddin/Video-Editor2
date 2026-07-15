@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { PipWindow, TimelineClip } from '@/types';
-import { X, GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, GripHorizontal, ChevronUp, ChevronDown, Plus, Lock, Unlock, Eye, EyeOff, Volume2, VolumeX, Trash2, Film, Music, Type, Sparkles } from 'lucide-react';
 import { DEFAULT_TRACK_HEIGHT } from '../timelineConstants';
 import { getTrackTop, getTrackHeight } from '../trackGeometry';
 
@@ -61,7 +61,9 @@ export function PipFloatingWindow({
     updatePipWindowDuration,
     reorderPipTrack,
     removeTrackFromPip,
+    updatePipTrack,
     addTrackToPip,
+    addEmptyTrackToPip,
     mediaLibrary,
     currentTime,
     selectedClipId,
@@ -69,6 +71,22 @@ export function PipFloatingWindow({
 
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [showAddTrackMenu, setShowAddTrackMenu] = useState(false);
+  const addTrackMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (addTrackMenuRef.current && !addTrackMenuRef.current.contains(event.target as Node)) {
+        setShowAddTrackMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const startXRef = useRef(0);
   const startDurationRef = useRef(0);
   const startRelTimeRef = useRef(0);
@@ -184,17 +202,18 @@ export function PipFloatingWindow({
 
   return (
     <div
-      className="absolute z-50 rounded-lg shadow-2xl bg-[#2a2a2a]/95 backdrop-blur-md border border-[#4a4a4a] overflow-hidden flex flex-col pointer-events-auto"
+      className={`absolute z-50 rounded-lg shadow-2xl bg-[#2a2a2a]/95 backdrop-blur-md border border-[#4a4a4a] flex flex-col pointer-events-auto ${isCollapsed ? 'rounded-lg' : ''}`}
       style={{
         left: `${windowLeft}px`,
         top: `${windowTop}px`,
         width: `${windowWidth}px`,
-        minHeight: '120px'
+        minHeight: isCollapsed ? 'auto' : '120px',
+        height: isCollapsed ? 'auto' : undefined
       }}
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex items-center justify-between px-2 py-1 bg-[#1e1e1e] border-b border-[#3e3e3e] cursor-move select-none"
+        className="flex items-center justify-between px-2 py-1 bg-[#1e1e1e] border-b border-[#3e3e3e] cursor-move select-none rounded-t-lg"
         onMouseDown={handleDragStart}
       >
         <div className="flex items-center gap-1.5 text-[#a0a0a0]">
@@ -229,6 +248,51 @@ export function PipFloatingWindow({
             }
             return null;
           })()}
+
+          {/* Add Track Button & Dropdown */}
+          <div className="relative" ref={addTrackMenuRef}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAddTrackMenu(!showAddTrackMenu);
+              }}
+              className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors flex items-center justify-center"
+              title="Add Track to PIP"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+            {showAddTrackMenu && (
+              <div className="absolute right-0 mt-1 w-24 bg-[#1e1e1e]/95 backdrop-blur-md border border-[#4a4a4a] rounded shadow-2xl z-[100] flex flex-col py-1 text-[10px]">
+                {(['video', 'audio', 'text', 'fx'] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      addEmptyTrackToPip(pipWindow.id, type);
+                      setShowAddTrackMenu(false);
+                    }}
+                    className="px-3 py-1.5 text-left hover:bg-white/10 text-gray-300 hover:text-white transition-colors capitalize font-medium flex items-center gap-1.5"
+                  >
+                    <span>+</span> {type}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="w-px h-4 bg-gray-600 mx-1"></div>
+
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsCollapsed(!isCollapsed);
+            }}
+            title={isCollapsed ? "Expand Workspace" : "Collapse Workspace"}
+            className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
+          >
+            {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+          </button>
+          <div className="w-px h-4 bg-gray-600 mx-1"></div>
+
           <button 
             onClick={(e) => {
               e.stopPropagation();
@@ -252,8 +316,9 @@ export function PipFloatingWindow({
         </div>
       </div>
 
-      <div 
-        className="flex-1 relative overflow-y-auto py-2 min-h-[60px]"
+      {!isCollapsed && (
+        <div 
+          className="flex-1 relative overflow-y-auto py-2 min-h-[60px] rounded-b-lg"
         onDrop={handlePipContainerDrop}
         onDragOver={handlePipContainerDragOver}
       >
@@ -278,48 +343,149 @@ export function PipFloatingWindow({
               return null;
             })()}
              {(pipWindow.tracks || []).map((track, idx) => {
-               if (track.hidden) return null;
+               // Render track type icon
+               const TrackIcon = () => {
+                 switch (track.type) {
+                   case 'video': return <Film className="w-3.5 h-3.5 text-blue-400" />;
+                   case 'audio': return <Music className="w-3.5 h-3.5 text-green-400" />;
+                   case 'text': return <Type className="w-3.5 h-3.5 text-yellow-400" />;
+                   case 'fx': return <Sparkles className="w-3.5 h-3.5 text-rose-400" />;
+                   default: return null;
+                 }
+               };
+
+               const isMutedOrHidden = track.type === 'audio' ? track.muted : track.hidden;
+
                return (
-                 <TimelineClipRow
-                   key={track.id}
-                   track={track}
-                   tracks={pipWindow.tracks}
-                   zoomLevel={zoomLevel}
-                   selectedClipIds={selectedClipIds}
-                   draggingClipId={draggingClipId}
-                   activeTool={activeTool}
-                   hoverCutClipId={hoverCutClipId}
-                   hoverCutX={hoverCutX}
-                   handleDragOver={handleDragOver}
-                   handleDrop={handleDrop}
-                   setHoveredTrackId={setHoveredTrackId}
-                   setDropPreview={setDropPreview}
-                   setContextMenu={setContextMenu}
-                   handleClipMouseDown={handleClipMouseDown}
-                   setHoverCutX={setHoverCutX}
-                   setHoverCutClipId={setHoverCutClipId}
-                   enterCompoundClip={() => {}}
-                   toggleKeyframeLineSelection={() => {}}
-                   selectedKeyframeLines={[]}
-                   showTransitionLayer={false}
-                   selectedTransitionClipId={null}
-                   hoveredTrackId={null}
-                   selectTrack={selectTrack}
-                   selectClip={selectClip}
-                   selectTransition={selectTransition}
-                 />
+                 <div key={track.id} className="flex items-stretch bg-gray-900/60 border border-white/5 rounded-md min-h-[44px] relative overflow-hidden group">
+                   {/* Compact Sidebar / Track Header */}
+                   <div 
+                     className="w-20 shrink-0 bg-gray-950/80 border-r border-white/5 flex flex-col justify-between p-1.5 z-10"
+                     onContextMenu={(e) => {
+                       e.preventDefault();
+                       e.stopPropagation();
+                       setContextMenu({
+                         x: e.clientX,
+                         y: e.clientY,
+                         items: [
+                           { label: 'Delete Track', action: () => removeTrackFromPip(pipWindow.id, track.id) },
+                           { label: track.muted ? 'Unmute' : 'Mute', action: () => updatePipTrack(pipWindow.id, track.id, { muted: !track.muted }) },
+                           { label: track.hidden ? 'Show' : 'Hide', action: () => updatePipTrack(pipWindow.id, track.id, { hidden: !track.hidden }) },
+                           { label: track.locked ? 'Unlock' : 'Lock', action: () => updatePipTrack(pipWindow.id, track.id, { locked: !track.locked }) },
+                           { label: 'Move Up', action: () => reorderPipTrack(pipWindow.id, idx, 'up') },
+                           { label: 'Move Down', action: () => reorderPipTrack(pipWindow.id, idx, 'down') },
+                         ]
+                       });
+                     }}
+                   >
+                     {/* Track Label and Icon */}
+                     <div className="flex items-center gap-1">
+                       <TrackIcon />
+                       <span className="text-[10px] font-semibold text-gray-300 uppercase truncate">
+                         {track.name || `${track.type.slice(0, 3)}${idx + 1}`}
+                       </span>
+                     </div>
+
+                     {/* Quick Actions */}
+                     <div className="flex items-center gap-1.5 mt-1">
+                       {/* Mute/Hide */}
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           if (track.type === 'audio') {
+                             updatePipTrack(pipWindow.id, track.id, { muted: !track.muted });
+                           } else {
+                             updatePipTrack(pipWindow.id, track.id, { hidden: !track.hidden });
+                           }
+                         }}
+                         className={`p-0.5 rounded hover:bg-white/10 transition-colors ${isMutedOrHidden ? 'text-red-400' : 'text-gray-400 hover:text-white'}`}
+                         title={track.type === 'audio' ? (track.muted ? 'Unmute' : 'Mute') : (track.hidden ? 'Show' : 'Hide')}
+                       >
+                         {track.type === 'audio' ? (
+                           track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />
+                         ) : (
+                           track.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />
+                         )}
+                       </button>
+
+                       {/* Lock */}
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           updatePipTrack(pipWindow.id, track.id, { locked: !track.locked });
+                         }}
+                         className={`p-0.5 rounded hover:bg-white/10 transition-colors ${track.locked ? 'text-yellow-400' : 'text-gray-400 hover:text-white'}`}
+                         title={track.locked ? 'Unlock' : 'Lock'}
+                       >
+                         {track.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                       </button>
+
+                       {/* Delete */}
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           removeTrackFromPip(pipWindow.id, track.id);
+                         }}
+                         className="p-0.5 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                         title="Delete Track"
+                       >
+                         <Trash2 className="w-3 h-3" />
+                       </button>
+                     </div>
+                   </div>
+
+                   {/* Clip Area */}
+                   <div className="flex-1 min-w-0 relative">
+                     {track.hidden ? (
+                       <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px] text-[10px] text-gray-500 italic select-none">
+                         Track contents hidden
+                       </div>
+                     ) : (
+                       <TimelineClipRow
+                         track={track}
+                         tracks={pipWindow.tracks}
+                         zoomLevel={zoomLevel}
+                         selectedClipIds={selectedClipIds}
+                         draggingClipId={draggingClipId}
+                         activeTool={activeTool}
+                         hoverCutClipId={hoverCutClipId}
+                         hoverCutX={hoverCutX}
+                         handleDragOver={handleDragOver}
+                         handleDrop={handleDrop}
+                         setHoveredTrackId={setHoveredTrackId}
+                         setDropPreview={setDropPreview}
+                         setContextMenu={setContextMenu}
+                         handleClipMouseDown={handleClipMouseDown}
+                         setHoverCutX={setHoverCutX}
+                         setHoverCutClipId={setHoverCutClipId}
+                         enterCompoundClip={() => {}}
+                         toggleKeyframeLineSelection={() => {}}
+                         selectedKeyframeLines={[]}
+                         showTransitionLayer={false}
+                         selectedTransitionClipId={null}
+                         hoveredTrackId={null}
+                         selectTrack={selectTrack}
+                         selectClip={selectClip}
+                         selectTransition={selectTransition}
+                       />
+                     )}
+                   </div>
+                 </div>
                );
              })}
           </div>
         )}
-      </div>
+        </div>
+      )}
 
-      <div 
-        className="absolute top-0 right-0 bottom-0 w-2 cursor-e-resize hover:bg-white/10 transition-colors group/resize z-20 flex items-center justify-center"
-        onMouseDown={handleResizeStart}
-      >
-        <div className="w-0.5 h-4 bg-gray-500 rounded-full group-hover/resize:bg-white opacity-0 group-hover/resize:opacity-100" />
-      </div>
+      {!isCollapsed && (
+        <div 
+          className="absolute top-0 right-0 bottom-0 w-2 cursor-e-resize hover:bg-white/10 transition-colors group/resize z-20 flex items-center justify-center"
+          onMouseDown={handleResizeStart}
+        >
+          <div className="w-0.5 h-4 bg-gray-500 rounded-full group-hover/resize:bg-white opacity-0 group-hover/resize:opacity-100" />
+        </div>
+      )}
     </div>
   );
 }

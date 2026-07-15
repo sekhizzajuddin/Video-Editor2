@@ -232,9 +232,17 @@ export interface ClipParticleSettings {
 }
 
 
+export type EasingType = 'linear' | 'hold' | 'easeIn' | 'easeOut' | 'easeInOut' | 'bezier';
+
 export interface SpeedRampKeyframe {
-  position: number; // 0 to 1 (normalized within clip duration)
-  speed: number;    // 0.1 to 4.0
+  id: string;
+  sourceTime: number;  // seconds in original media
+  speed: number;       // 1.0 = 100%
+  easing: EasingType;
+  bezierControl?: {
+    out: { x: number; y: number }; // Point { x: number; y: number }
+    in: { x: number; y: number };  // Point { x: number; y: number }
+  };
 }
 
 export interface PropertyKeyframe {
@@ -356,6 +364,7 @@ export interface PipWindow {
   tracks: TimelineTrack[];   // Mini-timeline tracks
   duration: number;          // Minimum visual duration is 5s
   zIndex: number;            // Overall PIP z-index relative to other PIPs
+  manualDuration?: boolean;  // User manually resized duration
 }
 
 // Timeline Track

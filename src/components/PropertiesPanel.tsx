@@ -37,7 +37,8 @@ import { searchFreesound } from '@/utils/audioSearchClient';
 import { AiSoundDesigner } from '@/components/AiSoundDesigner';
 import { AiMotionGraphicsDesigner } from '@/components/AiMotionGraphicsDesigner';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints } from '@/types';
-import { getSpeedAtPosition, getMediaTimeAtPosition } from '@/utils/speedRamp';
+import { getSpeedAtPosition, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
+import type { SpeedRampKeyframe, EasingType } from '@/types';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 
@@ -204,39 +205,39 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
   );
 }
 
-const PRESETS = {
+const PRESETS_RATIOS = {
   slowMo: [
-    { position: 0.0, speed: 1.0 },
-    { position: 0.25, speed: 1.0 },
-    { position: 0.5, speed: 0.3 },
-    { position: 0.75, speed: 1.0 },
-    { position: 1.0, speed: 1.0 },
+    { ratio: 0.0, speed: 1.0, easing: 'linear' as const },
+    { ratio: 0.25, speed: 1.0, easing: 'linear' as const },
+    { ratio: 0.5, speed: 0.3, easing: 'linear' as const },
+    { ratio: 0.75, speed: 1.0, easing: 'linear' as const },
+    { ratio: 1.0, speed: 1.0, easing: 'linear' as const },
   ],
   speedUp: [
-    { position: 0.0, speed: 0.5 },
-    { position: 0.4, speed: 0.5 },
-    { position: 0.7, speed: 2.0 },
-    { position: 1.0, speed: 2.0 },
+    { ratio: 0.0, speed: 0.5, easing: 'linear' as const },
+    { ratio: 0.4, speed: 0.5, easing: 'linear' as const },
+    { ratio: 0.7, speed: 2.0, easing: 'linear' as const },
+    { ratio: 1.0, speed: 2.0, easing: 'linear' as const },
   ],
   slowDown: [
-    { position: 0.0, speed: 2.0 },
-    { position: 0.3, speed: 2.0 },
-    { position: 0.6, speed: 0.5 },
-    { position: 1.0, speed: 0.5 },
+    { ratio: 0.0, speed: 2.0, easing: 'linear' as const },
+    { ratio: 0.3, speed: 2.0, easing: 'linear' as const },
+    { ratio: 0.6, speed: 0.5, easing: 'linear' as const },
+    { ratio: 1.0, speed: 0.5, easing: 'linear' as const },
   ],
   flash: [
-    { position: 0.0, speed: 1.0 },
-    { position: 0.35, speed: 1.0 },
-    { position: 0.5, speed: 3.5 },
-    { position: 0.65, speed: 1.0 },
-    { position: 1.0, speed: 1.0 },
+    { ratio: 0.0, speed: 1.0, easing: 'linear' as const },
+    { ratio: 0.35, speed: 1.0, easing: 'linear' as const },
+    { ratio: 0.5, speed: 3.5, easing: 'linear' as const },
+    { ratio: 0.65, speed: 1.0, easing: 'linear' as const },
+    { ratio: 1.0, speed: 1.0, easing: 'linear' as const },
   ],
   cinematic: [
-    { position: 0.0, speed: 1.0 },
-    { position: 0.2, speed: 1.0 },
-    { position: 0.4, speed: 0.25 },
-    { position: 0.75, speed: 0.25 },
-    { position: 1.0, speed: 1.0 },
+    { ratio: 0.0, speed: 1.0, easing: 'linear' as const },
+    { ratio: 0.2, speed: 1.0, easing: 'linear' as const },
+    { ratio: 0.4, speed: 0.25, easing: 'linear' as const },
+    { ratio: 0.75, speed: 0.25, easing: 'linear' as const },
+    { ratio: 1.0, speed: 1.0, easing: 'linear' as const },
   ],
 };
 
@@ -732,8 +733,8 @@ export function PropertiesPanel() {
   }
   const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
 
-  const updateClip = useCallback((clipId: string, updates: any) => {
-    storeUpdateClip(clipId, updates);
+  const updateClip = useCallback((clipId: string, updates: any, options?: { ripple?: boolean }) => {
+    storeUpdateClip(clipId, updates, options);
   }, [storeUpdateClip]);
 
   const removeClip = useCallback((clipId: string) => {
@@ -780,19 +781,39 @@ export function PropertiesPanel() {
       let speed = 0.1 + (1 - sY) * 3.9;
       speed = Math.max(0.1, Math.min(4.0, speed));
       speed = Math.round(speed * 100) / 100;
-      p = Math.round(p * 100) / 100;
 
       const ramp = [...(selectedClip.speedRamp || [])];
       if (ramp[draggingIndex]) {
         const isBoundary = draggingIndex === 0 || draggingIndex === ramp.length - 1;
-        const minP = draggingIndex > 0 ? ramp[draggingIndex - 1].position + 0.01 : 0.0;
-        const maxP = draggingIndex < ramp.length - 1 ? ramp[draggingIndex + 1].position - 0.01 : 1.0;
+        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+
+        // Convert timeline progress p to sourceTime using active engine
+        const engine = getSpeedRampEngine(selectedClip.id, selectedClip.speedRamp);
+        const localTimelineStart = engine.sourceToTimeline(selectedClip.trimStart);
+        const targetTimelineTime = localTimelineStart + p * selectedClip.duration;
+        const newSourceTime = engine.timelineToSource(targetTimelineTime);
+
+        // Clamp to neighbors to prevent out-of-order keyframes
+        const minSource = draggingIndex > 0 ? ramp[draggingIndex - 1].sourceTime + 0.05 : 0.0;
+        const maxSource = draggingIndex < ramp.length - 1 ? ramp[draggingIndex + 1].sourceTime - 0.05 : maxDuration;
 
         ramp[draggingIndex] = {
-          position: isBoundary ? (draggingIndex === 0 ? 0.0 : 1.0) : Math.max(minP, Math.min(maxP, p)),
+          ...ramp[draggingIndex],
+          sourceTime: isBoundary ? (draggingIndex === 0 ? 0.0 : maxDuration) : Math.max(minSource, Math.min(maxSource, newSourceTime)),
           speed: speed,
         };
-        updateClip(selectedClip.id, { speedRamp: ramp });
+
+        // Recalculate timeline duration based on new speed ramp curve
+        const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
+        const tempEngine = new SpeedRampEngine(sortedRamp);
+        const sourceEnd = maxDuration - selectedClip.trimEnd;
+        const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+
+        updateClip(selectedClip.id, {
+          speedRamp: sortedRamp,
+          duration: Math.max(0.1, newDuration),
+        }, { ripple: true });
       }
     };
 
@@ -807,7 +828,7 @@ export function PropertiesPanel() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingIndex, selectedClip, updateClip]);
+  }, [draggingIndex, selectedClip, updateClip, mediaLibrary]);
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
     const target = e.target as SVGElement;
@@ -822,13 +843,32 @@ export function PropertiesPanel() {
     let speed = 0.1 + (1 - sY) * 3.9;
     speed = Math.max(0.1, Math.min(4.0, speed));
     speed = Math.round(speed * 100) / 100;
-    p = Math.round(p * 100) / 100;
 
     const ramp = [...(selectedClip.speedRamp || [])];
-    ramp.push({ position: p, speed });
-    ramp.sort((a, b) => a.position - b.position);
+    const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+    const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
 
-    updateClip(selectedClip.id, { speedRamp: ramp });
+    const engine = getSpeedRampEngine(selectedClip.id, selectedClip.speedRamp);
+    const localTimelineStart = engine.sourceToTimeline(selectedClip.trimStart);
+    const targetTimelineTime = localTimelineStart + p * selectedClip.duration;
+    const newSourceTime = engine.timelineToSource(targetTimelineTime);
+
+    ramp.push({
+      id: `kf-${Date.now()}-${Math.random()}`,
+      sourceTime: newSourceTime,
+      speed,
+      easing: 'linear'
+    });
+    
+    const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
+    const tempEngine = new SpeedRampEngine(sortedRamp);
+    const sourceEnd = maxDuration - selectedClip.trimEnd;
+    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+
+    updateClip(selectedClip.id, { 
+      speedRamp: sortedRamp,
+      duration: Math.max(0.1, newDuration)
+    }, { ripple: true });
     useEditorStore.getState().saveSnapshot();
   };
 
@@ -3469,7 +3509,7 @@ export function PropertiesPanel() {
                     updateClip(selectedClip.id, {
                       speed: newSpeed,
                       duration: newDuration,
-                    });
+                    }, { ripple: true });
                     const state = useEditorStore.getState();
                     if (state.currentTime > selectedClip.startTime + newDuration) {
                       state.seek(selectedClip.startTime + newDuration - 0.1);
@@ -3484,7 +3524,7 @@ export function PropertiesPanel() {
                     updateClip(selectedClip.id, {
                       speed: newSpeed,
                       duration: newDuration,
-                    });
+                    }, { ripple: true });
                     useEditorStore.getState().saveSnapshot();
                   }}
                   className={`flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full ${
@@ -3509,14 +3549,16 @@ export function PropertiesPanel() {
                   onChange={(e) => {
                     if (e.target.checked) {
                       const currentSpeed = selectedClip.speed || 1.0;
+                      const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                      const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
                       updateClip(selectedClip.id, {
                         speedRamp: [
-                          { position: 0.0, speed: currentSpeed },
-                          { position: 1.0, speed: currentSpeed },
+                          { id: 'start', sourceTime: 0.0, speed: currentSpeed, easing: 'linear' },
+                          { id: 'end', sourceTime: maxDuration, speed: currentSpeed, easing: 'linear' },
                         ],
-                      });
+                      }, { ripple: true });
                     } else {
-                      updateClip(selectedClip.id, { speedRamp: undefined });
+                      updateClip(selectedClip.id, { speedRamp: undefined }, { ripple: true });
                     }
                     useEditorStore.getState().saveSnapshot();
                   }}
@@ -3638,7 +3680,11 @@ export function PropertiesPanel() {
 
                       {/* Keyframe Draggable Handles */}
                       {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
-                        const x = kf.position * 240;
+                        const engine = getSpeedRampEngine(selectedClip.id, selectedClip.speedRamp);
+                        const localTimelineStart = engine.sourceToTimeline(selectedClip.trimStart);
+                        const kfTimelineTime = engine.sourceToTimeline(kf.sourceTime) - localTimelineStart;
+                        const progress = selectedClip.duration > 0.001 ? kfTimelineTime / selectedClip.duration : 0;
+                        const x = progress * 240;
                         const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
                         const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
                         return (
@@ -3661,7 +3707,15 @@ export function PropertiesPanel() {
                               const ramp = [...(selectedClip.speedRamp || [])];
                               if (ramp.length > 2) {
                                 ramp.splice(idx, 1);
-                                updateClip(selectedClip.id, { speedRamp: ramp });
+                                const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                                const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                                const tempEngine = new SpeedRampEngine(ramp);
+                                const sourceEnd = maxDuration - selectedClip.trimEnd;
+                                const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+                                updateClip(selectedClip.id, { 
+                                  speedRamp: ramp,
+                                  duration: Math.max(0.1, newDuration)
+                                }, { ripple: true });
                                 useEditorStore.getState().saveSnapshot();
                               }
                             }}
@@ -3692,8 +3746,31 @@ export function PropertiesPanel() {
                         <button
                           key={preset.id}
                           onClick={() => {
-                            const ramp = PRESETS[preset.id as keyof typeof PRESETS];
-                            updateClip(selectedClip.id, { speedRamp: ramp });
+                            const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                            const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                            const presetId = preset.id as keyof typeof PRESETS_RATIOS;
+                            const ratios = PRESETS_RATIOS[presetId];
+                            const ramp = ratios.map((r, rIdx) => ({
+                              id: `kf-${rIdx}-${Date.now()}-${Math.random()}`,
+                              sourceTime: r.ratio * maxDuration,
+                              speed: r.speed,
+                              easing: r.easing
+                            }));
+                            const tempEngine = new SpeedRampEngine(ramp);
+                            const sourceEnd = maxDuration - selectedClip.trimEnd;
+                            const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+                            console.log('[PRESET CLICK]', preset.id);
+                            console.log('[PRESET CLICK] selectedClip.id:', selectedClip.id);
+                            console.log('[PRESET CLICK] selectedClip.duration (old):', selectedClip.duration);
+                            console.log('[PRESET CLICK] mediaItem found?:', !!mediaItem, 'maxDuration:', maxDuration);
+                            console.log('[PRESET CLICK] trimStart:', selectedClip.trimStart, 'trimEnd:', selectedClip.trimEnd);
+                            console.log('[PRESET CLICK] sourceEnd:', sourceEnd);
+                            console.log('[PRESET CLICK] newDuration (calculated):', newDuration);
+                            console.log('[PRESET CLICK] ramp:', JSON.stringify(ramp));
+                            updateClip(selectedClip.id, { 
+                              speedRamp: ramp,
+                              duration: Math.max(0.1, newDuration)
+                            }, { ripple: true });
                             useEditorStore.getState().saveSnapshot();
                           }}
                           className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#333] border border-[#3e3e3e] rounded text-[10px] text-white transition-colors text-center truncate focus:outline-none"
@@ -3703,12 +3780,20 @@ export function PropertiesPanel() {
                       ))}
                       <button
                         onClick={() => {
+                          const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                          const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                          const currentSpeed = selectedClip.speed || 1.0;
+                          const ramp = [
+                            { id: 'start', sourceTime: 0.0, speed: currentSpeed, easing: 'linear' as const },
+                            { id: 'end', sourceTime: maxDuration, speed: currentSpeed, easing: 'linear' as const },
+                          ];
+                          const tempEngine = new SpeedRampEngine(ramp);
+                          const sourceEnd = maxDuration - selectedClip.trimEnd;
+                          const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
                           updateClip(selectedClip.id, {
-                            speedRamp: [
-                              { position: 0.0, speed: 1.0 },
-                              { position: 1.0, speed: 1.0 },
-                            ],
-                          });
+                            speedRamp: ramp,
+                            duration: Math.max(0.1, newDuration)
+                          }, { ripple: true });
                           useEditorStore.getState().saveSnapshot();
                         }}
                         className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-red-950/40 hover:border-red-900 border border-[#3e3e3e] rounded text-[10px] text-[#ff6b6b] transition-colors text-center focus:outline-none"
@@ -3721,45 +3806,76 @@ export function PropertiesPanel() {
                   {/* Keyframe List Details */}
                   <div className="space-y-1">
                     <label className="text-[10px] text-[#a0a0a0] block font-medium">Keyframes</label>
-                    <div className="space-y-1 max-h-28 overflow-y-auto pr-1 custom-scrollbar">
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
                       {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
                         const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
+                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
                         return (
                           <div
                             key={idx}
-                            className="flex items-center justify-between bg-[#1e1e1e] border border-[#3e3e3e] rounded px-2 py-0.5 text-[10px]"
+                            className="flex flex-col gap-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded p-1.5 text-[10px]"
                           >
-                            <span className="text-amber-500 font-mono">#{idx + 1}</span>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[#888]">Pos:</span>
-                              {isBoundary ? (
-                                <span className="text-white font-mono w-10 text-center">{idx === 0 ? '0%' : '100%'}</span>
-                              ) : (
-                                <input
-                                  type="number"
-                                  min={0.01}
-                                  max={0.99}
-                                  step={0.01}
-                                  value={kf.position}
-                                  onChange={(e) => {
-                                    const val = Math.max(0.01, Math.min(0.99, Number(e.target.value)));
-                                    const ramp = [...(selectedClip.speedRamp || [])];
-                                    const minP = idx > 0 ? ramp[idx - 1].position + 0.01 : 0.0;
-                                    const maxP = idx < ramp.length - 1 ? ramp[idx + 1].position - 0.01 : 1.0;
-                                    ramp[idx] = {
-                                      ...kf,
-                                      position: Math.max(minP, Math.min(maxP, val)),
-                                    };
-                                    updateClip(selectedClip.id, { speedRamp: ramp });
-                                  }}
-                                  onBlur={() => useEditorStore.getState().saveSnapshot()}
-                                  className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
-                                />
-                              )}
+                            <div className="flex items-center justify-between">
+                              <span className="text-amber-500 font-mono font-bold">Keyframe #{idx + 1}</span>
+                              <button
+                                disabled={isBoundary}
+                                onClick={() => {
+                                  const ramp = [...(selectedClip.speedRamp || [])];
+                                  ramp.splice(idx, 1);
+                                  const tempEngine = new SpeedRampEngine(ramp);
+                                  const sourceEnd = maxDuration - selectedClip.trimEnd;
+                                  const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+                                  updateClip(selectedClip.id, { 
+                                    speedRamp: ramp,
+                                    duration: Math.max(0.1, newDuration)
+                                  }, { ripple: true });
+                                  useEditorStore.getState().saveSnapshot();
+                                }}
+                                className="text-red-400 hover:text-red-500 disabled:opacity-30 disabled:pointer-events-none transition-colors focus:outline-none"
+                                title="Delete Keyframe"
+                              >
+                                <Trash2 size={11} />
+                              </button>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[#888]">Speed:</span>
-                              <input
+                            <div className="grid grid-cols-3 gap-1 items-center">
+                              <div className="flex items-center gap-1">
+                                <span className="text-[#888]">Time:</span>
+                                {isBoundary ? (
+                                  <span className="text-white font-mono">{kf.sourceTime.toFixed(1)}s</span>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    min={0.01}
+                                    max={maxDuration - 0.01}
+                                    step={0.1}
+                                    value={Math.round(kf.sourceTime * 100) / 100}
+                                    onChange={(e) => {
+                                      const val = Math.max(0.01, Math.min(maxDuration - 0.01, Number(e.target.value)));
+                                      const ramp = [...(selectedClip.speedRamp || [])];
+                                      const minSource = idx > 0 ? ramp[idx - 1].sourceTime + 0.05 : 0.0;
+                                      const maxSource = idx < ramp.length - 1 ? ramp[idx + 1].sourceTime - 0.05 : maxDuration;
+                                      ramp[idx] = {
+                                        ...kf,
+                                        sourceTime: Math.max(minSource, Math.min(maxSource, val)),
+                                      };
+                                      const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
+                                      const tempEngine = new SpeedRampEngine(sortedRamp);
+                                      const sourceEnd = maxDuration - selectedClip.trimEnd;
+                                      const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+                                      updateClip(selectedClip.id, { 
+                                        speedRamp: sortedRamp,
+                                        duration: Math.max(0.1, newDuration)
+                                      }, { ripple: true });
+                                    }}
+                                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                                    className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
+                                  />
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[#888]">Speed:</span>
+                                <input
                                   type="number"
                                   min={0.1}
                                   max={4.0}
@@ -3769,25 +3885,50 @@ export function PropertiesPanel() {
                                     const val = Math.max(0.1, Math.min(4.0, Number(e.target.value)));
                                     const ramp = [...(selectedClip.speedRamp || [])];
                                     ramp[idx] = { ...kf, speed: val };
-                                    updateClip(selectedClip.id, { speedRamp: ramp });
+                                    const tempEngine = new SpeedRampEngine(ramp);
+                                    const sourceEnd = maxDuration - selectedClip.trimEnd;
+                                    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+                                    updateClip(selectedClip.id, { 
+                                      speedRamp: ramp,
+                                      duration: Math.max(0.1, newDuration)
+                                    }, { ripple: true });
                                   }}
                                   onBlur={() => useEditorStore.getState().saveSnapshot()}
                                   className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
                                 />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[#888]">Ease:</span>
+                                <select
+                                  value={kf.easing || 'linear'}
+                                  onChange={(e) => {
+                                    const val = e.target.value as EasingType;
+                                    const ramp = [...(selectedClip.speedRamp || [])];
+                                    ramp[idx] = {
+                                      ...kf,
+                                      easing: val,
+                                      bezierControl: val === 'bezier' ? { out: { x: 0.33, y: 0 }, in: { x: 0.67, y: 1 } } : undefined
+                                    };
+                                    const tempEngine = new SpeedRampEngine(ramp);
+                                    const sourceEnd = maxDuration - selectedClip.trimEnd;
+                                    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+                                    updateClip(selectedClip.id, { 
+                                      speedRamp: ramp,
+                                      duration: Math.max(0.1, newDuration)
+                                    }, { ripple: true });
+                                    useEditorStore.getState().saveSnapshot();
+                                  }}
+                                  className="bg-black text-white text-[8px] border border-[#3e3e3e] rounded px-1 py-0.5 focus:outline-none"
+                                >
+                                  <option value="linear">Linear</option>
+                                  <option value="hold">Hold</option>
+                                  <option value="easeIn">Ease In</option>
+                                  <option value="easeOut">Ease Out</option>
+                                  <option value="easeInOut">Ease In Out</option>
+                                  <option value="bezier">Bezier</option>
+                                </select>
+                              </div>
                             </div>
-                            <button
-                              disabled={isBoundary}
-                              onClick={() => {
-                                const ramp = [...(selectedClip.speedRamp || [])];
-                                ramp.splice(idx, 1);
-                                updateClip(selectedClip.id, { speedRamp: ramp });
-                                useEditorStore.getState().saveSnapshot();
-                              }}
-                              className="text-red-400 hover:text-red-500 disabled:opacity-30 disabled:pointer-events-none transition-colors focus:outline-none"
-                              title="Delete Keyframe"
-                            >
-                              <Trash2 size={12} />
-                            </button>
                           </div>
                         );
                       })}

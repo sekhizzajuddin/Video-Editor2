@@ -2153,9 +2153,9 @@ export function PreviewCanvas() {
                       startTime: ptAbsStart,
                       zIndex: z,
                       transform: pipClip.transform || {
-                        scale: 0.5,
-                        x: 25,
-                        y: 25,
+                        scale: 30,
+                        x: 30,
+                        y: 30,
                         rotation: 0
                       }
                     };

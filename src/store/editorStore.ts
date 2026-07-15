@@ -15,7 +15,7 @@ import type {
   SubtitleItem,
   ScopeSettings,
 } from '@/types';
-import { getMediaTimeForClip, getMediaTimeAtPosition } from '@/utils/speedRamp';
+import { getMediaTimeForClip, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
 
@@ -182,7 +182,7 @@ interface EditorActions {
   addTextMedia: (text: string) => void;
   rippleDeleteClip: (clipId: string) => void;
   removeClip: (clipId: string) => void;
-  updateClip: (clipId: string, updates: Partial<TimelineClip>) => void;
+  updateClip: (clipId: string, updates: Partial<TimelineClip>, options?: { ripple?: boolean }) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
   moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[], resolveOverlap?: boolean) => void;
   resolveOverlaps: (clipIds: string[]) => void;
@@ -200,8 +200,10 @@ interface EditorActions {
   updatePipWindowDuration: (pipId: string, duration: number) => void;
   setActivePipWindow: (pipId: string | null) => void;
   addTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx', mediaId: string, startTime: number, duration: number) => void;
+  addEmptyTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx') => void;
   removeTrackFromPip: (pipId: string, trackId: string) => void;
   reorderPipTrack: (pipId: string, trackIndex: number, direction: 'up' | 'down') => void;
+  updatePipTrack: (pipId: string, trackId: string, updates: Partial<TimelineTrack>) => void;
 
   // Playback
   play: () => void;
@@ -986,6 +988,29 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       // Also delete from pipWindows tracks
       const newPipWindows = { ...state.pipWindows };
       let pipUpdated = false;
+
+      // Collect PIP window IDs associated with deleted clips
+      const allClipsDeep = getAllClipsDeep(state);
+      const deletedClipsDeep = allClipsDeep.filter(c => idsToRemove.includes(c.id));
+      const orphanPipIds = new Set<string>();
+      for (const clip of deletedClipsDeep) {
+        if (clip.pipWindowIds) {
+          clip.pipWindowIds.forEach(pid => orphanPipIds.add(pid));
+        }
+      }
+      for (const [pipId, pip] of Object.entries(state.pipWindows || {})) {
+        if (idsToRemove.includes(pip.parentClipId)) {
+          orphanPipIds.add(pipId);
+        }
+      }
+
+      if (orphanPipIds.size > 0) {
+        for (const pipId of orphanPipIds) {
+          delete newPipWindows[pipId];
+        }
+        pipUpdated = true;
+      }
+
       for (const pipId in newPipWindows) {
         const pip = newPipWindows[pipId];
         const hasClip = pip.tracks.some(t => (t.clips || []).some(c => idsToRemove.includes(c.id)));
@@ -1005,21 +1030,88 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks: newTracks,
         selectedClipId: newSelectedClipId,
         selectedClipIds: newSelectedClipIds,
-        ...(pipUpdated ? { pipWindows: newPipWindows } : {})
+        ...(pipUpdated || orphanPipIds.size > 0 ? { pipWindows: newPipWindows } : {})
       };
     });
     get().recalcTotalDuration();
     get().saveSnapshot('Delete Clip');
   },
 
-  updateClip: (clipId, updates) => {
+  updateClip: (clipId, updates, options) => {
     set((state) => {
-      const { tracks, pipWindows } = mapTracksDeep(state, (track) => ({
-        ...track,
-        clips: track.clips.map((clip) =>
-          clip.id === clipId ? { ...clip, ...updates } : clip
-        ),
-      }));
+      const found = findClipDeep(state, clipId);
+      let durationOverride = updates.duration; // Use whatever the caller passed first
+      let durationDelta = 0;
+
+      // DEBUG: Log all speed ramp updates
+      if (updates.speedRamp !== undefined || updates.duration !== undefined) {
+        console.log('[updateClip] clipId:', clipId);
+        console.log('[updateClip] updates.duration:', updates.duration);
+        console.log('[updateClip] updates.speedRamp:', updates.speedRamp ? `[${updates.speedRamp.length} kf]` : updates.speedRamp);
+        console.log('[updateClip] options:', options);
+        if (found) {
+          const mediaItem = state.mediaLibrary.find((m) => m.id === found.clip.mediaId);
+          console.log('[updateClip] found clip.duration:', found.clip.duration);
+          console.log('[updateClip] clip.trimStart:', found.clip.trimStart, 'trimEnd:', found.clip.trimEnd, 'speed:', found.clip.speed);
+          console.log('[updateClip] mediaItem found?:', !!mediaItem, 'mediaItem.duration:', mediaItem?.duration);
+        }
+      }
+
+
+      // Only auto-calculate duration if the caller did NOT provide one explicitly
+      if (found && durationOverride === undefined && (updates.speedRamp !== undefined || updates.trimStart !== undefined || updates.trimEnd !== undefined || updates.speed !== undefined)) {
+        const clip = found.clip;
+        const speedRamp = updates.speedRamp !== undefined ? updates.speedRamp : clip.speedRamp;
+        const trimStart = updates.trimStart !== undefined ? updates.trimStart : clip.trimStart;
+        const trimEnd = updates.trimEnd !== undefined ? updates.trimEnd : clip.trimEnd;
+        const speed = updates.speed !== undefined ? updates.speed : clip.speed;
+
+        const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+        // CRITICAL: use the source media duration (NOT clip.duration which is timeline duration)
+        // If mediaItem not found, use clip.duration as best guess (but this may be wrong for text/image clips)
+        const sourceDur = mediaItem ? mediaItem.duration : (clip.trimStart + clip.trimEnd + clip.duration * clip.speed);
+
+        if (speedRamp && speedRamp.length >= 2) {
+          const tempEngine = new SpeedRampEngine(speedRamp);
+          const sourceEnd = sourceDur - trimEnd;
+          const calculatedDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(trimStart);
+          durationOverride = Math.max(0.1, calculatedDuration);
+        } else if (!speedRamp || speedRamp.length < 2) {
+          // Ramp removed or simple speed change
+          const rawSourceDuration = sourceDur - trimStart - trimEnd;
+          durationOverride = Math.max(0.1, rawSourceDuration / Math.max(0.01, speed));
+        }
+      }
+
+      if (found && options?.ripple && durationOverride !== undefined) {
+        durationDelta = durationOverride - found.clip.duration;
+      }
+
+      const finalUpdates = {
+        ...updates,
+        ...(durationOverride !== undefined ? { duration: durationOverride } : {})
+      };
+
+      const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+        const isTargetTrack = 
+          (!found?.isPip && pipId === null && track.id === found?.track.id) ||
+          (found?.isPip && pipId === found.pipId && track.id === found?.track.id);
+
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            if (clip.id === clipId) {
+              return { ...clip, ...finalUpdates };
+            }
+            if (isTargetTrack && durationDelta !== 0 && found) {
+              if (clip.startTime >= found.clip.startTime + found.clip.duration - 0.001) {
+                return { ...clip, startTime: clip.startTime + durationDelta };
+              }
+            }
+            return clip;
+          }),
+        };
+      });
 
       let updatedMediaLibrary = state.mediaLibrary;
       if (updates.textSettings && (updates.textSettings as any).text !== undefined) {
@@ -1027,7 +1119,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const newName = textVal.length > 10 ? textVal.slice(0, 10) + '...' : textVal;
         
         let mediaId: string | undefined;
-        const found = findClipDeep(state, clipId);
         if (found) {
           mediaId = found.clip.mediaId;
         }
@@ -1043,8 +1134,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().recalcTotalDuration();
-    get().saveSnapshot();
+    // NOTE: saveSnapshot() is intentionally NOT called here - callers call it explicitly when needed
+    // This prevents excessive snapshot creation during drag operations
   },
+
 
   moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
     let success = false;
@@ -1053,6 +1146,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ...track,
         clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
       }));
+      const newPipWindows: Record<string, PipWindow> = JSON.parse(JSON.stringify(state.pipWindows || {}));
 
       // Find and remove the clip
       let foundClip: TimelineClip | undefined;
@@ -1065,6 +1159,21 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
+      // If not found on main timeline, search inside PIP windows
+      if (!foundClip) {
+        for (const pip of Object.values(newPipWindows)) {
+          for (const track of pip.tracks) {
+            const idx = track.clips.findIndex((c) => c.id === clipId);
+            if (idx !== -1) {
+              const [clip] = track.clips.splice(idx, 1);
+              foundClip = clip;
+              break;
+            }
+          }
+          if (foundClip) break;
+        }
+      }
+
       if (!foundClip) return {};
 
       const oldStartTime = foundClip.startTime;
@@ -1072,7 +1181,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const D = foundClip.duration;
 
       const targetTrackId = newTrackId || foundClip.trackId;
-      const targetTrack = newTracks.find((t) => t.id === targetTrackId);
+      let targetTrack = newTracks.find((t) => t.id === targetTrackId);
+      if (!targetTrack) {
+        for (const pip of Object.values(newPipWindows)) {
+          targetTrack = pip.tracks.find((t) => t.id === targetTrackId);
+          if (targetTrack) break;
+        }
+      }
 
       if (targetTrack) {
         // Enforce track type compatibility (ARCH-5)
@@ -1086,7 +1201,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
         if (state.activeTool === 'ripple') {
           // Multi-track Ripple Move: Close old gap, then open space at newStartTime
-          newTracks.forEach((track) => {
+          // Context-aware ripple move: only affect tracks in same container (main vs PIP)
+          const isTargetPip = targetTrackId.includes('_pip');
+          const tracksToRipple = isTargetPip
+            ? Object.values(newPipWindows).find((p) => p.tracks.some((t) => t.id === targetTrackId))?.tracks || []
+            : newTracks;
+
+          tracksToRipple.forEach((track) => {
             track.clips.forEach((clip) => {
               if (clip.id === clipId) return;
               if (clip.startTime >= oldStartTime) {
@@ -1095,7 +1216,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             });
           });
 
-          newTracks.forEach((track) => {
+          tracksToRipple.forEach((track) => {
             track.clips.forEach((clip) => {
               if (clip.id === clipId) return;
               if (clip.startTime >= newStartTime) {
@@ -1116,6 +1237,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         } else {
           foundClip.startTime = Math.max(0, newStartTime);
         }
+        
+        // Clamp start time and duration if track is a PIP track with manual duration
+        if (targetTrackId.includes('_pip')) {
+          const pip = Object.values(newPipWindows).find((p) => p.tracks.some((t) => t.id === targetTrackId));
+          if (pip && pip.manualDuration) {
+            if (foundClip.startTime + foundClip.duration > pip.duration) {
+              if (foundClip.startTime >= pip.duration) {
+                foundClip.startTime = Math.max(0, pip.duration - foundClip.duration);
+              }
+              if (foundClip.startTime + foundClip.duration > pip.duration) {
+                foundClip.duration = Math.max(0.1, pip.duration - foundClip.startTime);
+              }
+            }
+          }
+        }
+
         foundClip.trackId = targetTrackId;
         targetTrack.clips.push(foundClip);
         success = true;
@@ -1127,13 +1264,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             linkedClip = track.clips.find((c) => c.id === foundClip!.linkedClipId);
             if (linkedClip) break;
           }
+          if (!linkedClip) {
+            for (const pip of Object.values(newPipWindows)) {
+              for (const track of pip.tracks) {
+                linkedClip = track.clips.find((c) => c.id === foundClip!.linkedClipId);
+                if (linkedClip) break;
+              }
+              if (linkedClip) break;
+            }
+          }
           if (linkedClip) {
             linkedClip.startTime = Math.max(0, linkedClip.startTime + deltaTime);
           }
         }
       }
 
-      return { tracks: newTracks };
+      return { tracks: newTracks, pipWindows: newPipWindows };
     });
 
     if (success) {
@@ -1264,6 +1410,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ...track,
         clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
       }));
+      const newPipWindows: Record<string, PipWindow> = JSON.parse(JSON.stringify(state.pipWindows || {}));
 
       const checkOverlapLocal = (
         clips: TimelineClip[],
@@ -1282,12 +1429,31 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       for (const clipId of clipIds) {
         let currentClip: TimelineClip | undefined;
         let currentTrack: TimelineTrack | undefined;
+        let isPip = false;
+        let parentPipId = '';
 
+        // Search main timeline tracks
         for (const track of newTracks) {
           currentClip = track.clips.find((c) => c.id === clipId);
           if (currentClip) {
             currentTrack = track;
             break;
+          }
+        }
+
+        // Search PIP window tracks
+        if (!currentClip) {
+          for (const [pipId, pip] of Object.entries(newPipWindows)) {
+            for (const track of pip.tracks) {
+              currentClip = track.clips.find((c) => c.id === clipId);
+              if (currentClip) {
+                currentTrack = track;
+                isPip = true;
+                parentPipId = pipId;
+                break;
+              }
+            }
+            if (currentClip) break;
           }
         }
 
@@ -1297,7 +1463,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const hasOverlap = checkOverlapLocal(otherClipsOnTrack, currentClip.startTime, currentClip.duration, clipId);
 
         if (hasOverlap) {
-          const sameTypeTracks = newTracks.filter((t) => t.type === currentTrack!.type);
+          const contextTracks = isPip ? newPipWindows[parentPipId].tracks : newTracks;
+          const sameTypeTracks = contextTracks.filter((t) => t.type === currentTrack!.type);
           let foundTrackId = '';
 
           for (const track of sameTypeTracks) {
@@ -1313,7 +1480,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             if (foundTrackId !== currentTrack.id) {
               currentTrack.clips = currentTrack.clips.filter((c) => c.id !== clipId);
               currentClip.trackId = foundTrackId;
-              const targetTrack = newTracks.find((t) => t.id === foundTrackId);
+              const targetTrack = contextTracks.find((t) => t.id === foundTrackId);
               if (targetTrack) {
                 targetTrack.clips.push(currentClip);
               }
@@ -1321,8 +1488,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           } else {
             const sameTypeCount = sameTypeTracks.length;
             const prefix = currentTrack.type === 'video' ? 'v' : currentTrack.type === 'text' ? 't' : currentTrack.type === 'fx' ? 'fx' : 'a';
-            const newTrackId = `${prefix}${sameTypeCount + 1}`;
-            const newTrackName = newTrackId.toUpperCase();
+            const newTrackId = isPip 
+              ? `${prefix}_pip_${generateId().slice(0, 4)}`
+              : `${prefix}${sameTypeCount + 1}`;
+            const newTrackName = isPip 
+              ? `${currentTrack.type.toUpperCase()} Track ${sameTypeCount + 1}`
+              : newTrackId.toUpperCase();
 
             const newTrack: TimelineTrack = {
               id: newTrackId,
@@ -1339,13 +1510,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             currentClip.trackId = newTrackId;
             newTrack.clips.push(currentClip);
 
-            const lastIdx = newTracks.map((t) => t.type).lastIndexOf(currentTrack.type);
-            newTracks.splice(lastIdx + 1, 0, newTrack);
+            const lastIdx = contextTracks.map((t) => t.type).lastIndexOf(currentTrack.type);
+            contextTracks.splice(lastIdx + 1, 0, newTrack);
           }
         }
       }
 
-      return { tracks: newTracks };
+      return { tracks: newTracks, pipWindows: newPipWindows };
     });
 
     get().recalcTotalDuration();
@@ -1390,21 +1561,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   applyAutoCuts: (clipId, aggressiveness = 'medium') => {
     set((state) => {
-      let targetTrackIndex = -1;
-      let targetClipIndex = -1;
-      let targetClip: any = null;
+      const found = findClipDeep(state, clipId);
+      if (!found) return {};
 
-      for (let i = 0; i < state.tracks.length; i++) {
-        const cIdx = state.tracks[i].clips.findIndex((c) => c.id === clipId);
-        if (cIdx !== -1) {
-          targetTrackIndex = i;
-          targetClipIndex = cIdx;
-          targetClip = state.tracks[i].clips[cIdx];
-          break;
-        }
-      }
-
-      if (!targetClip || targetTrackIndex === -1) return state;
+      const { clip: targetClip, track: targetTrack } = found;
+      const targetClipIndex = targetTrack.clips.findIndex((c) => c.id === clipId);
+      if (targetClipIndex === -1) return {};
 
       const segments = [];
       let ct = 0;
@@ -1425,10 +1587,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
-      const newTracks = [...state.tracks];
-      const track = { ...newTracks[targetTrackIndex] };
-      const newClips = [...track.clips];
-
       const baseStart = targetClip.startTime;
       const baseTrimStart = targetClip.trimStart || 0;
       const baseTrimEnd = targetClip.trimEnd || 0;
@@ -1436,7 +1594,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       let currentTimeOffset = 0;
       let timeSaved = 0;
-      const resultingClips = [];
+      const resultingClips: TimelineClip[] = [];
 
       for (const seg of segments) {
         if (seg.keep) {
@@ -1455,21 +1613,24 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
-      // Ripple delete
-      for (let i = 0; i < newClips.length; i++) {
-        if (i !== targetClipIndex && newClips[i].startTime > baseStart) {
-          newClips[i] = {
-            ...newClips[i],
-            startTime: newClips[i].startTime - timeSaved,
-          };
+      const { tracks, pipWindows } = mapTracksDeep(state, (track) => {
+        if (track.id !== targetTrack.id) return track;
+
+        const newClips = [...track.clips];
+        for (let i = 0; i < newClips.length; i++) {
+          if (i !== targetClipIndex && newClips[i].startTime > baseStart) {
+            newClips[i] = {
+              ...newClips[i],
+              startTime: newClips[i].startTime - timeSaved,
+            };
+          }
         }
-      }
 
-      newClips.splice(targetClipIndex, 1, ...resultingClips);
-      track.clips = newClips;
-      newTracks[targetTrackIndex] = track;
+        newClips.splice(targetClipIndex, 1, ...resultingClips);
+        return { ...track, clips: newClips };
+      });
 
-      return { tracks: newTracks };
+      return { tracks, pipWindows };
     });
     get().saveSnapshot('Auto Jump Cuts');
   },
@@ -1498,48 +1659,30 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
 
         if (hasRamp) {
-          const splitP = relativeSplitTime / clip.duration; // normalized split position
+          const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+          const splitSourceTime = engine.timelineToSource(relativeSplitTime);
+          const splitSpeed = engine.getSpeedAtSourceTime(splitSourceTime);
 
-          // Compute the interpolated speed at the split point for boundary keyframes
-          // Simple linear interpolation between the two surrounding keyframes
-          const sorted = [...clip.speedRamp!].sort((a, b) => a.position - b.position);
-          let splitSpeed = sorted[0].speed;
-          for (let si = 0; si < sorted.length - 1; si++) {
-            if (splitP >= sorted[si].position && splitP <= sorted[si + 1].position) {
-              const range = sorted[si + 1].position - sorted[si].position;
-              const t = range > 0.0001 ? (splitP - sorted[si].position) / range : 0;
-              splitSpeed = sorted[si].speed + t * (sorted[si + 1].speed - sorted[si].speed);
-              break;
-            }
-          }
+          const sorted = [...clip.speedRamp!].sort((a, b) => a.sourceTime - b.sourceTime);
 
-          // Left half: keyframes in [0, splitP] rescaled to [0, 1], plus a boundary at 1.0
-          const leftKeys = sorted
-            .filter((kf) => kf.position < splitP)
-            .map((kf) => ({
-              position: splitP > 0.0001 ? kf.position / splitP : 0,
-              speed: kf.speed,
-            }));
-          // Ensure position 0 exists
-          if (leftKeys.length === 0 || leftKeys[0].position > 0.001) {
-            leftKeys.unshift({ position: 0, speed: sorted[0].speed });
-          }
-          leftKeys.push({ position: 1.0, speed: splitSpeed });
+          // Left half: keyframes in [0, splitSourceTime]
+          const leftKeys = sorted.filter((kf) => kf.sourceTime < splitSourceTime);
+          leftKeys.push({
+            id: generateId(),
+            sourceTime: splitSourceTime,
+            speed: splitSpeed,
+            easing: 'linear',
+          });
           leftSpeedRamp = leftKeys;
 
-          // Right half: keyframes in [splitP, 1] rescaled to [0, 1], plus a boundary at 0.0
-          const rightRange = 1.0 - splitP;
-          const rightKeys = sorted
-            .filter((kf) => kf.position > splitP)
-            .map((kf) => ({
-              position: rightRange > 0.0001 ? (kf.position - splitP) / rightRange : 1,
-              speed: kf.speed,
-            }));
-          rightKeys.unshift({ position: 0, speed: splitSpeed });
-          // Ensure position 1 exists
-          if (rightKeys.length < 2 || rightKeys[rightKeys.length - 1].position < 0.999) {
-            rightKeys.push({ position: 1.0, speed: sorted[sorted.length - 1].speed });
-          }
+          // Right half: keyframes in [splitSourceTime, end]
+          const rightKeys = sorted.filter((kf) => kf.sourceTime > splitSourceTime);
+          rightKeys.unshift({
+            id: generateId(),
+            sourceTime: splitSourceTime,
+            speed: splitSpeed,
+            easing: 'linear',
+          });
           rightSpeedRamp = rightKeys;
         }
 
@@ -1571,7 +1714,20 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             else if (key === 'transform.rotation') baseVal = clip.transform.rotation;
             else if (key === 'transform.rotationX') baseVal = (clip.transform as any).rotationX ?? 0;
             else if (key === 'transform.rotationY') baseVal = (clip.transform as any).rotationY ?? 0;
-            const splitVal = getInterpolatedValue(kfs, relativeSplitTime);
+            // Simple linear interpolation fallback
+            let splitVal = baseVal;
+            if (kfs.length > 0) {
+              const leftKf = [...kfs].reverse().find(k => k.time <= relativeSplitTime);
+              const rightKf = kfs.find(k => k.time >= relativeSplitTime);
+              if (leftKf && rightKf && leftKf.time !== rightKf.time) {
+                const ratio = (relativeSplitTime - leftKf.time) / (rightKf.time - leftKf.time);
+                splitVal = leftKf.value + (rightKf.value - leftKf.value) * ratio;
+              } else if (leftKf) {
+                splitVal = leftKf.value;
+              } else if (rightKf) {
+                splitVal = rightKf.value;
+              }
+            }
 
             const leftKfs = kfs.filter((k) => k.time <= relativeSplitTime);
             leftKfs.push({ time: relativeSplitTime, value: splitVal });
@@ -2200,10 +2356,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ...t,
         clips: t.clips.map(updateClipKeyframes),
       }));
-      if (updatedMediaLibrary !== state.mediaLibrary) {
-        return { tracks: newTracks, pipWindows, mediaLibrary: updatedMediaLibrary };
-      }
-      return { tracks: newTracks, pipWindows };
+      return { tracks: newTracks };
     });
   },
 
@@ -2376,7 +2529,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set({ clipboardData: null, clipboardClip: null });
   },
   pasteClip: (pasteType) => {
-    const { clipboardData, currentTime, selectedTrackId, selectedClipIds, selectedClipId, tracks } = get();
+    const {
+      clipboardData, currentTime, selectedTrackId,
+      selectedClipIds, selectedClipId, tracks,
+      activePipWindowId, pipWindows
+    } = get();
     // Fallback to clipboardClip if clipboardData doesn't exist (backwards compatibility)
     const clipData = clipboardData || (get().clipboardClip ? { type: 'whole', clips: [get().clipboardClip] } : null);
     
@@ -2410,15 +2567,30 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const firstCopiedClip = clipData.clips[0] as any;
     let targetTrackId = selectedTrackId;
     if (!targetTrackId) {
-      if (tracks.length === 0) return;
+      let searchTracks = tracks;
+      if (activePipWindowId && pipWindows[activePipWindowId]) {
+        searchTracks = pipWindows[activePipWindowId].tracks;
+      }
+      if (searchTracks.length === 0) return;
       const preferredType = firstCopiedClip.trackType || (firstCopiedClip.mediaId ? 'video' : 'text');
-      const matchTrack = tracks.find(t => t.type === preferredType);
-      targetTrackId = matchTrack ? matchTrack.id : tracks[0].id;
+      const matchTrack = searchTracks.find(t => t.type === preferredType);
+      targetTrackId = matchTrack ? matchTrack.id : searchTracks[0].id;
     }
     
     // Sort copied clips by startTime to maintain relative spacing
     const sortedClips = [...clipData.clips].sort((a: any, b: any) => a.startTime - b.startTime);
-    const baseTimeOffset = currentTime - (sortedClips[0]?.startTime || 0);
+    
+    // Calculate local playhead position if inside PIP
+    let localCurrentTime = currentTime;
+    if (activePipWindowId && pipWindows[activePipWindowId]) {
+      const activePip = pipWindows[activePipWindowId];
+      const foundParent = findClipDeep(get(), activePip.parentClipId);
+      if (foundParent) {
+        const pipAbsStart = foundParent.clip.startTime + (activePip.relativeStartTime || 0);
+        localCurrentTime = Math.max(0, currentTime - pipAbsStart);
+      }
+    }
+    const baseTimeOffset = localCurrentTime - (sortedClips[0]?.startTime || 0);
 
     const newClips = sortedClips.map((clip: any) => {
       // Use structuredClone to safely deep clone nested properties (transform, colorFilters, etc)
@@ -2826,7 +2998,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           }
         }
         // Duration is maxClipEnd + 3 seconds, capped at 10 minutes (600 seconds)
-        const targetDuration = Math.min(600, Math.max(5, maxClipEnd + 3));
+        // If manualDuration is set, respect it but ensure it is at least maxClipEnd
+        const targetDuration = pip.manualDuration
+          ? Math.max(pip.duration, maxClipEnd)
+          : Math.min(600, Math.max(5, maxClipEnd + 3));
         if (pip.duration !== targetDuration) {
           updatedPipWindows[id] = { ...pip, duration: targetDuration };
           pipChanged = true;
@@ -2879,7 +3054,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().saveSnapshot('Create PIP Window');
-    window.alert('DEBUG: PIP Window created in store! ID: ' + id);
   },
 
   deletePipWindow: (pipId) => {
@@ -2937,7 +3111,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return {
         pipWindows: {
           ...state.pipWindows,
-          [pipId]: { ...pip, duration: Math.max(0.5, duration) }
+          [pipId]: { ...pip, duration: Math.max(0.5, duration), manualDuration: true }
         }
       };
     });
@@ -2962,11 +3136,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const existingTrack = pip.tracks.find((t) => t.type === type);
       
       if (existingTrack) {
-        // Find end time of the last clip in the track to append sequential clips
         let lastEnd = 0;
         for (const c of existingTrack.clips) {
           const end = c.startTime + c.duration;
           if (end > lastEnd) lastEnd = end;
+        }
+
+        let targetDuration = duration;
+        if (pip.manualDuration) {
+          const maxDur = pip.duration - lastEnd;
+          if (maxDur <= 0.05) return {}; // No space left
+          targetDuration = Math.min(duration, maxDur);
         }
 
         const newClip: TimelineClip = {
@@ -2974,7 +3154,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           trackId: existingTrack.id,
           mediaId,
           startTime: lastEnd, // Append to the end of the track
-          duration,
+          duration: targetDuration,
           trimStart: 0,
           trimEnd: 0,
           transform: { x: 30, y: 30, scale: 30, rotation: 0 },
@@ -2998,12 +3178,20 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         };
       } else {
         const trackId = generateId();
+        
+        let targetDuration = duration;
+        if (pip.manualDuration) {
+          const maxDur = pip.duration - startTime;
+          if (maxDur <= 0.05) return {};
+          targetDuration = Math.min(duration, maxDur);
+        }
+
         const newClip: TimelineClip = {
           id: generateId(),
           trackId,
           mediaId,
           startTime,
-          duration,
+          duration: targetDuration,
           trimStart: 0,
           trimEnd: 0,
           transform: { x: 30, y: 30, scale: 30, rotation: 0 }, // Default to bottom-right corner for PIP
@@ -3032,6 +3220,41 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
     get().recalcTotalDuration();
     get().saveSnapshot('Add PIP Clip');
+  },
+
+  addEmptyTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx') => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+
+      let prefix = 'v';
+      if (type === 'audio') prefix = 'a';
+      if (type === 'text') prefix = 't';
+      if (type === 'fx') prefix = 'fx';
+
+      const trackId = `${prefix}_pip_${generateId().slice(0, 4)}`;
+
+      const newTrack: TimelineTrack = {
+        id: trackId,
+        name: `${type.toUpperCase()} Track ${pip.tracks.length + 1}`,
+        type,
+        clips: [],
+        locked: false,
+        muted: false,
+        hidden: false,
+      };
+
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: {
+            ...pip,
+            tracks: [...pip.tracks, newTrack]
+          }
+        }
+      };
+    });
+    get().saveSnapshot('Add PIP Track');
   },
 
   removeTrackFromPip: (pipId: string, trackId: string) => {
@@ -3073,6 +3296,25 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       };
     });
+  },
+
+  updatePipTrack: (pipId, trackId, updates) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: {
+            ...pip,
+            tracks: pip.tracks.map(t =>
+              t.id === trackId ? { ...t, ...updates } : t
+            )
+          }
+        }
+      };
+    });
+    get().saveSnapshot('Update PIP Track');
   },
 
   // Keyboard Delete — remove selected PIP window or clip

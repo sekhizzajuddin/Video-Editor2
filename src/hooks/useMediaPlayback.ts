@@ -131,7 +131,11 @@ function findClipById(clipId: string) {
           const pipClip = pipTrack.clips.find(c => c.id === clipId);
           if (pipClip) {
             const absStartTime = clip.startTime + pip.relativeStartTime + pipClip.startTime;
-            return { clip: pipClip, track, absStartTime };
+            const mergedTrack = {
+              ...pipTrack,
+              muted: track.muted || pipTrack.muted || pipTrack.hidden
+            };
+            return { clip: pipClip, track: mergedTrack, absStartTime };
           }
         }
       }
@@ -255,7 +259,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
               for (const pipClip of pipTrack.clips) {
                 const ptAbsStart = pipAbsStart + pipClip.startTime;
                 if (currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
-                  addIfNew(pipClip, track, ptAbsStart);
+                  const mergedTrack = {
+                    ...pipTrack,
+                    muted: track.muted || pipTrack.muted || pipTrack.hidden
+                  };
+                  addIfNew(pipClip, mergedTrack, ptAbsStart);
                 }
               }
             }
