@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2, Sparkles, Image as ImageIcon, Video, Wand2, Download, Plus, Trash2 } from 'lucide-react';
-import { fetchVideoModels, generateAIVideo, checkVideoJobStatus } from '../utils/openRouterVideo';
+import { fetchAIModels, generateAIVideo, checkVideoJobStatus } from '../utils/openRouterVideo';
 import { OpenRouterModel } from '../types';
 import { useEditorStore } from '../store/editorStore';
 import { toast } from 'sonner';
@@ -41,7 +41,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
       // First try ENV key
       if (envKey) {
         try {
-          fetchedModels = await fetchVideoModels(envKey);
+          fetchedModels = await fetchAIModels(envKey);
           if (fetchedModels.length > 0) activeKey = envKey;
         } catch (e) {
           console.warn('ENV API key failed, falling back to settings key', e);
@@ -51,7 +51,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
       // If ENV failed or missing, try settings key
       if (fetchedModels.length === 0 && settingsKey) {
         try {
-          fetchedModels = await fetchVideoModels(settingsKey);
+          fetchedModels = await fetchAIModels(settingsKey);
           if (fetchedModels.length > 0) activeKey = settingsKey;
         } catch (e) {
           console.warn('Settings API key also failed', e);

@@ -2,7 +2,7 @@ import { OpenRouterModel } from '../types';
 
 const BASE_URL = 'https://openrouter.ai/api/v1';
 
-export const fetchVideoModels = async (apiKey: string): Promise<OpenRouterModel[]> => {
+export const fetchAIModels = async (apiKey: string): Promise<OpenRouterModel[]> => {
   try {
     const response = await fetch(`${BASE_URL}/models`, {
       method: 'GET',
