@@ -28,17 +28,34 @@ function captureVideoFrame(
   maxWidth = 320
 ): Promise<string> {
   return new Promise((resolve) => {
+    let resolved = false;
     video.currentTime = seekTime;
-    const onSeeked = () => {
+
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
       video.removeEventListener('seeked', onSeeked);
+      clearTimeout(timeoutId);
+
       const canvas = document.createElement('canvas');
-      const aspect = video.videoWidth / (video.videoHeight || 1);
-      canvas.width = Math.min(maxWidth, video.videoWidth);
+      const aspect = (video.videoWidth || 320) / (video.videoHeight || 180);
+      canvas.width = Math.min(maxWidth, video.videoWidth || 320);
       canvas.height = canvas.width / aspect;
       const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } catch (e) {}
       resolve(canvas.toDataURL('image/jpeg', 0.7));
     };
+
+    const onSeeked = () => {
+      finish();
+    };
+
+    const timeoutId = setTimeout(() => {
+      finish();
+    }, 1000);
+
     video.addEventListener('seeked', onSeeked);
   });
 }

@@ -10,6 +10,13 @@ const ffmpeg = new FFmpeg();
 // FFmpeg singleton load state
 let ffmpegLoadPromise: Promise<void> | null = null;
 let ffmpegLogs: string[] = [];
+let ffmpegLogHandlerRegistered = false;
+
+const ffmpegLogHandler = ({ message }: { message: string }) => {
+  ffmpegLogs.push(message);
+  if (ffmpegLogs.length > 200) ffmpegLogs.shift();
+  console.log('[FFmpeg]', message);
+};
 
 async function ensureFFmpegLoaded(): Promise<void> {
   if (ffmpeg.loaded) return;
@@ -23,12 +30,10 @@ async function ensureFFmpegLoaded(): Promise<void> {
     // which FFmpeg's worker can load correctly without COEP/CORS issues
     const baseURL = window.location.origin + '/ffmpeg';
 
-    ffmpeg.on('log', ({ message }) => {
-    // FIX M9: Cap log array at 500 entries to prevent unbounded memory growth
-    if (ffmpegLogs.length >= 500) ffmpegLogs.splice(0, ffmpegLogs.length - 499);
-    ffmpegLogs.push(message);
-    console.log('[FFmpeg]', message);
-  });
+    if (!ffmpegLogHandlerRegistered) {
+      ffmpeg.on('log', ffmpegLogHandler);
+      ffmpegLogHandlerRegistered = true;
+    }
 
     await ffmpeg.load({
       coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
@@ -83,6 +88,7 @@ export function ExportModal() {
   const videoStreamRef = useRef<MediaStream | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchTimeoutsRef = useRef<any[]>([]);
 
   // Refs for values that onstop callback needs without stale closures
   const exportFormatRef = useRef(exportFormat);
@@ -102,13 +108,18 @@ export function ExportModal() {
 
   // Cleanup function
   const cleanup = useCallback(() => {
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      try { recorderRef.current.stop(); } catch { /* ignore */ }
+    if (recorderRef.current) {
+      recorderRef.current.ondataavailable = null;
+      recorderRef.current.onstop = null;
+      recorderRef.current.onerror = null;
+      if (recorderRef.current.state !== 'inactive') {
+        try { recorderRef.current.stop(); } catch { /* ignore */ }
+      }
     }
     recorderRef.current = null;
 
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current.getVideoTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
     if (videoStreamRef.current) {
@@ -121,9 +132,13 @@ export function ExportModal() {
       timeoutRef.current = null;
     }
 
+    batchTimeoutsRef.current.forEach((t) => clearTimeout(t));
+    batchTimeoutsRef.current = [];
+
     try {
       if (ffmpeg.loaded) {
         ffmpeg.terminate();
+        ffmpegLoadPromise = null;
       }
     } catch (_) {}
 
@@ -409,7 +424,7 @@ export function ExportModal() {
     // The onstop handler is the CRITICAL path — it processes the recording
     recorder.onstop = async () => {
       videoStream.getTracks().forEach((t) => t.stop());
-      combinedStream.getTracks().forEach((t) => t.stop());
+      combinedStream.getVideoTracks().forEach((t) => t.stop());
       videoStreamRef.current = null;
       streamRef.current = null;
 
@@ -446,17 +461,19 @@ export function ExportModal() {
         setStatusMsg('Download started!');
         isExportingRef.current = false;
         setIsExporting(false);
-        setTimeout(() => {
+        const tId = setTimeout(() => {
           if (exportStatusRef.current === 'done') {
             if (currentBatchIndexRef.current < batchTargetsRef.current.length - 1) {
               // Start next batch!
               setCurrentBatchIndex(prev => prev + 1);
               updateStatus('idle');
               setIsExporting(false);
-              setTimeout(() => {
+              const tId2 = setTimeout(() => {
                 useEditorStore.getState().setAspectRatio(batchTargetsRef.current[currentBatchIndexRef.current] as any);
-                setTimeout(() => handleExport(), 500); // Give canvas time to resize
+                const tId3 = setTimeout(() => handleExport(), 500); // Give canvas time to resize
+                batchTimeoutsRef.current.push(tId3);
               }, 100);
+              batchTimeoutsRef.current.push(tId2);
             } else {
               setShowExportModal(false);
               setIsExporting(false);
@@ -465,6 +482,7 @@ export function ExportModal() {
             }
           }
         }, 2000);
+        batchTimeoutsRef.current.push(tId);
         return;
       }
 
@@ -485,17 +503,19 @@ export function ExportModal() {
         setStatusMsg('MP4 export complete!');
         isExportingRef.current = false;
         setIsExporting(false);
-        setTimeout(() => {
+        const tId = setTimeout(() => {
           if (exportStatusRef.current === 'done') {
             if (currentBatchIndexRef.current < batchTargetsRef.current.length - 1) {
               // Start next batch!
               setCurrentBatchIndex(prev => prev + 1);
               updateStatus('idle');
               setIsExporting(false);
-              setTimeout(() => {
+              const tId2 = setTimeout(() => {
                 useEditorStore.getState().setAspectRatio(batchTargetsRef.current[currentBatchIndexRef.current] as any);
-                setTimeout(() => handleExport(), 500); // Give canvas time to resize
+                const tId3 = setTimeout(() => handleExport(), 500); // Give canvas time to resize
+                batchTimeoutsRef.current.push(tId3);
               }, 100);
+              batchTimeoutsRef.current.push(tId2);
             } else {
               setShowExportModal(false);
               setIsExporting(false);
@@ -504,6 +524,7 @@ export function ExportModal() {
             }
           }
         }, 2000);
+        batchTimeoutsRef.current.push(tId);
       } catch (err: any) {
         console.error('FFmpeg MP4 export failed:', err);
         isExportingRef.current = false;

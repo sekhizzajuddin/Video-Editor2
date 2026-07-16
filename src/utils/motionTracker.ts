@@ -1,4 +1,5 @@
 import { CornerPoints } from '@/types';
+import { useEditorStore } from '@/store/editorStore';
 
 interface Point {
   x: number;
@@ -108,10 +109,22 @@ export async function trackMotion(
   const frameInterval = 1 / fps;
   const numSteps = Math.ceil(duration / frameInterval);
 
-  // Setup offscreen canvas to extract video frames
+  // Setup offscreen canvas dynamically based on aspect ratio
+  const store = useEditorStore.getState();
+  const aspectRatio = store.aspectRatio || '16:9';
+  let W = 854;
+  let H = 480;
+  if (aspectRatio === '9:16') {
+    W = 270;
+  } else if (aspectRatio === '1:1') {
+    W = 480;
+  } else if (aspectRatio === '4:3') {
+    W = 640;
+  }
+
   const canvas = document.createElement('canvas');
-  canvas.width = 854;
-  canvas.height = 480;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Could not create 2D canvas context');
 

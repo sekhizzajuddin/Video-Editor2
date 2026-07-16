@@ -188,7 +188,10 @@ export function generateFileHash(file: File): string {
 export async function saveProjectToDB(data: {
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
-  folders?: any[]; // Making it optional for backward compatibility
+  folders?: any[];
+  subtitles?: any[];
+  markers?: any[];
+  beatMarkers?: any[];
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
@@ -232,6 +235,18 @@ export async function saveProjectToDB(data: {
       }
       if (data.aspectRatio) {
         store.put(data.aspectRatio, 'aspectRatio');
+      }
+      if (data.folders) {
+        store.put(data.folders, 'folders');
+      }
+      if (data.subtitles) {
+        store.put(data.subtitles, 'subtitles');
+      }
+      if (data.markers) {
+        store.put(data.markers, 'markers');
+      }
+      if (data.beatMarkers) {
+        store.put(data.beatMarkers, 'beatMarkers');
       }
 
       transaction.oncomplete = () => resolve();
@@ -327,6 +342,9 @@ export async function loadProjectFromDB(): Promise<{
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
   folders?: any[];
+  subtitles?: any[];
+  markers?: any[];
+  beatMarkers?: any[];
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
@@ -349,6 +367,10 @@ export async function loadProjectFromDB(): Promise<{
     const currentTime = (await getValue('currentTime') as number) || 0;
     const aspectRatio = (await getValue('aspectRatio') as any) || '16:9';
     const pipWindows = (await getValue('pipWindows')) || {};
+    const folders = (await getValue('folders')) || [];
+    const subtitles = (await getValue('subtitles')) || [];
+    const markers = (await getValue('markers')) || [];
+    const beatMarkers = (await getValue('beatMarkers')) || [];
 
     if (!rawTracks || !rawMediaLibrary) return null;
 
@@ -361,6 +383,10 @@ export async function loadProjectFromDB(): Promise<{
     return {
       ...restored,
       pipWindows,
+      folders,
+      subtitles,
+      markers,
+      beatMarkers,
     };
   } catch (err) {
     console.error('Failed to load project from DB:', err);

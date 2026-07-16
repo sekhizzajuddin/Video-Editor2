@@ -25,9 +25,11 @@ const debouncedSaveProject = (state: any) => {
   if (saveTimeoutId) {
     clearTimeout(saveTimeoutId);
   }
+  useEditorStore.setState({ hasUnsavedChanges: true });
   saveTimeoutId = setTimeout(() => {
-    const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName, pipWindows } = state;
-    saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, pipWindows } as any).then(() => {
+    const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows } = state;
+    saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows } as any).then(() => {
+      useEditorStore.setState({ hasUnsavedChanges: false });
       if (projectId !== 'default') {
         saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
       }
@@ -1194,16 +1196,21 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           if (targetTrack) break;
         }
       }
-
       if (targetTrack) {
         // Enforce track type compatibility (ARCH-5)
         const media = state.mediaLibrary.find((m) => m.id === foundClip!.mediaId);
-        const isClipAudio = media ? media.type === 'audio' : (foundClip!.audioSettings !== undefined && !foundClip!.transform);
-        if (targetTrack.type === 'audio' && !isClipAudio) {
+        const clipType = media ? media.type : (foundClip!.textSettings ? 'text' : (foundClip!.fxSettings ? 'fx' : (foundClip!.audioSettings !== undefined && !foundClip!.transform ? 'audio' : 'video')));
+        if (targetTrack.type === 'audio' && clipType !== 'audio') {
           return {}; // Reject move of visual clip to audio track
         }
-        if (targetTrack.type === 'video' && isClipAudio) {
+        if (targetTrack.type === 'video' && clipType !== 'video' && clipType !== 'image') {
           return {}; // Reject move of audio clip to video track
+        }
+        if (targetTrack.type === 'text' && clipType !== 'text') {
+          return {}; // Reject move of non-text clip to text track
+        }
+        if (targetTrack.type === 'fx' && clipType !== 'fx') {
+          return {}; // Reject move of non-fx clip to fx track
         }
         if (state.activeTool === 'ripple') {
           // Multi-track Ripple Move: Close old gap, then open space at newStartTime
@@ -1496,10 +1503,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             const prefix = currentTrack.type === 'video' ? 'v' : currentTrack.type === 'text' ? 't' : currentTrack.type === 'fx' ? 'fx' : 'a';
             const newTrackId = isPip 
               ? `${prefix}_pip_${generateId().slice(0, 4)}`
-              : `${prefix}${sameTypeCount + 1}`;
+              : `track_${prefix}_${generateId()}`;
             const newTrackName = isPip 
               ? `${currentTrack.type.toUpperCase()} Track ${sameTypeCount + 1}`
-              : newTrackId.toUpperCase();
+              : `${prefix.toUpperCase()}${sameTypeCount + 1}`;
 
             const newTrack: TimelineTrack = {
               id: newTrackId,
@@ -1552,6 +1559,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
 
     if (!targetTrack) return { canMove: false, newPosition: newStartTime };
+
+    // Enforce track type compatibility
+    const media = state.mediaLibrary.find((m) => m.id === foundClip!.mediaId);
+    const clipType = media ? media.type : (foundClip!.textSettings ? 'text' : (foundClip!.fxSettings ? 'fx' : (foundClip!.audioSettings !== undefined && !foundClip!.transform ? 'audio' : 'video')));
+    if (targetTrack.type === 'audio' && clipType !== 'audio') {
+      return { canMove: false, newPosition: newStartTime };
+    }
+    if (targetTrack.type === 'video' && clipType !== 'video' && clipType !== 'image') {
+      return { canMove: false, newPosition: newStartTime };
+    }
+    if (targetTrack.type === 'text' && clipType !== 'text') {
+      return { canMove: false, newPosition: newStartTime };
+    }
+    if (targetTrack.type === 'fx' && clipType !== 'fx') {
+      return { canMove: false, newPosition: newStartTime };
+    }
 
     const otherClips = targetTrack.clips.filter((c) => c.id !== clipId);
     const adjustedStart = findNonOverlappingPosition(
@@ -1751,27 +1774,25 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
 
         const leftClip: TimelineClip = {
-          ...clip,
+          ...structuredClone(clip),
           id: leftClipId,
           splitGroupId: groupId,
           duration: relativeSplitTime,
           trimEnd: hasRamp
-            ? clip.trimEnd + (originalMediaDuration - (splitMediaTime - clip.trimStart))
+            ? originalMediaDuration - splitMediaTime
             : clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
-          effects: [...clip.effects],
           transitionOut: undefined, // Clear transition on the first half of the split
           speedRamp: leftSpeedRamp,
           animations: leftAnimations,
         };
 
         const rightClip: TimelineClip = {
-          ...clip,
+          ...structuredClone(clip),
           id: rightClipId,
           splitGroupId: groupId,
           startTime: splitTime,
           duration: clip.duration - relativeSplitTime,
           trimStart: splitMediaTime,
-          effects: [...clip.effects],
           transitionIn: undefined, // Clear transition on the second half of the split
           speedRamp: rightSpeedRamp,
           animations: rightAnimations,
@@ -2028,16 +2049,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set((state) => ({
       markers: [...state.markers, marker],
     }));
+    get().saveSnapshot('Add Marker');
   },
   updateMarker: (id, updates) => {
     set((state) => ({
       markers: state.markers.map((m) => (m.id === id ? { ...m, ...updates } : m)),
     }));
+    get().saveSnapshot('Update Marker');
   },
   removeMarker: (id) => {
     set((state) => ({
       markers: state.markers.filter((m) => m.id !== id),
     }));
+    get().saveSnapshot('Remove Marker');
   },
 
 
@@ -2176,7 +2200,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (type === 'text') prefix = 't';
     if (type === 'fx') prefix = 'fx';
     
-    const id = `${prefix}${get().tracks.filter((t) => t.type === type).length + 1}`;
+    const typeCount = get().tracks.filter((t) => t.type === type).length;
+    const id = `track_${prefix}_${generateId()}`;
     
     let linkedTrackId: string | undefined = undefined;
     if (type === 'fx') {
@@ -2192,7 +2217,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set((state) => {
       const newTrack = {
         id,
-        name: id.toUpperCase(),
+        name: `${prefix.toUpperCase()}${typeCount + 1}`,
         type,
         linkedTrackId,
         clips: [],
@@ -2364,6 +2389,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
       return { tracks: newTracks };
     });
+    get().saveSnapshot('Add Keyframe');
   },
 
   deleteMasterKeyframe: (clipId, time) => {
@@ -2414,6 +2440,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
       return { tracks: newTracks };
     });
+    get().saveSnapshot('Delete Keyframe');
   },
 
   moveMasterKeyframe: (clipId, oldTime, newTime) => {
@@ -2441,6 +2468,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
       return { tracks: newTracks };
     });
+    get().saveSnapshot('Move Keyframe');
   },
 
   breakMasterKeyframeLink: (clipId, time) => {
@@ -2467,6 +2495,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }));
       return { tracks: newTracks };
     });
+    get().saveSnapshot('Toggle Easing Hold');
   },
 
   toggleKeyframeLineSelection: (clipId, time, multi = false) => set((state) => {
@@ -2482,28 +2511,31 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
   }),
 
-  removeSelectedKeyframeLines: () => set((state) => {
-    if (state.selectedKeyframeLines.length === 0) return state;
-    const newTracks = state.tracks.map((t) => ({
-      ...t,
-      clips: t.clips.map((c) => {
-        const linesForClip = state.selectedKeyframeLines.filter((l: any) => l.clipId === c.id);
-        if (linesForClip.length === 0 || !c.animations) return c;
-        const anims: any = { ...c.animations };
-        Object.keys(anims).forEach(k => {
-          if (anims[k]) {
-            // FIX C11: Actually REMOVE the keyframes at the selected times instead of setting holdNext
-            anims[k] = anims[k].filter((kf: any) =>
-              !linesForClip.some((line: any) => Math.abs(kf.time - line.time) < 0.05)
-            );
-            if (anims[k].length === 0) delete anims[k];
-          }
-        });
-        return { ...c, animations: anims };
-      })
-    }));
-    return { tracks: newTracks, selectedKeyframeLines: [] };
-  }),
+  removeSelectedKeyframeLines: () => {
+    set((state) => {
+      if (state.selectedKeyframeLines.length === 0) return {};
+      const newTracks = state.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => {
+          const linesForClip = state.selectedKeyframeLines.filter((l: any) => l.clipId === c.id);
+          if (linesForClip.length === 0 || !c.animations) return c;
+          const anims: any = { ...c.animations };
+          Object.keys(anims).forEach(k => {
+            if (anims[k]) {
+              // FIX C11: Actually REMOVE the keyframes at the selected times instead of setting holdNext
+              anims[k] = anims[k].filter((kf: any) =>
+                !linesForClip.some((line: any) => Math.abs(kf.time - line.time) < 0.05)
+              );
+              if (anims[k].length === 0) delete anims[k];
+            }
+          });
+          return { ...c, animations: anims };
+        })
+      }));
+      return { tracks: newTracks, selectedKeyframeLines: [] };
+    });
+    get().saveSnapshot('Remove Keyframes');
+  },
 
   updateSettings: (newSettings) => set((state) => ({
     settings: { ...state.settings, ...newSettings }
@@ -2651,12 +2683,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (!selectedClipId) return;
     const found = findClipDeep(get(), selectedClipId);
     if (found) {
+      const clonedClip = structuredClone(found.clip);
       const dup = {
-        ...found.clip,
+        ...clonedClip,
         id: generateId(),
         startTime: found.clip.startTime + found.clip.duration,
         splitGroupId: undefined,
-        effects: [...found.clip.effects],
         isPreview: false,
       };
       get().addClip(dup);
@@ -2680,6 +2712,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks: JSON.parse(JSON.stringify(state.tracks)),
         currentTime: state.currentTime,
         pipWindows: JSON.parse(JSON.stringify(state.pipWindows || {})),
+        subtitles: JSON.parse(JSON.stringify(state.subtitles || [])),
+        markers: JSON.parse(JSON.stringify(state.markers || [])),
+        beatMarkers: JSON.parse(JSON.stringify(state.beatMarkers || [])),
         label: label || defaultLabel,
       };
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -2708,6 +2743,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks: JSON.parse(JSON.stringify(snap.tracks)),
         currentTime: snap.currentTime,
         pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
+        subtitles: JSON.parse(JSON.stringify(snap.subtitles || [])),
+        markers: JSON.parse(JSON.stringify(snap.markers || [])),
+        beatMarkers: JSON.parse(JSON.stringify(snap.beatMarkers || [])),
         historyIndex: state.historyIndex - 1,
       };
     });
@@ -2721,6 +2759,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks: JSON.parse(JSON.stringify(snap.tracks)),
         currentTime: snap.currentTime,
         pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
+        subtitles: JSON.parse(JSON.stringify(snap.subtitles || [])),
+        markers: JSON.parse(JSON.stringify(snap.markers || [])),
+        beatMarkers: JSON.parse(JSON.stringify(snap.beatMarkers || [])),
         historyIndex: state.historyIndex + 1,
       };
     });
@@ -2734,6 +2775,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks: JSON.parse(JSON.stringify(snap.tracks)),
         currentTime: snap.currentTime,
         pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
+        subtitles: JSON.parse(JSON.stringify(snap.subtitles || [])),
+        markers: JSON.parse(JSON.stringify(snap.markers || [])),
+        beatMarkers: JSON.parse(JSON.stringify(snap.beatMarkers || [])),
         historyIndex: index,
         selectedClipId: null,
         selectedClipIds: [],
@@ -2796,10 +2840,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const loadedTracks = data.tracks;
 
       const loadedPipWindows = (data as any).pipWindows || {};
+      const folders = data.folders || [];
+      const subtitles = (data as any).subtitles || [];
+      const markers = (data as any).markers || [];
+      const beatMarkers = (data as any).beatMarkers || [];
       set({
         tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
-        folders: data.folders || [],
+        folders,
+        subtitles,
+        markers,
+        beatMarkers,
         currentTime: data.currentTime,
         aspectRatio: data.aspectRatio || '16:9',
         pipWindows: loadedPipWindows,
@@ -2809,6 +2860,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             tracks: JSON.parse(JSON.stringify(loadedTracks)),
             currentTime: data.currentTime,
             pipWindows: JSON.parse(JSON.stringify(loadedPipWindows)),
+            subtitles: JSON.parse(JSON.stringify(subtitles)),
+            markers: JSON.parse(JSON.stringify(markers)),
+            beatMarkers: JSON.parse(JSON.stringify(beatMarkers)),
           }
         ],
         historyIndex: 0
@@ -3345,11 +3399,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ...times.map((time) => ({ time, clipId })),
       ].sort((a, b) => a.time - b.time),
     }));
+    get().saveSnapshot('Add Beat Markers');
   },
   clearBeatMarkers: (clipId) => {
     set((state) => ({
       beatMarkers: state.beatMarkers.filter((b) => b.clipId !== clipId),
     }));
+    get().saveSnapshot('Clear Beat Markers');
   },
 
   // Layout Presets
@@ -3412,17 +3468,20 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 }));
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', () => {
-    if (saveTimeoutId) {
-      clearTimeout(saveTimeoutId);
-      const state = useEditorStore.getState();
-      const { tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId, projectName } = state;
-      // Immediate save on close
-      saveProjectToDB({ tracks, mediaLibrary, folders, currentTime, aspectRatio, projectId } as any).then(() => {
+  window.addEventListener('beforeunload', (event) => {
+    const state = useEditorStore.getState();
+    if (state.hasUnsavedChanges || saveTimeoutId) {
+      if (saveTimeoutId) {
+        clearTimeout(saveTimeoutId);
+        const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows } = state;
+        // Immediate save on close
+        saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows } as any).catch(console.error);
         if (projectId !== 'default') {
           saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
         }
-      }).catch(console.error);
+      }
+      event.preventDefault();
+      event.returnValue = '';
     }
   });
 }

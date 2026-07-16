@@ -700,6 +700,12 @@ export function MediaPanel() {
   const [sfxGenerationProgress, setSfxGenerationProgress] = useState(0);
   const [sfxGeneratedCues, setSfxGeneratedCues] = useState<any[] | null>(null);
   const sfxBlobUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    return () => {
+      sfxBlobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+      sfxBlobUrlsRef.current = [];
+    };
+  }, []);
   const [showAiSfxModal, setShowAiSfxModal] = useState(false);
   const [showAIGeneratorModal, setShowAIGeneratorModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -880,6 +886,18 @@ export function MediaPanel() {
       setImportProgressPct((i / fileArray.length) * 100);
 
       try {
+        const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        const supportedExtensions = [
+          '.mp4', '.webm', '.ogg', '.mov', '.mkv',
+          '.mp3', '.wav', '.m4a', '.aac',
+          '.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg',
+          '.cube'
+        ];
+        if (!supportedExtensions.includes(ext)) {
+          toast.error(`Unsupported file type: ${file.name}`);
+          continue;
+        }
+
         // Handle .cube LUT files specially
         if (file.name.toLowerCase().endsWith('.cube')) {
           const text = await file.text();
@@ -998,6 +1016,9 @@ export function MediaPanel() {
           if (match.url && match.url.startsWith('blob:')) {
             URL.revokeObjectURL(match.url);
           }
+          if (match.thumbnail && match.thumbnail.startsWith('blob:') && match.thumbnail !== match.url) {
+            URL.revokeObjectURL(match.thumbnail);
+          }
           const objectUrl = URL.createObjectURL(file);
           
           // Save file to IndexedDB
@@ -1064,6 +1085,13 @@ export function MediaPanel() {
   }, [importFiles]);
 
   const handleDelete = (id: string) => {
+    const item = mediaLibrary.find((m) => m.id === id);
+    if (item && item.url && item.url.startsWith('blob:')) {
+      try { URL.revokeObjectURL(item.url); } catch (e) { console.error(e); }
+    }
+    if (item && item.thumbnail && item.thumbnail.startsWith('blob:')) {
+      try { URL.revokeObjectURL(item.thumbnail); } catch (e) { console.error(e); }
+    }
     removeMedia(id);
     setConfirmDeleteId(null);
   };

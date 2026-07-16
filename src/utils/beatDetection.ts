@@ -19,28 +19,16 @@ export interface BeatDetectionResult {
  * Detect beats in an audio file given its blob URL.
  * Returns beat timestamps in seconds.
  */
-let sharedDecodeCtx: AudioContext | OfflineAudioContext | null = null;
-
-function getDecodeContext(): AudioContext | OfflineAudioContext {
-  if (!sharedDecodeCtx) {
-    if (typeof OfflineAudioContext !== 'undefined') {
-      sharedDecodeCtx = new OfflineAudioContext(1, 1, 44100);
-    } else {
-      sharedDecodeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-  }
-  return sharedDecodeCtx;
-}
-
 export async function detectBeats(url: string): Promise<BeatDetectionResult> {
-  const audioCtx = getDecodeContext();
+  const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  
+  try {
+    // Fetch and decode audio
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-  // Fetch and decode audio
-  const response = await fetch(url);
-  const arrayBuffer = await response.arrayBuffer();
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-
-  const sampleRate = audioBuffer.sampleRate;
+    const sampleRate = audioBuffer.sampleRate;
   const channelData = audioBuffer.getChannelData(0);
   const duration = audioBuffer.duration;
 
@@ -105,6 +93,9 @@ export async function detectBeats(url: string): Promise<BeatDetectionResult> {
   }
 
   return { beats, bpm, confidence };
+} finally {
+  await audioCtx.close();
+}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

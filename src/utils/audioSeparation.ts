@@ -296,11 +296,12 @@ export function getFFmpegSeparationArgs(settings: SeparationSettings): string[] 
     // Convert to mid/side, attenuate mid, convert back to stereo
     // M = L + R (center, vocals), S = L - R (side, instruments)
     const midGain = 1.0 - strength;
-    const sideGain = 1.0;
+    const g1 = 0.5 * (1 + midGain);
+    const g2 = 0.5 * (1 - midGain);
 
     args.push(
       '-af',
-      `pan=stereo|c0=${midGain}*c0+${sideGain}*c1|c1=${midGain}*c0-${sideGain}*c1`
+      `pan=stereo|c0=${g1}*c0-${g2}*c1|c1=-${g2}*c0+${g1}*c1`
     );
   } else if (settings.mode === 'removeBgm') {
     // Keep center (vocals), reduce side (BGM)

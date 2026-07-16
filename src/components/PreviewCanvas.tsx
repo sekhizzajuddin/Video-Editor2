@@ -105,6 +105,7 @@ export function PreviewCanvas() {
   // Frame counter for throttling expensive operations
   const frameCounterRef = useRef(0);
   const framePendingRef = useRef(true);
+  const isRenderingRef = useRef(false);
 
   const getOrCreateCanvas = (key: string, w: number, h: number) => {
     let canvas = offscreenCanvasPool.current.get(key);
@@ -140,6 +141,16 @@ export function PreviewCanvas() {
           particlePoolsRef.current.delete(clipId);
         }
       }
+  }, [allClips]);
+
+  // Clean up unused offscreen canvases to prevent memory leaks
+  useEffect(() => {
+    const allClipIds = new Set(allClips.map((c) => `clip_${c.id}`));
+    for (const key of offscreenCanvasPool.current.keys()) {
+      if (key.startsWith('clip_') && !allClipIds.has(key)) {
+        offscreenCanvasPool.current.delete(key);
+      }
+    }
   }, [allClips]);
 
   // BUG-M2: Clear particle pools on seek/scrub to prevent stale particles
@@ -257,7 +268,7 @@ export function PreviewCanvas() {
       // Synchronously catch external seeks to prevent race conditions
       return useEditorStore.subscribe(
         (state) => {
-          if (!state.isPlaying) {
+          if (!state.isPlaying || Math.abs(state.currentTime - currentTimeRef.current) > 0.1) {
             currentTimeRef.current = state.currentTime;
           }
         }
@@ -266,7 +277,7 @@ export function PreviewCanvas() {
     
     // Fallback sync just in case
     useEffect(() => {
-      if (!useEditorStore.getState().isPlaying) {
+      if (!useEditorStore.getState().isPlaying || Math.abs(currentTime - currentTimeRef.current) > 0.1) {
          currentTimeRef.current = currentTime;
       }
     }, [currentTime]);
@@ -292,6 +303,11 @@ export function PreviewCanvas() {
       const allClips = allClipsRef.current;
 
       if (state.isExporting) {
+        if (isRenderingRef.current) {
+          animId = requestAnimationFrame(loop);
+          return;
+        }
+
         // Export Mode: Fixed timestep throttled to target export FPS
         const targetFps = state.exportFps || 30;
         const frameDuration = 1000 / targetFps; // ms per frame
@@ -327,6 +343,7 @@ export function PreviewCanvas() {
             return;
           }
 
+          isRenderingRef.current = true;
           currentSeek(newTime);
           currentTimeRef.current = newTime;
         }
@@ -1927,8 +1944,7 @@ export function PreviewCanvas() {
         // Background rect (centered at 0,0 which is already at clip's aX,aY center)
         if (ts.backgroundColor !== 'transparent') {
           ctx.fillStyle = ts.backgroundColor;
-          const bgX = ts.textAlign === 'left'  ? -20 :
-                      ts.textAlign === 'right' ? -(dw - 20) : -dw / 2;
+          const bgX = -dw / 2;
           ctx.fillRect(bgX, -dh / 2, dw, dh);
         }
 
@@ -2234,49 +2250,7 @@ export function PreviewCanvas() {
       }
     }
 
-    // ── Apply LUT per active clip ──────────────────────────────────────────
-    // After compositing all clips, apply LUT grading per clip that has one.
-    // We apply the last active clip's LUT to the full canvas for simplicity.
-    for (const track of visualTracks) {
-      for (const clip of track.clips) {
-        if (
-          clip.lut?.mediaId &&
-          currentTime >= clip.startTime &&
-          currentTime < clip.startTime + clip.duration
-        ) {
-          const lutMedia = mediaLibrary.find((m) => m.id === clip.lut!.mediaId);
-          if (lutMedia?.lutData) {
-            applyLutToCanvas(ctx, W, H, lutMedia.lutData, clip.lut!.intensity ?? 100);
-          }
-        }
-      }
-      // PIP clips LUT
-      const pipWindows = useEditorStore.getState().pipWindows || {};
-      for (const clip of (track.clips || [])) {
-        const clipPips = Object.values(pipWindows).filter(p => p && (p as any).parentClipId === clip.id);
-        for (const pip of (clipPips as any[])) {
-          const pipAbsStart = clip.startTime + (pip.relativeStartTime || 0);
-          if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
-            for (const pipTrack of pip.tracks) {
-              for (const pipClip of pipTrack.clips) {
-                const ptAbsStart = pipAbsStart + pipClip.startTime;
-                if (
-                  !pipClip.disabled &&
-                  pipClip.lut?.mediaId &&
-                  currentTime >= ptAbsStart &&
-                  currentTime < ptAbsStart + pipClip.duration
-                ) {
-                  const lutMedia = mediaLibrary.find((m) => m.id === pipClip.lut!.mediaId);
-                  if (lutMedia?.lutData) {
-                    applyLutToCanvas(ctx, W, H, lutMedia.lutData, pipClip.lut!.intensity ?? 100);
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    // Global LUT pass removed to prevent double-grading and resolution mismatch crashes
 
     ctx.restore(); // Restore from viewport transform
 
@@ -2552,6 +2526,7 @@ export function PreviewCanvas() {
           console.error("Error in renderCanvas:", err);
         } finally {
           isRendering = false;
+          isRenderingRef.current = false;
         }
       }
       rafId = requestAnimationFrame(tick);
@@ -3413,14 +3388,14 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   const totalY = cy + viewport.y - cy * viewport.zoom;
 
   const pcBase = activeClip.transform.perspectiveCorners || {
-    x0: W / 2 + aX - (baseW / 2) * (aScale / 100),
-    y0: H / 2 + aY - (baseH / 2) * (aScale / 100),
-    x1: W / 2 + aX + (baseW / 2) * (aScale / 100),
-    y1: H / 2 + aY - (baseH / 2) * (aScale / 100),
-    x2: W / 2 + aX + (baseW / 2) * (aScale / 100),
-    y2: H / 2 + aY + (baseH / 2) * (aScale / 100),
-    x3: W / 2 + aX - (baseW / 2) * (aScale / 100),
-    y3: H / 2 + aY + (baseH / 2) * (aScale / 100)
+    x0: 0,
+    y0: 0,
+    x1: W,
+    y1: 0,
+    x2: W,
+    y2: H,
+    x3: 0,
+    y3: H
   };
 
   let pc = { ...pcBase };
@@ -3490,14 +3465,14 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
 
     const step = e.shiftKey ? 10 : 1;
     const pcBase = activeClip.transform.perspectiveCorners || {
-      x0: W / 2 + aX - (baseW / 2) * (aScale / 100),
-      y0: H / 2 + aY - (baseH / 2) * (aScale / 100),
-      x1: W / 2 + aX + (baseW / 2) * (aScale / 100),
-      y1: H / 2 + aY - (baseH / 2) * (aScale / 100),
-      x2: W / 2 + aX + (baseW / 2) * (aScale / 100),
-      y2: H / 2 + aY + (baseH / 2) * (aScale / 100),
-      x3: W / 2 + aX - (baseW / 2) * (aScale / 100),
-      y3: H / 2 + aY + (baseH / 2) * (aScale / 100)
+      x0: 0,
+      y0: 0,
+      x1: W,
+      y1: 0,
+      x2: W,
+      y2: H,
+      x3: 0,
+      y3: H
     };
 
     const newPc = { ...pcBase };

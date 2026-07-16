@@ -532,8 +532,13 @@ export function PropertiesPanel() {
 
       console.log('[AI Separation] Decoding audio buffer...');
       const audioCtx = new AudioContext();
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      let audioBuffer: AudioBuffer;
+      try {
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      } finally {
+        await audioCtx.close();
+      }
 
       console.log('[AI Separation] Running local Demucs AI separation (WASM/WebGPU)...');
       const { vocals, backgroundMusic } = await aiVocalSeparator.separateAudioBuffer(audioBuffer, (progress) => {
@@ -984,7 +989,14 @@ export function PropertiesPanel() {
                 step="0.01"
                 min="0"
                 value={selectedSubtitle.startTime}
-                onChange={(e) => updateSubtitle(selectedSubtitle.id, { startTime: Number(e.target.value) })}
+                onChange={(e) => {
+                  const newStart = Math.max(0, Number(e.target.value));
+                  if (newStart >= selectedSubtitle.endTime) {
+                    toast.error("Start time must be before end time");
+                    return;
+                  }
+                  updateSubtitle(selectedSubtitle.id, { startTime: newStart });
+                }}
                 className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -2486,7 +2498,17 @@ export function PropertiesPanel() {
               const kbVal = kb || defaultKb;
 
               const updateKb = (patch: Partial<ClipKenBurnsSettings>) => {
-                updateClip(selectedClip.id, { kenBurns: { ...kbVal, ...patch } });
+                const merged = { ...kbVal, ...patch };
+                
+                const maxStartPan = Math.max(0, (merged.startScale - 100) / 2);
+                merged.startPanX = Math.max(-maxStartPan, Math.min(maxStartPan, merged.startPanX));
+                merged.startPanY = Math.max(-maxStartPan, Math.min(maxStartPan, merged.startPanY));
+
+                const maxEndPan = Math.max(0, (merged.endScale - 100) / 2);
+                merged.endPanX = Math.max(-maxEndPan, Math.min(maxEndPan, merged.endPanX));
+                merged.endPanY = Math.max(-maxEndPan, Math.min(maxEndPan, merged.endPanY));
+
+                updateClip(selectedClip.id, { kenBurns: merged });
               };
 
               const KbSlider = ({ label, value, min, max, step, onChange }: {
@@ -3915,11 +3937,14 @@ export function PropertiesPanel() {
                     step={0.1}
                     min={0}
                     value={selectedClip.trimStart}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const mediaItem = useEditorStore.getState().mediaLibrary.find(m => m.id === selectedClip.mediaId);
+                      const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                      const val = Math.max(0, Math.min(maxDuration - selectedClip.trimEnd - 0.1, Number(e.target.value)));
                       updateClip(selectedClip.id, {
-                        trimStart: Number(e.target.value),
-                      })
-                    }
+                        trimStart: val,
+                      });
+                    }}
                     onBlur={() => useEditorStore.getState().saveSnapshot()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
@@ -3934,11 +3959,14 @@ export function PropertiesPanel() {
                     step={0.1}
                     min={0}
                     value={selectedClip.trimEnd}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const mediaItem = useEditorStore.getState().mediaLibrary.find(m => m.id === selectedClip.mediaId);
+                      const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                      const val = Math.max(0, Math.min(maxDuration - selectedClip.trimStart - 0.1, Number(e.target.value)));
                       updateClip(selectedClip.id, {
-                        trimEnd: Number(e.target.value),
-                      })
-                    }
+                        trimEnd: val,
+                      });
+                    }}
                     onBlur={() => useEditorStore.getState().saveSnapshot()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();

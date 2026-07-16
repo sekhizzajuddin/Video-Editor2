@@ -565,6 +565,9 @@ export interface EditorSnapshot {
   tracks: TimelineTrack[];
   currentTime: number;
   pipWindows?: Record<string, PipWindow>;
+  subtitles?: SubtitleItem[];
+  markers?: TimelineMarker[];
+  beatMarkers?: { time: number; clipId: string }[];
   label?: string;
 }
 

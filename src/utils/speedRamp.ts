@@ -93,6 +93,11 @@ export class SpeedRampEngine {
       return 0;
     }
 
+    if (seg.startKf.easing === 'hold') {
+      if (Math.abs(v1) < 1e-10) return 0;
+      return deltaSource / v1;
+    }
+
     if (Math.abs(v1 - v2) < 1e-10) {
       if (Math.abs(v1) < 1e-10) return 0;
       return deltaSource / v1;
@@ -106,6 +111,11 @@ export class SpeedRampEngine {
     const v2 = seg.endKf.speed;
     const delta = sourceTime - seg.sourceStart;
     const totalDelta = seg.sourceEnd - seg.sourceStart;
+
+    if (seg.startKf.easing === 'hold') {
+      if (Math.abs(v1) < 1e-10) return 0;
+      return delta / v1;
+    }
 
     if (Math.abs(v1 - v2) < 1e-10) {
       if (Math.abs(v1) < 1e-10) return 0;
@@ -175,6 +185,10 @@ export class SpeedRampEngine {
     const v1 = seg.startKf.speed;
     const v2 = seg.endKf.speed;
     const delta = seg.sourceEnd - seg.sourceStart;
+
+    if (seg.startKf.easing === 'hold') {
+      return seg.sourceStart + localT * v1;
+    }
 
     if (Math.abs(v1 - v2) < 1e-10) {
       if (Math.abs(v1) < 1e-10) return seg.sourceStart;
