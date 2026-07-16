@@ -10,10 +10,11 @@ interface AIGeneratorModalProps {
 }
 
 export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
-  const { settings, addMedia } = useEditorStore();
-  const openRouterApiKey = settings?.openRouterApiKey;
-  const geminiApiKey = settings?.geminiApiKey;
+  const { settings, addMedia, aiVideoIsGenerating, aiVideoProgress, aiVideoJobId, aiVideoResultUrl, setAIVideoGenerationState } = useEditorStore();
+  const openRouterApiKey = settings?.openRouterApiKey || import.meta.env.VITE_OPENROUTER_API_KEY;
+  const geminiApiKey = settings?.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY;
 
+  const [workingApiKey, setWorkingApiKey] = useState<string>('');
   const [models, setModels] = useState<OpenRouterModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [selectedModel, setSelectedModel] = useState<string>('');
@@ -21,28 +22,58 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
   const [prompt, setPrompt] = useState('');
   const [referenceUrl, setReferenceUrl] = useState('');
   const [isEnhancing, setIsEnhancing] = useState(false);
-  
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [generationProgress, setGenerationProgress] = useState(0);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadModels() {
-      if (!openRouterApiKey) {
+      const envKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+      const settingsKey = settings?.openRouterApiKey;
+
+      if (!envKey && !settingsKey) {
         setLoadingModels(false);
         return;
       }
+
       setLoadingModels(true);
-      const fetchedModels = await fetchVideoModels(openRouterApiKey);
+      
+      let fetchedModels: OpenRouterModel[] = [];
+      let activeKey = '';
+
+      // First try ENV key
+      if (envKey) {
+        try {
+          fetchedModels = await fetchVideoModels(envKey);
+          if (fetchedModels.length > 0) activeKey = envKey;
+        } catch (e) {
+          console.warn('ENV API key failed, falling back to settings key', e);
+        }
+      }
+
+      // If ENV failed or missing, try settings key
+      if (fetchedModels.length === 0 && settingsKey) {
+        try {
+          fetchedModels = await fetchVideoModels(settingsKey);
+          if (fetchedModels.length > 0) activeKey = settingsKey;
+        } catch (e) {
+          console.warn('Settings API key also failed', e);
+        }
+      }
+
       setModels(fetchedModels);
+      
+      // Store the active key in a ref or state if needed, or just let the generate function use the same logic
+      // But we need to use this active key for generating videos as well.
+      if (activeKey) {
+        setWorkingApiKey(activeKey);
+      }
+
       if (fetchedModels.length > 0) {
         setSelectedModel(fetchedModels[0].id);
       }
+      
       setLoadingModels(false);
     }
     loadModels();
-  }, [openRouterApiKey]);
+  }, [settings?.openRouterApiKey]);
 
   const handleEnhancePrompt = async () => {
     if (!prompt.trim()) {
@@ -68,8 +99,8 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
   };
 
   const handleGenerate = async () => {
-    if (!openRouterApiKey) {
-      toast.error('Please configure your OpenRouter API key in settings.');
+    if (!workingApiKey) {
+      toast.error('Please configure your OpenRouter API key in settings or env.');
       return;
     }
     if (!prompt.trim()) {
@@ -77,73 +108,83 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
       return;
     }
     
-    setIsGenerating(true);
-    setGenerationProgress(10);
-    setResultUrl(null);
+    setAIVideoGenerationState({
+      aiVideoIsGenerating: true,
+      aiVideoProgress: 10,
+      aiVideoResultUrl: null
+    });
     
     try {
-      const idOrUrl = await generateAIVideo(prompt, selectedModel, openRouterApiKey, referenceUrl || undefined);
+      const idOrUrl = await generateAIVideo(prompt, selectedModel, workingApiKey, referenceUrl || undefined);
       
       // If it's a URL (synchronous or fast return)
       if (idOrUrl.startsWith('http') || idOrUrl.startsWith('blob:')) {
-        setResultUrl(idOrUrl);
-        setIsGenerating(false);
-        setGenerationProgress(100);
+        setAIVideoGenerationState({
+          aiVideoResultUrl: idOrUrl,
+          aiVideoIsGenerating: false,
+          aiVideoProgress: 100
+        });
         return;
       }
       
       // Otherwise, it's a job ID, we need to poll
-      setJobId(idOrUrl);
+      setAIVideoGenerationState({ aiVideoJobId: idOrUrl });
       pollStatus(idOrUrl);
 
     } catch (e: any) {
       console.error(e);
       toast.error(e.message);
-      setIsGenerating(false);
-      setGenerationProgress(0);
+      setAIVideoGenerationState({
+        aiVideoIsGenerating: false,
+        aiVideoProgress: 0
+      });
     }
   };
 
   const pollStatus = async (id: string) => {
-    if (!openRouterApiKey) return;
+    if (!workingApiKey) return;
     
     let attempts = 0;
     const maxAttempts = 60; // 60 * 5s = 5 minutes timeout
     
     const interval = setInterval(async () => {
       attempts++;
-      setGenerationProgress(Math.min(95, 10 + (attempts * 1.5)));
+      setAIVideoGenerationState({ aiVideoProgress: Math.min(95, 10 + (attempts * 1.5)) });
       
-      const { status, resultUrl, error } = await checkVideoJobStatus(id, openRouterApiKey);
+      const { status, resultUrl, error } = await checkVideoJobStatus(id, workingApiKey);
       
       if (status === 'completed' && resultUrl) {
         clearInterval(interval);
-        setResultUrl(resultUrl);
-        setGenerationProgress(100);
-        setIsGenerating(false);
-        setJobId(null);
+        setAIVideoGenerationState({
+          aiVideoResultUrl: resultUrl,
+          aiVideoProgress: 100,
+          aiVideoIsGenerating: false,
+          aiVideoJobId: null
+        });
         toast.success('AI Generation complete!');
       } else if (status === 'failed' || error || attempts >= maxAttempts) {
         clearInterval(interval);
-        setIsGenerating(false);
-        setGenerationProgress(0);
-        setJobId(null);
+        setAIVideoGenerationState({
+          aiVideoIsGenerating: false,
+          aiVideoProgress: 0,
+          aiVideoJobId: null
+        });
         toast.error(error || 'Generation timed out or failed.');
       }
     }, 5000);
   };
 
   const handleImportToProject = () => {
-    if (!resultUrl) return;
+    if (!aiVideoResultUrl) return;
     
-    const isVideo = resultUrl.includes('.mp4') || resultUrl.includes('video');
+    const isVideo = aiVideoResultUrl.includes('.mp4') || aiVideoResultUrl.includes('video');
     const id = `ai_gen_${Date.now()}`;
     
     addMedia({
       id,
       name: `AI Gen ${isVideo ? 'Video' : 'Image'}`,
       type: isVideo ? 'video' : 'image',
-      url: resultUrl,
+      url: aiVideoResultUrl,
       duration: isVideo ? 5 : 0, // Default duration if not determinable easily
       createdAt: Date.now()
     });
@@ -228,62 +269,76 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
           </div>
 
           {/* Result / Progress Area */}
-          {(isGenerating || resultUrl) && (
-            <div className="mt-2 p-4 border border-[#3e3e3e] rounded-lg bg-[#1e1e1e] flex flex-col items-center justify-center min-h-[200px] relative overflow-hidden">
-              {isGenerating && (
-                <div className="flex flex-col items-center gap-3 w-full max-w-xs z-10">
-                  <div className="relative">
-                    <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
-                    <div className="absolute inset-0 bg-amber-500/20 blur-xl rounded-full" />
-                  </div>
-                  <p className="text-xs text-[#a0a0a0] font-medium text-center">
-                    Generating your media...<br />
-                    <span className="text-[10px] text-[#6a6a6a]">This usually takes 1-3 minutes for video.</span>
-                  </p>
-                  
-                  {/* Progress Bar */}
-                  <div className="w-full h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500 ease-out" 
-                      style={{ width: `${generationProgress}%` }}
-                    />
-                  </div>
-                  <span className="text-[10px] text-amber-500/80">{Math.round(generationProgress)}%</span>
-                </div>
-              )}
+          {aiVideoIsGenerating && (
+            <div className="flex flex-col items-center justify-center py-12 px-6 border-2 border-dashed border-[#333333] rounded-lg bg-[#1A1A1A]">
+              <Loader2 className="w-10 h-10 text-amber-500 animate-spin mb-4" />
+              <div className="text-sm font-medium mb-2 text-center">Generating your masterpiece...</div>
+              <div className="w-full max-w-xs bg-black rounded-full h-2 mb-2 overflow-hidden relative">
+                <div 
+                  className="bg-gradient-to-r from-amber-600 to-amber-400 h-2 rounded-full transition-all duration-300 ease-out absolute top-0 left-0" 
+                  style={{ width: `${aiVideoProgress}%` }}
+                ></div>
+              </div>
+              <div className="text-xs text-[#888888]">{Math.round(aiVideoProgress)}%</div>
+            </div>
+          )}
+
+          {aiVideoResultUrl && !aiVideoIsGenerating && (
+            <div className="flex flex-col gap-4 border border-[#333333] rounded-lg p-2 bg-[#1A1A1A]">
+              <div className="relative aspect-video rounded overflow-hidden bg-black group">
+                {aiVideoResultUrl.includes('.mp4') || selectedModel.includes('video') ? (
+                  <video 
+                    src={aiVideoResultUrl} 
+                    controls 
+                    autoPlay 
+                    loop 
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <img 
+                    src={aiVideoResultUrl} 
+                    alt="Generated" 
+                    className="w-full h-full object-contain"
+                  />
+                )}
+              </div>
               
-              {resultUrl && (
-                <div className="w-full h-full flex flex-col gap-3">
-                  {resultUrl.includes('.mp4') || resultUrl.includes('video') ? (
-                    <video src={resultUrl} controls className="w-full h-auto max-h-[300px] rounded border border-[#3e3e3e] object-contain bg-black" />
-                  ) : (
-                    <img src={resultUrl} alt="Generated" className="w-full h-auto max-h-[300px] rounded border border-[#3e3e3e] object-contain bg-black" />
-                  )}
-                  
-                  <div className="flex gap-2 w-full mt-2">
-                    <button
-                      onClick={handleImportToProject}
-                      className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-black text-xs font-semibold rounded flex items-center justify-center gap-1 transition-colors"
-                    >
-                      <Plus className="w-3 h-3" /> Import to Project
-                    </button>
-                    <a
-                      href={resultUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 py-2 bg-[#2a2a2a] hover:bg-[#3e3e3e] text-white text-xs font-medium rounded flex items-center justify-center gap-1 transition-colors"
-                    >
-                      <Download className="w-3 h-3" /> Download
-                    </a>
-                    <button
-                      onClick={() => setResultUrl(null)}
-                      className="px-3 py-2 border border-red-500/30 hover:bg-red-500/10 text-red-400 text-xs font-medium rounded flex items-center justify-center transition-colors"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
+              <div className="flex justify-between items-center px-2 pb-2">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      addMedia({
+                        id: crypto.randomUUID(),
+                        name: `AI_${selectedModel.split('/')[1] || 'Media'}_${Date.now()}`,
+                        type: aiVideoResultUrl.includes('.mp4') || selectedModel.includes('video') ? 'video' : 'image',
+                        url: aiVideoResultUrl,
+                        duration: 5, // Default for video models
+                        folderId: undefined,
+                        createdAt: Date.now()
+                      });
+                      toast.success('Added to Media Library');
+                    }}
+                    className="px-4 py-2 bg-[#333333] hover:bg-[#444444] text-white text-xs font-medium rounded flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" /> Add to Library
+                  </button>
+                  <a
+                    href={aiVideoResultUrl}
+                    download
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-4 py-2 border border-[#333333] hover:bg-[#333333] text-white text-xs font-medium rounded flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Download className="w-3 h-3" /> Download
+                  </a>
+                  <button
+                    onClick={() => setAIVideoGenerationState({ aiVideoResultUrl: null })}
+                    className="px-3 py-2 border border-red-500/30 hover:bg-red-500/10 text-red-400 text-xs font-medium rounded flex items-center justify-center transition-colors"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
@@ -297,10 +352,10 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
           >
             Close
           </button>
-          {!isGenerating && !resultUrl && (
+          {!aiVideoIsGenerating && !aiVideoResultUrl && (
             <button
               onClick={handleGenerate}
-              disabled={!prompt || !openRouterApiKey || models.length === 0}
+              disabled={!prompt || !workingApiKey || models.length === 0}
               className="px-6 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-black text-xs font-bold rounded flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Sparkles className="w-3.5 h-3.5" />

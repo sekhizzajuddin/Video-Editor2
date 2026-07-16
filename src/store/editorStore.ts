@@ -158,6 +158,7 @@ function findNonOverlappingPosition(
 }
 
 interface EditorActions {
+  setAIVideoGenerationState: (state: any) => void;
   setScopeSettings: (settings: ScopeSettings) => void;
   setMuteTimelineAudio: (mute: boolean) => void;
   // Media Library
@@ -437,6 +438,10 @@ const initialState: EditorState = {
     showLimits: true,
     intensity: 100,
   },
+  aiVideoIsGenerating: false,
+  aiVideoProgress: 0,
+  aiVideoJobId: null,
+  aiVideoResultUrl: null,
 };
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
@@ -477,6 +482,7 @@ export const findClipDeep = (state: EditorState, clipId: string) => {
 export const useEditorStore = create<EditorState & EditorActions>((set, get) => ({
   ...initialState,
 
+  setAIVideoGenerationState: (state: any) => set((prev: any) => ({ ...prev, ...state })),
   setScopeSettings: (settings: ScopeSettings) => set({ scopeSettings: settings }),
 
   setSubtitles: (subtitles: SubtitleItem[]) => {

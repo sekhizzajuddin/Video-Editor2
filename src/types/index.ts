@@ -528,9 +528,16 @@ export interface EditorState {
   selectedSubtitleId: string | null;
   subtitleLanguage: string;
   scopeSettings: ScopeSettings;
+
+  // AI Video Generation State
+  aiVideoIsGenerating: boolean;
+  aiVideoProgress: number;
+  aiVideoJobId: string | null;
+  aiVideoResultUrl: string | null;
 }
 
 export interface EditorActions {
+  setAIVideoGenerationState: (state: Partial<Pick<EditorState, 'aiVideoIsGenerating' | 'aiVideoProgress' | 'aiVideoJobId' | 'aiVideoResultUrl'>>) => void;
   setScopeSettings: (settings: ScopeSettings) => void;
   setMuteTimelineAudio: (mute: boolean) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
