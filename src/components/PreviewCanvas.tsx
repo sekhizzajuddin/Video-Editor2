@@ -3835,14 +3835,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
         return;
       }
 
-      // Revoke previous blob URL to prevent memory leaks
-      if (editedBlobUrlRef.current) {
-        URL.revokeObjectURL(editedBlobUrlRef.current);
-        editedBlobUrlRef.current = null;
-      }
-
       const editedUrl = URL.createObjectURL(blob);
-      editedBlobUrlRef.current = editedUrl;
       const newMediaId = `img_edit_${Date.now()}`;
       const newFile = new File([blob], `edited_${mediaItem.name}.png`, { type: 'image/png' });
 
@@ -3873,9 +3866,6 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
         toast.success(`Image edit applied successfully (${action})!`);
       } catch (err) {
         console.error(err);
-        // Revoke on failure too since the URL won't be used
-        URL.revokeObjectURL(editedUrl);
-        editedBlobUrlRef.current = null;
         toast.error('Error saving edited image.');
       }
     }, 'image/png');

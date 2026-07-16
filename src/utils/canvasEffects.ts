@@ -41,7 +41,9 @@ export function getCachedImage(
 
   imageLoading.add(mediaId);
   const img = new Image();
-  img.crossOrigin = 'anonymous';
+  if (!url.startsWith('data:') && !url.startsWith('blob:')) {
+    img.crossOrigin = 'anonymous';
+  }
   img.onload = () => {
     // Evict oldest if limit reached
     if (imageCache.size >= MAX_CACHE_SIZE) {
