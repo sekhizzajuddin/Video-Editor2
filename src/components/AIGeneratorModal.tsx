@@ -18,6 +18,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
   const [models, setModels] = useState<OpenRouterModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [customModelId, setCustomModelId] = useState<string>(() => localStorage.getItem('openRouterCustomModelId') || '');
   
   const [prompt, setPrompt] = useState('');
   const [referenceUrl, setReferenceUrl] = useState('');
@@ -115,7 +116,8 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
     });
     
     try {
-      const idOrUrl = await generateAIVideo(prompt, selectedModel, workingApiKey, referenceUrl || undefined);
+      const finalModelId = customModelId.trim() || selectedModel;
+      const idOrUrl = await generateAIVideo(prompt, finalModelId, workingApiKey, referenceUrl || undefined);
       
       // If it's a URL (synchronous or fast return)
       if (idOrUrl.startsWith('http') || idOrUrl.startsWith('blob:')) {
@@ -233,6 +235,21 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
               </select>
             )}
             <span className="text-[10px] text-amber-500/80">Uses your OpenRouter API Key. Note: Not all models are guaranteed free.</span>
+          </div>
+
+          {/* Custom Model ID */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-[#a0a0a0]">Or Custom Model ID (Overrides Dropdown)</label>
+            <input
+              type="text"
+              placeholder="e.g., kwaivgi/kling-v3.0-pro"
+              value={customModelId}
+              onChange={(e) => {
+                setCustomModelId(e.target.value);
+                localStorage.setItem('openRouterCustomModelId', e.target.value);
+              }}
+              className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white focus:border-amber-500 outline-none"
+            />
           </div>
 
           {/* Reference Image */}
