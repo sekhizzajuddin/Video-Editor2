@@ -252,12 +252,13 @@ export async function saveProjectToDB(data: {
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => {
-        console.warn('[projectPersistence] Transaction aborted, likely due to DB closing');
-        resolve(); // Don't reject, just resolve silently
+        const reason = transaction.error?.message || 'Transaction aborted';
+        console.warn('[projectPersistence] Save transaction aborted:', reason);
+        reject(new Error(`Project save failed: ${reason}`));
       };
     });
   } catch (error: any) {
-    // Handle InvalidStateError gracefully
+    // InvalidStateError happens during app shutdown (DB connection closing) — treat as no-op
     if (error.name === 'InvalidStateError') {
       console.warn('[projectPersistence] DB connection closing, skipping save');
       return;

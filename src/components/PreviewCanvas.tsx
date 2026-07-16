@@ -16,10 +16,17 @@ import {
   Grid,
   ExternalLink,
   X,
+  Wand2,
+  Eraser,
+  Sparkles,
+  Ban,
+  Check,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useMediaPlayback, FrameCacheEntry } from '@/hooks/useMediaPlayback';
 import type { TimelineTrack, MediaItem } from '@/types';
+import { saveFileToDB } from '@/utils/projectPersistence';
+import { toast } from 'sonner';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatTime } from '@/utils/time';
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
@@ -769,7 +776,9 @@ export function PreviewCanvas() {
         if (extraTransform?.scale !== undefined) {
           finalScale *= extraTransform.scale;
         }
-        ctx.scale(finalScale, finalScale);
+        const scaleX = finalScale * (clip.transform?.flipH ? -1 : 1);
+        const scaleY = finalScale * (clip.transform?.flipV ? -1 : 1);
+        ctx.scale(scaleX, scaleY);
         ctx.rotate((aRot * Math.PI) / 180);
       }
 
@@ -2761,7 +2770,7 @@ export function PreviewCanvas() {
               : 'w-full h-full object-contain'
           }`}
         />
-        <InteractiveCanvasOverlay viewport={viewport} videoElements={videoElements} />
+        <InteractiveCanvasOverlay viewport={viewport} videoElements={videoElements} containerRef={containerRef} />
 
         {/* Overlay: canvas controls (top-left) */}
         <div className="absolute top-3 left-3 flex gap-1.5" onPointerDown={(e) => e.stopPropagation()}>
@@ -3042,10 +3051,182 @@ function getClipDimensions(clip: any, mediaLibrary: any[], W: number, H: number)
   };
 }
 
+function screenToImageCoords(mx: number, my: number, clip: any, baseW: number, baseH: number, currentTime: number) {
+  const aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
+  const aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
+  const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
+  const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+
+  // 1. Translate back by clip center offset
+  const tx = mx - aX;
+  const ty = my - aY;
+
+  // 2. Rotate back by negative rotation
+  const theta = (-aRot * Math.PI) / 180;
+  const rx = tx * Math.cos(theta) - ty * Math.sin(theta);
+  const ry = tx * Math.sin(theta) + ty * Math.cos(theta);
+
+  // 3. Scale back
+  const sf = aScale / 100 || 1;
+  const imgX = rx / sf;
+  const imgY = ry / sf;
+
+  // 4. Map from center-origin to top-left of image space
+  return {
+    x: imgX + baseW / 2,
+    y: imgY + baseH / 2
+  };
+}
+
+function imageToScreenCoords(ix: number, iy: number, clip: any, baseW: number, baseH: number, currentTime: number) {
+  const aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
+  const aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
+  const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
+  const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+
+  // 1. Map to center-origin
+  const cx = ix - baseW / 2;
+  const cy = iy - baseH / 2;
+
+  // 2. Scale
+  const sf = aScale / 100 || 1;
+  const sx = cx * sf;
+  const sy = cy * sf;
+
+  // 3. Rotate
+  const theta = (aRot * Math.PI) / 180;
+  const rx = sx * Math.cos(theta) - sy * Math.sin(theta);
+  const ry = sx * Math.sin(theta) + sy * Math.cos(theta);
+
+  // 4. Translate
+  return {
+    x: rx + aX,
+    y: ry + aY
+  };
+}
+
+function floodFill(imgData: ImageData, startX: number, startY: number, tolerance: number = 30): Uint8ClampedArray {
+  const w = imgData.width;
+  const h = imgData.height;
+  const pixels = imgData.data;
+  const visited = new Uint8Array(w * h);
+  const mask = new Uint8ClampedArray(w * h);
+
+  const sx = Math.max(0, Math.min(w - 1, Math.floor(startX)));
+  const sy = Math.max(0, Math.min(h - 1, Math.floor(startY)));
+
+  const targetIdx = (sy * w + sx) * 4;
+  const targetR = pixels[targetIdx];
+  const targetG = pixels[targetIdx + 1];
+  const targetB = pixels[targetIdx + 2];
+  const targetA = pixels[targetIdx + 3];
+
+  // Use head-pointer instead of shift() to avoid O(n²) performance on large images
+  const queue: [number, number][] = [[sx, sy]];
+  let head = 0;
+  visited[sy * w + sx] = 1;
+
+  while (head < queue.length) {
+    const [cx, cy] = queue[head++];
+    const idx = cy * w + cx;
+    mask[idx] = 255;
+
+    const neighbors = [
+      [cx + 1, cy],
+      [cx - 1, cy],
+      [cx, cy + 1],
+      [cx, cy - 1]
+    ];
+
+    for (const [nx, ny] of neighbors) {
+      if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+        const nIdx = ny * w + nx;
+        if (!visited[nIdx]) {
+          visited[nIdx] = 1;
+          const pIdx = nIdx * 4;
+          const dr = pixels[pIdx] - targetR;
+          const dg = pixels[pIdx + 1] - targetG;
+          const db = pixels[pIdx + 2] - targetB;
+          const da = pixels[pIdx + 3] - targetA;
+          const dist = Math.sqrt(dr * dr + dg * dg + db * db + da * da);
+          if (dist <= tolerance) {
+            queue.push([nx, ny]);
+          }
+        }
+      }
+    }
+  }
+  return mask;
+}
+
+function inpaint(imageData: ImageData, maskData: Uint8ClampedArray) {
+  const w = imageData.width;
+  const h = imageData.height;
+  const pixels = imageData.data;
+  const src = new Uint8ClampedArray(pixels);
+
+  // Perform 18 passes of color-diffusion inpainting
+  // NOTE: loop covers ALL pixels including border rows/cols; neighbors are clamped
+  for (let iter = 0; iter < 18; iter++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const maskIdx = y * w + x;
+
+        if (maskData[maskIdx] > 128) {
+          let rSum = 0, gSum = 0, bSum = 0, aSum = 0;
+          let count = 0;
+
+          // Clamped neighbor indices so border pixels are handled safely
+          const neighborCoords = [
+            [Math.max(0, y - 1), x],
+            [Math.min(h - 1, y + 1), x],
+            [y, Math.max(0, x - 1)],
+            [y, Math.min(w - 1, x + 1)]
+          ];
+
+          neighborCoords.forEach(([ny, nx]) => {
+            const nIdx = (ny * w + nx) * 4;
+            const nMIdx = ny * w + nx;
+            if (maskData[nMIdx] <= 128) {
+              rSum += src[nIdx];
+              gSum += src[nIdx + 1];
+              bSum += src[nIdx + 2];
+              aSum += src[nIdx + 3];
+              count++;
+            }
+          });
+
+          if (count > 0) {
+            pixels[idx] = rSum / count;
+            pixels[idx + 1] = gSum / count;
+            pixels[idx + 2] = bSum / count;
+            pixels[idx + 3] = aSum / count;
+          } else {
+            let rSumAll = 0, gSumAll = 0, bSumAll = 0, aSumAll = 0;
+            neighborCoords.forEach(([ny, nx]) => {
+              const nIdx = (ny * w + nx) * 4;
+              rSumAll += pixels[nIdx];
+              gSumAll += pixels[nIdx + 1];
+              bSumAll += pixels[nIdx + 2];
+              aSumAll += pixels[nIdx + 3];
+            });
+            pixels[idx] = rSumAll / 4;
+            pixels[idx + 1] = gSumAll / 4;
+            pixels[idx + 2] = bSumAll / 4;
+            pixels[idx + 3] = aSumAll / 4;
+          }
+        }
+      }
+    }
+    src.set(pixels);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Interactive Canvas Overlay Component
 // ---------------------------------------------------------------------------
-function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: number, y: number, zoom: number }, videoElements: Map<string, HTMLVideoElement> }) {
+function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { viewport: { x: number, y: number, zoom: number }, videoElements: Map<string, HTMLVideoElement>, containerRef: React.RefObject<HTMLDivElement | null> }) {
   const {
     tracks,
     selectedClipId,
@@ -3075,6 +3256,12 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   } | null>(null);
   
   const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
+
+  const [imageEditorTool, setImageEditorTool] = useState<'none' | 'magic' | 'lasso' | 'poly'>('none');
+  const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[]>([]);
+  const [selectionMask, setSelectionMask] = useState<Uint8ClampedArray | null>(null);
+  const editedBlobUrlRef = useRef<string | null>(null);
+  const isDrawingRef = useRef(false);
 
   let activeClip = null;
   let mediaItem = null;
@@ -3475,6 +3662,301 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
     };
   }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime, aspectRatio]);
 
+  const handleEditorPointerDown = (e: React.PointerEvent<SVGElement>) => {
+    if (!activeClip || !mediaItem || imageEditorTool === 'none') return;
+    e.stopPropagation();
+    // Capture pointer so fast lasso moves don't escape the element
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const scaleX = 854 / rect.width;
+    const scaleY = 480 / rect.height;
+    // Invert the SVG viewport transform: un-apply zoom + pan + aspect-ratio offsetX/Y
+    const rawMx = (e.clientX - rect.left) * scaleX - 854 / 2;
+    const rawMy = (e.clientY - rect.top) * scaleY - 480 / 2;
+    const mx = (rawMx - viewport.x) / (viewport.zoom || 1) - offsetX;
+    const my = (rawMy - viewport.y) / (viewport.zoom || 1) - offsetY;
+
+    // Guard: require image to be cached before flood-fill to avoid blank-canvas wipe
+    const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
+    if (imageEditorTool === 'magic' && !img) {
+      toast.info('Image is still loading. Please try again in a moment.');
+      return;
+    }
+
+    let imageW = img?.naturalWidth || 1920;
+    let imageH = img?.naturalHeight || 1080;
+
+    let vw = W;
+    let vh = H;
+    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+      vw = 1920;
+      vh = 1080;
+    }
+    let scaleToFit = 1;
+    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+      scaleToFit = Math.min(W / (vw || 1), H / (vh || 1));
+    }
+    const bW = vw * scaleToFit;
+    const bH = vh * scaleToFit;
+
+    const imgPos = screenToImageCoords(mx, my, activeClip, bW, bH, currentTime);
+
+    if (imageEditorTool === 'magic') {
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = imageW;
+      offCanvas.height = imageH;
+      const offCtx = offCanvas.getContext('2d');
+      if (!offCtx) { toast.error('Canvas unavailable.'); return; }
+      offCtx.drawImage(img!, 0, 0, imageW, imageH);
+      const imgData = offCtx.getImageData(0, 0, imageW, imageH);
+      const mask = floodFill(imgData, imgPos.x, imgPos.y, 30);
+      setSelectionMask(mask);
+      setSelectionPath([]);
+    } else if (imageEditorTool === 'lasso') {
+      isDrawingRef.current = true;
+      setSelectionPath([{ x: imgPos.x, y: imgPos.y }]);
+      setSelectionMask(null);
+    } else if (imageEditorTool === 'poly') {
+      setSelectionMask(null);
+      if (selectionPath.length > 2) {
+        const first = selectionPath[0];
+        // Compare in canvas-pixel space for consistent UX regardless of image resolution
+        const firstScreen = imageToScreenCoords(first.x, first.y, activeClip, bW, bH, currentTime);
+        const distScreen = Math.sqrt((mx - firstScreen.x) ** 2 + (my - firstScreen.y) ** 2);
+        if (distScreen < 15) {
+          setSelectionPath(prev => [...prev, { x: first.x, y: first.y }]);
+          return;
+        }
+      }
+      setSelectionPath(prev => [...prev, { x: imgPos.x, y: imgPos.y }]);
+    }
+  };
+
+  const handleEditorPointerMove = (e: React.PointerEvent<SVGElement>) => {
+    if (!activeClip || !mediaItem || !isDrawingRef.current || imageEditorTool !== 'lasso') return;
+    
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const scaleX = 854 / rect.width;
+    const scaleY = 480 / rect.height;
+    // Invert viewport transform (same as in handleEditorPointerDown)
+    const rawMx = (e.clientX - rect.left) * scaleX - 854 / 2;
+    const rawMy = (e.clientY - rect.top) * scaleY - 480 / 2;
+    const mx = (rawMx - viewport.x) / (viewport.zoom || 1) - offsetX;
+    const my = (rawMy - viewport.y) / (viewport.zoom || 1) - offsetY;
+
+    let vw = W;
+    let vh = H;
+    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+      vw = 1920;
+      vh = 1080;
+    }
+    let scaleToFit = 1;
+    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+      scaleToFit = Math.min(W / (vw || 1), H / (vh || 1));
+    }
+    const bW = vw * scaleToFit;
+    const bH = vh * scaleToFit;
+
+    const imgPos = screenToImageCoords(mx, my, activeClip, bW, bH, currentTime);
+    setSelectionPath(prev => [...prev, { x: imgPos.x, y: imgPos.y }]);
+  };
+
+  const handleEditorPointerUp = () => {
+    if (imageEditorTool === 'lasso') {
+      isDrawingRef.current = false;
+      if (selectionPath.length > 2) {
+        setSelectionPath(prev => [...prev, { x: prev[0].x, y: prev[0].y }]);
+      }
+    }
+  };
+
+  const applyEditorAction = async (action: 'delete' | 'remove' | 'erase') => {
+    if (!activeClip || !mediaItem || mediaItem.type !== 'image') return;
+
+    let imageW = 1920;
+    let imageH = 1080;
+    const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
+    if (img && img.naturalWidth > 0) {
+      imageW = img.naturalWidth;
+      imageH = img.naturalHeight;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = imageW;
+    canvas.height = imageH;
+    const ctx = canvas.getContext('2d')!;
+    if (img) {
+      ctx.drawImage(img, 0, 0, imageW, imageH);
+    }
+    const imgData = ctx.getImageData(0, 0, imageW, imageH);
+    const pixels = imgData.data;
+
+    let mask: any = new Uint8ClampedArray(imageW * imageH);
+    if (selectionMask) {
+      mask = selectionMask;
+    } else if (selectionPath.length > 2) {
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = imageW;
+      maskCanvas.height = imageH;
+      const maskCtx = maskCanvas.getContext('2d')!;
+      maskCtx.fillStyle = 'black';
+      maskCtx.fillRect(0, 0, imageW, imageH);
+      maskCtx.fillStyle = 'white';
+      maskCtx.beginPath();
+      selectionPath.forEach((p, idx) => {
+        if (idx === 0) maskCtx.moveTo(p.x, p.y);
+        else maskCtx.lineTo(p.x, p.y);
+      });
+      maskCtx.closePath();
+      maskCtx.fill();
+
+      const maskImgData = maskCtx.getImageData(0, 0, imageW, imageH);
+      for (let i = 0; i < mask.length; i++) {
+        mask[i] = maskImgData.data[i * 4];
+      }
+    } else {
+      toast.error('Please make a selection first.');
+      return;
+    }
+
+    if (action === 'delete') {
+      for (let i = 0; i < mask.length; i++) {
+        if (mask[i] > 128) {
+          const idx = i * 4;
+          pixels[idx] = 0;
+          pixels[idx + 1] = 0;
+          pixels[idx + 2] = 0;
+          pixels[idx + 3] = 255;
+        }
+      }
+    } else if (action === 'erase') {
+      for (let i = 0; i < mask.length; i++) {
+        if (mask[i] > 128) {
+          pixels[i * 4 + 3] = 0;
+        }
+      }
+    } else if (action === 'remove') {
+      inpaint(imgData, mask);
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        toast.error('Failed to apply edits.');
+        return;
+      }
+
+      // Revoke previous blob URL to prevent memory leaks
+      if (editedBlobUrlRef.current) {
+        URL.revokeObjectURL(editedBlobUrlRef.current);
+        editedBlobUrlRef.current = null;
+      }
+
+      const editedUrl = URL.createObjectURL(blob);
+      editedBlobUrlRef.current = editedUrl;
+      const newMediaId = `img_edit_${Date.now()}`;
+      const newFile = new File([blob], `edited_${mediaItem.name}.png`, { type: 'image/png' });
+
+      try {
+        await saveFileToDB(newMediaId, newFile);
+
+        const newMediaItem = {
+          id: newMediaId,
+          name: `Edited ${mediaItem.name}`,
+          type: 'image' as const,
+          duration: mediaItem.duration || 10,
+          url: editedUrl,
+          thumbnail: editedUrl,
+          size: blob.size,
+          createdAt: Date.now()
+        };
+
+        useEditorStore.setState((state) => ({
+          mediaLibrary: [...state.mediaLibrary, newMediaItem]
+        }));
+
+        updateClip(activeClip.id, {
+          mediaId: newMediaId
+        });
+
+        setSelectionPath([]);
+        setSelectionMask(null);
+        toast.success(`Image edit applied successfully (${action})!`);
+      } catch (err) {
+        console.error(err);
+        // Revoke on failure too since the URL won't be used
+        URL.revokeObjectURL(editedUrl);
+        editedBlobUrlRef.current = null;
+        toast.error('Error saving edited image.');
+      }
+    }, 'image/png');
+  };
+
+  const getRenderedSelectionPoints = () => {
+    if (!activeClip || !mediaItem) return '';
+    let imageW = 1920;
+    let imageH = 1080;
+    const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
+    if (img && img.naturalWidth > 0) {
+      imageW = img.naturalWidth;
+      imageH = img.naturalHeight;
+    }
+
+    let vw = W;
+    let vh = H;
+    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+      vw = 1920;
+      vh = 1080;
+    }
+    let scaleToFit = 1;
+    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+      scaleToFit = Math.min(W / (vw || 1), H / (vh || 1));
+    }
+    const bW = vw * scaleToFit;
+    const bH = vh * scaleToFit;
+
+    return selectionPath.map(p => {
+      const localX = (p.x / imageW) * bW - bW / 2;
+      const localY = (p.y / imageH) * bH - bH / 2;
+      return `${localX},${localY}`;
+    }).join(' ');
+  };
+
+  const maskDataUrl = useMemo(() => {
+    if (!selectionMask || !mediaItem) return null;
+    let imageW = 1920;
+    let imageH = 1080;
+    const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
+    if (img && img.naturalWidth > 0) {
+      imageW = img.naturalWidth;
+      imageH = img.naturalHeight;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = imageW;
+    canvas.height = imageH;
+    const ctx = canvas.getContext('2d')!;
+    const imgData = ctx.createImageData(imageW, imageH);
+    const pixels = imgData.data;
+
+    for (let i = 0; i < selectionMask.length; i++) {
+      if (selectionMask[i] > 128) {
+        pixels[i * 4] = 59;
+        pixels[i * 4 + 1] = 130;
+        pixels[i * 4 + 2] = 246;
+        pixels[i * 4 + 3] = 115;
+      } else {
+        pixels[i * 4 + 3] = 0;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return canvas.toDataURL();
+  }, [selectionMask, mediaItem]);
+
   if (!activeClip) return null;
 
   // Determine active viewport dimensions based on aspect ratio
@@ -3791,7 +4273,44 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
                   className="pointer-events-none"
                 />
 
-                {canvasTransformMode === 'resize' ? (
+                {/* Image Selection Mask & Marching Ants */}
+                {maskDataUrl && (
+                  <image
+                    href={maskDataUrl}
+                    x={-baseW / 2}
+                    y={-baseH / 2}
+                    width={baseW}
+                    height={baseH}
+                    className="pointer-events-none"
+                  />
+                )}
+
+                {selectionPath.length > 1 && (
+                  <polygon
+                    points={getRenderedSelectionPoints()}
+                    fill="rgba(255, 0, 255, 0.15)"
+                    stroke="#ff00ff"
+                    strokeWidth={1.5 / viewport.zoom}
+                    strokeDasharray="4,4"
+                    className="marching-ants pointer-events-none"
+                  />
+                )}
+
+                {imageEditorTool !== 'none' && (
+                  <rect
+                    x={-baseW / 2}
+                    y={-baseH / 2}
+                    width={baseW}
+                    height={baseH}
+                    fill="rgba(0,0,0,0.01)"
+                    className="pointer-events-auto cursor-crosshair focus:outline-none"
+                    onPointerDown={handleEditorPointerDown}
+                    onPointerMove={handleEditorPointerMove}
+                    onPointerUp={handleEditorPointerUp}
+                  />
+                )}
+
+                {imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
                   <>
                     {/* Invisible drag area for moving */}
                     <rect
@@ -3946,29 +4465,135 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
               />
             ))}
           </g>
+          <defs>
+            <style>{`
+              @keyframes marching-ants {
+                0% { stroke-dashoffset: 0; }
+                100% { stroke-dashoffset: -8; }
+              }
+              .marching-ants {
+                animation: marching-ants 0.4s linear infinite;
+              }
+            `}</style>
+          </defs>
         </svg>
       </div>
 
-      <div className="absolute top-4 right-4 bg-[#252525] border border-[#3e3e3e] rounded flex overflow-hidden shadow-lg pointer-events-auto z-10">
-        <button
-          className={`p-2 transition-colors ${
-            canvasTransformMode === 'resize' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
-          }`}
-          onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('resize'); }}
-          title="Transform Mode"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
-        <button
-          className={`p-2 transition-colors ${
-            canvasTransformMode === 'crop' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
-          }`}
-          onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('crop'); }}
-          title="Crop Mode"
-        >
-          <Scissors className="w-4 h-4" />
-        </button>
-      </div>
+      {/* Floating Picture Editor Toolbar */}
+      {mediaItem?.type === 'image' && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-[#141414]/90 backdrop-blur-md border border-[#3e3e3e] px-3.5 py-1.5 rounded-full flex items-center gap-3.5 pointer-events-auto shadow-2xl z-50 transition-all select-none">
+          <div className="flex items-center gap-1.5 border-r border-[#3e3e3e]/40 pr-3">
+            <span className="text-[9px] font-bold text-[#a0a0a0] uppercase tracking-wider mr-1">Selection Tools</span>
+            <button
+              onClick={() => {
+                setImageEditorTool(imageEditorTool === 'magic' ? 'none' : 'magic');
+                setSelectionPath([]);
+                setSelectionMask(null);
+              }}
+              className={`p-1.5 rounded-md hover:bg-[#2d2d2d] transition-all flex items-center gap-1 ${
+                imageEditorTool === 'magic' ? 'text-amber-500 bg-[#2d2d2d]' : 'text-[#d0d0d0]'
+              }`}
+              title="Magic Wand (Auto-Select Clicked Object)"
+            >
+              <Wand2 className="w-4 h-4" />
+              <span className="text-[10px] font-medium">Magic</span>
+            </button>
+            <button
+              onClick={() => {
+                setImageEditorTool(imageEditorTool === 'lasso' ? 'none' : 'lasso');
+                setSelectionPath([]);
+                setSelectionMask(null);
+              }}
+              className={`p-1.5 rounded-md hover:bg-[#2d2d2d] transition-all flex items-center gap-1 ${
+                imageEditorTool === 'lasso' ? 'text-amber-500 bg-[#2d2d2d]' : 'text-[#d0d0d0]'
+              }`}
+              title="Lasso Tool (Draw Freehand Selection)"
+            >
+              <Scissors className="w-4 h-4" />
+              <span className="text-[10px] font-medium">Lasso</span>
+            </button>
+            <button
+              onClick={() => {
+                setImageEditorTool(imageEditorTool === 'poly' ? 'none' : 'poly');
+                setSelectionPath([]);
+                setSelectionMask(null);
+              }}
+              className={`p-1.5 rounded-md hover:bg-[#2d2d2d] transition-all flex items-center gap-1 ${
+                imageEditorTool === 'poly' ? 'text-amber-500 bg-[#2d2d2d]' : 'text-[#d0d0d0]'
+              }`}
+              title="Polygon Lasso Tool (Click points, Double click to close)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-0.5"><path d="m12 3 8 5-3 10-10 3L3 11Z"/></svg>
+              <span className="text-[10px] font-medium">Poly</span>
+            </button>
+            {(selectionPath.length > 0 || selectionMask) && (
+              <button
+                onClick={() => {
+                  setSelectionPath([]);
+                  setSelectionMask(null);
+                }}
+                className="p-1 rounded hover:bg-[#2d2d2d] text-red-400 hover:text-red-300 transition-colors ml-1"
+                title="Clear Selection"
+              >
+                <Ban className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 pr-1">
+            <span className="text-[9px] font-bold text-[#a0a0a0] uppercase tracking-wider mr-1">Erase / Action Tools</span>
+            <button
+              onClick={() => applyEditorAction('delete')}
+              disabled={selectionPath.length === 0 && !selectionMask}
+              className="px-2.5 py-1 bg-red-600 hover:bg-red-500 disabled:bg-[#2d2d2d] disabled:text-[#6a6a6a] text-white text-[10px] font-semibold rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+              title="Delete Selection (Live Behind - Blank Screen)"
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => applyEditorAction('remove')}
+              disabled={selectionPath.length === 0 && !selectionMask}
+              className="px-2.5 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-[#2d2d2d] disabled:to-[#2d2d2d] disabled:text-[#6a6a6a] text-white text-[10px] font-semibold rounded-md transition-colors flex items-center gap-1 shadow-md cursor-pointer"
+              title="AI Remove Selection (Object Removal)"
+            >
+              <Sparkles className="w-3 h-3 animate-pulse" />
+              Remove
+            </button>
+            <button
+              onClick={() => applyEditorAction('erase')}
+              disabled={selectionPath.length === 0 && !selectionMask}
+              className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 disabled:bg-[#2d2d2d] disabled:text-[#6a6a6a] text-white text-[10px] font-semibold rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+              title="Erase Selection (Transparent Cutout)"
+            >
+              <Eraser className="w-3 h-3" />
+              Erase
+            </button>
+          </div>
+        </div>
+      )}
+
+      {imageEditorTool === 'none' && (
+        <div className="absolute top-4 right-4 bg-[#252525] border border-[#3e3e3e] rounded flex overflow-hidden shadow-lg pointer-events-auto z-10">
+          <button
+            className={`p-2 transition-colors ${
+              canvasTransformMode === 'resize' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+            }`}
+            onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('resize'); }}
+            title="Transform Mode"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+          <button
+            className={`p-2 transition-colors ${
+              canvasTransformMode === 'crop' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+            }`}
+            onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('crop'); }}
+            title="Crop Mode"
+          >
+            <Scissors className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </>
   );
 }

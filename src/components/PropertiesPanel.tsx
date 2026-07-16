@@ -2122,6 +2122,53 @@ export function PropertiesPanel() {
               )}
             </div>
 
+            {/* Flip Controls */}
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <button
+                onClick={() => toggleSection('flip')}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+              >
+                <span className="font-medium">Flip / Mirror</span>
+                {collapsedSections['flip'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                )}
+              </button>
+              {!collapsedSections['flip'] && (
+                <div className="px-2.5 pb-2.5 pt-1 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const cur = selectedClip.transform.flipH ?? false;
+                      updateClip(selectedClip.id, {
+                        transform: { ...selectedClip.transform, flipH: !cur }
+                      });
+                      useEditorStore.getState().saveSnapshot('Flip Horizontal');
+                    }}
+                    className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
+                      selectedClip.transform.flipH ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
+                    }`}
+                  >
+                    Flip Horizontal
+                  </button>
+                  <button
+                    onClick={() => {
+                      const cur = selectedClip.transform.flipV ?? false;
+                      updateClip(selectedClip.id, {
+                        transform: { ...selectedClip.transform, flipV: !cur }
+                      });
+                      useEditorStore.getState().saveSnapshot('Flip Vertical');
+                    }}
+                    className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
+                      selectedClip.transform.flipV ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
+                    }`}
+                  >
+                    Flip Vertical
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Perspective Warp & Motion Tracking */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button

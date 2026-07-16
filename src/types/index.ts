@@ -68,6 +68,8 @@ export interface ClipTransform {
   perspectiveCorners?: CornerPoints;
   perspectiveTrackingData?: { time: number; corners: CornerPoints }[];
   blendMode?: GlobalCompositeOperation; // compositor blend modes
+  flipH?: boolean;
+  flipV?: boolean;
 }
 
 // Crop bounds for clips (percentages 0-100)
