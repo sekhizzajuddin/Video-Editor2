@@ -113,7 +113,7 @@ export async function trackMotion(
   const store = useEditorStore.getState();
   const aspectRatio = store.aspectRatio || '16:9';
   let W = 854;
-  let H = 480;
+  const H = 480;
   if (aspectRatio === '9:16') {
     W = 270;
   } else if (aspectRatio === '1:1') {

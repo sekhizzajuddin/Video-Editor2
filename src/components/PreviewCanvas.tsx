@@ -2561,57 +2561,35 @@ export function PreviewCanvas() {
       const { updateClip, currentTime, settings } = useEditorStore.getState();
       const sens = settings.gestureSensitivity;
       
-      if (e.altKey) {
-        // Alt + Scroll -> Zoom Workspace
-        setViewport(prev => {
-          const zoomDelta = e.deltaY > 0 ? -0.1 * sens : 0.1 * sens;
-          const newZoom = Math.min(Math.max(prev.zoom + zoomDelta, 0.1), 5.0);
-          
-          const mx = (e.clientX - rect.left) * scaleX;
-          const my = (e.clientY - rect.top) * scaleY;
-          const cx = 854 / 2;
-          const cy = 480 / 2;
-          
-          const nx = (mx - cx) * (1 - newZoom / prev.zoom) + prev.x * (newZoom / prev.zoom);
-          const ny = (my - cy) * (1 - newZoom / prev.zoom) + prev.y * (newZoom / prev.zoom);
-          
-          return { x: nx, y: ny, zoom: newZoom };
-        });
-      } else if (e.ctrlKey || e.metaKey) {
-        // Ctrl + Scroll (or pinch) -> Zoom Content (Clip Scale)
-        const state = useEditorStore.getState();
-        let currentClip = null;
-        if (state.selectedClipId) {
-          for (const t of state.tracks) {
-            if (t.type === 'video') {
-              const c = t.clips.find(c => c.id === state.selectedClipId);
-              if (c && state.currentTime >= c.startTime && state.currentTime < c.startTime + c.duration) {
-                currentClip = c;
-                break;
-              }
-            }
+      const state = useEditorStore.getState();
+      let currentClip = null;
+      if (state.selectedClipId) {
+        for (const t of state.tracks) {
+          const c = t.clips.find(c => c.id === state.selectedClipId);
+          if (c && state.currentTime >= c.startTime && state.currentTime < c.startTime + c.duration) {
+            currentClip = c;
+            break;
           }
+        }
+      }
+
+      if (currentClip) {
+        const currentScale = currentClip.transform.scale;
+        const zoomDelta = e.deltaY > 0 ? -2 * sens : 2 * sens;
+        const newScale = Math.max(10, Math.min(1000, currentScale + zoomDelta));
+        
+        let animations = currentClip.animations || {};
+        const localTime = currentTime - currentClip.startTime;
+        if (animations['transform.scale']) {
+          animations = { ...animations, 'transform.scale': addOrUpdateKeyframe(animations['transform.scale'], localTime, newScale) };
         }
         
-        if (currentClip) {
-          const currentScale = currentClip.transform.scale;
-          // pinch zooms often have small deltaY (e.g. 1-5), mouse wheel is often 100
-          const zoomDelta = e.deltaY > 0 ? -2 * sens : 2 * sens;
-          const newScale = Math.max(10, Math.min(1000, currentScale + zoomDelta));
-          
-          let animations = currentClip.animations || {};
-          const localTime = currentTime - currentClip.startTime;
-          if (animations['transform.scale']) {
-            animations = { ...animations, 'transform.scale': addOrUpdateKeyframe(animations['transform.scale'], localTime, newScale) };
-          }
-          
-          updateClip(currentClip.id, { 
-            transform: { ...currentClip.transform, scale: newScale },
-            animations 
-          });
-        }
+        updateClip(currentClip.id, { 
+          transform: { ...currentClip.transform, scale: newScale },
+          animations 
+        });
       } else {
-        // Two-finger pan -> Pan Workspace
+        // Fallback to panning workspace if no clip selected
         const panSpeed = settings.scrollSpeed;
         setViewport(prev => ({
           ...prev,
@@ -2631,21 +2609,34 @@ export function PreviewCanvas() {
       lastPanPos.current = { x: e.clientX, y: e.clientY };
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (activeTool === 'zoom') {
-      const rect = containerRef.current!.getBoundingClientRect();
-      const scaleX = 854 / rect.width;
-      const scaleY = 480 / rect.height;
-      const mx = (e.clientX - rect.left) * scaleX;
-      const my = (e.clientY - rect.top) * scaleY;
-      
-      setViewport(prev => {
-        const zoomDelta = e.altKey ? -0.5 : 0.5;
-        const newZoom = Math.min(Math.max(prev.zoom + zoomDelta, 0.1), 5.0);
-        const cx = 854 / 2;
-        const cy = 480 / 2;
-        const nx = (mx - cx) * (1 - newZoom / prev.zoom) + prev.x * (newZoom / prev.zoom);
-        const ny = (my - cy) * (1 - newZoom / prev.zoom) + prev.y * (newZoom / prev.zoom);
-        return { x: nx, y: ny, zoom: newZoom };
-      });
+      const state = useEditorStore.getState();
+      let currentClip = null;
+      if (state.selectedClipId) {
+        for (const t of state.tracks) {
+          const c = t.clips.find(c => c.id === state.selectedClipId);
+          if (c && state.currentTime >= c.startTime && state.currentTime < c.startTime + c.duration) {
+            currentClip = c;
+            break;
+          }
+        }
+      }
+
+      if (currentClip) {
+        const factor = e.shiftKey ? 1 / 1.5 : 1.5;
+        const newScale = Math.max(10, Math.min(1000, Math.round(currentClip.transform.scale * factor)));
+        
+        let animations = currentClip.animations || {};
+        const localTime = state.currentTime - currentClip.startTime;
+        if (animations['transform.scale']) {
+          animations = { ...animations, 'transform.scale': addOrUpdateKeyframe(animations['transform.scale'], localTime, newScale) };
+        }
+        
+        updateClip(currentClip.id, {
+          transform: { ...currentClip.transform, scale: newScale },
+          animations
+        });
+        useEditorStore.getState().saveSnapshot();
+      }
     }
   };
 
@@ -3009,6 +3000,47 @@ export function PreviewCanvas() {
   );
 }
 
+function getClipDimensions(clip: any, mediaLibrary: any[], W: number, H: number): { width: number; height: number } {
+  if (!clip) return { width: 0, height: 0 };
+  const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId) || null;
+  let vw = W;
+  let vh = H;
+  
+  if (mediaItem?.type === 'video') {
+    vw = 1920;
+    vh = 1080;
+  } else if (mediaItem?.type === 'image') {
+    vw = 1920;
+    vh = 1080;
+  } else if (mediaItem?.type === 'text' || clip.textSettings || clip.mediaId === 'text-placeholder') {
+    const ts = clip.textSettings;
+    if (ts) {
+      const fontSize = Number(ts.fontSize) || 48;
+      const text = String(ts.text || '');
+      const lines = text.split('\n');
+      const estCharWidth = fontSize * 0.6;
+      const longestLine = lines.reduce((max: number, l: string) => Math.max(max, l.length), 0);
+      vw = Math.max(80, longestLine * estCharWidth + 40);
+      vh = lines.length * (fontSize * 1.35) + 20;
+    } else {
+      vw = 300;
+      vh = 80;
+    }
+  }
+
+  let scaleToFit = 1;
+  if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+    scaleToFit = Math.min(W / (vw || 1), H / (vh || 1));
+  }
+  const baseW = vw * scaleToFit;
+  const baseH = vh * scaleToFit;
+  
+  const scale = clip.transform?.scale ?? 100;
+  return {
+    width: baseW * (scale / 100),
+    height: baseH * (scale / 100),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Interactive Canvas Overlay Component
@@ -3094,6 +3126,16 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
       }
     }
   }
+
+  const aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']) : 0;
+  const aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']) : 0;
+  const aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']) : 100;
+  const aRot = activeClip ? getAnimatedValue(activeClip.transform.rotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']) : 0;
+
+  const aCropLeft = activeClip ? getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']) : 0;
+  const aCropTop = activeClip ? getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']) : 0;
+  const aCropRight = activeClip ? getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']) : 0;
+  const aCropBot = activeClip ? getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']) : 0;
 
   useEffect(() => {
     if (!dragState || !activeClip) return;
@@ -3221,22 +3263,153 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
       if (dragState.type === 'move') {
         let newX = x + dx;
         let newY = y + dy;
-        
-        const newGuides: {axis: 'x'|'y', position: number}[] = [];
-        const snapThreshold = 15; // px (before scaling)
-        
-        // Center snapping
-        if (Math.abs(newX) < snapThreshold) {
-          newX = 0;
-          newGuides.push({ axis: 'x', position: 0 });
+
+        const newGuides: { axis: 'x' | 'y'; position: number }[] = [];
+        const snapThreshold = 12; // px (magnetic range)
+
+        const draggedWidth = (dragState.baseW || 854) * (scale / 100);
+        const draggedHeight = (dragState.baseH || 480) * (scale / 100);
+
+        // 1. Gather other active clips
+        const state = useEditorStore.getState();
+        const otherActiveClips: any[] = [];
+        state.tracks.forEach((track) => {
+          if (track.hidden) return;
+          track.clips.forEach((clip) => {
+            if (clip.id === activeClip.id) return;
+            if (currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+              otherActiveClips.push(clip);
+            }
+          });
+        });
+
+        if (state.pipWindows) {
+          Object.values(state.pipWindows).forEach((pip: any) => {
+            let parentClip = null;
+            for (const t of state.tracks) {
+              parentClip = t.clips.find(c => c.id === pip.parentClipId);
+              if (parentClip) break;
+            }
+            if (!parentClip) return;
+            const pipAbsStart = parentClip.startTime + (pip.relativeStartTime || 0);
+            if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+              pip.tracks.forEach((track: any) => {
+                track.clips.forEach((clip: any) => {
+                  if (clip.id === activeClip.id) return;
+                  const ptAbsStart = pipAbsStart + clip.startTime;
+                  if (currentTime >= ptAbsStart && currentTime < ptAbsStart + clip.duration) {
+                    otherActiveClips.push(clip);
+                  }
+                });
+              });
+            }
+          });
         }
-        if (Math.abs(newY) < snapThreshold) {
-          newY = 0;
-          newGuides.push({ axis: 'y', position: 0 });
+
+        // 2. Snapping X Axis
+        let bestSnapX: number | null = null;
+        let minDiffX = Infinity;
+        let snapXVal: number | null = null;
+
+        const targetsX = [
+          -W / 2, // Canvas left
+          0,      // Canvas center
+          W / 2   // Canvas right
+        ];
+
+        otherActiveClips.forEach((other) => {
+          const dims = getClipDimensions(other, mediaLibrary, W, H);
+          const oX = other.transform?.x ?? 0;
+          targetsX.push(oX - dims.width / 2); // Other left
+          targetsX.push(oX);                  // Other center
+          targetsX.push(oX + dims.width / 2);  // Other right
+        });
+
+        const draggedAnchorsX = [
+          { val: newX - draggedWidth / 2, type: 'left' },
+          { val: newX, type: 'center' },
+          { val: newX + draggedWidth / 2, type: 'right' }
+        ];
+
+        draggedAnchorsX.forEach((anchor) => {
+          targetsX.forEach((targetVal) => {
+            const diff = Math.abs(anchor.val - targetVal);
+            if (diff < snapThreshold && diff < minDiffX) {
+              minDiffX = diff;
+              if (anchor.type === 'left') {
+                bestSnapX = targetVal + draggedWidth / 2;
+              } else if (anchor.type === 'center') {
+                bestSnapX = targetVal;
+              } else {
+                bestSnapX = targetVal - draggedWidth / 2;
+              }
+              snapXVal = targetVal;
+            }
+          });
+        });
+
+        if (bestSnapX !== null) {
+          newX = bestSnapX;
+          if (snapXVal !== null) {
+            newGuides.push({ axis: 'x', position: snapXVal });
+          }
         }
-        
-        setSnapGuides(newGuides);
-        
+
+        // 3. Snapping Y Axis
+        let bestSnapY: number | null = null;
+        let minDiffY = Infinity;
+        let snapYVal: number | null = null;
+
+        const targetsY = [
+          -H / 2, // Canvas top
+          0,      // Canvas center
+          H / 2   // Canvas bottom
+        ];
+
+        otherActiveClips.forEach((other) => {
+          const dims = getClipDimensions(other, mediaLibrary, W, H);
+          const oY = other.transform?.y ?? 0;
+          targetsY.push(oY - dims.height / 2); // Other top
+          targetsY.push(oY);                   // Other center
+          targetsY.push(oY + dims.height / 2);  // Other bottom
+        });
+
+        const draggedAnchorsY = [
+          { val: newY - draggedHeight / 2, type: 'top' },
+          { val: newY, type: 'center' },
+          { val: newY + draggedHeight / 2, type: 'bottom' }
+        ];
+
+        draggedAnchorsY.forEach((anchor) => {
+          targetsY.forEach((targetVal) => {
+            const diff = Math.abs(anchor.val - targetVal);
+            if (diff < snapThreshold && diff < minDiffY) {
+              minDiffY = diff;
+              if (anchor.type === 'top') {
+                bestSnapY = targetVal + draggedHeight / 2;
+              } else if (anchor.type === 'center') {
+                bestSnapY = targetVal;
+              } else {
+                bestSnapY = targetVal - draggedHeight / 2;
+              }
+              snapYVal = targetVal;
+            }
+          });
+        });
+
+        if (bestSnapY !== null) {
+          newY = bestSnapY;
+          if (snapYVal !== null) {
+            newGuides.push({ axis: 'y', position: snapYVal });
+          }
+        }
+
+        // Filter duplicates
+        const uniqueGuides = newGuides.filter(
+          (g, idx, self) => self.findIndex((o) => o.axis === g.axis && Math.abs(o.position - g.position) < 0.1) === idx
+        );
+        setSnapGuides(uniqueGuides);
+
         getNewAnimations('transform.x', newX);
         getNewAnimations('transform.y', newY);
         x = newX;
@@ -3359,15 +3532,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements }: { viewport: { x: 
   const baseW = vw * scaleToFit;
   const baseH = vh * scaleToFit;
 
-  const aX = getAnimatedValue(activeClip.transform.x, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']);
-  const aY = getAnimatedValue(activeClip.transform.y, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']);
-  const aScale = getAnimatedValue(activeClip.transform.scale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']);
-  const aRot = getAnimatedValue(activeClip.transform.rotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']);
 
-  const aCropLeft = getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']);
-  const aCropTop = getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']);
-  const aCropRight = getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']);
-  const aCropBot = getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']);
 
   const handleMouseDown = (e: React.MouseEvent, type: string) => {
     e.stopPropagation();

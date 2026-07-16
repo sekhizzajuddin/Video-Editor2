@@ -44,7 +44,7 @@ function captureVideoFrame(
       const ctx = canvas.getContext('2d')!;
       try {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      } catch (e) {}
+      } catch (_) {}
       resolve(canvas.toDataURL('image/jpeg', 0.7));
     };
 

@@ -1,4 +1,4 @@
-import { SpeedRampKeyframe, EasingType } from '../types';
+import { SpeedRampKeyframe } from '../types';
 
 export interface Point {
   x: number;
