@@ -226,7 +226,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
                   const isFree = m.pricing.prompt === "0" && m.pricing.completion === "0";
                   return (
                     <option key={m.id} value={m.id}>
-                      {m.name} {isFree ? '(FREE)' : '(PAID)'}
+                      {m.id.toLowerCase().includes('nvidia') ? '🟢 NVIDIA ' : '🌐 '}{m.name} {isFree ? '(FREE)' : '(PAID)'}
                     </option>
                   );
                 })}
