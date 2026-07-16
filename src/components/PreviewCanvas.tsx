@@ -1,4 +1,5 @@
 import { applyAiBackgroundMask } from '../utils/aiBackground';
+import { removeBackground } from '@imgly/background-removal';
 import {
   Play,
   Pause,
@@ -3260,6 +3261,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
   const [imageEditorTool, setImageEditorTool] = useState<'none' | 'magic' | 'lasso' | 'poly'>('none');
   const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[]>([]);
   const [selectionMask, setSelectionMask] = useState<Uint8ClampedArray | null>(null);
+  const [isProcessingSelection, setIsProcessingSelection] = useState(false);
   const editedBlobUrlRef = useRef<string | null>(null);
   const isDrawingRef = useRef(false);
 
@@ -3712,18 +3714,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
     const imageW = img?.naturalWidth || 1920;
     const imageH = img?.naturalHeight || 1080;
 
-    if (imageEditorTool === 'magic') {
-      const offCanvas = document.createElement('canvas');
-      offCanvas.width = imageW;
-      offCanvas.height = imageH;
-      const offCtx = offCanvas.getContext('2d');
-      if (!offCtx) { toast.error('Canvas unavailable.'); return; }
-      offCtx.drawImage(img!, 0, 0, imageW, imageH);
-      const imgData = offCtx.getImageData(0, 0, imageW, imageH);
-      const mask = floodFill(imgData, imgPos.x, imgPos.y, 30);
-      setSelectionMask(mask);
-      setSelectionPath([]);
-    } else if (imageEditorTool === 'lasso') {
+    if (imageEditorTool === 'magic' || imageEditorTool === 'lasso') {
       isDrawingRef.current = true;
       setSelectionPath([{ x: imgPos.x, y: imgPos.y }]);
       setSelectionMask(null);
@@ -3743,20 +3734,129 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
   };
 
   const handleEditorPointerMove = (e: React.PointerEvent<SVGElement>) => {
-    if (!activeClip || !mediaItem || !isDrawingRef.current || imageEditorTool !== 'lasso') return;
+    if (!activeClip || !mediaItem || !isDrawingRef.current || (imageEditorTool !== 'lasso' && imageEditorTool !== 'magic')) return;
     const imgPos = clientToImagePixel(e);
     if (!imgPos) return;
     setSelectionPath(prev => [...prev, { x: imgPos.x, y: imgPos.y }]);
   };
 
   const handleEditorPointerUp = () => {
-    if (imageEditorTool === 'lasso') {
+    if (imageEditorTool === 'lasso' || imageEditorTool === 'magic') {
       isDrawingRef.current = false;
       if (selectionPath.length > 2) {
-        setSelectionPath(prev => [...prev, { x: prev[0].x, y: prev[0].y }]);
+        const closedPath = [...selectionPath, { x: selectionPath[0].x, y: selectionPath[0].y }];
+        setSelectionPath(closedPath);
+        if (imageEditorTool === 'magic') {
+          processSmartSelection(closedPath);
+        }
       }
     }
   };
+
+  const processSmartSelection = async (path: {x: number, y: number}[]) => {
+    if (!activeClip || !mediaItem || mediaItem.type !== 'image') return;
+    
+    let imageW = 1920;
+    let imageH = 1080;
+    const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
+    if (!img || img.naturalWidth === 0) {
+      toast.error('Image not fully loaded yet.');
+      return;
+    }
+    imageW = img.naturalWidth;
+    imageH = img.naturalHeight;
+
+    // 1. Calculate Bounding Box of the drawn lasso
+    let minX = imageW, minY = imageH, maxX = 0, maxY = 0;
+    path.forEach(p => {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    });
+
+    // Add padding (10% or at least 20px)
+    const pad = Math.max(20, (maxX - minX) * 0.1);
+    minX = Math.max(0, Math.floor(minX - pad));
+    minY = Math.max(0, Math.floor(minY - pad));
+    maxX = Math.min(imageW, Math.ceil(maxX + pad));
+    maxY = Math.min(imageH, Math.ceil(maxY + pad));
+
+    const boxW = maxX - minX;
+    const boxH = maxY - minY;
+    
+    if (boxW <= 10 || boxH <= 10) {
+      setSelectionPath([]);
+      toast.error('Selection too small.');
+      return;
+    }
+
+    setIsProcessingSelection(true);
+    const toastId = toast.loading('Running ML segmentation on selection...');
+
+    try {
+      // 2. Crop the image to the bounding box
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = boxW;
+      cropCanvas.height = boxH;
+      const cropCtx = cropCanvas.getContext('2d')!;
+      cropCtx.drawImage(img, minX, minY, boxW, boxH, 0, 0, boxW, boxH);
+
+      const blob = await new Promise<Blob | null>(resolve => cropCanvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('Failed to create blob for cropping');
+
+      // 3. Run ML segmentation on the crop
+      const resultBlob = await removeBackground(blob, {
+        publicPath: 'https://static.imgly.com/@imgly/background-removal-data/1.4.0/dist/',
+        progress: (key: string, current: number, total: number) => {
+          // Could update toast if needed
+        }
+      });
+
+      // 4. Map the transparent PNG back to a full-size mask
+      const resultImg = new Image();
+      const resultUrl = URL.createObjectURL(resultBlob);
+      await new Promise((resolve, reject) => {
+        resultImg.onload = () => {
+          URL.revokeObjectURL(resultUrl);
+          resolve(null);
+        };
+        resultImg.onerror = (e) => {
+          URL.revokeObjectURL(resultUrl);
+          reject(e);
+        };
+        resultImg.src = resultUrl;
+      });
+
+      const fullMaskCanvas = document.createElement('canvas');
+      fullMaskCanvas.width = imageW;
+      fullMaskCanvas.height = imageH;
+      const fullMaskCtx = fullMaskCanvas.getContext('2d')!;
+      fullMaskCtx.fillStyle = 'black'; // background is completely unselected
+      fullMaskCtx.fillRect(0, 0, imageW, imageH);
+      
+      // Draw the isolated object in the exact bounding box location
+      fullMaskCtx.drawImage(resultImg, minX, minY, boxW, boxH);
+      
+      const fullMaskData = fullMaskCtx.getImageData(0, 0, imageW, imageH);
+      const mask = new Uint8ClampedArray(imageW * imageH);
+      
+      // Extract alpha channel: anywhere imgly kept the object, alpha > 0
+      for (let i = 0; i < mask.length; i++) {
+        mask[i] = fullMaskData.data[i * 4 + 3]; // alpha channel
+      }
+      
+      setSelectionMask(mask);
+      setSelectionPath([]); // Clear the visual lasso path, the mask is now perfect
+      toast.success('Smart selection completed!', { id: toastId });
+    } catch (error) {
+      console.error('Smart selection error:', error);
+      toast.error('Smart selection failed. Falling back to manual lasso.', { id: toastId });
+    } finally {
+      setIsProcessingSelection(false);
+    }
+  };
+
 
   const applyEditorAction = async (action: 'delete' | 'remove' | 'erase') => {
     if (!activeClip || !mediaItem || mediaItem.type !== 'image') return;
@@ -4282,6 +4382,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                     onPointerDown={handleEditorPointerDown}
                     onPointerMove={handleEditorPointerMove}
                     onPointerUp={handleEditorPointerUp}
+                    onPointerCancel={handleEditorPointerUp}
                   />
                 )}
 
