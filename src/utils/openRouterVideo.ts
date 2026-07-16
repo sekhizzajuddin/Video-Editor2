@@ -2,7 +2,7 @@ import { OpenRouterModel } from '../types';
 
 const BASE_URL = 'https://openrouter.ai/api/v1';
 
-export const fetchAIModels = async (apiKey: string): Promise<OpenRouterModel[]> => {
+export const fetchOpenRouterModels = async (apiKey: string): Promise<OpenRouterModel[]> => {
   try {
     const response = await fetch(`${BASE_URL}/models`, {
       method: 'GET',
@@ -17,17 +17,8 @@ export const fetchAIModels = async (apiKey: string): Promise<OpenRouterModel[]> 
     }
 
     const data = await response.json();
-    // Filter models that are typically video or image-to-video
-    const videoKeywords = ['kling', 'veo', 'seedance', 'wan', 'sora', 'minimax', 'hailuo', 'runway', 'luma', 'flux', 'stable-diffusion', 'dall-e', 'ideogram', 'midjourney', 'nvidia'];
-    
-    const videoModels = data.data.filter((model: any) => {
-      const isVideoOrImage = videoKeywords.some(kw => model.id.toLowerCase().includes(kw));
-      // Specifically filter out known pure coding/text models if they accidentally matched
-      const isCoding = model.id.toLowerCase().includes('coder') || model.id.toLowerCase().includes('code:');
-      return isVideoOrImage && !isCoding;
-    });
-
-    return videoModels;
+    // OpenRouter primarily hosts LLMs. We will return all models so the user can see what is available.
+    return data.data;
   } catch (error) {
     console.error('Error fetching video models:', error);
     return [];
