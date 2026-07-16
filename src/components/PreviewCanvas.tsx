@@ -1,4 +1,4 @@
-﻿import { applyAiBackgroundMask } from '../utils/aiBackground';
+import { applyAiBackgroundMask } from '../utils/aiBackground';
 import {
   Play,
   Pause,
@@ -290,7 +290,7 @@ export function PreviewCanvas() {
     }, [currentTime]);
 
   // -------------------------------------------------------------------
-  // Playback loop â€“ advance currentTime via rAF when playing
+  // Playback loop Ã¢â‚¬â€œ advance currentTime via rAF when playing
   // -------------------------------------------------------------------
   useEffect(() => {
     if (!isPlaying) return;
@@ -420,7 +420,7 @@ export function PreviewCanvas() {
   }, [isPlaying]);
 
   // -------------------------------------------------------------------
-  // Canvas rendering â€“ called whenever time, tracks, or images change
+  // Canvas rendering Ã¢â‚¬â€œ called whenever time, tracks, or images change
   // -------------------------------------------------------------------
   const renderCanvas = useCallback(async () => {
     const {
@@ -454,7 +454,7 @@ export function PreviewCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // â”€â”€ Double buffering: render to offscreen composite canvas, then blit â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Double buffering: render to offscreen composite canvas, then blit Ã¢â€â‚¬Ã¢â€â‚¬
     const composite = getOrCreateCanvas('composite', canvas.width, canvas.height);
     // BUG-H1: Clear context on resize to re-apply willReadFrequently
     if (composite.width !== canvas.width || composite.height !== canvas.height) {
@@ -493,7 +493,7 @@ export function PreviewCanvas() {
     // OPTIMIZATION: Dynamically scale down pixel-heavy effects by 50% during playback (unless exporting)
     const DOWNSCALE = (isPlaying && !isExporting) ? 0.5 : 1.0;
 
-    // â”€â”€ Frame gate: during scrubbing, check if videos are ready or have cached frames â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Frame gate: during scrubbing, check if videos are ready or have cached frames Ã¢â€â‚¬Ã¢â€â‚¬
     // If a video is seeking AND we have no cached frame for it, retain the last frame.
     if (!isPlaying) {
       const allVideoTracks = tracks.filter((t) => t.type === 'video' && !t.hidden);
@@ -526,7 +526,7 @@ export function PreviewCanvas() {
       }
 
       if (needsWait) {
-        // No cached frame available â€” show the last good frame instead of flashing
+        // No cached frame available Ã¢â‚¬â€ show the last good frame instead of flashing
         const mainCtx = canvas.getContext('2d');
         if (mainCtx && lastFrameCanvasRef.current && lastFrameCanvasRef.current.width > 0) {
           mainCtx.drawImage(lastFrameCanvasRef.current, 0, 0);
@@ -1550,7 +1550,7 @@ export function PreviewCanvas() {
           hasRealMedia = true;
           anyClipDrawn = true;
         } else if (isPlaying) {
-          // Video not ready yet during playback â€“ draw placeholder
+          // Video not ready yet during playback Ã¢â‚¬â€œ draw placeholder
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'VIDEO', '#3b82f6');
           anyClipDrawn = true;
         } else {
@@ -1577,7 +1577,7 @@ export function PreviewCanvas() {
           dx = -baseDw / 2 + baseDw * cLeft;
           dy = -baseDh / 2 + baseDh * cTop;
 
-          // â”€â”€ Ken Burns zoom + pan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // Ã¢â€â‚¬Ã¢â€â‚¬ Ken Burns zoom + pan Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
           const kb = clip.kenBurns;
           if (kb?.enabled) {
             const rawP = clip.duration > 0
@@ -1597,7 +1597,7 @@ export function PreviewCanvas() {
             ctx.translate(kbPanX, kbPanY);
             ctx.scale(kbScale, kbScale);
           }
-          // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
           applyClipMask(ctx, clip.mask, dx, dy, dw, dh);
 
@@ -1702,7 +1702,7 @@ export function PreviewCanvas() {
           hasRealMedia = true;
           anyClipDrawn = true;
         } else {
-          // Image still loading â€“ placeholder
+          // Image still loading Ã¢â‚¬â€œ placeholder
           drawMediaPlaceholder(ctx, W, H, mediaItem.name, 'IMAGE', '#f59e0b');
           anyClipDrawn = true;
         }
@@ -1737,7 +1737,7 @@ export function PreviewCanvas() {
           animation: rawTs?.animation,
         };
 
-        // â”€â”€ Animation progress â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Animation progress Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         const localTime = Math.max(0, currentTime - clip.startTime);
         const clipDur = clip.duration;
         const inDur  = ts.animation?.inDuration ?? 0.5;
@@ -1772,7 +1772,7 @@ export function PreviewCanvas() {
               break;
             }
 
-            // â”€â”€â”€ CINEMATIC ANIMATIONS (IN) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CINEMATIC ANIMATIONS (IN) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
             case 'elastic': {
               // Spring overshoot: ease-out-elastic curve
@@ -1787,14 +1787,14 @@ export function PreviewCanvas() {
 
             case 'revealWipe': {
               // Text slides in and alpha clips: simulates a wipe-reveal curtain
-              // We move from left + fade in â€” canvas clip-path is approximated with offset
+              // We move from left + fade in Ã¢â‚¬â€ canvas clip-path is approximated with offset
               textXOffset += (1 - inProgress) * -200;
               textAlpha   *= Math.min(1, inProgress * 2); // fast alpha so it feels like a wipe
               break;
             }
 
             case 'splitReveal': {
-              // Scales up from near-zero with fade â€” classic cinematic title reveal
+              // Scales up from near-zero with fade Ã¢â‚¬â€ classic cinematic title reveal
               const ease = 1 - Math.pow(1 - inProgress, 3); // cubic ease-out
               textScale *= (0.05 + 0.95 * ease);
               textAlpha *= ease;
@@ -1802,7 +1802,7 @@ export function PreviewCanvas() {
             }
 
             case 'glitch': {
-              // Rapid random XY jitter that settles as inProgress â†’ 1
+              // Rapid random XY jitter that settles as inProgress Ã¢â€ â€™ 1
               const glitchIntensity = Math.max(0, 1 - inProgress * 2); // stops halfway
               const time = performance.now() / 1000;
               textXOffset += glitchIntensity * 20 * (Math.sin(time * 80)  > 0 ? 1 : -1);
@@ -1815,21 +1815,21 @@ export function PreviewCanvas() {
               // Simulated letter-spacing compress: characters start very close (squished scale X)
               // We fake it with horizontal scale + slight alpha
               const ease = 1 - Math.pow(1 - inProgress, 2); // quad ease-out
-              textScale   *= (0.4 + 0.6 * ease);   // scale X from 0.4 â†’ 1.0
+              textScale   *= (0.4 + 0.6 * ease);   // scale X from 0.4 Ã¢â€ â€™ 1.0
               textAlpha   *= ease;
               break;
             }
 
             case 'rollUp': {
               // Film-credit hard roll: text comes from far below very fast
-              const ease = 1 - Math.pow(1 - inProgress, 4); // quart ease-out â€” fast then eases
+              const ease = 1 - Math.pow(1 - inProgress, 4); // quart ease-out Ã¢â‚¬â€ fast then eases
               textYOffset += (1 - ease) * 180;
               textAlpha   *= Math.min(1, inProgress * 4); // opacity snaps on early
               break;
             }
 
             case 'scaleFlip': {
-              // Y-axis squeeze (scaleY 0 â†’ 1) then pops open â€” dramatic reveal
+              // Y-axis squeeze (scaleY 0 Ã¢â€ â€™ 1) then pops open Ã¢â‚¬â€ dramatic reveal
               const ease = inProgress < 0.5
                 ? 4 * inProgress * inProgress * inProgress            // cubic ease-in for first half
                 : 1 - Math.pow(-2 * inProgress + 2, 3) / 2;          // cubic ease-out for second half
@@ -1839,9 +1839,9 @@ export function PreviewCanvas() {
             }
 
             case 'zoomBlur': {
-              // Blockbuster zoom: starts very large and slams down to 1Ã—, heavy alpha ramp
+              // Blockbuster zoom: starts very large and slams down to 1Ãƒâ€”, heavy alpha ramp
               const ease = 1 - Math.pow(1 - inProgress, 3); // cubic ease-out
-              textScale *= (3.0 - 2.0 * ease);     // 3Ã— â†’ 1Ã— zoom in
+              textScale *= (3.0 - 2.0 * ease);     // 3Ãƒâ€” Ã¢â€ â€™ 1Ãƒâ€” zoom in
               textAlpha *= ease * ease;             // quadratic alpha so it "appears" through blur
               break;
             }
@@ -1857,7 +1857,7 @@ export function PreviewCanvas() {
             case 'slideLeft': textXOffset -= (1 - outProgress) * 160; break;
             case 'slideRight':textXOffset += (1 - outProgress) * 160; break;
 
-            // â”€â”€â”€ CINEMATIC OUT animations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CINEMATIC OUT animations Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
             case 'elastic': {
               // Reverse elastic: snap away then spring back slightly before exiting
@@ -1912,7 +1912,7 @@ export function PreviewCanvas() {
           }
         }
 
-        // â”€â”€ Multiline split â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Multiline split Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
                 
         if (rawTs?.animationPreset === 'typewriter') {
           const totalChars = displayText.length;
@@ -1944,7 +1944,7 @@ export function PreviewCanvas() {
         dw = maxLineWidth + 40;
         dh = lines.length * lineHeight + 20;
 
-        // â”€â”€ Sub-transform for animation (applied on top of clip transform) â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Sub-transform for animation (applied on top of clip transform) Ã¢â€â‚¬
         ctx.save();
         ctx.translate(textXOffset, textYOffset);
         ctx.scale(textScale, textScale);
@@ -1966,7 +1966,7 @@ export function PreviewCanvas() {
         lines.forEach((line: string, lineIdx: number) => {
           const lineY = -totalTextH / 2 + lineIdx * lineHeight + lineHeight / 2;
 
-          // 3D depth layers â€” FIX H3: no shadow on depth layers (shadow goes on the main text below)
+          // 3D depth layers Ã¢â‚¬â€ FIX H3: no shadow on depth layers (shadow goes on the main text below)
           if (ts.threeD) {
             ctx.shadowBlur = 0;
             ctx.fillStyle = ts.shadowColor;
@@ -2028,7 +2028,7 @@ export function PreviewCanvas() {
 
         // Check if currentTime falls into any active transition zone
         // A transition can be defined as transitionIn on clipB (incoming clip) OR
-        // transitionOut on clipA (outgoing clip) â€” check both so dropped transitions work regardless
+        // transitionOut on clipA (outgoing clip) Ã¢â‚¬â€ check both so dropped transitions work regardless
         for (let idx = 1; idx < sortedClips.length; idx++) {
           const clipB = sortedClips[idx];
           const clipA = sortedClips[idx - 1];
@@ -2263,7 +2263,7 @@ export function PreviewCanvas() {
 
     ctx.restore(); // Restore from viewport transform
 
-    // â”€â”€ Render Subtitles (from store subtitles array) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Render Subtitles (from store subtitles array) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     const storeState = useEditorStore.getState();
     const subsList = (storeState as any).subtitles;
     const activeSubLanguage = (storeState as any).subtitleLanguage || 'en';
@@ -2320,7 +2320,7 @@ export function PreviewCanvas() {
       }
     }
 
-    // â”€â”€ Grid Overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Grid Overlay Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if (showGrid && !isExporting) {
       ctx.save();
       ctx.globalAlpha = 1;
@@ -2466,7 +2466,7 @@ export function PreviewCanvas() {
 
     ctx.restore(); // Restore from global canvas resolution scale
 
-    // â”€â”€ Double buffer blit: copy finished composite to visible canvas in one atomic draw â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Double buffer blit: copy finished composite to visible canvas in one atomic draw Ã¢â€â‚¬Ã¢â€â‚¬
     const mainCtx = canvas.getContext('2d');
     if (mainCtx) {
       mainCtx.clearRect(0, 0, canvas.width, canvas.height);
@@ -2489,7 +2489,7 @@ export function PreviewCanvas() {
     }
   }, []);
 
-  // â”€â”€ Unified render loop to prevent flickering during scrubbing â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Unified render loop to prevent flickering during scrubbing Ã¢â€â‚¬Ã¢â€â‚¬
   // Use a frame-pending flag + single rAF loop instead of canceling/rescheduling.
   const renderCanvasRef = useRef(renderCanvas);
   const rafActiveRef = useRef(false);
@@ -2736,7 +2736,7 @@ export function PreviewCanvas() {
 
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e]">
-      {/* Canvas Container â€” flex-1 so it shares space with the control bar */}
+      {/* Canvas Container Ã¢â‚¬â€ flex-1 so it shares space with the control bar */}
       <div 
         ref={containerRef} 
         id="preview-canvas-wrapper" 
@@ -2746,7 +2746,7 @@ export function PreviewCanvas() {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onClick={(e) => {
-          // Ctrl+click or Alt+click â†’ set particle emitter position
+          // Ctrl+click or Alt+click Ã¢â€ â€™ set particle emitter position
           const selClip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
           if (selClip?.particleSettings && (e.ctrlKey || e.altKey)) {
             const rect = e.currentTarget.getBoundingClientRect();
@@ -2854,7 +2854,7 @@ export function PreviewCanvas() {
         </div>
       </div>
 
-      {/* â”€â”€ Playback Control Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Playback Control Bar Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */}
       <div
         className="shrink-0 flex flex-col bg-[#181818] border-t border-[#2e2e2e]"
         onPointerDown={(e) => e.stopPropagation()}
@@ -2982,7 +2982,7 @@ export function PreviewCanvas() {
                 title="Playback Speed"
                 className="text-[10px] font-mono text-[#888] hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-white/5 border border-transparent hover:border-white/10"
               >
-                {playbackSpeed === 1 ? '1Ã—' : `${playbackSpeed}Ã—`}
+                {playbackSpeed === 1 ? '1Ãƒâ€”' : `${playbackSpeed}Ãƒâ€”`}
               </button>
               {showSpeedMenu && (
                 <div className="absolute bottom-full right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl overflow-hidden z-50 pointer-events-auto">
@@ -2996,7 +2996,7 @@ export function PreviewCanvas() {
                           : 'text-[#a0a0a0] hover:bg-[#2a2a2a] hover:text-white'
                       }`}
                     >
-                      {s}Ã—
+                      {s}Ãƒâ€”
                     </button>
                   ))}
                 </div>
@@ -3121,7 +3121,7 @@ function floodFill(imgData: ImageData, startX: number, startY: number, tolerance
   const targetB = pixels[targetIdx + 2];
   const targetA = pixels[targetIdx + 3];
 
-  // Use head-pointer instead of shift() to avoid O(nÂ²) performance on large images
+  // Use head-pointer instead of shift() to avoid O(nÃ‚Â²) performance on large images
   const queue: [number, number][] = [[sx, sy]];
   let head = 0;
   visited[sy * w + sx] = 1;
@@ -3662,52 +3662,55 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
     };
   }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime, aspectRatio]);
 
+  // Convert clientX/Y to image pixel coordinates using SVG's own coordinate system.
+  // The <rect> lives inside the clip's transform group, so its CTM already encodes
+  // all viewport pan/zoom + aspect offset + clip position/rotation/scale transforms.
+  // getScreenCTM().inverse() gives us the rect-local coordinate directly.
+  const clientToImagePixel = (e: React.PointerEvent<SVGElement>): { x: number; y: number } | null => {
+    const svgEl = e.currentTarget.closest('svg') as SVGSVGElement | null;
+    if (!svgEl) return null;
+
+    // Get the image dimensions
+    const img = getCachedImage(mediaItem!.id, mediaItem!.url as string, () => {});
+    const imageW = img?.naturalWidth || 1920;
+    const imageH = img?.naturalHeight || 1080;
+
+    // Use getScreenCTM to convert client coords to the <rect>'s local space
+    const target = e.currentTarget as unknown as SVGGraphicsElement;
+    const ctm = target.getScreenCTM();
+    if (!ctm) return null;
+    const pt = svgEl.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const localPt = pt.matrixTransform(ctm.inverse());
+
+    // localPt is in the rect's local space: x in [-baseW/2, baseW/2], y in [-baseH/2, baseH/2]
+    // Map to image pixel space: (0..imageW, 0..imageH)
+    const imgX = Math.round(((localPt.x + baseW / 2) / baseW) * imageW);
+    const imgY = Math.round(((localPt.y + baseH / 2) / baseH) * imageH);
+
+    return {
+      x: Math.max(0, Math.min(imageW - 1, imgX)),
+      y: Math.max(0, Math.min(imageH - 1, imgY))
+    };
+  };
+
   const handleEditorPointerDown = (e: React.PointerEvent<SVGElement>) => {
     if (!activeClip || !mediaItem || imageEditorTool === 'none') return;
     e.stopPropagation();
-    // Capture pointer so fast lasso moves don't escape the element
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
 
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const scaleX = 854 / rect.width;
-    const scaleY = 480 / rect.height;
-    // Invert the SVG viewport transform: un-apply zoom + pan + aspect-ratio offsetX/Y
-    const rawMx = (e.clientX - rect.left) * scaleX - 854 / 2;
-    const rawMy = (e.clientY - rect.top) * scaleY - 480 / 2;
-    const mx = (rawMx - viewport.x) / (viewport.zoom || 1) - offsetX;
-    const my = (rawMy - viewport.y) / (viewport.zoom || 1) - offsetY;
-
-    // Guard: require image to be cached before flood-fill to avoid blank-canvas wipe
     const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
     if (imageEditorTool === 'magic' && !img) {
       toast.info('Image is still loading. Please try again in a moment.');
       return;
     }
 
-    let imageW = img?.naturalWidth || 1920;
-    let imageH = img?.naturalHeight || 1080;
+    const imgPos = clientToImagePixel(e);
+    if (!imgPos) return;
 
-    let vw = W;
-    let vh = H;
-    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
-      vw = 1920;
-      vh = 1080;
-    }
-    let scaleToFit = 1;
-    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
-      scaleToFit = Math.min(W / (vw || 1), H / (vh || 1));
-    }
-    const bW = vw * scaleToFit;
-    const bH = vh * scaleToFit;
-
-    // screenToImageCoords returns coords in bW/bH (rendered canvas) space.
-    // Scale to actual image pixel space (imageW/imageH) for consistent storage.
-    const imgPosBase = screenToImageCoords(mx, my, activeClip, bW, bH, currentTime);
-    const imgPos = {
-      x: Math.round((imgPosBase.x / bW) * imageW),
-      y: Math.round((imgPosBase.y / bH) * imageH)
-    };
+    const imageW = img?.naturalWidth || 1920;
+    const imageH = img?.naturalHeight || 1080;
 
     if (imageEditorTool === 'magic') {
       const offCanvas = document.createElement('canvas');
@@ -3728,13 +3731,9 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
       setSelectionMask(null);
       if (selectionPath.length > 2) {
         const first = selectionPath[0];
-        // Compare in canvas-pixel space for consistent UX regardless of image resolution
-        const firstScreen = imageToScreenCoords(
-          (first.x / imageW) * bW, (first.y / imageH) * bH,
-          activeClip, bW, bH, currentTime
-        );
-        const distScreen = Math.sqrt((mx - firstScreen.x) ** 2 + (my - firstScreen.y) ** 2);
-        if (distScreen < 15) {
+        const dist = Math.sqrt((imgPos.x - first.x) ** 2 + (imgPos.y - first.y) ** 2);
+        const closeThreshold = Math.max(15, imageW * 0.01);
+        if (dist < closeThreshold) {
           setSelectionPath(prev => [...prev, { x: first.x, y: first.y }]);
           return;
         }
@@ -3745,41 +3744,8 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
 
   const handleEditorPointerMove = (e: React.PointerEvent<SVGElement>) => {
     if (!activeClip || !mediaItem || !isDrawingRef.current || imageEditorTool !== 'lasso') return;
-    
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const scaleX = 854 / rect.width;
-    const scaleY = 480 / rect.height;
-    // Invert viewport transform (same as in handleEditorPointerDown)
-    const rawMx = (e.clientX - rect.left) * scaleX - 854 / 2;
-    const rawMy = (e.clientY - rect.top) * scaleY - 480 / 2;
-    const mx = (rawMx - viewport.x) / (viewport.zoom || 1) - offsetX;
-    const my = (rawMy - viewport.y) / (viewport.zoom || 1) - offsetY;
-
-    // Get actual image dimensions to correctly scale coordinates
-    const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
-    const imageW = img?.naturalWidth || 1920;
-    const imageH = img?.naturalHeight || 1080;
-
-    let vw = W;
-    let vh = H;
-    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
-      vw = 1920;
-      vh = 1080;
-    }
-    let scaleToFit = 1;
-    if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
-      scaleToFit = Math.min(W / (vw || 1), H / (vh || 1));
-    }
-    const bW = vw * scaleToFit;
-    const bH = vh * scaleToFit;
-
-    // Scale from rendered canvas space â†’ actual image pixel space
-    const imgPosBase = screenToImageCoords(mx, my, activeClip, bW, bH, currentTime);
-    const imgPos = {
-      x: Math.round((imgPosBase.x / bW) * imageW),
-      y: Math.round((imgPosBase.y / bH) * imageH)
-    };
+    const imgPos = clientToImagePixel(e);
+    if (!imgPos) return;
     setSelectionPath(prev => [...prev, { x: imgPos.x, y: imgPos.y }]);
   };
 
@@ -4345,7 +4311,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                       onMouseDown={(e) => handleMouseDown(e, 'move')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'move')}
                     />
-                    {/* Rotation handle â€” circle above the top-center of the clip */}
+                    {/* Rotation handle Ã¢â‚¬â€ circle above the top-center of the clip */}
                     <line
                       x1={0}
                       y1={-baseH / 2}
@@ -4526,7 +4492,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
                     : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
                 }`}
-                title="Magic Wand â€“ auto-select region by color"
+                title="Magic Wand Ã¢â‚¬â€œ auto-select region by color"
               >
                 <Wand2 className="w-4 h-4" />
                 <span className="text-[9px] font-medium leading-none">Magic</span>
@@ -4544,7 +4510,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
                     : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
                 }`}
-                title="Lasso â€“ draw freehand selection"
+                title="Lasso Ã¢â‚¬â€œ draw freehand selection"
               >
                 <Scissors className="w-4 h-4" />
                 <span className="text-[9px] font-medium leading-none">Lasso</span>
@@ -4562,7 +4528,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
                     : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
                 }`}
-                title="Polygon â€“ click points to draw polygon"
+                title="Polygon Ã¢â‚¬â€œ click points to draw polygon"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3 8 5-3 10-10 3L3 11Z"/></svg>
                 <span className="text-[9px] font-medium leading-none">Polygon</span>
@@ -4592,7 +4558,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                 onClick={() => applyEditorAction('delete')}
                 disabled={selectionPath.length === 0 && !selectionMask}
                 className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 bg-red-600/80 hover:bg-red-500 disabled:bg-[#252525] disabled:text-[#555] text-white transition-all"
-                title="Delete â€“ fill selection with black"
+                title="Delete Ã¢â‚¬â€œ fill selection with black"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/></svg>
                 <span className="text-[9px] font-medium leading-none">Delete</span>
@@ -4603,7 +4569,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                 onClick={() => applyEditorAction('remove')}
                 disabled={selectionPath.length === 0 && !selectionMask}
                 className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 bg-gradient-to-b from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 disabled:from-[#252525] disabled:to-[#252525] disabled:text-[#555] text-white transition-all"
-                title="Remove â€“ AI object removal (inpainting)"
+                title="Remove Ã¢â‚¬â€œ AI object removal (inpainting)"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span className="text-[9px] font-medium leading-none">Remove</span>
@@ -4614,7 +4580,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                 onClick={() => applyEditorAction('erase')}
                 disabled={selectionPath.length === 0 && !selectionMask}
                 className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg bg-purple-700/80 hover:bg-purple-600 disabled:bg-[#252525] disabled:text-[#555] text-white transition-all"
-                title="Erase â€“ make selection transparent"
+                title="Erase Ã¢â‚¬â€œ make selection transparent"
               >
                 <Eraser className="w-3.5 h-3.5" />
                 <span className="text-[9px] font-medium leading-none">Erase</span>
