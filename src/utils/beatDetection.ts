@@ -94,7 +94,9 @@ export async function detectBeats(url: string): Promise<BeatDetectionResult> {
 
   return { beats, bpm, confidence };
 } finally {
-  await audioCtx.close();
+  if (audioCtx.state !== 'closed') {
+    await audioCtx.close().catch(() => {});
+  }
 }
 }
 

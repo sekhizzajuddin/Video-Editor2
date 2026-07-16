@@ -1048,6 +1048,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   updateClip: (clipId, updates, options) => {
     set((state) => {
       const found = findClipDeep(state, clipId);
+      if (!found) return state; // Prevent null pointer exception if clip was deleted
+      
       let durationOverride = updates.duration; // Use whatever the caller passed first
       let durationDelta = 0;
 
@@ -2717,6 +2719,35 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         beatMarkers: JSON.parse(JSON.stringify(state.beatMarkers || [])),
         label: label || defaultLabel,
       };
+
+      // Check if anything actually changed (ignoring currentTime and label)
+      if (state.historyIndex >= 0 && state.history[state.historyIndex]) {
+        const lastSnap = state.history[state.historyIndex];
+        
+        // Fast string comparison since we already stringified above
+        const t1 = JSON.stringify(lastSnap.tracks);
+        const t2 = JSON.stringify(snapshot.tracks);
+        
+        if (t1 === t2) {
+          const p1 = JSON.stringify(lastSnap.pipWindows || {});
+          const p2 = JSON.stringify(snapshot.pipWindows || {});
+          
+          if (p1 === p2) {
+            const s1 = JSON.stringify(lastSnap.subtitles || []);
+            const s2 = JSON.stringify(snapshot.subtitles || []);
+            const m1 = JSON.stringify(lastSnap.markers || []);
+            const m2 = JSON.stringify(snapshot.markers || []);
+            const b1 = JSON.stringify(lastSnap.beatMarkers || []);
+            const b2 = JSON.stringify(snapshot.beatMarkers || []);
+            
+            if (s1 === s2 && m1 === m2 && b1 === b2) {
+              // Nothing meaningful changed, don't create history entry
+              return {};
+            }
+          }
+        }
+      }
+
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(snapshot);
       return {

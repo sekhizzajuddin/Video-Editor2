@@ -12,14 +12,29 @@ export function clearPreviewCaches() {
   imageLoading.clear();
 }
 
+let separationCleanup: (() => void) | null = null;
+
 if (typeof window !== 'undefined') {
-  window.addEventListener('procut-evict-media-cache', ((e: CustomEvent) => {
+  const handler = ((e: CustomEvent) => {
     const id = e.detail?.id;
     if (id) {
       imageCache.delete(id);
       imageLoading.delete(id);
     }
-  }) as EventListener);
+  }) as EventListener;
+  
+  window.addEventListener('procut-evict-media-cache', handler);
+  
+  separationCleanup = () => {
+    window.removeEventListener('procut-evict-media-cache', handler);
+  };
+}
+
+export function cleanupCanvasEffects() {
+  if (separationCleanup) {
+    separationCleanup();
+    separationCleanup = null;
+  }
 }
 
 export function getCachedImage(
@@ -147,8 +162,17 @@ export function drawPerspectiveTexture(
   gridCols: number = 8,
   gridRows: number = 8
 ) {
-  const imgW = (img as any).videoWidth || (img as any).width || 854;
-  const imgH = (img as any).videoHeight || (img as any).height || 480;
+  const imgW = ('videoWidth' in img && (img as any).videoWidth > 0) 
+    ? (img as any).videoWidth 
+    : ('width' in img && (img as any).width > 0)
+      ? (img as any).width
+      : 854;
+      
+  const imgH = ('videoHeight' in img && (img as any).videoHeight > 0) 
+    ? (img as any).videoHeight 
+    : ('height' in img && (img as any).height > 0)
+      ? (img as any).height
+      : 480;
 
   const getBilinearPoint = (u: number, v: number) => {
     const x = (1 - u) * (1 - v) * corners.x0 + u * (1 - v) * corners.x1 + u * v * corners.x2 + (1 - u) * v * corners.x3;

@@ -361,8 +361,9 @@ function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCard
     animationFrameRef.current = requestAnimationFrame(render);
 
     return () => {
-      if (animationFrameRef.current) {
+      if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     };
   }, [isHovered, tmpl]);
@@ -849,6 +850,19 @@ export function MediaPanel() {
   useEffect(() => {
     return () => {
       window.speechSynthesis.cancel();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.stop(); } catch (e) {}
+      }
+      if (mediaRecorderRef.current?.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+      }
+      if (ttsAudioRef.current) {
+        try {
+          ttsAudioRef.current.pause();
+          ttsAudioRef.current.src = '';
+        } catch (_) {}
+        ttsAudioRef.current = null;
+      }
     };
   }, []);
 

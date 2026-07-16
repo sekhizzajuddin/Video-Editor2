@@ -62,6 +62,11 @@ export class GeminiLiveClient {
             this.rejectConnect = null;
             this.resolveConnect = null;
           }
+          if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+          }
+          this.isConnected = false;
         };
       } catch (err) {
         if (this.rejectConnect) {

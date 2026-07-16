@@ -116,7 +116,7 @@ export function useVoiceoverRecording() {
 
         setRecordingSeconds(0);
         recordingTimerRef.current = setInterval(() => {
-          setRecordingSeconds((s) => s + 1);
+          setRecordingSeconds(Math.floor((Date.now() - recordingStartTimeMsRef.current) / 1000));
         }, 1000);
 
         recorder.start();
@@ -151,14 +151,31 @@ export function useVoiceoverRecording() {
 
   useEffect(() => {
     return () => {
+      // Clear interval first
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
       }
+      
+      // Stop MediaRecorder
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (e) {
+          console.warn('Error stopping MediaRecorder:', e);
+        }
       }
+      
+      // Stop all audio tracks
       if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach((track) => track.stop());
+        audioStreamRef.current.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch (e) {
+            console.warn('Error stopping track:', e);
+          }
+        });
+        audioStreamRef.current = null;
       }
     };
   }, []);

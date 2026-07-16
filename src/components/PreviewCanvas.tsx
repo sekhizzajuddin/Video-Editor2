@@ -115,6 +115,16 @@ export function PreviewCanvas() {
   const framePendingRef = useRef(true);
   const isRenderingRef = useRef(false);
 
+  // Clean up canvas contexts on unmount (Bug 15 & 40)
+  useEffect(() => {
+    return () => {
+      offscreenCanvasPool.current.clear();
+      compositeCtxRef.current = null;
+      lastFrameCanvasRef.current = null;
+      lastFrameCtxRef.current = null;
+    };
+  }, []);
+
   const getOrCreateCanvas = (key: string, w: number, h: number) => {
     let canvas = offscreenCanvasPool.current.get(key);
     if (!canvas) {
@@ -296,12 +306,14 @@ export function PreviewCanvas() {
   useEffect(() => {
     if (!isPlaying) return;
     let animId: number;
+    let isActive = true;
     let lastTime = performance.now();
     
     // Reset particle time tracking when playback starts to prevent jump
     lastParticleTimeRef.current = null;
 
     const loop = (now: number) => {
+      if (!isActive) return;
       const state = useEditorStore.getState();
       const dir = state.playbackDirection ?? 1;
       const speed = state.playbackSpeed;
@@ -417,7 +429,10 @@ export function PreviewCanvas() {
     };
 
     animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
+    return () => {
+      isActive = false;
+      cancelAnimationFrame(animId);
+    };
   }, [isPlaying]);
 
   // -------------------------------------------------------------------
@@ -839,10 +854,14 @@ export function PreviewCanvas() {
       }
 
       // Sanitize filter properties to prevent NaN values from crashing canvas filter parser
-      const exposure = Number.isFinite(filters.exposure) ? filters.exposure : 0;
-      const contrast = Number.isFinite(filters.contrast) ? filters.contrast : 100;
-      const saturation = Number.isFinite(filters.saturation) ? filters.saturation : 100;
-      const blur = Number.isFinite(filters.blur) ? filters.blur : 0;
+      filters.exposure = Number.isFinite(filters.exposure) ? filters.exposure : 0;
+      filters.contrast = Number.isFinite(filters.contrast) ? filters.contrast : 100;
+      filters.saturation = Number.isFinite(filters.saturation) ? filters.saturation : 100;
+      filters.blur = Number.isFinite(filters.blur) ? filters.blur : 0;
+      filters.temperature = Number.isFinite(filters.temperature) ? filters.temperature : 0;
+      filters.tint = Number.isFinite(filters.tint) ? filters.tint : 0;
+      
+      const { exposure, contrast, saturation, blur } = filters;
 
       const applyFxToContext = (
         oCtx: CanvasRenderingContext2D,

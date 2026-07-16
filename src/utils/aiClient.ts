@@ -151,24 +151,27 @@ CRITICAL OUTPUT RULES:
 
   const { controller, clear } = makeController(fps, segmentDuration);
 
-  const response = await fetchWithKeyFailover(
-    (key) => {
-      if (provider === 'groq') {
-        requestHeaders['Authorization'] = `Bearer ${key}`;
-        return 'https://api.groq.com/openai/v1/chat/completions';
-      }
-      return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`;
-    },
-    {
-      method: 'POST',
-      headers: requestHeaders,
-      body: JSON.stringify(requestBody),
-      signal: controller.signal
-    },
-    provider
-  );
-
-  clear();
+  let response;
+  try {
+    response = await fetchWithKeyFailover(
+      (key) => {
+        if (provider === 'groq') {
+          requestHeaders['Authorization'] = `Bearer ${key}`;
+          return 'https://api.groq.com/openai/v1/chat/completions';
+        }
+        return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`;
+      },
+      {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      },
+      provider
+    );
+  } finally {
+    clear();
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -257,17 +260,23 @@ Return ONLY valid JSON (no markdown):
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-  const response = await fetchWithKeyFailover(
-    (key) => 'https://api.groq.com/openai/v1/chat/completions',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    },
-    'groq'
-  );
-  clearTimeout(timeoutId);
+  let response;
+  try {
+    response = await fetchWithKeyFailover(
+      (key) => 'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      },
+      'groq'
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const fallback = { keywords: query, alternatives: [] };
 
@@ -458,24 +467,27 @@ Return ONLY this JSON format, no markdown:
 
   const { controller, clear } = makeController(1, segmentDuration);
 
-  const response = await fetchWithKeyFailover(
-    (key) => {
-      if (provider === 'groq') {
-        requestHeaders['Authorization'] = `Bearer ${key}`;
-        return 'https://api.groq.com/openai/v1/chat/completions';
-      }
-      return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`;
-    },
-    {
-      method: 'POST',
-      headers: requestHeaders,
-      body: JSON.stringify(requestBody),
-      signal: controller.signal
-    },
-    provider
-  );
-
-  clear();
+  let response;
+  try {
+    response = await fetchWithKeyFailover(
+      (key) => {
+        if (provider === 'groq') {
+          requestHeaders['Authorization'] = `Bearer ${key}`;
+          return 'https://api.groq.com/openai/v1/chat/completions';
+        }
+        return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`;
+      },
+      {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      },
+      provider
+    );
+  } finally {
+    clear();
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -556,18 +568,21 @@ Return ONLY a valid JSON array, no markdown:
 
   const { controller, clear } = makeController(1, 30);
 
-  const response = await fetchWithKeyFailover(
-    (key) => `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    },
-    'gemini'
-  );
-
-  clear();
+  let response;
+  try {
+    response = await fetchWithKeyFailover(
+      (key) => `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      },
+      'gemini'
+    );
+  } finally {
+    clear();
+  }
 
   if (!response.ok) {
     const errorText = await response.text();

@@ -176,9 +176,12 @@ export async function splitAudioBySilence(audioBlob: Blob, expectedCount: number
     }
 
     return clips;
+  } catch (error) {
+    console.error('Audio splitting failed:', error);
+    throw error;
   } finally {
     if (audioContext.state !== 'closed') {
-      audioContext.close();
+      await audioContext.close().catch(() => {});
     }
   }
 }

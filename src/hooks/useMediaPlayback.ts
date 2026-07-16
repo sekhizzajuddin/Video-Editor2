@@ -452,10 +452,19 @@ export function useMediaPlayback(): MediaPlaybackResult {
           el.removeEventListener('timeupdate', stableTriggerRedraw);
           el.removeEventListener('canplay', stableTriggerRedraw);
         }
-        entry.el.src = '';
+        if (entry.separationGraph) {
+          try { entry.separationGraph.input.disconnect(); } catch (e) {}
+        }
+        if (entry.pitchNode) {
+          try { entry.pitchNode.disconnect(); } catch (e) {}
+        }
+        if (entry.gainNode) {
+          try { entry.gainNode.disconnect(); } catch (e) {}
+        }
         if (entry.sourceNode) {
           try { entry.sourceNode.disconnect(); } catch (e) {}
         }
+        entry.el.src = '';
         entry.el.remove();
         pool.delete(clipId);
         videoMap.delete(clipId);
@@ -1055,10 +1064,19 @@ export function useMediaPlayback(): MediaPlaybackResult {
           el.removeEventListener('timeupdate', stableTriggerRedraw);
           el.removeEventListener('canplay', stableTriggerRedraw);
         }
-        entry.el.src = '';
+        if (entry.separationGraph) {
+          try { entry.separationGraph.input.disconnect(); } catch (e) {}
+        }
+        if (entry.pitchNode) {
+          try { entry.pitchNode.disconnect(); } catch (e) {}
+        }
+        if (entry.gainNode) {
+          try { entry.gainNode.disconnect(); } catch (e) {}
+        }
         if (entry.sourceNode) {
           try { entry.sourceNode.disconnect(); } catch (e) {}
         }
+        entry.el.src = '';
         entry.el.remove();
       }
       pool.clear();

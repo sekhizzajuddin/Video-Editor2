@@ -89,18 +89,24 @@ export class SpeedRampEngine {
     const v2 = seg.endKf.speed;
     const deltaSource = seg.sourceEnd - seg.sourceStart;
 
+    // Handle both speeds being zero or near-zero
     if (Math.abs(v1) < 1e-10 && Math.abs(v2) < 1e-10) {
-      return 0;
+      return deltaSource > 0 ? 0.001 : 0;
     }
 
     if (seg.startKf.easing === 'hold') {
-      if (Math.abs(v1) < 1e-10) return 0;
+      if (Math.abs(v1) < 1e-10) return deltaSource > 0 ? 0.001 : 0;
       return deltaSource / v1;
     }
 
     if (Math.abs(v1 - v2) < 1e-10) {
-      if (Math.abs(v1) < 1e-10) return 0;
+      if (Math.abs(v1) < 1e-10) return deltaSource > 0 ? 0.001 : 0;
       return deltaSource / v1;
+    }
+
+    // Prevent division by zero in log calculation
+    if (v1 <= 0 || v2 <= 0) {
+      return deltaSource / Math.max(0.001, (v1 + v2) / 2);
     }
 
     return (deltaSource / (v2 - v1)) * Math.log(v2 / v1);

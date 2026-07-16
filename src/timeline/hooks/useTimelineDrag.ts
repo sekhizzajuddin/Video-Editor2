@@ -14,7 +14,8 @@ const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime:
   if (draggedClips.length <= 1) return true;
   
   const clipsWithTime = draggedClips.map(dc => {
-     const c = tracks.flatMap(t => t.clips).find(x => x.id === dc.id);
+     const allClips = tracks?.flatMap(t => t.clips || []) || [];
+     const c = allClips.find(x => x?.id === dc.id);
      return { start: dc.originalStartTime, end: dc.originalStartTime + (c?.duration || 0) };
   });
   
