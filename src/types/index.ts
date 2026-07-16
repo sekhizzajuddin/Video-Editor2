@@ -520,6 +520,7 @@ export interface EditorState {
     groqApiKey?: string;
     freesoundApiKey?: string;
     elevenLabsApiKey?: string;
+    openRouterApiKey?: string;
   };
   beatMarkers: { time: number; clipId: string }[];
   projectTemplates: ProjectTemplate[];
@@ -596,5 +597,27 @@ export interface ProjectTemplate {
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
   totalDuration: number;
+  createdAt: number;
+}
+
+export interface OpenRouterModel {
+  id: string;
+  name: string;
+  description?: string;
+  pricing: {
+    prompt: string;
+    completion: string;
+    image?: string;
+    request?: string;
+  };
+}
+
+export interface AIGenerationJob {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress?: number;
+  resultUrl?: string;
+  error?: string;
+  prompt: string;
   createdAt: number;
 }

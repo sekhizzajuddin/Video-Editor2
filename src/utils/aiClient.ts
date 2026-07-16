@@ -723,3 +723,17 @@ Output format MUST exactly match this JSON schema:
     throw new Error(`Failed to parse ${provider.toUpperCase()} response: ${text.substring(0, 200)}`);
   }
 }
+
+export async function enhancePromptWithGemini(prompt: string, apiKey: string): Promise<string> {
+  const systemPrompt = "You are an expert AI Video and Image prompt engineer. Enhance the following basic prompt into a highly detailed, cinematic, and professional prompt suitable for advanced AI video generators like Sora, Kling, or Midjourney. Focus on lighting, camera angles, atmosphere, and visual fidelity. Return ONLY the enhanced prompt string without any conversational filler or quotes.";
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nUser Prompt: ${prompt}` }] }]
+    })
+  });
+  if (!response.ok) throw new Error("Failed to enhance prompt");
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].text;
+}

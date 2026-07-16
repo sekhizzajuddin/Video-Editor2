@@ -61,6 +61,7 @@ import { captureCanvasChunk } from '@/utils/canvasCapture';
 import { analyzeCanvasChunkWithGemini } from '@/utils/aiClient';
 import { generateCombinedSfx } from '@/utils/elevenLabsClient';
 import { AiSoundDesigner } from './AiSoundDesigner';
+import { AIGeneratorModal } from './AIGeneratorModal';
 
 const TRANSITIONS = [
   { name: 'Fade', color: 'from-amber-500/20 to-transparent', preview: 'Fade in/out between clips' },
@@ -698,6 +699,7 @@ export function MediaPanel() {
   const [sfxGeneratedCues, setSfxGeneratedCues] = useState<any[] | null>(null);
   const sfxBlobUrlsRef = useRef<string[]>([]);
   const [showAiSfxModal, setShowAiSfxModal] = useState(false);
+  const [showAIGeneratorModal, setShowAIGeneratorModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
@@ -1715,7 +1717,16 @@ export function MediaPanel() {
                   title="Record Screen"
                 >
                   {isRecordingScreen ? <Square className="w-3 h-3 text-red-400" /> : <Monitor className="w-3 h-3 text-red-400" />}
-                  {isRecordingScreen ? 'Stop Recording' : 'Record Screen'}
+                  {isRecordingScreen ? 'Stop' : 'Record'}
+                </button>
+                <button
+                  onClick={() => setShowAIGeneratorModal(true)}
+                  disabled={importing}
+                  className="flex-1 py-2 bg-gradient-to-r from-amber-600/20 to-amber-500/20 hover:from-amber-600/40 hover:to-amber-500/40 border-2 border-dashed border-amber-500/50 hover:border-amber-500 text-amber-500 hover:text-amber-400 rounded text-xs flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                  title="AI Generation"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  AI Gen
                 </button>
               </div>
 
@@ -3293,6 +3304,11 @@ export function MediaPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Video Generator Modal */}
+      {showAIGeneratorModal && (
+        <AIGeneratorModal onClose={() => setShowAIGeneratorModal(false)} />
       )}
 
       {/* AI SFX Designer Modal */}
