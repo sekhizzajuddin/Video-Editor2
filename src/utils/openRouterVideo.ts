@@ -18,13 +18,13 @@ export const fetchVideoModels = async (apiKey: string): Promise<OpenRouterModel[
 
     const data = await response.json();
     // Filter models that are typically video or image-to-video
-    const videoKeywords = ['kling', 'veo', 'seedance', 'wan', 'sora', 'minimax', 'hailuo'];
+    const videoKeywords = ['kling', 'veo', 'seedance', 'wan', 'sora', 'minimax', 'hailuo', 'runway', 'luma', 'flux', 'stable-diffusion', 'dall-e', 'ideogram', 'midjourney', 'nvidia'];
     
     const videoModels = data.data.filter((model: any) => {
       const isVideoOrImage = videoKeywords.some(kw => model.id.toLowerCase().includes(kw));
-      const isFree = model.id.toLowerCase().includes('free') || 
-                     (model.pricing && parseFloat(model.pricing.prompt) === 0 && parseFloat(model.pricing.completion) === 0);
-      return isVideoOrImage || isFree;
+      // Specifically filter out known pure coding/text models if they accidentally matched
+      const isCoding = model.id.toLowerCase().includes('coder') || model.id.toLowerCase().includes('code:');
+      return isVideoOrImage && !isCoding;
     });
 
     return videoModels;
