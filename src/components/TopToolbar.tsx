@@ -63,6 +63,7 @@ import {
   MonitorPlay,
   Link,
   Activity,
+  Sparkles,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
@@ -500,6 +501,15 @@ export function TopToolbar() {
         >
           <Activity className="w-3.5 h-3.5" />
           Scopes
+        </button>
+
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('toggle-copilot'))}
+          title="AI Copilot"
+          className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Copilot
         </button>
 
         <button

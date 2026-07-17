@@ -15,6 +15,7 @@ import { TeleprompterModal } from '@/components/TeleprompterModal';
 import { HelpModal } from '@/components/HelpModal';
 import { HelpTooltipManager } from '@/components/HelpTooltipManager';
 import { WelcomeScreen } from '@/components/WelcomeScreen';
+import { AiCopilot } from '@/components/AiCopilot';
 import { useEditorStore } from '@/store/editorStore';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 import { saveAutosaveToDB } from '@/utils/projectPersistence';
@@ -71,6 +72,7 @@ function App() {
     setWorkspaceLayout({ ...workspaceLayout, preset: 'Custom', timelineHeight: newH });
   };
   const [bottomTab, setBottomTab] = useState<'timeline' | 'mixer'>('timeline');
+  const [showCopilot, setShowCopilot] = useState(false);
   const isDraggingLeft = useRef(false);
   const isDraggingRight = useRef(false);
   const isDraggingTimeline = useRef(false);
@@ -317,6 +319,12 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
+
+  useEffect(() => {
+    const handleToggleCopilot = () => setShowCopilot(p => !p);
+    window.addEventListener('toggle-copilot', handleToggleCopilot);
+    return () => window.removeEventListener('toggle-copilot', handleToggleCopilot);
+  }, []);
 
   // Load project on mount is removed since WelcomeScreen handles it
 
@@ -578,6 +586,7 @@ function App() {
       <ExportModal />
       <SettingsModal />
       <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />
+      {showCopilot && <AiCopilot onClose={() => setShowCopilot(false)} />}
       <Toaster />
     </div>
   );
