@@ -37,7 +37,7 @@ import { searchFreesound } from '@/utils/audioSearchClient';
 import { aiVocalSeparator } from '@/utils/aiVocalSeparator';
 import { AiSoundDesigner } from '@/components/AiSoundDesigner';
 import { AiMotionGraphicsDesigner } from '@/components/AiMotionGraphicsDesigner';
-import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints } from '@/types';
+import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
 import type { SpeedRampKeyframe, EasingType } from '@/types';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
@@ -278,6 +278,7 @@ export function PropertiesPanel() {
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const [showTunedToast, setShowTunedToast] = useState(false);
+  const [voiceTuneResults, setVoiceTuneResults] = useState<VoiceTuneResult[]>([]);
   const [isTracking, setIsTracking] = useState(false);
   const [trackProgress, setTrackProgress] = useState(0);
   const { videoElements } = useMediaPlayback();
@@ -1344,12 +1345,17 @@ export function PropertiesPanel() {
     fadeIn: 0,
     fadeOut: 0,
     bass: 0,
+    mid: 0,
     treble: 0,
     muted: false,
     preservePitch: true,
     pitch: 0,
     voiceFormant: 0,
     humanize: false,
+    denoise: 0,
+    compression: 0,
+    deEsser: 0,
+    warmth: 0,
   };
 
   const clipAudio = selectedClip?.audioSettings || defaultAudioSettings;
@@ -1464,23 +1470,23 @@ export function PropertiesPanel() {
     if (selectedClipIds.length < 2) return;
 
     setIsAnalyzingVoice(true);
+    setVoiceTuneResults([]);
 
-    // Use an async IIFE so we can await real audio decoding
     (async () => {
       let audioCtx: AudioContext | null = null;
       try {
-        // Find all selected clips
         const selectedClips = tracks
           .flatMap((t) => t.clips)
           .filter((c) => selectedClipIds.includes(c.id));
 
-        // Analyze each clip's actual audio data
         audioCtx = new AudioContext();
         const clipAnalyses: {
           clip: typeof selectedClips[0];
-          rmsDb: number;        // RMS loudness in dB
-          spectralCenter: number; // 0-1, low = bassy, high = bright/tinny
-          zeroCrossRate: number;  // Pitch brightness indicator
+          rmsDb: number;
+          spectralCenter: number;
+          zeroCrossRate: number;
+          midEnergy: number;
+          dynRange: number;
           currentSettings: typeof defaultAudioSettings;
         }[] = [];
 
@@ -1491,17 +1497,16 @@ export function PropertiesPanel() {
           let rmsDb = -20;
           let spectralCenter = 0.5;
           let zeroCrossRate = 0.15;
+          let midEnergy = 0.5;
+          let dynRange = 10;
 
           try {
-            // Fetch and decode the actual audio from the media file
             const response = await fetch(media.url);
             const arrayBuffer = await response.arrayBuffer();
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-
             const rawData = audioBuffer.getChannelData(0);
             const sampleRate = audioBuffer.sampleRate;
 
-            // Calculate the analysis window based on clip trim/duration
             const startSample = Math.floor(clip.trimStart * sampleRate);
             const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
             const mediaDuration = hasRamp
@@ -1514,114 +1519,148 @@ export function PropertiesPanel() {
             const audioWindow = rawData.slice(startSample, endSample);
 
             if (audioWindow.length > 0) {
-              // 1. RMS Loudness (dB)
+              // 1. RMS Loudness
               let sumSquares = 0;
-              for (let i = 0; i < audioWindow.length; i++) {
-                sumSquares += audioWindow[i] * audioWindow[i];
-              }
+              for (let i = 0; i < audioWindow.length; i++) sumSquares += audioWindow[i] * audioWindow[i];
               const rms = Math.sqrt(sumSquares / audioWindow.length);
               rmsDb = rms > 0 ? 20 * Math.log10(rms) : -60;
 
-              // 2. Spectral Centroid (bass/treble balance)
-              // Run a simplified FFT-like analysis: compare energy in low vs high bands
+              // 2. Spectral energy split: low / mid / high
               const blockSize = 2048;
-              let lowEnergy = 0;
-              let highEnergy = 0;
+              let lowEnergy = 0, midEnergySum = 0, highEnergy = 0;
               const numBlocks = Math.floor(audioWindow.length / blockSize);
               for (let b = 0; b < Math.min(numBlocks, 50); b++) {
                 const offset = b * blockSize;
-                // Low band: compute autocorrelation-like energy for slow oscillations
-                let lo = 0, hi = 0;
+                let lo = 0, mi = 0, hi = 0;
                 for (let i = 0; i < blockSize - 1; i++) {
-                  const sample = audioWindow[offset + i];
-                  const nextSample = audioWindow[offset + i + 1];
-                  // Low freq: samples that change slowly (similar neighbors)
-                  lo += Math.abs(sample) * (1 - Math.abs(sample - nextSample));
-                  // High freq: samples that change rapidly (different neighbors)
-                  hi += Math.abs(sample) * Math.abs(sample - nextSample);
+                  const s = audioWindow[offset + i];
+                  const ns = audioWindow[offset + i + 1];
+                  const diff = Math.abs(s - ns);
+                  lo += Math.abs(s) * (1 - Math.min(1, diff * 4));
+                  hi += Math.abs(s) * Math.min(1, diff * 4);
+                  mi += Math.abs(s) * (1 - Math.abs(diff - 0.05) * 10);
                 }
-                lowEnergy += lo;
-                highEnergy += hi;
+                lowEnergy += lo; midEnergySum += mi; highEnergy += hi;
               }
-              const totalEnergy = lowEnergy + highEnergy;
+              const totalEnergy = lowEnergy + midEnergySum + highEnergy;
               spectralCenter = totalEnergy > 0 ? highEnergy / totalEnergy : 0.5;
+              midEnergy = totalEnergy > 0 ? midEnergySum / totalEnergy : 0.5;
 
-              // 3. Zero-Crossing Rate (pitch/brightness indicator)
+              // 3. Zero-Crossing Rate
               let crossings = 0;
               for (let i = 1; i < audioWindow.length; i++) {
                 if ((audioWindow[i] >= 0 && audioWindow[i - 1] < 0) ||
-                    (audioWindow[i] < 0 && audioWindow[i - 1] >= 0)) {
-                  crossings++;
-                }
+                    (audioWindow[i] < 0 && audioWindow[i - 1] >= 0)) crossings++;
               }
               zeroCrossRate = crossings / audioWindow.length;
+
+              // 4. Dynamic range estimate (peak vs RMS)
+              let peak = 0;
+              for (let i = 0; i < audioWindow.length; i++) {
+                const a = Math.abs(audioWindow[i]);
+                if (a > peak) peak = a;
+              }
+              const peakDb = peak > 0 ? 20 * Math.log10(peak) : -60;
+              dynRange = peakDb - rmsDb;
             }
           } catch {
-            // If decoding fails, use clip-specific deterministic estimates
             const hash = clip.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-            rmsDb = -25 + (hash % 15); // -25 to -10 dB range
-            spectralCenter = 0.3 + (hash % 7) * 0.06; // 0.3 to 0.66
-            zeroCrossRate = 0.08 + (hash % 10) * 0.015; // 0.08 to 0.215
+            rmsDb = -25 + (hash % 15);
+            spectralCenter = 0.3 + (hash % 7) * 0.06;
+            zeroCrossRate = 0.08 + (hash % 10) * 0.015;
+            midEnergy = 0.3 + (hash % 5) * 0.08;
+            dynRange = 8 + (hash % 10);
           }
 
-          clipAnalyses.push({
-            clip,
-            rmsDb,
-            spectralCenter,
-            zeroCrossRate,
-            currentSettings: clip.audioSettings || defaultAudioSettings,
-          });
+          clipAnalyses.push({ clip, rmsDb, spectralCenter, zeroCrossRate, midEnergy, dynRange, currentSettings: clip.audioSettings || defaultAudioSettings });
         }
 
-        if (clipAnalyses.length < 2) {
-          return;
-        }
+        if (clipAnalyses.length < 2) return;
 
-        // Use the first selected clip as the "reference" voice target
         const reference = clipAnalyses[0];
+        const results: VoiceTuneResult[] = [];
 
-        // Apply corrections to make every clip match the reference
         for (const analysis of clipAnalyses) {
-          // 1. Volume: closely match RMS loudness to reference (±12 dB max)
+          const isReference = analysis.clip.id === reference.clip.id;
+
+          // 1. Volume: match RMS loudness
           const loudnessDiff = reference.rmsDb - analysis.rmsDb;
-          const volumeAdjust = Math.max(-12, Math.min(12, Math.round(loudnessDiff * 0.95)));
+          const volumeAdj = isReference ? 0 : Math.max(-12, Math.min(12, Math.round(loudnessDiff * 0.95)));
 
-          // 2. Bass/Treble EQ: matching tone (±12 dB max)
+          // 2. Bass/Treble: match tone
           const spectralDiff = reference.spectralCenter - analysis.spectralCenter;
-          const bassAdjust = Math.round(Math.max(-12, Math.min(12, spectralDiff * -45)));
-          const trebleAdjust = Math.round(Math.max(-12, Math.min(12, spectralDiff * 45)));
+          const bassAdj = isReference ? 0 : Math.round(Math.max(-12, Math.min(12, spectralDiff * -45)));
+          const trebleAdj = isReference ? 0 : Math.round(Math.max(-12, Math.min(12, spectralDiff * 45)));
 
-          // 3. Formant/Character: voice character matching (±75 max)
+          // 3. Mid EQ: match mid presence
+          const midDiff = reference.midEnergy - analysis.midEnergy;
+          const midAdj = isReference ? 0 : Math.round(Math.max(-12, Math.min(12, midDiff * 60)));
+
+          // 4. Formant / Pitch
           const zcrDiff = reference.zeroCrossRate - analysis.zeroCrossRate;
-          const formantAdjust = Math.round(Math.max(-75, Math.min(75, zcrDiff * 800)));
+          const formantAdj = isReference ? 0 : Math.round(Math.max(-75, Math.min(75, zcrDiff * 800)));
+          const pitchAdj = isReference ? 0 : Math.round(Math.max(-5, Math.min(5, zcrDiff * 75)));
 
-          // 4. Pitch: unify speaker fundamental pitch (±5 semitones max)
-          const pitchAdjust = Math.round(Math.max(-5, Math.min(5, zcrDiff * 75)));
+          // 5. Compression: more dynamic range → apply more compression to even out
+          const dynDiff = analysis.dynRange - reference.dynRange;
+          const compAdj = isReference ? 0 : Math.max(0, Math.min(80, Math.round(dynDiff * 5)));
 
+          // 6. Warmth: if clip is thinner (less low-mid), add warmth
+          const warmthAdj = isReference ? 0 : Math.round(Math.max(-60, Math.min(60, -spectralDiff * 60)));
+
+          // 7. De-Esser: if clip has MORE sibilance than reference, reduce it
+          const zcrExcess = analysis.zeroCrossRate - reference.zeroCrossRate;
+          const deEsserAdj = isReference ? 0 : Math.max(0, Math.min(70, Math.round(zcrExcess * 500)));
+
+          const cur = analysis.currentSettings;
           const newSettings = {
-            ...analysis.currentSettings,
-            volume: Math.max(-40, Math.min(12, analysis.currentSettings.volume + volumeAdjust)),
-            bass: Math.max(-15, Math.min(15, analysis.currentSettings.bass + bassAdjust)),
-            treble: Math.max(-15, Math.min(15, analysis.currentSettings.treble + trebleAdjust)),
-            voiceFormant: Math.max(-100, Math.min(100, analysis.currentSettings.voiceFormant + formantAdjust)),
-            pitch: Math.max(-12, Math.min(12, analysis.currentSettings.pitch + pitchAdjust)),
+            ...cur,
+            volume:      Math.max(-40, Math.min(12,   cur.volume + volumeAdj)),
+            bass:        Math.max(-15, Math.min(15,   (cur.bass || 0) + bassAdj)),
+            mid:         Math.max(-15, Math.min(15,   (cur.mid  || 0) + midAdj)),
+            treble:      Math.max(-15, Math.min(15,   (cur.treble || 0) + trebleAdj)),
+            voiceFormant:Math.max(-100,Math.min(100,  cur.voiceFormant + formantAdj)),
+            pitch:       Math.max(-12, Math.min(12,   cur.pitch + pitchAdj)),
+            compression: Math.max(0,   Math.min(100,  (cur.compression || 0) + compAdj)),
+            warmth:      Math.max(-100,Math.min(100,  (cur.warmth || 0) + warmthAdj)),
+            deEsser:     Math.max(0,   Math.min(100,  (cur.deEsser || 0) + deEsserAdj)),
           };
 
           updateClip(analysis.clip.id, { audioSettings: newSettings });
+
+          // Find clip name
+          const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === analysis.clip.mediaId);
+          const track = tracks.find((t) => t.clips.some((c) => c.id === analysis.clip.id));
+          const clipIndex = track?.clips.findIndex((c) => c.id === analysis.clip.id) ?? 0;
+          const clipName = media?.name || `Clip ${clipIndex + 1}`;
+
+          results.push({
+            clipId: analysis.clip.id,
+            clipName,
+            isReference,
+            adjustments: {
+              volume:       volumeAdj !== 0 ? volumeAdj : undefined,
+              bass:         bassAdj   !== 0 ? bassAdj   : undefined,
+              mid:          midAdj    !== 0 ? midAdj    : undefined,
+              treble:       trebleAdj !== 0 ? trebleAdj : undefined,
+              pitch:        pitchAdj  !== 0 ? pitchAdj  : undefined,
+              voiceFormant: formantAdj !== 0 ? formantAdj : undefined,
+              compression:  compAdj   !== 0 ? compAdj   : undefined,
+              warmth:       warmthAdj  !== 0 ? warmthAdj  : undefined,
+              deEsser:      deEsserAdj !== 0 ? deEsserAdj : undefined,
+            },
+          });
         }
 
-        useEditorStore.getState().saveSnapshot();
+        useEditorStore.getState().saveSnapshot('Auto Voice Tune');
+        setVoiceTuneResults(results);
         setShowTunedToast(true);
 
-        setTimeout(() => {
-          setShowTunedToast(false);
-        }, 3000);
+        setTimeout(() => { setShowTunedToast(false); }, 6000);
       } catch (err) {
         console.error('Auto Voice Tune error:', err);
       } finally {
-        if (audioCtx && audioCtx.state !== 'closed') {
-          audioCtx.close().catch(console.error);
-        }
+        if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(console.error);
         setIsAnalyzingVoice(false);
       }
     })();
@@ -4096,15 +4135,20 @@ export function PropertiesPanel() {
                 )}
               </div>
             )}
-            {/* AI Auto Voice Tune (Visible only when multiple clips selected) */}
             {selectedClipIds.length > 1 && (
               <div className="bg-purple-950/20 border border-purple-500/30 rounded p-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-400" />
                   <span className="text-xs text-white font-semibold">AI Auto Voice Tune</span>
+                  {voiceTuneResults.length > 0 && (
+                    <button
+                      onClick={() => setVoiceTuneResults([])}
+                      className="ml-auto text-[9px] text-purple-400 hover:text-purple-200"
+                    >Clear</button>
+                  )}
                 </div>
                 <p className="text-[11px] text-[#c0a0d0]">
-                  Align and normalize {selectedClipIds.length} selected vocal profiles. Unifies volume levels and frequency balance.
+                  Align and normalize {selectedClipIds.length} selected vocal profiles. Unifies volume, EQ, pitch, warmth, compression and character.
                 </p>
 
                 {isAnalyzingVoice ? (
@@ -4114,11 +4158,41 @@ export function PropertiesPanel() {
                     <div className="w-1 h-7 bg-pink-500 rounded-full animate-bounce" />
                     <div className="w-1 h-6 bg-purple-300 rounded-full animate-bounce [animation-delay:-0.15s]" />
                     <div className="w-1 h-4 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                    <span className="text-[10px] text-purple-200 ml-2 font-medium">Tuning vocal models...</span>
+                    <span className="text-[10px] text-purple-200 ml-2 font-medium">Analyzing & tuning vocals...</span>
                   </div>
-                ) : showTunedToast ? (
-                  <div className="bg-purple-900/40 border border-purple-500/30 text-purple-200 text-xs rounded py-2.5 text-center font-medium">
-                    ✓ Vocals Unified successfully!
+                ) : voiceTuneResults.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] text-purple-300 font-semibold uppercase tracking-wider mb-1">✓ Applied Settings Per Clip</div>
+                    {voiceTuneResults.map((r) => (
+                      <div key={r.clipId} className={`rounded p-2 border text-[10px] ${ r.isReference ? 'bg-purple-900/30 border-purple-400/40' : 'bg-[#1a1a2e] border-purple-900/40' }`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          {r.isReference && <span className="text-[8px] bg-amber-500 text-black px-1 rounded font-bold">REF</span>}
+                          <span className="text-purple-100 font-medium truncate">{r.clipName}</span>
+                        </div>
+                        {r.isReference ? (
+                          <span className="text-purple-400/70">Reference clip — all others tuned to match this</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {r.adjustments.volume   !== undefined && <span className="bg-[#2a2a3e] text-cyan-300 px-1.5 py-0.5 rounded">Vol: {r.adjustments.volume > 0 ? '+' : ''}{r.adjustments.volume}dB</span>}
+                            {r.adjustments.bass     !== undefined && <span className="bg-[#2a2a3e] text-green-300 px-1.5 py-0.5 rounded">Bass: {r.adjustments.bass > 0 ? '+' : ''}{r.adjustments.bass}dB</span>}
+                            {r.adjustments.mid      !== undefined && <span className="bg-[#2a2a3e] text-yellow-300 px-1.5 py-0.5 rounded">Mid: {r.adjustments.mid > 0 ? '+' : ''}{r.adjustments.mid}dB</span>}
+                            {r.adjustments.treble   !== undefined && <span className="bg-[#2a2a3e] text-orange-300 px-1.5 py-0.5 rounded">Treble: {r.adjustments.treble > 0 ? '+' : ''}{r.adjustments.treble}dB</span>}
+                            {r.adjustments.pitch    !== undefined && <span className="bg-[#2a2a3e] text-pink-300 px-1.5 py-0.5 rounded">Pitch: {r.adjustments.pitch > 0 ? '+' : ''}{r.adjustments.pitch}st</span>}
+                            {r.adjustments.voiceFormant !== undefined && <span className="bg-[#2a2a3e] text-purple-300 px-1.5 py-0.5 rounded">Formant: {r.adjustments.voiceFormant > 0 ? '+' : ''}{r.adjustments.voiceFormant}</span>}
+                            {r.adjustments.compression !== undefined && <span className="bg-[#2a2a3e] text-blue-300 px-1.5 py-0.5 rounded">Comp: +{r.adjustments.compression}%</span>}
+                            {r.adjustments.warmth   !== undefined && <span className="bg-[#2a2a3e] text-amber-300 px-1.5 py-0.5 rounded">Warmth: {r.adjustments.warmth > 0 ? '+' : ''}{r.adjustments.warmth}</span>}
+                            {r.adjustments.deEsser  !== undefined && <span className="bg-[#2a2a3e] text-red-300 px-1.5 py-0.5 rounded">De-Ess: +{r.adjustments.deEsser}%</span>}
+                            {Object.values(r.adjustments).every(v => v === undefined) && <span className="text-purple-400/70">No adjustment needed</span>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      onClick={handleAutoVoiceTune}
+                      className="w-full mt-1 py-1.5 bg-purple-800/60 hover:bg-purple-700/60 text-purple-200 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <Sparkles className="w-3 h-3" /> Re-Tune
+                    </button>
                   </div>
                 ) : (
                   <button
@@ -4336,6 +4410,69 @@ export function PropertiesPanel() {
                       />
                     </div>
                   </div>
+
+                  {/* Warmth Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Warmth</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {(clipAudio.warmth ?? 0) === 0 ? 'Neutral' : (clipAudio.warmth ?? 0) > 0 ? `+${clipAudio.warmth} Warm` : `${clipAudio.warmth} Thin`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={-100} max={100}
+                        value={clipAudio.warmth ?? 0}
+                        onChange={(e) => handleAudioChange('warmth', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('warmth')}
+                        title="Double-click to reset. Adds low-mid body to thin AI voices."
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Compression Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Compression</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {(clipAudio.compression ?? 0) === 0 ? 'Off' : `${clipAudio.compression}%`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={0} max={100}
+                        value={clipAudio.compression ?? 0}
+                        onChange={(e) => handleAudioChange('compression', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('compression')}
+                        title="Double-click to turn off. Evens out loud and quiet parts."
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* De-Esser Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">De-Esser</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {(clipAudio.deEsser ?? 0) === 0 ? 'Off' : `${clipAudio.deEsser}%`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={0} max={100}
+                        value={clipAudio.deEsser ?? 0}
+                        onChange={(e) => handleAudioChange('deEsser', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('deEsser')}
+                        title="Double-click to turn off. Reduces harsh S and Sh sibilance sounds."
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-red-400 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -4481,6 +4618,29 @@ export function PropertiesPanel() {
                         onDoubleClick={() => handleAudioReset('bass')}
                         title="Double-click to reset to 0 dB"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Mid */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Mid (1kHz Presence)</span>
+                      <span className="font-mono text-[#a0a0a0]">
+                        {(clipAudio.mid ?? 0) > 0 ? `+${clipAudio.mid ?? 0}` : (clipAudio.mid ?? 0)} dB
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={-15}
+                        max={15}
+                        value={clipAudio.mid ?? 0}
+                        onChange={(e) => handleAudioChange('mid', Number(e.target.value))}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => handleAudioReset('mid')}
+                        title="Double-click to reset to 0 dB"
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-yellow-400 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>

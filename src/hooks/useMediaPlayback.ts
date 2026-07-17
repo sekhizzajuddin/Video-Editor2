@@ -86,7 +86,11 @@ interface MediaElement {
   vocalFilter?: BiquadFilterNode;
   denoiseFilter?: BiquadFilterNode;
   bassFilter?: BiquadFilterNode;
+  midFilter?: BiquadFilterNode;         // NEW: Mid-band EQ (peaking @ 1kHz)
   trebleFilter?: BiquadFilterNode;
+  compressorNode?: DynamicsCompressorNode; // NEW: Per-clip compressor
+  deEsserFilter?: BiquadFilterNode;     // NEW: De-Esser (peaking @ 7kHz, negative)
+  warmthFilter?: BiquadFilterNode;      // NEW: Warmth (lowshelf @ 250Hz)
   pannerNode?: StereoPannerNode;
   gainNode?: GainNode;
   delayNode?: DelayNode;
@@ -770,10 +774,36 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const targetBass = Math.max(-15, Math.min(15, baseBass));
         if (Math.abs(entry.bassFilter.gain.value - targetBass) > 0.1) entry.bassFilter.gain.setTargetAtTime(targetBass, ctxTime, rampTime);
       }
+      if (entry.midFilter) {
+        const targetMid = Math.max(-15, Math.min(15, audioSettings.mid ?? 0));
+        if (Math.abs(entry.midFilter.gain.value - targetMid) > 0.1) entry.midFilter.gain.setTargetAtTime(targetMid, ctxTime, rampTime);
+      }
       if (entry.trebleFilter) {
         const baseTreble = (audioSettings.treble || 0) + (audioSettings.humanize ? 1.0 : 0);
         const targetTreble = Math.max(-15, Math.min(15, baseTreble));
         if (Math.abs(entry.trebleFilter.gain.value - targetTreble) > 0.1) entry.trebleFilter.gain.setTargetAtTime(targetTreble, ctxTime, rampTime);
+      }
+      // Compression: 0% = ratio 1:1 (bypass), 100% = ratio 20:1 with threshold -24dB
+      if (entry.compressorNode) {
+        const comp = (audioSettings.compression ?? 0) / 100;
+        const targetThreshold = comp > 0 ? -24 * comp : 0;
+        const targetRatio = 1 + 19 * comp;
+        if (Math.abs(entry.compressorNode.threshold.value - targetThreshold) > 0.5)
+          entry.compressorNode.threshold.setTargetAtTime(targetThreshold, ctxTime, rampTime);
+        if (Math.abs(entry.compressorNode.ratio.value - targetRatio) > 0.5)
+          entry.compressorNode.ratio.setTargetAtTime(targetRatio, ctxTime, rampTime);
+      }
+      // De-Esser: 0% = 0dB, 100% = -18dB cut at 7kHz
+      if (entry.deEsserFilter) {
+        const targetDeEsserGain = -((audioSettings.deEsser ?? 0) / 100) * 18;
+        if (Math.abs(entry.deEsserFilter.gain.value - targetDeEsserGain) > 0.1)
+          entry.deEsserFilter.gain.setTargetAtTime(targetDeEsserGain, ctxTime, rampTime);
+      }
+      // Warmth: -100 = -6dB at 250Hz (thin), 0 = flat, +100 = +6dB at 250Hz (warm)
+      if (entry.warmthFilter) {
+        const targetWarmth = ((audioSettings.warmth ?? 0) / 100) * 6;
+        if (Math.abs(entry.warmthFilter.gain.value - targetWarmth) > 0.1)
+          entry.warmthFilter.gain.setTargetAtTime(targetWarmth, ctxTime, rampTime);
       }
 
       // Update Stereo Panning combining clip panning and track-level panning
@@ -1300,6 +1330,34 @@ function initAudioGraph(entry: MediaElement) {
     trebleFilter.frequency.value = 3000;
     trebleFilter.gain.value = 0;
 
+    // 4a. Mid equalizer filter (peaking at 1000 Hz — vocal presence)
+    const midFilter = audioCtx.createBiquadFilter();
+    midFilter.type = 'peaking';
+    midFilter.frequency.value = 1000;
+    midFilter.Q.value = 1.0;
+    midFilter.gain.value = 0;
+
+    // 4b. Per-clip Compressor (Dynamic Range)
+    const compressorNode = audioCtx.createDynamicsCompressor();
+    compressorNode.threshold.value = 0;   // 0 = fully bypassed (threshold at 0dB clips nothing)
+    compressorNode.knee.value = 40;
+    compressorNode.ratio.value = 1;       // ratio 1:1 = no compression
+    compressorNode.attack.value = 0.003;
+    compressorNode.release.value = 0.25;
+
+    // 4c. De-Esser filter (peaking at 7000 Hz, negative gain reduces sibilance)
+    const deEsserFilter = audioCtx.createBiquadFilter();
+    deEsserFilter.type = 'peaking';
+    deEsserFilter.frequency.value = 7000;
+    deEsserFilter.Q.value = 2.0;
+    deEsserFilter.gain.value = 0;
+
+    // 4d. Warmth filter (lowshelf at 250 Hz — low-mid body)
+    const warmthFilter = audioCtx.createBiquadFilter();
+    warmthFilter.type = 'lowshelf';
+    warmthFilter.frequency.value = 250;
+    warmthFilter.gain.value = 0;
+
     // 5. Room Ambience feedback delay loop
     //    feedbackInputGain gates audio INTO the delay chain (0.0 = fully bypassed, no energy accumulation)
     const feedbackInputGain = audioCtx.createGain();
@@ -1326,11 +1384,15 @@ function initAudioGraph(entry: MediaElement) {
     separationGraph.output.connect(vocalFilter);
     vocalFilter.connect(denoiseFilter);
     denoiseFilter.connect(bassFilter);
-    bassFilter.connect(trebleFilter);
+    bassFilter.connect(midFilter);
+    midFilter.connect(trebleFilter);
+    trebleFilter.connect(compressorNode);
+    compressorNode.connect(deEsserFilter);
+    deEsserFilter.connect(warmthFilter);
 
-    // Room Ambience: treble → feedbackInputGain (GATE) → delayNode → delayGain → panner/gain
+    // Room Ambience: warmth → feedbackInputGain (GATE) → delayNode → delayGain → panner/gain
     // The feedback loop is fully isolated behind feedbackInputGain — zero energy enters when gate is 0
-    trebleFilter.connect(feedbackInputGain);
+    warmthFilter.connect(feedbackInputGain);
     feedbackInputGain.connect(delayNode);
     delayNode.connect(delayGain);
     delayNode.connect(feedbackNode);
@@ -1338,11 +1400,11 @@ function initAudioGraph(entry: MediaElement) {
 
     // Panning & output destination routing
     if (pannerNode) {
-      trebleFilter.connect(pannerNode);
+      warmthFilter.connect(pannerNode);
       delayGain.connect(pannerNode);
       pannerNode.connect(gainNode);
     } else {
-      trebleFilter.connect(gainNode);
+      warmthFilter.connect(gainNode);
       delayGain.connect(gainNode);
     }
 
@@ -1356,7 +1418,11 @@ function initAudioGraph(entry: MediaElement) {
     entry.vocalFilter = vocalFilter;
     entry.denoiseFilter = denoiseFilter;
     entry.bassFilter = bassFilter;
+    entry.midFilter = midFilter;
     entry.trebleFilter = trebleFilter;
+    entry.compressorNode = compressorNode;
+    entry.deEsserFilter = deEsserFilter;
+    entry.warmthFilter = warmthFilter;
     entry.delayNode = delayNode;
     entry.delayGain = delayGain;
     entry.feedbackInputGain = feedbackInputGain;

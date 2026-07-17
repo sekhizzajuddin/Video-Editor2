@@ -119,6 +119,10 @@ export interface ClipAudioSettings {
   voiceFormant: number; // -100 to 100 (default 0)
   humanize: boolean;    // one-click AI humanizer toggle (default false)
   denoise?: number;     // 0 to 100 (default 0, noise reduction intensity)
+  mid?: number;         // -15 to 15 dB (default 0) — Mid-band EQ (1kHz presence)
+  compression?: number; // 0 to 100 (default 0) — Dynamic range compression %
+  deEsser?: number;     // 0 to 100 (default 0) — Sibilance reduction %
+  warmth?: number;      // -100 to 100 (default 0) — Low-mid warmth/body
   // AI Vocal / BGM Separation (Demucs)
   aiVocalSeparation?: {
     isProcessed: boolean;   // True if AI has generated the stems
@@ -139,6 +143,24 @@ export interface ClipAudioSettings {
       mid: number;
       high: number;
     };
+  };
+}
+
+// Per-clip result from AI Auto Voice Tune
+export interface VoiceTuneResult {
+  clipId: string;
+  clipName: string;
+  isReference: boolean;
+  adjustments: {
+    volume?: number;
+    bass?: number;
+    mid?: number;
+    treble?: number;
+    pitch?: number;
+    voiceFormant?: number;
+    compression?: number;
+    warmth?: number;
+    deEsser?: number;
   };
 }
 
