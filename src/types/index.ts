@@ -278,11 +278,21 @@ export interface SpeedRampKeyframe {
   };
 }
 
+export interface BezierControl {
+  x: number;
+  y: number;
+  inX?: number;
+  inY?: number;
+}
+
 export interface PropertyKeyframe {
   time: number;
   value: number;
-  easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+  easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold' | 'bezier';
   holdNext?: boolean;
+  bezier?: BezierControl;
+  spatialTangent?: { x: number; y: number };
+  roving?: boolean;
 }
 
 export interface ClipAnimations {
@@ -331,7 +341,7 @@ export interface ClipKenBurnsSettings {
 
 export interface ClipMaskSettings {
   enabled: boolean;
-  type: 'rectangle' | 'circle' | 'path';
+  type: 'rectangle' | 'circle' | 'path' | 'split' | 'filmstrip' | 'heart' | 'star' | 'matte';
   x: number; // 0-100%
   y: number; // 0-100%
   width: number; // 0-100%
@@ -339,6 +349,9 @@ export interface ClipMaskSettings {
   points: { x: number, y: number }[]; // For path type
   feather: number; // 0-100
   invert: boolean;
+  rotation?: number; // 0-360 degrees
+  roundness?: number; // 0-100% (for rectangle)
+  matteSourceClipId?: string; // For track matte
 }
 
 // Timeline Clip
@@ -611,7 +624,7 @@ export type TimeFormat = 'HH:MM:SS' | 'MM:SS' | 'frames';
 export interface Transition {
   id: string;
   name: string;
-  type: 'dissolve' | 'wipe' | 'zoom' | 'slide' | 'custom';
+  type: 'dissolve' | 'wipe' | 'zoom' | 'slide' | 'shake' | 'flash' | 'zoomRush' | 'glitch' | 'lightLeak' | 'whipPan' | 'pixelate' | 'mirror' | 'custom';
   duration: number;
   params: Record<string, unknown>;
 }

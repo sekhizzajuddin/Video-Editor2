@@ -74,10 +74,19 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         }
 
         if (closestClip && minDistance < 5.0) { // Apply if dropped within 5 seconds of a boundary
-          const type = transitionName.toLowerCase().includes('dissolve') ? 'dissolve'
-                     : transitionName.toLowerCase().includes('wipe') ? 'wipe'
-                     : transitionName.toLowerCase().includes('zoom') ? 'zoom'
-                     : transitionName.toLowerCase().includes('slide') ? 'slide'
+          const nameLower = transitionName.toLowerCase();
+          const type = nameLower.includes('dissolve') ? 'dissolve'
+                     : nameLower.includes('wipe') ? 'wipe'
+                     : nameLower.includes('zoomrush') ? 'zoomRush'
+                     : nameLower.includes('zoom') ? 'zoom'
+                     : nameLower.includes('slide') ? 'slide'
+                     : nameLower.includes('shake') ? 'shake'
+                     : nameLower.includes('flash') ? 'flash'
+                     : nameLower.includes('glitch') ? 'glitch'
+                     : nameLower.includes('light leak') ? 'lightLeak'
+                     : nameLower.includes('whip pan') ? 'whipPan'
+                     : nameLower.includes('pixelate') ? 'pixelate'
+                     : nameLower.includes('mirror') ? 'mirror'
                      : 'dissolve';
                      
           const newTransition = {

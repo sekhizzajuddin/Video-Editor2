@@ -42,6 +42,7 @@ import { getSpeedAtPosition, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRa
 import type { SpeedRampKeyframe, EasingType } from '@/types';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
+import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -1197,8 +1198,13 @@ export function PropertiesPanel() {
   const localTime = currentTime - absoluteStartTime;
   const animations = selectedClip.animations || {};
   const getMasterKeyframes = () => {
-    if (!animations['transform.x']) return [];
-    return animations['transform.x'].map((k: any) => k.time);
+    const allTimes = new Set<number>();
+    Object.values(animations).forEach((kfList: any) => {
+      if (Array.isArray(kfList)) {
+        kfList.forEach((k: any) => allTimes.add(k.time));
+      }
+    });
+    return Array.from(allTimes).sort((a, b) => a - b);
   };
   const keyframeTimes = getMasterKeyframes();
   const hasMasterKeyframes = keyframeTimes.length > 0;
@@ -1866,302 +1872,971 @@ export function PropertiesPanel() {
                   </div>
                 </button>
                 {!collapsedSections['position'] && (
-                  <div className="px-2.5 pb-2.5 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <div className="mb-1">
-                          <label className="text-[10px] text-[#a0a0a0] block">X Position</label>
-                        </div>
-                        <input
-                          type="number"
-                          value={Math.round(getPropVal(selectedClip.transform.x, 'transform.x'))}
-                          onChange={(e) => setPropVal('transform.x', Number(e.target.value), { transform: { ...selectedClip.transform, x: Number(e.target.value) } })}
-                          onBlur={() => useEditorStore.getState().saveSnapshot()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  <div className="px-2.5 pb-2.5 space-y-4">
+                    {/* Position X */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">X Position</label>
+                        <KeyframeControl
+                          propertyKey="transform.x"
+                          value={getPropVal(selectedClip.transform.x, 'transform.x')}
+                          keyframes={animations['transform.x'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.x'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.x': newKf }
+                            });
                           }}
-                          className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.x'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.x': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.x'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.x': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.x'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.x'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
                         />
                       </div>
-                      <div>
-                        <div className="mb-1">
-                          <label className="text-[10px] text-[#a0a0a0] block">Y Position</label>
-                        </div>
-                        <input
-                          type="number"
-                          value={Math.round(getPropVal(selectedClip.transform.y, 'transform.y'))}
-                          onChange={(e) => setPropVal('transform.y', Number(e.target.value), { transform: { ...selectedClip.transform, y: Number(e.target.value) } })}
-                          onBlur={() => useEditorStore.getState().saveSnapshot()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.x'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <input
+                        type="number"
+                        value={Math.round(getPropVal(selectedClip.transform.x, 'transform.x'))}
+                        onChange={(e) => setPropVal('transform.x', Number(e.target.value), { transform: { ...selectedClip.transform, x: Number(e.target.value) } })}
+                        onBlur={() => useEditorStore.getState().saveSnapshot()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        }}
+                        className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    {/* Position Y */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">Y Position</label>
+                        <KeyframeControl
+                          propertyKey="transform.y"
+                          value={getPropVal(selectedClip.transform.y, 'transform.y')}
+                          keyframes={animations['transform.y'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.y'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.y': newKf }
+                            });
                           }}
-                          className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.y'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.y': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.y'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.y': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.y'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.y'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
                         />
+                      </div>
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.y'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <input
+                        type="number"
+                        value={Math.round(getPropVal(selectedClip.transform.y, 'transform.y'))}
+                        onChange={(e) => setPropVal('transform.y', Number(e.target.value), { transform: { ...selectedClip.transform, y: Number(e.target.value) } })}
+                        onBlur={() => useEditorStore.getState().saveSnapshot()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        }}
+                        className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Scale */}
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                <button
+                  onClick={() => toggleSection('scale')}
+                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                >
+                  <span className="font-medium">Scale</span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                      title="Reset Scale"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    </div>
+                    {collapsedSections['scale'] ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    )}
+                  </div>
+                </button>
+                {!collapsedSections['scale'] && (
+                  <div className="px-2.5 pb-2.5 space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] text-[#a0a0a0]">Scale Multiplier</span>
+                      <KeyframeControl
+                        propertyKey="transform.scale"
+                        value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
+                        keyframes={animations['transform.scale'] || []}
+                        currentTime={localTime}
+                        clipId={selectedClip.id}
+                        onAddKeyframe={(time, val) => {
+                          const newKf = addOrUpdateKeyframe(animations['transform.scale'] || [], time, val, { easing: 'bezier' });
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, 'transform.scale': newKf }
+                          });
+                        }}
+                        onRemoveKeyframe={(time) => {
+                          const newKf = (animations['transform.scale'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, 'transform.scale': newKf }
+                          });
+                        }}
+                        onUpdateEasing={(time, easing) => {
+                          const newKf = (animations['transform.scale'] || []).map(k => 
+                            Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                          );
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, 'transform.scale': newKf }
+                          });
+                        }}
+                        onJumpToNext={() => {
+                          const next = (animations['transform.scale'] || []).find(k => k.time > localTime + 0.05);
+                          if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                        }}
+                        onJumpToPrev={() => {
+                          const prev = [...(animations['transform.scale'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                          if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                        }}
+                      />
+                    </div>
+                    <KeyframeMiniTimeline
+                      keyframes={animations['transform.scale'] || []}
+                      currentTime={localTime}
+                      duration={selectedClip.duration}
+                      onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={10}
+                        max={400}
+                        value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
+                        title="Double-click to reset to 100%"
+                        onChange={(e) => setPropVal('transform.scale', Number(e.target.value), { transform: { ...selectedClip.transform, scale: Number(e.target.value) } })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => {
+                          setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                      <span 
+                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                        title="Click to cycle common values"
+                        onClick={() => {
+                          const steps = [10, 25, 50, 75, 100, 150, 200, 300, 400];
+                          const cur = getPropVal(selectedClip.transform.scale, 'transform.scale');
+                          let next = steps.find(s => s > cur) ?? steps[0];
+                          setPropVal('transform.scale', next, { transform: { ...selectedClip.transform, scale: next } });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                      >
+                        {Math.round(getPropVal(selectedClip.transform.scale, 'transform.scale'))}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Rotation */}
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                <button
+                  onClick={() => toggleSection('rotation')}
+                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                >
+                  <span className="font-medium">Rotation</span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
+                        setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
+                        setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                      title="Reset Rotation"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    </div>
+                    {collapsedSections['rotation'] ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    )}
+                  </div>
+                </button>
+                {!collapsedSections['rotation'] && (
+                  <div className="px-2.5 pb-2.5 space-y-3">
+                    {/* Rotate X */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">Rotate X (3D)</label>
+                        <KeyframeControl
+                          propertyKey="transform.rotationX"
+                          value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
+                          keyframes={animations['transform.rotationX'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.rotationX'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationX': newKf }
+                            });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.rotationX'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationX': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.rotationX'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationX': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.rotationX'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.rotationX'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
+                        />
+                      </div>
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.rotationX'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
+                          title="Double-click to reset to 0°"
+                          onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onDoubleClick={() => {
+                            setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <span 
+                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                          title="Click to step 45°"
+                          onClick={() => {
+                            const cur = getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX');
+                            let next = cur + 45;
+                            if (next > 180) next = -180;
+                            setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                        >
+                          {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Rotate Y */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">Rotate Y (3D)</label>
+                        <KeyframeControl
+                          propertyKey="transform.rotationY"
+                          value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
+                          keyframes={animations['transform.rotationY'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.rotationY'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationY': newKf }
+                            });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.rotationY'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationY': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.rotationY'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationY': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.rotationY'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.rotationY'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
+                        />
+                      </div>
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.rotationY'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
+                          title="Double-click to reset to 0°"
+                          onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onDoubleClick={() => {
+                            setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <span 
+                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                          title="Click to step 45°"
+                          onClick={() => {
+                            const cur = getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY');
+                            let next = cur + 45;
+                            if (next > 180) next = -180;
+                            setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                        >
+                          {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Rotate Z */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">Rotate Z (3D)</label>
+                        <KeyframeControl
+                          propertyKey="transform.rotation"
+                          value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
+                          keyframes={animations['transform.rotation'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.rotation'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotation': newKf }
+                            });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.rotation'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotation': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.rotation'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotation': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.rotation'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.rotation'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
+                        />
+                      </div>
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.rotation'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
+                          title="Double-click to reset to 0°"
+                          onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onDoubleClick={() => {
+                            setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <span 
+                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                          title="Click to step 45°"
+                          onClick={() => {
+                            const cur = getPropVal(selectedClip.transform.rotation ?? 0, 'transform.rotation');
+                            let next = cur + 45;
+                            if (next > 180) next = -180;
+                            setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                        >
+                          {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
+                        </span>
                       </div>
                     </div>
                   </div>
                 )}
               </div>
 
-            {/* Scale */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
-              <button
-                onClick={() => toggleSection('scale')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
-              >
-                <span className="font-medium">Scale</span>
-                <div className="flex items-center gap-2">
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
-                      useEditorStore.getState().saveSnapshot();
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
-                    title="Reset Scale"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
-                  </div>
-                  {collapsedSections['scale'] ? (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  )}
-                </div>
-              </button>
-              {!collapsedSections['scale'] && (
-                <div className="px-2.5 pb-2.5">
+              {/* Opacity */}
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                <button
+                  onClick={() => toggleSection('opacity')}
+                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                >
+                  <span className="font-medium">Opacity</span>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min={10}
-                      max={400}
-                      value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
-                      title="Double-click to reset to 100%"
-                      onChange={(e) => setPropVal('transform.scale', Number(e.target.value), { transform: { ...selectedClip.transform, scale: Number(e.target.value) } })}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                      onDoubleClick={() => {
-                        setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
-                        useEditorStore.getState().saveSnapshot();
-                      }}
-                      className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                    />
-                    <span 
-                      className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                      title="Click to cycle common values"
-                      onClick={() => {
-                        const steps = [10, 25, 50, 75, 100, 150, 200, 300, 400];
-                        const cur = getPropVal(selectedClip.transform.scale, 'transform.scale');
-                        let next = steps.find(s => s > cur) ?? steps[0];
-                        setPropVal('transform.scale', next, { transform: { ...selectedClip.transform, scale: next } });
-                        useEditorStore.getState().saveSnapshot();
-                      }}
-                    >
-                      {Math.round(getPropVal(selectedClip.transform.scale, 'transform.scale'))}%
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Rotation */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
-              <button
-                onClick={() => toggleSection('rotation')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
-              >
-                <span className="font-medium">3D Rotation</span>
-                <div className="flex items-center gap-2">
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                      setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                      setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                      useEditorStore.getState().saveSnapshot();
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
-                    title="Reset All Rotations"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
-                  </div>
-                  {collapsedSections['rotation'] ? (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  )}
-                </div>
-              </button>
-              {!collapsedSections['rotation'] && (
-                <div className="px-2.5 pb-2.5 space-y-3">
-                  {/* Rotate X */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-[#a0a0a0]">Rotate X (3D)</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={-180}
-                        max={180}
-                        value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
-                        title="Double-click to reset to 0°"
-                        onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                        onDoubleClick={() => {
-                          setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                          useEditorStore.getState().saveSnapshot();
-                        }}
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                      />
-                      <span 
-                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                        title="Click to step 45°"
-                        onClick={() => {
-                          const cur = getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX');
-                          let next = cur + 45;
-                          if (next > 180) next = -180;
-                          setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
-                          useEditorStore.getState().saveSnapshot();
-                        }}
-                      >
-                        {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Rotate Y */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-[#a0a0a0]">Rotate Y (3D)</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={-180}
-                        max={180}
-                        value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
-                        title="Double-click to reset to 0°"
-                        onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                        onDoubleClick={() => {
-                          setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                          useEditorStore.getState().saveSnapshot();
-                        }}
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                      />
-                      <span 
-                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                        title="Click to step 45°"
-                        onClick={() => {
-                          const cur = getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY');
-                          let next = cur + 45;
-                          if (next > 180) next = -180;
-                          setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
-                          useEditorStore.getState().saveSnapshot();
-                        }}
-                      >
-                        {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Rotate Z */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-[#a0a0a0]">Rotate Z (3D)</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={-180}
-                        max={180}
-                        value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
-                        title="Double-click to reset to 0°"
-                        onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                        onDoubleClick={() => {
-                          setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                          useEditorStore.getState().saveSnapshot();
-                        }}
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                      />
-                      <span 
-                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                        title="Click to step 45°"
-                        onClick={() => {
-                          const cur = getPropVal(selectedClip.transform.rotation ?? 0, 'transform.rotation');
-                          let next = cur + 45;
-                          if (next > 180) next = -180;
-                          setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
-                          useEditorStore.getState().saveSnapshot();
-                        }}
-                      >
-                        {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Opacity */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
-              <button
-                onClick={() => toggleSection('opacity')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
-              >
-                <span className="font-medium">Opacity</span>
-                <div className="flex items-center gap-2">
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPropVal('opacity', 1, { opacity: 1 });
-                      useEditorStore.getState().saveSnapshot();
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
-                    title="Reset Opacity"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
-                  </div>
-                  {collapsedSections['opacity'] ? (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                  )}
-                </div>
-              </button>
-              {!collapsedSections['opacity'] && (
-                <div className="px-2.5 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={getPropVal(selectedClip.opacity, 'opacity')}
-                      title="Double-click to reset to 100%"
-                      onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                      onDoubleClick={() => {
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setPropVal('opacity', 1, { opacity: 1 });
                         useEditorStore.getState().saveSnapshot();
                       }}
-                      className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                      title="Reset Opacity"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    </div>
+                    {collapsedSections['opacity'] ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    )}
+                  </div>
+                </button>
+                {!collapsedSections['opacity'] && (
+                  <div className="px-2.5 pb-2.5 space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] text-[#a0a0a0]">Opacity Value</span>
+                      <KeyframeControl
+                        propertyKey="opacity"
+                        value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
+                        keyframes={animations['opacity'] || []}
+                        currentTime={localTime}
+                        clipId={selectedClip.id}
+                        onAddKeyframe={(time, val) => {
+                          const newKf = addOrUpdateKeyframe(animations['opacity'] || [], time, val, { easing: 'bezier' });
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, opacity: newKf }
+                          });
+                        }}
+                        onRemoveKeyframe={(time) => {
+                          const newKf = (animations['opacity'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, opacity: newKf }
+                          });
+                        }}
+                        onUpdateEasing={(time, easing) => {
+                          const newKf = (animations['opacity'] || []).map(k => 
+                            Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                          );
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, opacity: newKf }
+                          });
+                        }}
+                        onJumpToNext={() => {
+                          const next = (animations['opacity'] || []).find(k => k.time > localTime + 0.05);
+                          if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                        }}
+                        onJumpToPrev={() => {
+                          const prev = [...(animations['opacity'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                          if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                        }}
+                      />
+                    </div>
+                    <KeyframeMiniTimeline
+                      keyframes={animations['opacity'] || []}
+                      currentTime={localTime}
+                      duration={selectedClip.duration}
+                      onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
                     />
-                    <span 
-                      className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                      title="Click to cycle values"
-                      onClick={() => {
-                        const steps = [0, 25, 50, 75, 100];
-                        const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
-                        let next = steps.find(s => s > cur) ?? steps[0];
-                        setPropVal('opacity', next / 100, { opacity: next / 100 });
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
+                        title="Double-click to reset to 100%"
+                        onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => {
+                          setPropVal('opacity', 1, { opacity: 1 });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                      <span 
+                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                        title="Click to cycle values"
+                        onClick={() => {
+                          const steps = [0, 25, 50, 75, 100];
+                          const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
+                          let next = steps.find(s => s > cur) ?? steps[0];
+                          setPropVal('opacity', next / 100, { opacity: next / 100 });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                      >
+                        {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Opacity slider replacement helper */}
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                <button
+                  onClick={() => toggleSection('rotation')}
+                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                >
+                  <span className="font-medium">Rotation</span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
+                        setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
+                        setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
                         useEditorStore.getState().saveSnapshot();
                       }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                      title="Reset Rotation"
                     >
-                      {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%
-                    </span>
+                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    </div>
+                    {collapsedSections['rotation'] ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
+                </button>
+                {!collapsedSections['rotation'] && (
+                  <div className="px-2.5 pb-2.5 space-y-3">
+                    {/* Rotate X */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">Rotate X (3D)</label>
+                        <KeyframeControl
+                          propertyKey="transform.rotationX"
+                          value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
+                          keyframes={animations['transform.rotationX'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.rotationX'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationX': newKf }
+                            });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.rotationX'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationX': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.rotationX'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationX': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.rotationX'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.rotationX'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
+                        />
+                      </div>
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.rotationX'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
+                          title="Double-click to reset to 0°"
+                          onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onDoubleClick={() => {
+                            setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <span 
+                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                          title="Click to step 45°"
+                          onClick={() => {
+                            const cur = getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX');
+                            let next = cur + 45;
+                            if (next > 180) next = -180;
+                            setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                        >
+                          {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
+                        </span>
+                      </div>
+                    </div>
 
-            {/* Flip Controls */}
+                    {/* Rotate Y */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">Rotate Y (3D)</label>
+                        <KeyframeControl
+                          propertyKey="transform.rotationY"
+                          value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
+                          keyframes={animations['transform.rotationY'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.rotationY'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationY': newKf }
+                            });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.rotationY'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationY': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.rotationY'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotationY': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.rotationY'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.rotationY'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
+                        />
+                      </div>
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.rotationY'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
+                          title="Double-click to reset to 0°"
+                          onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onDoubleClick={() => {
+                            setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <span 
+                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                          title="Click to step 45°"
+                          onClick={() => {
+                            const cur = getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY');
+                            let next = cur + 45;
+                            if (next > 180) next = -180;
+                            setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                        >
+                          {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Rotate Z */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-[#a0a0a0]">Rotate Z (3D)</label>
+                        <KeyframeControl
+                          propertyKey="transform.rotation"
+                          value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
+                          keyframes={animations['transform.rotation'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.rotation'] || [], time, val, { easing: 'bezier' });
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotation': newKf }
+                            });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.rotation'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotation': newKf }
+                            });
+                          }}
+                          onUpdateEasing={(time, easing) => {
+                            const newKf = (animations['transform.rotation'] || []).map(k => 
+                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                            );
+                            updateClip(selectedClip.id, {
+                              animations: { ...animations, 'transform.rotation': newKf }
+                            });
+                          }}
+                          onJumpToNext={() => {
+                            const next = (animations['transform.rotation'] || []).find(k => k.time > localTime + 0.05);
+                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                          }}
+                          onJumpToPrev={() => {
+                            const prev = [...(animations['transform.rotation'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                          }}
+                        />
+                      </div>
+                      <KeyframeMiniTimeline
+                        keyframes={animations['transform.rotation'] || []}
+                        currentTime={localTime}
+                        duration={selectedClip.duration}
+                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
+                          title="Double-click to reset to 0°"
+                          onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onDoubleClick={() => {
+                            setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <span 
+                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                          title="Click to step 45°"
+                          onClick={() => {
+                            const cur = getPropVal(selectedClip.transform.rotation ?? 0, 'transform.rotation');
+                            let next = cur + 45;
+                            if (next > 180) next = -180;
+                            setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
+                            useEditorStore.getState().saveSnapshot();
+                          }}
+                        >
+                          {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Opacity */}
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                <button
+                  onClick={() => toggleSection('opacity')}
+                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                >
+                  <span className="font-medium">Opacity</span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPropVal('opacity', 1, { opacity: 1 });
+                        useEditorStore.getState().saveSnapshot();
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                      title="Reset Opacity"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    </div>
+                    {collapsedSections['opacity'] ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    )}
+                  </div>
+                </button>
+                {!collapsedSections['opacity'] && (
+                  <div className="px-2.5 pb-2.5 space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] text-[#a0a0a0]">Opacity Value</span>
+                      <KeyframeControl
+                        propertyKey="opacity"
+                        value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
+                        keyframes={animations['opacity'] || []}
+                        currentTime={localTime}
+                        clipId={selectedClip.id}
+                        onAddKeyframe={(time, val) => {
+                          const newKf = addOrUpdateKeyframe(animations['opacity'] || [], time, val, { easing: 'bezier' });
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, opacity: newKf }
+                          });
+                        }}
+                        onRemoveKeyframe={(time) => {
+                          const newKf = (animations['opacity'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, opacity: newKf }
+                          });
+                        }}
+                        onUpdateEasing={(time, easing) => {
+                          const newKf = (animations['opacity'] || []).map(k => 
+                            Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
+                          );
+                          updateClip(selectedClip.id, {
+                            animations: { ...animations, opacity: newKf }
+                          });
+                        }}
+                        onJumpToNext={() => {
+                          const next = (animations['opacity'] || []).find(k => k.time > localTime + 0.05);
+                          if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
+                        }}
+                        onJumpToPrev={() => {
+                          const prev = [...(animations['opacity'] || [])].reverse().find(k => k.time < localTime - 0.05);
+                          if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
+                        }}
+                      />
+                    </div>
+                    <KeyframeMiniTimeline
+                      keyframes={animations['opacity'] || []}
+                      currentTime={localTime}
+                      duration={selectedClip.duration}
+                      onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
+                        title="Double-click to reset to 100%"
+                        onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
+                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onDoubleClick={() => {
+                          setPropVal('opacity', 1, { opacity: 1 });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      />
+                      <span 
+                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+                        title="Click to cycle values"
+                        onClick={() => {
+                          const steps = [0, 25, 50, 75, 100];
+                          const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
+                          let next = steps.find(s => s > cur) ?? steps[0];
+                          setPropVal('opacity', next / 100, { opacity: next / 100 });
+                          useEditorStore.getState().saveSnapshot();
+                        }}
+                      >
+                        {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
                 onClick={() => toggleSection('flip')}
@@ -2744,7 +3419,7 @@ export function PropertiesPanel() {
         })()}
 
         {activePropertiesTab === 'mask' && (() => {
-          const mask = selectedClip.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, points: [], feather: 0, invert: false };
+          const mask = selectedClip.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, points: [], feather: 0, invert: false, rotation: 0, roundness: 0, matteSourceClipId: '' };
           const updateMask = (updates: any) => {
             updateClip(selectedClip.id, { mask: { ...mask, ...updates } });
           };
@@ -2786,12 +3461,12 @@ export function PropertiesPanel() {
                   {/* Mask Type */}
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase tracking-wider text-[#a0a0a0]">Mask Shape</label>
-                    <div className="flex gap-2">
-                      {['rectangle', 'circle'].map(t => (
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {['rectangle', 'circle', 'split', 'filmstrip', 'heart', 'star', 'matte'].map(t => (
                         <button
                           key={t}
                           onClick={() => { updateMask({ type: t }); handleMouseUp(); }}
-                          className={`flex-1 py-1.5 text-xs rounded border transition-colors ${mask.type === t ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-[#3e3e3e] bg-[#2d2d2d] text-[#a0a0a0] hover:border-[#4e4e4e]'}`}
+                          className={`py-1 text-[10px] rounded border transition-colors ${mask.type === t ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-[#3e3e3e] bg-[#2d2d2d] text-[#a0a0a0] hover:border-[#4e4e4e]'}`}
                         >
                           {t.charAt(0).toUpperCase() + t.slice(1)}
                         </button>
@@ -2803,9 +3478,40 @@ export function PropertiesPanel() {
                   <div className="space-y-3 p-3 bg-[#2d2d2d] rounded-md border border-[#3e3e3e]">
                     <Slider label="Position X" value={mask.x} min={0} max={100} unit="%" prop="x" />
                     <Slider label="Position Y" value={mask.y} min={0} max={100} unit="%" prop="y" />
-                    <Slider label={mask.type === 'circle' ? 'Radius' : 'Width'} value={mask.width} min={0} max={100} unit="%" prop="width" />
+                    
+                    {(mask.type === 'rectangle' || mask.type === 'circle' || mask.type === 'heart' || mask.type === 'star') && (
+                      <Slider label={mask.type === 'circle' ? 'Radius' : 'Width'} value={mask.width} min={0} max={100} unit="%" prop="width" />
+                    )}
+                    
+                    {(mask.type === 'rectangle' || mask.type === 'filmstrip') && (
+                      <Slider label="Height" value={mask.height ?? 50} min={0} max={100} unit="%" prop="height" />
+                    )}
+                    
+                    <Slider label="Rotation" value={mask.rotation ?? 0} min={0} max={360} unit="°" prop="rotation" />
+                    
                     {mask.type === 'rectangle' && (
-                      <Slider label="Height" value={mask.height} min={0} max={100} unit="%" prop="height" />
+                      <Slider label="Roundness" value={mask.roundness ?? 0} min={0} max={100} unit="%" prop="roundness" />
+                    )}
+                    
+                    {mask.type === 'matte' && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase tracking-wider text-[#a0a0a0]">Matte Source Clip</label>
+                        <select
+                          value={mask.matteSourceClipId || ''}
+                          onChange={(e) => { updateMask({ matteSourceClipId: e.target.value }); handleMouseUp(); }}
+                          className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded p-1.5 focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">Select visual clip...</option>
+                          {tracks.flatMap(t => t.clips)
+                            .filter(c => c.id !== selectedClip.id && (c.mediaId?.startsWith('clip_') || c.textSettings || c.mediaId?.includes('text')))
+                            .map(c => (
+                              <option key={c.id} value={c.id}>
+                                {c.name || c.id}
+                              </option>
+                            ))
+                          }
+                        </select>
+                      </div>
                     )}
                     
                     <div className="h-px bg-[#3e3e3e] my-2" />

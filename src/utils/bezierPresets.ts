@@ -1,0 +1,35 @@
+import { BezierControl } from '@/types';
+
+export interface BezierPreset {
+  name: string;
+  description: string;
+  value: BezierControl;
+  category: 'standard' | 'bounce' | 'smooth' | 'sharp';
+}
+
+export const BEZIER_PRESETS: BezierPreset[] = [
+  // Standard CSS Easings
+  { name: 'Linear', description: 'No acceleration', value: { x: 0, y: 0, inX: 1, inY: 1 }, category: 'standard' },
+  { name: 'Ease', description: 'Default smooth', value: { x: 0.25, y: 0.1, inX: 0.25, inY: 1 }, category: 'standard' },
+  { name: 'Ease In', description: 'Slow start', value: { x: 0.42, y: 0, inX: 1, inY: 1 }, category: 'standard' },
+  { name: 'Ease Out', description: 'Slow end', value: { x: 0, y: 0, inX: 0.58, inY: 1 }, category: 'standard' },
+  { name: 'Ease In-Out', description: 'Slow start & end', value: { x: 0.42, y: 0, inX: 0.58, inY: 1 }, category: 'standard' },
+  
+  // Smooth
+  { name: 'Super Smooth', description: 'Ultra gentle', value: { x: 0.45, y: 0.05, inX: 0.55, inY: 0.95 }, category: 'smooth' },
+  { name: 'Sine In', description: 'Gentle start', value: { x: 0.32, y: 0, inX: 0.6, inY: 0.36 }, category: 'smooth' },
+  { name: 'Sine Out', description: 'Gentle end', value: { x: 0.4, y: 0.64, inX: 0.68, inY: 1 }, category: 'smooth' },
+  
+  // Sharp / Impact
+  { name: 'Power In', description: 'Fast acceleration', value: { x: 0.55, y: 0.085, inX: 0.68, inY: 0.53 }, category: 'sharp' },
+  { name: 'Power Out', description: 'Fast deceleration', value: { x: 0.25, y: 0.46, inX: 0.45, inY: 0.94 }, category: 'sharp' },
+  { name: 'Expo In', description: 'Explosive start', value: { x: 0.95, y: 0.05, inX: 0.795, inY: 0.035 }, category: 'sharp' },
+  { name: 'Expo Out', description: 'Explosive end', value: { x: 0.19, y: 1, inX: 0.22, inY: 1 }, category: 'sharp' },
+  
+  // Bounce / Overshoot
+  { name: 'Back In', description: 'Pull back then snap', value: { x: 0.6, y: -0.28, inX: 0.735, inY: 0.045 }, category: 'bounce' },
+  { name: 'Back Out', description: 'Overshoot then settle', value: { x: 0.175, y: 0.885, inX: 0.32, inY: 1.275 }, category: 'bounce' },
+  { name: 'Back In-Out', description: 'Pull & overshoot', value: { x: 0.68, y: -0.55, inX: 0.265, inY: 1.55 }, category: 'bounce' },
+  { name: 'Elastic', description: 'Springy wobble', value: { x: 0.5, y: 1.5, inX: 0.5, inY: 1 }, category: 'bounce' },
+  { name: 'Overshoot', description: 'Slight bounce', value: { x: 0.15, y: 1.2, inX: 0.85, inY: 0.9 }, category: 'bounce' },
+];

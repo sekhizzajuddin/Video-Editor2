@@ -82,6 +82,14 @@ const TRANSITIONS = [
   { name: 'Slide Up Push', color: 'from-lime-500/20 to-transparent', preview: 'Push next clip in from bottom to top' },
   { name: 'Slide Down Push', color: 'from-lime-500/20 to-transparent', preview: 'Push next clip in from top to bottom' },
   { name: 'Zoom Out Spin', color: 'from-rose-500/20 to-transparent', preview: 'Classic spinning zoom transition' },
+  { name: 'Camera Shake', color: 'from-red-500/20 to-transparent', preview: 'Drill/Hip-Hop vibration drop' },
+  { name: 'Flash Cut', color: 'from-yellow-400/20 to-transparent', preview: 'White flash transition strobe' },
+  { name: 'Zoom Rush', color: 'from-orange-500/20 to-transparent', preview: 'Exponential zoom in transition' },
+  { name: 'RGB Glitch', color: 'from-cyan-500/20 to-transparent', preview: 'Digital glitch color splitting' },
+  { name: 'Light Leak', color: 'from-rose-400/20 to-transparent', preview: 'Warm bloom light leak fade' },
+  { name: 'Whip Pan', color: 'from-indigo-500/20 to-transparent', preview: 'Whip pan camera motion sweep' },
+  { name: 'Pixelate', color: 'from-violet-500/20 to-transparent', preview: 'Retro game pixelation blockiness' },
+  { name: 'Kaleidoscope', color: 'from-teal-500/20 to-transparent', preview: 'Mirror segments transition' },
 ];
 
 // Timeline FX — dragged to FX tracks. type field maps to PreviewCanvas fxType.
@@ -419,6 +427,7 @@ export function MediaPanel() {
     insertTextClip,
     addBeatMarkers,
     clearBeatMarkers,
+    autoSyncTrackToBeats,
     projectTemplates,
     saveProjectAsTemplate,
     deleteProjectTemplate,
@@ -441,6 +450,12 @@ export function MediaPanel() {
     aiVideoIsGenerating,
     aiVideoProgress,
   } = useEditorStore();
+
+  const [syncTargetTrack, setSyncTargetTrack] = useState('');
+  const [syncAudioClip, setSyncAudioClip] = useState('');
+  const [syncEveryNBeats, setSyncEveryNBeats] = useState(4);
+  const [syncTransitionType, setSyncTransitionType] = useState('dissolve');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Click-to-apply fallback handlers
   const handleTemplateClick = (tmpl: any) => {
@@ -3092,8 +3107,126 @@ export function MediaPanel() {
         })()}
 
         {activeMediaTab === 'transitions' && (
-          <div className="flex-1 overflow-y-auto p-2">
-            <p className="text-xs text-[#a0a0a0] mb-3">Drag transitions between clips on timeline (Hover to preview)</p>
+          <div className="flex-1 overflow-y-auto p-2 space-y-4">
+            {/* Auto Beat Sync Tool Card */}
+            <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/20 border border-indigo-500/20 rounded-lg p-3 space-y-3">
+              <div className="flex items-center gap-2 text-indigo-400">
+                <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+                <span className="text-xs font-semibold uppercase tracking-wider">🤖 Auto Beat Sync</span>
+              </div>
+              <p className="text-[10px] text-[#a0a0a0] leading-tight">
+                Automatically align video cuts & apply professional transitions synchronized to your audio track's beat markers.
+              </p>
+
+              <div className="space-y-2">
+                {/* Audio Clip Selection */}
+                <div>
+                  <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Select Audio Track (Beats Source)</label>
+                  <select
+                    value={syncAudioClip}
+                    onChange={(e) => setSyncAudioClip(e.target.value)}
+                    className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">Select audio...</option>
+                    {tracks.flatMap(t => t.clips)
+                      .filter(c => c.mediaId?.startsWith('clip_') || c.mediaId?.includes('audio') || c.audioSettings) 
+                      .map(c => (
+                        <option key={c.id} value={c.id}>
+                          🎵 {c.name || c.id}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+
+                {/* Target Video Track Selection */}
+                <div>
+                  <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Select Video Track to Sync</label>
+                  <select
+                    value={syncTargetTrack}
+                    onChange={(e) => setSyncTargetTrack(e.target.value)}
+                    className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">Select video track...</option>
+                    {tracks.filter(t => t.type === 'video').map(t => (
+                      <option key={t.id} value={t.id}>
+                        📺 {t.name || `Track ${t.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Every N Beats */}
+                  <div>
+                    <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Interval (Beats)</label>
+                    <select
+                      value={syncEveryNBeats}
+                      onChange={(e) => setSyncEveryNBeats(Number(e.target.value))}
+                      className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="1">Every Beat (1)</option>
+                      <option value="2">2 Beats</option>
+                      <option value="4">4 Beats (1 Bar)</option>
+                      <option value="8">8 Beats (2 Bars)</option>
+                    </select>
+                  </div>
+
+                  {/* Transition Type */}
+                  <div>
+                    <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Transition</label>
+                    <select
+                      value={syncTransitionType}
+                      onChange={(e) => setSyncTransitionType(e.target.value)}
+                      className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">None (Hard Cuts)</option>
+                      <option value="dissolve">Cross Dissolve</option>
+                      <option value="shake">Camera Shake</option>
+                      <option value="flash">Flash Cut</option>
+                      <option value="zoomRush">Zoom Rush</option>
+                      <option value="glitch">RGB Glitch</option>
+                      <option value="lightLeak">Light Leak</option>
+                      <option value="whipPan">Whip Pan</option>
+                      <option value="pixelate">Pixelate</option>
+                      <option value="mirror">Kaleidoscope</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  if (!syncTargetTrack || !syncAudioClip) {
+                    alert('Please select both an Audio clip and a Video track!');
+                    return;
+                  }
+                  setIsSyncing(true);
+                  setTimeout(() => {
+                    autoSyncTrackToBeats(syncTargetTrack, syncAudioClip, syncEveryNBeats, syncTransitionType || undefined);
+                    setIsSyncing(false);
+                  }, 600);
+                }}
+                disabled={isSyncing || !syncTargetTrack || !syncAudioClip}
+                className="w-full py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:from-gray-800 disabled:to-gray-800 text-xs font-semibold text-white rounded-md transition-all shadow-md active:scale-[0.98] flex items-center justify-center gap-1.5"
+              >
+                {isSyncing ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Syncing Cuts...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Auto Beat Sync!
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="h-px bg-[#3e3e3e]" />
+
+            <p className="text-xs text-[#a0a0a0] mb-1">Drag transitions between clips on timeline (Hover to preview)</p>
             <div className="grid grid-cols-2 gap-2">
               {TRANSITIONS.map((transition) => (
                 <TransitionCard key={transition.name} transition={transition} />
@@ -3484,6 +3617,191 @@ function TransitionCard({ transition }: TransitionCardProps) {
         } else {
           drawImageCover(imgA, 1 - t);
           drawImageCover(imgB, t, t);
+        }
+      } else if (nameLower.includes('shake')) {
+        const intensity = 10;
+        const seed = Math.floor(t * 60);
+        const rng = (s: number) => {
+          const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453123;
+          return x - Math.floor(x);
+        };
+        const offsetX = (rng(seed) - 0.5) * intensity * (1 - t);
+        const offsetY = (rng(seed + 1) - 0.5) * intensity * (1 - t);
+        const rot = (rng(seed + 2) - 0.5) * 5 * (1 - t);
+
+        ctx.save();
+        ctx.translate(W / 2 + offsetX, H / 2 + offsetY);
+        ctx.rotate((rot * Math.PI) / 180);
+        ctx.translate(-W / 2, -H / 2);
+        drawImageCover(imgA, 1);
+        if (t > 0.7) {
+          ctx.globalAlpha = (t - 0.7) / 0.3;
+          drawImageCover(imgB, 1);
+        }
+        ctx.restore();
+      } else if (nameLower.includes('flash')) {
+        const flashIntensity = Math.sin(t * Math.PI);
+        drawImageCover(imgA, 1);
+        if (flashIntensity > 0.1) {
+          ctx.save();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.globalAlpha = flashIntensity;
+          ctx.fillRect(0, 0, W, H);
+          ctx.restore();
+        }
+        if (t > 0.5) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, (t - 0.5) * 4);
+          drawImageCover(imgB, 1);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('zoom rush')) {
+        const ease = t === 0 ? 0 : t === 1 ? 1 : t < 0.5 ? Math.pow(2, 20 * t - 10) / 2 : (2 - Math.pow(2, -20 * t + 10)) / 2;
+        if (t < 0.8) {
+          ctx.save();
+          ctx.globalAlpha = 1 - ease;
+          drawImageCover(imgA, 1, 1 + ease * 1.5);
+          ctx.restore();
+        }
+        if (t > 0.2) {
+          ctx.save();
+          ctx.globalAlpha = ease;
+          drawImageCover(imgB, 1, 2 - ease * 1.5);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('glitch')) {
+        const slices = 12;
+        const rng = (s: number) => {
+          const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453123;
+          return x - Math.floor(x);
+        };
+        
+        ctx.save();
+        for (let i = 0; i < slices; i++) {
+          const sy = (H / slices) * i;
+          const sliceH = H / slices;
+          const seed = i + Math.floor(t * 30);
+          const offsetX = (rng(seed) - 0.5) * 20 * (1 - t);
+          const rgbOffset = 5 * (1 - t);
+
+          ctx.globalCompositeOperation = 'screen';
+          drawImageCover(imgA, 1, 1, offsetX - rgbOffset, sy);
+          drawImageCover(imgA, 1, 1, offsetX, sy);
+          drawImageCover(imgA, 1, 1, offsetX + rgbOffset, sy);
+        }
+        ctx.restore();
+
+        if (t > 0.6) {
+          ctx.save();
+          ctx.globalAlpha = (t - 0.6) / 0.4;
+          drawImageCover(imgB, 1);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('light leak')) {
+        drawImageCover(imgA, 1);
+        ctx.save();
+        const gradient = ctx.createRadialGradient(W * 0.8, -H * 0.2, 0, W * 0.8, -H * 0.2, W * 1.2);
+        const alpha = Math.sin(t * Math.PI) * 0.6;
+        gradient.addColorStop(0, `rgba(255, 107, 53, ${alpha})`);
+        gradient.addColorStop(0.5, `rgba(255, 107, 53, ${alpha * 0.5})`);
+        gradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = gradient;
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+
+        if (t > 0.5) {
+          ctx.save();
+          ctx.globalAlpha = (t - 0.5) * 2;
+          drawImageCover(imgB, 1);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('whip pan')) {
+        const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const fromOffset = ease * W;
+        
+        ctx.save();
+        drawImageCover(imgA, 1, 1, fromOffset, 0);
+        ctx.restore();
+
+        if (t > 0.1) {
+          const toX = -W + W * ease;
+          ctx.save();
+          drawImageCover(imgB, 1, 1, toX, 0);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('pixelate')) {
+        const pixelSize = Math.floor(1 + Math.sin(t * Math.PI) * 15);
+        if (pixelSize <= 1) {
+          drawImageCover(imgA, 1);
+        } else {
+          const offWidth = Math.ceil(W / pixelSize);
+          const offHeight = Math.ceil(H / pixelSize);
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = offWidth;
+          tempCanvas.height = offHeight;
+          const tempCtx = tempCanvas.getContext('2d')!;
+          
+          tempCtx.save();
+          tempCtx.scale(offWidth / W, offHeight / H);
+          if (imgA.complete && imgA.naturalWidth > 0) {
+            const scale = Math.max(W / imgA.naturalWidth, H / imgA.naturalHeight);
+            const dw = imgA.naturalWidth * scale;
+            const dh = imgA.naturalHeight * scale;
+            tempCtx.drawImage(imgA, (W - dw)/2, (H - dh)/2, dw, dh);
+          }
+          tempCtx.restore();
+
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(tempCanvas, 0, 0, W, H);
+          ctx.imageSmoothingEnabled = true;
+          ctx.restore();
+        }
+
+        if (t > 0.5) {
+          ctx.save();
+          ctx.globalAlpha = (t - 0.5) * 2;
+          drawImageCover(imgB, 1);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('kaleidoscope')) {
+        const segments = 4;
+        
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = W;
+        tempCanvas.height = H;
+        const tempCtx = tempCanvas.getContext('2d')!;
+        if (imgA.complete && imgA.naturalWidth > 0) {
+          const scale = Math.max(W / imgA.naturalWidth, H / imgA.naturalHeight);
+          const dw = imgA.naturalWidth * scale;
+          const dh = imgA.naturalHeight * scale;
+          tempCtx.drawImage(imgA, (W - dw)/2, (H - dh)/2, dw, dh);
+        }
+
+        ctx.save();
+        ctx.translate(W / 2, H / 2);
+        for (let i = 0; i < segments; i++) {
+          ctx.save();
+          ctx.rotate((i * Math.PI * 2) / segments);
+          const scale = 1 + Math.sin(t * Math.PI) * 0.2;
+          ctx.scale(scale, scale);
+          
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.arc(0, 0, Math.max(W, H), -Math.PI / segments, Math.PI / segments);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(tempCanvas, -W / 2, -H / 2, W, H);
+          ctx.restore();
+        }
+        ctx.restore();
+
+        if (t > 0.5) {
+          ctx.save();
+          ctx.globalAlpha = (t - 0.5) * 2;
+          drawImageCover(imgB, 1);
+          ctx.restore();
         }
       } else {
         drawImageCover(imgA, 1 - t);

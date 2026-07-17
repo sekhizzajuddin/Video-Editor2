@@ -322,6 +322,7 @@ interface EditorActions {
   // Beat Markers
   addBeatMarkers: (clipId: string, times: number[]) => void;
   clearBeatMarkers: (clipId: string) => void;
+  autoSyncTrackToBeats: (trackId: string, audioClipId: string, everyNBeats: number, transitionType?: string) => void;
 
   // Project Templates
   saveProjectAsTemplate: (name: string, description: string) => Promise<void>;
@@ -2369,6 +2370,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           { k: 'color.blur', v: values.color?.blur },
           { k: 'color.fadedFilm', v: values.color?.fadedFilm },
           { k: 'color.vignette', v: values.color?.vignette },
+          { k: 'mask.x', v: values.mask?.x },
+          { k: 'mask.y', v: values.mask?.y },
+          { k: 'mask.width', v: values.mask?.width },
+          { k: 'mask.height', v: values.mask?.height },
+          { k: 'mask.rotation', v: values.mask?.rotation },
+          { k: 'mask.feather', v: values.mask?.feather },
+          { k: 'mask.roundness', v: values.mask?.roundness },
         ];
         
         props.forEach(p => {
@@ -2424,6 +2432,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
                 updatedClip = {
                   ...updatedClip,
                   audioSettings: { ...(updatedClip.audioSettings || {}), [parts[1]]: kfToDelete.value } as any
+                };
+              } else if (parts[0] === 'mask') {
+                updatedClip = {
+                  ...updatedClip,
+                  mask: { ...(updatedClip.mask || {}), [parts[1]]: kfToDelete.value } as any
                 };
               }
             }
@@ -3437,6 +3450,88 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       beatMarkers: state.beatMarkers.filter((b) => b.clipId !== clipId),
     }));
     get().saveSnapshot('Clear Beat Markers');
+  },
+  autoSyncTrackToBeats: (trackId, audioClipId, everyNBeats, transitionType) => {
+    set((state) => {
+      const track = state.tracks.find((t) => t.id === trackId);
+      if (!track) return {};
+
+      // Find the audio clip
+      let audioClip: any = null;
+      for (const t of state.tracks) {
+        const found = t.clips.find((c) => c.id === audioClipId || c.mediaId === audioClipId);
+        if (found) {
+          audioClip = found;
+          break;
+        }
+      }
+      if (!audioClip) return {};
+
+      // Get beat markers for this audio clip
+      const markers = state.beatMarkers
+        .filter((bm) => bm.clipId === audioClip.mediaId || bm.clipId === audioClip.id)
+        .map((bm) => audioClip.startTime + bm.time - (audioClip.trimStart || 0))
+        .filter((t) => t >= audioClip.startTime && t <= audioClip.startTime + audioClip.duration)
+        .sort((a, b) => a - b);
+
+      if (markers.length === 0) return {};
+
+      // Sort track clips by startTime
+      const clips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+      if (clips.length === 0) return {};
+
+      const step = everyNBeats || 4;
+      const updatedClips = clips.map((clip, idx) => {
+        const startBeatIdx = idx * step;
+        const endBeatIdx = (idx + 1) * step;
+
+        const clampedStartIdx = Math.min(startBeatIdx, markers.length - 1);
+        const clampedEndIdx = Math.min(endBeatIdx, markers.length - 1);
+
+        let newStart = markers[clampedStartIdx];
+        let newEnd = markers[clampedEndIdx];
+
+        if (newStart === newEnd) {
+          newStart = idx > 0 ? clips[idx - 1].startTime + clips[idx - 1].duration : clip.startTime;
+          newEnd = newStart + 2.0;
+        }
+
+        const newDuration = Math.max(0.1, newEnd - newStart);
+        const trimStart = clip.trimStart || 0;
+
+        let transitionIn = clip.transitionIn;
+        if (transitionType && idx > 0) {
+          transitionIn = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: transitionType.charAt(0).toUpperCase() + transitionType.slice(1),
+            type: transitionType as any,
+            duration: 0.5,
+            params: {}
+          };
+        }
+
+        return {
+          ...clip,
+          startTime: newStart,
+          duration: newDuration,
+          trimStart,
+          transitionIn
+        };
+      });
+
+      const updatedTracks = state.tracks.map((t) => {
+        if (t.id === trackId) {
+          return { ...t, clips: updatedClips };
+        }
+        return t;
+      });
+
+      return {
+        tracks: updatedTracks,
+        hasUnsavedChanges: true
+      };
+    });
+    get().saveSnapshot('Auto Beat Sync');
   },
 
   // Layout Presets

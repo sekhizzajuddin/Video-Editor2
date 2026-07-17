@@ -610,45 +610,187 @@ export function PreviewCanvas() {
 
     let anyClipDrawn = false;
 
-    // Helper to apply masking
-    const applyClipMask = (context: CanvasRenderingContext2D, mask: any, dx: number, dy: number, dw: number, dh: number) => {
+    const drawRoundedRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    };
+
+    const drawHeart = (ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number) => {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + h * 0.15);
+      ctx.bezierCurveTo(
+        cx, cy - h * 0.35,
+        cx - w * 0.5, cy - h * 0.35,
+        cx - w * 0.5, cy + h * 0.15
+      );
+      ctx.bezierCurveTo(
+        cx - w * 0.5, cy + h * 0.4,
+        cx, cy + h * 0.45,
+        cx, cy + h * 0.45
+      );
+      ctx.bezierCurveTo(
+        cx, cy + h * 0.45,
+        cx + w * 0.5, cy + h * 0.4,
+        cx + w * 0.5, cy + h * 0.15
+      );
+      ctx.bezierCurveTo(
+        cx + w * 0.5, cy - h * 0.35,
+        cx, cy - h * 0.35,
+        cx, cy + h * 0.15
+      );
+      ctx.closePath();
+    };
+
+    const drawStar = (ctx: CanvasRenderingContext2D, cx: number, cy: number, spikes: number, outerRadius: number, innerRadius: number) => {
+      let rot = (Math.PI / 2) * 3;
+      let x = cx;
+      let y = cy;
+      const step = Math.PI / spikes;
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - outerRadius);
+      for (let i = 0; i < spikes; i++) {
+        x = cx + Math.cos(rot) * outerRadius;
+        y = cy + Math.sin(rot) * outerRadius;
+        ctx.lineTo(x, y);
+        rot += step;
+
+        x = cx + Math.cos(rot) * innerRadius;
+        y = cy + Math.sin(rot) * innerRadius;
+        ctx.lineTo(x, y);
+        rot += step;
+      }
+      ctx.lineTo(cx, cy - outerRadius);
+      ctx.closePath();
+    };
+
+    let inMatteRendering = false;
+
+    const applyClipMaskOffscreen = async (
+      oCtx: CanvasRenderingContext2D,
+      mask: any,
+      ow: number,
+      oh: number,
+      clipId: string,
+      clipStartTime: number,
+      animations: any
+    ) => {
       if (!mask || !mask.enabled) return;
-      context.beginPath();
-      if (mask.type === 'rectangle') {
-        const mx = dx + (mask.x / 100) * dw - (mask.width / 100) * dw / 2;
-        const my = dy + (mask.y / 100) * dh - (mask.height / 100) * dh / 2;
-        const mw = (mask.width / 100) * dw;
-        const mh = (mask.height / 100) * dh;
-        context.rect(mx, my, mw, mh);
-      } else if (mask.type === 'circle') {
-        const mx = dx + (mask.x / 100) * dw;
-        const my = dy + (mask.y / 100) * dh;
-        const mr = (mask.width / 100) * Math.min(dw, dh) / 2;
-        context.arc(mx, my, mr, 0, Math.PI * 2);
-      } else if (mask.type === 'path' && mask.points?.length > 0) {
-        mask.points.forEach((pt: any, i: number) => {
-          const px = dx + (pt.x / 100) * dw;
-          const py = dy + (pt.y / 100) * dh;
-          if (i === 0) context.moveTo(px, py);
-          else context.lineTo(px, py);
-        });
-        context.closePath();
+      
+      const mX = getAnimatedValue(mask.x ?? 50, currentTime, clipStartTime, animations?.['mask.x']);
+      const mY = getAnimatedValue(mask.y ?? 50, currentTime, clipStartTime, animations?.['mask.y']);
+      const mW = getAnimatedValue(mask.width ?? 50, currentTime, clipStartTime, animations?.['mask.width']);
+      const mH = getAnimatedValue(mask.height ?? 50, currentTime, clipStartTime, animations?.['mask.height']);
+      const mRot = getAnimatedValue(mask.rotation ?? 0, currentTime, clipStartTime, animations?.['mask.rotation']);
+      const mFeather = getAnimatedValue(mask.feather ?? 0, currentTime, clipStartTime, animations?.['mask.feather']);
+      const mRoundness = getAnimatedValue(mask.roundness ?? 0, currentTime, clipStartTime, animations?.['mask.roundness']);
+      
+      const mx = (mX / 100) * ow;
+      const my = (mY / 100) * oh;
+      const mw = (mW / 100) * ow;
+      const mh = (mH / 100) * oh;
+      const feather = (mFeather / 100) * Math.min(ow, oh);
+      
+      const maskCanvas = getOrCreateCanvas('clip_mask_temp_' + clipId, ow, oh);
+      const maskCtx = maskCanvas.getContext('2d')!;
+      maskCtx.clearRect(0, 0, ow, oh);
+      
+      maskCtx.save();
+      maskCtx.translate(mx, my);
+      maskCtx.rotate((mRot * Math.PI) / 180);
+      
+      if (feather > 0) {
+        maskCtx.filter = `blur(${feather}px)`;
       }
       
-      if (mask.invert) {
-        context.rect(dx - 10000, dy - 10000, dw + 20000, dh + 20000);
-        context.clip('evenodd');
-      } else {
-        context.clip();
+      maskCtx.fillStyle = '#FFFFFF';
+      
+      if (mask.type === 'rectangle') {
+        const rx = -mw / 2;
+        const ry = -mh / 2;
+        const cornerRadius = (mRoundness / 100) * Math.min(mw, mh) / 2;
+        if (cornerRadius > 0) {
+          drawRoundedRect(maskCtx, rx, ry, mw, mh, cornerRadius);
+          maskCtx.fill();
+        } else {
+          maskCtx.fillRect(rx, ry, mw, mh);
+        }
+      } else if (mask.type === 'circle') {
+        const mr = mw / 2;
+        maskCtx.beginPath();
+        maskCtx.arc(0, 0, mr, 0, Math.PI * 2);
+        maskCtx.fill();
+      } else if (mask.type === 'split') {
+        maskCtx.fillRect(-ow * 10, 0, ow * 20, oh * 10);
+      } else if (mask.type === 'filmstrip') {
+        maskCtx.fillRect(-ow * 10, -mh / 2, ow * 20, mh);
+      } else if (mask.type === 'heart') {
+        drawHeart(maskCtx, 0, 0, mw, mh);
+        maskCtx.fill();
+      } else if (mask.type === 'star') {
+        drawStar(maskCtx, 0, 0, 5, mw / 2, mw / 4);
+        maskCtx.fill();
+      } else if (mask.type === 'matte' && mask.matteSourceClipId && !inMatteRendering) {
+        const state = useEditorStore.getState();
+        const sourceClip = findClipDeep(state, mask.matteSourceClipId);
+        if (sourceClip) {
+          inMatteRendering = true;
+          maskCtx.restore();
+          maskCtx.save();
+          await drawSingleClip(sourceClip, 1, undefined, maskCtx);
+          
+          const matteData = maskCtx.getImageData(0, 0, ow, oh);
+          const pixels = matteData.data;
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i];
+            const g = pixels[i + 1];
+            const b = pixels[i + 2];
+            const a = pixels[i + 3];
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            pixels[i + 3] = (lum / 255) * a;
+            pixels[i] = 255;
+            pixels[i + 1] = 255;
+            pixels[i + 2] = 255;
+          }
+          maskCtx.putImageData(matteData, 0, 0);
+          inMatteRendering = false;
+        }
       }
+      
+      maskCtx.restore();
+      
+      if (mask.invert) {
+        maskCtx.save();
+        maskCtx.globalCompositeOperation = 'source-out';
+        maskCtx.fillStyle = '#FFFFFF';
+        maskCtx.fillRect(0, 0, ow, oh);
+        maskCtx.restore();
+      }
+      
+      oCtx.save();
+      oCtx.globalCompositeOperation = 'destination-in';
+      oCtx.drawImage(maskCanvas, 0, 0);
+      oCtx.restore();
     };
 
     // Helper to draw a single clip with custom opacity/transform multipliers
     const drawSingleClip = async (
       clip: any,
       opacityMultiplier: number = 1,
-      extraTransform?: { translateX?: number; translateY?: number; scale?: number }
+      extraTransform?: { translateX?: number; translateY?: number; scale?: number },
+      targetCtx?: CanvasRenderingContext2D
     ) => {
+      const ctx = targetCtx || compositeCtxRef.current;
+      if (!ctx) return;
       let mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
       if (!mediaItem) {
         if (clip.mediaId === 'text-placeholder' || clip.textSettings || clip.id?.startsWith('clip_subtitle') || clip.id?.startsWith('clip_typo')) {
@@ -1471,8 +1613,6 @@ export function PreviewCanvas() {
           dx = -baseDw / 2 + baseDw * cLeft;
           dy = -baseDh / 2 + baseDh * cTop;
 
-          applyClipMask(ctx, clip.mask, dx, dy, dw, dh);
-
           // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
           const hasWheels = filters.shadows || filters.midtones || filters.highlights;
@@ -1481,7 +1621,8 @@ export function PreviewCanvas() {
           const hasLuma = clip.lumaKey?.enabled;
           const hasLut = !!clip.lut?.mediaId;
           const hasFx = !!activeFxClip;
-          const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg;
+          const hasMask = clip.mask?.enabled;
+          const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg || hasMask;
 
           if (hasPerspectiveWarp && corners) {
             const offscreenWidth = Math.max(1, Math.round(dw * DOWNSCALE));
@@ -1491,17 +1632,17 @@ export function PreviewCanvas() {
             if (oCtx) {
               oCtx.clearRect(0, 0, offscreen.width, offscreen.height);
               oCtx.drawImage(frameSource, sx, sy, sw, sh, 0, 0, offscreen.width, offscreen.height);
-                if (hasAiBg) {
-                  await applyAiBackgroundMask(
-                    oCtx,
-                    offscreen.width,
-                    offscreen.height,
-                    frameSource as any,
-                    clip.aiBackground?.edgeBlur ?? 0,
-                    clip.aiBackground?.modelSelection ?? 0
-                  );
-                }
-                if (hasChroma && clip.chromaKey) {
+              if (hasAiBg) {
+                await applyAiBackgroundMask(
+                  oCtx,
+                  offscreen.width,
+                  offscreen.height,
+                  frameSource as any,
+                  clip.aiBackground?.edgeBlur ?? 0,
+                  clip.aiBackground?.modelSelection ?? 0
+                );
+              }
+              if (hasChroma && clip.chromaKey) {
                 applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
               }
               if (hasLuma && clip.lumaKey) {
@@ -1518,6 +1659,9 @@ export function PreviewCanvas() {
               }
               if (hasFx) {
                 applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
+              }
+              if (hasMask) {
+                await applyClipMaskOffscreen(oCtx, clip.mask, offscreen.width, offscreen.height, clip.id, clip.startTime, clip.animations);
               }
               drawPerspectiveTexture(ctx, offscreen, corners);
             }
@@ -1557,6 +1701,9 @@ export function PreviewCanvas() {
                 }
                 if (hasFx) {
                   applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
+                }
+                if (hasMask) {
+                  await applyClipMaskOffscreen(oCtx, clip.mask, offscreen.width, offscreen.height, clip.id, clip.startTime, clip.animations);
                 }
                 ctx.drawImage(offscreen, dx, dy, dw, dh);
               } else {
@@ -1619,17 +1766,11 @@ export function PreviewCanvas() {
           }
           // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-          applyClipMask(ctx, clip.mask, dx, dy, dw, dh);
 
           // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
-          const hasWheels = filters.shadows || filters.midtones || filters.highlights;
-          const hasAiBg = clip.aiBackground?.enabled;
-          const hasChroma = clip.chromaKey?.enabled;
-          const hasLuma = clip.lumaKey?.enabled;
-          const hasLut = !!clip.lut?.mediaId;
-          const hasFx = !!activeFxClip;
-          const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg;
+          const hasMask = clip.mask?.enabled;
+          const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg || hasMask;
 
           if (hasPerspectiveWarp && corners) {
             const offscreenWidth = Math.max(1, Math.round(dw * DOWNSCALE));
@@ -1666,6 +1807,9 @@ export function PreviewCanvas() {
               }
               if (hasFx) {
                 applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
+              }
+              if (hasMask) {
+                await applyClipMaskOffscreen(oCtx, clip.mask, offscreen.width, offscreen.height, clip.id, clip.startTime, clip.animations);
               }
               drawPerspectiveTexture(ctx, offscreen, corners);
             }
@@ -1705,6 +1849,9 @@ export function PreviewCanvas() {
                 }
                 if (hasFx) {
                   applyFxToContext(oCtx, offscreen.width, offscreen.height, activeFxClip);
+                }
+                if (hasMask) {
+                  await applyClipMaskOffscreen(oCtx, clip.mask, offscreen.width, offscreen.height, clip.id, clip.startTime, clip.animations);
                 }
                 ctx.drawImage(offscreen, dx, dy, dw, dh);
               } else {
@@ -2137,6 +2284,215 @@ export function PreviewCanvas() {
                     await drawSingleClip(clipB, 1);
                     await drawSingleClip(clipA, 1 - t, { scale: 1 - t });
                     await drawSingleClip(clipB, t, { scale: t });
+                  }
+                } else if (type === 'shake') {
+                  const intensity = ((trans.params?.intensity as number) ?? 0.7) * 30;
+                  const seed = Math.floor(t * 60);
+                  const rng = (s: number) => {
+                    const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453123;
+                    return x - Math.floor(x);
+                  };
+                  const offsetX = (rng(seed) - 0.5) * intensity * (1 - t);
+                  const offsetY = (rng(seed + 1) - 0.5) * intensity * (1 - t);
+                  const rot = (rng(seed + 2) - 0.5) * ((trans.params?.intensity as number) ?? 0.7) * 5 * (1 - t);
+
+                  ctx.save();
+                  ctx.translate(W / 2 + offsetX, H / 2 + offsetY);
+                  ctx.rotate((rot * Math.PI) / 180);
+                  ctx.translate(-W / 2, -H / 2);
+                  await drawSingleClip(clipA, 1);
+                  if (t > 0.7) {
+                    ctx.globalAlpha = (t - 0.7) / 0.3;
+                    await drawSingleClip(clipB, 1);
+                    ctx.globalAlpha = 1;
+                  }
+                  ctx.restore();
+                } else if (type === 'flash') {
+                  const intensity = (trans.params?.intensity as number) ?? 1.0;
+                  const flashIntensity = Math.sin(t * Math.PI) * intensity;
+                  await drawSingleClip(clipA, 1);
+                  if (flashIntensity > 0.1) {
+                    ctx.save();
+                    ctx.fillStyle = (trans.params?.color as string) || '#FFFFFF';
+                    ctx.globalAlpha = flashIntensity;
+                    ctx.fillRect(0, 0, W, H);
+                    ctx.restore();
+                  }
+                  if (t > 0.5) {
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, (t - 0.5) * 4);
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
+                  }
+                } else if (type === 'zoomRush') {
+                  const intensity = (trans.params?.intensity as number) ?? 0.8;
+                  const dir = trans.params?.direction === 'out' ? -1 : 1;
+                  const ease = t === 0 ? 0 : t === 1 ? 1 : t < 0.5 ? Math.pow(2, 20 * t - 10) / 2 : (2 - Math.pow(2, -20 * t + 10)) / 2;
+                  if (t < 0.8) {
+                    const fromScale = dir === 1 ? 1 + ease * intensity * 2 : 1 - ease * 0.5;
+                    ctx.save();
+                    ctx.globalAlpha = 1 - ease;
+                    ctx.translate(W / 2, H / 2);
+                    ctx.scale(fromScale, fromScale);
+                    ctx.translate(-W / 2, -H / 2);
+                    await drawSingleClip(clipA, 1);
+                    ctx.restore();
+                  }
+                  if (t > 0.2) {
+                    const toScale = dir === 1 ? 2 - ease * 2 : 0.5 + ease * 0.5;
+                    ctx.save();
+                    ctx.globalAlpha = ease;
+                    ctx.translate(W / 2, H / 2);
+                    ctx.scale(toScale, toScale);
+                    ctx.translate(-W / 2, -H / 2);
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
+                  }
+                } else if (type === 'glitch') {
+                  const intensity = (trans.params?.intensity as number) ?? 0.9;
+                  const slices = Math.floor(10 + intensity * 20);
+                  const rng = (s: number) => {
+                    const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453123;
+                    return x - Math.floor(x);
+                  };
+                  const tempCanvas = getOrCreateCanvas('transition_glitch_temp', W, H);
+                  const tempCtx = tempCanvas.getContext('2d')!;
+                  tempCtx.clearRect(0, 0, W, H);
+                  await drawSingleClip(clipA, 1, undefined, tempCtx);
+
+                  ctx.save();
+                  for (let i = 0; i < slices; i++) {
+                    const sy = (H / slices) * i;
+                    const sliceH = H / slices;
+                    const seed = i + Math.floor(t * 30);
+                    const offsetX = (rng(seed) - 0.5) * intensity * 100 * (1 - t);
+                    const rgbOffset = intensity * 15 * (1 - t);
+
+                    ctx.globalCompositeOperation = 'screen';
+                    ctx.drawImage(tempCanvas, 0, sy, W, sliceH, offsetX - rgbOffset, sy, W, sliceH);
+                    ctx.drawImage(tempCanvas, 0, sy, W, sliceH, offsetX, sy, W, sliceH);
+                    ctx.drawImage(tempCanvas, 0, sy, W, sliceH, offsetX + rgbOffset, sy, W, sliceH);
+                  }
+                  ctx.restore();
+
+                  if (t > 0.6) {
+                    ctx.save();
+                    ctx.globalAlpha = (t - 0.6) / 0.4;
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
+                  }
+                } else if (type === 'lightLeak') {
+                  const intensity = (trans.params?.intensity as number) ?? 0.6;
+                  const color = (trans.params?.color as string) || '#FF6B35';
+                  await drawSingleClip(clipA, 1);
+
+                  ctx.save();
+                  const gradient = ctx.createRadialGradient(W * 0.8, -H * 0.2, 0, W * 0.8, -H * 0.2, W * 1.2);
+                  const alpha = Math.sin(t * Math.PI) * intensity * 0.6;
+                  const parseColor = (hex: string, a: number) => {
+                    const r = parseInt(hex.slice(1, 3), 16) || 255;
+                    const g = parseInt(hex.slice(3, 5), 16) || 107;
+                    const b = parseInt(hex.slice(5, 7), 16) || 53;
+                    return `rgba(${r}, ${g}, ${b}, ${a})`;
+                  };
+                  gradient.addColorStop(0, parseColor(color, alpha));
+                  gradient.addColorStop(0.5, parseColor(color, alpha * 0.5));
+                  gradient.addColorStop(1, 'transparent');
+                  ctx.fillStyle = gradient;
+                  ctx.globalCompositeOperation = 'screen';
+                  ctx.fillRect(0, 0, W, H);
+                  ctx.restore();
+
+                  if (t > 0.5) {
+                    ctx.save();
+                    ctx.globalAlpha = (t - 0.5) * 2;
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
+                  }
+                } else if (type === 'whipPan') {
+                  const intensity = (trans.params?.intensity as number) ?? 0.8;
+                  const dir = trans.params?.direction || 'right';
+                  const isHorizontal = dir === 'left' || dir === 'right';
+                  const sign = dir === 'right' || dir === 'down' ? 1 : -1;
+                  const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+                  const fromOffset = sign * ease * W * (isHorizontal ? 1 : 0.3);
+                  const fromOffsetY = sign * ease * H * (isHorizontal ? 0.3 : 1);
+
+                  ctx.save();
+                  await drawSingleClip(clipA, 1, { translateX: fromOffset, translateY: fromOffsetY });
+                  ctx.restore();
+
+                  if (t > 0.1) {
+                    const toStart = -sign * W * (isHorizontal ? 1 : 0.3);
+                    const toStartY = -sign * H * (isHorizontal ? 0.3 : 1);
+                    const toX = toStart + (W * (isHorizontal ? 1 : 0.3) + toStart) * ease;
+                    const toY = toStartY + (H * (isHorizontal ? 0.3 : 1) + toStartY) * ease;
+                    ctx.save();
+                    await drawSingleClip(clipB, 1, { translateX: toX, translateY: toY });
+                    ctx.restore();
+                  }
+                } else if (type === 'pixelate') {
+                  const intensity = (trans.params?.intensity as number) ?? 0.7;
+                  const pixelSize = Math.floor(1 + Math.sin(t * Math.PI) * intensity * 50);
+
+                  if (pixelSize <= 1) {
+                    await drawSingleClip(clipA, 1);
+                  } else {
+                    const offWidth = Math.ceil(W / pixelSize);
+                    const offHeight = Math.ceil(H / pixelSize);
+                    const tempCanvas = getOrCreateCanvas('transition_pixel_temp', offWidth, offHeight);
+                    const tempCtx = tempCanvas.getContext('2d')!;
+                    tempCtx.clearRect(0, 0, offWidth, offHeight);
+                    
+                    tempCtx.save();
+                    tempCtx.scale(offWidth / W, offHeight / H);
+                    await drawSingleClip(clipA, 1, undefined, tempCtx);
+                    tempCtx.restore();
+
+                    ctx.save();
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.drawImage(tempCanvas, 0, 0, W, H);
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.restore();
+                  }
+
+                  if (t > 0.5) {
+                    ctx.save();
+                    ctx.globalAlpha = (t - 0.5) * 2;
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
+                  }
+                } else if (type === 'mirror') {
+                  const intensity = (trans.params?.intensity as number) ?? 0.5;
+                  const segments = Math.floor(2 + intensity * 6);
+                  const tempCanvas = getOrCreateCanvas('transition_mirror_temp', W, H);
+                  const tempCtx = tempCanvas.getContext('2d')!;
+                  tempCtx.clearRect(0, 0, W, H);
+                  await drawSingleClip(clipA, 1, undefined, tempCtx);
+
+                  ctx.save();
+                  ctx.translate(W / 2, H / 2);
+                  for (let i = 0; i < segments; i++) {
+                    ctx.save();
+                    ctx.rotate((i * Math.PI * 2) / segments);
+                    const scale = 1 + Math.sin(t * Math.PI) * 0.2;
+                    ctx.scale(scale, scale);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.arc(0, 0, Math.max(W, H), -Math.PI / segments, Math.PI / segments);
+                    ctx.closePath();
+                    ctx.clip();
+                    ctx.drawImage(tempCanvas, -W / 2, -H / 2, W, H);
+                    ctx.restore();
+                  }
+                  ctx.restore();
+
+                  if (t > 0.5) {
+                    ctx.save();
+                    ctx.globalAlpha = (t - 0.5) * 2;
+                    await drawSingleClip(clipB, 1);
+                    ctx.restore();
                   }
                 } else {
                   await drawSingleClip(clipA, 1 - t);
@@ -3258,6 +3614,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
     setCanvasTransformMode,
     aspectRatio,
     useProxies,
+    activePropertiesTab,
   } = useEditorStore();
 
   const updateClip = useCallback((clipId: string, updates: any) => {
@@ -3344,6 +3701,35 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
   const aCropTop = activeClip ? getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']) : 0;
   const aCropRight = activeClip ? getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']) : 0;
   const aCropBot = activeClip ? getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']) : 0;
+
+  const getHeartPathData = (x: number, y: number, w: number, h: number): string => {
+    return `M 0,${h * 0.15} 
+            C 0,${-h * 0.35} ${-w * 0.5},${-h * 0.35} ${-w * 0.5},${h * 0.15}
+            C ${-w * 0.5},${h * 0.4} 0,${h * 0.45} 0,${h * 0.45}
+            C 0,${h * 0.45} ${w * 0.5},${h * 0.4} ${w * 0.5},${h * 0.15}
+            C ${w * 0.5},${-h * 0.35} 0,${-h * 0.35} 0,${h * 0.15} Z`;
+  };
+
+  const getStarPointsData = (cx: number, cy: number, spikes: number, outerRadius: number, innerRadius: number): string => {
+    let rot = (Math.PI / 2) * 3;
+    let x = cx;
+    let y = cy;
+    const step = Math.PI / spikes;
+    const pts = [];
+
+    for (let i = 0; i < spikes; i++) {
+      x = cx + Math.cos(rot) * outerRadius;
+      y = cy + Math.sin(rot) * outerRadius;
+      pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+      rot += step;
+
+      x = cx + Math.cos(rot) * innerRadius;
+      y = cy + Math.sin(rot) * innerRadius;
+      pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+      rot += step;
+    }
+    return pts.join(' ');
+  };
 
   useEffect(() => {
     if (!dragState || !activeClip) return;
@@ -3465,6 +3851,171 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
             }
           });
         }
+        return;
+      }
+
+      if (dragState.type.startsWith('mask-')) {
+        const initM = (dragState as any).initMask || { x: 50, y: 50, width: 50, height: 50, rotation: 0, feather: 0, roundness: 0 };
+        let mx = initM.x;
+        let my = initM.y;
+        let mw = initM.width;
+        let mh = initM.height;
+        let mRot = initM.rotation;
+        let mFeather = initM.feather;
+        let mRoundness = initM.roundness;
+
+        const baseW = dragState.baseW || 854;
+        const baseH = dragState.baseH || 480;
+
+        if (dragState.type === 'mask-move') {
+          const theta = (-aRot * Math.PI) / 180;
+          const localDx = dx * Math.cos(theta) - dy * Math.sin(theta);
+          const localDy = dx * Math.sin(theta) + dy * Math.cos(theta);
+
+          mx = Math.max(0, Math.min(100, initM.x + (localDx / baseW) * 100));
+          my = Math.max(0, Math.min(100, initM.y + (localDy / baseH) * 100));
+          
+          getNewAnimations('mask.x', mx);
+          getNewAnimations('mask.y', my);
+        } else if (dragState.type === 'mask-rot') {
+          const container = document.getElementById('preview-canvas-wrapper');
+          if (container) {
+            const rect = container.getBoundingClientRect();
+            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
+            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            
+            const clipRotRad = (-aRot * Math.PI) / 180;
+            const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
+            const myLocal = clientXLocal * Math.sin(clipRotRad) + clientYLocal * Math.cos(clipRotRad);
+            
+            const maskCXLocal = -baseW / 2 + (mx / 100) * baseW;
+            const maskCYLocal = -baseH / 2 + (my / 100) * baseH;
+            
+            const vx = mxLocal - maskCXLocal;
+            const vy = myLocal - maskCYLocal;
+            
+            let angle = Math.atan2(vy, vx) * (180 / Math.PI);
+            angle += 90;
+            mRot = Math.round((angle + 360) % 360);
+            
+            getNewAnimations('mask.rotation', mRot);
+          }
+        } else if (dragState.type === 'mask-resize-r') {
+          const theta = (aRot * Math.PI) / 180;
+          const container = document.getElementById('preview-canvas-wrapper');
+          if (container) {
+            const rect = container.getBoundingClientRect();
+            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
+            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            
+            const clipRotRad = (-aRot * Math.PI) / 180;
+            const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
+            const myLocal = clientXLocal * Math.sin(clipRotRad) + clientYLocal * Math.cos(clipRotRad);
+            
+            const maskCXLocal = -baseW / 2 + (mx / 100) * baseW;
+            const maskCYLocal = -baseH / 2 + (my / 100) * baseH;
+            
+            const vx = mxLocal - maskCXLocal;
+            const vy = myLocal - maskCYLocal;
+            
+            const maskRotRad = (mRot * Math.PI) / 180;
+            const projX = vx * Math.cos(-maskRotRad) - vy * Math.sin(-maskRotRad);
+            
+            mw = Math.max(2, Math.min(200, (Math.abs(projX) * 2 / baseW) * 100));
+            getNewAnimations('mask.width', mw);
+          }
+        } else if (dragState.type === 'mask-resize-b') {
+          const theta = (aRot * Math.PI) / 180;
+          const container = document.getElementById('preview-canvas-wrapper');
+          if (container) {
+            const rect = container.getBoundingClientRect();
+            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
+            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            
+            const clipRotRad = (-aRot * Math.PI) / 180;
+            const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
+            const myLocal = clientXLocal * Math.sin(clipRotRad) + clientYLocal * Math.cos(clipRotRad);
+            
+            const maskCXLocal = -baseW / 2 + (mx / 100) * baseW;
+            const maskCYLocal = -baseH / 2 + (my / 100) * baseH;
+            
+            const vx = mxLocal - maskCXLocal;
+            const vy = myLocal - maskCYLocal;
+            
+            const maskRotRad = (mRot * Math.PI) / 180;
+            const projY = vx * Math.sin(-maskRotRad) + vy * Math.cos(-maskRotRad);
+            
+            mh = Math.max(2, Math.min(200, (Math.abs(projY) * 2 / baseH) * 100));
+            getNewAnimations('mask.height', mh);
+          }
+        } else if (dragState.type === 'mask-feather') {
+          const theta = (aRot * Math.PI) / 180;
+          const container = document.getElementById('preview-canvas-wrapper');
+          if (container) {
+            const rect = container.getBoundingClientRect();
+            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
+            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            
+            const clipRotRad = (-aRot * Math.PI) / 180;
+            const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
+            const myLocal = clientXLocal * Math.sin(clipRotRad) + clientYLocal * Math.cos(clipRotRad);
+            
+            const maskCXLocal = -baseW / 2 + (mx / 100) * baseW;
+            const maskCYLocal = -baseH / 2 + (my / 100) * baseH;
+            
+            const vx = mxLocal - maskCXLocal;
+            const vy = myLocal - maskCYLocal;
+            
+            const maskRotRad = (mRot * Math.PI) / 180;
+            const projX = vx * Math.cos(-maskRotRad) - vy * Math.sin(-maskRotRad);
+            
+            const maskLocalW = (mw / 100) * baseW;
+            const minDim = Math.min(baseW, baseH);
+            const distFromEdge = projX - maskLocalW / 2;
+            mFeather = Math.max(0, Math.min(100, (distFromEdge / (minDim / 2)) * 100));
+            getNewAnimations('mask.feather', mFeather);
+          }
+        } else if (dragState.type === 'mask-roundness') {
+          const theta = (aRot * Math.PI) / 180;
+          const container = document.getElementById('preview-canvas-wrapper');
+          if (container) {
+            const rect = container.getBoundingClientRect();
+            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
+            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            
+            const clipRotRad = (-aRot * Math.PI) / 180;
+            const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
+            const myLocal = clientXLocal * Math.sin(clipRotRad) + clientYLocal * Math.cos(clipRotRad);
+            
+            const maskCXLocal = -baseW / 2 + (mx / 100) * baseW;
+            const maskCYLocal = -baseH / 2 + (my / 100) * baseH;
+            
+            const vx = mxLocal - maskCXLocal;
+            const vy = myLocal - maskCYLocal;
+            
+            const maskRotRad = (mRot * Math.PI) / 180;
+            const projX = vx * Math.cos(-maskRotRad) - vy * Math.sin(-maskRotRad);
+            
+            const maskLocalW = (mw / 100) * baseW;
+            const relativeOffset = (projX + maskLocalW / 2) / (maskLocalW / 2);
+            mRoundness = Math.max(0, Math.min(100, relativeOffset * 100));
+            getNewAnimations('mask.roundness', mRoundness);
+          }
+        }
+
+        updateClip(activeClip.id, {
+          mask: {
+            ...activeClip.mask,
+            x: mx,
+            y: my,
+            width: mw,
+            height: mh,
+            rotation: mRot,
+            feather: mFeather,
+            roundness: mRoundness,
+          },
+          animations
+        });
         return;
       }
 
@@ -4112,12 +4663,14 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
 
   const handleMouseDown = (e: React.MouseEvent, type: string) => {
     e.stopPropagation();
+    const mask = activeClip?.mask || { x: 50, y: 50, width: 50, height: 50, rotation: 0, feather: 0, roundness: 0 };
     setDragState({
       type,
       startX: e.clientX,
       startY: e.clientY,
       initTransform: { x: aX, y: aY, scale: aScale, rotation: aRot },
       initCrop: { left: aCropLeft, top: aCropTop, right: aCropRight, bottom: aCropBot },
+      initMask: { ...mask },
       baseW,
       baseH,
     });
@@ -4304,6 +4857,13 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
     });
   };
 
+  const mask = activeClip?.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, rotation: 0, feather: 0, roundness: 0 };
+  const maskLocalX = activeClip ? -baseW / 2 + (mask.x / 100) * baseW : 0;
+  const maskLocalY = activeClip ? -baseH / 2 + (mask.y / 100) * baseH : 0;
+  const maskLocalW = activeClip ? (mask.width / 100) * baseW : 0;
+  const maskLocalH = activeClip ? (mask.height / 100) * baseH : 0;
+  const maskRot = mask.rotation || 0;
+
   return (
     <>
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
@@ -4355,17 +4915,241 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
               <g
                 transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
               >
-                {/* Main selection border */}
-                <rect
-                  x={-baseW / 2}
-                  y={-baseH / 2}
-                  width={baseW}
-                  height={baseH}
-                  fill="none"
-                  stroke="#fbbf24"
-                  strokeWidth={1.5 / viewport.zoom}
-                  className="pointer-events-none"
-                />
+                {activePropertiesTab === 'mask' && mask.enabled ? (
+                  <g transform={`translate(${maskLocalX}, ${maskLocalY}) rotate(${maskRot})`}>
+                    {/* Outline of the mask shape */}
+                    {mask.type === 'rectangle' && (
+                      <rect
+                        x={-maskLocalW / 2}
+                        y={-maskLocalH / 2}
+                        width={maskLocalW}
+                        height={maskLocalH}
+                        rx={(mask.roundness || 0) / 100 * Math.min(maskLocalW, maskLocalH) / 2}
+                        ry={(mask.roundness || 0) / 100 * Math.min(maskLocalW, maskLocalH) / 2}
+                        fill="none"
+                        stroke="#00d4ff"
+                        strokeWidth={2 / viewport.zoom}
+                        strokeDasharray="4,4"
+                      />
+                    )}
+                    
+                    {mask.type === 'circle' && (
+                      <ellipse
+                        cx={0}
+                        cy={0}
+                        rx={maskLocalW / 2}
+                        ry={maskLocalH / 2}
+                        fill="none"
+                        stroke="#00d4ff"
+                        strokeWidth={2 / viewport.zoom}
+                        strokeDasharray="4,4"
+                      />
+                    )}
+                    
+                    {mask.type === 'split' && (
+                      <>
+                        <line
+                          x1={-baseW * 5}
+                          y1={0}
+                          x2={baseW * 5}
+                          y2={0}
+                          stroke="#00d4ff"
+                          strokeWidth={2 / viewport.zoom}
+                          strokeDasharray="4,4"
+                        />
+                        <rect
+                          x={-baseW * 5}
+                          y={0}
+                          width={baseW * 10}
+                          height={baseH * 5}
+                          fill="rgba(0, 212, 255, 0.07)"
+                          style={{ pointerEvents: 'none' }}
+                        />
+                      </>
+                    )}
+                    
+                    {mask.type === 'filmstrip' && (
+                      <>
+                        <line
+                          x1={-baseW * 5}
+                          y1={-maskLocalH / 2}
+                          x2={baseW * 5}
+                          y2={-maskLocalH / 2}
+                          stroke="#00d4ff"
+                          strokeWidth={2 / viewport.zoom}
+                          strokeDasharray="4,4"
+                        />
+                        <line
+                          x1={-baseW * 5}
+                          y1={maskLocalH / 2}
+                          x2={baseW * 5}
+                          y2={maskLocalH / 2}
+                          stroke="#00d4ff"
+                          strokeWidth={2 / viewport.zoom}
+                          strokeDasharray="4,4"
+                        />
+                        <rect
+                          x={-baseW * 5}
+                          y={-maskLocalH / 2}
+                          width={baseW * 10}
+                          height={maskLocalH}
+                          fill="rgba(0, 212, 255, 0.07)"
+                          style={{ pointerEvents: 'none' }}
+                        />
+                      </>
+                    )}
+                    
+                    {mask.type === 'heart' && (
+                      <path
+                        d={getHeartPathData(-maskLocalW / 2, -maskLocalH / 2, maskLocalW, maskLocalH)}
+                        fill="none"
+                        stroke="#00d4ff"
+                        strokeWidth={2 / viewport.zoom}
+                        strokeDasharray="4,4"
+                      />
+                    )}
+                    
+                    {mask.type === 'star' && (
+                      <polygon
+                        points={getStarPointsData(0, 0, 5, maskLocalW / 2, maskLocalW / 4)}
+                        fill="none"
+                        stroke="#00d4ff"
+                        strokeWidth={2 / viewport.zoom}
+                        strokeDasharray="4,4"
+                      />
+                    )}
+
+                    {/* Center Translate Handle */}
+                    <circle
+                      cx={0}
+                      cy={0}
+                      r={7 / viewport.zoom}
+                      fill="#00d4ff"
+                      stroke="white"
+                      strokeWidth={1.5 / viewport.zoom}
+                      className="pointer-events-auto cursor-move"
+                      onMouseDown={(e) => handleMouseDown(e, 'mask-move')}
+                    />
+
+                    {/* Rotation Arm & Handle */}
+                    <line
+                      x1={0}
+                      y1={0}
+                      x2={0}
+                      y2={-maskLocalH / 2 - 30 / viewport.zoom}
+                      stroke="#00d4ff"
+                      strokeWidth={1.5 / viewport.zoom}
+                    />
+                    <circle
+                      cx={0}
+                      cy={-maskLocalH / 2 - 34 / viewport.zoom}
+                      r={6 / viewport.zoom}
+                      fill="#ffd700"
+                      stroke="white"
+                      strokeWidth={1.5 / viewport.zoom}
+                      className="pointer-events-auto cursor-alias"
+                      onMouseDown={(e) => handleMouseDown(e, 'mask-rot')}
+                    />
+
+                    {/* Resize Handles (Width) */}
+                    {(mask.type === 'rectangle' || mask.type === 'circle' || mask.type === 'heart' || mask.type === 'star') && (
+                      <>
+                        <circle
+                          cx={maskLocalW / 2}
+                          cy={0}
+                          r={6 / viewport.zoom}
+                          fill="white"
+                          stroke="#00d4ff"
+                          strokeWidth={1.5 / viewport.zoom}
+                          className="pointer-events-auto cursor-ew-resize"
+                          onMouseDown={(e) => handleMouseDown(e, 'mask-resize-r')}
+                        />
+                        <circle
+                          cx={-maskLocalW / 2}
+                          cy={0}
+                          r={6 / viewport.zoom}
+                          fill="white"
+                          stroke="#00d4ff"
+                          strokeWidth={1.5 / viewport.zoom}
+                          className="pointer-events-auto cursor-ew-resize"
+                          onMouseDown={(e) => handleMouseDown(e, 'mask-resize-r')}
+                        />
+                      </>
+                    )}
+
+                    {/* Resize Handles (Height) */}
+                    {(mask.type === 'rectangle' || mask.type === 'filmstrip') && (
+                      <>
+                        <circle
+                          cx={0}
+                          cy={-maskLocalH / 2}
+                          r={6 / viewport.zoom}
+                          fill="white"
+                          stroke="#00d4ff"
+                          strokeWidth={1.5 / viewport.zoom}
+                          className="pointer-events-auto cursor-ns-resize"
+                          onMouseDown={(e) => handleMouseDown(e, 'mask-resize-b')}
+                        />
+                        <circle
+                          cx={0}
+                          cy={maskLocalH / 2}
+                          r={6 / viewport.zoom}
+                          fill="white"
+                          stroke="#00d4ff"
+                          strokeWidth={1.5 / viewport.zoom}
+                          className="pointer-events-auto cursor-ns-resize"
+                          onMouseDown={(e) => handleMouseDown(e, 'mask-resize-b')}
+                        />
+                      </>
+                    )}
+
+                    {/* Feather Handle */}
+                    <g transform={`translate(${mask.type === 'split' ? 50 / viewport.zoom : maskLocalW / 2 + 15 / viewport.zoom}, 0)`}>
+                      <polygon
+                        points="0,-4 8,0 0,4"
+                        fill="#ff6b6b"
+                        className="pointer-events-auto cursor-pointer"
+                        onMouseDown={(e) => handleMouseDown(e, 'mask-feather')}
+                        transform={`translate(${(mask.feather / 100) * Math.min(baseW, baseH) / 2}, 0)`}
+                      />
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2={50 / viewport.zoom}
+                        y2={0}
+                        stroke="#ff6b6b"
+                        strokeWidth={1.5 / viewport.zoom}
+                        strokeDasharray="2,2"
+                        opacity={0.6}
+                      />
+                    </g>
+
+                    {/* Roundness Handle */}
+                    {mask.type === 'rectangle' && (
+                      <circle
+                        cx={-maskLocalW / 2 + (mask.roundness || 0) / 100 * maskLocalW / 2}
+                        cy={-maskLocalH / 2 + (mask.roundness || 0) / 100 * maskLocalH / 2}
+                        r={5 / viewport.zoom}
+                        fill="#9b59b6"
+                        stroke="white"
+                        strokeWidth={1.5 / viewport.zoom}
+                        className="pointer-events-auto cursor-nwse-resize"
+                        onMouseDown={(e) => handleMouseDown(e, 'mask-roundness')}
+                      />
+                    )}
+                  </g>
+                ) : (
+                  <rect
+                    x={-baseW / 2}
+                    y={-baseH / 2}
+                    width={baseW}
+                    height={baseH}
+                    fill="none"
+                    stroke="#fbbf24"
+                    strokeWidth={1.5 / viewport.zoom}
+                    className="pointer-events-none"
+                  />
+                )}
 
                 {/* Image Selection Mask & Marching Ants */}
                 {maskDataUrl && (
@@ -4405,7 +5189,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
                   />
                 )}
 
-                {imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
+                {activePropertiesTab === 'mask' && mask.enabled ? null : imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
                   <>
                     {/* Invisible drag area for moving */}
                     <rect
