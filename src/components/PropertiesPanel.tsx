@@ -39,7 +39,7 @@ import { AiSoundDesigner } from '@/components/AiSoundDesigner';
 import { AiMotionGraphicsDesigner } from '@/components/AiMotionGraphicsDesigner';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
-import type { SpeedRampKeyframe, EasingType } from '@/types';
+import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } from '@/types';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
@@ -1196,7 +1196,7 @@ export function PropertiesPanel() {
 
   const absoluteStartTime = getClipAbsoluteStartTime(selectedClip.id);
   const localTime = currentTime - absoluteStartTime;
-  const animations = selectedClip.animations || {};
+  const animations: ClipAnimations = selectedClip.animations || {};
   const getMasterKeyframes = () => {
     const allTimes = new Set<number>();
     Object.values(animations).forEach((kfList: any) => {
@@ -3504,11 +3504,14 @@ export function PropertiesPanel() {
                           <option value="">Select visual clip...</option>
                           {tracks.flatMap(t => t.clips)
                             .filter(c => c.id !== selectedClip.id && (c.mediaId?.startsWith('clip_') || c.textSettings || c.mediaId?.includes('text')))
-                            .map(c => (
-                              <option key={c.id} value={c.id}>
-                                {c.name || c.id}
-                              </option>
-                            ))
+                            .map(c => {
+                              const mediaName = mediaLibrary.find(m => m.id === c.mediaId)?.name;
+                              return (
+                                <option key={c.id} value={c.id}>
+                                  {mediaName || c.id}
+                                </option>
+                              );
+                            })
                           }
                         </select>
                       </div>

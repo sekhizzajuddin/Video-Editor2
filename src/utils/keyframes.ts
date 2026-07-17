@@ -98,7 +98,7 @@ export function getAnimatedValue(
   const easing = k1.easing || 'linear';
   let easedT: number;
 
-  switch (easing) {
+  switch (easing as any) {
     case 'ease-in':
     case 'easeIn':
       easedT = t * t;

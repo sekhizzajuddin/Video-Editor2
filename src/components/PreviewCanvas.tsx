@@ -3636,6 +3636,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
     baseW?: number;
     baseH?: number;
     initCorners?: LocalCornerPoints;
+    initMask?: any;
   } | null>(null);
   
   const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
