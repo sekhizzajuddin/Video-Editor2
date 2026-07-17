@@ -45,7 +45,7 @@ export const BezierCurveEditor: React.FC<BezierCurveEditorProps> = ({
   const [dragging, setDragging] = useState<'cp1' | 'cp2' | null>(null);
   const [hovered, setHovered] = useState<'cp1' | 'cp2' | null>(null);
   const [previewT, setPreviewT] = useState(0);
-  const animRef = useRef<number>();
+  const animRef = useRef<number | null>(null);
 
   // Normalize values
   const cp1x = clamp(value.x, 0, 1);

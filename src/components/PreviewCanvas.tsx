@@ -1769,6 +1769,12 @@ export function PreviewCanvas() {
 
           // Apply standard filters and optional 3-way color grading wheels
           ctx.filter = `brightness(${100 + exposure}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
+          const hasWheels = filters.shadows || filters.midtones || filters.highlights;
+          const hasAiBg = clip.aiBackground?.enabled;
+          const hasChroma = clip.chromaKey?.enabled;
+          const hasLuma = clip.lumaKey?.enabled;
+          const hasLut = !!clip.lut?.mediaId;
+          const hasFx = !!activeFxClip;
           const hasMask = clip.mask?.enabled;
           const needsOffscreen = hasWheels || hasChroma || hasLuma || hasLut || hasFx || hasAiBg || hasMask;
 

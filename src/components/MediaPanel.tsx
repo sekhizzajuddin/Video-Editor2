@@ -3130,11 +3130,14 @@ export function MediaPanel() {
                     <option value="">Select audio...</option>
                     {tracks.flatMap(t => t.clips)
                       .filter(c => c.mediaId?.startsWith('clip_') || c.mediaId?.includes('audio') || c.audioSettings) 
-                      .map(c => (
-                        <option key={c.id} value={c.id}>
-                          🎵 {c.name || c.id}
-                        </option>
-                      ))
+                      .map(c => {
+                        const mediaName = mediaLibrary.find(m => m.id === c.mediaId)?.name;
+                        return (
+                          <option key={c.id} value={c.id}>
+                            🎵 {mediaName || c.id}
+                          </option>
+                        );
+                      })
                     }
                   </select>
                 </div>
