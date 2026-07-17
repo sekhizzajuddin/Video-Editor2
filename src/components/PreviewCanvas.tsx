@@ -4582,7 +4582,7 @@ function InteractiveCanvasOverlay({ viewport, videoElements, containerRef }: { v
         >
           {/* Sidebar panel */}
           <div
-            className={`flex flex-col bg-[#141414]/95 backdrop-blur-md border border-[#3e3e3e] border-r-0 rounded-l-xl shadow-2xl overflow-hidden transition-all duration-200 ${
+            className={`flex flex-col bg-[#141414]/95 backdrop-blur-md border border-[#3e3e3e] border-r-0 rounded-l-xl shadow-2xl overflow-y-auto overflow-x-hidden max-h-[90vh] custom-scrollbar transition-all duration-200 ${
               imageEditorTool !== 'none' || true ? 'w-[90px]' : 'w-0 opacity-0'
             }`}
           >
