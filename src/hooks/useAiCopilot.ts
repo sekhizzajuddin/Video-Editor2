@@ -369,6 +369,13 @@ export const useAiCopilot = () => {
         }))
       }));
 
+      const mediaLibraryContext = editorStore.mediaLibrary.map(m => ({
+        id: m.id,
+        name: m.name,
+        type: m.type,
+        duration: m.duration
+      }));
+
       const systemPrompt = `You are a professional Video Editor AI Assistant with advanced reasoning capabilities.
 
 CURRENT PROJECT CONTEXT:
@@ -378,6 +385,16 @@ CURRENT PROJECT CONTEXT:
 - Selected Clips: ${editorStore.selectedClipIds.length > 0 ? editorStore.selectedClipIds.join(', ') : 'None'}
 - Total Tracks: ${editorStore.tracks.length}
 - Total Clips: ${timelineContext.reduce((sum, t) => sum + t.clips.length, 0)}
+
+TIMELINE STATE:
+\`\`\`json
+${JSON.stringify(timelineContext, null, 2)}
+\`\`\`
+
+MEDIA LIBRARY:
+\`\`\`json
+${JSON.stringify(mediaLibraryContext, null, 2)}
+\`\`\`
 
 INTENT ANALYSIS (from AI Training Module):
 - Detected Intent: ${intent}

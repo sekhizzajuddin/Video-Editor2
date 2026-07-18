@@ -175,7 +175,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
       </div>
 
       {/* Chat Area */}
-      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+      <div className="flex-1 p-4 overflow-y-auto min-h-0" ref={scrollRef}>
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 space-y-4">
             <Bot className="w-12 h-12 text-zinc-700" />
@@ -255,7 +255,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
             )}
           </div>
         )}
-      </ScrollArea>
+      </div>
 
       {/* Input Area */}
       <div className="p-3 bg-black/40 border-t border-white/10">
