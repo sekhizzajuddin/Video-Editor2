@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bot, User, Send, Mic, X, Sparkles, Square, Brain, ThumbsUp, ThumbsDown, RefreshCw, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Bot, User, Send, Mic, X, Sparkles, Square, Brain, ThumbsUp, ThumbsDown, RefreshCw, Trash2, Eye, EyeOff, AlertTriangle, Clock } from 'lucide-react';
 import { useAiCopilot, ChatMessage } from '../hooks/useAiCopilot';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -13,22 +13,51 @@ interface AiCopilotProps {
 export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
   const [inputText, setInputText] = useState('');
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
-  const { 
-    messages, 
-    sendMessage, 
-    isProcessing, 
-    isListening, 
-    startListening, 
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+  const {
+    messages,
+    sendMessage,
+    isProcessing,
+    isListening,
+    startListening,
     stopListening,
     provideFeedback,
     clearChat,
     toggleThinkingMode,
     isThinking,
-    getTrainingStats
+    getTrainingStats,
+    pendingConfirmation,
+    resolveConfirmation,
+    rateLimitStatus,
+    workflowProgress,
+    abortWorkflow,
   } = useAiCopilot();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stats = getTrainingStats();
 
+  // Phase 1: Live cooldown countdown ticker
+  useEffect(() => {
+    if (!rateLimitStatus.isInCooldown) {
+      setCooldownSeconds(0);
+      return;
+    }
+    setCooldownSeconds(Math.ceil(rateLimitStatus.cooldownRemainingMs / 1000));
+    const interval = setInterval(() => {
+      const remaining = Math.ceil(globalThisGetStatus() / 1000);
+      setCooldownSeconds(Math.max(0, remaining));
+      if (remaining <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [rateLimitStatus.isInCooldown, rateLimitStatus.cooldownRemainingMs]);
+
+  // Lightweight accessor for live cooldown updates without circular imports
+  const globalThisGetStatus = () => {
+    return rateLimitStatus.cooldownRemainingMs;
+  };
+
+  // Auto-scroll to bottom when messages update
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -174,6 +203,64 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
         </div>
       </div>
 
+      {/* Phase 1: Rate Limit Banner / Cooldown */}
+      {(rateLimitStatus.isInCooldown || rateLimitStatus.remainingCalls <= 5) && (
+        <div className={`px-3 py-2 border-b border-white/10 text-xs flex items-center gap-2 ${
+          rateLimitStatus.isInCooldown
+            ? 'bg-red-900/30 text-red-200'
+            : 'bg-amber-900/20 text-amber-200'
+        }`}>
+          <Clock className="w-3.5 h-3.5" />
+          {rateLimitStatus.isInCooldown ? (
+            <span>
+              ⏳ Rate limit cooldown — auto-retry in <strong>{cooldownSeconds}s</strong>
+            </span>
+          ) : (
+            <span>
+              ⚠️ Only <strong>{rateLimitStatus.remainingCalls}</strong> API call{rateLimitStatus.remainingCalls === 1 ? '' : 's'} left this minute
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Phase 1: Confirmation Modal for destructive operations */}
+      {pendingConfirmation && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-2xl">
+          <Card className="max-w-sm w-[90%] p-4 bg-zinc-900 border-amber-500/40 border-2 shadow-xl">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <h4 className="font-semibold text-amber-200">Confirm Destructive Action</h4>
+                <p className="mt-1 text-sm text-zinc-300">
+                  AI wants to execute <code className="text-amber-300 font-mono">{pendingConfirmation.toolName}</code>
+                </p>
+                <pre className="mt-2 text-xs bg-black/40 p-2 rounded border border-white/10 overflow-x-auto max-h-24 overflow-y-auto text-zinc-300">
+                  {JSON.stringify(pendingConfirmation.args, null, 2).slice(0, 200)}
+                </pre>
+                <p className="text-xs text-zinc-500 mt-2">{pendingConfirmation.description}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4 justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => resolveConfirmation(false)}
+                className="text-zinc-400 hover:text-zinc-200"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => resolveConfirmation(true)}
+                className="bg-amber-600 hover:bg-amber-500 text-white"
+              >
+                Approve
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* Chat Area */}
       <div className="flex-1 p-4 overflow-y-auto min-h-0" ref={scrollRef}>
         {messages.length === 0 ? (
@@ -209,7 +296,14 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
                   }`}>
                     {msg.content}
                   </div>
-                  
+
+                  {msg.role === 'assistant' && msg.isLocal && (
+                    <div className="mt-1 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      Local · 0 API calls
+                    </div>
+                  )}
+
                   {msg.role === 'assistant' && (
                     <>
                       {msg.thinking && renderThinkingTrace(msg)}
@@ -253,6 +347,52 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
                 </div>
               </div>
             )}
+
+            {/* Phase 2: Live Workflow Progress Card */}
+            {workflowProgress && workflowProgress.totalSteps > 0 && (
+              <div className="flex gap-3">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-blue-500/20 text-blue-300">
+                  <span className="text-xs">⚙️</span>
+                </div>
+                <div className="flex-1 rounded-xl bg-blue-900/15 border border-blue-500/30 p-3 text-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-semibold text-blue-200 flex items-center gap-1.5">
+                      <span className="capitalize">{workflowProgress.phase}</span>
+                      <span className="text-blue-400/60">·</span>
+                      <span>{workflowProgress.currentStepLabel}</span>
+                    </div>
+                    <span className="text-blue-400">
+                      {workflowProgress.succeeded}/{workflowProgress.totalSteps}
+                    </span>
+                  </div>
+                  <div className="flex gap-0.5 mb-2">
+                    {workflowProgress.steps.map((s, i) => (
+                      <div
+                        key={s.id || i}
+                        className={`h-1 flex-1 rounded-full ${
+                          s.status === 'success'
+                            ? 'bg-emerald-400'
+                            : s.status === 'failed'
+                            ? 'bg-red-400'
+                            : s.status === 'running'
+                            ? 'bg-blue-400 animate-pulse'
+                            : 'bg-white/10'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-[10px] text-zinc-400 hover:text-red-300"
+                    onClick={abortWorkflow}
+                  >
+                    <X className="w-3 h-3 mr-1" />
+                    Stop
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -263,9 +403,15 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
           <Input
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Ask AI to edit..."
+            placeholder={
+              rateLimitStatus.isInCooldown
+                ? `Cooldown — retry in ${cooldownSeconds}s...`
+                : pendingConfirmation
+                ? 'Confirm or cancel the pending action above...'
+                : 'Ask AI to edit (try "play", "test everything", "add text Hello")...'
+            }
             className="flex-1 bg-white/5 border-white/10 pr-24 rounded-xl focus-visible:ring-1 focus-visible:ring-primary/50"
-            disabled={isProcessing || isListening}
+            disabled={isProcessing || isListening || !!pendingConfirmation}
           />
           
           <div className="absolute right-1 flex items-center gap-1">

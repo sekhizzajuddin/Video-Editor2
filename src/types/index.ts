@@ -661,6 +661,92 @@ export interface OpenRouterModel {
   };
 }
 
+// ============================================
+// AI Copilot Workflow Types (Phase 1)
+// ============================================
+
+export type AIToolStatus = 'pending' | 'running' | 'success' | 'failed' | 'awaiting_confirmation';
+
+export interface AIToolStep {
+  id: string;
+  toolName: string;
+  args: Record<string, any>;
+  expectation?: string;
+  status: AIToolStatus;
+  error?: string;
+  result?: any;
+  rollbackable: boolean;
+  requiresConfirmation: boolean;
+  userFriendlyLabel?: string;
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export interface AIWorkflowPlan {
+  id: string;
+  prompt: string;
+  totalSteps: number;
+  steps: AIToolStep[];
+  estimatedDuration: number;
+  needsConfirmation: boolean;
+  destructiveOpsCount: number;
+  createdAt: number;
+}
+
+export interface AIWorkflowReport {
+  planId: string;
+  totalSteps: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
+  totalDurationMs: number;
+  summary: string;
+  steps: AIToolStep[];
+  finalState?: Record<string, any>;
+}
+
+export interface AIConfirmationRequest {
+  stepId: string;
+  toolName: string;
+  args: Record<string, any>;
+  description: string;
+  reason: string;
+  risk: 'low' | 'medium' | 'high';
+}
+
+export interface AIRateLimitStatusFE {
+  canMakeCall: boolean;
+  remainingCalls: number;
+  resetInMs: number;
+  isInCooldown: boolean;
+  cooldownRemainingMs: number;
+}
+
+export interface AISelfTestResult {
+  testId: string;
+  testName: string;
+  category: 'import' | 'edit' | 'audio' | 'color' | 'effects' | 'text' | 'export' | 'meta';
+  status: 'pass' | 'fail' | 'skip';
+  durationMs: number;
+  message: string;
+  details?: string;
+  error?: string;
+}
+
+export interface AISelfTestReport {
+  totalTests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  passRate: number;
+  durationMs: number;
+  byCategory: Record<string, { passed: number; failed: number; total: number }>;
+  results: AISelfTestResult[];
+  workingFeatures: string[];
+  notWorkingFeatures: string[];
+  summary: string;
+}
+
 export interface AIGenerationJob {
   id: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
@@ -670,3 +756,4 @@ export interface AIGenerationJob {
   prompt: string;
   createdAt: number;
 }
+
