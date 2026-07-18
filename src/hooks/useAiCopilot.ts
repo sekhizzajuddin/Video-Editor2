@@ -141,7 +141,7 @@ ${JSON.stringify(mediaLibraryContext, null, 2)}
 INTENT ANALYSIS (from AI Training Module):
 - Detected Intent: ${intent}
 - Confidence: ${(confidence * 100).toFixed(0)}%
-- Entities: ${entities.map(e => `${e.type}:${e.value || e.reference}`).join(', ') || 'None'}
+- Entities: ${entities.map(e => `${e.type}:${e.value || e.raw}`).join(', ') || 'None'}
 
 ${thinkingTrace ? `THINKING TRACE:
 Analysis: ${thinkingTrace.analysis}
