@@ -143,7 +143,33 @@ CRITICAL OUTPUT RULES:
           ]
         }
       ],
-      response_format: { type: 'json_object' },
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'cues_schema',
+          strict: false,
+          schema: {
+            type: 'object',
+            properties: {
+              cues: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    start: { type: 'number' },
+                    end: { type: 'number' },
+                    query: { type: 'string' },
+                    type: { type: 'string' },
+                    reason: { type: 'string' }
+                  },
+                  required: ['start', 'end', 'query', 'type', 'reason']
+                }
+              }
+            },
+            required: ['cues']
+          }
+        }
+      },
       temperature: 0.4,
       max_tokens: 3000
     };
@@ -252,7 +278,21 @@ Return ONLY valid JSON (no markdown):
         content: `Convert this ${type === 'bgm' ? 'music/BGM' : 'sound effect/SFX'} description to Freesound.org search keywords:\n"${query}"`
       }
     ],
-    response_format: { type: 'json_object' },
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'refinement_schema',
+        strict: false,
+        schema: {
+          type: 'object',
+          properties: {
+            keywords: { type: 'string' },
+            alternatives: { type: 'array', items: { type: 'string' } }
+          },
+          required: ['keywords', 'alternatives']
+        }
+      }
+    },
     temperature: 0.1,
     max_tokens: 150
   };
@@ -459,7 +499,33 @@ Return ONLY this JSON format, no markdown:
           ]
         }
       ],
-      response_format: { type: 'json_object' },
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'suggestions_schema',
+          strict: false,
+          schema: {
+            type: 'object',
+            properties: {
+              suggestions: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    templateId: { type: 'string' },
+                    start: { type: 'number' },
+                    end: { type: 'number' },
+                    suggestedText: { type: 'string' },
+                    reason: { type: 'string' }
+                  },
+                  required: ['templateId', 'start', 'end', 'suggestedText', 'reason']
+                }
+              }
+            },
+            required: ['suggestions']
+          }
+        }
+      },
       temperature: 0.4,
       max_tokens: 1024
     };
@@ -695,7 +761,34 @@ Output format MUST exactly match this JSON schema:
           ]
         }
       ],
-      response_format: { type: 'json_object' },
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'canvas_cues_schema',
+          strict: false,
+          schema: {
+            type: 'object',
+            properties: {
+              cues: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    start: { type: 'number' },
+                    end: { type: 'number' },
+                    query: { type: 'string' },
+                    type: { type: 'string' },
+                    scene: { type: 'string' },
+                    reason: { type: 'string' }
+                  },
+                  required: ['start', 'end', 'query', 'type', 'scene', 'reason']
+                }
+              }
+            },
+            required: ['cues']
+          }
+        }
+      },
       temperature: 0.4,
       max_tokens: 3000
     };
