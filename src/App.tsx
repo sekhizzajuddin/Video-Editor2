@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { Music, MousePointer2, ArrowRightToLine, ArrowLeftToLine, ArrowLeftRight, Timer, Scissors, Hand, ZoomIn, Undo2, Redo2 } from 'lucide-react';
+import { Music, MousePointer2, ArrowRightToLine, ArrowLeftToLine, ArrowLeftRight, Timer, Scissors, Hand, ZoomIn, Undo2, Redo2, Sparkles } from 'lucide-react';
 import type { EditorTool } from '@/types';
 import { TopToolbar } from '@/components/TopToolbar';
 import { MediaPanel } from '@/components/MediaPanel';
@@ -586,7 +586,22 @@ function App() {
       <ExportModal />
       <SettingsModal />
       <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />
-      {showCopilot && <AiCopilot onClose={() => setShowCopilot(false)} />}
+      {showCopilot ? (
+        <AiCopilot onClose={() => setShowCopilot(false)} />
+      ) : (
+        <button
+          onClick={() => setShowCopilot(true)}
+          title="Open AI Copilot"
+          className="fixed bottom-5 right-5 z-40 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2.5 rounded-full shadow-2xl shadow-purple-500/50 flex items-center gap-2 transition-all duration-300 hover:scale-105 border border-white/20 group"
+        >
+          <div className="relative flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full" />
+          </div>
+          <span className="text-sm font-semibold tracking-wide">AI Copilot</span>
+        </button>
+      )}
       <Toaster />
     </div>
   );

@@ -22,6 +22,8 @@ import {
   ImageIcon,
   Loader2,
   Crop,
+  Pipette,
+  Crosshair,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
@@ -277,6 +279,7 @@ export function PropertiesPanel() {
   } = useEditorStore();
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [isPickingChromaColor, setIsPickingChromaColor] = useState(false);
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const [showTunedToast, setShowTunedToast] = useState(false);
   const [voiceTuneResults, setVoiceTuneResults] = useState<VoiceTuneResult[]>([]);
@@ -1671,6 +1674,125 @@ export function PropertiesPanel() {
       }
     })();
   };
+  // ─── Chroma Key Helpers ─────────────────────────────────────────────
+  const rgbToHex = (r: number, g: number, b: number): string => {
+    return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+  };
+
+  const hexToRgb = (hex: string): [number, number, number] => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)]
+      : [0, 255, 0];
+  };
+
+  const sampleCanvasColor = (canvas: HTMLCanvasElement, clientX: number, clientY: number): string => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((clientX - rect.left) * scaleX)));
+    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((clientY - rect.top) * scaleY)));
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return '#00ff00';
+
+    const pixel = ctx.getImageData(x, y, 1, 1).data;
+    return rgbToHex(pixel[0], pixel[1], pixel[2]);
+  };
+
+  const autoDetectBackgroundColor = (canvas: HTMLCanvasElement): string | null => {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const margin = Math.max(2, Math.floor(Math.min(w, h) * 0.04));
+
+    // Sample 6 points: 4 corners + top/bottom center
+    const coords = [
+      [margin, margin],
+      [w - margin, margin],
+      [margin, h - margin],
+      [w - margin, h - margin],
+      [Math.floor(w / 2), margin],
+      [Math.floor(w / 2), h - margin],
+    ];
+
+    let r = 0, g = 0, b = 0;
+    coords.forEach(([cx, cy]) => {
+      const p = ctx.getImageData(cx, cy, 1, 1).data;
+      r += p[0]; g += p[1]; b += p[2];
+    });
+
+    return rgbToHex(Math.round(r / coords.length), Math.round(g / coords.length), Math.round(b / coords.length));
+  };
+
+  const CHROMA_KEY_PRESETS = [
+    { name: 'Green', hex: '#00ff00' },
+    { name: 'Blue', hex: '#0000ff' },
+    { name: 'Red', hex: '#ff0000' },
+    { name: 'White', hex: '#ffffff' },
+    { name: 'Black', hex: '#000000' },
+    { name: 'Magenta', hex: '#ff00ff' },
+  ];
+
+  // ─── Eyedropper Canvas Interaction ──────────────────────────────────
+  useEffect(() => {
+    if (!isPickingChromaColor) {
+      const canvas = useEditorStore.getState().previewCanvas;
+      if (canvas) canvas.style.cursor = '';
+      return;
+    }
+
+    const canvas = useEditorStore.getState().previewCanvas;
+    if (!canvas) {
+      setIsPickingChromaColor(false);
+      toast.error('Preview canvas not ready. Play the video first.');
+      return;
+    }
+
+    canvas.style.cursor = 'crosshair';
+    toast.info('🖱 Click on the preview canvas to pick a color. Press ESC to cancel.', { duration: 4000 });
+
+    const handleMouseDown = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const isOnCanvas =
+        e.clientX >= rect.left && e.clientX <= rect.right &&
+        e.clientY >= rect.top && e.clientY <= rect.bottom;
+
+      if (isOnCanvas) {
+        e.preventDefault();
+        e.stopPropagation();
+        const color = sampleCanvasColor(canvas, e.clientX, e.clientY);
+        const existing = selectedClip?.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+        storeUpdateClip(selectedClip!.id, {
+          chromaKey: { ...existing, color }
+        });
+        useEditorStore.getState().saveSnapshot('Chroma Color Picked');
+        toast.success(`🎨 Color picked: ${color}`);
+      } else {
+        toast.info('Color picking cancelled');
+      }
+      setIsPickingChromaColor(false);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPickingChromaColor(false);
+        toast.info('Color picking cancelled');
+      }
+    };
+
+    document.addEventListener('mousedown', handleMouseDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+      canvas.style.cursor = '';
+    };
+  }, [isPickingChromaColor, selectedClip?.id, storeUpdateClip]);
+
   return (
     <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
       {/* Tabs */}
@@ -4040,7 +4162,12 @@ export function PropertiesPanel() {
                 onClick={() => toggleSection('chromaKey')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
               >
-                <span className="font-medium">Chroma Key / Green Screen</span>
+                <span className="font-medium flex items-center gap-2">
+                  Chroma Key / Green Screen
+                  {selectedClip.chromaKey?.enabled && (
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-semibold">ON</span>
+                  )}
+                </span>
                 {collapsedSections['chromaKey'] ? (
                   <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 ) : (
@@ -4049,7 +4176,7 @@ export function PropertiesPanel() {
               </button>
               {!collapsedSections['chromaKey'] && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
-                  {/* Enable Chroma Key */}
+                  {/* Enable Toggle */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -4061,76 +4188,212 @@ export function PropertiesPanel() {
                         });
                         useEditorStore.getState().saveSnapshot();
                       }}
-                      className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-amber-500 focus:ring-0 focus:ring-offset-0"
+                      className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-emerald-500 focus:ring-0 focus:ring-offset-0"
                     />
                     <span className="text-[11px] text-[#d0d0d0]">Enable Chroma Key</span>
                   </label>
 
-                  {/* Key Color Picker */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="text-[#a0a0a0]">Key Color</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[#a0a0a0] uppercase">{selectedClip.chromaKey?.color || '#00FF00'}</span>
+                  {selectedClip.chromaKey?.enabled && (
+                    <div className="space-y-3">
+                      {/* Color Presets */}
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] text-[#a0a0a0] uppercase tracking-wider font-medium">Quick Presets</span>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {CHROMA_KEY_PRESETS.map((preset) => (
+                            <button
+                              key={preset.name}
+                              onClick={() => {
+                                const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                                updateClip(selectedClip.id, {
+                                  chromaKey: { ...existing, color: preset.hex }
+                                });
+                                useEditorStore.getState().saveSnapshot();
+                              }}
+                              className={`flex items-center gap-1 px-2 py-1 rounded border text-[10px] transition-colors ${
+                                selectedClip.chromaKey?.color?.toLowerCase() === preset.hex.toLowerCase()
+                                  ? 'border-emerald-500 bg-emerald-500/10 text-white'
+                                  : 'border-[#3e3e3e] bg-[#1e1e1e] text-[#a0a0a0] hover:border-[#5e5e5e] hover:text-white'
+                              }`}
+                            >
+                              <span
+                                className="w-2.5 h-2.5 rounded-full border border-white/20"
+                                style={{ backgroundColor: preset.hex }}
+                              />
+                              {preset.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Active Color + Picker + Eyedropper + Auto-Detect */}
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] text-[#a0a0a0] uppercase tracking-wider font-medium">Key Color</span>
+                        <div className="flex items-center gap-2 bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
+                          <div
+                            className="w-8 h-8 rounded border border-white/10 shrink-0 shadow-inner"
+                            style={{ backgroundColor: selectedClip.chromaKey?.color || '#00ff00' }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-white font-mono uppercase tracking-wide">
+                              {selectedClip.chromaKey?.color || '#00FF00'}
+                            </div>
+                            <div className="text-[9px] text-[#6a6a6a]">
+                              {(() => {
+                                const [r, g, b] = hexToRgb(selectedClip.chromaKey?.color || '#00ff00');
+                                return `RGB(${r}, ${g}, ${b})`;
+                              })()}
+                            </div>
+                          </div>
+
+                          <input
+                            type="color"
+                            value={selectedClip.chromaKey?.color || '#00ff00'}
+                            onChange={(e) => {
+                              const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                              updateClip(selectedClip.id, {
+                                chromaKey: { ...existing, color: e.target.value }
+                              });
+                            }}
+                            onBlur={() => useEditorStore.getState().saveSnapshot()}
+                            className="w-6 h-6 bg-transparent border-0 rounded cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border [&::-webkit-color-swatch]:border-[#3e3e3e] [&::-webkit-color-swatch]:rounded"
+                          />
+
+                          <button
+                            onClick={() => setIsPickingChromaColor(true)}
+                            disabled={isPickingChromaColor}
+                            className={`p-1.5 rounded transition-colors ${
+                              isPickingChromaColor
+                                ? 'bg-emerald-500 text-black'
+                                : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:bg-[#4e4e4e]'
+                            }`}
+                            title="Pick color from canvas"
+                          >
+                            <Pipette className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              const canvas = useEditorStore.getState().previewCanvas;
+                              if (!canvas) {
+                                toast.error('Preview canvas not available');
+                                return;
+                              }
+                              const color = autoDetectBackgroundColor(canvas);
+                              if (color) {
+                                const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                                updateClip(selectedClip.id, {
+                                  chromaKey: { ...existing, color }
+                                });
+                                useEditorStore.getState().saveSnapshot();
+                                toast.success(`Auto-detected: ${color}`);
+                              }
+                            }}
+                            className="p-1.5 bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:bg-[#4e4e4e] transition-colors"
+                            title="Auto-detect background from corners"
+                          >
+                            <Wand2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Threshold */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-[#d0d0d0]">Threshold</span>
+                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.threshold ?? 30}%</span>
+                        </div>
                         <input
-                          type="color"
-                          value={selectedClip.chromaKey?.color || '#00ff00'}
+                          type="range"
+                          min={1}
+                          max={100}
+                          value={selectedClip.chromaKey?.threshold ?? 30}
                           onChange={(e) => {
                             const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
                             updateClip(selectedClip.id, {
-                              chromaKey: { ...existing, color: e.target.value }
+                              chromaKey: { ...existing, threshold: Number(e.target.value) }
                             });
                           }}
-                          onBlur={() => useEditorStore.getState().saveSnapshot()}
-                          className="w-5 h-5 bg-transparent border-0 rounded cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border [&::-webkit-color-swatch]:border-[#3e3e3e] [&::-webkit-color-swatch]:rounded"
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <div className="flex justify-between text-[9px] text-[#5a5a5a]">
+                          <span>Precise</span>
+                          <span>Lenient</span>
+                        </div>
+                      </div>
+
+                      {/* Softness */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-[#d0d0d0]">Softness / Spill</span>
+                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.softness ?? 10}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={selectedClip.chromaKey?.softness ?? 10}
+                          onChange={(e) => {
+                            const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                            updateClip(selectedClip.id, {
+                              chromaKey: { ...existing, softness: Number(e.target.value) }
+                            });
+                          }}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                       </div>
-                    </div>
-                  </div>
 
-                  {/* Threshold Slider */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="text-[#d0d0d0]">Threshold</span>
-                      <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.threshold ?? 30}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={100}
-                      value={selectedClip.chromaKey?.threshold ?? 30}
-                      onChange={(e) => {
-                        const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
-                        updateClip(selectedClip.id, {
-                          chromaKey: { ...existing, threshold: Number(e.target.value) }
-                        });
-                      }}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                    />
-                  </div>
+                      {/* Spill Suppression */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-[#d0d0d0]">Spill Suppression</span>
+                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.spillSuppression ?? 0}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={selectedClip.chromaKey?.spillSuppression ?? 0}
+                          onChange={(e) => {
+                            const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10, spillSuppression: 0, edgeFeather: 0 };
+                            updateClip(selectedClip.id, {
+                              chromaKey: { ...existing, spillSuppression: Number(e.target.value) }
+                            });
+                          }}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          title="Reduces green/blue fringe on subject edges"
+                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <p className="text-[9px] text-[#5a5a5a]">Removes color reflection from subject edges</p>
+                      </div>
 
-                  {/* Softness Slider */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="text-[#d0d0d0]">Softness / Spill</span>
-                      <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.softness ?? 10}%</span>
+                      {/* Edge Feather */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-[#d0d0d0]">Edge Feather</span>
+                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.edgeFeather ?? 0}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={20}
+                          step={0.5}
+                          value={selectedClip.chromaKey?.edgeFeather ?? 0}
+                          onChange={(e) => {
+                            const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10, spillSuppression: 0, edgeFeather: 0 };
+                            updateClip(selectedClip.id, {
+                              chromaKey: { ...existing, edgeFeather: Number(e.target.value) }
+                            });
+                          }}
+                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          title="Softens the edges of the keyed area"
+                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                        <p className="text-[9px] text-[#5a5a5a]">Smooths harsh edges for natural compositing</p>
+                      </div>
                     </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={selectedClip.chromaKey?.softness ?? 10}
-                      onChange={(e) => {
-                        const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
-                        updateClip(selectedClip.id, {
-                          chromaKey: { ...existing, softness: Number(e.target.value) }
-                        });
-                      }}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                    />
-                  </div>
+                  )}
                 </div>
               )}
             </div>

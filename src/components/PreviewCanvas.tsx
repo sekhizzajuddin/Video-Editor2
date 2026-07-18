@@ -1643,7 +1643,16 @@ export function PreviewCanvas() {
                 );
               }
               if (hasChroma && clip.chromaKey) {
-                applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                applyChromaKeyOnData(
+                  oCtx,
+                  offscreen.width,
+                  offscreen.height,
+                  clip.chromaKey.color,
+                  clip.chromaKey.threshold,
+                  clip.chromaKey.softness,
+                  clip.chromaKey.spillSuppression ?? 0,
+                  clip.chromaKey.edgeFeather ?? 0
+                );
               }
               if (hasLuma && clip.lumaKey) {
                 applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);
@@ -1685,7 +1694,16 @@ export function PreviewCanvas() {
                   );
                 }
                 if (hasChroma && clip.chromaKey) {
-                  applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                  applyChromaKeyOnData(
+                    oCtx,
+                    offscreen.width,
+                    offscreen.height,
+                    clip.chromaKey.color,
+                    clip.chromaKey.threshold,
+                    clip.chromaKey.softness,
+                    clip.chromaKey.spillSuppression ?? 0,
+                    clip.chromaKey.edgeFeather ?? 0
+                  );
                 }
                 if (hasLuma && clip.lumaKey) {
                   applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);
@@ -1797,7 +1815,16 @@ export function PreviewCanvas() {
                 );
               }
               if (hasChroma && clip.chromaKey) {
-                applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                applyChromaKeyOnData(
+                  oCtx,
+                  offscreen.width,
+                  offscreen.height,
+                  clip.chromaKey.color,
+                  clip.chromaKey.threshold,
+                  clip.chromaKey.softness,
+                  clip.chromaKey.spillSuppression ?? 0,
+                  clip.chromaKey.edgeFeather ?? 0
+                );
               }
               if (hasLuma && clip.lumaKey) {
                 applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);
@@ -1839,7 +1866,16 @@ export function PreviewCanvas() {
                   );
                 }
                 if (hasChroma && clip.chromaKey) {
-                  applyChromaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.chromaKey.color, clip.chromaKey.threshold, clip.chromaKey.softness);
+                  applyChromaKeyOnData(
+                    oCtx,
+                    offscreen.width,
+                    offscreen.height,
+                    clip.chromaKey.color,
+                    clip.chromaKey.threshold,
+                    clip.chromaKey.softness,
+                    clip.chromaKey.spillSuppression ?? 0,
+                    clip.chromaKey.edgeFeather ?? 0
+                  );
                 }
                 if (hasLuma && clip.lumaKey) {
                   applyLumaKeyOnData(oCtx, offscreen.width, offscreen.height, clip.lumaKey.type, clip.lumaKey.threshold, clip.lumaKey.softness);

@@ -643,7 +643,9 @@ export function applyChromaKeyOnData(
   h: number,
   keyColorHex: string,
   threshold: number,
-  softness: number
+  softness: number,
+  spillSuppression: number = 0,
+  edgeFeather: number = 0
 ) {
   try {
     const imgData = oCtx.getImageData(0, 0, w, h);
@@ -660,6 +662,10 @@ export function applyChromaKeyOnData(
     const th = threshold * 2.4; 
     const soft = softness * 2.4;
 
+    // Determine key color type for spill suppression
+    const isGreenScreen = kg >= kr && kg >= kb;
+    const isBlueScreen = kb >= kr && kb >= kg;
+
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
@@ -670,16 +676,69 @@ export function applyChromaKeyOnData(
 
       const dist = Math.sqrt((u - ku) ** 2 + (v - kv) ** 2);
 
+      let alpha = 1.0;
       if (dist < th) {
-        data[i + 3] = 0; 
+        alpha = 0;
       } else if (dist < th + soft && soft > 0) {
-        const factor = (dist - th) / soft;
-        data[i + 3] = Math.round(data[i + 3] * factor);
+        alpha = (dist - th) / soft;
       }
+
+      // ─── Spill Suppression ─────────────────────────────
+      if (spillSuppression > 0 && alpha < 1.0) {
+        const spillFactor = (1 - alpha) * (spillSuppression / 100);
+        if (isGreenScreen) {
+          // Reduce green, boost red/blue slightly
+          data[i] = Math.min(255, r + (r * spillFactor * 0.3));
+          data[i + 1] = Math.max(0, g - (g * spillFactor * 0.5));
+          data[i + 2] = Math.min(255, b + (b * spillFactor * 0.3));
+        } else if (isBlueScreen) {
+          // Reduce blue
+          data[i] = Math.min(255, r + (r * spillFactor * 0.3));
+          data[i + 1] = Math.min(255, g + (g * spillFactor * 0.3));
+          data[i + 2] = Math.max(0, b - (b * spillFactor * 0.5));
+        }
+      }
+
+      data[i + 3] = Math.round(alpha * data[i + 3]);
     }
+
+    // ─── Edge Feather ───────────────────────────────────
+    if (edgeFeather > 0) {
+      const radius = Math.max(1, Math.floor(edgeFeather));
+      blurAlphaChannel(imgData, radius);
+    }
+
     oCtx.putImageData(imgData, 0, 0);
   } catch (err) {
     console.error('Failed to apply Chroma Key', err);
+  }
+}
+
+/** Simple box blur on alpha channel only */
+function blurAlphaChannel(imageData: ImageData, radius: number): void {
+  const { width, height, data } = imageData;
+  const alpha = new Float32Array(width * height);
+  for (let i = 0; i < width * height; i++) alpha[i] = data[i * 4 + 3];
+
+  const output = new Float32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0, count = 0;
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const ny = y + dy, nx = x + dx;
+          if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+            sum += alpha[ny * width + nx];
+            count++;
+          }
+        }
+      }
+      output[y * width + x] = sum / count;
+    }
+  }
+
+  for (let i = 0; i < width * height; i++) {
+    data[i * 4 + 3] = Math.floor(output[i]);
   }
 }
 

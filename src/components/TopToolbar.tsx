@@ -506,10 +506,10 @@ export function TopToolbar() {
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('toggle-copilot'))}
           title="AI Copilot"
-          className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
+          className="px-3 py-1.5 bg-gradient-to-r from-purple-600/90 to-indigo-600/90 hover:from-purple-500 hover:to-indigo-500 text-white border border-purple-400/50 text-xs rounded-full flex items-center gap-1.5 transition-all font-semibold shadow-md shadow-purple-900/40"
         >
-          <Sparkles className="w-3.5 h-3.5" />
-          Copilot
+          <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+          AI Copilot
         </button>
 
         <button

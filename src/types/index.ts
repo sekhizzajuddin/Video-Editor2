@@ -319,6 +319,8 @@ export interface ClipChromaKeySettings {
   color: string;      // Hex color, e.g. '#00ff00'
   threshold: number;  // 0 to 100
   softness: number;   // 0 to 100
+  spillSuppression?: number; // 0 to 100
+  edgeFeather?: number;      // 0 to 20
 }
 
 export interface ClipLumaKeySettings {
