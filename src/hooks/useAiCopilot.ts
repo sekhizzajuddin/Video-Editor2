@@ -33,6 +33,27 @@ export const useAiCopilot = () => {
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const lastMessageTime = useRef(0);
+  const isMountedRef = useRef(true);
+  const RATE_LIMIT_MS = 1000;
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (e) {
+          console.warn('Error stopping MediaRecorder:', e);
+        }
+      }
+      if (mediaRecorderRef.current?.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const conversationContextRef = useRef<ConversationContext>({
     selectedClipIds: [],
     currentTime: 0,
@@ -58,19 +79,43 @@ export const useAiCopilot = () => {
       recentActions: trainingModule.getRecentActions(),
       userIntent: messages.length > 0 ? messages[messages.length - 1].content : undefined
     };
-  }, [editorStore.selectedClipIds, editorStore.currentTime, editorStore.projectName, editorStore.totalDuration, editorStore.tracks, messages]);
+  }, [
+    editorStore.selectedClipIds.length,
+    editorStore.currentTime,
+    editorStore.projectName,
+    editorStore.totalDuration,
+    editorStore.tracks.length,
+    editorStore.tracks.reduce((sum, t) => sum + t.clips.length, 0),
+    messages.length
+  ]);
 
   const sendMessage = async (text: string) => {
+    const now = Date.now();
+    if (now - lastMessageTime.current < RATE_LIMIT_MS) {
+      if (isMountedRef.current) {
+        setMessages(prev => [...prev, { 
+          id: Date.now().toString(), 
+          role: 'assistant', 
+          content: 'Please wait a moment between messages.',
+          timestamp: Date.now()
+        }]);
+      }
+      return;
+    }
+    lastMessageTime.current = now;
+
     if (!text.trim()) return;
     
     // Use Vercel env/session key first, then fallback to user settings
     // @ts-ignore
-    const groqKey = import.meta.env.VITE_GROQ_API_KEY || sessionStorage.getItem('procut_groq_key') || editorStore.settings.groqApiKey;
+    const groqKey = import.meta.env.VITE_GROQ_API_KEY || sessionStorage.getItem('procut_groq_key') || editorStore.settings?.groqApiKey;
     if (!groqKey) {
-      setMessages(prev => [...prev, 
-        { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
-        { id: (Date.now() + 1).toString(), role: 'assistant', content: 'Please configure your Groq API key in the settings to use the AI Copilot.', timestamp: Date.now() }
-      ]);
+      if (isMountedRef.current) {
+        setMessages(prev => [...prev, 
+          { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
+          { id: (Date.now() + 1).toString(), role: 'assistant', content: 'Please configure your Groq API key in the settings to use the AI Copilot.', timestamp: Date.now() }
+        ]);
+      }
       return;
     }
 
@@ -80,8 +125,14 @@ export const useAiCopilot = () => {
       content: text,
       timestamp: Date.now()
     };
-    setMessages(prev => [...prev, newUserMsg]);
-    setIsProcessing(true);
+    if (isMountedRef.current) {
+      setMessages(prev => [...prev, newUserMsg]);
+      setIsProcessing(true);
+    }
+
+    const controller = new AbortController();
+    const API_TIMEOUT_MS = 30000;
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
     try {
       const { intent, confidence, entities } = await trainingModule.analyzeIntent(
@@ -180,8 +231,11 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
           tool_choice: 'auto',
           temperature: 0.3,
           max_tokens: 2000
-        })
+        }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`API Error: ${response.status}`);
@@ -208,7 +262,21 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
         for (const toolCall of message.tool_calls) {
           if (toolCall.type === 'function') {
             const funcName = toolCall.function.name;
-            const args = JSON.parse(toolCall.function.arguments);
+            let args: any;
+            
+            try {
+              args = JSON.parse(toolCall.function.arguments);
+            } catch (parseError: any) {
+              console.error('Failed to parse tool arguments:', parseError);
+              toolCalls.push({
+                name: funcName,
+                args: toolCall.function.arguments,
+                status: 'failed',
+                error: `Invalid JSON: ${parseError.message}`
+              });
+              aiResponseContent += `- ❌ ${funcName}: Failed to parse arguments\n`;
+              continue;
+            }
             
             const validation = trainingModule.validateToolCall(
               funcName,
@@ -262,17 +330,38 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
         assistantMsg.content = aiResponseContent;
       }
 
-      setMessages(prev => [...prev, assistantMsg]);
-    } catch (error) {
+      if (isMountedRef.current) {
+        setMessages(prev => [...prev, assistantMsg]);
+      }
+    } catch (error: any) {
       console.error("AI Copilot Error:", error);
-      setMessages(prev => [...prev, { 
-        id: Date.now().toString(), 
-        role: 'assistant', 
-        content: 'An error occurred while processing your request. Please check your API key and try again.',
-        timestamp: Date.now()
-      }]);
+      let errorMessage = 'An error occurred while processing your request.';
+      
+      if (error.name === 'AbortError') {
+        errorMessage = 'Request timed out. Please try again.';
+      } else if (error.message?.includes('401')) {
+        errorMessage = 'Invalid API key. Please check your Groq API key in Settings.';
+      } else if (error.message?.includes('429')) {
+        errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+      } else if (error.message?.includes('network') || error.message?.includes('fetch')) {
+        errorMessage = 'Network error. Please check your internet connection.';
+      } else if (error.message?.includes('503')) {
+        errorMessage = 'AI service temporarily unavailable. Please try again later.';
+      }
+      
+      if (isMountedRef.current) {
+        setMessages(prev => [...prev, { 
+          id: Date.now().toString(), 
+          role: 'assistant', 
+          content: errorMessage,
+          timestamp: Date.now()
+        }]);
+      }
     } finally {
-      setIsProcessing(false);
+      clearTimeout(timeoutId);
+      if (isMountedRef.current) {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -309,13 +398,17 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
     }
   };
 
-  const stopListening = () => {
+  const stopListening = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
+    }
+    
+    if (mediaRecorderRef.current?.stream) {
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
+    
     setIsListening(false);
-  };
+  }, []);
 
   const provideFeedback = (messageId: string, feedback: 'positive' | 'negative') => {
     trainingModule.learnFromFeedback(messageId, feedback);
