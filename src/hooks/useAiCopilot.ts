@@ -167,7 +167,7 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
           'Authorization': `Bearer ${groqKey}`
         },
         body: JSON.stringify({
-          model: 'openai/gpt-oss-120b',
+          model: 'llama-3.3-70b-versatile',
           messages: [
             { role: 'system', content: systemPrompt },
             ...messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
