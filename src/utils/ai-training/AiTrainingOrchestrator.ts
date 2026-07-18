@@ -16,7 +16,7 @@ import { AiTrainingThumbnail } from './AiTrainingThumbnail';
 export class AiTrainingOrchestrator {
   private feedbackHistory: Map<string, 'positive' | 'negative'> = new Map();
   private actionHistory: string[] = [];
-  
+  private modules: AiTrainingModuleInterface[] = [
     new AiTrainingMediaImport(),
     new AiTrainingMediaTransition(),
     new AiTrainingPropertyTransformation(),
