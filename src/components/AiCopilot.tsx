@@ -27,17 +27,13 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
     getTrainingStats
   } = useAiCopilot();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [stats, setStats] = useState({ totalInteractions: 0, recentActions: [] as string[] });
+  const stats = getTrainingStats();
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isProcessing]);
-
-  useEffect(() => {
-    setStats(getTrainingStats());
-  }, [messages, getTrainingStats]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

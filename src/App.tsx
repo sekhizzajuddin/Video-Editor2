@@ -592,7 +592,7 @@ function App() {
         <button
           onClick={() => setShowCopilot(true)}
           title="Open AI Copilot"
-          className="fixed bottom-5 right-5 z-40 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2.5 rounded-full shadow-2xl shadow-purple-500/50 flex items-center gap-2 transition-all duration-300 hover:scale-105 border border-white/20 group"
+          className="fixed bottom-5 right-5 z-[100] bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2.5 rounded-full shadow-2xl shadow-purple-500/50 flex items-center gap-2 transition-all duration-300 hover:scale-105 border border-white/20 group"
         >
           <div className="relative flex items-center justify-center">
             <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
