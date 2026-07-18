@@ -691,24 +691,22 @@ export function PropertiesPanel() {
   // Auto-switch properties panel tabs only when the clip selection CHANGES (not on property updates)
   const lastAutoSwitchedClip = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedClip) {
-      if (activePropertiesTab !== 'history') {
-        setActivePropertiesTab('history');
-      }
+    if (!primarySelectedId) {
+      setActivePropertiesTab('history');
       return;
     }
     if (lastAutoSwitchedClip.current === primarySelectedId) return; // don't override manual tab changes
     lastAutoSwitchedClip.current = primarySelectedId;
-    if (selectedTrack?.type === 'fx' || selectedClip.fxSettings || selectedClip.particleSettings) {
+    if (selectedTrack?.type === 'fx' || selectedClip?.fxSettings || selectedClip?.particleSettings) {
       setActivePropertiesTab('effects');
     } else if (selectedTrack?.type === 'audio') {
       setActivePropertiesTab('audio');
-    } else if (selectedTrack?.type === 'text' || selectedClip.textSettings) {
+    } else if (selectedTrack?.type === 'text' || selectedClip?.textSettings) {
       setActivePropertiesTab('text');
     } else {
       setActivePropertiesTab('transform');
     }
-  }, [primarySelectedId, selectedClip, activePropertiesTab, setActivePropertiesTab]);
+  }, [primarySelectedId, setActivePropertiesTab]);
 
 
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
