@@ -5,7 +5,7 @@ import { useEditorStore } from '@/store/editorStore';
  */
 export function getEnvGeminiKey(): string {
   // @ts-ignore
-  return import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY || '';
+  return import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY || sessionStorage.getItem('procut_gemini_key') || '';
 }
 
 /**
@@ -13,7 +13,7 @@ export function getEnvGeminiKey(): string {
  */
 export function getEnvGroqKey(): string {
   // @ts-ignore
-  return import.meta.env.VITE_GROQ_API_KEY || import.meta.env.GROQ_API_KEY || '';
+  return import.meta.env.VITE_GROQ_API_KEY || import.meta.env.GROQ_API_KEY || sessionStorage.getItem('procut_groq_key') || '';
 }
 
 /**

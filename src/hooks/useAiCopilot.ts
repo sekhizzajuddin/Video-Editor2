@@ -321,7 +321,9 @@ export const useAiCopilot = () => {
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
     
-    const groqKey = editorStore.settings.groqApiKey;
+    // Use Vercel env/session key first, then fallback to user settings
+    // @ts-ignore
+    const groqKey = import.meta.env.VITE_GROQ_API_KEY || sessionStorage.getItem('procut_groq_key') || editorStore.settings.groqApiKey;
     if (!groqKey) {
       setMessages(prev => [...prev, 
         { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
