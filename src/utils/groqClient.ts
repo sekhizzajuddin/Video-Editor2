@@ -35,7 +35,7 @@ export async function transcribeAudioWithGroq(audioBlob: Blob): Promise<any> {
 }
 
 /**
- * Basic reasoning using LLaMA 3.3 70B Versatile on Groq.
+ * Basic reasoning using OpenAI GPT-OSS 120B on Groq.
  */
 export async function analyzeReasoningWithGroq(prompt: string, systemPrompt?: string): Promise<string> {
   const messages: any[] = [];
@@ -45,7 +45,7 @@ export async function analyzeReasoningWithGroq(prompt: string, systemPrompt?: st
   messages.push({ role: 'user', content: prompt });
 
   const payload = {
-    model: 'llama-3.3-70b-versatile',
+    model: 'openai/gpt-oss-120b',
     messages,
     temperature: 0.2
   };
