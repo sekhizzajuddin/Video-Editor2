@@ -241,15 +241,53 @@ export const executeAITool = (name: string, args: any) => {
     case 'addClip': {
       const media = store.mediaLibrary.find(m => m.id === args.mediaId);
       if (!media) return { success: false, error: 'Media not found' };
-      
+
+      const clipDuration = media.duration || 5;
+
+      // Phase 6 fix: when the AI submits many addClip calls in one batch
+      // (e.g. "Import All Media"), it often forgets to assign a non-overlapping
+      // startTime. Without staggering, all clips land at the same `startTime`,
+      // producing dense overlap that overloads timeline rendering and triggers
+      // React error #310 elsewhere. Auto-stagger onto V1 if startTime is at
+      // 0 or overlapping with an existing clip.
+      const requestedStart = typeof args.startTime === 'number' ? args.startTime : null;
+      const allClips = (store.tracks ?? []).flatMap((t: any) => (t.clips ?? []));
+
+      let resolvedStart = requestedStart;
+      if (resolvedStart === null || Number.isNaN(resolvedStart) || resolvedStart < 0) {
+        const lastEnd = allClips.reduce(
+          (max: number, c: any) => Math.max(max, (c.startTime ?? 0) + (c.duration ?? 0)),
+          0
+        );
+        resolvedStart = lastEnd; // append at the end (overlap-safe)
+      } else {
+        // Detect overlap with existing clips; if so, push just past it.
+        let safety = 0;
+        while (safety < 5 && allClips.some((c: any) => {
+          const cs = c.startTime ?? 0;
+          const ce = cs + (c.duration ?? 0);
+          return resolvedStart! < ce && resolvedStart! + clipDuration > cs;
+        })) {
+          const maxEnd = allClips
+            .filter((c: any) => {
+              const cs = c.startTime ?? 0;
+              const ce = cs + (c.duration ?? 0);
+              return resolvedStart! < ce && resolvedStart! + clipDuration > cs;
+            })
+            .reduce((m: number, c: any) => Math.max(m, (c.startTime ?? 0) + (c.duration ?? 0)), 0);
+          resolvedStart = maxEnd;
+          safety++;
+        }
+      }
+
       const newClip = {
-        id: 'clip_' + Date.now().toString(36),
+        id: 'clip_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7),
         mediaId: media.id,
         trackId: args.trackId,
-        startTime: args.startTime,
-        duration: media.duration || 5,
+        startTime: resolvedStart,
+        duration: clipDuration,
         trimStart: 0,
-        trimEnd: media.duration || 5,
+        trimEnd: clipDuration,
         opacity: 1,
         speed: 1,
         effects: [],
@@ -258,10 +296,10 @@ export const executeAITool = (name: string, args: any) => {
         colorFilters: { temperature: 0, tint: 0, exposure: 0, contrast: 100, saturation: 100, blur: 0, fadedFilm: 0, vignette: 0 },
         audioSettings: { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, mid: 0, treble: 0, muted: false, preservePitch: true, pitch: 0, voiceFormant: 0, humanize: false }
       };
-      
+
       store.addClip(newClip as any);
       store.recalcTotalDuration();
-      return { success: true, message: `Clip added at ${args.startTime}s` };
+      return { success: true, message: `Clip added at ${resolvedStart.toFixed(2)}s` };
     }
     case 'updateClip': {
       store.updateClip(args.clipId, args.updates);

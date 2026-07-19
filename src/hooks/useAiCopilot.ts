@@ -120,6 +120,12 @@ export const useAiCopilot = () => {
   const executorRef = useRef<WorkflowExecutor | null>(null);
   const autoTesterAbortedRef = useRef(false);
 
+  // Phase 1: Guard against re-entrant rate-limit retry chain. When the AI
+  // returns 429 we schedule ONE retry timer; subsequent cooldown checks
+  // during that window won't schedule additional timers because the prior
+  // timer handles it. This prevents ping-pong retry storms.
+  const retryTimerRef = useRef<any>(null);
+
   const editorStore = useEditorStore();
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -153,6 +159,11 @@ export const useAiCopilot = () => {
       }
       if (mediaRecorderRef.current?.stream) {
         mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
+      // Clear pending retry timer if any
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
       }
       isMountedRef.current = false;
     };
@@ -835,12 +846,16 @@ export const useAiCopilot = () => {
           }
         ]);
       }
-      // Optionally schedule retry
-      setTimeout(() => {
-        if (isMountedRef.current) {
-          sendMessage(resolvedText);
-        }
-      }, waitMs + 100);
+      // Schedule ONE retry if not already pending. Guard prevents stacking
+      // when the user clicks send multiple times during cooldown.
+      if (!retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          if (isMountedRef.current) {
+            sendMessage(resolvedText);
+          }
+        }, waitMs + 100);
+      }
       return;
     }
 

@@ -343,6 +343,80 @@ export class MetaSubAgent implements SubAgent {
 }
 
 // ============================================================
+// Mask / Alpha Sub-Agent (Phase 5)
+// ============================================================
+export class MaskAlphaSubAgent implements SubAgent {
+  name = 'Mask / Alpha';
+  domain = 'mask';
+  tools = ['updateClip'];
+
+  capability: SubAgentCapability = {
+    toolName: '*',
+    domains: ['mask', 'alpha', 'silhouette', 'cutout', 'matte'],
+    description:
+      'Per-clip mask/alpha operations (rectangular mask shape, feather, rotation, roundness). Implementation: updateClip with arg `updates.mask`.',
+  };
+
+  preconditionCheck(_args: any, _context: ConversationContext) {
+    return { canProceed: true };
+  }
+
+  validateAndFill(args: any, _ctx: ConversationContext): SubAgentValidationResult {
+    if (!args || typeof args !== 'object') {
+      return { valid: false, error: 'Args must be an object' };
+    }
+    // Accept either { mask: {...} } or top-level properties that should be wrapped.
+    const updates = args.updates ?? {};
+    let mask = updates.mask;
+
+    if (!mask && typeof args.width === 'number' || typeof args.height === 'number' || typeof args.feather === 'number') {
+      // Top-level mask props — wrap them.
+      mask = {};
+      if (typeof args.x === 'number') mask.x = Math.max(0, Math.min(2, args.x));
+      if (typeof args.y === 'number') mask.y = Math.max(0, Math.min(2, args.y));
+      if (typeof args.width === 'number') mask.width = Math.max(0, Math.min(2, args.width));
+      if (typeof args.height === 'number') mask.height = Math.max(0, Math.min(2, args.height));
+      if (typeof args.rotation === 'number') mask.rotation = Math.max(-180, Math.min(180, args.rotation));
+      if (typeof args.feather === 'number') mask.feather = Math.max(0, Math.min(100, args.feather));
+      if (typeof args.roundness === 'number') mask.roundness = Math.max(0, Math.min(100, args.roundness));
+      return {
+        valid: true,
+        sanitizedArgs: {
+          clipId: args.clipId,
+          updates: { mask },
+        },
+      };
+    }
+
+    if (mask && typeof mask === 'object') {
+      const sanitizedMask = { ...mask };
+      // Clamp mask values to safe ranges (ClipMaskSettings uses 0-2 for x/y/width/height)
+      if (typeof sanitizedMask.x === 'number') sanitizedMask.x = Math.max(0, Math.min(2, sanitizedMask.x));
+      if (typeof sanitizedMask.y === 'number') sanitizedMask.y = Math.max(0, Math.min(2, sanitizedMask.y));
+      if (typeof sanitizedMask.width === 'number') sanitizedMask.width = Math.max(0, Math.min(2, sanitizedMask.width));
+      if (typeof sanitizedMask.height === 'number') sanitizedMask.height = Math.max(0, Math.min(2, sanitizedMask.height));
+      if (typeof sanitizedMask.rotation === 'number') sanitizedMask.rotation = Math.max(-180, Math.min(180, sanitizedMask.rotation));
+      if (typeof sanitizedMask.feather === 'number') sanitizedMask.feather = Math.max(0, Math.min(100, sanitizedMask.feather));
+      if (typeof sanitizedMask.roundness === 'number') sanitizedMask.roundness = Math.max(0, Math.min(100, sanitizedMask.roundness));
+
+      return {
+        valid: true,
+        sanitizedArgs: {
+          clipId: args.clipId,
+          updates: { mask: sanitizedMask },
+        },
+      };
+    }
+
+    return {
+      valid: false,
+      error:
+        'use updateClip with updates.mask = { x, y, width, height, rotation, feather, roundness }',
+    };
+  }
+}
+
+// ============================================================
 // Sub-Agent Router
 // ============================================================
 const ALL_AGENTS: SubAgent[] = [
@@ -351,6 +425,7 @@ const ALL_AGENTS: SubAgent[] = [
   new MediaSubAgent(),
   new AudioSubAgent(),
   new ColorSubAgent(),
+  new MaskAlphaSubAgent(),  // Phase 5: explicit mask/alpha handling
   new MetaSubAgent(),
 ];
 

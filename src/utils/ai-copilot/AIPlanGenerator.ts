@@ -1,5 +1,15 @@
 import type { AIWorkflowPlan, AIToolStep } from '../../types';
 import type { ConversationContext } from '../ai-training/types';
+import {
+  buildVocabularyHint,
+  buildVocabularySnapshot,
+  getDomainVocabularyList,
+  normalizeVocabulary,
+} from './VocabularyCorrections';
+import {
+  pickPlan,
+  buildSystemHint,
+} from './SemanticsDisambiguator';
 
 export interface PlanGenerationContext {
   userMessage: string;
@@ -24,10 +34,12 @@ const BASE_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 const SYSTEM_PROMPT = `You are an expert video-editing automation planner.
 
+NEVER invent tools, actions, or argument keys that don't exist in the registry.
+
 Given a user request, the current project state, and the available tools, you MUST return a single JSON object (no prose, no markdown fences) with this exact shape:
 
 {
-  "intent": "Short intent label (e.g. APPLY_CINEMATIC_LOOK)",
+  "intent": "Short intent label (e.g. APPLY_MASK, CHANGE_OPACITY)",
   "confidence": 0.0-1.0,
   "rationale": "1-2 sentence strategy explanation",
   "steps": [
@@ -47,16 +59,34 @@ Given a user request, the current project state, and the available tools, you MU
 }
 
 Rules:
-1. Use only tools from the AVAILABLE TOOLS list, EVERY toolName MUST be exact match.
+1. Use ONLY tools from the AVAILABLE TOOLS list, EVERY toolName MUST be exact match.
+   ✘ DO NOT call: "settings", "settings Mask", "re-composite Masks", "Mask action", "Apply LUT Settings"
+   ✔ USE ONLY: updateClip, splitClip, rippleDeleteClip, addMasterKeyframe, addText, addTransition, seek, etc.
 2. Order steps so each step's prerequisites are met by earlier steps.
 3. If a step might fail, list a fallback approach in "alternatives".
 4. Keep steps MINIMAL (prefer 1-3 steps, max 5 unless user requested a workflow).
 5. Args MUST match the tool's JSON schema (no extra fields, required fields present).
 6. Confidence below 0.7 means ask for clarification — return { "clarify": true, "question": "..." } instead of steps.
-7. For destructive operations (delete/remove/export/overwrite), include their index in destructiveOpsIndices.
+7. For destructive operations (delete/remove/export/overwrite/splitClip/autoCuts), include their index in destructiveOpsIndices.
 8. Never invent mediaIds, clipIds, or trackIds — use placeholders like "{{last_clip}}" or rely on implicit selection.
 9. ALL text values should be JSON-safe strings (no raw newlines, escape quotes).
-10. Return ONLY the JSON object. No leading/trailing text.`;
+10. Return ONLY the JSON object. No leading/trailing text.
+
+DOMAIN ACCURACY:
+- "mask / alpha" → updateClip with key "mask" (NOT a separate tool). Shape: { x, y, width, height, rotation, feather, roundness }.
+- "color / LUT / look" → updateClip with key "colorFilters". Shape: { temperature, tint, exposure, contrast, saturation, blur, fadedFilm, vignette }.
+- "transform / zoom / pan / rotate" → updateClip with key "transform". Shape: { x, y, scale, rotation, flipH, flipV }.
+- "audio / volume / mute" → updateClip with key "audioSettings". Shape: { volume, pan, fadeIn, fadeOut, bass, mid, treble, muted }.
+- "text" → addText tool.
+- "transition / fade" → addTransition tool.
+
+SPELLING / VOCABULARY:
+- The user's request goes through vocabulary correction. If you see "modifl" it's already "modify". Trust the normalized form.
+
+CLARIFICATION:
+- If the user requests something ambiguous (e.g., "make it better"), say clarify: true and ask for a specific outcome.
+- If a property has no explicit value, ask before assuming a default.
+`;
 
 /**
  * PlanGenerator - Single-call JSON plan generator.
@@ -73,8 +103,8 @@ export class AIPlanGenerator {
   constructor(config: PlanGenerationConfig = {}) {
     this.config = {
       maxSteps: config.maxSteps ?? 5,
-      temperature: config.temperature ?? 0.3,
-      maxOutputTokens: config.maxOutputTokens ?? 1500,
+      temperature: config.temperature ?? 0.1, // Phase 5: lower temp for precision
+      maxOutputTokens: config.maxOutputTokens ?? 1800,
     };
   }
 
@@ -106,7 +136,11 @@ export class AIPlanGenerator {
           ],
           temperature: this.config.temperature,
           max_tokens: this.config.maxOutputTokens,
+          // Groq accepts these JSON-mode params for `openai-compatible` chat:
+          //   - response_format: { type: 'json_object' }
+          //   - structured outputs via json_schema (Llama 3.3 70B supports this).
           response_format: { type: 'json_object' },
+          stream: false,
         }),
         signal: controller.signal,
       });
@@ -136,12 +170,34 @@ export class AIPlanGenerator {
       )
       .join('\n');
 
-    return `USER REQUEST: "${ctx.userMessage}"
+    // Phase 5: Apply vocabulary corrections BEFORE the prompt goes to the
+    // model. The user often types things like "modifl" or "alhpa"; we
+    // normalize them so the model sees clean input. We then attach a
+    // vocabulary hint so the model understands what we did.
+    const vocabSnap = buildVocabularySnapshot(ctx.userMessage);
+    const normalizedUserMessage = normalizeVocabulary(ctx.userMessage) || ctx.userMessage;
+    const vocabHint = buildVocabularyHint(ctx.userMessage);
 
+    // Phase 5: Disambiguate to a single high-confidence intent + canonical
+    // tool, lock down the arg shape, and forbid hallucinated tool names.
+    const plan = pickPlan(normalizedUserMessage);
+    const semanticHint = buildSystemHint(plan.plan ?? { intent: 'unknown', canonicalTool: '', properties: [], confidence: 0, summary: '' }) || '';
+
+    // Phase 5: Domain vocabulary so model uses canonical words.
+    const domainVocab = getDomainVocabularyList();
+
+    return `USER REQUEST (verbatim): "${ctx.userMessage}"
+
+USER REQUEST (normalized): "${normalizedUserMessage}"
+
+${vocabHint ? vocabHint + '\n' : ''}${semanticHint ? semanticHint + '\n' : ''}
 CURRENT PROJECT CONTEXT:
 ${JSON.stringify(ctx.conversation, null, 2)}
 
-AVAILABLE TOOLS (only use these):
+DOMAIN VOCABULARY (canonical names you MUST use):
+${domainVocab}
+
+AVAILABLE TOOLS (only use these EXACT names — never invent tools):
 ${toolList}
 
 WORKFLOW: max ${this.config.maxSteps} steps. Limit destructive ops to necessary minimum.`;
@@ -159,10 +215,22 @@ WORKFLOW: max ${this.config.maxSteps} steps. Limit destructive ops to necessary 
     const createdAt = Date.now();
 
     let parsed: any;
+    const cleanedContent = this.stripJsonFence(content);
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(cleanedContent);
     } catch (err) {
-      return this.fallbackPlan(ctx, 'JSON parse failed');
+      // Try one more time with an aggressive extractor: locate first '{' and
+      // matching '}' (allowing nested braces).
+      const innerJson = this.extractFirstJsonObject(cleanedContent);
+      if (innerJson) {
+        try {
+          parsed = JSON.parse(innerJson);
+        } catch {
+          return this.fallbackPlan(ctx, 'JSON parse failed after re-extract');
+        }
+      } else {
+        return this.fallbackPlan(ctx, 'JSON parse failed');
+      }
     }
 
     if (parsed?.clarify === true) {
@@ -269,6 +337,67 @@ WORKFLOW: max ${this.config.maxSteps} steps. Limit destructive ops to necessary 
       destructiveOpsCount: 0,
       createdAt: Date.now(),
     };
+  }
+
+  /**
+   * Strip JSON code fences some Groq/Llama models wrap their output in:
+   *   ```json
+   *   { ... }
+   *   ```
+   * also removes stray prose around the JSON.
+   */
+  private stripJsonFence(content: string): string {
+    if (!content) return '';
+    let out = content.trim();
+
+    // Strip ```json ... ``` or ``` ... ``` fences.
+    const fenceMatch = out.match(/^```(?:json|JSON)?\s*([\s\S]*?)```\s*$/);
+    if (fenceMatch) {
+      out = fenceMatch[1].trim();
+    }
+
+    // Remove a leading leading prose paragraph before the first '{'.
+    const openIdx = out.indexOf('{');
+    const closeIdx = out.lastIndexOf('}');
+    if (openIdx !== -1 && closeIdx !== -1 && closeIdx > openIdx) {
+      out = out.substring(openIdx, closeIdx + 1);
+    }
+    return out.trim();
+  }
+
+  /**
+   * Best-effort extractor for the first balanced JSON object in `content`.
+   * Avoids the case where the model emits multiple JSON blocks.
+   */
+  private extractFirstJsonObject(content: string): string | null {
+    if (!content) return null;
+    const start = content.indexOf('{');
+    if (start === -1) return null;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < content.length; i++) {
+      const ch = content[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) return content.substring(start, i + 1);
+      }
+    }
+    return null;
   }
 }
 
