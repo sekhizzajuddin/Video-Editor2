@@ -558,7 +558,11 @@ export function SettingsModal() {
                         const a = document.createElement('a');
                         a.href = url;
                         a.download = 'procut-shortcuts.json';
+                        document.body.appendChild(a);
                         a.click();
+                        document.body.removeChild(a);
+                        // FIX C3: release blob URL to prevent memory leak
+                        setTimeout(() => URL.revokeObjectURL(url), 0);
                       }}
                       className="px-2.5 py-1 text-[10px] text-amber-400 hover:text-amber-300 border border-amber-900/30 hover:bg-amber-900/20 rounded transition-colors"
                     >Export</button>

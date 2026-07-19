@@ -3529,6 +3529,10 @@ function TransitionCard({ transition }: TransitionCardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isHovered, setIsHovered] = useState(false);
   const animationRef = useRef<number | null>(null);
+  // FIX H8: keep latest transition so the rAF closure doesn't go stale
+  // when the parent re-renders with a new transition object.
+  const transitionRef = useRef(transition);
+  useEffect(() => { transitionRef.current = transition; }, [transition]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -3550,7 +3554,7 @@ function TransitionCard({ transition }: TransitionCardProps) {
 
     const draw = (t: number) => {
       ctx.clearRect(0, 0, W, H);
-      const nameLower = transition.name.toLowerCase();
+      const nameLower = transitionRef.current.name.toLowerCase();
 
       const drawImageCover = (img: HTMLImageElement, opacity: number, scaleMultiplier: number = 1, tx: number = 0, ty: number = 0) => {
         if (!img.complete || img.naturalWidth === 0) {
@@ -3836,7 +3840,7 @@ function TransitionCard({ transition }: TransitionCardProps) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isHovered]);
+  }, [isHovered, transition]);
 
   return (
     <div

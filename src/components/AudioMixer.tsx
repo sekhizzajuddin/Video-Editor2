@@ -334,6 +334,24 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // FIX H12: visibility gate. Don't burn CPU when the mixer tab is hidden
+    // or the canvas is scrolled off-screen.
+    let isVisible = canvas.getBoundingClientRect().width > 0;
+    let stopRequested = false;
+    const container = canvas.parentElement;
+    let observer: IntersectionObserver | null = null;
+    if (container && 'IntersectionObserver' in window) {
+      observer = new IntersectionObserver(
+        ([entry]) => { isVisible = entry.isIntersecting; },
+        { threshold: 0.01 }
+      );
+      observer.observe(container);
+    }
+    const onVisibilityChange = () => {
+      if (!document.hidden && isVisible) drawMeter();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     const drawMeter = () => {
       const analyserL = (window as any).procutMasterAnalyserL;
       const analyserR = (window as any).procutMasterAnalyserR;
@@ -457,13 +475,22 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
       const peakYR = h - (normPeakR * h);
       ctx.fillRect(w / 2 + 1, Math.max(0, peakYR - 1), w / 2 - 1, 2);
 
+      // FIX H12: skip CPU work when not visible / tab hidden
+      if (stopRequested || !isVisible || document.hidden) {
+        animationRef.current = requestAnimationFrame(drawMeter);
+        return;
+      }
+
       animationRef.current = requestAnimationFrame(drawMeter);
     };
 
     animationRef.current = requestAnimationFrame(drawMeter);
 
     return () => {
+      stopRequested = true;
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      if (observer) observer.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
 

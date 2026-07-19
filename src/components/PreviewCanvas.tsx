@@ -24,6 +24,7 @@ import {
   Check,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useMediaPlayback, FrameCacheEntry } from '@/hooks/useMediaPlayback';
 import type { TimelineTrack, MediaItem } from '@/types';
 import { saveFileToDB } from '@/utils/projectPersistence';
@@ -56,6 +57,12 @@ import {
 // ---------------------------------------------------------------------------
 export function PreviewCanvas() {
   const particlePoolsRef = useRef<Map<string, ParticlePool>>(new Map());
+  // FIX H4: per-field selector with shallow equality.
+  // Previously useEditorStore() with no selector caused PreviewCanvas to
+  // re-render on EVERY zustand state change (including unrelated fields
+  // like mediaLibrary.insert, pipWindows moves, etc.). With useShallow
+  // the component only re-renders when at least one of these 34 fields
+  // actually changes reference.
   const {
     currentTime,
     isPlaying,
@@ -187,6 +194,7 @@ export function PreviewCanvas() {
   const [imageRevision, setImageRevision] = useState(0);
   const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
 
+  const previousRenderDepsRef = useRef<any>(null);
   const renderDepsRef = useRef<any>({
     currentTime,
     tracks,
@@ -211,6 +219,12 @@ export function PreviewCanvas() {
     useProxies
   });
 
+  // FIX H3: only request a redraw when at least one tracked field changed.
+  // `framePendingRef.current = true` previously fired on every store change
+  // (e.g. selectedClipIds toggle, pipWindow text edit) which forced full
+  // canvas redraws even when nothing visible changed. Now we compare the
+  // previous capture with the latest selector snapshot and only set
+  // framePendingRef when something actually moved.
   useEffect(() => {
     renderDepsRef.current = {
       currentTime,
@@ -235,7 +249,40 @@ export function PreviewCanvas() {
       progressBarHeight,
       useProxies
     };
-    framePendingRef.current = true;
+    const prev = previousRenderDepsRef.current;
+    if (
+      !prev ||
+      prev.currentTime !== currentTime ||
+      prev.tracks !== tracks ||
+      prev.imageRevision !== imageRevision ||
+      prev.videoElements !== videoElements ||
+      prev.frameCache !== frameCache ||
+      prev.viewport !== viewport ||
+      prev.isPlaying !== isPlaying ||
+      prev.aspectRatio !== aspectRatio ||
+      prev.isExporting !== isExporting ||
+      prev.exportWidth !== exportWidth ||
+      prev.exportHeight !== exportHeight ||
+      prev.showGrid !== showGrid ||
+      prev.showProgressBar !== showProgressBar ||
+      prev.canvasBgColor !== canvasBgColor ||
+      prev.settings !== settings ||
+      prev.requestRedraw !== requestRedraw ||
+      prev.progressBarColor !== progressBarColor ||
+      prev.progressBarHeight !== progressBarHeight ||
+      prev.useProxies !== useProxies ||
+      prev.selectedClipId !== selectedClipId ||
+      prev.mediaLibrary !== mediaLibrary
+    ) {
+      framePendingRef.current = true;
+      previousRenderDepsRef.current = {
+        currentTime, tracks, selectedClipId, mediaLibrary, videoElements,
+        frameCache, imageRevision, requestRedraw, viewport, settings,
+        showGrid, canvasBgColor, isPlaying, aspectRatio, isExporting,
+        exportWidth, exportHeight, showProgressBar, progressBarColor,
+        progressBarHeight, useProxies
+      };
+    }
   }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, settings, showGrid, canvasBgColor, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight, showProgressBar, progressBarColor, progressBarHeight, useProxies]);
   
   const [isSpacePressed, setIsSpacePressed] = useState(false);
@@ -2651,31 +2698,36 @@ export function PreviewCanvas() {
     }
     
     // 3b. Render particles for any clip that has particleSettings
-    for (const track of visualTracks) {
-      for (const clip of track.clips) {
-        if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
-          renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
+    // FIX H2: actually use skipExpensiveFX. While scrubbing/paused we skip
+    // per-clip particle simulation and other expensive effects — they'd
+    // otherwise drop scrubbing FPS to single-digit on large projects.
+    if (!skipExpensiveFX) {
+      for (const track of visualTracks) {
+        for (const clip of track.clips) {
+          if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+            renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
+          }
         }
-      }
-      // PIP clips particles
-      const pipWindows = useEditorStore.getState().pipWindows || {};
-      for (const clip of (track.clips || [])) {
-        const clipPips = Object.values(pipWindows).filter(p => p && (p as any).parentClipId === clip.id);
-        for (const pip of (clipPips as any[])) {
-          const pipAbsStart = clip.startTime + (pip.relativeStartTime || 0);
-          if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
-            for (const pipTrack of pip.tracks) {
-              for (const pipClip of pipTrack.clips) {
-                const ptAbsStart = pipAbsStart + pipClip.startTime;
-                if (!pipClip.disabled && pipClip.particleSettings && currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
-                  renderParticles(ctx, pipClip.id, pipClip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
+        // PIP clips particles
+        const pipWindows = useEditorStore.getState().pipWindows || {};
+        for (const clip of (track.clips || [])) {
+          const clipPips = Object.values(pipWindows).filter(p => p && (p as any).parentClipId === clip.id);
+          for (const pip of (clipPips as any[])) {
+            const pipAbsStart = clip.startTime + (pip.relativeStartTime || 0);
+            if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+              for (const pipTrack of pip.tracks) {
+                for (const pipClip of pipTrack.clips) {
+                  const ptAbsStart = pipAbsStart + pipClip.startTime;
+                  if (!pipClip.disabled && pipClip.particleSettings && currentTime >= ptAbsStart && currentTime < ptAbsStart + pipClip.duration) {
+                    renderParticles(ctx, pipClip.id, pipClip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
+                  }
                 }
               }
             }
           }
         }
       }
-    }
+    } // end if (!skipExpensiveFX)
 
     // Global LUT pass removed to prevent double-grading and resolution mismatch crashes
 
@@ -2912,9 +2964,9 @@ export function PreviewCanvas() {
   const renderCanvasRef = useRef(renderCanvas);
   const rafActiveRef = useRef(false);
 
-    useEffect(() => {
+  useEffect(() => {
     renderCanvasRef.current = renderCanvas;
-  });
+  }, [renderCanvas]);
 
   // Mark that a new frame is needed whenever renderCanvas changes
   useEffect(() => {

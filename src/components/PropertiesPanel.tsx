@@ -793,16 +793,28 @@ export function PropertiesPanel() {
         e.clientX >= rect.left && e.clientX <= rect.right &&
         e.clientY >= rect.top && e.clientY <= rect.bottom;
 
+      // FIX H18: re-read selectedClip from the store at click time so we don't
+      // write to a stale clip id if selection changed while the picker was open.
+      const liveClip = useEditorStore.getState().selectedClipId
+        ? useEditorStore.getState().tracks
+            .flatMap(t => t.clips)
+            .find(c => c.id === useEditorStore.getState().selectedClipId)
+        : null;
+
       if (isOnCanvas) {
         e.preventDefault();
         e.stopPropagation();
-        const color = sampleCanvasColor(canvas, e.clientX, e.clientY);
-        const existing = selectedClip?.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
-        storeUpdateClip(selectedClip!.id, {
-          chromaKey: { ...existing, color }
-        });
-        useEditorStore.getState().saveSnapshot('Chroma Color Picked');
-        toast.success(`🎨 Color picked: ${color}`);
+        if (!liveClip) {
+          toast.info('Color picking cancelled — no clip selected.');
+        } else {
+          const color = sampleCanvasColor(canvas, e.clientX, e.clientY);
+          const existing = liveClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+          storeUpdateClip(liveClip.id, {
+            chromaKey: { ...existing, color }
+          });
+          useEditorStore.getState().saveSnapshot('Chroma Color Picked');
+          toast.success(`🎨 Color picked: ${color}`);
+        }
       } else {
         toast.info('Color picking cancelled');
       }

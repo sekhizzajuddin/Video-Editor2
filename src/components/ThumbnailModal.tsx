@@ -20,43 +20,57 @@ export function ThumbnailModal({ isOpen, onClose, imageData }: ThumbnailModalPro
   const [textLayers, setTextLayers] = useState<TextLayer[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const [imageReady, setImageReady] = useState(false);
 
+  // Reset when closed
   useEffect(() => {
     if (!isOpen) {
-      setTextLayers([]); // Reset when closed
+      setTextLayers([]);
+      imageRef.current = null;
+      setImageReady(false);
     }
   }, [isOpen]);
 
+  // FIX C5: Load image ONCE (decode is expensive on a 1080p JPEG).
+  // Previously the effect re-ran on every textLayers change, forcing the browser
+  // to re-decode the full image on each keystroke.
   useEffect(() => {
-    if (isOpen && imageData && canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
-      if (!ctx) return;
+    if (!isOpen || !imageData) return;
+    const img = new Image();
+    img.onload = () => {
+      imageRef.current = img;
+      setImageReady(true);
+    };
+    img.src = imageData;
+    return () => {
+      img.onload = null;
+    };
+  }, [isOpen, imageData]);
 
-      const img = new Image();
-      img.onload = () => {
-        canvasRef.current!.width = img.width;
-        canvasRef.current!.height = img.height;
-        ctx.drawImage(img, 0, 0);
-
-        // Draw text layers
-        textLayers.forEach(layer => {
-          ctx.font = `bold ${layer.fontSize}px Impact, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          
-          // Outline
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = layer.fontSize * 0.15;
-          ctx.strokeText(layer.text, layer.x, layer.y);
-          
-          // Fill
-          ctx.fillStyle = layer.color;
-          ctx.fillText(layer.text, layer.x, layer.y);
-        });
-      };
-      img.src = imageData;
-    }
-  }, [isOpen, imageData, textLayers]);
+  // FIX C5: Re-draw text overlays cheaply when textLayers change.
+  // We composite from the already-decoded bitmap. No re-decode.
+  useEffect(() => {
+    if (!isOpen || !imageReady || !canvasRef.current || !imageRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const img = imageRef.current;
+    if (canvas.width !== img.width) canvas.width = img.width;
+    if (canvas.height !== img.height) canvas.height = img.height;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+    textLayers.forEach(layer => {
+      ctx.font = `bold ${layer.fontSize}px Impact, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = layer.fontSize * 0.15;
+      ctx.strokeText(layer.text, layer.x, layer.y);
+      ctx.fillStyle = layer.color;
+      ctx.fillText(layer.text, layer.x, layer.y);
+    });
+  }, [isOpen, imageReady, textLayers]);
 
   if (!isOpen || !imageData) return null;
 

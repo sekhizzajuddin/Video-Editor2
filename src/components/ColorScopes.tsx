@@ -65,16 +65,43 @@ export function ColorScopes({ canvasRef }: ColorScopesProps) {
     };
   }, [showScopes, isPlaying, activeScope]);
 
-  // If paused, we still want to draw when the user scrubs the timeline
+  // FIX C6: paused-state polling — was an unbounded 10Hz loop with no
+  // visibility gate. Now pause-polling stops the moment the canvas is hidden
+  // (e.g. user switches tab/panel away from the preview).
   useEffect(() => {
     if (!showScopes || isPlaying) return;
-    let timer: NodeJS.Timeout;
+
+    const container = vscopeRef.current?.parentElement?.parentElement ?? null;
+    let isVisible = true;
+    let observer: IntersectionObserver | null = null;
+    if (container && 'IntersectionObserver' in window) {
+      observer = new IntersectionObserver(
+        ([entry]) => { isVisible = entry.isIntersecting; },
+        { threshold: 0.01 }
+      );
+      observer.observe(container);
+    }
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
     const poll = () => {
-      drawScopes();
+      if (stopped) return;
+      if (isVisible) drawScopes();
       timer = setTimeout(poll, 100);
     };
     poll();
-    return () => clearTimeout(timer);
+
+    const onVis = () => {
+      if (!document.hidden && isVisible) drawScopes();
+    };
+    document.addEventListener('visibilitychange', onVis);
+
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      if (observer) observer.disconnect();
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [showScopes, isPlaying, activeScope]);
 
   const drawVectorscope = (data: Uint8ClampedArray, w: number, h: number) => {

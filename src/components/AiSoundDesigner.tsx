@@ -358,12 +358,19 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
       setCues(prev => prev.map((c, idx) => {
         const posInRegen = indices.indexOf(idx);
         if (posInRegen === -1) return c;
-        
+
         const audioBlob = generatedBlobs[posInRegen];
         if (!audioBlob || audioBlob.size === 0) return c;
-        
+
         const blobUrl = URL.createObjectURL(audioBlob);
-        
+
+        // FIX C1: Revoke previous blob URL before overwriting to prevent memory leak
+        c.options?.forEach(o => {
+          if (o?.previewUrl?.startsWith('blob:')) {
+            try { URL.revokeObjectURL(o.previewUrl); } catch {}
+          }
+        });
+
         return {
           ...c,
           trimOffset: 0,
@@ -612,7 +619,11 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
             name: option.name.length > 28 ? option.name.substring(0, 28) + '…' : option.name,
             type: 'audio' as const,
             duration: option.duration,
-            url: URL.createObjectURL(blob),
+            // FIX: avoid creating a duplicate blob URL here when one already exists;
+            // persistence uses the File object, so prefer reusing the option's previewUrl.
+            url: option.previewUrl && option.previewUrl.startsWith('blob:')
+              ? option.previewUrl
+              : URL.createObjectURL(blob),
             createdAt: now
           };
           addMedia(mediaItem, file);

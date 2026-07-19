@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Sparkles, Image as ImageIcon, Video, Wand2, Download, Plus, Trash2 } from 'lucide-react';
 import { fetchOpenRouterModels, generateAIVideo, checkVideoJobStatus } from '../utils/openRouterVideo';
 import { OpenRouterModel } from '../types';
@@ -19,6 +19,18 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
   const [loadingModels, setLoadingModels] = useState(true);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [customModelId, setCustomModelId] = useState<string>(() => localStorage.getItem('openRouterCustomModelId') || '');
+
+  // FIX C7: ref to active poll handle so we can clearInterval on unmount.
+  const pollHandleRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollHandleRef.current !== null) {
+        clearInterval(pollHandleRef.current);
+        pollHandleRef.current = null;
+      }
+    };
+  }, []);
   
   const [prompt, setPrompt] = useState('');
   const [referenceUrl, setReferenceUrl] = useState('');
@@ -145,18 +157,21 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
 
   const pollStatus = async (id: string) => {
     if (!workingApiKey) return;
-    
+
     let attempts = 0;
     const maxAttempts = 60; // 60 * 5s = 5 minutes timeout
-    
+
+    // FIX C7: keep an external handle so unmount / state-toggle can clearInterval.
+    // Was previously only cleared from inside its own callback.
     const interval = setInterval(async () => {
       attempts++;
       setAIVideoGenerationState({ aiVideoProgress: Math.min(95, 10 + (attempts * 1.5)) });
-      
+
       const { status, resultUrl, error } = await checkVideoJobStatus(id, workingApiKey);
-      
+
       if (status === 'completed' && resultUrl) {
         clearInterval(interval);
+        pollHandleRef.current = null;
         setAIVideoGenerationState({
           aiVideoResultUrl: resultUrl,
           aiVideoProgress: 100,
@@ -166,6 +181,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
         toast.success('AI Generation complete!');
       } else if (status === 'failed' || error || attempts >= maxAttempts) {
         clearInterval(interval);
+        pollHandleRef.current = null;
         setAIVideoGenerationState({
           aiVideoIsGenerating: false,
           aiVideoProgress: 0,
@@ -174,6 +190,8 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
         toast.error(error || 'Generation timed out or failed.');
       }
     }, 5000);
+
+    pollHandleRef.current = interval;
   };
 
   const handleImportToProject = () => {
