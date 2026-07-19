@@ -712,6 +712,119 @@ export function PropertiesPanel() {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const isRamped = selectedClip ? !!(selectedClip.speedRamp && selectedClip.speedRamp.length >= 2) : false;
+  const hexToRgb = (hex: string): [number, number, number] => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)]
+      : [0, 255, 0];
+  };
+
+  const sampleCanvasColor = (canvas: HTMLCanvasElement, clientX: number, clientY: number): string => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((clientX - rect.left) * scaleX)));
+    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((clientY - rect.top) * scaleY)));
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return '#00ff00';
+
+    const pixel = ctx.getImageData(x, y, 1, 1).data;
+    return rgbToHex(pixel[0], pixel[1], pixel[2]);
+  };
+
+  const autoDetectBackgroundColor = (canvas: HTMLCanvasElement): string | null => {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const margin = Math.max(2, Math.floor(Math.min(w, h) * 0.04));
+
+    // Sample 6 points: 4 corners + top/bottom center
+    const coords = [
+      [margin, margin],
+      [w - margin, margin],
+      [margin, h - margin],
+      [w - margin, h - margin],
+      [Math.floor(w / 2), margin],
+      [Math.floor(w / 2), h - margin],
+    ];
+
+    let r = 0, g = 0, b = 0;
+    coords.forEach(([cx, cy]) => {
+      const p = ctx.getImageData(cx, cy, 1, 1).data;
+      r += p[0]; g += p[1]; b += p[2];
+    });
+
+    return rgbToHex(Math.round(r / coords.length), Math.round(g / coords.length), Math.round(b / coords.length));
+  };
+
+  const CHROMA_KEY_PRESETS = [
+    { name: 'Green', hex: '#00ff00' },
+    { name: 'Blue', hex: '#0000ff' },
+    { name: 'Red', hex: '#ff0000' },
+    { name: 'White', hex: '#ffffff' },
+    { name: 'Black', hex: '#000000' },
+    { name: 'Magenta', hex: '#ff00ff' },
+  ];
+
+  // ─── Eyedropper Canvas Interaction ──────────────────────────────────
+  useEffect(() => {
+    if (!isPickingChromaColor) {
+      const canvas = useEditorStore.getState().previewCanvas;
+      if (canvas) canvas.style.cursor = '';
+      return;
+    }
+
+    const canvas = useEditorStore.getState().previewCanvas;
+    if (!canvas) {
+      setIsPickingChromaColor(false);
+      toast.error('Preview canvas not ready. Play the video first.');
+      return;
+    }
+
+    canvas.style.cursor = 'crosshair';
+    toast.info('🖱 Click on the preview canvas to pick a color. Press ESC to cancel.', { duration: 4000 });
+
+    const handleMouseDown = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const isOnCanvas =
+        e.clientX >= rect.left && e.clientX <= rect.right &&
+        e.clientY >= rect.top && e.clientY <= rect.bottom;
+
+      if (isOnCanvas) {
+        e.preventDefault();
+        e.stopPropagation();
+        const color = sampleCanvasColor(canvas, e.clientX, e.clientY);
+        const existing = selectedClip?.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+        storeUpdateClip(selectedClip!.id, {
+          chromaKey: { ...existing, color }
+        });
+        useEditorStore.getState().saveSnapshot('Chroma Color Picked');
+        toast.success(`🎨 Color picked: ${color}`);
+      } else {
+        toast.info('Color picking cancelled');
+      }
+      setIsPickingChromaColor(false);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPickingChromaColor(false);
+        toast.info('Color picking cancelled');
+      }
+    };
+
+    document.addEventListener('mousedown', handleMouseDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+      canvas.style.cursor = '';
+    };
+  }, [isPickingChromaColor, selectedClip?.id, storeUpdateClip]);
 
   useEffect(() => {
     if (draggingIndex === null || !selectedClip) return;
@@ -1677,119 +1790,6 @@ export function PropertiesPanel() {
     return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
   };
 
-  const hexToRgb = (hex: string): [number, number, number] => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result
-      ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)]
-      : [0, 255, 0];
-  };
-
-  const sampleCanvasColor = (canvas: HTMLCanvasElement, clientX: number, clientY: number): string => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((clientX - rect.left) * scaleX)));
-    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((clientY - rect.top) * scaleY)));
-
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return '#00ff00';
-
-    const pixel = ctx.getImageData(x, y, 1, 1).data;
-    return rgbToHex(pixel[0], pixel[1], pixel[2]);
-  };
-
-  const autoDetectBackgroundColor = (canvas: HTMLCanvasElement): string | null => {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
-
-    const w = canvas.width;
-    const h = canvas.height;
-    const margin = Math.max(2, Math.floor(Math.min(w, h) * 0.04));
-
-    // Sample 6 points: 4 corners + top/bottom center
-    const coords = [
-      [margin, margin],
-      [w - margin, margin],
-      [margin, h - margin],
-      [w - margin, h - margin],
-      [Math.floor(w / 2), margin],
-      [Math.floor(w / 2), h - margin],
-    ];
-
-    let r = 0, g = 0, b = 0;
-    coords.forEach(([cx, cy]) => {
-      const p = ctx.getImageData(cx, cy, 1, 1).data;
-      r += p[0]; g += p[1]; b += p[2];
-    });
-
-    return rgbToHex(Math.round(r / coords.length), Math.round(g / coords.length), Math.round(b / coords.length));
-  };
-
-  const CHROMA_KEY_PRESETS = [
-    { name: 'Green', hex: '#00ff00' },
-    { name: 'Blue', hex: '#0000ff' },
-    { name: 'Red', hex: '#ff0000' },
-    { name: 'White', hex: '#ffffff' },
-    { name: 'Black', hex: '#000000' },
-    { name: 'Magenta', hex: '#ff00ff' },
-  ];
-
-  // ─── Eyedropper Canvas Interaction ──────────────────────────────────
-  useEffect(() => {
-    if (!isPickingChromaColor) {
-      const canvas = useEditorStore.getState().previewCanvas;
-      if (canvas) canvas.style.cursor = '';
-      return;
-    }
-
-    const canvas = useEditorStore.getState().previewCanvas;
-    if (!canvas) {
-      setIsPickingChromaColor(false);
-      toast.error('Preview canvas not ready. Play the video first.');
-      return;
-    }
-
-    canvas.style.cursor = 'crosshair';
-    toast.info('🖱 Click on the preview canvas to pick a color. Press ESC to cancel.', { duration: 4000 });
-
-    const handleMouseDown = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const isOnCanvas =
-        e.clientX >= rect.left && e.clientX <= rect.right &&
-        e.clientY >= rect.top && e.clientY <= rect.bottom;
-
-      if (isOnCanvas) {
-        e.preventDefault();
-        e.stopPropagation();
-        const color = sampleCanvasColor(canvas, e.clientX, e.clientY);
-        const existing = selectedClip?.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
-        storeUpdateClip(selectedClip!.id, {
-          chromaKey: { ...existing, color }
-        });
-        useEditorStore.getState().saveSnapshot('Chroma Color Picked');
-        toast.success(`🎨 Color picked: ${color}`);
-      } else {
-        toast.info('Color picking cancelled');
-      }
-      setIsPickingChromaColor(false);
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsPickingChromaColor(false);
-        toast.info('Color picking cancelled');
-      }
-    };
-
-    document.addEventListener('mousedown', handleMouseDown, true);
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown, true);
-      document.removeEventListener('keydown', handleKeyDown);
-      canvas.style.cursor = '';
-    };
-  }, [isPickingChromaColor, selectedClip?.id, storeUpdateClip]);
 
   return (
     <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
