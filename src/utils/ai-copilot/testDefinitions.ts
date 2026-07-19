@@ -123,11 +123,11 @@ const importTests: TestDefinition[] = [
     runner: async () => {
       // Static check — require probing utilities exist
       try {
-        const { inferMediaType } = await import('../mediaProbe');
-        const sample = inferMediaType?.({ type: 'video/mp4' } as any);
+        const m: any = await import('../mediaProbe');
+        const sample = m?.detectMediaType?.({ type: 'video/mp4' } as any);
         return sample
-          ? ok('mediaProbe.inferMediaType reachable')
-          : fail('inferMediaType returned undefined');
+          ? ok('mediaProbe.detectMediaType reachable')
+          : fail('detectMediaType returned undefined');
       } catch (err: any) {
         return fail(`mediaProbe import failed: ${err?.message ?? err}`);
       }
@@ -955,7 +955,11 @@ const exportTests: TestDefinition[] = [
     category: 'export',
     runner: async () => {
       try {
-        const m = await import('../../../packages/core/src/export/export-engine');
+        // Use string-cast to bypass TS static analysis. packages/core is
+        // a dev-only test target loaded at runtime; not part of production
+        // bundle, so type-checking its full tree would break builds.
+        const path = '../../../packages/core/src/export/export-engine';
+        const m: any = await import(/* @vite-ignore */ path);
         return Object.keys(m || {}).length > 0
           ? ok('export-engine module loaded')
           : fail('Module empty');
@@ -971,7 +975,8 @@ const exportTests: TestDefinition[] = [
     category: 'export',
     runner: async () => {
       try {
-        const m = await import('../../../packages/core/src/device/export-estimator');
+        const path: any = '../../../packages/core/src/device/export-estimator';
+        const m: any = await import(/* @vite-ignore */ path);
         return Object.keys(m || {}).length > 0
           ? ok('export-estimator module loaded')
           : fail('Module empty');
@@ -992,7 +997,7 @@ const exportTests: TestDefinition[] = [
         const after = store.showExportModal ?? false;
         return after === true && before === false
           ? ok('Export modal shown')
-          : `unexpected: before=${before} after=${after}`;
+          : fail(`unexpected: before=${before} after=${after}`);
       } catch (err: any) {
         return fail(`export modal failed: ${err?.message ?? err}`);
       }
@@ -1004,7 +1009,8 @@ const exportTests: TestDefinition[] = [
     category: 'export',
     runner: async () => {
       try {
-        const m = await import('../../../packages/core/src/export/types');
+        const path: any = '../../../packages/core/src/export/types';
+        const m: any = await import(/* @vite-ignore */ path);
         return Object.keys(m || {}).length > 0
           ? ok('export/types loaded')
           : fail('Module empty');

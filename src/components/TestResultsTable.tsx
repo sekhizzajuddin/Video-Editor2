@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronUp, Clock } from 'lucide-react';
-import type { AISelfTestReport, AISelfTestResult } from '../../types';
-import { CATEGORY_LABELS } from '../../utils/ai-copilot/TestReportGenerator';
+import type { AISelfTestReport, AISelfTestResult } from '../types';
+import { CATEGORY_LABELS } from '../utils/ai-copilot/TestReportGenerator';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 
@@ -87,9 +87,9 @@ export const TestResultsTable: React.FC<TestResultsTableProps> = ({ report, isRu
 
       {/* Categories */}
       <div className="border-b border-white/10">
-        {Object.entries(report.byCategory).map(([cat, stats]) => {
+        {(Object.entries(report.byCategory) as [string, { passed: number; failed: number; total: number }][]).map(([cat, stats]) => {
           const isExpanded = expanded.has(`cat-${cat}`);
-          const testResults = report.results.filter((r) => r.category === cat);
+          const testResults = report.results.filter((r: AISelfTestResult) => r.category === cat);
           return (
             <div key={cat} className="border-b border-white/5 last:border-b-0">
               <button
@@ -111,7 +111,7 @@ export const TestResultsTable: React.FC<TestResultsTableProps> = ({ report, isRu
 
               {isExpanded && (
                 <div className="px-3 pb-2 space-y-1">
-                  {testResults.map((r) => {
+                  {testResults.map((r: AISelfTestResult) => {
                     const testKey = `${r.testId}-${cat}`;
                     return (
                       <div
@@ -166,7 +166,7 @@ export const TestResultsTable: React.FC<TestResultsTableProps> = ({ report, isRu
               ❌ {report.notWorkingFeatures.length} Not Working
             </span>
             <div className="mt-1.5 space-y-0.5">
-              {report.notWorkingFeatures.map((f, i) => (
+              {report.notWorkingFeatures.map((f: string, i: number) => (
                 <div key={i} className="text-[10px] text-red-300/70 font-mono">
                   • {f}
                 </div>

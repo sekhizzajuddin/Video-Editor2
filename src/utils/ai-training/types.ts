@@ -66,6 +66,9 @@ export interface ConversationContext {
   recentActions: string[];
   userIntent?: string;
   clipboard?: { type: 'clip' | 'media' | 'effect'; data: any; };
+  mediaLibrary?: any[]; // Phase 5: optional media library snapshot for matching
+  failedStepSummary?: any[];
+  lastFailure?: string;
 }
 
 export interface IntentPattern {

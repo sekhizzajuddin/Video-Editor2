@@ -13,7 +13,7 @@ const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite";
 
 export class PersonSegmentationEngine {
-  private segmenter: ImageSegmenter | null = null;
+  private segmenter: any = null;
   private initialized = false;
   private initializing: Promise<void> | null = null;
   private cachedMask: SegmentationResult | null = null;
@@ -91,10 +91,10 @@ export class PersonSegmentationEngine {
 
     let rawMask: Float32Array | null = null;
 
-    this.segmenter.segmentForVideo(this.segCanvas, Math.round(now), (result) => {
+    this.segmenter.segmentForVideo(this.segCanvas, Math.round(now), (result: any) => {
       if (result.confidenceMasks && result.confidenceMasks.length > 0) {
-        const labels = this.segmenter?.getLabels() ?? [];
-        const personLabelIndex = labels.findIndex((label) =>
+        const labels = (this.segmenter as any)?.getLabels() ?? [];
+        const personLabelIndex = labels.findIndex((label: any) =>
           /foreground|human|person|selfie/i.test(label),
         );
         const foregroundMaskIndex =

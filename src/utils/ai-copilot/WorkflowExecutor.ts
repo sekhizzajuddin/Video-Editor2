@@ -10,9 +10,9 @@ import { aiPlanGenerator } from './AIPlanGenerator';
 import { subAgentRouter, type SubAgent } from './SubAgents';
 
 export interface ExecutorConfig {
-  maxIterations: number;
-  maxExecutionMs: number;
-  allowReplan: boolean;
+  maxIterations?: number;
+  maxExecutionMs?: number;
+  allowReplan?: boolean;
   requestConfirmation: (step: AIToolStep) => Promise<boolean>;
   onStepUpdate?: (step: AIToolStep, index: number) => void;
   onPhaseChange?: (phase: ExecutionPhase) => void;
@@ -41,8 +41,19 @@ export interface ExecutionContext {
   }>;
 }
 
+interface NormalizedConfig {
+  maxIterations: number;
+  maxExecutionMs: number;
+  allowReplan: boolean;
+  requestConfirmation: (step: AIToolStep) => Promise<boolean>;
+  onStepUpdate?: (step: AIToolStep, index: number) => void;
+  onPhaseChange?: (phase: ExecutionPhase) => void;
+  apiKey?: string;
+  model?: string;
+}
+
 export class WorkflowExecutor {
-  private config: ExecutorConfig;
+  private config: NormalizedConfig;
   private aborted = false;
   private startedAt = 0;
 
@@ -128,7 +139,7 @@ export class WorkflowExecutor {
           const failed = this.markStepFailed(step, pre.reason ?? 'precondition failed');
           results.push(failed);
           this.config.onStepUpdate?.(failed, i);
-          lastError = pre.reason;
+          lastError = pre.reason ?? null;
           lastFailedStep = failed;
           // Replan-able: store failed step
           break;
@@ -139,7 +150,7 @@ export class WorkflowExecutor {
         this.config.onStepUpdate?.(result, i);
 
         if (result.status === 'failed' && result.requiresConfirmation === false) {
-          lastError = result.error;
+          lastError = result.error ?? null;
           lastFailedStep = result;
           break;
         }
@@ -361,14 +372,17 @@ export function createExecutor(deps: {
   onPhaseChange?: (phase: ExecutionPhase) => void;
   model?: string;
   maxIterations?: number;
+  allowReplan?: boolean;
+  maxExecutionMs?: number;
 }): WorkflowExecutor {
   return new WorkflowExecutor({
     apiKey: deps.apiKey,
     model: deps.model,
-    allowReplan: true,
+    allowReplan: deps.allowReplan ?? true,
     requestConfirmation: deps.requestConfirmation,
     onStepUpdate: deps.onStepUpdate,
     onPhaseChange: deps.onPhaseChange,
     maxIterations: deps.maxIterations ?? 2,
+    maxExecutionMs: deps.maxExecutionMs ?? 120000,
   });
 }
