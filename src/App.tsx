@@ -587,7 +587,9 @@ function App() {
       <SettingsModal />
       <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />
       {showCopilot ? (
-        <AiCopilot onClose={() => setShowCopilot(false)} />
+        <ErrorBoundary fallback={<div />} key="ai-copilot">
+          <AiCopilot onClose={() => setShowCopilot(false)} />
+        </ErrorBoundary>
       ) : (
         <button
           onClick={() => setShowCopilot(true)}

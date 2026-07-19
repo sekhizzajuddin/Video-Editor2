@@ -250,11 +250,16 @@ export const executeAITool = (name: string, args: any) => {
       // producing dense overlap that overloads timeline rendering and triggers
       // React error #310 elsewhere. Auto-stagger onto V1 if startTime is at
       // 0 or overlapping with an existing clip.
-      const requestedStart = typeof args.startTime === 'number' ? args.startTime : null;
+      const requestedStartRaw = args.startTime;
+      const requestedStart =
+        typeof requestedStartRaw === 'number' && Number.isFinite(requestedStartRaw) &&
+          requestedStartRaw >= 0
+          ? requestedStartRaw
+          : null;
       const allClips = (store.tracks ?? []).flatMap((t: any) => (t.clips ?? []));
 
-      let resolvedStart = requestedStart;
-      if (resolvedStart === null || Number.isNaN(resolvedStart) || resolvedStart < 0) {
+      let resolvedStart: number | null = requestedStart;
+      if (resolvedStart === null) {
         const lastEnd = allClips.reduce(
           (max: number, c: any) => Math.max(max, (c.startTime ?? 0) + (c.duration ?? 0)),
           0
@@ -263,21 +268,26 @@ export const executeAITool = (name: string, args: any) => {
       } else {
         // Detect overlap with existing clips; if so, push just past it.
         let safety = 0;
-        while (safety < 5 && allClips.some((c: any) => {
+        let probeStart = resolvedStart;
+        while (safety < 20 && allClips.some((c: any) => {
           const cs = c.startTime ?? 0;
           const ce = cs + (c.duration ?? 0);
-          return resolvedStart! < ce && resolvedStart! + clipDuration > cs;
+          return probeStart < ce && probeStart + clipDuration > cs;
         })) {
           const maxEnd = allClips
             .filter((c: any) => {
               const cs = c.startTime ?? 0;
               const ce = cs + (c.duration ?? 0);
-              return resolvedStart! < ce && resolvedStart! + clipDuration > cs;
+              return probeStart < ce && probeStart + clipDuration > cs;
             })
-            .reduce((m: number, c: any) => Math.max(m, (c.startTime ?? 0) + (c.duration ?? 0)), 0);
-          resolvedStart = maxEnd;
+            .reduce(
+              (m: number, c: any) => Math.max(m, (c.startTime ?? 0) + (c.duration ?? 0)),
+              probeStart
+            );
+          probeStart = maxEnd + 0.001; // tiny offset to avoid touching boundary
           safety++;
         }
+        resolvedStart = probeStart;
       }
 
       const newClip = {
@@ -299,7 +309,7 @@ export const executeAITool = (name: string, args: any) => {
 
       store.addClip(newClip as any);
       store.recalcTotalDuration();
-      return { success: true, message: `Clip added at ${resolvedStart.toFixed(2)}s` };
+      return { success: true, message: `Clip added at ${(resolvedStart ?? 0).toFixed(2)}s` };
     }
     case 'updateClip': {
       store.updateClip(args.clipId, args.updates);

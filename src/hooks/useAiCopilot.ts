@@ -455,11 +455,14 @@ export const useAiCopilot = () => {
         tokenCharRate: 60,
         onEvent: throttledSet,
       });
+      // Emit stream events one at a time with a microtask yield so React can
+      // flush intermediate state changes. This avoids React error #310 when
+      // many tool calls complete back-to-back (e.g. "Import All Media").
       streamer.start(report.totalSteps);
       for (let i = 0; i < report.steps.length; i++) {
         const s = report.steps[i];
         streamer.emitStep(s, i);
-        await new Promise((r) => setTimeout(r, 80));
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
       streamer.emitComplete(report);
 

@@ -127,7 +127,12 @@ export class WorkflowExecutor {
 
       this.config.onPhaseChange?.('executing');
 
-      // Execute steps with optional confirmation gate
+      // Execute steps with optional confirmation gate.
+      // We add a tiny `requestAnimationFrame` yield between steps so React
+      // commits prior state updates before the next tool mutates the store.
+      // This prevents React error #310 storms when a single workflow
+      // contains many state-mutating steps (e.g. "import all media" = ~20
+      // addClip calls back-to-back).
       const results: AIToolStep[] = [];
       for (let i = 0; i < plan.steps.length; i++) {
         const step = plan.steps[i];
@@ -148,6 +153,17 @@ export class WorkflowExecutor {
         const result = await this.executeStep(step);
         results.push(result);
         this.config.onStepUpdate?.(result, i);
+
+        // Yield to the browser so React can flush commits before the next
+        // mutation. Skipping the yield may produce 50+ pending setState
+        // calls in <16ms and trigger React error #310.
+        if (i < plan.steps.length - 1) {
+          await new Promise<void>((resolve) =>
+            typeof requestAnimationFrame !== 'undefined'
+              ? requestAnimationFrame(() => resolve())
+              : setTimeout(resolve, 16)
+          );
+        }
 
         if (result.status === 'failed' && result.requiresConfirmation === false) {
           lastError = result.error ?? null;

@@ -7,12 +7,18 @@ import { ScrollArea } from './ui/scroll-area';
 import { Card } from './ui/card';
 import { TestResultsTable } from './TestResultsTable';
 import { globalRateLimiter } from '../utils/ai-copilot/RateLimiter';
+import { useRenderGuard } from '../utils/ai-copilot/useRenderGuard';
 
 interface AiCopilotProps {
   onClose: () => void;
 }
 
 export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
+  // Phase 5: Dev-time guard against runaway renders. No-op in normal flow;
+  // if any useEffect/setState combo starts looping, this surfaces a clear
+  // console message + body[data-runaway] attribute for diagnostics.
+  useRenderGuard({ label: 'AiCopilot', windowMs: 1500, maxRenders: 20 });
+
   const [inputText, setInputText] = useState('');
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
@@ -42,23 +48,30 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
   const stats = getTrainingStats();
 
   // Phase 1: Live cooldown countdown ticker — reads from global rate limiter
-  // instead of stale closure, so countdown reflects real cooldown every 1s.
+  // directly each 1s tick. Bug fix: the closure references `interval`; declare
+  // it BEFORE `tick()` runs to avoid TDZ ReferenceError, and avoid setState
+  // re-triggering when the local state hasn't actually changed (would
+  // otherwise produce an extra render per tick).
   useEffect(() => {
     if (!globalRateLimiter.isInCooldown()) {
       setCooldownSeconds(0);
       return;
     }
+    let intervalId: ReturnType<typeof setInterval> | null = null;
     const tick = () => {
       const remaining = globalRateLimiter.getCooldownRemainingMs();
       const seconds = Math.max(0, Math.ceil(remaining / 1000));
-      setCooldownSeconds(seconds);
-      if (seconds <= 0) {
-        clearInterval(interval);
+      setCooldownSeconds((prev) => (prev === seconds ? prev : seconds));
+      if (seconds <= 0 && intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
       }
     };
     tick();
-    const interval = setInterval(tick, 1000);
-    return () => clearInterval(interval);
+    intervalId = setInterval(tick, 1000);
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [rateLimitStatus.isInCooldown]);
 
   // Auto-scroll to bottom when messages update
