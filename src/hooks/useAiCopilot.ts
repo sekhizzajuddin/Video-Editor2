@@ -17,6 +17,17 @@ import {
   ExecutionPhase,
 } from '../utils/ai-copilot/WorkflowExecutor';
 import type { AIWorkflowPlan, AIToolStep, AIWorkflowReport } from '../types';
+import { autoTester, AutoTesterOptions } from '../utils/ai-copilot/AutoTester';
+import { TestReportGenerator } from '../utils/ai-copilot/TestReportGenerator';
+import type { AISelfTestReport } from '../types';
+import {
+  ExecutionStreamer,
+  StreamEvent,
+} from '../utils/ai-copilot/ExecutionStreamer';
+import {
+  VoiceCommandParser,
+  rememberWorkflowReport,
+} from '../utils/ai-copilot/VoiceCommandParser';
 
 function countAllClips(tracks: any[]): number {
   return tracks.reduce((sum, t) => sum + (t?.clips?.length || 0), 0);
@@ -90,8 +101,24 @@ export const useAiCopilot = () => {
   } | null>(null);
   const [rateLimitStatus, setRateLimitStatus] = useState<RateLimitStatus>(globalRateLimiter.getStatus());
   const [workflowProgress, setWorkflowProgress] = useState<WorkflowProgress | null>(null);
+  const [streamingText, setStreamingText] = useState<{
+    messageId: string;
+    text: string;
+    fullText: string;
+    phase: 'phase-1' | 'phase-2' | 'phase-3';
+  } | null>(null);
+  const [selfTestState, setSelfTestState] = useState<{
+    isRunning: boolean;
+    report: AISelfTestReport | null;
+    progress: { done: number; total: number; current: string };
+  }>({
+    isRunning: false,
+    report: null,
+    progress: { done: 0, total: 0, current: '' },
+  });
 
   const executorRef = useRef<WorkflowExecutor | null>(null);
+  const autoTesterAbortedRef = useRef(false);
 
   const editorStore = useEditorStore();
 
@@ -395,6 +422,39 @@ export const useAiCopilot = () => {
         timestamp: Date.now(),
       };
 
+      // Phase 4: Use ExecutionStreamer with throttled consumer for smoother UX
+      const streamMessageId = `stream_${Date.now()}`;
+      const throttledSet = ExecutionStreamer.throttleConsumer(
+        (event: StreamEvent) => {
+          if (!isMountedRef.current) return;
+          if (event.type === 'thinking_chunk') {
+            const chunk = event.data.chunk as string;
+            setStreamingText((prev) =>
+              prev && prev.messageId === streamMessageId
+                ? { ...prev, text: chunk, fullText: event.data.full ?? chunk }
+                : { messageId: streamMessageId, text: chunk, fullText: chunk, phase: 'phase-2' }
+            );
+          } else if (event.type === 'stream_complete') {
+            setStreamingText(null);
+          }
+        },
+        40 // ~25fps; avoids React render storm on rapid chunk stream
+      );
+      const streamer = new ExecutionStreamer({
+        tokenCharRate: 60,
+        onEvent: throttledSet,
+      });
+      streamer.start(report.totalSteps);
+      for (let i = 0; i < report.steps.length; i++) {
+        const s = report.steps[i];
+        streamer.emitStep(s, i);
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      streamer.emitComplete(report);
+
+      // Phase 4: remember full workflow (enables "do that whole workflow")
+      rememberWorkflowReport(report);
+
       // Record primary tool actions in memory
       for (const s of report.steps) {
         if (s.status === 'success') {
@@ -433,6 +493,63 @@ export const useAiCopilot = () => {
       }
     }
   };
+
+  /**
+   * Phase 3: Run autonomous self-test using the AutoTester.
+   * Returns the full report (also stored in selfTestState).
+   * 0 RPM — entirely local execution.
+   */
+  const runSelfTest = useCallback(async (options: AutoTesterOptions = {}) => {
+    autoTesterAbortedRef.current = false;
+    autoTester.abort();
+
+    if (isMountedRef.current) {
+      setSelfTestState({
+        isRunning: true,
+        report: null,
+        progress: { done: 0, total: 0, current: 'Initializing...' },
+      });
+    }
+
+    const unsubscribe = autoTester.subscribe({
+      onProgress: (progress) => {
+        if (isMountedRef.current) {
+          setSelfTestState((prev) => ({ ...prev, progress }));
+        }
+      },
+    });
+
+    try {
+      const report = await autoTester.runReport(options);
+      if (isMountedRef.current) {
+        setSelfTestState({
+          isRunning: false,
+          report,
+          progress: { done: report.totalTests, total: report.totalTests, current: '' },
+        });
+      }
+      return report;
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        setSelfTestState((prev) => ({
+          ...prev,
+          isRunning: false,
+        }));
+      }
+      console.error('[SelfTest] Error:', err);
+      return null;
+    } finally {
+      unsubscribe();
+    }
+  }, []);
+
+  const abortSelfTest = useCallback(() => {
+    autoTesterAbortedRef.current = true;
+    autoTester.abort();
+    if (isMountedRef.current) {
+      setSelfTestState((prev) => ({ ...prev, isRunning: false }));
+    }
+  }, []);
 
   // Phase 1: Local intent handler (ZERO RPM)
   const handleLocalIntent = useCallback(async (intent: ParsedIntent) => {
@@ -521,15 +638,26 @@ export const useAiCopilot = () => {
         break;
       }
       case 'RUN_SELF_TEST': {
-        // Connect to Phase 3 hook (currently Phase 1 stub)
+        // Phase 3: Run the real AutoTester (0 RPM!)
         try {
-          const result = executeAITool('runSelfTest', { scope: 'full' });
-          responseContent = result.success
-            ? `🧪 ${result.message}\n\n_Full implementation arriving in Phase 3._`
-            : `❌ Self-test failed: ${result.error}`;
-          toolCalls = [record('runSelfTest', { scope: 'full' }, result.success ? 'success' : 'failed', result)];
+          const report = await runSelfTest({ scope: 'full' });
+          if (report) {
+            responseContent = TestReportGenerator.toMarkdown(report);
+            toolCalls = [
+              record(
+                'runSelfTest',
+                { scope: 'full' },
+                report.failed === 0 ? 'success' : 'failed',
+                { reportId: Date.now().toString(), passRate: report.passRate }
+              ),
+            ];
+          } else {
+            responseContent = '❌ Self-test failed to run. Check console for details.';
+            toolCalls = [record('runSelfTest', { scope: 'full' }, 'failed', { error: 'runner failed' })];
+          }
         } catch (err) {
           responseContent = `❌ Self-test error: ${err instanceof Error ? err.message : 'Unknown'}`;
+          toolCalls = [record('runSelfTest', { scope: 'full' }, 'failed', { error: responseContent })];
         }
         break;
       }
@@ -614,6 +742,11 @@ export const useAiCopilot = () => {
   }, [pendingConfirmation]);
 
   const sendMessage = async (text: string) => {
+    // Guard BUG #2: refuse re-entry while processing to avoid double-set
+    if (isProcessing) {
+      return;
+    }
+
     const now = Date.now();
     if (now - lastMessageTime.current < RATE_LIMIT_MS) {
       if (isMountedRef.current) {
@@ -630,31 +763,54 @@ export const useAiCopilot = () => {
 
     if (!text.trim()) return;
 
+    // Phase 4: Voice-aware normalization (strip "uh", "um", "like", articles)
+    const normalizedText = VoiceCommandParser.normalize(text);
+    const inputForParsing = normalizedText || text;
+
     // Phase 1: Resolve voice/text references FIRST ("do that again")
-    let resolvedText = text;
+    let resolvedText = inputForParsing;
     let originalAction: any = null;
-    resolvedTextRef.current = text;
-    if (memoryStore.isReferenceCommand(text)) {
-      const ref = memoryStore.resolveReference(text);
-      if (ref.isReference && ref.resolved !== text) {
+    resolvedTextRef.current = inputForParsing;
+
+    // Try tool-specific reference first ("do that import thing again")
+    const validToolNames = aiToolRegistry.map((t) => t.name);
+    const toolRef = memoryStore.parseToolReference(inputForParsing, validToolNames);
+    if (toolRef) {
+      const ref = memoryStore.resolveToolReference(inputForParsing, toolRef);
+      if (ref.isReference && ref.originalAction) {
         resolvedText = ref.resolved;
         originalAction = ref.originalAction;
         resolvedTextRef.current = resolvedText;
-      } else if (ref.isReference && !ref.originalAction) {
-        // Reference but no prior action
-        if (isMountedRef.current) {
-          setMessages(prev => [...prev,
-            { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
-            {
-              id: (Date.now() + 1).toString(),
-              role: 'assistant',
-              content: 'No previous action to repeat. Try something specific first.',
-              timestamp: Date.now(),
-              isLocal: true,
-            }
-          ]);
+      }
+    } else if (memoryStore.isReferenceCommand(inputForParsing)) {
+      // Phase 4: Full voice parser can disambiguate better than regex alone
+      const voiceResult = VoiceCommandParser.parse(inputForParsing);
+      if (voiceResult.isReference && voiceResult.lastAction) {
+        resolvedText = voiceResult.resolved ?? inputForParsing;
+        originalAction = voiceResult.lastAction;
+        resolvedTextRef.current = resolvedText;
+      } else {
+        const ref = memoryStore.resolveReference(inputForParsing);
+        if (ref.isReference && ref.resolved !== inputForParsing) {
+          resolvedText = ref.resolved;
+          originalAction = ref.originalAction;
+          resolvedTextRef.current = resolvedText;
+        } else if (ref.isReference && !ref.originalAction) {
+          // Reference but no prior action
+          if (isMountedRef.current) {
+            setMessages(prev => [...prev,
+              { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
+              {
+                id: (Date.now() + 1).toString(),
+                role: 'assistant',
+                content: 'No previous action to repeat. Try something specific first.',
+                timestamp: Date.now(),
+                isLocal: true,
+              }
+            ]);
+          }
+          return;
         }
-        return;
       }
     }
 
@@ -669,7 +825,7 @@ export const useAiCopilot = () => {
       const waitMs = globalRateLimiter.getCooldownRemainingMs();
       if (isMountedRef.current) {
         setMessages(prev => [...prev,
-          { id: Date.now().toString(), role: 'user', content: resolvedText, timestamp: Date.now() },
+          { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
           {
             id: (Date.now() + 1).toString(),
             role: 'assistant',
@@ -708,7 +864,10 @@ export const useAiCopilot = () => {
     if (userWantsExecutor) {
       return executeViaExecutor(resolvedText, groqKey, text);
     }
-    // else fall through to legacy single-shot path below
+
+    // BUG #7: Legacy single-shot path kept for simple AI queries that don't
+    // need multi-step planning. Mutex: isProcessing is checked at top of
+    // sendMessage, so this branch is entry-safe. Below: emit user msg ONCE.
 
     const newUserMsg: ChatMessage = { 
       id: Date.now().toString(), 
@@ -1074,6 +1233,11 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
       || (editorStore as any).settings?.groqApiKey
       || ''
     ), prompt),
+    selfTestState,
+    abortSelfTest,
+    runSelfTest,
+    streamingText,
+    clearStreamingText: () => setStreamingText(null),
     getTrainingStats: () => ({
       totalInteractions: trainingModule.getRecentActions().length,
       recentActions: trainingModule.getRecentActions()

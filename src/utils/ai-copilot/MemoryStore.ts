@@ -106,6 +106,34 @@ export class MemoryStore {
     return this.actionHistory.slice(-count);
   }
 
+  /**
+   * Phase 4: Look up actions for a specific tool across the window.
+   * Used by "do that import thing again" voice commands.
+   */
+  getLastActionByTool(toolName: string): RecordedAction | null {
+    for (let i = this.actionHistory.length - 1; i >= 0; i--) {
+      if (this.actionHistory[i].toolName === toolName) {
+        return this.actionHistory[i];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Phase 4: Get the most recent workflow (multi-step) for "re-run workflow".
+   */
+  getLastWorkflowActions(limit: number = 5): RecordedAction[] {
+    const out: RecordedAction[] = [];
+    for (let i = this.actionHistory.length - 1; i >= 0; i--) {
+      const a = this.actionHistory[i];
+      if (a.intent && a.intent.startsWith('workflow:')) {
+        out.push(a);
+        if (out.length >= limit) break;
+      }
+    }
+    return out.reverse();
+  }
+
   getRecentConversations(count: number = 10): ConversationMemoryEntry[] {
     return this.conversationMemory.slice(-count);
   }
@@ -113,6 +141,37 @@ export class MemoryStore {
   isReferenceCommand(message: string): boolean {
     const trimmed = message.trim();
     return REFERENCE_KEYWORDS.some((regex) => regex.test(trimmed));
+  }
+
+  /**
+   * Phase 4: Detect "do that <tool> again" references and return the tool name.
+   * Returns null if no tool-specific reference is detected.
+   *
+   * BUG #6: the raw regex captures any \w+ word; check whether the captured
+   * token is actually in the AI tool registry before accepting it as a tool.
+   */
+  parseToolReference(
+    message: string,
+    validToolNames?: string[] | Set<string>
+  ): string | null {
+    const candidateA = message.trim().match(
+      /\b(?:do|run|try|redo|repeat)\s+(?:that|this|the)\s+(\w+)\s+(?:again|thing|command|action)\b/i
+    );
+    const candidateB = message.trim().match(
+      /\b(?:do|run|try|redo|repeat)\s+(?:that|this)\s+(\w+)\s+thing\b/i
+    );
+
+    const candidates = [candidateA, candidateB].filter(Boolean) as RegExpMatchArray[];
+    for (const match of candidates) {
+      const tool = match[1];
+      if (!validToolNames) return tool; // backward-compat: caller didn't opt into validation
+      const set =
+        validToolNames instanceof Set
+          ? validToolNames
+          : new Set(validToolNames);
+      if (set.has(tool)) return tool;
+    }
+    return null;
   }
 
   resolveReference(message: string): { resolved: string; originalAction?: RecordedAction; isReference: boolean } {
@@ -148,6 +207,26 @@ export class MemoryStore {
     return {
       resolved: reExecPrompt,
       originalAction: lastAction,
+      isReference: true,
+    };
+  }
+
+  /**
+   * Phase 4: Resolve tool-specific reference like "do that import again".
+   * Looks up the most recent action for that toolName.
+   */
+  resolveToolReference(message: string, toolName: string): {
+    resolved: string;
+    originalAction?: RecordedAction;
+    isReference: boolean;
+  } {
+    const action = this.getLastActionByTool(toolName);
+    if (!action) {
+      return { resolved: message, isReference: false };
+    }
+    return {
+      resolved: `Re-run ${toolName} with previous args. Original user command: "${action.rawPrompt}". Args: ${JSON.stringify(action.args).slice(0, 200)}`,
+      originalAction: action,
       isReference: true,
     };
   }

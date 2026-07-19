@@ -5,6 +5,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Card } from './ui/card';
+import { TestResultsTable } from './TestResultsTable';
+import { globalRateLimiter } from '../utils/ai-copilot/RateLimiter';
 
 interface AiCopilotProps {
   onClose: () => void;
@@ -31,31 +33,33 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
     rateLimitStatus,
     workflowProgress,
     abortWorkflow,
+    selfTestState,
+    runSelfTest,
+    abortSelfTest,
+    streamingText,
   } = useAiCopilot();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stats = getTrainingStats();
 
-  // Phase 1: Live cooldown countdown ticker
+  // Phase 1: Live cooldown countdown ticker — reads from global rate limiter
+  // instead of stale closure, so countdown reflects real cooldown every 1s.
   useEffect(() => {
-    if (!rateLimitStatus.isInCooldown) {
+    if (!globalRateLimiter.isInCooldown()) {
       setCooldownSeconds(0);
       return;
     }
-    setCooldownSeconds(Math.ceil(rateLimitStatus.cooldownRemainingMs / 1000));
-    const interval = setInterval(() => {
-      const remaining = Math.ceil(globalThisGetStatus() / 1000);
-      setCooldownSeconds(Math.max(0, remaining));
-      if (remaining <= 0) {
+    const tick = () => {
+      const remaining = globalRateLimiter.getCooldownRemainingMs();
+      const seconds = Math.max(0, Math.ceil(remaining / 1000));
+      setCooldownSeconds(seconds);
+      if (seconds <= 0) {
         clearInterval(interval);
       }
-    }, 1000);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [rateLimitStatus.isInCooldown, rateLimitStatus.cooldownRemainingMs]);
-
-  // Lightweight accessor for live cooldown updates without circular imports
-  const globalThisGetStatus = () => {
-    return rateLimitStatus.cooldownRemainingMs;
-  };
+  }, [rateLimitStatus.isInCooldown]);
 
   // Auto-scroll to bottom when messages update
   useEffect(() => {
@@ -170,13 +174,17 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed bottom-16 right-4 w-96 max-w-[calc(100vw-2rem)] h-[600px] max-h-[calc(100vh-6rem)] bg-background/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden ring-1 ring-white/5">
+    <div
+      className="fixed bottom-16 right-4 w-96 max-w-[calc(100vw-2rem)] h-[600px] max-h-[calc(100vh-6rem)] bg-background/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden ring-1 ring-white/5"
+      role="region"
+      aria-label="AI Copilot Assistant"
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-white/5">
         <div className="flex items-center gap-2 text-primary">
-          <Sparkles className="w-5 h-5" />
+          <Sparkles className="w-5 h-5" aria-hidden="true" />
           <h3 className="font-semibold tracking-tight">AI Copilot</h3>
-          <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-2">Pro</span>
+          <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-2" aria-label="Pro tier">Pro</span>
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -185,6 +193,8 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
             className="w-7 h-7 rounded-lg hover:bg-white/10"
             onClick={toggleThinkingMode}
             title={isThinking ? "Disable thinking trace" : "Enable thinking trace"}
+            aria-label={isThinking ? "Disable thinking trace" : "Enable thinking trace"}
+            aria-pressed={isThinking}
           >
             {isThinking ? <Brain className="w-4 h-4 text-blue-400" /> : <Brain className="w-4 h-4 text-zinc-600" />}
           </Button>
@@ -192,12 +202,33 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
             variant="ghost"
             size="icon"
             className="w-7 h-7 rounded-lg hover:bg-white/10"
+            onClick={() => {
+              if (selfTestState.isRunning) abortSelfTest();
+              else void runSelfTest({ scope: 'full' });
+            }}
+            title={selfTestState.isRunning ? 'Stop self-test' : 'Run full self-test (50+ tests)'}
+            aria-label={selfTestState.isRunning ? 'Stop self-test' : 'Run full self-test'}
+            aria-busy={selfTestState.isRunning}
+          >
+            <Sparkles className={`w-4 h-4 ${selfTestState.isRunning ? 'text-amber-400 animate-pulse' : 'text-zinc-400'}`} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-7 h-7 rounded-lg hover:bg-white/10"
             onClick={clearChat}
             title="Clear chat history"
+            aria-label="Clear chat history"
           >
             <Trash2 className="w-4 h-4 text-zinc-400" />
           </Button>
-          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-white/10" onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-8 h-8 rounded-full hover:bg-white/10"
+            onClick={onClose}
+            aria-label="Close AI Copilot"
+          >
             <X className="w-4 h-4 text-zinc-400" />
           </Button>
         </div>
@@ -228,16 +259,25 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-2xl">
           <Card className="max-w-sm w-[90%] p-4 bg-zinc-900 border-amber-500/40 border-2 shadow-xl">
             <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
               <div className="flex-1 min-w-0">
                 <h4 className="font-semibold text-amber-200">Confirm Destructive Action</h4>
                 <p className="mt-1 text-sm text-zinc-300">
-                  AI wants to execute <code className="text-amber-300 font-mono">{pendingConfirmation.toolName}</code>
+                  AI wants to execute{' '}
+                  <code className="text-amber-300 font-mono bg-amber-900/20 px-1 rounded">
+                    {pendingConfirmation.toolName}
+                  </code>
                 </p>
-                <pre className="mt-2 text-xs bg-black/40 p-2 rounded border border-white/10 overflow-x-auto max-h-24 overflow-y-auto text-zinc-300">
+                <pre
+                  className="mt-2 text-xs bg-black/40 p-2 rounded border border-white/10 overflow-x-auto max-h-24 overflow-y-auto text-zinc-300"
+                  aria-label="Tool arguments"
+                >
                   {JSON.stringify(pendingConfirmation.args, null, 2).slice(0, 200)}
                 </pre>
                 <p className="text-xs text-zinc-500 mt-2">{pendingConfirmation.description}</p>
+                <p className="text-[10px] text-zinc-600 mt-2">
+                  You can always undo with <kbd className="font-mono bg-zinc-800 px-1 py-0.5 rounded">Ctrl+Z</kbd> after.
+                </p>
               </div>
             </div>
             <div className="flex gap-2 mt-4 justify-end">
@@ -246,6 +286,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
                 size="sm"
                 onClick={() => resolveConfirmation(false)}
                 className="text-zinc-400 hover:text-zinc-200"
+                aria-label="Cancel destructive action"
               >
                 Cancel
               </Button>
@@ -253,6 +294,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
                 size="sm"
                 onClick={() => resolveConfirmation(true)}
                 className="bg-amber-600 hover:bg-amber-500 text-white"
+                aria-label="Approve destructive action"
               >
                 Approve
               </Button>
@@ -262,7 +304,13 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
       )}
 
       {/* Chat Area */}
-      <div className="flex-1 p-4 overflow-y-auto min-h-0" ref={scrollRef}>
+      <div
+        className="flex-1 p-4 overflow-y-auto min-h-0"
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-label="AI Copilot conversation log"
+      >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 space-y-4">
             <Bot className="w-12 h-12 text-zinc-700" />
@@ -335,15 +383,30 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
               </div>
             ))}
             
-            {isProcessing && (
-              <div className="flex gap-3">
+            {isProcessing && !streamingText && (
+              <div className="flex gap-3" role="status" aria-label="AI is processing">
                 <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-white/10 text-zinc-300">
-                  <Bot className="w-4 h-4" />
+                  <Bot className="w-4 h-4" aria-hidden="true" />
                 </div>
-                <div className="px-4 py-3 rounded-2xl bg-white/5 border border-white/10 rounded-tl-sm flex items-center gap-1.5">
+                <div className="px-4 py-3 rounded-2xl bg-white/5 border border-white/10 rounded-tl-sm flex items-center gap-1.5" aria-label="Loading">
                   <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                   <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                   <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              </div>
+            )}
+
+            {/* Phase 4: Live streaming text (typewriter effect) */}
+            {streamingText && (
+              <div className="flex gap-3" role="status" aria-label="AI response streaming">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-white/10 text-zinc-300">
+                  <Bot className="w-4 h-4" aria-hidden="true" />
+                </div>
+                <div className="px-4 py-3 rounded-2xl bg-white/5 border border-white/10 rounded-tl-sm flex-1 min-w-0">
+                  <pre className="font-sans text-sm text-zinc-200 whitespace-pre-wrap break-words overflow-hidden">
+                    {streamingText.text}
+                    <span className="inline-block w-1.5 h-4 bg-zinc-400 ml-1 align-middle animate-pulse" aria-hidden="true" />
+                  </pre>
                 </div>
               </div>
             )}
@@ -393,6 +456,23 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
                 </div>
               </div>
             )}
+
+            {/* Phase 3: Self-Test Results — shown when a recent run is in progress or completed */}
+            {(selfTestState.isRunning || selfTestState.report) && (
+              <div className="flex gap-3">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-indigo-500/20 text-indigo-300">
+                  <span className="text-xs">🧪</span>
+                </div>
+                <div className="flex-1">
+                  <TestResultsTable
+                    report={selfTestState.report}
+                    isRunning={selfTestState.isRunning}
+                    currentTest={selfTestState.progress.current}
+                    progress={{ done: selfTestState.progress.done, total: selfTestState.progress.total }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -412,21 +492,25 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
             }
             className="flex-1 bg-white/5 border-white/10 pr-24 rounded-xl focus-visible:ring-1 focus-visible:ring-primary/50"
             disabled={isProcessing || isListening || !!pendingConfirmation}
+            aria-label="AI Copilot message input"
+            aria-disabled={isProcessing || isListening || !!pendingConfirmation}
           />
-          
+
           <div className="absolute right-1 flex items-center gap-1">
             <Button
               type="button"
               size="icon"
               variant="ghost"
               className={`w-8 h-8 rounded-lg transition-colors ${
-                isListening 
-                  ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30 hover:text-red-400' 
+                isListening
+                  ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30 hover:text-red-400'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/10'
               }`}
               onClick={toggleListen}
               disabled={isProcessing}
               title="Voice Command"
+              aria-label={isListening ? 'Stop voice capture' : 'Start voice command'}
+              aria-pressed={isListening}
             >
               {isListening ? <Square className="w-4 h-4 fill-current" /> : <Mic className="w-4 h-4" />}
             </Button>
@@ -435,6 +519,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
               size="icon"
               className="w-8 h-8 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
               disabled={!inputText.trim() || isProcessing || isListening}
+              aria-label="Send message"
             >
               <Send className="w-4 h-4" />
             </Button>

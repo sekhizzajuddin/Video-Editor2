@@ -170,21 +170,37 @@ export class AiTrainingOrchestrator {
       const value = parseFloat(timeMatch[1]);
       const unit = timeMatch[2].toLowerCase();
       const seconds = unit.startsWith('ms') ? value / 1000 : value;
-      entities.push({ type: 'TIME', value: seconds, raw: timeMatch[0] });
+      // IMPROVEMENT #8: guard rails. Reject NaN, Infinity, and out-of-bounds.
+      if (
+        Number.isFinite(seconds) &&
+        seconds >= 0 &&
+        seconds < 24 * 60 * 60 // < 24h reasonable
+      ) {
+        entities.push({ type: 'TIME', value: seconds, raw: timeMatch[0] });
+      }
     }
 
-    // Clip references
-    const clipIdMatch = lowerMessage.match(/(clip|video|audio|image|text)\s*[:\-]?\s*(\w+)/i);
+    // Clip references — IMPROVEMENT #8: filter common stop words
+    const stopWords = new Set([
+      'the', 'that', 'this', 'a', 'an', 'and', 'or', 'for', 'to', 'it',
+      'from', 'with', 'on', 'at', 'in', 'is', 'be', 'as', 'do', 'is',
+      'my', 'me', 'your', 'our', 'their', 'his', 'its', 'i', 'you', 'we',
+      'they', 'he', 'she',
+    ]);
+    const clipIdMatch = lowerMessage.match(/(?:^|\s)(clip|video|audio|image|text)\s*[:\-]?\s*(\w+)/i);
     if (clipIdMatch) {
-      entities.push({
-        type: 'CLIP_REFERENCE',
-        value: clipIdMatch[2],
-        raw: clipIdMatch[0]
-      });
+      const token = clipIdMatch[2].toLowerCase();
+      if (!stopWords.has(token) && token.length >= 2) {
+        entities.push({
+          type: 'CLIP_REFERENCE',
+          value: token,
+          raw: clipIdMatch[0].trim(),
+        });
+      }
     }
 
-    // Position references
-    const positionMatch = lowerMessage.match(/(start|begin|end|finish|middle|center)/i);
+    // Position references — IMPROVEMENT #8: prefer whole-word match
+    const positionMatch = lowerMessage.match(/\b(start|begin|end|finish|middle|center)\b/i);
     if (positionMatch) {
       entities.push({
         type: 'POSITION',
