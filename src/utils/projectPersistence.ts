@@ -13,9 +13,25 @@ const DB_VERSION = 3; // Bumped to handle new autosaves object store
 
 let activeProjectId: string = 'default';
 let dbInstance: IDBDatabase | null = null;
+let dbOpeningPromise: Promise<IDBDatabase> | null = null;
+let openingProjectId: string | null = null;
+
+const activeBlobUrls = new Set<string>();
+
+export function registerBlobUrl(url: string) {
+  if (url && url.startsWith('blob:')) {
+    activeBlobUrls.add(url);
+  }
+}
+
+export function revokeAllBlobUrls() {
+  activeBlobUrls.forEach(url => URL.revokeObjectURL(url));
+  activeBlobUrls.clear();
+}
 
 export function setActiveProject(id: string) {
   if (activeProjectId !== id) {
+    revokeAllBlobUrls();
     activeProjectId = id;
     if (dbInstance) {
       dbInstance.close();
@@ -89,16 +105,23 @@ export async function deleteProjectMeta(id: string): Promise<void> {
 
 
 function getDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (dbInstance) return resolve(dbInstance);
+  if (dbInstance && openingProjectId === activeProjectId) return Promise.resolve(dbInstance);
+  if (dbOpeningPromise && openingProjectId === activeProjectId) return dbOpeningPromise;
 
+  openingProjectId = activeProjectId;
+  
+  dbOpeningPromise = new Promise((resolve, reject) => {
     const dbName = activeProjectId === 'default' ? DB_NAME : `${DB_NAME}_${activeProjectId}`;
     const request = indexedDB.open(dbName, DB_VERSION);
 
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      dbOpeningPromise = null;
+      reject(request.error);
+    };
     request.onsuccess = () => {
       const db = request.result;
       dbInstance = db;
+      dbOpeningPromise = null;
       
       db.onclose = () => { dbInstance = null; };
       db.onversionchange = () => { db.close(); dbInstance = null; };
@@ -183,9 +206,43 @@ export function generateFileHash(file: File): string {
 }
 
 /**
+ * Sanitizes tracks for storage by removing preview state and recursively handling compound clips.
+ */
+function sanitizeTracksForStorage(tracks: TimelineTrack[]): TimelineTrack[] {
+  return tracks.map(track => ({
+    ...track,
+    clips: track.clips.map(clip => {
+      const sanitized = { ...clip, isPreview: false };
+      if (sanitized.type === 'compound' && sanitized.nestedTimeline) {
+        sanitized.nestedTimeline = {
+          ...sanitized.nestedTimeline,
+          tracks: sanitizeTracksForStorage(sanitized.nestedTimeline.tracks || [])
+        };
+      }
+      
+      // Preserve LUT table Float32Arrays explicitly if needed (IndexedDB handles them via structured clone, 
+      // but if they were converted to objects by accident elsewhere, we fix them here)
+      if (sanitized.filters) {
+        sanitized.filters = sanitized.filters.map((f: any) => {
+          if (f.type === 'lut' && f.lutData && f.lutData.table && !ArrayBuffer.isView(f.lutData.table)) {
+             f.lutData = {
+                ...f.lutData,
+                table: new Float32Array(Object.values(f.lutData.table))
+             };
+          }
+          return f;
+        });
+      }
+      return sanitized;
+    })
+  }));
+}
+
+/**
  * Persists the entire project config (tracks metadata, media list, timeline) to IndexedDB.
  */
 export async function saveProjectToDB(data: {
+  targetProjectId?: string;
   tracks: TimelineTrack[];
   mediaLibrary: MediaItem[];
   folders?: any[];
@@ -196,6 +253,12 @@ export async function saveProjectToDB(data: {
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
 }): Promise<void> {
+  // Auto-Save Protection
+  if (data.targetProjectId && data.targetProjectId !== activeProjectId) {
+    console.warn(`[projectPersistence] Skipping save: target project ${data.targetProjectId} is no longer active.`);
+    return;
+  }
+
   try {
     const db = await getDB();
     
@@ -219,13 +282,7 @@ export async function saveProjectToDB(data: {
         frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
       }));
 
-      const cleanTracks = data.tracks.map(track => ({
-        ...track,
-        clips: track.clips.map(clip => ({
-          ...clip,
-          isPreview: false
-        }))
-      }));
+      const cleanTracks = sanitizeTracksForStorage(data.tracks);
 
       store.put(cleanTracks, 'tracks');
       store.put(cleanMediaLibrary, 'mediaLibrary');
@@ -296,6 +353,7 @@ export async function restoreSnapshotMedia(snapshot: {
     const file = await getFileFromDB(item.id);
     if (file) {
       const objectUrl = URL.createObjectURL(file);
+      registerBlobUrl(objectUrl);
 
       // Regenerate thumbnail if present
       let newThumb = undefined;
@@ -352,47 +410,53 @@ export async function loadProjectFromDB(): Promise<{
 } | null> {
   const db = await getDB();
 
-  const getValue = (key: string): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction('project', 'readonly');
-      const store = transaction.objectStore('project');
+  return new Promise((resolve, reject) => {
+    let transaction: IDBTransaction;
+    try {
+      transaction = db.transaction('project', 'readonly');
+    } catch (e) {
+      return reject(e);
+    }
+    const store = transaction.objectStore('project');
+    const keys = ['tracks', 'mediaLibrary', 'currentTime', 'aspectRatio', 'pipWindows', 'folders', 'subtitles', 'markers', 'beatMarkers'];
+    let pending = keys.length;
+    let hasError = false;
+    const result: any = {};
+
+    keys.forEach(key => {
       const request = store.get(key);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        if (hasError) return;
+        result[key] = request.result;
+        pending--;
+        if (pending === 0) {
+          if (!result.tracks || !result.mediaLibrary) {
+            resolve(null);
+          } else {
+            restoreSnapshotMedia({
+              tracks: result.tracks,
+              mediaLibrary: result.mediaLibrary,
+              currentTime: result.currentTime || 0,
+              aspectRatio: result.aspectRatio || '16:9',
+            }).then(restored => {
+              resolve({
+                ...restored,
+                pipWindows: result.pipWindows || {},
+                folders: result.folders || [],
+                subtitles: result.subtitles || [],
+                markers: result.markers || [],
+                beatMarkers: result.beatMarkers || []
+              });
+            }).catch(reject);
+          }
+        }
+      };
+      request.onerror = () => {
+        hasError = true;
+        reject(request.error);
+      };
     });
-  };
-
-  try {
-    const rawTracks = await getValue('tracks') as TimelineTrack[];
-    const rawMediaLibrary = await getValue('mediaLibrary') as MediaItem[];
-    const currentTime = (await getValue('currentTime') as number) || 0;
-    const aspectRatio = (await getValue('aspectRatio') as any) || '16:9';
-    const pipWindows = (await getValue('pipWindows')) || {};
-    const folders = (await getValue('folders')) || [];
-    const subtitles = (await getValue('subtitles')) || [];
-    const markers = (await getValue('markers')) || [];
-    const beatMarkers = (await getValue('beatMarkers')) || [];
-
-    if (!rawTracks || !rawMediaLibrary) return null;
-
-    const restored = await restoreSnapshotMedia({
-      tracks: rawTracks,
-      mediaLibrary: rawMediaLibrary,
-      currentTime,
-      aspectRatio,
-    });
-    return {
-      ...restored,
-      pipWindows,
-      folders,
-      subtitles,
-      markers,
-      beatMarkers,
-    };
-  } catch (err) {
-    console.error('Failed to load project from DB:', err);
-    return null;
-  }
+  });
 }
 
 /**
@@ -414,13 +478,7 @@ export async function saveAutosaveToDB(data: {
     frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
   }));
 
-  const cleanTracks = data.tracks.map(track => ({
-    ...track,
-    clips: track.clips.map(clip => ({
-      ...clip,
-      isPreview: false
-    }))
-  }));
+  const cleanTracks = sanitizeTracksForStorage(data.tracks);
 
   const snapshot = {
     tracks: cleanTracks,
@@ -639,13 +697,7 @@ export async function saveTemplatesToDB(templates: any[]): Promise<void> {
       thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
       frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
     })),
-    tracks: template.tracks.map((track: any) => ({
-      ...track,
-      clips: track.clips.map((clip: any) => ({
-        ...clip,
-        isPreview: false
-      }))
-    }))
+    tracks: sanitizeTracksForStorage(template.tracks)
   }));
 
   return new Promise((resolve, reject) => {
@@ -684,6 +736,7 @@ export async function resolveMediaItemFromDB(item: MediaItem): Promise<MediaItem
     const file = await getFileFromDB(item.id);
     if (file) {
       const objectUrl = URL.createObjectURL(file);
+      registerBlobUrl(objectUrl);
 
       // Regenerate thumbnail if present
       let newThumb = undefined;

@@ -898,6 +898,7 @@ export const useAiCopilot = () => {
       setIsProcessing(true);
     }
 
+    const capturedContext = { ...conversationContextRef.current };
     const controller = new AbortController();
     const API_TIMEOUT_MS = 30000;
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -1093,7 +1094,7 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
             }
 
             try {
-              const result = executeAITool(funcName, args);
+              const result = executeAITool(funcName, args, conversationContextRef.current);
               
               toolCalls.push({
                 name: funcName,

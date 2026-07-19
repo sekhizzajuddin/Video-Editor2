@@ -84,38 +84,10 @@ export class SpeedRampEngine {
     }
   }
 
-  private computeSegmentTimelineDuration(seg: SpeedSegment): number {
+  private integrateTimelineDuration(seg: SpeedSegment, targetSourceTime: number): number {
     const v1 = seg.startKf.speed;
     const v2 = seg.endKf.speed;
-    const deltaSource = seg.sourceEnd - seg.sourceStart;
-
-    // Handle both speeds being zero or near-zero
-    if (Math.abs(v1) < 1e-10 && Math.abs(v2) < 1e-10) {
-      return deltaSource > 0 ? 0.001 : 0;
-    }
-
-    if (seg.startKf.easing === 'hold') {
-      if (Math.abs(v1) < 1e-10) return deltaSource > 0 ? 0.001 : 0;
-      return deltaSource / v1;
-    }
-
-    if (Math.abs(v1 - v2) < 1e-10) {
-      if (Math.abs(v1) < 1e-10) return deltaSource > 0 ? 0.001 : 0;
-      return deltaSource / v1;
-    }
-
-    // Prevent division by zero in log calculation
-    if (v1 <= 0 || v2 <= 0) {
-      return deltaSource / Math.max(0.001, (v1 + v2) / 2);
-    }
-
-    return (deltaSource / (v2 - v1)) * Math.log(v2 / v1);
-  }
-
-  private partialSegmentTimelineDuration(seg: SpeedSegment, sourceTime: number): number {
-    const v1 = seg.startKf.speed;
-    const v2 = seg.endKf.speed;
-    const delta = sourceTime - seg.sourceStart;
+    const delta = targetSourceTime - seg.sourceStart;
     const totalDelta = seg.sourceEnd - seg.sourceStart;
 
     if (seg.startKf.easing === 'hold') {
@@ -123,15 +95,55 @@ export class SpeedRampEngine {
       return delta / v1;
     }
 
-    if (Math.abs(v1 - v2) < 1e-10) {
-      if (Math.abs(v1) < 1e-10) return 0;
-      return delta / v1;
+    if (seg.startKf.easing === 'linear' || !seg.startKf.easing) {
+      if (Math.abs(v1 - v2) < 1e-10) {
+        if (Math.abs(v1) < 1e-10) return 0;
+        return delta / v1;
+      }
+      const ratio = totalDelta > 0.0001 ? delta / totalDelta : 0;
+      const currentV = v1 + (v2 - v1) * ratio;
+      if (v1 <= 0 || currentV <= 0) {
+        return delta / Math.max(0.001, (v1 + currentV) / 2);
+      }
+      return (totalDelta / (v2 - v1)) * Math.log(currentV / v1);
     }
 
-    const ratio = totalDelta > 0.0001 ? delta / totalDelta : 0;
-    const currentV = v1 + (v2 - v1) * ratio;
+    // 5-Point Gauss-Legendre Quadrature for non-linear easing
+    const x = [
+      0.0,
+      0.538469310105683,
+      -0.538469310105683,
+      0.906179845938664,
+      -0.906179845938664
+    ];
+    const w = [
+      0.568888888888889,
+      0.478628670499366,
+      0.478628670499366,
+      0.236926885056189,
+      0.236926885056189
+    ];
     
-    return (totalDelta / (v2 - v1)) * Math.log(currentV / v1);
+    let integral = 0;
+    const halfDelta = delta / 2;
+    const midPoint = seg.sourceStart + halfDelta;
+    
+    for (let i = 0; i < 5; i++) {
+      const s = midPoint + halfDelta * x[i];
+      const speedAtS = this.interpolateSpeed(seg, s);
+      const val = 1.0 / Math.max(0.01, speedAtS); // Avoid dividing by zero speed
+      integral += w[i] * val;
+    }
+    
+    return halfDelta * integral;
+  }
+
+  private computeSegmentTimelineDuration(seg: SpeedSegment): number {
+    return this.integrateTimelineDuration(seg, seg.sourceEnd);
+  }
+
+  private partialSegmentTimelineDuration(seg: SpeedSegment, sourceTime: number): number {
+    return this.integrateTimelineDuration(seg, sourceTime);
   }
 
   sourceToTimeline(sourceTime: number): number {

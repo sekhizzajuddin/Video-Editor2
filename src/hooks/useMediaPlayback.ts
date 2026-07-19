@@ -381,6 +381,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const handleSeeked = () => {
           // Cache this decoded frame as ImageBitmap for instant scrubbing
           if (el.videoWidth > 0 && el.readyState >= 2) {
+            const capturedTime = el.currentTime;
             createImageBitmap(el).then(bitmap => {
               if (!poolRef.current.has(clipId) && !pendingSeeksRef.current.has(clipId)) {
                 bitmap.close();
@@ -391,7 +392,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
                 clipCache = [];
                 frameCacheRef.current.set(clipId, clipCache);
               }
-              const roundedTime = Math.round(el.currentTime * 30) / 30;
+              const roundedTime = Math.round(capturedTime * 30) / 30;
               const existingKf = clipCache.findIndex(f => Math.abs(f.time - roundedTime) < 0.015);
               if (existingKf >= 0) {
                 clipCache[existingKf].bitmap.close();
@@ -465,13 +466,21 @@ export function useMediaPlayback(): MediaPlaybackResult {
         if (entry.gainNode) {
           try { entry.gainNode.disconnect(); } catch (e) {}
         }
-        if (entry.sourceNode) {
-          try { entry.sourceNode.disconnect(); } catch (e) {}
+        if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
+
+        if (entry.feedbackNode) {
+          try { entry.feedbackNode.disconnect(); } catch(e) {}
         }
+        if (entry.delayNode) {
+          try { entry.delayNode.disconnect(); } catch(e) {}
+        }
+
         entry.el.src = '';
         entry.el.remove();
         pool.delete(clipId);
         videoMap.delete(clipId);
+        const frames = frameCacheRef.current.get(clipId);
+        if (frames) frames.forEach(f => { try { f.bitmap.close(); } catch(e) {} });
         frameCacheRef.current.delete(clipId);
         pendingSeeksRef.current.delete(clipId);
       }
@@ -640,9 +649,35 @@ export function useMediaPlayback(): MediaPlaybackResult {
     const clips = activeClips();
     const playingIds = new Set(clips.map((c) => c.clipId));
 
+    
+    const clipNodeMap = new Map();
+    const state = useEditorStore.getState();
+    for (const track of state.tracks) {
+      for (const clip of track.clips) {
+        clipNodeMap.set(clip.id, { clip, track, absStartTime: clip.startTime });
+      }
+    }
+    const pipWindows = state.pipWindows || {};
+    for (const track of state.tracks) {
+      for (const clip of track.clips) {
+        const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
+        for (const pip of clipPips) {
+          for (const pipTrack of pip.tracks) {
+            for (const pipClip of pipTrack.clips) {
+              const absStartTime = clip.startTime + pip.relativeStartTime + pipClip.startTime;
+              const mergedTrack = { ...pipTrack, muted: track.muted || pipTrack.muted || pipTrack.hidden };
+              clipNodeMap.set(pipClip.id, { clip: pipClip, track: mergedTrack, absStartTime });
+            }
+          }
+        }
+      }
+    }
+
     for (const [clipId, entry] of pool) {
+      if (!playingIds.has(clipId)) continue;
       // Find the clip in the tracks
-      const foundNode = findClipById(clipId);
+      const foundNode = clipNodeMap.get(clipId);
+
       const fullClip = foundNode ? foundNode.clip : null;
       const targetTrack = foundNode ? foundNode.track : null;
 
@@ -1036,10 +1071,17 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const media = mediaLibrary.find((m) => m.id === entry.mediaId);
         if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
         const targetSrc = media.url;
+        
         if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
           el.src = targetSrc;
+          const pendingTime = pendingSeeksRef.current.get(clipId);
+          if (pendingTime !== undefined) {
+             el.currentTime = pendingTime;
+             pendingSeeksRef.current.delete(clipId);
+          }
           el.load();
         }
+
       }
       return;
     }
@@ -1065,10 +1107,17 @@ export function useMediaPlayback(): MediaPlaybackResult {
       
       if (isNear && !isPendingRestore) {
         const targetSrc = media.url;
+        
         if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
           el.src = targetSrc;
+          const pendingTime = pendingSeeksRef.current.get(clipId);
+          if (pendingTime !== undefined) {
+             el.currentTime = pendingTime;
+             pendingSeeksRef.current.delete(clipId);
+          }
           el.load();
         }
+
       } else {
         if (el.src !== '') {
           el.removeAttribute('src');
@@ -1103,14 +1152,22 @@ export function useMediaPlayback(): MediaPlaybackResult {
         if (entry.gainNode) {
           try { entry.gainNode.disconnect(); } catch (e) {}
         }
-        if (entry.sourceNode) {
-          try { entry.sourceNode.disconnect(); } catch (e) {}
+        if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
+
+        if (entry.feedbackNode) {
+          try { entry.feedbackNode.disconnect(); } catch(e) {}
         }
+        if (entry.delayNode) {
+          try { entry.delayNode.disconnect(); } catch(e) {}
+        }
+
         entry.el.src = '';
         entry.el.remove();
       }
       pool.clear();
       videoMapRef.current.clear();
+      frameCacheRef.current.forEach(frames => frames.forEach(f => { try { f.bitmap.close(); } catch(e) {} }));
+      frameCacheRef.current.clear();
       pendingSeeksRef.current.clear();
     };
   }, [triggerRedraw]);

@@ -274,7 +274,7 @@ export class WorkflowExecutor {
       }
       const finalArgs = validationResult.sanitizedArgs ?? step.args;
 
-      const result = executeAITool(step.toolName, finalArgs);
+      const result = executeAITool(step.toolName, finalArgs, ctx.conversation);
 
       return {
         ...step,

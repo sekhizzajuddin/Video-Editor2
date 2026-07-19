@@ -541,6 +541,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const durationToCut = end - start;
 
       const newTracks = state.tracks.map(track => {
+        if (track.locked) return track;
         // 1. Remove clips that are entirely inside the cut region
         let newClips = track.clips.filter(c => {
           const cEnd = c.startTime + c.duration;
@@ -965,6 +966,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const shiftDuration = maxEndTime - minStartTime;
 
         newTracks = state.tracks.map((track) => {
+          if (track.locked) return track;
           const remainingClips = track.clips.filter((c) => !idsToRemove.includes(c.id));
           const shiftedClips = remainingClips.map((clip) => {
             if (clip.startTime >= minStartTime) {
@@ -982,10 +984,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           };
         });
       } else {
-        newTracks = state.tracks.map((track) => ({
-          ...track,
-          clips: track.clips.filter((c) => !idsToRemove.includes(c.id)),
-        }));
+        newTracks = state.tracks.map((track) => {
+          if (track.locked) return track;
+          return {
+            ...track,
+            clips: track.clips.filter((c) => !idsToRemove.includes(c.id)),
+          };
+        });
       }
 
       const newSelectedClipIds = state.selectedClipIds.filter((id) => !idsToRemove.includes(id));
@@ -1153,6 +1158,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
     let success = false;
     set((state) => {
+      // Locked Track Check
+      const sourceTrack = state.tracks.find((t) => t.clips.some((c) => c.id === clipId));
+      if (sourceTrack && sourceTrack.locked) return {};
+      const targetTrackId = newTrackId || (sourceTrack ? sourceTrack.id : null);
+      const targetTrack = state.tracks.find((t) => t.id === targetTrackId);
+      if (targetTrack && targetTrack.locked) return {};
+
       const newTracks = state.tracks.map((track) => ({
         ...track,
         clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
@@ -1306,6 +1318,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   moveClips: (updates, resolveOverlap = false) => {
     set((state) => {
+      // Locked Track Check
+      for (const update of updates) {
+        const sourceTrack = state.tracks.find((t) => t.clips.some((c) => c.id === update.clipId));
+        if (sourceTrack && sourceTrack.locked) return {};
+        const targetTrackId = update.newTrackId || (sourceTrack ? sourceTrack.id : null);
+        const targetTrack = state.tracks.find((t) => t.id === targetTrackId);
+        if (targetTrack && targetTrack.locked) return {};
+      }
+
       const newTracks = JSON.parse(JSON.stringify(state.tracks));
       const newPipWindows = JSON.parse(JSON.stringify(state.pipWindows || {}));
 
@@ -2844,6 +2865,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Project
   setProjectInfo: (id, name) => set({ projectId: id, projectName: name }),
   resetProject: async (clearDB = false) => {
+    if (saveTimeoutId) {
+      clearTimeout(saveTimeoutId);
+      saveTimeoutId = null;
+    }
+
     // Revoke all object URLs
     const { mediaLibrary } = get();
     mediaLibrary.forEach((m) => {
@@ -2876,6 +2902,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   loadProject: async () => {
+    if (saveTimeoutId) {
+      clearTimeout(saveTimeoutId);
+      saveTimeoutId = null;
+    }
+
     try {
       setActiveProject(get().projectId);
       const data = await loadProjectFromDB();

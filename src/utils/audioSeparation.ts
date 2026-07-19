@@ -143,10 +143,18 @@ function createFallbackSeparationNode(
   let highBand = (settings.frequencyBands?.high ?? 100) / 100;
 
   node.onaudioprocess = (e) => {
+    const isMono = e.inputBuffer.numberOfChannels === 1;
+    const isOutMono = e.outputBuffer.numberOfChannels === 1;
     const inputL = e.inputBuffer.getChannelData(0);
-    const inputR = e.inputBuffer.getChannelData(1);
+    const inputR = isMono ? inputL : e.inputBuffer.getChannelData(1);
     const outputL = e.outputBuffer.getChannelData(0);
-    const outputR = e.outputBuffer.getChannelData(1);
+    const outputR = isOutMono ? outputL : e.outputBuffer.getChannelData(1);
+
+    if (isMono) {
+      outputL.set(inputL);
+      if (!isOutMono) outputR.set(inputR);
+      return;
+    }
 
     for (let i = 0; i < inputL.length; i++) {
       const l = inputL[i];
@@ -229,12 +237,23 @@ class VocalSeparationProcessor extends AudioWorkletProcessor {
   process(inputs, outputs) {
     const input = inputs[0];
     const output = outputs[0];
-    if (!input || input.length < 2 || !output || output.length < 2) return true;
+    if (!input || input.length === 0 || !output || output.length === 0) return true;
 
+    const isMono = input.length === 1;
+    const isOutMono = output.length === 1;
+    
     const inputL = input[0];
-    const inputR = input[1];
+    const inputR = isMono ? input[0] : input[1];
     const outputL = output[0];
-    const outputR = output[1];
+    const outputR = isOutMono ? output[0] : output[1];
+
+    if (isMono) {
+      for (let i = 0; i < inputL.length; i++) {
+        outputL[i] = inputL[i];
+        if (!isOutMono) outputR[i] = inputR[i];
+      }
+      return true;
+    }
 
     const mode = this.mode;
     const strength = this.strength;

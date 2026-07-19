@@ -10,6 +10,7 @@ function solveBezierX(t: number, x1: number, x2: number): number {
     const f = 3 * x3 * x3 * x * x1 + 3 * x3 * x * x * x2 + x * x * x - t;
     const df = 3 * x3 * x3 * x1 + 6 * x3 * x * (x2 - x1) + 3 * x * x * (1 - x2);
     if (Math.abs(f) < 1e-6) break;
+    if (Math.abs(df) < 1e-6) break;
     x = x - f / df;
     x = Math.max(0, Math.min(1, x));
   }
@@ -138,7 +139,12 @@ export function addOrUpdateKeyframe(
 ): PropertyKeyframe[] {
   const newArray = [...keyframes];
   const idx = findKeyframeIndex(newArray, localTime);
-  const existingIdx = (idx >= 0 && Math.abs(newArray[idx].time - localTime) < 0.03) ? idx : -1;
+  let existingIdx = -1;
+  if (idx >= 0 && Math.abs(newArray[idx].time - localTime) < 0.03) {
+    existingIdx = idx;
+  } else if (idx + 1 < newArray.length && Math.abs(newArray[idx + 1].time - localTime) < 0.03) {
+    existingIdx = idx + 1;
+  }
   
   const newKeyframe: PropertyKeyframe = {
     time: localTime,
@@ -190,14 +196,20 @@ export function autoComputeBezierHandles(keyframes: PropertyKeyframe[]): Propert
     const dy = next.value - prev.value;
     const slope = dx > 0.001 ? dy / dx : 0;
 
-    const outTime = (curr.time - prev.time) * 0.3;
-    const inTime = (next.time - curr.time) * 0.3;
+    const outTime = (curr.time - prev.time) * 0.33;
+    const inTime = (next.time - curr.time) * 0.33;
+    
+    const valRangeOut = next.value - curr.value;
+    const valRangeIn = curr.value - prev.value;
+
+    const normSlopeOut = Math.abs(valRangeOut) > 0.001 ? (slope * outTime) / valRangeOut : 0;
+    const normSlopeIn = Math.abs(valRangeIn) > 0.001 ? (slope * inTime) / valRangeIn : 0;
 
     curr.bezier = {
       x: 0.33,
-      y: Math.max(0, Math.min(1, 0.33 + slope * outTime * 0.1)),
+      y: 0.33 * normSlopeOut,
       inX: 0.67,
-      inY: Math.max(0, Math.min(1, 0.67 + slope * inTime * 0.1))
+      inY: 1.0 - 0.33 * normSlopeIn
     };
   }
   return keyframes;

@@ -230,7 +230,12 @@ export function requiresConfirmation(toolName: string, args?: any): boolean {
 }
 
 // Execution handler for AI tool calls
-export const executeAITool = (name: string, args: any) => {
+export const executeAITool = (name: string, args: any, context?: { currentTime?: number }) => {
+  const store = useEditorStore.getState();
+  
+  if (context?.currentTime !== undefined && Math.abs(store.currentTime - context.currentTime) > 0.5) {
+    return { success: false, error: 'Stale prompt: Playhead moved before execution' };
+  }
   const store = useEditorStore.getState();
   
   switch (name) {
