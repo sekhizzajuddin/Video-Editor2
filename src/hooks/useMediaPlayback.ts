@@ -380,7 +380,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         // Seeked handler that checks for subsequent pending seeks before triggering redraw
         const handleSeeked = () => {
           // Cache this decoded frame as ImageBitmap for instant scrubbing
-          if (el.videoWidth > 0 && el.readyState >= 2) {
+          if (el.videoWidth > 0 && el.readyState >= 2 && !pendingSeeksRef.current.has(clipId)) {
             const capturedTime = el.currentTime;
             createImageBitmap(el).then(bitmap => {
               if (!poolRef.current.has(clipId) && !pendingSeeksRef.current.has(clipId)) {
@@ -401,10 +401,13 @@ export function useMediaPlayback(): MediaPlaybackResult {
                 clipCache.push({ time: roundedTime, bitmap });
                 clipCache.sort((a, b) => a.time - b.time);
               }
-              // Evict oldest frames if cache too large (keep 120 frames per clip)
-              while (clipCache.length > 120) {
+              // Temporal Eviction: Evict frames furthest from currentTime
+              if (clipCache.length > 120) {
+                const ct = useEditorStore.getState().currentTime;
+                clipCache.sort((a, b) => Math.abs(b.time - ct) - Math.abs(a.time - ct));
                 const removed = clipCache.shift();
                 removed?.bitmap.close();
+                clipCache.sort((a, b) => a.time - b.time);
               }
             }).catch(() => {});
           }
@@ -1102,8 +1105,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
       
       const isPendingRestore = media.url === 'PENDING_RESTORE';
       const absStart = foundNode ? foundNode.absStartTime : clipObj.startTime;
-      // Load if within 8 seconds of playhead, otherwise unload
-      const isNear = !clipTrack.hidden && currentTime >= absStart - 8 && currentTime < absStart + clipObj.duration + 8;
+      // Load if within 60 seconds of playhead, otherwise unload
+      const isNear = !clipTrack.hidden && currentTime >= absStart - 60 && currentTime < absStart + clipObj.duration + 60;
       
       if (isNear && !isPendingRestore) {
         const targetSrc = media.url;

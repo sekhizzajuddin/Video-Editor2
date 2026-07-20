@@ -5,6 +5,14 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
   const { tracks } = useEditorStore();
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const lastScrubTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      audioPoolRef.current.forEach(a => { a.pause(); a.src = ""; });
+      audioPoolRef.current.clear();
+    };
+  }, []);
+
   
   useEffect(() => {
     if (!isScrubbing || scrubTime === null) {
@@ -41,7 +49,6 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
     audioPoolRef.current.forEach((audio, id) => {
       if (!activeIds.has(id)) {
         audio.pause();
-        audioPoolRef.current.delete(id);
       }
     });
 

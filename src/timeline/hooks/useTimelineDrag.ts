@@ -681,24 +681,33 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     [splitClip],
   );
 
+  const lastScrubTimeRef = useRef<number>(0);
+  const latestClientXRef = useRef<number>(0);
+
   const handleMouseMove = (e: MouseEvent) => {
     if (isScrubbing) {
-      if (scrubRafIdRef.current !== null) {
-        cancelAnimationFrame(scrubRafIdRef.current);
+      latestClientXRef.current = e.clientX;
+      if (scrubRafIdRef.current === null) {
+        scrubRafIdRef.current = requestAnimationFrame(() => {
+          scrubRafIdRef.current = null;
+          const clientX = latestClientXRef.current;
+          const rect = trackContainerRef.current?.getBoundingClientRect();
+          if (rect) {
+            const currentScrollLeft = useEditorStore.getState().scrollLeft;
+            const x = clientX - rect.left + currentScrollLeft;
+            const time = Math.max(0, x / zoomLevel);
+            
+            const now = performance.now();
+            if (now - lastScrubTimeRef.current > 33) {
+              seek(time);
+              lastScrubTimeRef.current = now;
+            }
+            
+            setScrubTime(time);
+            setScrubMouseX(clientX);
+          }
+        });
       }
-      const clientX = e.clientX;
-      scrubRafIdRef.current = requestAnimationFrame(() => {
-        scrubRafIdRef.current = null;
-        const rect = trackContainerRef.current?.getBoundingClientRect();
-        if (rect) {
-          const currentScrollLeft = useEditorStore.getState().scrollLeft;
-          const x = clientX - rect.left + currentScrollLeft;
-          const time = Math.max(0, x / zoomLevel);
-          seek(time);
-          setScrubTime(time);
-          setScrubMouseX(clientX);
-        }
-      });
     }
 
     if (dragState && dragState.draggedClips && dragState.draggedClips.length > 0) {

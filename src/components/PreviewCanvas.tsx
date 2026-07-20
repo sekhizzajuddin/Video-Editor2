@@ -348,139 +348,6 @@ export function PreviewCanvas() {
     }, [currentTime]);
 
   // -------------------------------------------------------------------
-  // Playback loop Ã¢â‚¬â€œ advance currentTime via rAF when playing
-  // -------------------------------------------------------------------
-  useEffect(() => {
-    if (!isPlaying) return;
-    let animId: number;
-    let isActive = true;
-    let lastTime = performance.now();
-    
-    // Reset particle time tracking when playback starts to prevent jump
-    lastParticleTimeRef.current = null;
-
-    const loop = (now: number) => {
-      if (!isActive) return;
-      const state = useEditorStore.getState();
-      const dir = state.playbackDirection ?? 1;
-      const speed = state.playbackSpeed;
-      const currentSeek = state.seek;
-      const currentPause = state.pause;
-      const selectedIds = state.selectedClipIds;
-      const allClips = allClipsRef.current;
-
-      if (state.isExporting) {
-        if (isRenderingRef.current) {
-          animId = requestAnimationFrame(loop);
-          return;
-        }
-
-        // Export Mode: Fixed timestep throttled to target export FPS
-        const targetFps = state.exportFps || 30;
-        const frameDuration = 1000 / targetFps; // ms per frame
-        const elapsed = now - lastTime;
-
-        if (elapsed >= frameDuration) {
-          // Adjust lastTime by frameDuration to maintain precision
-          lastTime = now - (elapsed % frameDuration);
-          
-          const dt = 1 / targetFps;
-          const newTime = currentTimeRef.current + dt * speed * dir;
-
-          // Capping at sequence end
-          let maxEndSequence = 0;
-          for (const c of allClips) {
-            const end = c.startTime + c.duration;
-            if (end > maxEndSequence) maxEndSequence = end;
-          }
-
-          if (dir >= 0 && newTime >= maxEndSequence) {
-            currentSeek(maxEndSequence);
-            currentTimeRef.current = maxEndSequence;
-            currentPause();
-            if (animId) cancelAnimationFrame(animId);
-            return;
-          }
-
-          if (dir < 0 && newTime <= 0) {
-            currentSeek(0);
-            currentTimeRef.current = 0;
-            currentPause();
-            if (animId) cancelAnimationFrame(animId);
-            return;
-          }
-
-          isRenderingRef.current = true;
-          currentSeek(newTime);
-          currentTimeRef.current = newTime;
-        }
-        animId = requestAnimationFrame(loop);
-      } else {
-        // Normal Playback Mode: Real-time clock delta
-        const dt = (now - lastTime) / 1000;
-        lastTime = now;
-        const newTime = currentTimeRef.current + dt * speed * dir;
-
-        if (selectedIds.length > 0) {
-          // Selection Loop Playback Mode
-          const selectedClips = allClips.filter((c) => selectedIds.includes(c.id));
-          if (selectedClips.length > 0) {
-            let minStart = Infinity;
-            let maxEnd = -Infinity;
-            for (const c of selectedClips) {
-              if (c.startTime < minStart) minStart = c.startTime;
-              const end = c.startTime + c.duration;
-              if (end > maxEnd) maxEnd = end;
-            }
-
-            if (newTime >= maxEnd || newTime < minStart) {
-              const startPos = dir >= 0 ? minStart : maxEnd;
-              currentSeek(startPos);
-              currentTimeRef.current = startPos;
-            } else {
-              currentSeek(newTime);
-              currentTimeRef.current = newTime;
-            }
-            animId = requestAnimationFrame(loop);
-            return;
-          }
-        }
-
-        // Default Playback Mode (Cap at sequence end)
-        let maxEndSequence = 0;
-        for (const c of allClips) {
-          const end = c.startTime + c.duration;
-          if (end > maxEndSequence) maxEndSequence = end;
-        }
-
-        if (dir < 0 && newTime <= 0) {
-          currentSeek(0);
-          currentTimeRef.current = 0;
-          currentPause();
-          if (animId) cancelAnimationFrame(animId);
-          return;
-        }
-
-        if (dir >= 0 && newTime >= maxEndSequence) {
-          currentSeek(0);
-          currentTimeRef.current = 0;
-          currentPause();
-          if (animId) cancelAnimationFrame(animId);
-          return;
-        }
-
-        currentSeek(newTime);
-        currentTimeRef.current = newTime;
-        animId = requestAnimationFrame(loop);
-      }
-    };
-
-    animId = requestAnimationFrame(loop);
-    return () => {
-      isActive = false;
-      cancelAnimationFrame(animId);
-    };
-  }, [isPlaying]);
 
   // -------------------------------------------------------------------
   // Canvas rendering Ã¢â‚¬â€œ called whenever time, tracks, or images change
@@ -2988,14 +2855,83 @@ export function PreviewCanvas() {
       if (tabVisible) framePendingRef.current = true; // redraw immediately on restore
     };
     document.addEventListener('visibilitychange', onVisChange);
-
     let isRendering = false;
-    const tick = async () => {
-      // FIX: During playback, always mark a new frame as pending so the render loop
-      // never skips a frame even if the previous render took >16ms.
-      if (useEditorStore.getState().isPlaying) {
+    let lastTime = performance.now();
+    let lastSyncTime = performance.now();
+    
+    const tick = async (now) => {
+      const state = useEditorStore.getState();
+      
+      if (state.isPlaying) {
         framePendingRef.current = true;
+        
+        const dir = state.playbackDirection ?? 1;
+        const speed = state.playbackSpeed;
+        const currentSeek = state.seek;
+        const currentPause = state.pause;
+        const allClips = allClipsRef.current;
+        const selectedIds = state.selectedClipIds;
+        
+        let newTime = currentTimeRef.current;
+        
+        if (state.isExporting) {
+           const targetFps = state.exportFps || 30;
+           const frameDuration = 1000 / targetFps;
+           const elapsed = now - lastTime;
+           if (elapsed >= frameDuration) {
+             lastTime = now - (elapsed % frameDuration);
+             newTime = currentTimeRef.current + (1 / targetFps) * speed * dir;
+           }
+        } else {
+           const dt = (now - lastTime) / 1000;
+           lastTime = now;
+           newTime = currentTimeRef.current + dt * speed * dir;
+        }
+
+        if (newTime !== currentTimeRef.current) {
+            let maxEndSequence = 0;
+            for (const c of allClips) {
+              const end = c.startTime + c.duration;
+              if (end > maxEndSequence) maxEndSequence = end;
+            }
+
+            if (selectedIds.length > 0) {
+              const selectedClips = allClips.filter(c => selectedIds.includes(c.id));
+              if (selectedClips.length > 0) {
+                let minStart = Infinity;
+                let maxEnd = -Infinity;
+                for (const c of selectedClips) {
+                  if (c.startTime < minStart) minStart = c.startTime;
+                  const end = c.startTime + c.duration;
+                  if (end > maxEnd) maxEnd = end;
+                }
+                if (newTime >= maxEnd || newTime < minStart) {
+                  newTime = dir >= 0 ? minStart : maxEnd;
+                }
+              }
+            } else {
+              if (dir < 0 && newTime <= 0) {
+                newTime = 0;
+                currentPause();
+              } else if (dir >= 0 && newTime >= maxEndSequence) {
+                newTime = 0;
+                currentPause();
+              }
+            }
+
+            currentTimeRef.current = newTime;
+            
+            // Sync to global store throttled (30 fps = 33ms)
+            if (now - lastSyncTime > 33) {
+               currentSeek(newTime);
+               lastSyncTime = now;
+            }
+        }
+      } else {
+        lastTime = now;
+        lastSyncTime = now;
       }
+
       if (tabVisible && framePendingRef.current && !isRendering) {
         framePendingRef.current = false;
         isRendering = true;
