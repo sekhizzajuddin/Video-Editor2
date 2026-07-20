@@ -26,6 +26,7 @@ import {
   Crosshair,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
 import { toast } from 'sonner';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
@@ -277,7 +278,37 @@ export function PropertiesPanel() {
     updateSubtitle,
     deleteSubtitle,
     selectSubtitle,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    tracks: s.tracks,
+    selectedClipId: s.selectedClipId,
+    selectedClipIds: s.selectedClipIds,
+    pipWindows: s.pipWindows,
+    activePropertiesTab: s.activePropertiesTab,
+    setActivePropertiesTab: s.setActivePropertiesTab,
+    updateClip: s.updateClip,
+    removeClip: s.removeClip,
+    copyClip: s.copyClip,
+    duplicateClip: s.duplicateClip,
+    splitClip: s.splitClip,
+    currentTime: s.currentTime,
+    selectedTransitionClipId: s.selectedTransitionClipId,
+    updateTransition: s.updateTransition,
+    removeTransition: s.removeTransition,
+    addMasterKeyframe: s.addMasterKeyframe,
+    deleteMasterKeyframe: s.deleteMasterKeyframe,
+    history: s.history,
+    historyIndex: s.historyIndex,
+    jumpToHistoryIndex: s.jumpToHistoryIndex,
+    addMedia: s.addMedia,
+    addTrack: s.addTrack,
+    addClip: s.addClip,
+    mediaLibrary: s.mediaLibrary,
+    subtitles: s.subtitles,
+    selectedSubtitleId: s.selectedSubtitleId,
+    updateSubtitle: s.updateSubtitle,
+    deleteSubtitle: s.deleteSubtitle,
+    selectSubtitle: s.selectSubtitle,
+  })));
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [isPickingChromaColor, setIsPickingChromaColor] = useState(false);

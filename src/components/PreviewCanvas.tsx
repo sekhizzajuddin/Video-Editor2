@@ -99,7 +99,43 @@ export function PreviewCanvas() {
     progressBarColor,
     progressBarHeight,
     useProxies,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    currentTime: s.currentTime,
+    isPlaying: s.isPlaying,
+    totalDuration: s.totalDuration,
+    isMuted: s.isMuted,
+    volume: s.volume,
+    togglePlayback: s.togglePlayback,
+    seek: s.seek,
+    setVolume: s.setVolume,
+    toggleMute: s.toggleMute,
+    tracks: s.tracks,
+    selectedClipId: s.selectedClipId,
+    selectedClipIds: s.selectedClipIds,
+    pipWindows: s.pipWindows,
+    selectClip: s.selectClip,
+    playbackSpeed: s.playbackSpeed,
+    setPlaybackSpeed: s.setPlaybackSpeed,
+    playbackDirection: s.playbackDirection,
+    mediaLibrary: s.mediaLibrary,
+    updateClip: s.updateClip,
+    canvasTransformMode: s.canvasTransformMode,
+    setCanvasTransformMode: s.setCanvasTransformMode,
+    setPreviewCanvas: s.setPreviewCanvas,
+    previewCanvas: s.previewCanvas,
+    activeTool: s.activeTool,
+    settings: s.settings,
+    aspectRatio: s.aspectRatio,
+    isExporting: s.isExporting,
+    exportWidth: s.exportWidth,
+    exportHeight: s.exportHeight,
+    showScopes: s.showScopes,
+    setShowScopes: s.setShowScopes,
+    showProgressBar: s.showProgressBar,
+    progressBarColor: s.progressBarColor,
+    progressBarHeight: s.progressBarHeight,
+    useProxies: s.useProxies,
+  })));
 
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
 
@@ -157,6 +193,11 @@ export function PreviewCanvas() {
   useEffect(() => {
     allClipsRef.current = allClips;
   }, [allClips]);
+
+  // Memoized tracks signature to prevent unnecessary redraws
+  const tracksSignature = useMemo(() => {
+    return tracks.map(t => `${t.id}:${t.clips.length}:${t.hidden}`).join('|');
+  }, [tracks]);
 
   // Clean up unused particle pools to prevent memory leaks
   useEffect(() => {
@@ -253,7 +294,7 @@ export function PreviewCanvas() {
     if (
       !prev ||
       prev.currentTime !== currentTime ||
-      prev.tracks !== tracks ||
+      prev.tracksSignature !== tracksSignature ||
       prev.imageRevision !== imageRevision ||
       prev.videoElements !== videoElements ||
       prev.frameCache !== frameCache ||
@@ -276,14 +317,14 @@ export function PreviewCanvas() {
     ) {
       framePendingRef.current = true;
       previousRenderDepsRef.current = {
-        currentTime, tracks, selectedClipId, mediaLibrary, videoElements,
+        currentTime, tracksSignature, selectedClipId, mediaLibrary, videoElements,
         frameCache, imageRevision, requestRedraw, viewport, settings,
         showGrid, canvasBgColor, isPlaying, aspectRatio, isExporting,
         exportWidth, exportHeight, showProgressBar, progressBarColor,
         progressBarHeight, useProxies
       };
     }
-  }, [currentTime, tracks, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, settings, showGrid, canvasBgColor, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight, showProgressBar, progressBarColor, progressBarHeight, useProxies]);
+  }, [currentTime, tracksSignature, selectedClipId, mediaLibrary, videoElements, frameCache, imageRevision, requestRedraw, viewport, settings, showGrid, canvasBgColor, isPlaying, aspectRatio, isExporting, exportWidth, exportHeight, showProgressBar, progressBarColor, progressBarHeight, useProxies]);
   
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
@@ -3140,6 +3181,23 @@ export function PreviewCanvas() {
   const previewWidth = settings.previewQuality === 'quarter' ? 213 : settings.previewQuality === 'half' ? 427 : 854;
   const previewHeight = settings.previewQuality === 'quarter' ? 120 : settings.previewQuality === 'half' ? 240 : 480;
 
+  const cursorStyle = useMemo(() => {
+    const sc = tracks.flatMap(t=>t.clips).find(c=>c.id===selectedClipId);
+    return activeTool === 'hand' ? (isPanning.current ? 'grabbing' : 'grab') : (activeTool === 'zoom' ? 'zoom-in' : (sc?.particleSettings ? 'crosshair' : 'default'));
+  }, [activeTool, tracks, selectedClipId]);
+
+  const progressBarStyle = useMemo(() => ({
+    width: `${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}%`
+  }), [currentTime, totalDuration]);
+
+  const scrubThumbStyle = useMemo(() => ({
+    left: `calc(${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}% - 6px)`
+  }), [currentTime, totalDuration]);
+
+  const volumeBarStyle = useMemo(() => ({
+    width: `${isMuted ? 0 : volume * 100}%`
+  }), [isMuted, volume]);
+
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e]">
       {/* Canvas Container Ã¢â‚¬â€ flex-1 so it shares space with the control bar */}
@@ -3163,7 +3221,7 @@ export function PreviewCanvas() {
             updateClip(selClip.id, { particleSettings: { ...selClip.particleSettings, emitterX: Math.round(x), emitterY: Math.round(y) } });
           }
         }}
-        style={{ cursor: activeTool === 'hand' ? (isPanning.current ? 'grabbing' : 'grab') : (activeTool === 'zoom' ? 'zoom-in' : (() => { const sc = tracks.flatMap(t=>t.clips).find(c=>c.id===selectedClipId); return sc?.particleSettings ? 'crosshair' : 'default'; })()) }}
+        style={{ cursor: cursorStyle }}
       >
         <canvas
           id="preview-canvas"
@@ -3271,7 +3329,7 @@ export function PreviewCanvas() {
             <div className="absolute inset-0 rounded-full bg-[#333]" />
             <div
               className="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400"
-              style={{ width: `${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}%` }}
+              style={progressBarStyle}
             />
             <input
               type="range"
@@ -3286,7 +3344,7 @@ export function PreviewCanvas() {
             {/* Scrub thumb */}
             <div
               className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-amber-400 shadow-lg shadow-amber-500/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-              style={{ left: `calc(${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}% - 6px)` }}
+              style={scrubThumbStyle}
             />
           </div>
         </div>
@@ -3367,7 +3425,7 @@ export function PreviewCanvas() {
                 <div className="absolute inset-0 rounded-full bg-[#333]" />
                 <div
                   className="absolute top-0 left-0 h-full rounded-full bg-[#666] group-hover/vol:bg-amber-500 transition-colors"
-                  style={{ width: `${isMuted ? 0 : volume * 100}%` }}
+                  style={volumeBarStyle}
                 />
                 <input
                   type="range"

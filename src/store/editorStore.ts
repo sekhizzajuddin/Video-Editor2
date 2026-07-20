@@ -1224,21 +1224,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       let durationOverride = updates.duration; // Use whatever the caller passed first
       let durationDelta = 0;
 
-      // DEBUG: Log all speed ramp updates
-      if (updates.speedRamp !== undefined || updates.duration !== undefined) {
-        console.log('[updateClip] clipId:', clipId);
-        console.log('[updateClip] updates.duration:', updates.duration);
-        console.log('[updateClip] updates.speedRamp:', updates.speedRamp ? `[${updates.speedRamp.length} kf]` : updates.speedRamp);
-        console.log('[updateClip] options:', options);
-        if (found) {
-          const mediaItem = state.mediaLibrary.find((m) => m.id === found.clip.mediaId);
-          console.log('[updateClip] found clip.duration:', found.clip.duration);
-          console.log('[updateClip] clip.trimStart:', found.clip.trimStart, 'trimEnd:', found.clip.trimEnd, 'speed:', found.clip.speed);
-          console.log('[updateClip] mediaItem found?:', !!mediaItem, 'mediaItem.duration:', mediaItem?.duration);
-        }
-      }
-
-
       // Only auto-calculate duration if the caller did NOT provide one explicitly
       if (found && durationOverride === undefined && (updates.speedRamp !== undefined || updates.trimStart !== undefined || updates.trimEnd !== undefined || updates.speed !== undefined)) {
         const clip = found.clip;
@@ -3265,14 +3250,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Recalculate total duration from all clips and clean up empty custom tracks
   recalcTotalDuration: () => {
-    const { tracks, pipWindows } = get();
+    const { tracks, pipWindows, totalDuration } = get();
 
-    // FIX M29: Do NOT silently remove user-created tracks that happen to be empty.
-    // Only auto-remove tracks that are both dynamic AND have never had any clips/overLayers.
-    // Keep all non-dynamic (user-created) tracks regardless of empty state.
+    // FIX: Only rebuild tracks array if something actually changed (removing empty dynamic tracks)
     const cleanedTracks = tracks.filter(
       (t) => !t.isDynamic || t.clips.length > 0
     );
+    const tracksChanged = cleanedTracks.length !== tracks.length || cleanedTracks !== tracks;
 
     let maxEnd = 0;
     for (const track of cleanedTracks) {
@@ -3281,6 +3265,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         if (end > maxEnd) maxEnd = end;
       }
     }
+    const newTotalDuration = maxEnd || 0.1;
 
     // Recalculate PIP Window durations:
     // Ensure every PIP window has a 3-second blank gap after the last clip, up to 10 minutes maximum (600s).
@@ -3309,10 +3294,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }
     }
 
+    // FIX: Only call set() if something actually changed — avoids broadcast storm during drag
+    if (!tracksChanged && Math.abs(newTotalDuration - totalDuration) < 0.001 && !pipChanged) {
+      return; // No-op: nothing changed
+    }
+
     // Set totalDuration with a minimum floor of 0.1 to avoid unusable slider empty state
     set({
       tracks: cleanedTracks,
-      totalDuration: maxEnd || 0.1,
+      totalDuration: newTotalDuration,
       ...(pipChanged ? { pipWindows: updatedPipWindows } : {})
     });
   },

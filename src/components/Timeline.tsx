@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   TRACK_HEADER_WIDTH,
   RULER_HEIGHT,
@@ -66,7 +67,46 @@ export function Timeline() {
     pipWindows,
     activePipWindowId,
     setActivePipWindow,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    tracks: s.tracks,
+    zoomLevel: s.zoomLevel,
+    selectedClipId: s.selectedClipId,
+    selectedClipIds: s.selectedClipIds,
+    activeTool: s.activeTool,
+    selectedTrackId: s.selectedTrackId,
+    draggingClipId: s.draggingClipId,
+    totalDuration: s.totalDuration,
+    play: s.play,
+    pause: s.pause,
+    selectClip: s.selectClip,
+    selectClips: s.selectClips,
+    selectTrack: s.selectTrack,
+    seek: s.seek,
+    splitClip: s.splitClip,
+    zoomIn: s.zoomIn,
+    zoomOut: s.zoomOut,
+    toggleTrackLock: s.toggleTrackLock,
+    toggleTrackMute: s.toggleTrackMute,
+    addTrack: s.addTrack,
+    removeTrack: s.removeTrack,
+    showTransitionLayer: s.showTransitionLayer,
+    selectedTransitionClipId: s.selectedTransitionClipId,
+    setShowTransitionLayer: s.setShowTransitionLayer,
+    selectTransition: s.selectTransition,
+    selectedKeyframeLines: s.selectedKeyframeLines,
+    toggleKeyframeLineSelection: s.toggleKeyframeLineSelection,
+    reorderTrack: s.reorderTrack,
+    inPoint: s.inPoint,
+    outPoint: s.outPoint,
+    markers: s.markers,
+    beatMarkers: s.beatMarkers,
+    settings: s.settings,
+    enterCompoundClip: s.enterCompoundClip,
+    setDragPreview: s.setDragPreview,
+    pipWindows: s.pipWindows,
+    activePipWindowId: s.activePipWindowId,
+    setActivePipWindow: s.setActivePipWindow,
+  })));
 
 
   // ── Hook composition ──────────────────────────────────────────────────

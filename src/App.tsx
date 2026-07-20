@@ -17,6 +17,7 @@ import { HelpTooltipManager } from '@/components/HelpTooltipManager';
 import { WelcomeScreen } from '@/components/WelcomeScreen';
 import { AiCopilot } from '@/components/AiCopilot';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 import { saveAutosaveToDB } from '@/utils/projectPersistence';
 import { Toaster } from '@/components/ui/sonner';
@@ -53,7 +54,37 @@ function App() {
     setShowTeleprompter,
     projectId,
     selectedClipIds,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    togglePlayback: s.togglePlayback,
+    activeTool: s.activeTool,
+    setActiveTool: s.setActiveTool,
+    selectedClipId: s.selectedClipId,
+    removeClip: s.removeClip,
+    splitClip: s.splitClip,
+    copyClip: s.copyClip,
+    pasteClip: s.pasteClip,
+    cutClip: s.cutClip,
+    duplicateClip: s.duplicateClip,
+    undo: s.undo,
+    redo: s.redo,
+    zoomIn: s.zoomIn,
+    zoomOut: s.zoomOut,
+    history: s.history,
+    historyIndex: s.historyIndex,
+    tracks: s.tracks,
+    selectClips: s.selectClips,
+    selectedTransitionClipId: s.selectedTransitionClipId,
+    removeTransition: s.removeTransition,
+    removeSelectedKeyframeLines: s.removeSelectedKeyframeLines,
+    settings: s.settings,
+    workspaceLayout: s.workspaceLayout,
+    setWorkspaceLayout: s.setWorkspaceLayout,
+    updateSettings: s.updateSettings,
+    showTeleprompter: s.showTeleprompter,
+    setShowTeleprompter: s.setShowTeleprompter,
+    projectId: s.projectId,
+    selectedClipIds: s.selectedClipIds,
+  })));
 
   const leftWidth = workspaceLayout.leftWidth;
   const rightWidth = workspaceLayout.rightWidth;

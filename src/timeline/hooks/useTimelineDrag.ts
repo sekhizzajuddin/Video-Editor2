@@ -682,6 +682,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   );
 
   const lastScrubTimeRef = useRef<number>(0);
+  const lastScrubStateUpdateRef = useRef<number>(0);
   const latestClientXRef = useRef<number>(0);
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -703,8 +704,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               lastScrubTimeRef.current = now;
             }
             
-            setScrubTime(time);
-            setScrubMouseX(clientX);
+            const scrubNow = performance.now();
+            if (scrubNow - lastScrubStateUpdateRef.current > 16) {
+              setScrubTime(time);
+              setScrubMouseX(clientX);
+              lastScrubStateUpdateRef.current = scrubNow;
+            }
           }
         });
       }
