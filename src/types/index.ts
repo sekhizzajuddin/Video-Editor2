@@ -453,6 +453,7 @@ export interface ClipInterpolationSettings {
 
 export interface ImageSequence {
   id: string;
+  name?: string;
   trackId: string;
   startTime: number;
   totalDuration: number;
@@ -460,6 +461,11 @@ export interface ImageSequence {
   defaultClipDuration: number;
   overlap: number;
   transitionType: SequenceTransitionType;
+  kenBurnsAuto?: boolean;
+  interpolation?: {
+    enabled: boolean;
+    easing?: string;
+  };
   createdAt: number;
 }
 

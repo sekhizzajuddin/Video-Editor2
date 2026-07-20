@@ -236,7 +236,6 @@ export const executeAITool = (name: string, args: any, context?: { currentTime?:
   if (context?.currentTime !== undefined && Math.abs(store.currentTime - context.currentTime) > 0.5) {
     return { success: false, error: 'Stale prompt: Playhead moved before execution' };
   }
-  const store = useEditorStore.getState();
   
   switch (name) {
     case 'addMasterKeyframe': {

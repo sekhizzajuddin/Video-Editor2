@@ -146,6 +146,8 @@ function getDB(): Promise<IDBDatabase> {
       }
     };
   });
+  
+  return dbOpeningPromise;
 }
 
 /**
