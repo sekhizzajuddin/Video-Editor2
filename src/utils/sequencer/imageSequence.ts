@@ -143,6 +143,7 @@ export function buildSequence(input: BuildSequenceInputs): BuildSequenceResult {
   }
 
   const sequence: ImageSequence = {
+    totalDuration: clips.length * defaultClipDuration - Math.max(0, clips.length - 1) * overlap,
     id: sequenceId,
     trackId,
     startTime,

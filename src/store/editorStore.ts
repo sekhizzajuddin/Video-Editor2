@@ -352,6 +352,7 @@ const initialState: EditorState = {
   selectedClipId: null,
   selectedClipIds: [],
   pipWindows: {},
+  sequences: [],
   activePipWindowId: null,
   selectedTransitionClipId: null,
   selectedKeyframeLines: [],
@@ -631,7 +632,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const id = `seq_${Date.now()}`;
     const duration = opts.defaultClipDuration ?? 3;
     const overlap = opts.overlap ?? 0;
-    const memberClipIds = [];
+    const memberClipIds: string[] = [];
     
     let currentStart = opts.startTime;
     

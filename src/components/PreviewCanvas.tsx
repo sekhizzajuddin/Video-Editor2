@@ -2859,7 +2859,7 @@ export function PreviewCanvas() {
     let lastTime = performance.now();
     let lastSyncTime = performance.now();
     
-    const tick = async (now) => {
+    const tick = async (now: number) => {
       const state = useEditorStore.getState();
       
       if (state.isPlaying) {

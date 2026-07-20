@@ -95,7 +95,7 @@ export function SequenceProperties() {
             value={sequence.overlap}
             onChange={(e) => handleUpdate({ overlap: Number(e.target.value) })}
             className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white px-2 py-1 focus:outline-none focus:border-emerald-500"
-            disabled={sequence.transitionType === 'none'}
+            disabled={sequence.transitionType === 'crossfade'}
           />
         </div>
       </div>
