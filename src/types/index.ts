@@ -462,10 +462,7 @@ export interface ImageSequence {
   overlap: number;
   transitionType: SequenceTransitionType;
   kenBurnsAuto?: boolean;
-  interpolation?: {
-    enabled: boolean;
-    easing?: string;
-  };
+  interpolation?: ClipInterpolationSettings;
   createdAt: number;
 }
 

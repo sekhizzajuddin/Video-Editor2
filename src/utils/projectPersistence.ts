@@ -214,7 +214,7 @@ function sanitizeTracksForStorage(tracks: TimelineTrack[]): TimelineTrack[] {
   return tracks.map(track => ({
     ...track,
     clips: track.clips.map(clip => {
-      const sanitized = { ...clip, isPreview: false };
+      const sanitized: any = { ...clip, isPreview: false };
       if (sanitized.type === 'compound' && sanitized.nestedTimeline) {
         sanitized.nestedTimeline = {
           ...sanitized.nestedTimeline,

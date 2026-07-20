@@ -1367,36 +1367,36 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const deltaTime = newStartTime - oldStartTime;
       const D = foundClip.duration;
 
-      const targetTrackId = newTrackId || foundClip.trackId;
-      let targetTrack = newTracks.find((t) => t.id === targetTrackId);
-      if (!targetTrack) {
+      const finalTargetTrackId = newTrackId || foundClip.trackId;
+      let finalTargetTrack = newTracks.find((t) => t.id === finalTargetTrackId);
+      if (!finalTargetTrack) {
         for (const pip of Object.values(newPipWindows)) {
-          targetTrack = pip.tracks.find((t) => t.id === targetTrackId);
-          if (targetTrack) break;
+          finalTargetTrack = pip.tracks.find((t) => t.id === finalTargetTrackId);
+          if (finalTargetTrack) break;
         }
       }
-      if (targetTrack) {
+      if (finalTargetTrack) {
         // Enforce track type compatibility (ARCH-5)
         const media = state.mediaLibrary.find((m) => m.id === foundClip!.mediaId);
         const clipType = media ? media.type : (foundClip!.textSettings ? 'text' : (foundClip!.fxSettings ? 'fx' : (foundClip!.audioSettings !== undefined && !foundClip!.transform ? 'audio' : 'video')));
-        if (targetTrack.type === 'audio' && clipType !== 'audio') {
+        if (finalTargetTrack.type === 'audio' && clipType !== 'audio') {
           return {}; // Reject move of visual clip to audio track
         }
-        if (targetTrack.type === 'video' && clipType !== 'video' && clipType !== 'image') {
+        if (finalTargetTrack.type === 'video' && clipType !== 'video' && clipType !== 'image') {
           return {}; // Reject move of audio clip to video track
         }
-        if (targetTrack.type === 'text' && clipType !== 'text') {
+        if (finalTargetTrack.type === 'text' && clipType !== 'text') {
           return {}; // Reject move of non-text clip to text track
         }
-        if (targetTrack.type === 'fx' && clipType !== 'fx') {
+        if (finalTargetTrack.type === 'fx' && clipType !== 'fx') {
           return {}; // Reject move of non-fx clip to fx track
         }
         if (state.activeTool === 'ripple') {
           // Multi-track Ripple Move: Close old gap, then open space at newStartTime
           // Context-aware ripple move: only affect tracks in same container (main vs PIP)
-          const isTargetPip = targetTrackId.includes('_pip');
+          const isTargetPip = finalTargetTrackId.includes('_pip');
           const tracksToRipple = isTargetPip
-            ? Object.values(newPipWindows).find((p) => p.tracks.some((t) => t.id === targetTrackId))?.tracks || []
+            ? Object.values(newPipWindows).find((p) => p.tracks.some((t) => t.id === finalTargetTrackId))?.tracks || []
             : newTracks;
 
           tracksToRipple.forEach((track) => {
@@ -1420,7 +1420,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           foundClip.startTime = Math.max(0, newStartTime);
         } else if (resolveOverlap) {
           const adjustedStart = findNonOverlappingPosition(
-            targetTrack.clips,
+            finalTargetTrack.clips,
             newStartTime,
             foundClip.duration,
             clipId
@@ -1431,8 +1431,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
         
         // Clamp start time and duration if track is a PIP track with manual duration
-        if (targetTrackId.includes('_pip')) {
-          const pip = Object.values(newPipWindows).find((p) => p.tracks.some((t) => t.id === targetTrackId));
+        if (finalTargetTrackId.includes('_pip')) {
+          const pip = Object.values(newPipWindows).find((p) => p.tracks.some((t) => t.id === finalTargetTrackId));
           if (pip && pip.manualDuration) {
             if (foundClip.startTime + foundClip.duration > pip.duration) {
               if (foundClip.startTime >= pip.duration) {
@@ -1445,8 +1445,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           }
         }
 
-        foundClip.trackId = targetTrackId;
-        targetTrack.clips.push(foundClip);
+        foundClip.trackId = finalTargetTrackId;
+        finalTargetTrack.clips.push(foundClip);
         success = true;
 
         // Also move linked clip if it exists
