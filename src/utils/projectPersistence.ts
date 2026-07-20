@@ -252,6 +252,7 @@ export async function saveProjectToDB(data: {
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
+  sequences?: any[];
 }): Promise<void> {
   // Auto-Save Protection
   if (data.targetProjectId && data.targetProjectId !== activeProjectId) {
@@ -304,6 +305,9 @@ export async function saveProjectToDB(data: {
       }
       if (data.beatMarkers) {
         store.put(data.beatMarkers, 'beatMarkers');
+      }
+      if (data.sequences) {
+        store.put(data.sequences, 'sequences');
       }
 
       transaction.oncomplete = () => resolve();
@@ -407,6 +411,7 @@ export async function loadProjectFromDB(): Promise<{
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
+  sequences?: any[];
 } | null> {
   const db = await getDB();
 
@@ -418,7 +423,7 @@ export async function loadProjectFromDB(): Promise<{
       return reject(e);
     }
     const store = transaction.objectStore('project');
-    const keys = ['tracks', 'mediaLibrary', 'currentTime', 'aspectRatio', 'pipWindows', 'folders', 'subtitles', 'markers', 'beatMarkers'];
+    const keys = ['tracks', 'mediaLibrary', 'currentTime', 'aspectRatio', 'pipWindows', 'folders', 'subtitles', 'markers', 'beatMarkers', 'sequences'];
     let pending = keys.length;
     let hasError = false;
     const result: any = {};
@@ -445,7 +450,8 @@ export async function loadProjectFromDB(): Promise<{
                 folders: result.folders || [],
                 subtitles: result.subtitles || [],
                 markers: result.markers || [],
-                beatMarkers: result.beatMarkers || []
+                beatMarkers: result.beatMarkers || [],
+                sequences: result.sequences || []
               });
             }).catch(reject);
           }

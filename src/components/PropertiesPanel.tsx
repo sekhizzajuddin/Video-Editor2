@@ -45,6 +45,7 @@ import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } 
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
+import { SequenceProperties } from './properties/SequenceProperties';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -1897,6 +1898,7 @@ export function PropertiesPanel() {
 
       {/* Properties Content */}
       <div className="flex-1 overflow-y-auto p-3">
+        <SequenceProperties />
         {activePropertiesTab === 'transform' && (() => {
           // Reusing outer component scope helpers: localTime, animations, getPropVal, setPropVal, handleToggleMasterKeyframe
           const keyframeTimes = getMasterKeyframes();

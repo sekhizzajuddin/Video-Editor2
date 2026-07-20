@@ -626,7 +626,13 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
               : URL.createObjectURL(blob),
             createdAt: now
           };
-          addMedia(mediaItem, file);
+          try {
+            addMedia(mediaItem, file);
+          } finally {
+            if (!(option.previewUrl && option.previewUrl.startsWith('blob:'))) {
+              setTimeout(() => URL.revokeObjectURL(mediaItem.url), 1000);
+            }
+          }
 
           const targetTrack = cue.type === 'bgm' ? bgmTrack : sfxTrack;
           const globalStart = clip.startTime + cue.start;

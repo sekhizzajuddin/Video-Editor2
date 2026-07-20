@@ -313,6 +313,31 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         return;
       }
 
+      // ── NEW: Sequence Drop (Multi-Image) ──
+      const sequenceData = e.dataTransfer.getData('application/procut-media-sequence');
+      if (sequenceData) {
+        try {
+          const mediaIds = JSON.parse(sequenceData);
+          if (Array.isArray(mediaIds) && mediaIds.length >= 2) {
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const startTime = Math.max(0, x / zoomLevel);
+            
+            useEditorStore.getState().addImageSequence(mediaIds, {
+              trackId,
+              startTime,
+              defaultClipDuration: 3,
+              transitionType: 'kenburnsAuto'
+            });
+            setHoveredTrackId(null);
+            setDropPreview(null);
+            return; // Skip single-clip path
+          }
+        } catch (err) {
+          console.error('Failed to parse sequence drop', err);
+        }
+      }
+
       // ── Media Item Drop ──
       const mediaId = e.dataTransfer.getData('application/procut-media');
       if (!mediaId) return;

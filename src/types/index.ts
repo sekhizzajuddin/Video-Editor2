@@ -402,6 +402,70 @@ export interface TimelineClip {
   lut?: ClipLutSettings;
   mask?: ClipMaskSettings;
   pipWindowIds?: string[]; // Array of PIP window IDs attached to this clip
+  // Sequencer / Interpolation (Gap #2 + #3)
+  interpolation?: ClipInterpolationSettings;
+  sequenceId?: string; // Image sequence membership
+  sequenceIndex?: number; // position in sequence (0, 1, 2...)
+}
+
+// ─── Sequencer / Interpolation ───────────────────────────────────────────
+export type InterpolationMode = 'none' | 'kenburns' | 'morph' | 'opticalFlow';
+
+export type InterpolationPreset =
+  | 'off'
+  | 'kenburns-pan'
+  | 'kenburns-zoomIn'
+  | 'kenburns-zoomOut'
+  | 'kenburns-orbit'
+  | 'morph-fade'
+  | 'morph-warp'
+  | 'flow-rife';
+
+export type SequenceTransitionType =
+  | 'cut'
+  | 'fade'
+  | 'crossfade'
+  | 'kenburnsFade'
+  | 'kenburnsAuto';
+
+export type SequenceEasing =
+  | 'linear'
+  | 'easeIn'
+  | 'easeOut'
+  | 'easeInOut';
+
+export type OpticalFlowModel = 'rife40' | 'rife49' | 'dain';
+
+export interface ClipInterpolationSettings {
+  mode: InterpolationMode;
+  autoKenBurns?: boolean;
+  preset?: InterpolationPreset;
+  panAmplitude?: number;   // 0–100 (% of frame)
+  zoomAmount?: number;     // 0–100 (% scale)
+  blendDuration?: number;  // seconds, overlap with next image
+  intensity?: number;      // 0–100 (effect strength)
+  easing?: SequenceEasing;
+  // optical-flow specific
+  flowModel?: OpticalFlowModel;
+  flowCount?: number;      // intermediate frames per pair (default 1)
+  flowFramerate?: number;  // target fps for synthesized segment
+}
+
+export interface ImageSequence {
+  id: string;
+  trackId: string;
+  startTime: number;
+  totalDuration: number;
+  memberClipIds: string[];
+  defaultClipDuration: number;
+  overlap: number;
+  transitionType: SequenceTransitionType;
+  createdAt: number;
+}
+
+export interface InterpolationRenderFrame {
+  // light cache pointer so re-renders are cheap
+  cacheKey: string;
 }
 
 // NEW: PIP Window - A nested mini-timeline attached to a specific clip
@@ -471,7 +535,10 @@ export interface EditorState {
   // PIP Nested Timelines
   pipWindows: Record<string, PipWindow>;
   activePipWindowId: string | null;
-  
+
+  // Image Sequencer (Gap #2 + #3)
+  sequences: ImageSequence[];
+
   selectedTrackId: string | null;
   markers: TimelineMarker[];
 

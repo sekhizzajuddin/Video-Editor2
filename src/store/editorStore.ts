@@ -20,15 +20,14 @@ import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, cle
 import { getAnimatedValue } from '@/utils/keyframes';
 
 let saveTimeoutId: any = null;
-
 const debouncedSaveProject = (state: any) => {
   if (saveTimeoutId) {
     clearTimeout(saveTimeoutId);
   }
   useEditorStore.setState({ hasUnsavedChanges: true });
   saveTimeoutId = setTimeout(() => {
-    const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows } = state;
-    saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows } as any).then(() => {
+    const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences } = state;
+    saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows, sequences } as any).then(() => {
       useEditorStore.setState({ hasUnsavedChanges: false });
       if (projectId !== 'default') {
         saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
@@ -39,7 +38,6 @@ const debouncedSaveProject = (state: any) => {
     saveTimeoutId = null;
   }, 5000);
 };
-
 
 const generateId = () =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -170,6 +168,11 @@ interface EditorActions {
   createFolder: (name: string, parentId?: string | null) => void;
   deleteFolder: (id: string) => void;
   moveMediaToFolder: (mediaId: string, folderId: string | null) => void;
+
+  // Image Sequence Operations
+  addImageSequence: (mediaIds: string[], opts: { trackId: string; startTime: number; defaultClipDuration?: number; overlap?: number; transitionType?: any }) => string;
+  updateSequence: (sequenceId: string, patch: any) => void;
+  dissolveSequence: (sequenceId: string) => void;
 
   // Timeline Operations
   addClip: (clip: TimelineClip) => void;
@@ -624,6 +627,167 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   // Media Library
+  addImageSequence: (mediaIds, opts) => {
+    const id = `seq_${Date.now()}`;
+    const duration = opts.defaultClipDuration ?? 3;
+    const overlap = opts.overlap ?? 0;
+    const memberClipIds = [];
+    
+    let currentStart = opts.startTime;
+    
+    mediaIds.forEach((mediaId, idx) => {
+      const clipId = `clip_${Date.now()}_${idx}`;
+      const isLast = idx === mediaIds.length - 1;
+      const clipDuration = isLast ? duration : duration + overlap;
+      
+      get().addClip({
+        id: clipId,
+        mediaId,
+        trackId: opts.trackId,
+        startTime: currentStart,
+        duration: clipDuration,
+        trimStart: 0,
+        trimEnd: 0,
+        opacity: 100,
+        speed: 1,
+        effects: [],
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        sequenceId: id,
+        sequenceIndex: idx,
+        interpolation: {
+          mode: opts.transitionType === 'kenburnsAuto' ? 'kenburns' : 'none',
+          autoKenBurns: opts.transitionType === 'kenburnsAuto' || opts.transitionType === 'kenburnsFade',
+        },
+        kenBurns: (opts.transitionType === 'kenburnsAuto' || opts.transitionType === 'kenburnsFade') ? {
+          enabled: true,
+          startScale: Math.random() > 0.5 ? 100 : 115,
+          endScale: Math.random() > 0.5 ? 115 : 100,
+          startPanX: (Math.random() - 0.5) * 10,
+          startPanY: (Math.random() - 0.5) * 10,
+          endPanX: (Math.random() - 0.5) * 10,
+          endPanY: (Math.random() - 0.5) * 10,
+          easing: 'easeInOut'
+        } : undefined,
+        transitionOut: (!isLast && (opts.transitionType === 'crossfade' || opts.transitionType === 'kenburnsFade') && overlap > 0) ? {
+          id: 'auto_' + Date.now(),
+          name: 'Dissolve',
+          type: 'dissolve',
+          duration: overlap,
+          params: {}
+        } : undefined
+      });
+      
+      memberClipIds.push(clipId);
+      currentStart += duration - overlap;
+    });
+    
+    set((state) => ({
+      sequences: [
+        ...(state.sequences || []),
+        {
+          id,
+          trackId: opts.trackId,
+          startTime: opts.startTime,
+          totalDuration: currentStart - opts.startTime + (overlap > 0 ? overlap : 0),
+          memberClipIds,
+          defaultClipDuration: duration,
+          overlap,
+          transitionType: opts.transitionType ?? 'cut',
+          createdAt: Date.now(),
+        },
+      ],
+    }));
+    
+    return id;
+  },
+
+  updateSequence: (sequenceId, patch) => {
+    set((state) => {
+      const seqIndex = state.sequences.findIndex(s => s.id === sequenceId);
+      if (seqIndex === -1) return state;
+      
+      const oldSeq = state.sequences[seqIndex];
+      const newSeq = { ...oldSeq, ...patch };
+      
+      const newSequences = [...state.sequences];
+      newSequences[seqIndex] = newSeq;
+
+      // Update timeline clips
+      const newTracks = [...state.tracks];
+      const memberClips: { trackIdx: number; clipIdx: number; clip: any }[] = [];
+
+      newTracks.forEach((track, tIdx) => {
+        track.clips.forEach((clip, cIdx) => {
+          if (clip.sequenceId === sequenceId) {
+            memberClips.push({ trackIdx: tIdx, clipIdx: cIdx, clip: { ...clip } });
+          }
+        });
+      });
+
+      memberClips.sort((a, b) => (a.clip.sequenceIndex ?? 0) - (b.clip.sequenceIndex ?? 0));
+
+      if (memberClips.length > 0) {
+        let currentStart = memberClips[0].clip.startTime;
+
+        memberClips.forEach((m, idx) => {
+          const isLast = idx === memberClips.length - 1;
+          const clipDuration = isLast ? newSeq.defaultClipDuration : newSeq.defaultClipDuration + newSeq.overlap;
+          
+          m.clip.startTime = currentStart;
+          m.clip.duration = clipDuration;
+
+          m.clip.interpolation = {
+            ...m.clip.interpolation,
+            mode: newSeq.transitionType === 'kenburnsAuto' ? 'kenburns' : 'none',
+            autoKenBurns: newSeq.transitionType === 'kenburnsAuto' || newSeq.transitionType === 'kenburnsFade',
+          };
+
+          m.clip.kenBurns = (newSeq.transitionType === 'kenburnsAuto' || newSeq.transitionType === 'kenburnsFade') ? (m.clip.kenBurns || {
+            enabled: true,
+            startScale: Math.random() > 0.5 ? 100 : 115,
+            endScale: Math.random() > 0.5 ? 115 : 100,
+            startPanX: (Math.random() - 0.5) * 10,
+            startPanY: (Math.random() - 0.5) * 10,
+            endPanX: (Math.random() - 0.5) * 10,
+            endPanY: (Math.random() - 0.5) * 10,
+            easing: 'easeInOut'
+          }) : undefined;
+
+          if (!isLast && (newSeq.transitionType === 'crossfade' || newSeq.transitionType === 'kenburnsFade') && newSeq.overlap > 0) {
+             m.clip.transitionOut = {
+                id: 'auto_' + Date.now(),
+                name: 'Dissolve',
+                type: 'dissolve',
+                duration: newSeq.overlap,
+                params: {}
+             };
+          } else {
+             m.clip.transitionOut = undefined;
+          }
+
+          currentStart += (newSeq.defaultClipDuration - newSeq.overlap);
+        });
+
+        memberClips.forEach(m => {
+           const newTrack = { ...newTracks[m.trackIdx] };
+           const newClips = [...newTrack.clips];
+           newClips[m.clipIdx] = m.clip;
+           newTrack.clips = newClips;
+           newTracks[m.trackIdx] = newTrack;
+        });
+      }
+
+      return { sequences: newSequences, tracks: newTracks };
+    });
+    get().saveSnapshot('Update Sequence');
+  },
+
+  dissolveSequence: (sequenceId) => {
+    set((state) => ({
+      sequences: state.sequences.filter(s => s.id !== sequenceId)
+    }));
+  },
+
   addMedia: (item, file) => {
     set((state) => ({
       mediaLibrary: [...state.mediaLibrary, item],

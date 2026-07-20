@@ -681,6 +681,7 @@ export function MediaPanel() {
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [openSection, setOpenSection] = useState<'fx' | 'color' | 'particles'>('fx');
   const [previewItem, setPreviewItem] = useState<any | null>(null);
   const [templateCategory, setTemplateCategory] = useState<string>('all');

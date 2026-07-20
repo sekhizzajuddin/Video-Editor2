@@ -843,5 +843,5 @@ export async function enhancePromptWithGemini(prompt: string, apiKey: string): P
   });
   if (!response.ok) throw new Error("Failed to enhance prompt");
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text;
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }

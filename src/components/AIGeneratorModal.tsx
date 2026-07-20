@@ -163,6 +163,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
 
     // FIX C7: keep an external handle so unmount / state-toggle can clearInterval.
     // Was previously only cleared from inside its own callback.
+    if (pollHandleRef.current) clearInterval(pollHandleRef.current);
     const interval = setInterval(async () => {
       attempts++;
       setAIVideoGenerationState({ aiVideoProgress: Math.min(95, 10 + (attempts * 1.5)) });
