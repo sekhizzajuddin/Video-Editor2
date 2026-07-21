@@ -458,7 +458,7 @@ export function PreviewCanvas() {
             const mi = mediaLibrary.find((m) => m.id === clip.mediaId);
             if (mi && mi.type === 'video') {
               const videoEl = videoElements.get(clip.id);
-              if (videoEl && (videoEl.seeking || videoEl.readyState < 2)) {
+              if (videoEl && videoEl.readyState < 1 && (!videoEl.videoWidth || videoEl.videoWidth === 0)) {
                 // Check if we have a cached frame close enough to use
                 const clipCache = frameCache.get(clip.id);
                 const mediaTime = getMediaTimeForClip({

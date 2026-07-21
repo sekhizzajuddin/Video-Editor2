@@ -721,7 +721,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const time = Math.max(0, x / zoomLevel);
             
             const now = performance.now();
-            if (now - lastScrubTimeRef.current > 33) {
+            if (now - lastScrubTimeRef.current > 16) {
               seek(time);
               lastScrubTimeRef.current = now;
             }

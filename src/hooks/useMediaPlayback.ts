@@ -496,7 +496,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
   useEffect(() => {
     const syncPlayback = async () => {
       const now = performance.now();
-      if (now - lastVideoSyncRef.current < 33) return;
+      const syncInterval = isPlaying ? 33 : 0;
+      if (now - lastVideoSyncRef.current < syncInterval) return;
       lastVideoSyncRef.current = now;
 
       const pool = poolRef.current;
