@@ -991,7 +991,7 @@ export function PreviewCanvas() {
           }
 
             const videoEl = videoElements.get(clip.id);
-            if (videoEl && videoEl.readyState >= 2) {
+            if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
               const vw = videoEl.videoWidth || w;
               const vh = videoEl.videoHeight || h;
               const scale = Math.min(w / vw, h / vh);
@@ -1449,7 +1449,7 @@ export function PreviewCanvas() {
 
       if (mediaItem.type === 'video') {
         const videoEl = videoElements.get(clip.id);
-        const videoReady = videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0;
+        const videoReady = videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0;
 
         // Determine frame source: live video element or cached ImageBitmap
         let frameSource: CanvasImageSource | null = null;
@@ -1499,7 +1499,7 @@ export function PreviewCanvas() {
               if (otherId === clip.id) continue;
               // Find the clip that owns this element to check mediaId
               const ownerClip = tracks.flatMap((t: any) => t.clips).find((c: any) => c.id === otherId);
-              if (ownerClip?.mediaId === clip.mediaId && otherEl.readyState >= 2 && otherEl.videoWidth > 0) {
+              if (ownerClip?.mediaId === clip.mediaId && otherEl.readyState >= 1 && otherEl.videoWidth > 0) {
                 // Seek this sibling to the correct time if needed
                 const siblingDrift = Math.abs(otherEl.currentTime - targetMediaTime);
                 if (siblingDrift < 2.0) { // Only use if reasonably close

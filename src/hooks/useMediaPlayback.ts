@@ -380,7 +380,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         // Seeked handler that checks for subsequent pending seeks before triggering redraw
         const handleSeeked = () => {
           // Cache this decoded frame as ImageBitmap for instant scrubbing
-          if (el.videoWidth > 0 && el.readyState >= 2 && !pendingSeeksRef.current.has(clipId)) {
+          if (el.videoWidth > 0 && el.readyState >= 2) {
             const capturedTime = el.currentTime;
             createImageBitmap(el).then(bitmap => {
               if (!poolRef.current.has(clipId) && !pendingSeeksRef.current.has(clipId)) {
