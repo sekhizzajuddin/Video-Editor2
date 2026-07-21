@@ -51,64 +51,8 @@ import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { parseSRT } from '@/utils/srtParser';
-import demoA from '../assets/transition_demo_a.webp';
-import demoB from '../assets/transition_demo_b.webp';
-import { toast } from 'sonner';
-import {
-  Film,
-  Music,
-  Image,
-  Search,
-  Mic,
-  Grid3X3,
-  List,
-  Upload,
-  Sparkles,
-  Waves,
-  Folder,
-  Sun,
-  Droplets,
-  Zap,
-  Trash2,
-  X,
-  Loader2,
-  Type,
-  Play,
-  AlertTriangle,
-  Tv2,
-  Clapperboard,
-  Radio,
-  ScanLine,
-  Aperture,
-  Hexagon,
-  FlipHorizontal,
-  ZoomIn,
-  Focus,
-  Eye,
-  Flame,
-  Monitor,
-  CloudSnow,
-  CloudRain,
-  Star,
-  Wind,
-  Leaf,
-  Heart,
-  Code2,
-  ChevronDown,
-  ChevronRight,
-  Square,
-  Plus,
-  Globe,
-  Scissors,
-} from 'lucide-react';
-import React, { useState, useRef, useCallback, useEffect, Fragment } from 'react';
-import { useEditorStore } from '@/store/editorStore';
-import type { MediaTab, MediaType, MediaItem } from '@/types';
-import { probeFile } from '@/utils/mediaProbe';
-import { saveFileToDB } from '@/utils/projectPersistence';
-import { parseSRT } from '@/utils/srtParser';
-import demoA from '../assets/transition_demo_a.webp';
-import demoB from '../assets/transition_demo_b.webp';
+import demoA from '../../assets/transition_demo_a.webp';
+import demoB from '../../assets/transition_demo_b.webp';
 import { toast } from 'sonner';
 import { parseCubeLut } from '@/utils/lutParser';
 import { detectBeats } from '@/utils/beatDetection';

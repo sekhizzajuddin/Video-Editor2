@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useEditorStore } from '@/store/editorStore';
 import { detectBeats } from '@/utils/beatDetection';

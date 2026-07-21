@@ -1,3 +1,4 @@
+import { Waves } from 'lucide-react';
 import React from 'react';
 import { Film, Sun, Tv2, Radio, Monitor, Flame, ScanLine, Hexagon, FlipHorizontal, ZoomIn, Aperture, Eye, Focus, Grid3X3, Droplets, CloudSnow, CloudRain, Star, Sparkles, Wind, Leaf, Heart, Code2, Clapperboard, Zap } from 'lucide-react';
 

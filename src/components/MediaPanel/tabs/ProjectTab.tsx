@@ -16,8 +16,8 @@ export function ProjectTab({
 }: any) {
   return (
     <div className="flex flex-col h-full">
-      {activeMediaTab === 'project' && (
-          <>
+
+
             {/* Search & View Controls */}
             <div className="p-2 border-b border-[#3e3e3e]">
               <div className="relative mb-2">
@@ -118,7 +118,7 @@ export function ProjectTab({
               {/* Missing files warning banner */}
               {(() => {
                 const missing = mediaLibrary.filter(
-                  (m) => m.type !== 'text' && m.type !== 'fx' && (m.url === 'PENDING_RESTORE' || !m.url)
+                  (m: MediaItem) => m.type !== 'text' && m.type !== 'fx' && (m.url === 'PENDING_RESTORE' || !m.url)
                 );
                 if (missing.length > 0) {
                   return (
@@ -193,7 +193,7 @@ export function ProjectTab({
                 </div>
               ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-2 gap-1.5 p-2">
-                  {filteredMedia.map((media) => (
+                  {filteredMedia.map((media: MediaItem) => (
                     <div
                       key={media.id}
                       draggable
@@ -272,7 +272,7 @@ export function ProjectTab({
                 </div>
               ) : (
                 <div className="flex flex-col">
-                  {filteredMedia.map((media) => (
+                  {filteredMedia.map((media: MediaItem) => (
                     <div
                       key={media.id}
                       draggable
@@ -349,8 +349,8 @@ export function ProjectTab({
                 </div>
               )}
             </div>
-          </>
-        )}
+          
+        
     </div>
   );
 }

@@ -2,12 +2,12 @@
 import { useState, useRef } from 'react';
 import { toast } from 'sonner';
 import { useEditorStore } from '@/store/editorStore';
-import { generateSpeech } from '@/utils/aiClient';
+
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { probeFile } from '@/utils/mediaProbe';
 import { v4 as uuidv4 } from 'uuid';
 
-export function useTTS() {
+export function useTTS(setActiveMediaTab?: any) {
   const addMedia = useEditorStore(state => state.addMedia);
   const [ttsText, setTtsText] = useState('');
 const [ttsLanguage, setTtsLanguage] = useState('en');
