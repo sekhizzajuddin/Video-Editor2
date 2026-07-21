@@ -54,14 +54,70 @@ import { parseSRT } from '@/utils/srtParser';
 import demoA from '../assets/transition_demo_a.webp';
 import demoB from '../assets/transition_demo_b.webp';
 import { toast } from 'sonner';
+import {
+  Film,
+  Music,
+  Image,
+  Search,
+  Mic,
+  Grid3X3,
+  List,
+  Upload,
+  Sparkles,
+  Waves,
+  Folder,
+  Sun,
+  Droplets,
+  Zap,
+  Trash2,
+  X,
+  Loader2,
+  Type,
+  Play,
+  AlertTriangle,
+  Tv2,
+  Clapperboard,
+  Radio,
+  ScanLine,
+  Aperture,
+  Hexagon,
+  FlipHorizontal,
+  ZoomIn,
+  Focus,
+  Eye,
+  Flame,
+  Monitor,
+  CloudSnow,
+  CloudRain,
+  Star,
+  Wind,
+  Leaf,
+  Heart,
+  Code2,
+  ChevronDown,
+  ChevronRight,
+  Square,
+  Plus,
+  Globe,
+  Scissors,
+} from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect, Fragment } from 'react';
+import { useEditorStore } from '@/store/editorStore';
+import type { MediaTab, MediaType, MediaItem } from '@/types';
+import { probeFile } from '@/utils/mediaProbe';
+import { saveFileToDB } from '@/utils/projectPersistence';
+import { parseSRT } from '@/utils/srtParser';
+import demoA from '../assets/transition_demo_a.webp';
+import demoB from '../assets/transition_demo_b.webp';
+import { toast } from 'sonner';
 import { parseCubeLut } from '@/utils/lutParser';
 import { detectBeats } from '@/utils/beatDetection';
 import { MOTION_TEMPLATES, MotionTemplate } from '@/utils/motionTemplates';
 import { captureCanvasChunk } from '@/utils/canvasCapture';
 import { analyzeCanvasChunkWithGemini } from '@/utils/aiClient';
 import { generateCombinedSfx } from '@/utils/elevenLabsClient';
-import { AiSoundDesigner } from './AiSoundDesigner';
-import { AIGeneratorModal } from './AIGeneratorModal';
+import { AiSoundDesigner } from '../AiSoundDesigner';
+import { AIGeneratorModal } from '../AIGeneratorModal';
 // Timeline FX — dragged to FX tracks. type field maps to PreviewCanvas fxType.
 // Color Correction — dragged to a video/image clip to apply that preset
 // Particle Effects — dragged to a video/image/FX clip
@@ -292,6 +348,7 @@ function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCard
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 export function MediaPanel() {
+  const [isLocalImporting, setIsLocalImporting] = useState(false);
     const { detectingBeatId, handleDetectBeats } = useAudioFeatures();
     const { ttsText, setTtsText, ttsLanguage, setTtsLanguage, ttsRate, setTtsRate, ttsPitch, setTtsPitch, ttsEngine, setTtsEngine, ttsVoice, setTtsVoice, isGeneratingTTS, ttsAudioRef, previewTTS, generateTTS } = useTTS();
     const { isDragging, isUploading: importing, fileInputRef, handleDragOver, handleDragLeave, handleDrop, handleFileSelect } = useMediaImport();
@@ -680,7 +737,7 @@ export function MediaPanel() {
         const blob = new Blob(chunks, { type: 'video/webm' });
         const file = new File([blob], 'Screen Record.webm', { type: 'video/webm' });
         
-        setImporting(true);
+        setIsLocalImporting(true);
         try {
           const url = URL.createObjectURL(file);
           const meta = await probeFile(file);
@@ -701,7 +758,7 @@ export function MediaPanel() {
         } catch (e) {
           console.error(e);
         } finally {
-          setImporting(false);
+          setIsLocalImporting(false);
           setIsRecordingScreen(false);
         }
       };
@@ -770,7 +827,7 @@ export function MediaPanel() {
 
   // Real import with probing
   const importFiles = useCallback(async (files: FileList | File[]) => {
-    setImporting(true);
+    setIsLocalImporting(true);
     setImportProgressPct(0);
     const fileArray = Array.from(files);
 
@@ -821,7 +878,7 @@ export function MediaPanel() {
       setImportProgressPct(((i + 1) / fileArray.length) * 100);
     }
 
-    setImporting(false);
+    setIsLocalImporting(false);
     setImportProgress('');
     setImportProgressPct(0);
   }, [addMedia]);
@@ -874,7 +931,7 @@ export function MediaPanel() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setImporting(true);
+    setIsLocalImporting(true);
     setImportProgress('Re-linking project files...');
     setImportProgressPct(0);
 
@@ -930,7 +987,7 @@ export function MediaPanel() {
     // Dispatch event to notify PreviewCanvas to redraw
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
 
-    setImporting(false);
+    setIsLocalImporting(false);
     setImportProgress('');
     setImportProgressPct(0);
     toast.success(`Successfully re-linked ${linkedCount} files!`);
