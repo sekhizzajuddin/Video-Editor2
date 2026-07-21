@@ -510,7 +510,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
   
       // Detect if playback has just started, or if the user performed a manual seek
       const playStarted = isPlaying && !wasPlayingRef.current;
-      const userSeeked = Math.abs(currentTime - expectedPlaybackTime) > 0.15;
+      const userSeeked = !isPlaying || Math.abs(currentTime - expectedPlaybackTime) > 0.01;
       const forceSeek = playStarted || userSeeked;
   
       lastTimeRef.current = currentTime;
@@ -575,7 +575,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const driftLimit = isReversing ? 0.02 : 0.25;
 
         if (clipForceSeek || drift > driftLimit) {
-          const forceSeekThreshold = isReversing ? 0.02 : 0.05; // 50ms
+          const forceSeekThreshold = !isPlaying ? 0.005 : (isReversing ? 0.02 : 0.05); // 50ms
           const threshold = clipForceSeek ? forceSeekThreshold : driftLimit;
           if (drift > threshold) {
             if (entry.el.seeking) {
