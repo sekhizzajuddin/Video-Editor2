@@ -485,55 +485,65 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const frames = frameCacheRef.current.get(clipId);
         if (frames) frames.forEach(f => { try { f.bitmap.close(); } catch(e) {} });
         frameCacheRef.current.delete(clipId);
-        pendingSeeksRef.current.delete(clipId);
-      }
-    }
   }, [tracks, mediaLibrary, stableTriggerRedraw]);
 
   // Sync playback state — play / pause / seek
+  const lastVideoSyncRef = useRef<number>(0);
+
   useEffect(() => {
     const syncPlayback = async () => {
+      const now = performance.now();
+      if (now - lastVideoSyncRef.current < 33) return;
+      lastVideoSyncRef.current = now;
+
       const pool = poolRef.current;
       const clips = activeClips();
-    const playingIds = new Set(clips.map((c) => c.clipId));
 
-    const now = performance.now();
-    const elapsedRealTime = (now - lastRealTimeRef.current) / 1000;
-    const expectedPlaybackTime = lastTimeRef.current + elapsedRealTime * playbackSpeed;
-
-    // Detect if playback has just started, or if the user performed a manual seek
-    const playStarted = isPlaying && !wasPlayingRef.current;
-    const userSeeked = Math.abs(currentTime - expectedPlaybackTime) > 0.15;
-    const forceSeek = playStarted || userSeeked;
-
-    lastTimeRef.current = currentTime;
-    lastRealTimeRef.current = now;
-    wasPlayingRef.current = isPlaying;
-
-    for (const [clipId, entry] of pool) {
-      const clip = clips.find((c) => c.clipId === clipId);
-      const isActiveAndPlaying = !!clip && isPlaying;
-
-      if (isActiveAndPlaying) {
-        connectAudioNode(entry);
-      } else {
-        disconnectAudioNode(entry);
-      }
-
-      if (!clip || !isPlaying) {
-        // Pause this element
-        if (!entry.el.paused) {
-          entry.el.pause();
+      const playingIds = new Set(clips.map((c) => c.clipId));
+  
+      const elapsedRealTime = (now - lastRealTimeRef.current) / 1000;
+      const expectedPlaybackTime = lastTimeRef.current + elapsedRealTime * playbackSpeed;
+  
+      // Detect if playback has just started, or if the user performed a manual seek
+      const playStarted = isPlaying && !wasPlayingRef.current;
+      const userSeeked = Math.abs(currentTime - expectedPlaybackTime) > 0.15;
+      const forceSeek = playStarted || userSeeked;
+  
+      lastTimeRef.current = currentTime;
+      lastRealTimeRef.current = now;
+      wasPlayingRef.current = isPlaying;
+  
+      for (const [clipId, entry] of pool) {
+        const clip = clips.find((c) => c.clipId === clipId);
+        const isActiveAndPlaying = !!clip && isPlaying;
+  
+        if (isActiveAndPlaying) {
+          connectAudioNode(entry);
+        } else {
+          disconnectAudioNode(entry);
         }
-      } else {
-        // Resume Audio Context if suspended (browser user interaction gesture unlock)
-        if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
-          try {
-            await entry.audioCtx.resume();
-          } catch (err) {
-            console.warn("Exception during audioCtx.resume:", err);
+  
+        if (!clip || !isPlaying) {
+          // Pause this element
+          if (!entry.el.paused) {
+            entry.el.pause();
+          }
+        } else {
+          // Resume Audio Context if suspended (browser user interaction gesture unlock)
+          if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(() => {
+                entry.audioCtx.resume().catch(console.warn);
+              });
+            } else {
+              setTimeout(() => {
+                entry.audioCtx.resume().catch(console.warn);
+              }, 0);
+            }
           }
         }
+        
+        if (!clip) continue;
 
         // Calculate the media time corresponding to currentTime
         const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);

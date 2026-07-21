@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { getRampedTrimEndForRightResize, getRampedTrimStartForLeftResize, getSpeedRampEngine } from '@/utils/speedRamp';
 import { getTrackHeight, getTrackTop, getTrackAtY } from '../trackGeometry';
@@ -61,10 +62,26 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     selectTrack,
     selectTransition,
     seek,
-    setTransientTime,
     splitClip,
     setDragPreview,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    tracks: s.tracks,
+    zoomLevel: s.zoomLevel,
+    activeTool: s.activeTool,
+    settings: s.settings,
+    selectedClipId: s.selectedClipId,
+    selectedClipIds: s.selectedClipIds,
+    selectedTransitionClipId: s.selectedTransitionClipId,
+    selectedTrackId: s.selectedTrackId,
+    moveClip: s.moveClip,
+    moveClips: s.moveClips,
+    selectClip: s.selectClip,
+    selectTrack: s.selectTrack,
+    selectTransition: s.selectTransition,
+    seek: s.seek,
+    splitClip: s.splitClip,
+    setDragPreview: s.setDragPreview,
+  })));
 
   const dragRafIdRef = useRef<number | null>(null);
   const resizeRafIdRef = useRef<number | null>(null);
@@ -667,7 +684,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       
       setScrubTime(time);
       setScrubMouseX(e.clientX);
-      setTransientTime(time);
+      seek(time);
 
       e.preventDefault();
       e.stopPropagation();
@@ -701,12 +718,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             
             const now = performance.now();
             if (now - lastScrubTimeRef.current > 33) {
-              setTransientTime(time);
+              seek(time);
               lastScrubTimeRef.current = now;
             }
             
             const scrubNow = performance.now();
-            if (scrubNow - lastScrubStateUpdateRef.current > 16) {
+            if (scrubNow - lastScrubStateUpdateRef.current > 33) {
               setScrubTime(time);
               setScrubMouseX(clientX);
               lastScrubStateUpdateRef.current = scrubNow;
@@ -1122,14 +1139,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     }
 
     if (isScrubbing) {
-      const rect = trackContainerRef.current?.getBoundingClientRect();
-      if (rect) {
-        const clientX = latestClientXRef.current;
-        const currentScrollLeft = useEditorStore.getState().scrollLeft;
-        const x = clientX - rect.left + currentScrollLeft;
-        const time = Math.max(0, x / zoomLevel);
-        seek(time);
-      }
       setIsScrubbing(false);
       setScrubTime(null);
     }
