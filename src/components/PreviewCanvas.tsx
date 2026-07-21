@@ -370,7 +370,11 @@ export function PreviewCanvas() {
   const currentTimeRef = useRef(currentTime);
   useEffect(() => {
     return useEditorStore.subscribe((state) => {
-      if (!state.isPlaying || Math.abs(state.currentTime - currentTimeRef.current) > 0.3) {
+      // Always sync during scrubbing (not playing). During playback, only
+      // sync on large jumps (external seeks) to avoid fighting the tick loop.
+      if (!state.isPlaying) {
+        currentTimeRef.current = state.currentTime;
+      } else if (Math.abs(state.currentTime - currentTimeRef.current) > 0.3) {
         currentTimeRef.current = state.currentTime;
       }
     });
@@ -383,8 +387,10 @@ export function PreviewCanvas() {
   // Canvas rendering Ã¢â‚¬â€œ called whenever time, tracks, or images change
   // -------------------------------------------------------------------
   const renderCanvas = useCallback(async () => {
-    const state = useEditorStore.getState() as any;
-    const currentTime = state.isPlaying ? currentTimeRef.current : (state.transientTime ?? state.currentTime);
+    const state = useEditorStore.getState();
+    // During playback, use the high-frequency ref (updated every rAF tick).
+    // During scrubbing, read directly from store (updated by seek()).
+    const currentTime = state.isPlaying ? currentTimeRef.current : state.currentTime;
     const {
       tracks: tracksRaw,
       selectedClipId,
@@ -2890,10 +2896,12 @@ export function PreviewCanvas() {
     let lastTime = performance.now();
     let lastSyncTime = performance.now();
     
-    const tick = async (now: number) => {
+    const tick = (now: number) => {
+      // ALWAYS schedule the next frame FIRST so the loop never stalls
+      rafId = requestAnimationFrame(tick);
+
       const state = useEditorStore.getState();
-      
-      const actualTime = (state as any).transientTime ?? state.currentTime;
+      const actualTime = state.currentTime;
       
       if (state.isPlaying) {
         framePendingRef.current = true;
@@ -2964,26 +2972,24 @@ export function PreviewCanvas() {
         lastTime = now;
         lastSyncTime = now;
         
-        // Detect scrub/transient updates
+        // Detect scrub: read latest currentTime from store every tick
         if (Math.abs(actualTime - currentTimeRef.current) > 0.001) {
             currentTimeRef.current = actualTime;
             framePendingRef.current = true;
         }
       }
 
+      // Fire-and-forget render — NEVER block the rAF loop
       if (tabVisible && framePendingRef.current && !isRendering) {
         framePendingRef.current = false;
         isRendering = true;
-        try {
-          await renderCanvasRef.current();
-        } catch (err) {
+        renderCanvasRef.current().catch((err: unknown) => {
           console.error("Error in renderCanvas:", err);
-        } finally {
+        }).finally(() => {
           isRendering = false;
           isRenderingRef.current = false;
-        }
+        });
       }
-      rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
