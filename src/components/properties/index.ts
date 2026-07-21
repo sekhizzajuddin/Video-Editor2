@@ -4,7 +4,7 @@
  * Modular re-exports for Properties Panel.
  */
 
-export { PropertiesPanelContainer as PropertiesPanel } from './PropertiesPanelContainer';
+export { PropertiesPanel } from './PropertiesPanel';
 export * from './propertiesTypes';
 export { PropertyTabHeader } from './PropertyTabHeader';
 export { ColorWheel } from './ColorWheel';
