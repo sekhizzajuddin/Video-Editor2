@@ -485,6 +485,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const frames = frameCacheRef.current.get(clipId);
         if (frames) frames.forEach(f => { try { f.bitmap.close(); } catch(e) {} });
         frameCacheRef.current.delete(clipId);
+        pendingSeeksRef.current.delete(clipId);
+      }
+    }
   }, [tracks, mediaLibrary, stableTriggerRedraw]);
 
   // Sync playback state — play / pause / seek
@@ -533,11 +536,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
           if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
             if (window.requestIdleCallback) {
               window.requestIdleCallback(() => {
-                entry.audioCtx.resume().catch(console.warn);
+                entry.audioCtx?.resume().catch(console.warn);
               });
             } else {
               setTimeout(() => {
-                entry.audioCtx.resume().catch(console.warn);
+                entry.audioCtx?.resume().catch(console.warn);
               }, 0);
             }
           }
@@ -589,7 +592,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
           entry.el.pause();
         }
       }
-    }
 
     // Pause and pre-seek inactive elements to their start position (trimStart or transition start) so they play instantly and seamlessly
     for (const [clipId, entry] of pool) {
