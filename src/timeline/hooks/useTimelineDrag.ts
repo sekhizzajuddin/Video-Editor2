@@ -61,6 +61,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     selectTrack,
     selectTransition,
     seek,
+    setTransientTime,
     splitClip,
     setDragPreview,
   } = useEditorStore();
@@ -666,7 +667,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       
       setScrubTime(time);
       setScrubMouseX(e.clientX);
-      seek(time);
+      setTransientTime(time);
 
       e.preventDefault();
       e.stopPropagation();
@@ -700,7 +701,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             
             const now = performance.now();
             if (now - lastScrubTimeRef.current > 33) {
-              seek(time);
+              setTransientTime(time);
               lastScrubTimeRef.current = now;
             }
             
@@ -1121,6 +1122,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     }
 
     if (isScrubbing) {
+      const rect = trackContainerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const clientX = latestClientXRef.current;
+        const currentScrollLeft = useEditorStore.getState().scrollLeft;
+        const x = clientX - rect.left + currentScrollLeft;
+        const time = Math.max(0, x / zoomLevel);
+        seek(time);
+      }
       setIsScrubbing(false);
       setScrubTime(null);
     }

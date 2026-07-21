@@ -216,6 +216,7 @@ interface EditorActions {
   pause: () => void;
   togglePlayback: () => void;
   seek: (time: number) => void;
+  setTransientTime: (time: number) => void;
   setPlaybackSpeed: (speed: number) => void;
   setPlaybackDirection: (dir: -1 | 0 | 1, speed?: number) => void;
   setVolume: (volume: number) => void;
@@ -2289,7 +2290,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       playbackDirection: !state.isPlaying ? 1 : 0 
     }));
   },
-  seek: (time) => set({ currentTime: Math.max(0, time) }),
+  seek: (time) => {
+    const state = get() as any;
+    state.transientTime = undefined;
+    set({ currentTime: Math.max(0, time) });
+  },
+  setTransientTime: (time) => {
+    const state = get() as any;
+    state.transientTime = Math.max(0, time);
+  },
   setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
   setPlaybackDirection: (dir, speed = 1) => {
     if (dir === 0) {

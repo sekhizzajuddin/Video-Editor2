@@ -57,6 +57,7 @@ import {
 // ---------------------------------------------------------------------------
 export function PreviewCanvas() {
   const particlePoolsRef = useRef<Map<string, ParticlePool>>(new Map());
+  const currentTime = useEditorStore.getState().currentTime;
   // FIX H4: per-field selector with shallow equality.
   // Previously useEditorStore() with no selector caused PreviewCanvas to
   // re-render on EVERY zustand state change (including unrelated fields
@@ -64,7 +65,6 @@ export function PreviewCanvas() {
   // the component only re-renders when at least one of these 34 fields
   // actually changes reference.
   const {
-    currentTime,
     isPlaying,
     totalDuration,
     isMuted,
@@ -100,7 +100,6 @@ export function PreviewCanvas() {
     progressBarHeight,
     useProxies,
   } = useEditorStore(useShallow(s => ({
-    currentTime: s.currentTime,
     isPlaying: s.isPlaying,
     totalDuration: s.totalDuration,
     isMuted: s.isMuted,
@@ -268,8 +267,7 @@ export function PreviewCanvas() {
   // framePendingRef when something actually moved.
   useEffect(() => {
     renderDepsRef.current = {
-      currentTime,
-      tracks,
+        tracks,
       selectedClipId,
       mediaLibrary,
       videoElements,
@@ -293,7 +291,7 @@ export function PreviewCanvas() {
     const prev = previousRenderDepsRef.current;
     if (
       !prev ||
-      prev.currentTime !== currentTime ||
+      
       prev.tracksSignature !== tracksSignature ||
       prev.imageRevision !== imageRevision ||
       prev.videoElements !== videoElements ||
@@ -370,23 +368,7 @@ export function PreviewCanvas() {
 
   // Keep a mutable ref of currentTime so the playback loop effect doesn't tear down/setup on every frame
   const currentTimeRef = useRef(currentTime);
-  useEffect(() => {
-      // Synchronously catch external seeks to prevent race conditions
-      return useEditorStore.subscribe(
-        (state) => {
-          if (!state.isPlaying || Math.abs(state.currentTime - currentTimeRef.current) > 0.1) {
-            currentTimeRef.current = state.currentTime;
-          }
-        }
-      );
-    }, []);
-    
-    // Fallback sync just in case
-    useEffect(() => {
-      if (!useEditorStore.getState().isPlaying || Math.abs(currentTime - currentTimeRef.current) > 0.1) {
-         currentTimeRef.current = currentTime;
-      }
-    }, [currentTime]);
+  
 
   // -------------------------------------------------------------------
 
@@ -2903,6 +2885,8 @@ export function PreviewCanvas() {
     const tick = async (now: number) => {
       const state = useEditorStore.getState();
       
+      const actualTime = (state as any).transientTime ?? state.currentTime;
+      
       if (state.isPlaying) {
         framePendingRef.current = true;
         
@@ -2971,6 +2955,12 @@ export function PreviewCanvas() {
       } else {
         lastTime = now;
         lastSyncTime = now;
+        
+        // Detect scrub/transient updates
+        if (Math.abs(actualTime - currentTimeRef.current) > 0.001) {
+            currentTimeRef.current = actualTime;
+            framePendingRef.current = true;
+        }
       }
 
       if (tabVisible && framePendingRef.current && !isRendering) {
