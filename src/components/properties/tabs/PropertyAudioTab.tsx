@@ -18,6 +18,10 @@ import {
 import { TimelineClip, TimelineTrack, MediaItem, ClipAudioSettings } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
+import { AudioEqualizerFeature } from '../features/AudioEqualizerFeature';
+import { SmartAudioEnhanceFeature } from '../features/SmartAudioEnhanceFeature';
+import { VoiceEffectsFeature } from '../features/VoiceEffectsFeature';
+import { AiVocalSeparationFeature } from '../features/AiVocalSeparationFeature';
 
 interface PropertyAudioTabProps {
   selectedClip: TimelineClip;
@@ -266,190 +270,11 @@ export function PropertyAudioTab({
         </div>
       </div>
 
-      {/* Equalizer (EQ) */}
-      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-white uppercase tracking-wider">3-Band Equalizer (EQ)</span>
-          <button
-            onClick={() => {
-              handleAudioChange('bass', 0);
-              handleAudioChange('mid', 0);
-              handleAudioChange('treble', 0);
-            }}
-            className="text-[9px] text-[#a0a0a0] hover:text-amber-400 transition-colors"
-          >
-            Reset EQ
-          </button>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          {/* Bass */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>Bass</span>
-              <span className="font-mono">{clipAudio.bass ?? 0}dB</span>
-            </div>
-            <input
-              type="range"
-              min={-15}
-              max={15}
-              value={clipAudio.bass ?? 0}
-              onChange={(e) => handleAudioChange('bass', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-
-          {/* Mid */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>Mid</span>
-              <span className="font-mono">{clipAudio.mid ?? 0}dB</span>
-            </div>
-            <input
-              type="range"
-              min={-15}
-              max={15}
-              value={clipAudio.mid ?? 0}
-              onChange={(e) => handleAudioChange('mid', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-
-          {/* Treble */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>Treble</span>
-              <span className="font-mono">{clipAudio.treble ?? 0}dB</span>
-            </div>
-            <input
-              type="range"
-              min={-15}
-              max={15}
-              value={clipAudio.treble ?? 0}
-              onChange={(e) => handleAudioChange('treble', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Advanced Audio Processing */}
-      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Advanced Processing</span>
-          <button
-            onClick={() => handleAudioChange('humanize', !clipAudio.humanize)}
-            className={`px-2 py-1 rounded text-[9px] font-medium transition-colors ${clipAudio.humanize ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'bg-[#1e1e1e] text-[#a0a0a0] border border-[#3e3e3e] hover:text-white'}`}
-            title="AI Humanize (Enhance Dynamics)"
-          >
-            {clipAudio.humanize ? 'Humanize: ON' : 'Humanize: OFF'}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          {/* Denoise */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>Denoise</span>
-              <span className="font-mono">{clipAudio.denoise ?? 0}%</span>
-            </div>
-            <input
-              type="range" min={0} max={100}
-              value={clipAudio.denoise ?? 0}
-              onChange={(e) => handleAudioChange('denoise', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-
-          {/* Compression */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>Compression</span>
-              <span className="font-mono">{clipAudio.compression ?? 0}%</span>
-            </div>
-            <input
-              type="range" min={0} max={100}
-              value={clipAudio.compression ?? 0}
-              onChange={(e) => handleAudioChange('compression', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-
-          {/* De-Esser */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>De-Esser</span>
-              <span className="font-mono">{clipAudio.deEsser ?? 0}%</span>
-            </div>
-            <input
-              type="range" min={0} max={100}
-              value={clipAudio.deEsser ?? 0}
-              onChange={(e) => handleAudioChange('deEsser', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-
-          {/* Warmth */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>Warmth</span>
-              <span className="font-mono">{clipAudio.warmth ?? 0}%</span>
-            </div>
-            <input
-              type="range" min={-100} max={100}
-              value={clipAudio.warmth ?? 0}
-              onChange={(e) => handleAudioChange('warmth', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-
-          {/* Voice Formant */}
-          <div className="space-y-1 col-span-2">
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
-              <span>Voice Formant</span>
-              <span className="font-mono">{clipAudio.voiceFormant ?? 0}</span>
-            </div>
-            <input
-              type="range" min={-100} max={100}
-              value={clipAudio.voiceFormant ?? 0}
-              onChange={(e) => handleAudioChange('voiceFormant', Number(e.target.value))}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* AI Vocal / BGM Separation */}
-      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
-            <Scissors className="w-3.5 h-3.5 text-purple-400" /> Vocal & BGM Separation
-          </span>
-        </div>
-
-        <button
-          onClick={() => {
-            const current = clipAudio.vocalSeparation || { enabled: false, mode: 'removeVocals', strength: 80 };
-            handleAudioChange('vocalSeparation', { ...current, enabled: !current.enabled });
-          }}
-          className={`w-full py-2 px-3 rounded text-xs font-medium flex items-center justify-center gap-2 transition-all ${
-            clipAudio.vocalSeparation?.enabled
-              ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
-              : 'bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/20'
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          {clipAudio.vocalSeparation?.enabled ? 'Vocal Separation Active' : 'Enable Vocal Separation'}
-        </button>
-      </div>
+      {/* Advanced Features */}
+      <AudioEqualizerFeature clip={selectedClip} />
+      <SmartAudioEnhanceFeature clip={selectedClip} />
+      <VoiceEffectsFeature clip={selectedClip} />
+      <AiVocalSeparationFeature clip={selectedClip} />
     </div>
   );
 }

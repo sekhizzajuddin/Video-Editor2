@@ -30,6 +30,10 @@ import { TimelineClip, TimelineTrack } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { BezierCurveEditor } from '@/components/BezierCurveEditor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
+import { KenBurnsFeature } from '../features/KenBurnsFeature';
+import { PerspectiveWarpFeature } from '../features/PerspectiveWarpFeature';
+import { Advanced3DTransformFeature } from '../features/Advanced3DTransformFeature';
+import { SmartReframeFeature } from '../features/SmartReframeFeature';
 
 interface PropertyTransformTabProps {
   selectedClip: TimelineClip;
@@ -365,79 +369,13 @@ export function PropertyTransformTab({
           />
         </div>
 
-        {/* 3D Rotation X */}
-        <div className="space-y-1">
-          <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-            <span className="flex items-center gap-1">
-              Rotation X (Tilt)
-              <KeyframeControl
-                propertyKey="transform.rotationX"
-                value={selectedClip.transform.rotationX ?? 0}
-                keyframes={selectedClip.animations?.['transform.rotationX'] || []}
-                currentTime={localClipTime}
-                clipId={selectedClip.id}
-                onAddKeyframe={handleAddKeyframe('transform.rotationX')}
-                onRemoveKeyframe={handleRemoveKeyframe('transform.rotationX')}
-                onUpdateEasing={handleUpdateEasing('transform.rotationX')}
-                onJumpToNext={handleJumpToNext('transform.rotationX')}
-                onJumpToPrev={handleJumpToPrev('transform.rotationX')}
-              />
-            </span>
-            <span className="font-mono">{getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}°</span>
-          </div>
-          <input
-            type="range"
-            min={-180}
-            max={180}
-            value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
-            onChange={(e) => upd('transform.rotationX', Number(e.target.value))}
-            onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-            className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-          />
-          <KeyframeMiniTimeline
-            keyframes={selectedClip.animations?.['transform.rotationX'] || []}
-            currentTime={localClipTime}
-            duration={selectedClip.duration}
-            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
-          />
-        </div>
-
-        {/* 3D Rotation Y */}
-        <div className="space-y-1">
-          <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-            <span className="flex items-center gap-1">
-              Rotation Y (Pan)
-              <KeyframeControl
-                propertyKey="transform.rotationY"
-                value={selectedClip.transform.rotationY ?? 0}
-                keyframes={selectedClip.animations?.['transform.rotationY'] || []}
-                currentTime={localClipTime}
-                clipId={selectedClip.id}
-                onAddKeyframe={handleAddKeyframe('transform.rotationY')}
-                onRemoveKeyframe={handleRemoveKeyframe('transform.rotationY')}
-                onUpdateEasing={handleUpdateEasing('transform.rotationY')}
-                onJumpToNext={handleJumpToNext('transform.rotationY')}
-                onJumpToPrev={handleJumpToPrev('transform.rotationY')}
-              />
-            </span>
-            <span className="font-mono">{getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}°</span>
-          </div>
-          <input
-            type="range"
-            min={-180}
-            max={180}
-            value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
-            onChange={(e) => upd('transform.rotationY', Number(e.target.value))}
-            onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-            className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-          />
-          <KeyframeMiniTimeline
-            keyframes={selectedClip.animations?.['transform.rotationY'] || []}
-            currentTime={localClipTime}
-            duration={selectedClip.duration}
-            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
-          />
-        </div>
+        <Advanced3DTransformFeature 
+          clip={selectedClip} 
+          isKfActive={isKfActive}
+          addKf={addKf}
+          remKf={remKf}
+          getPropVal={getPropVal}
+        />
       </div>
 
       {/* Opacity & Blend Mode */}
@@ -558,98 +496,10 @@ export function PropertyTransformTab({
         </div>
       </div>
 
-      {/* Perspective Pinning & Corner Motion Tracking */}
-      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
-            <Box className="w-3.5 h-3.5 text-sky-400" /> Perspective Pinning
-          </span>
-          <button
-            onClick={() => updateClip(selectedClip.id, {
-              transform: {
-                ...selectedClip.transform,
-                perspectivePin: !selectedClip.transform.perspectivePin
-              }
-            })}
-            className={`w-8 h-4 rounded-full transition-colors relative ${selectedClip.transform.perspectivePin ? 'bg-sky-500' : 'bg-[#3e3e3e]'}`}
-          >
-            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${selectedClip.transform.perspectivePin ? 'left-4' : 'left-0.5'}`} />
-          </button>
-        </div>
-
-        {selectedClip.transform.perspectivePin && (
-          <div className="space-y-3 pt-1 border-t border-[#3e3e3e]">
-            <p className="text-[10px] text-[#a0a0a0] leading-relaxed">
-              Drag the 4 corner handles directly on the canvas preview to warp perspective.
-            </p>
-
-            <button
-              onClick={handleStartTracking}
-              disabled={isTracking}
-              className={`w-full py-2 px-3 rounded text-xs font-medium flex items-center justify-center gap-2 transition-all ${
-                isTracking
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/40 cursor-wait'
-                  : 'bg-sky-500 hover:bg-sky-400 text-black shadow-md shadow-sky-500/20'
-              }`}
-            >
-              <Crosshair className="w-3.5 h-3.5" />
-              {isTracking ? `Tracking motion ${trackProgress}%...` : 'Auto-Track Corners with AI'}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Ken Burns */}
-      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
-        <div className="flex items-center justify-between cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, kenBurns: !prev.kenBurns }))}>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Ken Burns (Pan & Zoom)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={selectedClip.kenBurns?.enabled ?? false}
-              onChange={(e) => {
-                e.stopPropagation();
-                updateClip(selectedClip.id, { 
-                  kenBurns: selectedClip.kenBurns 
-                    ? { ...selectedClip.kenBurns, enabled: e.target.checked }
-                    : { enabled: e.target.checked, startScale: 1.0, startPanX: 0, startPanY: 0, endScale: 1.2, endPanX: 0, endPanY: 0, easing: 'easeInOut' }
-                });
-                useEditorStore.getState().saveSnapshot();
-              }}
-              className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
-            />
-          </div>
-        </div>
-
-        {selectedClip.kenBurns?.enabled && !collapsedSections.kenBurns && (
-          <div className="space-y-3 pt-2 border-t border-[#3e3e3e]">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <span className="text-[10px] text-[#a0a0a0]">Start Scale: {(selectedClip.kenBurns.startScale * 100).toFixed(0)}%</span>
-                <input
-                  type="range" min="0.1" max="3" step="0.1"
-                  value={selectedClip.kenBurns.startScale}
-                  onChange={(e) => updateClip(selectedClip.id, { kenBurns: { ...selectedClip.kenBurns!, startScale: Number(e.target.value) } })}
-                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                  className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                />
-              </div>
-              <div className="space-y-1">
-                <span className="text-[10px] text-[#a0a0a0]">End Scale: {(selectedClip.kenBurns.endScale * 100).toFixed(0)}%</span>
-                <input
-                  type="range" min="0.1" max="3" step="0.1"
-                  value={selectedClip.kenBurns.endScale}
-                  onChange={(e) => updateClip(selectedClip.id, { kenBurns: { ...selectedClip.kenBurns!, endScale: Number(e.target.value) } })}
-                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                  className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Advanced Features */}
+      <PerspectiveWarpFeature clip={selectedClip} />
+      <KenBurnsFeature clip={selectedClip} />
+      <SmartReframeFeature clip={selectedClip} />
 
       {/* Bezier Easing */}
       <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
