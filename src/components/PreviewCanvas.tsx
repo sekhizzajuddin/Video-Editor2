@@ -368,6 +368,13 @@ export function PreviewCanvas() {
 
   // Keep a mutable ref of currentTime so the playback loop effect doesn't tear down/setup on every frame
   const currentTimeRef = useRef(currentTime);
+  useEffect(() => {
+    return useEditorStore.subscribe((state) => {
+      if (!state.isPlaying || Math.abs(state.currentTime - currentTimeRef.current) > 0.3) {
+        currentTimeRef.current = state.currentTime;
+      }
+    });
+  }, []);
   
 
   // -------------------------------------------------------------------
@@ -377,7 +384,7 @@ export function PreviewCanvas() {
   // -------------------------------------------------------------------
   const renderCanvas = useCallback(async () => {
     const state = useEditorStore.getState() as any;
-    const currentTime = state.transientTime ?? state.currentTime;
+    const currentTime = state.isPlaying ? currentTimeRef.current : (state.transientTime ?? state.currentTime);
     const {
       tracks: tracksRaw,
       selectedClipId,
