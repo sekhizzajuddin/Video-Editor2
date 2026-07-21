@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { TimelineClip, TimelineTrack, MediaItem, ClipAudioSettings } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
+import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 
 interface PropertyAudioTabProps {
   selectedClip: TimelineClip;
@@ -31,21 +32,6 @@ interface PropertyAudioTabProps {
   isKfActive: (propKey: string) => boolean;
 }
 
-const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
-  <button
-    onClick={onClick}
-    title={active ? 'Remove keyframe at current playhead' : 'Add keyframe at current playhead'}
-    className={`p-1 rounded transition-colors ${
-      active
-        ? 'text-amber-400 bg-amber-500/20 border border-amber-500/40'
-        : 'text-[#888] hover:text-white hover:bg-[#3e3e3e]'
-    }`}
-  >
-    <svg className="w-3 h-3" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-      <polygon points="12 2 22 12 12 22 2 12 12 2" />
-    </svg>
-  </button>
-);
 
 export function PropertyAudioTab({
   selectedClip,
@@ -59,6 +45,30 @@ export function PropertyAudioTab({
   remKf,
   isKfActive,
 }: PropertyAudioTabProps) {
+  const localClipTime = Math.max(0, currentTime - selectedClip.startTime);
+
+  const handleAddKeyframe = (propKey: string) => (time: number, val: number) => addKf(propKey, val);
+  const handleRemoveKeyframe = (propKey: string) => (time: number) => remKf(propKey);
+  const handleUpdateEasing = (propKey: string) => (time: number, easing: any) => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const updatedList = currentList.map(kf => Math.abs(kf.time - time) < 0.05 ? { ...kf, easing } : kf);
+    updateClip(selectedClip.id, { animations: { ...anims, [propKey]: updatedList } });
+    useEditorStore.getState().saveSnapshot();
+  };
+  const handleJumpToNext = (propKey: string) => () => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const nextKf = currentList.find(k => k.time > localClipTime + 0.05);
+    if (nextKf) useEditorStore.getState().seek(selectedClip.startTime + nextKf.time);
+  };
+  const handleJumpToPrev = (propKey: string) => () => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const prevKf = [...currentList].reverse().find(k => k.time < localClipTime - 0.05);
+    if (prevKf) useEditorStore.getState().seek(selectedClip.startTime + prevKf.time);
+  };
+
 
   const defaultAudioSettings: ClipAudioSettings = {
     volume: 0,
@@ -152,9 +162,17 @@ export function PropertyAudioTab({
           <div className="flex justify-between text-[10px] text-[#a0a0a0]">
             <span className="flex items-center gap-1">
               Volume (dB)
-              <KeyframeIcon
-                active={isKfActive('audio.volume')}
-                onClick={() => isKfActive('audio.volume') ? remKf('audio.volume') : addKf('audio.volume', clipAudio.volume)}
+              <KeyframeControl
+                propertyKey="audio.volume"
+                value={clipAudio.volume}
+                keyframes={selectedClip.animations?.['audio.volume'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('audio.volume')}
+                onRemoveKeyframe={handleRemoveKeyframe('audio.volume')}
+                onUpdateEasing={handleUpdateEasing('audio.volume')}
+                onJumpToNext={handleJumpToNext('audio.volume')}
+                onJumpToPrev={handleJumpToPrev('audio.volume')}
               />
             </span>
             <span className="font-mono">{getPropVal(clipAudio.volume, 'audio.volume') > 0 ? `+${getPropVal(clipAudio.volume, 'audio.volume')}` : getPropVal(clipAudio.volume, 'audio.volume')} dB</span>
@@ -169,6 +187,12 @@ export function PropertyAudioTab({
             onMouseUp={() => useEditorStore.getState().saveSnapshot()}
             onDoubleClick={() => handleAudioChange('volume', 0)}
             className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['audio.volume'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
           />
         </div>
 
@@ -305,6 +329,97 @@ export function PropertyAudioTab({
               max={15}
               value={clipAudio.treble ?? 0}
               onChange={(e) => handleAudioChange('treble', Number(e.target.value))}
+              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Advanced Audio Processing */}
+      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Advanced Processing</span>
+          <button
+            onClick={() => handleAudioChange('humanize', !clipAudio.humanize)}
+            className={`px-2 py-1 rounded text-[9px] font-medium transition-colors ${clipAudio.humanize ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'bg-[#1e1e1e] text-[#a0a0a0] border border-[#3e3e3e] hover:text-white'}`}
+            title="AI Humanize (Enhance Dynamics)"
+          >
+            {clipAudio.humanize ? 'Humanize: ON' : 'Humanize: OFF'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* Denoise */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+              <span>Denoise</span>
+              <span className="font-mono">{clipAudio.denoise ?? 0}%</span>
+            </div>
+            <input
+              type="range" min={0} max={100}
+              value={clipAudio.denoise ?? 0}
+              onChange={(e) => handleAudioChange('denoise', Number(e.target.value))}
+              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+            />
+          </div>
+
+          {/* Compression */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+              <span>Compression</span>
+              <span className="font-mono">{clipAudio.compression ?? 0}%</span>
+            </div>
+            <input
+              type="range" min={0} max={100}
+              value={clipAudio.compression ?? 0}
+              onChange={(e) => handleAudioChange('compression', Number(e.target.value))}
+              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+            />
+          </div>
+
+          {/* De-Esser */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+              <span>De-Esser</span>
+              <span className="font-mono">{clipAudio.deEsser ?? 0}%</span>
+            </div>
+            <input
+              type="range" min={0} max={100}
+              value={clipAudio.deEsser ?? 0}
+              onChange={(e) => handleAudioChange('deEsser', Number(e.target.value))}
+              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+            />
+          </div>
+
+          {/* Warmth */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+              <span>Warmth</span>
+              <span className="font-mono">{clipAudio.warmth ?? 0}%</span>
+            </div>
+            <input
+              type="range" min={-100} max={100}
+              value={clipAudio.warmth ?? 0}
+              onChange={(e) => handleAudioChange('warmth', Number(e.target.value))}
+              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+            />
+          </div>
+
+          {/* Voice Formant */}
+          <div className="space-y-1 col-span-2">
+            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+              <span>Voice Formant</span>
+              <span className="font-mono">{clipAudio.voiceFormant ?? 0}</span>
+            </div>
+            <input
+              type="range" min={-100} max={100}
+              value={clipAudio.voiceFormant ?? 0}
+              onChange={(e) => handleAudioChange('voiceFormant', Number(e.target.value))}
               onMouseUp={() => useEditorStore.getState().saveSnapshot()}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />

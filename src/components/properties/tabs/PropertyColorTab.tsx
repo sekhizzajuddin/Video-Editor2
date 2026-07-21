@@ -16,6 +16,7 @@ import { TimelineClip, MediaItem, ClipColorFilters } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { ColorWheel } from '../ColorWheel';
 import { calculateAutoColor } from '@/utils/autoColor';
+import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 
 interface PropertyColorTabProps {
   selectedClip: TimelineClip;
@@ -42,21 +43,6 @@ const rgbToHex = (r: number, g: number, b: number): string => {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 
-const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
-  <button
-    onClick={onClick}
-    title={active ? 'Remove keyframe at current playhead' : 'Add keyframe at current playhead'}
-    className={`p-1 rounded transition-colors ${
-      active
-        ? 'text-amber-400 bg-amber-500/20 border border-amber-500/40'
-        : 'text-[#888] hover:text-white hover:bg-[#3e3e3e]'
-    }`}
-  >
-    <svg className="w-3 h-3" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-      <polygon points="12 2 22 12 12 22 2 12 12 2" />
-    </svg>
-  </button>
-);
 
 export function PropertyColorTab({
   selectedClip,
@@ -69,6 +55,30 @@ export function PropertyColorTab({
   remKf,
   isKfActive,
 }: PropertyColorTabProps) {
+  const localClipTime = Math.max(0, currentTime - selectedClip.startTime);
+
+  const handleAddKeyframe = (propKey: string) => (time: number, val: number) => addKf(propKey, val);
+  const handleRemoveKeyframe = (propKey: string) => (time: number) => remKf(propKey);
+  const handleUpdateEasing = (propKey: string) => (time: number, easing: any) => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const updatedList = currentList.map(kf => Math.abs(kf.time - time) < 0.05 ? { ...kf, easing } : kf);
+    updateClip(selectedClip.id, { animations: { ...anims, [propKey]: updatedList } });
+    useEditorStore.getState().saveSnapshot();
+  };
+  const handleJumpToNext = (propKey: string) => () => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const nextKf = currentList.find(k => k.time > localClipTime + 0.05);
+    if (nextKf) useEditorStore.getState().seek(selectedClip.startTime + nextKf.time);
+  };
+  const handleJumpToPrev = (propKey: string) => () => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const prevKf = [...currentList].reverse().find(k => k.time < localClipTime - 0.05);
+    if (prevKf) useEditorStore.getState().seek(selectedClip.startTime + prevKf.time);
+  };
+
   const [isPickingChromaColor, setIsPickingChromaColor] = useState(false);
 
   const defaultColorFilters: ClipColorFilters = {
@@ -190,9 +200,17 @@ export function PropertyColorTab({
           <div className="flex justify-between text-[10px] text-[#a0a0a0]">
             <span className="flex items-center gap-1">
               Temperature
-              <KeyframeIcon
-                active={isKfActive('color.temperature')}
-                onClick={() => isKfActive('color.temperature') ? remKf('color.temperature') : addKf('color.temperature', clipFilters.temperature)}
+              <KeyframeControl
+                propertyKey="color.temperature"
+                value={clipFilters.temperature}
+                keyframes={selectedClip.animations?.['color.temperature'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('color.temperature')}
+                onRemoveKeyframe={handleRemoveKeyframe('color.temperature')}
+                onUpdateEasing={handleUpdateEasing('color.temperature')}
+                onJumpToNext={handleJumpToNext('color.temperature')}
+                onJumpToPrev={handleJumpToPrev('color.temperature')}
               />
             </span>
             <span className="font-mono">{getPropVal(clipFilters.temperature, 'color.temperature')}</span>
@@ -214,9 +232,17 @@ export function PropertyColorTab({
           <div className="flex justify-between text-[10px] text-[#a0a0a0]">
             <span className="flex items-center gap-1">
               Tint
-              <KeyframeIcon
-                active={isKfActive('color.tint')}
-                onClick={() => isKfActive('color.tint') ? remKf('color.tint') : addKf('color.tint', clipFilters.tint)}
+              <KeyframeControl
+                propertyKey="color.tint"
+                value={clipFilters.tint}
+                keyframes={selectedClip.animations?.['color.tint'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('color.tint')}
+                onRemoveKeyframe={handleRemoveKeyframe('color.tint')}
+                onUpdateEasing={handleUpdateEasing('color.tint')}
+                onJumpToNext={handleJumpToNext('color.tint')}
+                onJumpToPrev={handleJumpToPrev('color.tint')}
               />
             </span>
             <span className="font-mono">{getPropVal(clipFilters.tint, 'color.tint')}</span>
@@ -261,7 +287,21 @@ export function PropertyColorTab({
         <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[#3e3e3e]">
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-              <span>Exposure</span>
+              <span className="flex items-center gap-1">
+                Exposure
+                <KeyframeControl
+                  propertyKey="color.exposure"
+                  value={clipFilters.exposure ?? 0}
+                  keyframes={selectedClip.animations?.['color.exposure'] || []}
+                  currentTime={localClipTime}
+                  clipId={selectedClip.id}
+                  onAddKeyframe={handleAddKeyframe('color.exposure')}
+                  onRemoveKeyframe={handleRemoveKeyframe('color.exposure')}
+                  onUpdateEasing={handleUpdateEasing('color.exposure')}
+                  onJumpToNext={handleJumpToNext('color.exposure')}
+                  onJumpToPrev={handleJumpToPrev('color.exposure')}
+                />
+              </span>
               <span className="font-mono">{getPropVal(clipFilters.exposure, 'color.exposure')}</span>
             </div>
             <input
@@ -274,11 +314,31 @@ export function PropertyColorTab({
               onDoubleClick={() => handleFilterReset('exposure')}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['color.exposure'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
           </div>
 
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-              <span>Contrast</span>
+              <span className="flex items-center gap-1">
+                Contrast
+                <KeyframeControl
+                  propertyKey="color.contrast"
+                  value={clipFilters.contrast ?? 100}
+                  keyframes={selectedClip.animations?.['color.contrast'] || []}
+                  currentTime={localClipTime}
+                  clipId={selectedClip.id}
+                  onAddKeyframe={handleAddKeyframe('color.contrast')}
+                  onRemoveKeyframe={handleRemoveKeyframe('color.contrast')}
+                  onUpdateEasing={handleUpdateEasing('color.contrast')}
+                  onJumpToNext={handleJumpToNext('color.contrast')}
+                  onJumpToPrev={handleJumpToPrev('color.contrast')}
+                />
+              </span>
               <span className="font-mono">{getPropVal(clipFilters.contrast, 'color.contrast')}</span>
             </div>
             <input
@@ -291,11 +351,31 @@ export function PropertyColorTab({
               onDoubleClick={() => handleFilterReset('contrast')}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['color.contrast'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
           </div>
 
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-              <span>Saturation</span>
+              <span className="flex items-center gap-1">
+                Saturation
+                <KeyframeControl
+                  propertyKey="color.saturation"
+                  value={clipFilters.saturation ?? 100}
+                  keyframes={selectedClip.animations?.['color.saturation'] || []}
+                  currentTime={localClipTime}
+                  clipId={selectedClip.id}
+                  onAddKeyframe={handleAddKeyframe('color.saturation')}
+                  onRemoveKeyframe={handleRemoveKeyframe('color.saturation')}
+                  onUpdateEasing={handleUpdateEasing('color.saturation')}
+                  onJumpToNext={handleJumpToNext('color.saturation')}
+                  onJumpToPrev={handleJumpToPrev('color.saturation')}
+                />
+              </span>
               <span className="font-mono">{getPropVal(clipFilters.saturation, 'color.saturation')}</span>
             </div>
             <input
@@ -308,11 +388,31 @@ export function PropertyColorTab({
               onDoubleClick={() => handleFilterReset('saturation')}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['color.saturation'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
           </div>
 
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-              <span>Blur</span>
+              <span className="flex items-center gap-1">
+                Blur
+                <KeyframeControl
+                  propertyKey="color.blur"
+                  value={clipFilters.blur ?? 0}
+                  keyframes={selectedClip.animations?.['color.blur'] || []}
+                  currentTime={localClipTime}
+                  clipId={selectedClip.id}
+                  onAddKeyframe={handleAddKeyframe('color.blur')}
+                  onRemoveKeyframe={handleRemoveKeyframe('color.blur')}
+                  onUpdateEasing={handleUpdateEasing('color.blur')}
+                  onJumpToNext={handleJumpToNext('color.blur')}
+                  onJumpToPrev={handleJumpToPrev('color.blur')}
+                />
+              </span>
               <span className="font-mono">{getPropVal(clipFilters.blur, 'color.blur')}px</span>
             </div>
             <input
@@ -325,6 +425,12 @@ export function PropertyColorTab({
               onDoubleClick={() => handleFilterReset('blur')}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['color.blur'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
           </div>
         </div>
       </div>
@@ -338,7 +444,21 @@ export function PropertyColorTab({
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-              <span>Faded Film</span>
+              <span className="flex items-center gap-1">
+                Faded Film
+                <KeyframeControl
+                  propertyKey="color.fadedFilm"
+                  value={clipFilters.fadedFilm ?? 0}
+                  keyframes={selectedClip.animations?.['color.fadedFilm'] || []}
+                  currentTime={localClipTime}
+                  clipId={selectedClip.id}
+                  onAddKeyframe={handleAddKeyframe('color.fadedFilm')}
+                  onRemoveKeyframe={handleRemoveKeyframe('color.fadedFilm')}
+                  onUpdateEasing={handleUpdateEasing('color.fadedFilm')}
+                  onJumpToNext={handleJumpToNext('color.fadedFilm')}
+                  onJumpToPrev={handleJumpToPrev('color.fadedFilm')}
+                />
+              </span>
               <span className="font-mono">{getPropVal(clipFilters.fadedFilm ?? 0, 'color.fadedFilm')}</span>
             </div>
             <input
@@ -351,11 +471,31 @@ export function PropertyColorTab({
               onDoubleClick={() => handleFilterReset('fadedFilm')}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['color.fadedFilm'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
           </div>
 
           <div className="space-y-1">
             <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-              <span>Vignette</span>
+              <span className="flex items-center gap-1">
+                Vignette
+                <KeyframeControl
+                  propertyKey="color.vignette"
+                  value={clipFilters.vignette ?? 0}
+                  keyframes={selectedClip.animations?.['color.vignette'] || []}
+                  currentTime={localClipTime}
+                  clipId={selectedClip.id}
+                  onAddKeyframe={handleAddKeyframe('color.vignette')}
+                  onRemoveKeyframe={handleRemoveKeyframe('color.vignette')}
+                  onUpdateEasing={handleUpdateEasing('color.vignette')}
+                  onJumpToNext={handleJumpToNext('color.vignette')}
+                  onJumpToPrev={handleJumpToPrev('color.vignette')}
+                />
+              </span>
               <span className="font-mono">{getPropVal(clipFilters.vignette ?? 0, 'color.vignette')}</span>
             </div>
             <input
@@ -368,6 +508,12 @@ export function PropertyColorTab({
               onDoubleClick={() => handleFilterReset('vignette')}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['color.vignette'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
           </div>
         </div>
       </div>
@@ -576,6 +722,102 @@ export function PropertyColorTab({
                   onChange={(e) => {
                     const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
                     updateClip(selectedClip.id, { chromaKey: { ...existing, softness: Number(e.target.value) } });
+                  }}
+                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                  className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Luma Key */}
+      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Luma Key (Light/Dark)</span>
+          <button
+            onClick={() => {
+              const existing = selectedClip.lumaKey ?? { enabled: false, type: 'dark', threshold: 50, softness: 10 };
+              updateClip(selectedClip.id, {
+                lumaKey: { ...existing, enabled: !existing.enabled }
+              });
+              useEditorStore.getState().saveSnapshot();
+            }}
+            className={`w-8 h-4 rounded-full transition-colors relative ${selectedClip.lumaKey?.enabled ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
+          >
+            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${selectedClip.lumaKey?.enabled ? 'left-4' : 'left-0.5'}`} />
+          </button>
+        </div>
+
+        {selectedClip.lumaKey?.enabled && (
+          <div className="space-y-3 pt-2 border-t border-[#3e3e3e]">
+            {/* Type Selection */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const existing = selectedClip.lumaKey ?? { enabled: true, type: 'dark', threshold: 50, softness: 10 };
+                  updateClip(selectedClip.id, { lumaKey: { ...existing, type: 'dark' } });
+                  useEditorStore.getState().saveSnapshot();
+                }}
+                className={`flex-1 py-1.5 rounded text-[10px] font-medium border transition-colors ${
+                  selectedClip.lumaKey?.type === 'dark'
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                    : 'bg-[#1e1e1e] text-[#a0a0a0] border-[#3e3e3e] hover:text-white'
+                }`}
+              >
+                Key Out Darks
+              </button>
+              <button
+                onClick={() => {
+                  const existing = selectedClip.lumaKey ?? { enabled: true, type: 'dark', threshold: 50, softness: 10 };
+                  updateClip(selectedClip.id, { lumaKey: { ...existing, type: 'light' } });
+                  useEditorStore.getState().saveSnapshot();
+                }}
+                className={`flex-1 py-1.5 rounded text-[10px] font-medium border transition-colors ${
+                  selectedClip.lumaKey?.type === 'light'
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                    : 'bg-[#1e1e1e] text-[#a0a0a0] border-[#3e3e3e] hover:text-white'
+                }`}
+              >
+                Key Out Lights
+              </button>
+            </div>
+
+            {/* Threshold & Softness */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] text-[#a0a0a0]">
+                  <span>Threshold</span>
+                  <span className="font-mono">{selectedClip.lumaKey?.threshold ?? 50}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={selectedClip.lumaKey?.threshold ?? 50}
+                  onChange={(e) => {
+                    const existing = selectedClip.lumaKey ?? { enabled: true, type: 'dark', threshold: 50, softness: 10 };
+                    updateClip(selectedClip.id, { lumaKey: { ...existing, threshold: Number(e.target.value) } });
+                  }}
+                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                  className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] text-[#a0a0a0]">
+                  <span>Softness</span>
+                  <span className="font-mono">{selectedClip.lumaKey?.softness ?? 10}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={selectedClip.lumaKey?.softness ?? 10}
+                  onChange={(e) => {
+                    const existing = selectedClip.lumaKey ?? { enabled: true, type: 'dark', threshold: 50, softness: 10 };
+                    updateClip(selectedClip.id, { lumaKey: { ...existing, softness: Number(e.target.value) } });
                   }}
                   onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                   className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"

@@ -23,10 +23,13 @@ import {
   Box,
   Crosshair,
   TrendingUp,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { TimelineClip, TimelineTrack } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { BezierCurveEditor } from '@/components/BezierCurveEditor';
+import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 
 interface PropertyTransformTabProps {
   selectedClip: TimelineClip;
@@ -47,21 +50,6 @@ interface PropertyTransformTabProps {
   setTrackProgress: (n: number) => void;
 }
 
-const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
-  <button
-    onClick={onClick}
-    title={active ? 'Remove keyframe at current playhead' : 'Add keyframe at current playhead'}
-    className={`p-1 rounded transition-colors ${
-      active
-        ? 'text-amber-400 bg-amber-500/20 border border-amber-500/40'
-        : 'text-[#888] hover:text-white hover:bg-[#3e3e3e]'
-    }`}
-  >
-    <svg className="w-3 h-3" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-      <polygon points="12 2 22 12 12 22 2 12 12 2" />
-    </svg>
-  </button>
-);
 
 export function PropertyTransformTab({
   selectedClip,
@@ -81,6 +69,30 @@ export function PropertyTransformTab({
   trackProgress,
   setTrackProgress,
 }: PropertyTransformTabProps) {
+  const localClipTime = Math.max(0, currentTime - selectedClip.startTime);
+
+  const handleAddKeyframe = (propKey: string) => (time: number, val: number) => addKf(propKey, val);
+  const handleRemoveKeyframe = (propKey: string) => (time: number) => remKf(propKey);
+  const handleUpdateEasing = (propKey: string) => (time: number, easing: any) => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const updatedList = currentList.map(kf => Math.abs(kf.time - time) < 0.05 ? { ...kf, easing } : kf);
+    updateClip(selectedClip.id, { animations: { ...anims, [propKey]: updatedList } });
+    useEditorStore.getState().saveSnapshot();
+  };
+  const handleJumpToNext = (propKey: string) => () => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const nextKf = currentList.find(k => k.time > localClipTime + 0.05);
+    if (nextKf) useEditorStore.getState().seek(selectedClip.startTime + nextKf.time);
+  };
+  const handleJumpToPrev = (propKey: string) => () => {
+    const anims = selectedClip.animations || {};
+    const currentList = anims[propKey] || [];
+    const prevKf = [...currentList].reverse().find(k => k.time < localClipTime - 0.05);
+    if (prevKf) useEditorStore.getState().seek(selectedClip.startTime + prevKf.time);
+  };
+
 
   const handleAlign = (type: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom' | 'reset') => {
     let newX = getPropVal(selectedClip.transform.x, 'transform.x');
@@ -173,12 +185,31 @@ export function PropertyTransformTab({
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Position</span>
           <div className="flex items-center gap-1">
-            <KeyframeIcon
-              active={isKfActive('transform.x') || isKfActive('transform.y')}
-              onClick={() => {
-                if (isKfActive('transform.x')) { remKf('transform.x'); remKf('transform.y'); }
-                else { addKf('transform.x', selectedClip.transform.x); addKf('transform.y', selectedClip.transform.y); }
-              }}
+            <span className="text-[10px] text-[#888] mr-1">X</span>
+            <KeyframeControl
+              propertyKey="transform.x"
+              value={selectedClip.transform.x}
+              keyframes={selectedClip.animations?.['transform.x'] || []}
+              currentTime={localClipTime}
+              clipId={selectedClip.id}
+              onAddKeyframe={handleAddKeyframe('transform.x')}
+              onRemoveKeyframe={handleRemoveKeyframe('transform.x')}
+              onUpdateEasing={handleUpdateEasing('transform.x')}
+              onJumpToNext={handleJumpToNext('transform.x')}
+              onJumpToPrev={handleJumpToPrev('transform.x')}
+            />
+            <span className="text-[10px] text-[#888] ml-2 mr-1">Y</span>
+            <KeyframeControl
+              propertyKey="transform.y"
+              value={selectedClip.transform.y}
+              keyframes={selectedClip.animations?.['transform.y'] || []}
+              currentTime={localClipTime}
+              clipId={selectedClip.id}
+              onAddKeyframe={handleAddKeyframe('transform.y')}
+              onRemoveKeyframe={handleRemoveKeyframe('transform.y')}
+              onUpdateEasing={handleUpdateEasing('transform.y')}
+              onJumpToNext={handleJumpToNext('transform.y')}
+              onJumpToPrev={handleJumpToPrev('transform.y')}
             />
           </div>
         </div>
@@ -212,8 +243,20 @@ export function PropertyTransformTab({
               onMouseUp={() => useEditorStore.getState().saveSnapshot()}
               className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['transform.x'] || selectedClip.animations?.['transform.y'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
           </div>
         </div>
+        <KeyframeMiniTimeline
+          keyframes={selectedClip.animations?.['transform.x'] || selectedClip.animations?.['transform.y'] || []}
+          currentTime={localClipTime}
+          duration={selectedClip.duration}
+          onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+        />
       </div>
 
       {/* Scale & Rotation */}
@@ -253,9 +296,17 @@ export function PropertyTransformTab({
           <div className="flex justify-between text-[10px] text-[#a0a0a0]">
             <span className="flex items-center gap-1">
               Scale
-              <KeyframeIcon
-                active={isKfActive('transform.scale')}
-                onClick={() => isKfActive('transform.scale') ? remKf('transform.scale') : addKf('transform.scale', selectedClip.transform.scale)}
+              <KeyframeControl
+                propertyKey="transform.scale"
+                value={selectedClip.transform.scale}
+                keyframes={selectedClip.animations?.['transform.scale'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('transform.scale')}
+                onRemoveKeyframe={handleRemoveKeyframe('transform.scale')}
+                onUpdateEasing={handleUpdateEasing('transform.scale')}
+                onJumpToNext={handleJumpToNext('transform.scale')}
+                onJumpToPrev={handleJumpToPrev('transform.scale')}
               />
             </span>
             <span className="font-mono">{getPropVal(selectedClip.transform.scale, 'transform.scale')}%</span>
@@ -269,6 +320,12 @@ export function PropertyTransformTab({
             onMouseUp={() => useEditorStore.getState().saveSnapshot()}
             className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
           />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['transform.scale'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
         </div>
 
         {/* Rotation */}
@@ -276,9 +333,17 @@ export function PropertyTransformTab({
           <div className="flex justify-between text-[10px] text-[#a0a0a0]">
             <span className="flex items-center gap-1">
               Rotation
-              <KeyframeIcon
-                active={isKfActive('transform.rotation')}
-                onClick={() => isKfActive('transform.rotation') ? remKf('transform.rotation') : addKf('transform.rotation', selectedClip.transform.rotation)}
+              <KeyframeControl
+                propertyKey="transform.rotation"
+                value={selectedClip.transform.rotation}
+                keyframes={selectedClip.animations?.['transform.rotation'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('transform.rotation')}
+                onRemoveKeyframe={handleRemoveKeyframe('transform.rotation')}
+                onUpdateEasing={handleUpdateEasing('transform.rotation')}
+                onJumpToNext={handleJumpToNext('transform.rotation')}
+                onJumpToPrev={handleJumpToPrev('transform.rotation')}
               />
             </span>
             <span className="font-mono">{getPropVal(selectedClip.transform.rotation, 'transform.rotation')}°</span>
@@ -291,6 +356,86 @@ export function PropertyTransformTab({
             onChange={(e) => upd('transform.rotation', Number(e.target.value))}
             onMouseUp={() => useEditorStore.getState().saveSnapshot()}
             className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['transform.rotation'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
+        </div>
+
+        {/* 3D Rotation X */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] text-[#a0a0a0]">
+            <span className="flex items-center gap-1">
+              Rotation X (Tilt)
+              <KeyframeControl
+                propertyKey="transform.rotationX"
+                value={selectedClip.transform.rotationX ?? 0}
+                keyframes={selectedClip.animations?.['transform.rotationX'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('transform.rotationX')}
+                onRemoveKeyframe={handleRemoveKeyframe('transform.rotationX')}
+                onUpdateEasing={handleUpdateEasing('transform.rotationX')}
+                onJumpToNext={handleJumpToNext('transform.rotationX')}
+                onJumpToPrev={handleJumpToPrev('transform.rotationX')}
+              />
+            </span>
+            <span className="font-mono">{getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}°</span>
+          </div>
+          <input
+            type="range"
+            min={-180}
+            max={180}
+            value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
+            onChange={(e) => upd('transform.rotationX', Number(e.target.value))}
+            onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+            className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['transform.rotationX'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+          />
+        </div>
+
+        {/* 3D Rotation Y */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] text-[#a0a0a0]">
+            <span className="flex items-center gap-1">
+              Rotation Y (Pan)
+              <KeyframeControl
+                propertyKey="transform.rotationY"
+                value={selectedClip.transform.rotationY ?? 0}
+                keyframes={selectedClip.animations?.['transform.rotationY'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('transform.rotationY')}
+                onRemoveKeyframe={handleRemoveKeyframe('transform.rotationY')}
+                onUpdateEasing={handleUpdateEasing('transform.rotationY')}
+                onJumpToNext={handleJumpToNext('transform.rotationY')}
+                onJumpToPrev={handleJumpToPrev('transform.rotationY')}
+              />
+            </span>
+            <span className="font-mono">{getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}°</span>
+          </div>
+          <input
+            type="range"
+            min={-180}
+            max={180}
+            value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
+            onChange={(e) => upd('transform.rotationY', Number(e.target.value))}
+            onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+            className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['transform.rotationY'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
           />
         </div>
       </div>
@@ -336,9 +481,17 @@ export function PropertyTransformTab({
           <div className="flex justify-between text-[10px] text-[#a0a0a0]">
             <span className="flex items-center gap-1">
               <Eye className="w-3 h-3" /> Opacity
-              <KeyframeIcon
-                active={isKfActive('opacity')}
-                onClick={() => isKfActive('opacity') ? remKf('opacity') : addKf('opacity', selectedClip.opacity)}
+              <KeyframeControl
+                propertyKey="opacity"
+                value={selectedClip.opacity}
+                keyframes={selectedClip.animations?.['opacity'] || []}
+                currentTime={localClipTime}
+                clipId={selectedClip.id}
+                onAddKeyframe={handleAddKeyframe('opacity')}
+                onRemoveKeyframe={handleRemoveKeyframe('opacity')}
+                onUpdateEasing={handleUpdateEasing('opacity')}
+                onJumpToNext={handleJumpToNext('opacity')}
+                onJumpToPrev={handleJumpToPrev('opacity')}
               />
             </span>
             <span className="font-mono">{Math.round(getPropVal(selectedClip.opacity, 'opacity') * 100)}%</span>
@@ -352,6 +505,12 @@ export function PropertyTransformTab({
             onChange={(e) => upd('opacity', Number(e.target.value))}
             onMouseUp={() => useEditorStore.getState().saveSnapshot()}
             className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          />
+          <KeyframeMiniTimeline
+            keyframes={selectedClip.animations?.['opacity'] || []}
+            currentTime={localClipTime}
+            duration={selectedClip.duration}
+            onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
           />
         </div>
       </div>
@@ -440,35 +599,100 @@ export function PropertyTransformTab({
         )}
       </div>
 
-      {/* Bezier Easing & Keyframe Curve Editor */}
-      {selectedClip.animations && Object.keys(selectedClip.animations).length > 0 && (
-        <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-amber-400" /> Keyframe Easing Curve
-            </span>
+      {/* Ken Burns */}
+      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
+        <div className="flex items-center justify-between cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, kenBurns: !prev.kenBurns }))}>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Ken Burns (Pan & Zoom)</span>
           </div>
-
-          <div className="h-44 bg-[#1e1e1e] rounded border border-[#3e3e3e] p-2">
-            <BezierCurveEditor
-              value={{ x: 0.33, y: 0.67 }}
-              onChange={(updatedControl) => {
-                const anims = { ...(selectedClip.animations || {}) };
-                for (const propKey in anims) {
-                  const kfs = anims[propKey];
-                  if (kfs) {
-                    anims[propKey] = kfs.map((kf: any) => ({
-                      ...kf,
-                      bezierControl: updatedControl
-                    }));
-                  }
-                }
-                updateClip(selectedClip.id, { animations: anims });
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selectedClip.kenBurns?.enabled ?? false}
+              onChange={(e) => {
+                e.stopPropagation();
+                updateClip(selectedClip.id, { 
+                  kenBurns: selectedClip.kenBurns 
+                    ? { ...selectedClip.kenBurns, enabled: e.target.checked }
+                    : { enabled: e.target.checked, startScale: 1.0, startPanX: 0, startPanY: 0, endScale: 1.2, endPanX: 0, endPanY: 0, easing: 'easeInOut' }
+                });
+                useEditorStore.getState().saveSnapshot();
               }}
+              className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
             />
           </div>
         </div>
-      )}
+
+        {selectedClip.kenBurns?.enabled && !collapsedSections.kenBurns && (
+          <div className="space-y-3 pt-2 border-t border-[#3e3e3e]">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <span className="text-[10px] text-[#a0a0a0]">Start Scale: {(selectedClip.kenBurns.startScale * 100).toFixed(0)}%</span>
+                <input
+                  type="range" min="0.1" max="3" step="0.1"
+                  value={selectedClip.kenBurns.startScale}
+                  onChange={(e) => updateClip(selectedClip.id, { kenBurns: { ...selectedClip.kenBurns!, startScale: Number(e.target.value) } })}
+                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                  className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] text-[#a0a0a0]">End Scale: {(selectedClip.kenBurns.endScale * 100).toFixed(0)}%</span>
+                <input
+                  type="range" min="0.1" max="3" step="0.1"
+                  value={selectedClip.kenBurns.endScale}
+                  onChange={(e) => updateClip(selectedClip.id, { kenBurns: { ...selectedClip.kenBurns!, endScale: Number(e.target.value) } })}
+                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                  className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bezier Easing */}
+      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3">
+        <div className="flex items-center justify-between cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, bezier: !prev.bezier }))}>
+          <span className="text-[10px] font-semibold text-white uppercase tracking-wider">Animation Easing Curve</span>
+          {collapsedSections.bezier ? <ChevronDown className="w-4 h-4 text-[#888]" /> : <ChevronUp className="w-4 h-4 text-[#888]" />}
+        </div>
+        
+        {!collapsedSections.bezier && (
+          <div className="space-y-3 pt-2 border-t border-[#3e3e3e]">
+            <div className="flex gap-1.5">
+              <button className="px-2 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white rounded text-[9px] transition-colors">Linear</button>
+              <button className="px-2 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white rounded text-[9px] transition-colors">Ease In</button>
+              <button className="px-2 py-1 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white rounded text-[9px] transition-colors">Ease Out</button>
+            </div>
+
+            <div className="h-44 bg-[#1e1e1e] rounded border border-[#3e3e3e] p-2">
+              <BezierCurveEditor
+                value={{ x: 0.33, y: 0.67 }}
+                onChange={(updatedControl) => {
+                  const anims = { ...(selectedClip.animations || {}) };
+                  for (const propKey in anims) {
+                    const kfs = anims[propKey];
+                    if (kfs) {
+                      anims[propKey] = kfs.map((kf: any) => ({
+                        ...kf,
+                        bezierControl: updatedControl
+                      }));
+                    }
+                  }
+                  updateClip(selectedClip.id, { animations: anims });
+                }}
+              />
+            </div>
+          </div>
+        )}
+        <KeyframeMiniTimeline
+          keyframes={selectedClip.animations?.['transform.x'] || selectedClip.animations?.['transform.y'] || []}
+          currentTime={localClipTime}
+          duration={selectedClip.duration}
+          onSeek={(time) => useEditorStore.getState().seek(selectedClip.startTime + time)}
+        />
+      </div>
     </div>
   );
-}
+};

@@ -152,6 +152,45 @@ export function PropertyMaskTab({
           </div>
         </>
       )}
+
+      {/* AI Background Removal */}
+      <div className="bg-[#2d2d2d] rounded-lg border border-[#3e3e3e] p-3 space-y-3 mt-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-semibold text-white uppercase tracking-wider">AI Background Removal</span>
+          <button
+            onClick={() => {
+              const current = selectedClip.aiBackground ?? { enabled: false, edgeBlur: 0 };
+              updateClip(selectedClip.id, {
+                aiBackground: { ...current, enabled: !current.enabled }
+              });
+              useEditorStore.getState().saveSnapshot();
+            }}
+            className={`w-8 h-4 rounded-full transition-colors relative ${selectedClip.aiBackground?.enabled ? 'bg-purple-500' : 'bg-[#3e3e3e]'}`}
+          >
+            <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${selectedClip.aiBackground?.enabled ? 'left-[18px]' : 'left-0.5'}`} />
+          </button>
+        </div>
+        
+        {selectedClip.aiBackground?.enabled && (
+          <div className="space-y-3 pt-2 border-t border-[#3e3e3e]">
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-[11px]">
+                <span className="text-[#d0d0d0]">Edge Blur</span>
+                <span className="text-amber-500 font-mono">{selectedClip.aiBackground.edgeBlur ?? 0}px</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                value={selectedClip.aiBackground.edgeBlur ?? 0}
+                onChange={(e) => updateClip(selectedClip.id, { aiBackground: { ...selectedClip.aiBackground!, edgeBlur: Number(e.target.value) } })}
+                onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                className="w-full accent-amber-500 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer"
+              />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
