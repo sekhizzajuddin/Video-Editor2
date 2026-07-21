@@ -376,8 +376,9 @@ export function PreviewCanvas() {
   // Canvas rendering Ã¢â‚¬â€œ called whenever time, tracks, or images change
   // -------------------------------------------------------------------
   const renderCanvas = useCallback(async () => {
+    const state = useEditorStore.getState() as any;
+    const currentTime = state.transientTime ?? state.currentTime;
     const {
-      currentTime,
       tracks: tracksRaw,
       selectedClipId,
       mediaLibrary: mediaLibraryRaw,
