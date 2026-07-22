@@ -1,4 +1,4 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 import {
   SpeedSliderSection,
   SpeedRampingSection,
@@ -6,7 +6,7 @@ import {
 } from './speed';
 
 interface SpeedTabProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   mediaLibrary: any[];
   isRamped: boolean;
   updateClip: (clipId: string, updates: any, options?: { ripple?: boolean }) => void;

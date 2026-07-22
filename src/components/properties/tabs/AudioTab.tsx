@@ -1,4 +1,4 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 import {
   AISoundDesignerSection,
   VolumeSection,
@@ -8,8 +8,8 @@ import {
 } from './audio';
 
 interface AudioTabProps {
-  selectedClip: Clip;
-  clipAudio: any;
+  selectedClip: TimelineClip;
+  TimelineClipAudio: any;
   selectedClipIds: string[];
   isAnalyzingVoice: boolean;
   handleAutoVoiceTune: () => void;
@@ -28,7 +28,7 @@ interface AudioTabProps {
 
 export function AudioTab({
   selectedClip,
-  clipAudio,
+  TimelineClipAudio,
   selectedClipIds,
   isAnalyzingVoice,
   handleAutoVoiceTune,
@@ -61,21 +61,21 @@ export function AudioTab({
       )}
 
       <VolumeSection
-        volume={clipAudio.volume}
+        volume={TimelineClipAudio.volume}
         onChange={(val) => handleAudioChange('volume', val)}
         onReset={() => handleAudioReset('volume')}
       />
 
       <PanSection
-        pan={clipAudio.pan}
+        pan={TimelineClipAudio.pan}
         onChange={(val) => handleAudioChange('pan', val)}
         onReset={() => handleAudioReset('pan')}
       />
 
       <EQSection
-        bass={clipAudio.bass || 0}
-        mid={clipAudio.mid || 0}
-        treble={clipAudio.treble || 0}
+        bass={TimelineClipAudio.bass || 0}
+        mid={TimelineClipAudio.mid || 0}
+        treble={TimelineClipAudio.treble || 0}
         onBassChange={(val) => handleAudioChange('bass', val)}
         onMidChange={(val) => handleAudioChange('mid', val)}
         onTrebleChange={(val) => handleAudioChange('treble', val)}

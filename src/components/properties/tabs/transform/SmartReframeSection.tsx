@@ -1,8 +1,8 @@
 import { useEditorStore } from '@/store/editorStore';
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 
 interface SmartReframeSectionProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   updateClip: (clipId: string, updates: any, options?: { ripple?: boolean }) => void;
 }
 

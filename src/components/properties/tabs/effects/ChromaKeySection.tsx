@@ -1,7 +1,7 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 
 interface ChromaKeySectionProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
 }
 
 export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {

@@ -1,7 +1,7 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 
 interface EffectsListSectionProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
 }
 
 export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {

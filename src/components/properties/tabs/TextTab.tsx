@@ -1,4 +1,4 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 import {
   TextContentSection,
   TextStylePresetsSection,
@@ -10,7 +10,7 @@ import {
 } from './text';
 
 interface TextTabProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   updateClip: (clipId: string, updates: any) => void;
 }
 

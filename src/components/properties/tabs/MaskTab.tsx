@@ -1,4 +1,4 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 import {
   MaskEnableSection,
   MaskTypeSection,
@@ -7,12 +7,12 @@ import {
 } from './mask';
 
 interface MaskTabProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   updateClip: (clipId: string, updates: any) => void;
 }
 
 export function MaskTab({ selectedClip, updateClip }: MaskTabProps) {
-  const mask = selectedClip.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, points: [], feather: 0, invert: false, rotation: 0, roundness: 0, matteSourceClipId: '' };
+  const mask = selectedClip.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, points: [], feather: 0, invert: false, rotation: 0, roundness: 0, matteSourceclipId: '' };
   
   const updateMask = (updates: any) => {
     updateClip(selectedClip.id, { mask: { ...mask, ...updates } });

@@ -1,4 +1,4 @@
-import type { Clip, ClipAnimations } from '@/types';
+import type { TimelineClip, ClipAnimations } from '@/types';
 import {
   SmartReframeSection,
   KeyframesSection,
@@ -9,7 +9,7 @@ import {
 } from './transform';
 
 interface TransformTabProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   selectedClipIds: string[];
   localTime: number;
   absoluteStartTime: number;

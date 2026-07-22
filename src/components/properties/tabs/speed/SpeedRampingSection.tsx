@@ -1,7 +1,7 @@
-import type { Clip, SpeedRampKeyframe } from '@/types';
+import type { TimelineClip, SpeedRampKeyframe } from '@/types';
 
 interface SpeedRampingSectionProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   isRamped: boolean;
   mediaLibrary: any[];
   updateClip: (clipId: string, updates: any, options?: { ripple?: boolean }) => void;

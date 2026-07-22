@@ -2,10 +2,10 @@ import { RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { addOrUpdateKeyframe } from '@/utils/keyframes';
-import type { Clip, ClipAnimations } from '@/types';
+import type { TimelineClip, ClipAnimations } from '@/types';
 
 interface OpacitySectionProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   localTime: number;
   absoluteStartTime: number;
   animations: ClipAnimations;

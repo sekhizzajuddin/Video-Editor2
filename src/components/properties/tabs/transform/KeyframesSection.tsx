@@ -1,9 +1,9 @@
 import { Trash2 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
-import type { Clip, ClipAnimations } from '@/types';
+import type { TimelineClip, ClipAnimations } from '@/types';
 
 interface KeyframesSectionProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   localTime: number;
   animations: ClipAnimations;
   hasMasterKeyframes: boolean;
@@ -15,6 +15,7 @@ interface KeyframesSectionProps {
 
 export function KeyframesSection({
   selectedClip,
+  animations,
   keyframeTimes,
   hasMasterKeyframes,
   isOnKeyframe,

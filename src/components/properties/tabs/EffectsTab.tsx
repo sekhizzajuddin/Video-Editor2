@@ -1,4 +1,4 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 import {
   AIMotionGraphicsSection,
   EffectsListSection,
@@ -6,7 +6,7 @@ import {
 } from './effects';
 
 interface EffectsTabProps {
-  selectedClip: Clip;
+  selectedClip: TimelineClip;
   selectedTrack: any;
   aiProvider: 'gemini' | 'groq';
   setAiProvider: (v: 'gemini' | 'groq') => void;

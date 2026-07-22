@@ -1,4 +1,4 @@
-import type { Clip } from '@/types';
+import type { TimelineClip } from '@/types';
 import {
   ColorSectionContainer,
   TemperatureSection,
@@ -12,8 +12,8 @@ import {
 } from './color';
 
 interface ColorTabProps {
-  selectedClip: Clip;
-  clipFilters: any;
+  selectedClip: TimelineClip;
+  TimelineClipFilters: any;
   collapsedSections: Record<string, boolean>;
   toggleSection: (section: string) => void;
   getPropVal: (base: number, propKey: string) => number;
@@ -22,7 +22,7 @@ interface ColorTabProps {
 }
 
 export function ColorTab({
-  clipFilters,
+  TimelineClipFilters,
   collapsedSections,
   toggleSection,
   getPropVal,
@@ -38,27 +38,27 @@ export function ColorTab({
         toggleSection={toggleSection}
       >
         <TemperatureSection
-          temperature={getPropVal(clipFilters.temperature, 'color.temperature')}
+          temperature={getPropVal(TimelineClipFilters.temperature, 'color.temperature')}
           onChange={(val) => handleFilterChange('temperature', val)}
           onReset={() => handleFilterReset('temperature')}
         />
         <TintSection
-          tint={getPropVal(clipFilters.tint, 'color.tint')}
+          tint={getPropVal(TimelineClipFilters.tint, 'color.tint')}
           onChange={(val) => handleFilterChange('tint', val)}
           onReset={() => handleFilterReset('tint')}
         />
         <ExposureSection
-          exposure={getPropVal(clipFilters.exposure, 'color.exposure')}
+          exposure={getPropVal(TimelineClipFilters.exposure, 'color.exposure')}
           onChange={(val) => handleFilterChange('exposure', val)}
           onReset={() => handleFilterReset('exposure')}
         />
         <ContrastSection
-          contrast={getPropVal(clipFilters.contrast, 'color.contrast')}
+          contrast={getPropVal(TimelineClipFilters.contrast, 'color.contrast')}
           onChange={(val) => handleFilterChange('contrast', val)}
           onReset={() => handleFilterReset('contrast')}
         />
         <SaturationSection
-          saturation={getPropVal(clipFilters.saturation, 'color.saturation')}
+          saturation={getPropVal(TimelineClipFilters.saturation, 'color.saturation')}
           onChange={(val) => handleFilterChange('saturation', val)}
           onReset={() => handleFilterReset('saturation')}
         />
@@ -71,17 +71,17 @@ export function ColorTab({
         toggleSection={toggleSection}
       >
         <BlurSection
-          blur={getPropVal(clipFilters.blur, 'color.blur')}
+          blur={getPropVal(TimelineClipFilters.blur, 'color.blur')}
           onChange={(val) => handleFilterChange('blur', val)}
           onReset={() => handleFilterReset('blur')}
         />
         <FadedFilmSection
-          fadedFilm={getPropVal(clipFilters.fadedFilm, 'color.fadedFilm')}
+          fadedFilm={getPropVal(TimelineClipFilters.fadedFilm, 'color.fadedFilm')}
           onChange={(val) => handleFilterChange('fadedFilm', val)}
           onReset={() => handleFilterReset('fadedFilm')}
         />
         <VignetteSection
-          vignette={getPropVal(clipFilters.vignette, 'color.vignette')}
+          vignette={getPropVal(TimelineClipFilters.vignette, 'color.vignette')}
           onChange={(val) => handleFilterChange('vignette', val)}
           onReset={() => handleFilterReset('vignette')}
         />
