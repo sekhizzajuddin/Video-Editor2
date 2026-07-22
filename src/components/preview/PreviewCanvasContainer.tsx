@@ -363,13 +363,6 @@ export function PreviewCanvasContainer() {
   const renderCanvas = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
-    // Apply canvas context optimizations based on playback state
-    const mainCtx = canvas.getContext('2d');
-    if (mainCtx) {
-      optimizeCanvasContext(mainCtx, isPlaying, isScrubbing);
-    }
-    
     await renderCanvasEngine({
       canvas,
       compositeCtxRef,
@@ -379,7 +372,7 @@ export function PreviewCanvasContainer() {
       lastFrameCanvasRef,
       renderDeps: renderDepsRef.current,
     });
-  }, [isPlaying, isScrubbing]);
+  }, []);
 
   const renderCanvasRef = useRef(renderCanvas);
   const rafActiveRef = useRef(false);
