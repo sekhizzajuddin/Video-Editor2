@@ -22,6 +22,7 @@ import { ThumbnailModal } from '../ThumbnailModal';
 import { ParticlePool } from '@/utils/canvasEffects';
 import { addOrUpdateKeyframe } from '@/utils/keyframes';
 import { renderCanvasEngine } from './CanvasRenderingEngine';
+import { getRenderQualitySettings, optimizeCanvasContext, debouncedScrub } from './RenderingOptimizations';
 import { PreviewCanvasOverlay } from './PreviewCanvasOverlay';
 import {
   PreviewCanvasHeaderToolbar,
@@ -127,6 +128,9 @@ export function PreviewCanvasContainer() {
   const [thumbnailImageData, setThumbnailImageData] = useState<string | null>(null);
   const [isPopoutOpen, setIsPopoutOpen] = useState(false);
   const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [adaptiveQuality, setAdaptiveQuality] = useState<'high' | 'medium' | 'low'>('high');
+  const lastScrubTimeRef = useRef<number>(0);
 
   useEffect(() => {
     return () => {
@@ -359,6 +363,13 @@ export function PreviewCanvasContainer() {
   const renderCanvas = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    
+    // Apply canvas context optimizations based on playback state
+    const mainCtx = canvas.getContext('2d');
+    if (mainCtx) {
+      optimizeCanvasContext(mainCtx, isPlaying, isScrubbing);
+    }
+    
     await renderCanvasEngine({
       canvas,
       compositeCtxRef,
@@ -368,7 +379,7 @@ export function PreviewCanvasContainer() {
       lastFrameCanvasRef,
       renderDeps: renderDepsRef.current,
     });
-  }, []);
+  }, [isPlaying, isScrubbing]);
 
   const renderCanvasRef = useRef(renderCanvas);
   const rafActiveRef = useRef(false);
