@@ -720,14 +720,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const x = clientX - rect.left + currentScrollLeft;
             const time = Math.max(0, x / zoomLevel);
             
-            const now = performance.now();
-            if (now - lastScrubTimeRef.current > 40) {
-              seek(time);
-              lastScrubTimeRef.current = now;
-            }
+            seek(time);
             
             const scrubNow = performance.now();
-            if (scrubNow - lastScrubStateUpdateRef.current > 33) {
+            if (scrubNow - lastScrubStateUpdateRef.current > 16) {
               setScrubTime(time);
               setScrubMouseX(clientX);
               lastScrubStateUpdateRef.current = scrubNow;

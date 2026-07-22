@@ -169,6 +169,13 @@ export function PreviewCanvasContainer() {
     }
   }, [allClips]);
 
+  const isPanning = useRef(false);
+  const lastPanPos = useRef({ x: 0, y: 0 });
+
+  const [imageRevision, setImageRevision] = useState(0);
+  const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
+
+  // Subscribe to time changes for particle pool reset
   const prevTimeRef = useRef(currentTime);
   useEffect(() => {
     if (Math.abs(currentTime - prevTimeRef.current) > 0.1) {
@@ -177,11 +184,36 @@ export function PreviewCanvasContainer() {
     prevTimeRef.current = currentTime;
   }, [currentTime]);
 
-  const isPanning = useRef(false);
-  const lastPanPos = useRef({ x: 0, y: 0 });
-
-  const [imageRevision, setImageRevision] = useState(0);
-  const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
+  // Subscribe directly to currentTime changes from store - bypasses React render cycle for instant frame updates during scrubbing
+  useEffect(() => {
+    let lastFrameTimeForScrubSync = 0;
+    
+    const unsub = useEditorStore.subscribe((state) => {
+      const newTime = state.currentTime;
+      
+      if (Math.abs(newTime - currentTimeRef.current) > 0.001) {
+        currentTimeRef.current = newTime;
+        framePendingRef.current = true;
+        
+        // For scrubbing - render immediately at full speed
+        if (!state.isPlaying) {
+          const now = performance.now();
+          // Throttle only the renderDeps ref update, not the canvas redraw itself
+          if (now - lastFrameTimeForScrubSync > 8) {
+            lastFrameTimeForScrubSync = now;
+            
+            // Update render dependencies ref directly without React re-render
+            renderDepsRef.current = {
+              ...renderDepsRef.current,
+              currentTime: newTime,
+            };
+          }
+        }
+      }
+    });
+    
+    return unsub;
+  }, []);
 
   const previousRenderDepsRef = useRef<any>(null);
   const renderDepsRef = useRef<any>({
@@ -350,15 +382,6 @@ export function PreviewCanvasContainer() {
   }, [setPreviewCanvas, previewCanvas]);
 
   const currentTimeRef = useRef(currentTime);
-  useEffect(() => {
-    return useEditorStore.subscribe((state) => {
-      if (!state.isPlaying) {
-        currentTimeRef.current = state.currentTime;
-      } else if (Math.abs(state.currentTime - currentTimeRef.current) > 0.3) {
-        currentTimeRef.current = state.currentTime;
-      }
-    });
-  }, []);
 
   const renderCanvas = useCallback(async () => {
     const canvas = canvasRef.current;
