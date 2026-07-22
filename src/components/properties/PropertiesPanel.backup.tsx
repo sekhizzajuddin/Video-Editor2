@@ -46,7 +46,7 @@ import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } 
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
-import { SequenceProperties } from './properties/SequenceProperties';
+import { SequenceProperties } from './SequenceProperties';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -1953,7 +1953,7 @@ export function PropertiesPanel() {
                   onClick={async () => {
                     if (!selectedClip) return;
                     // Dynamic import to avoid heavy loads if not used
-                    const { generateSmartReframeKeyframes } = await import('../utils/smartReframe');
+                    const { generateSmartReframeKeyframes } = await import('@/utils/smartReframe');
                     const aspect = useEditorStore.getState().aspectRatio;
                     const newAnimations = generateSmartReframeKeyframes(selectedClip, aspect as any);
                     updateClip(selectedClip.id, { animations: newAnimations });
