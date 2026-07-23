@@ -1076,6 +1076,78 @@ export function useMediaPlayback(): MediaPlaybackResult {
     }
   }, [currentTime, isPlaying, activeClips, mediaLibrary]);
 
+  // DIRECT Zustand subscription for instant video element seeking during scrubbing (bypasses React render cycle)
+  // This ensures video elements start seeking IMMEDIATELY when store state changes, without waiting for React re-render
+  useEffect(() => {
+    let lastScrubSeekTime = 0;
+    
+    const unsub = useEditorStore.subscribe((state) => {
+      if (state.isPlaying) return;
+      
+      const newTime = state.currentTime;
+      const now = performance.now();
+      // Throttle video element seeking to ~60fps to avoid overloading the decoder
+      if (now - lastScrubSeekTime < 16) return;
+      lastScrubSeekTime = now;
+      
+      const pool = poolRef.current;
+      if (!pool || pool.size === 0) return;
+      
+      // Read fresh state directly from store to avoid stale closures
+      const freshMediaLibrary = useEditorStore.getState().mediaLibrary;
+      const freshTracks = useEditorStore.getState().tracks;
+      
+      // Build active clips from fresh tracks
+      const clipsArr: Array<{ clipId: string; mediaId: string; clipStart: number; clipDuration: number; trimStart: number; speed: number; speedRamp?: any }> = [];
+      for (const track of freshTracks) {
+        if (track.hidden) continue;
+        for (const clip of track.clips) {
+          if (clip.type === 'video' || clip.type === 'audio') {
+            if (newTime >= clip.startTime && newTime < clip.startTime + clip.duration) {
+              clipsArr.push({
+                clipId: clip.id,
+                mediaId: clip.mediaId,
+                clipStart: clip.startTime,
+                clipDuration: clip.duration,
+                trimStart: (clip as any).trimStart ?? 0,
+                speed: (clip as any).speed ?? 1,
+                speedRamp: (clip as any).speedRamp,
+              });
+            }
+          }
+        }
+      }
+      
+      for (const clip of clipsArr) {
+        const entry = pool.get(clip.clipId);
+        if (!entry || entry.type !== 'video') continue;
+        
+        const el = entry.el as HTMLVideoElement;
+        const mediaItem = freshMediaLibrary.find((m) => m.id === clip.mediaId);
+        const maxDuration = mediaItem ? mediaItem.duration : 10000;
+        const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+          id: clip.clipId,
+          startTime: clip.clipStart,
+          duration: clip.clipDuration,
+          trimStart: clip.trimStart,
+          speed: clip.speed,
+          speedRamp: clip.speedRamp
+        }, newTime)));
+        
+        if (el.seeking) {
+          pendingSeeksRef.current.set(clip.clipId, mediaTime);
+        } else {
+          const drift = Math.abs(el.currentTime - mediaTime);
+          if (drift > 0.03) {
+            el.currentTime = mediaTime;
+          }
+        }
+      }
+    });
+    
+    return unsub;
+  }, []);
+
   // Dynamically load/unload video sources based on proximity to currentTime to prevent decoder starvation
   useEffect(() => {
     const pool = poolRef.current;

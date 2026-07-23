@@ -184,34 +184,17 @@ export function PreviewCanvasContainer() {
     prevTimeRef.current = currentTime;
   }, [currentTime]);
 
-  // Subscribe directly to currentTime changes from store - bypasses React render cycle for instant frame updates during scrubbing
+  // DIRECT Zustand subscription for instant frame updates during scrubbing (bypasses React render cycle)
+  // Sets framePendingRef IMMEDIATELY when currentTime changes in store so RAF tick renders without delay
   useEffect(() => {
-    let lastFrameTimeForScrubSync = 0;
-    
     const unsub = useEditorStore.subscribe((state) => {
+      if (state.isPlaying) return;
       const newTime = state.currentTime;
-      
       if (Math.abs(newTime - currentTimeRef.current) > 0.001) {
         currentTimeRef.current = newTime;
         framePendingRef.current = true;
-        
-        // For scrubbing - render immediately at full speed
-        if (!state.isPlaying) {
-          const now = performance.now();
-          // Throttle only the renderDeps ref update, not the canvas redraw itself
-          if (now - lastFrameTimeForScrubSync > 8) {
-            lastFrameTimeForScrubSync = now;
-            
-            // Update render dependencies ref directly without React re-render
-            renderDepsRef.current = {
-              ...renderDepsRef.current,
-              currentTime: newTime,
-            };
-          }
-        }
       }
     });
-    
     return unsub;
   }, []);
 
@@ -368,6 +351,8 @@ export function PreviewCanvasContainer() {
   useEffect(() => {
     const handleFrameUpdate = () => {
       if (!useEditorStore.getState().isPlaying) {
+        // Set framePending directly so the RAF tick renders IMMEDIATELY, bypassing React state update latency
+        framePendingRef.current = true;
         requestRedraw();
       }
     };
