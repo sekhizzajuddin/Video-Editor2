@@ -416,11 +416,10 @@ export function useMediaPlayback(): MediaPlaybackResult {
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
             pendingSeeksRef.current.delete(clipId);
-            if (!useEditorStore.getState().isPlaying && (el as any).fastSeek) {
-              (el as any).fastSeek(pendingTime);
-            } else {
-              el.currentTime = pendingTime;
-            }
+            // ALWAYS use exact currentTime assignment for pending seeks (not fastSeek).
+            // fastSeek jumps to the nearest keyframe which can be seconds away,
+            // causing extremely choppy scrubbing visuals.
+            el.currentTime = pendingTime;
           }
         };
 
@@ -429,6 +428,19 @@ export function useMediaPlayback(): MediaPlaybackResult {
         el.addEventListener('seeked', handleSeeked);
         el.addEventListener('timeupdate', stableTriggerRedraw);
         el.addEventListener('canplay', stableTriggerRedraw);
+
+        // requestVideoFrameCallback fires exactly when a NEW video frame is presented.
+        // This is far more reliable than 'seeked' or 'timeupdate' for detecting decoded frames
+        // during scrubbing, since it fires per-frame (not per-seek-completion).
+        if ('requestVideoFrameCallback' in el) {
+          const onVideoFrame = () => {
+            if (!poolRef.current.has(clipId)) return; // element removed
+            triggerRedraw();
+            // Re-register for the next frame
+            (el as any).requestVideoFrameCallback(onVideoFrame);
+          };
+          (el as any).requestVideoFrameCallback(onVideoFrame);
+        }
 
         getMediaContainer().appendChild(el);
         // el.load() not called here — proximity preloader will manage it
@@ -585,11 +597,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
             if (entry.el.seeking) {
               pendingSeeksRef.current.set(clipId, mediaTime);
             } else {
-              if (!isPlaying && (entry.el as any).fastSeek) {
-                (entry.el as any).fastSeek(mediaTime);
-              } else {
-                entry.el.currentTime = mediaTime;
-              }
+              // Always use exact currentTime for scrub seeking (not fastSeek).
+              // fastSeek jumps to nearest keyframe causing choppy scrubbing.
+              entry.el.currentTime = mediaTime;
             }
           }
         }
@@ -1147,11 +1157,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
         } else {
           const drift = Math.abs(el.currentTime - mediaTime);
           if (drift > 0.03) {
-            if ((el as any).fastSeek) {
-              (el as any).fastSeek(mediaTime);
-            } else {
-              el.currentTime = mediaTime;
-            }
+            // Always use exact currentTime for scrub seeking (not fastSeek).
+            // fastSeek jumps to nearest keyframe causing choppy scrubbing.
+            el.currentTime = mediaTime;
           }
         }
       }

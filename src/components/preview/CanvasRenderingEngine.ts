@@ -571,7 +571,7 @@ export async function renderCanvasEngine({
 
       if (mediaItem.type === 'video') {
         videoEl = videoElements.get(clip.id) || null;
-        if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+        if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
           vw = videoEl.videoWidth;
           vh = videoEl.videoHeight;
           hasRealMedia = true;
