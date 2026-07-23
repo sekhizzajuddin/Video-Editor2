@@ -359,14 +359,32 @@ export function PreviewCanvasContainer() {
   useEffect(() => {
     const handleFrameUpdate = () => {
       if (!useEditorStore.getState().isPlaying) {
-        // Set framePending directly so the RAF tick renders IMMEDIATELY, bypassing React state update latency
+        // Set framePending directly so the RAF tick renders IMMEDIATELY.
+        // NOTE: Do NOT call requestRedraw() here — it triggers setImageRevision
+        // which causes a full React re-render of PreviewCanvasContainer, wasting
+        // 5-15ms per frame during scrubbing. framePendingRef is sufficient.
         framePendingRef.current = true;
-        requestRedraw();
       }
     };
     window.addEventListener('procut-frame-updated', handleFrameUpdate);
     return () => window.removeEventListener('procut-frame-updated', handleFrameUpdate);
-  }, [requestRedraw]);
+  }, []);
+
+  // Direct Zustand subscription: immediately flag framePending when currentTime changes
+  // during scrubbing. This bypasses React's async render cycle — state updates via
+  // useEffect can be delayed 16-50ms, but this fires synchronously.
+  useEffect(() => {
+    let lastTime = useEditorStore.getState().currentTime;
+    const unsub = useEditorStore.subscribe((state) => {
+      if (state.isPlaying) return;
+      if (Math.abs(state.currentTime - lastTime) > 0.001) {
+        lastTime = state.currentTime;
+        currentTimeRef.current = state.currentTime;
+        framePendingRef.current = true;
+      }
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     if (canvasRef.current && !previewCanvas) {
