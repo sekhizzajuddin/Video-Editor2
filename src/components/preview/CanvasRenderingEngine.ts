@@ -133,7 +133,7 @@ export async function renderCanvasEngine({
   }
   if (!compositeCtxRef.current) return;
   const ctx = compositeCtxRef.current;
-  const skipExpensiveFX = !isPlaying;
+  const skipExpensiveFX = isPlaying;
 
   const now = performance.now();
   const lastTime = lastParticleTimeRef.current ?? now;
@@ -150,7 +150,11 @@ export async function renderCanvasEngine({
   const W_target = 854;
   const H_target = 480;
   const canvas_scale = canvas.width / W_target;
-  const DOWNSCALE = (isPlaying && !isExporting) ? 0.5 : 1.0;
+  // DOWNSCALE was previously 0.5 during playback for performance, but this caused
+  // mask rendering bugs (destination-in compositing at half-resolution coordinates
+  // produced smaller-than-expected clipped output). With GPU acceleration restored
+  // (no willReadFrequently on composite canvas), full-res rendering is fast enough.
+  const DOWNSCALE = 1.0;
 
   // NOTE: The old needsWait early-return was removed because it blocked the entire
   // rendering pipeline when a video element was mid-seek (readyState < 1). The
@@ -725,19 +729,9 @@ export async function renderCanvasEngine({
           }
 
           if (clip.mask?.enabled) {
-            // CRITICAL: The oCtx has scale(DOWNSCALE) applied from line 657.
-            // The mask function creates its own canvas at ow×oh pixels and draws the mask there,
-            // then composites it onto oCtx via drawImage(maskCanvas, 0, 0).
-            // If we pass offCanvas.width/height (which are dw*DOWNSCALE), the mask canvas
-            // would be at the physical pixel size, but oCtx's scale(0.5) would draw it at
-            // HALF that size → mask covers only 1/4 of the clip → video appears small.
-            //
-            // Fix: Restore oCtx to identity transform, apply mask at physical pixel coordinates,
-            // then restore the scale for any subsequent drawing.
-            oCtx.restore(); // Remove scale(DOWNSCALE)
+            // With DOWNSCALE=1.0, offCanvas dimensions match logical dimensions,
+            // so the mask can be applied directly without transform manipulation.
             await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations);
-            oCtx.save();
-            oCtx.scale(DOWNSCALE, DOWNSCALE); // Re-apply DOWNSCALE for subsequent ops
           }
 
           oCtx.restore();
