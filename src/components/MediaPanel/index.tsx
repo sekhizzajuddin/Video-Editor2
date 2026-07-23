@@ -74,7 +74,7 @@ import { useMediaImport } from "@/hooks/media/useMediaImport";
 import { useTTS } from "@/hooks/media/useTTS";
 import { useAudioFeatures } from "@/hooks/media/useAudioFeatures";
 
-function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCardProps) {
+export const TemplatePreviewCard = React.memo(function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -288,7 +288,7 @@ function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCard
       <span className="text-[8px] text-amber-400/40 group-hover:text-amber-400/80 transition-colors shrink-0">DRAG</span>
     </div>
   );
-}
+});
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -3037,7 +3037,7 @@ export function MediaPanel() {
   );
 }
 
-function TransitionCard({ transition }: TransitionCardProps) {
+export const TransitionCard = React.memo(function TransitionCard({ transition }: TransitionCardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isHovered, setIsHovered] = useState(false);
   const animationRef = useRef<number | null>(null);
@@ -3388,4 +3388,6 @@ function TransitionCard({ transition }: TransitionCardProps) {
       </div>
     </div>
   );
-}
+});
+
+  
