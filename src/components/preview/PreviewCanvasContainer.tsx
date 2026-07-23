@@ -497,6 +497,18 @@ export function PreviewCanvasContainer() {
         framePendingRef.current = false;
         isRendering = true;
         isRenderingRef.current = true;
+
+        // CRITICAL FIX: Patch renderDepsRef with FRESH store data right before rendering.
+        // Without this, renderDepsRef holds stale values because React's useEffect hasn't
+        // processed the Zustand state change yet when the RAF tick fires.
+        const freshState = useEditorStore.getState();
+        const deps = renderDepsRef.current;
+        deps.currentTime = currentTimeRef.current;
+        deps.tracks = freshState.tracks;
+        deps.selectedClipId = freshState.selectedClipId;
+        deps.mediaLibrary = freshState.mediaLibrary;
+        deps.isPlaying = freshState.isPlaying;
+
         renderCanvasRef.current()
           .catch((err: unknown) => {
             console.error('Error in renderCanvas:', err);
