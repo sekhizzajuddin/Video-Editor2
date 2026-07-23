@@ -416,7 +416,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
             pendingSeeksRef.current.delete(clipId);
-            el.currentTime = pendingTime;
+            if (!useEditorStore.getState().isPlaying && (el as any).fastSeek) {
+              (el as any).fastSeek(pendingTime);
+            } else {
+              el.currentTime = pendingTime;
+            }
           }
         };
 
@@ -581,7 +585,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
             if (entry.el.seeking) {
               pendingSeeksRef.current.set(clipId, mediaTime);
             } else {
-              entry.el.currentTime = mediaTime;
+              if (!isPlaying && (entry.el as any).fastSeek) {
+                (entry.el as any).fastSeek(mediaTime);
+              } else {
+                entry.el.currentTime = mediaTime;
+              }
             }
           }
         }
@@ -1102,7 +1110,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
       for (const track of freshTracks) {
         if (track.hidden) continue;
         for (const clip of track.clips) {
-          if (clip.type === 'video' || clip.type === 'audio') {
+          if (track.type === 'video' || track.type === 'audio' || (clip as any).type === 'video') {
             if (newTime >= clip.startTime && newTime < clip.startTime + clip.duration) {
               clipsArr.push({
                 clipId: clip.id,
@@ -1139,7 +1147,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
         } else {
           const drift = Math.abs(el.currentTime - mediaTime);
           if (drift > 0.03) {
-            el.currentTime = mediaTime;
+            if ((el as any).fastSeek) {
+              (el as any).fastSeek(mediaTime);
+            } else {
+              el.currentTime = mediaTime;
+            }
           }
         }
       }

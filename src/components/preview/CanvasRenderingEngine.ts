@@ -626,7 +626,36 @@ export async function renderCanvasEngine({
 
       if (hasRealMedia) {
         anyClipDrawn = true;
-        const sourceElement = (mediaItem.type === 'video' ? videoEl : imageEl)!;
+        let sourceElement: CanvasImageSource = (mediaItem.type === 'video' ? videoEl : imageEl)!;
+
+        if (mediaItem.type === 'video' && !isPlaying && videoEl) {
+          const clipCache = frameCache.get(clip.id);
+          if (clipCache && clipCache.length > 0) {
+            const mediaTime = getMediaTimeForClip({
+              id: clip.id, startTime: clip.startTime,
+              duration: clip.duration, trimStart: clip.trimStart,
+              speed: clip.speed, speedRamp: (clip as any).speedRamp
+            }, currentTime);
+            const roundedTime = Math.round(mediaTime * 30) / 30;
+
+            let bestFrame: FrameCacheEntry | null = null;
+            let minDiff = Infinity;
+            for (const f of clipCache) {
+              const diff = Math.abs(f.time - roundedTime);
+              if (diff < minDiff) {
+                minDiff = diff;
+                bestFrame = f;
+              }
+            }
+
+            const videoDrift = Math.abs(videoEl.currentTime - mediaTime);
+            if (bestFrame && (videoEl.seeking || minDiff <= videoDrift || minDiff < 0.1)) {
+              sourceElement = bestFrame.bitmap;
+              vw = bestFrame.bitmap.width;
+              vh = bestFrame.bitmap.height;
+            }
+          }
+        }
 
         const clipW = dw * (1 - cLeft - cRight);
         const clipH = dh * (1 - cTop - cBot);

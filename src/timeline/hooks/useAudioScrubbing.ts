@@ -14,6 +14,8 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
   }, []);
 
   
+  const lastAudioScrubTickRef = useRef<number>(0);
+
   useEffect(() => {
     if (!isScrubbing || scrubTime === null) {
       // Stop all scrubbing audio when scrubbing stops
@@ -23,6 +25,10 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
       lastScrubTimeRef.current = null;
       return;
     }
+
+    const now = performance.now();
+    if (now - lastAudioScrubTickRef.current < 50) return;
+    lastAudioScrubTickRef.current = now;
     
     const delta = lastScrubTimeRef.current !== null ? Math.abs(scrubTime - lastScrubTimeRef.current) : 0;
     lastScrubTimeRef.current = scrubTime;
