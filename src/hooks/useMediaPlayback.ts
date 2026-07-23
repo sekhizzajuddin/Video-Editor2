@@ -436,10 +436,10 @@ export function useMediaPlayback(): MediaPlaybackResult {
           const onVideoFrame = () => {
             if (!poolRef.current.has(clipId)) return; // element removed
             triggerRedraw();
-            // Re-register for the next frame
-            (el as any).requestVideoFrameCallback(onVideoFrame);
+            // Re-register for the next frame and store the handle for cleanup
+            (el as any)._rvfcHandle = (el as any).requestVideoFrameCallback(onVideoFrame);
           };
-          (el as any).requestVideoFrameCallback(onVideoFrame);
+          (el as any)._rvfcHandle = (el as any).requestVideoFrameCallback(onVideoFrame);
         }
 
         getMediaContainer().appendChild(el);
@@ -475,6 +475,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
           }
           el.removeEventListener('timeupdate', stableTriggerRedraw);
           el.removeEventListener('canplay', stableTriggerRedraw);
+          // Cancel pending requestVideoFrameCallback to prevent leak
+          if (el._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
+            el.cancelVideoFrameCallback(el._rvfcHandle);
+            el._rvfcHandle = null;
+          }
         }
         if (entry.separationGraph) {
           try { entry.separationGraph.input.disconnect(); } catch (e) {}

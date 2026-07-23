@@ -1,5 +1,6 @@
 import { X, Download, Sparkles, AlertCircle } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { formatSimpleTime } from '@/utils/time';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
@@ -56,7 +57,11 @@ export function ExportModal() {
     showExportModal, setShowExportModal, totalDuration, tracks,
     previewCanvas, masterAudioStream, seek, isPlaying, togglePlayback, currentTime,
     inPoint, outPoint, setIsExporting, setExportFps, setExportDimensions, aspectRatio
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    showExportModal: s.showExportModal, setShowExportModal: s.setShowExportModal, totalDuration: s.totalDuration, tracks: s.tracks,
+    previewCanvas: s.previewCanvas, masterAudioStream: s.masterAudioStream, seek: s.seek, isPlaying: s.isPlaying, togglePlayback: s.togglePlayback, currentTime: s.currentTime,
+    inPoint: s.inPoint, outPoint: s.outPoint, setIsExporting: s.setIsExporting, setExportFps: s.setExportFps, setExportDimensions: s.setExportDimensions, aspectRatio: s.aspectRatio
+  })));
 
   const [fps, setFps] = useState('30');
   const [quality, setQuality] = useState('high');

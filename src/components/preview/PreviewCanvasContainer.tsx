@@ -196,15 +196,8 @@ export function PreviewCanvasContainer() {
     prevTimeRef.current = currentTime;
   }, [currentTime]);
 
-  // DIRECT Zustand subscription for instant frame updates during transformation, property changes, and scrubbing
-  useEffect(() => {
-    const unsub = useEditorStore.subscribe((state) => {
-      if (state.isPlaying) return;
-      currentTimeRef.current = state.currentTime;
-      framePendingRef.current = true;
-    });
-    return unsub;
-  }, []);
+  // NOTE: Direct Zustand subscription for currentTime-based scrub updates is below
+  // (around line 373). It only fires on actual time changes, not every store mutation.
 
   const previousRenderDepsRef = useRef<any>(null);
   const renderDepsRef = useRef<any>({
@@ -370,15 +363,19 @@ export function PreviewCanvasContainer() {
     return () => window.removeEventListener('procut-frame-updated', handleFrameUpdate);
   }, []);
 
-  // Direct Zustand subscription: immediately flag framePending when currentTime changes
-  // during scrubbing. This bypasses React's async render cycle — state updates via
-  // useEffect can be delayed 16-50ms, but this fires synchronously.
+  // Direct Zustand subscription: immediately flag framePending when currentTime
+  // or tracks change during scrubbing/editing. This bypasses React's async render
+  // cycle — state updates via useEffect can be delayed 16-50ms.
   useEffect(() => {
     let lastTime = useEditorStore.getState().currentTime;
+    let lastTracks = useEditorStore.getState().tracks;
     const unsub = useEditorStore.subscribe((state) => {
       if (state.isPlaying) return;
-      if (Math.abs(state.currentTime - lastTime) > 0.001) {
+      const timeChanged = Math.abs(state.currentTime - lastTime) > 0.001;
+      const tracksChanged = state.tracks !== lastTracks;
+      if (timeChanged || tracksChanged) {
         lastTime = state.currentTime;
+        lastTracks = state.tracks;
         currentTimeRef.current = state.currentTime;
         framePendingRef.current = true;
       }

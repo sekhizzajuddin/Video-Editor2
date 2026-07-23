@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, ArrowLeftRight, GripVertical, ZoomIn, Plus } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 
 interface TransitionTargetProps {
@@ -134,7 +135,7 @@ export function TransitionTarget({
   isSelected,
   zoomLevel,
 }: TransitionTargetProps) {
-  const { selectTransition } = useEditorStore();
+  const { selectTransition } = useEditorStore(useShallow(s => ({ selectTransition: s.selectTransition })));
   const [isDragOver, setIsDragOver] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });

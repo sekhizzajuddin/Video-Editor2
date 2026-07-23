@@ -3,6 +3,7 @@ import { X, Loader2, Sparkles, Image as ImageIcon, Video, Wand2, Download, Plus,
 import { fetchOpenRouterModels, generateAIVideo, checkVideoJobStatus } from '../utils/openRouterVideo';
 import { OpenRouterModel } from '../types';
 import { useEditorStore } from '../store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 
 interface AIGeneratorModalProps {
@@ -10,7 +11,7 @@ interface AIGeneratorModalProps {
 }
 
 export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
-  const { settings, addMedia, aiVideoIsGenerating, aiVideoProgress, aiVideoJobId, aiVideoResultUrl, setAIVideoGenerationState } = useEditorStore();
+  const { settings, addMedia, aiVideoIsGenerating, aiVideoProgress, aiVideoJobId, aiVideoResultUrl, setAIVideoGenerationState } = useEditorStore(useShallow(s => ({ settings: s.settings, addMedia: s.addMedia, aiVideoIsGenerating: s.aiVideoIsGenerating, aiVideoProgress: s.aiVideoProgress, aiVideoJobId: s.aiVideoJobId, aiVideoResultUrl: s.aiVideoResultUrl, setAIVideoGenerationState: s.setAIVideoGenerationState })));
   const openRouterApiKey = settings?.openRouterApiKey || import.meta.env.VITE_OPENROUTER_API_KEY;
   const geminiApiKey = settings?.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY;
 

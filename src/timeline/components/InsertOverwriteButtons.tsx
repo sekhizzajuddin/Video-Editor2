@@ -1,9 +1,10 @@
 import React from 'react';
 import { ArrowLeftToLine, ArrowRightToLine } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export function InsertOverwriteButtons() {
-  const { insertClip, overwriteClip, selectedClipId, tracks, currentTime } = useEditorStore();
+  const { insertClip, overwriteClip, selectedClipId, tracks, currentTime } = useEditorStore(useShallow(s => ({ insertClip: s.insertClip, overwriteClip: s.overwriteClip, selectedClipId: s.selectedClipId, tracks: s.tracks, currentTime: s.currentTime })));
   
   const handleInsert = () => {
     if (!selectedClipId) return;

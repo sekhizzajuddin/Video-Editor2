@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { PipWindow, TimelineClip } from '@/types';
 import { X, GripHorizontal, ChevronUp, ChevronDown, Plus, Lock, Unlock, Eye, EyeOff, Volume2, VolumeX, Trash2, Film, Music, Type, Sparkles } from 'lucide-react';
 import { DEFAULT_TRACK_HEIGHT } from '../timelineConstants';
@@ -67,7 +68,18 @@ export function PipFloatingWindow({
     mediaLibrary,
     currentTime,
     selectedClipId,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    updatePipWindowStartTime: s.updatePipWindowStartTime,
+    updatePipWindowDuration: s.updatePipWindowDuration,
+    reorderPipTrack: s.reorderPipTrack,
+    removeTrackFromPip: s.removeTrackFromPip,
+    updatePipTrack: s.updatePipTrack,
+    addTrackToPip: s.addTrackToPip,
+    addEmptyTrackToPip: s.addEmptyTrackToPip,
+    mediaLibrary: s.mediaLibrary,
+    currentTime: s.currentTime,
+    selectedClipId: s.selectedClipId,
+  })));
 
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);

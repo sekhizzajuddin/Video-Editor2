@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Maximize2, Minimize2, Settings2 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 interface ColorScopesProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
 }
 
 export function ColorScopes({ canvasRef }: ColorScopesProps) {
-  const { showScopes, setShowScopes, isPlaying } = useEditorStore();
+  const { showScopes, setShowScopes, isPlaying } = useEditorStore(useShallow(s => ({ showScopes: s.showScopes, setShowScopes: s.setShowScopes, isPlaying: s.isPlaying })));
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeScope, setActiveScope] = useState<'vectorscope' | 'waveform' | 'parade' | 'all'>('all');
   

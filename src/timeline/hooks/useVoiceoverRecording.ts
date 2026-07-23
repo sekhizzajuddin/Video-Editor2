@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export function useVoiceoverRecording() {
   const {
@@ -10,7 +11,15 @@ export function useVoiceoverRecording() {
     play,
     pause,
     addClip,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    isRecordingVoiceover: s.isRecordingVoiceover,
+    recordingTrackId: s.recordingTrackId,
+    startVoiceoverRecordingState: s.startVoiceoverRecordingState,
+    stopVoiceoverRecordingState: s.stopVoiceoverRecordingState,
+    play: s.play,
+    pause: s.pause,
+    addClip: s.addClip,
+  })));
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);

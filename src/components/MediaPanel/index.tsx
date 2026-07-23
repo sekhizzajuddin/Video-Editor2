@@ -45,8 +45,9 @@ import {
   Globe,
   Scissors,
 } from 'lucide-react';
-import React, { useState, useRef, useCallback, useEffect, Fragment } from 'react';
+import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
@@ -327,7 +328,37 @@ export function MediaPanel() {
     seek,
     aiVideoIsGenerating,
     aiVideoProgress,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    mediaLibrary: s.mediaLibrary,
+    activeMediaTab: s.activeMediaTab,
+    setActiveMediaTab: s.setActiveMediaTab,
+    addMedia: s.addMedia,
+    removeMedia: s.removeMedia,
+    insertTextClip: s.insertTextClip,
+    addBeatMarkers: s.addBeatMarkers,
+    clearBeatMarkers: s.clearBeatMarkers,
+    autoSyncTrackToBeats: s.autoSyncTrackToBeats,
+    projectTemplates: s.projectTemplates,
+    saveProjectAsTemplate: s.saveProjectAsTemplate,
+    deleteProjectTemplate: s.deleteProjectTemplate,
+    loadProjectTemplate: s.loadProjectTemplate,
+    tracks: s.tracks,
+    addTrack: s.addTrack,
+    addClip: s.addClip,
+    updateClip: s.updateClip,
+    selectClip: s.selectClip,
+    saveSnapshot: s.saveSnapshot,
+    subtitles: s.subtitles,
+    selectedSubtitleId: s.selectedSubtitleId,
+    selectSubtitle: s.selectSubtitle,
+    addTextMedia: s.addTextMedia,
+    rippleDeleteClip: s.rippleDeleteClip,
+    removeClip: s.removeClip,
+    currentTime: s.currentTime,
+    seek: s.seek,
+    aiVideoIsGenerating: s.aiVideoIsGenerating,
+    aiVideoProgress: s.aiVideoProgress,
+  })));
 
   const [syncTargetTrack, setSyncTargetTrack] = useState('');
   const [syncAudioClip, setSyncAudioClip] = useState('');
@@ -756,10 +787,10 @@ export function MediaPanel() {
     { id: 'effects', label: 'Effects', icon: Waves },
   ];
 
-  const filteredMedia = mediaLibrary.filter((m) =>
+  const filteredMedia = useMemo(() => mediaLibrary.filter((m) =>
     m.type !== 'text' && m.type !== 'fx' &&
     m.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ), [mediaLibrary, searchQuery]);
 
   const handleDragStart = (e: React.DragEvent, mediaId: string) => {
     e.dataTransfer.setData('application/procut-media', mediaId);

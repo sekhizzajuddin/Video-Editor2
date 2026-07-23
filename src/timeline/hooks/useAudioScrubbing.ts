@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null) {
-  const { tracks } = useEditorStore();
+  const { tracks } = useEditorStore(useShallow(s => ({ tracks: s.tracks })));
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const lastScrubTimeRef = useRef<number | null>(null);
 

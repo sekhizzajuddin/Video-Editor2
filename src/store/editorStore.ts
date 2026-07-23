@@ -189,6 +189,7 @@ interface EditorActions {
   rippleDeleteClip: (clipId: string) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>, options?: { ripple?: boolean }) => void;
+  batchUpdateClips: (updates: { clipId: string; changes: Partial<TimelineClip> }[]) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
   moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[], resolveOverlap?: boolean) => void;
   resolveOverlaps: (clipIds: string[]) => void;
@@ -1304,6 +1305,29 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     // This prevents excessive snapshot creation during drag operations
   },
 
+  // Batch update multiple clips in a SINGLE set() call.
+  // Use this instead of calling updateClip() in a loop to avoid N separate store
+  // notifications (and N React re-renders) per frame during resize/ripple operations.
+  batchUpdateClips: (updates) => {
+    if (updates.length === 0) return;
+    if (updates.length === 1) {
+      // Single update: delegate to updateClip for full logic (duration recalc, text sync)
+      get().updateClip(updates[0].clipId, updates[0].changes);
+      return;
+    }
+    set((state) => {
+      const updateMap = new Map(updates.map(u => [u.clipId, u.changes]));
+      const { tracks, pipWindows } = mapTracksDeep(state, (track) => ({
+        ...track,
+        clips: track.clips.map((clip) => {
+          const changes = updateMap.get(clip.id);
+          return changes ? { ...clip, ...changes } : clip;
+        }),
+      }));
+      return { tracks, pipWindows };
+    });
+    get().recalcTotalDuration();
+  },
 
   moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
     let success = false;

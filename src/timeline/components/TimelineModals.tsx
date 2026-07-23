@@ -18,6 +18,7 @@ import {
   Link,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { TimelineTrack, TimelineMarker } from '@/types';
 import type { TimelineState } from '../hooks/useTimelineState';
 
@@ -81,7 +82,16 @@ export function TimelineModals({
     updateMarker,
     removeMarker,
     updateClip,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    isRecordingVoiceover: s.isRecordingVoiceover,
+    recordingTrackId: s.recordingTrackId,
+    unlinkAudio: s.unlinkAudio,
+    breakLinkConnection: s.breakLinkConnection,
+    splitClip: s.splitClip,
+    updateMarker: s.updateMarker,
+    removeMarker: s.removeMarker,
+    updateClip: s.updateClip,
+  })));
 
   const handleEditMarker = (markerId: string) => {
     const marker = markers.find(m => m.id === markerId);

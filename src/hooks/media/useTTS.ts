@@ -325,6 +325,8 @@ const generateTTS = async () => {
 
         audioEl.src = '';
         audioEl.remove();
+        // Revoke the blob URL to free the pinned binary data from memory
+        URL.revokeObjectURL(audioUrl);
 
         setIsGeneratingTTS(false);
         setTtsText('');

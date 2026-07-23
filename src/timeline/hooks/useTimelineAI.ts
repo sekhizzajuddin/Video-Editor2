@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { TimelineClip, TimelineTrack } from '@/types';
 import { synthesizeProceduralSFX } from '../sfxSynth';
 import { parseTransliteratedResponse } from '../timelineUtils';
@@ -41,7 +42,11 @@ export function useTimelineAI({ timelineState }: UseTimelineAIDeps) {
     tracks,
     mediaLibrary,
     addClip,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    tracks: s.tracks,
+    mediaLibrary: s.mediaLibrary,
+    addClip: s.addClip,
+  })));
 
   const {
     setSfxModalClipId,

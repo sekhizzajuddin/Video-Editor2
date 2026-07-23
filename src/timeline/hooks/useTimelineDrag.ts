@@ -55,6 +55,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     moveClip,
     moveClips,
     updateClip,
+    batchUpdateClips,
     setDraggingClipId,
     resolveOverlaps,
     selectClip,
@@ -76,6 +77,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     moveClip: s.moveClip,
     moveClips: s.moveClips,
     updateClip: s.updateClip,
+    batchUpdateClips: s.batchUpdateClips,
     setDraggingClipId: s.setDraggingClipId,
     resolveOverlaps: s.resolveOverlaps,
     selectClip: s.selectClip,
@@ -774,18 +776,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const clampedDuration = sourceContentDuration / clampedSpeed;
             const delta = clampedDuration - resizeState.originalDuration;
 
-            updateClip(resizeState.clipId, {
-              duration: clampedDuration,
-              speed: clampedSpeed,
-            });
-
+            const batchUpdates: { clipId: string; changes: Partial<TimelineClip> }[] = [
+              { clipId: resizeState.clipId, changes: { duration: clampedDuration, speed: clampedSpeed } },
+            ];
             if (resizeState.rippleClips) {
-              resizeState.rippleClips.forEach((c) => {
-                updateClip(c.id, {
-                  startTime: c.originalStartTime + delta,
-                });
-              });
+              for (const c of resizeState.rippleClips) {
+                batchUpdates.push({ clipId: c.id, changes: { startTime: c.originalStartTime + delta } });
+              }
             }
+            batchUpdateClips(batchUpdates);
           } else {
             const shrink = -dt; // dragging right (shrink) -> shrink > 0, dragging left (expand) -> shrink < 0
             
@@ -843,18 +842,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               ? getRampedTrimEndForRightResize(clip, clamped, sourceDuration)
               : resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
 
-            updateClip(resizeState.clipId, {
-              duration: clamped,
-              trimEnd: Math.max(0, newTrimEnd),
-            });
-
+            const batchUpdates: { clipId: string; changes: Partial<TimelineClip> }[] = [
+              { clipId: resizeState.clipId, changes: { duration: clamped, trimEnd: Math.max(0, newTrimEnd) } },
+            ];
             if (resizeState.rippleClips) {
-              resizeState.rippleClips.forEach((c) => {
-                updateClip(c.id, {
-                  startTime: c.originalStartTime + delta,
-                });
-              });
+              for (const c of resizeState.rippleClips) {
+                batchUpdates.push({ clipId: c.id, changes: { startTime: c.originalStartTime + delta } });
+              }
             }
+            batchUpdateClips(batchUpdates);
           } else {
             const shrink = dt; // dragging right (shrink) -> dt > 0, dragging left (expand) -> dt < 0
             const newDuration = Math.max(0.1, resizeState.originalDuration - shrink);
@@ -876,18 +872,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               ? getRampedTrimStartForLeftResize(clip, -deltaDuration)
               : resizeState.originalTrimStart - deltaDuration * clip.speed;
 
-            updateClip(resizeState.clipId, {
-              duration: clampedDuration,
-              trimStart: Math.max(0, newTrimStart),
-            });
-
+            const batchUpdates: { clipId: string; changes: Partial<TimelineClip> }[] = [
+              { clipId: resizeState.clipId, changes: { duration: clampedDuration, trimStart: Math.max(0, newTrimStart) } },
+            ];
             if (resizeState.rippleClips) {
-              resizeState.rippleClips.forEach((c) => {
-                updateClip(c.id, {
-                  startTime: c.originalStartTime + deltaDuration,
-                });
-              });
+              for (const c of resizeState.rippleClips) {
+                batchUpdates.push({ clipId: c.id, changes: { startTime: c.originalStartTime + deltaDuration } });
+              }
             }
+            batchUpdateClips(batchUpdates);
           }
           return;
         }
