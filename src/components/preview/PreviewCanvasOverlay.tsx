@@ -23,6 +23,7 @@ import {
   Ban,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { getCachedImage, LocalCornerPoints } from '@/utils/canvasEffects';
 import { saveFileToDB } from '@/utils/projectPersistence';
@@ -53,7 +54,19 @@ export function PreviewCanvasOverlay({
     aspectRatio,
     useProxies,
     activePropertiesTab,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    tracks: s.tracks,
+    selectedClipId: s.selectedClipId,
+    pipWindows: s.pipWindows,
+    currentTime: s.currentTime,
+    mediaLibrary: s.mediaLibrary,
+    updateClip: s.updateClip,
+    canvasTransformMode: s.canvasTransformMode,
+    setCanvasTransformMode: s.setCanvasTransformMode,
+    aspectRatio: s.aspectRatio,
+    useProxies: s.useProxies,
+    activePropertiesTab: s.activePropertiesTab,
+  })));
 
   const updateClip = useCallback((clipId: string, updates: any) => {
     storeUpdateClip(clipId, updates);
@@ -1031,8 +1044,8 @@ export function PreviewCanvasOverlay({
   const offsetX = (854 - viewW) / 2;
   const offsetY = (480 - viewH) / 2;
 
-  let vw = W;
-  let vh = H;
+  let vw = 1920;
+  let vh = 1080;
   if (mediaItem?.type === 'video') {
     const v = videoElements.get(activeClip.id);
     if (v && v.videoWidth > 0) {

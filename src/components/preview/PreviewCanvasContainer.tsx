@@ -153,7 +153,12 @@ export function PreviewCanvasContainer() {
       (t.clips || []).map((c) => 
         `${c.id}:${c.startTime}:${c.duration}:${c.opacity ?? 1}:` +
         `${c.transform?.x ?? 0}:${c.transform?.y ?? 0}:${c.transform?.scale ?? 100}:${c.transform?.rotation ?? 0}:` +
-        `${c.crop?.left ?? 0}:${c.crop?.top ?? 0}:${c.crop?.right ?? 0}:${c.crop?.bottom ?? 0}`
+        `${c.crop?.left ?? 0}:${c.crop?.top ?? 0}:${c.crop?.right ?? 0}:${c.crop?.bottom ?? 0}:` +
+        `${c.transform?.blendMode ?? ''}:${c.transform?.flipH ?? false}:${c.transform?.flipV ?? false}:` +
+        `${c.mask?.enabled ?? false}:${c.mask?.type ?? ''}:${c.mask?.x ?? 50}:${c.mask?.y ?? 50}:` +
+        `${c.mask?.width ?? 50}:${c.mask?.height ?? 50}:${c.mask?.rotation ?? 0}:` +
+        `${c.mask?.feather ?? 0}:${c.mask?.roundness ?? 0}:${c.mask?.invert ?? false}:` +
+        `${c.chromaKey?.enabled ?? false}:${c.chromaKey?.color ?? ''}:${c.chromaKey?.threshold ?? 0}`
       ).join(',')
     ).join('|');
   }, [tracks]);

@@ -618,8 +618,14 @@ export async function renderCanvasEngine({
             const videoDrift = videoEl ? Math.abs(videoEl.currentTime - mediaTime) : Infinity;
             if (!videoReady || minDiff <= videoDrift) {
               cachedBitmap = bestFrame.bitmap;
-              vw = bestFrame.bitmap.width;
-              vh = bestFrame.bitmap.height;
+              // Only use bitmap dimensions if we don't already have video element dimensions.
+              // Using bitmap dimensions when the video element already provided them would cause
+              // size mismatches (the 'objects shrink automatically' bug) because bitmaps may be
+              // captured at a different resolution than the video's native dimensions.
+              if (!hasRealMedia) {
+                vw = bestFrame.bitmap.width;
+                vh = bestFrame.bitmap.height;
+              }
               hasRealMedia = true;
             }
           }
