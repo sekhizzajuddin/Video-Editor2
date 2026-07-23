@@ -126,7 +126,7 @@ export async function renderCanvasEngine({
   if (!compositeCtxRef.current) {
     compositeCtxRef.current = composite.getContext('2d', {
       alpha: false,
-      willReadFrequently: !settings.hardwareAcceleration
+      willReadFrequently: true
     }) || null;
   }
   if (!compositeCtxRef.current) return;
@@ -663,7 +663,7 @@ export async function renderCanvasEngine({
         if (clipW > 0 && clipH > 0) {
           const offCanvasKey = `clip_${clip.id}_${Math.round(dw)}x${Math.round(dh)}`;
           const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, dw * DOWNSCALE, dh * DOWNSCALE);
-          const oCtx = offCanvas.getContext('2d', { willReadFrequently: !skipExpensiveFX })!;
+          const oCtx = offCanvas.getContext('2d', { willReadFrequently: true })!;
           oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
 
           oCtx.save();

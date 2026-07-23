@@ -148,7 +148,14 @@ export function PreviewCanvasContainer() {
   }, [allClips]);
 
   const tracksSignature = useMemo(() => {
-    return tracks.map((t) => `${t.id}:${t.clips.length}:${t.hidden}`).join('|');
+    return tracks.map((t) => 
+      `${t.id}:${t.hidden}:` + 
+      (t.clips || []).map((c) => 
+        `${c.id}:${c.startTime}:${c.duration}:${c.opacity ?? 1}:` +
+        `${c.transform?.x ?? 0}:${c.transform?.y ?? 0}:${c.transform?.scale ?? 100}:${c.transform?.rotation ?? 0}:` +
+        `${c.crop?.left ?? 0}:${c.crop?.top ?? 0}:${c.crop?.right ?? 0}:${c.crop?.bottom ?? 0}`
+      ).join(',')
+    ).join('|');
   }, [tracks]);
 
   useEffect(() => {
@@ -184,16 +191,12 @@ export function PreviewCanvasContainer() {
     prevTimeRef.current = currentTime;
   }, [currentTime]);
 
-  // DIRECT Zustand subscription for instant frame updates during scrubbing (bypasses React render cycle)
-  // Sets framePendingRef IMMEDIATELY when currentTime changes in store so RAF tick renders without delay
+  // DIRECT Zustand subscription for instant frame updates during transformation, property changes, and scrubbing
   useEffect(() => {
     const unsub = useEditorStore.subscribe((state) => {
       if (state.isPlaying) return;
-      const newTime = state.currentTime;
-      if (Math.abs(newTime - currentTimeRef.current) > 0.001) {
-        currentTimeRef.current = newTime;
-        framePendingRef.current = true;
-      }
+      currentTimeRef.current = state.currentTime;
+      framePendingRef.current = true;
     });
     return unsub;
   }, []);
