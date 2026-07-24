@@ -43,28 +43,18 @@ export function PreviewCanvasOverlay({
   containerRef
 }: InteractiveCanvasOverlayProps) {
   const currentTime = useEditorStore(s => s.currentTime);
-  const {
-    tracks,
-    selectedClipId,
-    pipWindows,
-    mediaLibrary,
-    updateClip: storeUpdateClip,
-    canvasTransformMode,
-    setCanvasTransformMode,
-    aspectRatio,
-    useProxies,
-    activePropertiesTab,
-  } = useEditorStore(useShallow(s => ({
+  const selectedClipId = useEditorStore(s => s.selectedClipId);
+  const canvasTransformMode = useEditorStore(s => s.canvasTransformMode);
+  const setCanvasTransformMode = useEditorStore(s => s.setCanvasTransformMode);
+  const aspectRatio = useEditorStore(s => s.aspectRatio);
+  const useProxies = useEditorStore(s => s.useProxies);
+  const activePropertiesTab = useEditorStore(s => s.activePropertiesTab);
+  const storeUpdateClip = useEditorStore(s => s.updateClip);
+
+  const { tracks, pipWindows, mediaLibrary } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
-    selectedClipId: s.selectedClipId,
     pipWindows: s.pipWindows,
     mediaLibrary: s.mediaLibrary,
-    updateClip: s.updateClip,
-    canvasTransformMode: s.canvasTransformMode,
-    setCanvasTransformMode: s.setCanvasTransformMode,
-    aspectRatio: s.aspectRatio,
-    useProxies: s.useProxies,
-    activePropertiesTab: s.activePropertiesTab,
   })));
 
   const updateClip = useCallback((clipId: string, updates: any) => {

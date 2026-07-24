@@ -159,7 +159,6 @@ export function useTimelineState() {
   const [isTranscribing, setIsTranscribing] = useState(false);
 
   // Scroll sync refs
-  const scrollStoreThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dragMouseXRef = useRef<number | null>(null);
   const dragMouseYRef = useRef<number | null>(null);
@@ -237,7 +236,6 @@ export function useTimelineState() {
     isTranscribing,
     setIsTranscribing,
 
-    scrollStoreThrottleRef,
     scrollIntervalRef,
     dragMouseXRef,
     dragMouseYRef,

@@ -91,9 +91,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
   const dragRafIdRef = useRef<number | null>(null);
   const resizeRafIdRef = useRef<number | null>(null);
-  // P1 FIX: Reuse mutable slide-batch buffer to avoid GC pressure from fresh
-  // array allocations at 60Hz during slide drag operations.
-  const slideBatchRef = useRef<Array<{clipId: string; changes: Partial<TimelineClip>}>>([]); 
+  // P0 FIX: Universal mutable batch buffer to avoid GC pressure from fresh
+  // array allocations at 60Hz across ALL drag/resize/ripple/slip operations.
+  const batchBufferRef = useRef<Array<{clipId: string; changes: Partial<TimelineClip>}>>([]); 
 
 
   const {
@@ -779,15 +779,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const clampedDuration = sourceContentDuration / clampedSpeed;
             const delta = clampedDuration - resizeState.originalDuration;
 
-            const batchUpdates: { clipId: string; changes: Partial<TimelineClip> }[] = [
-              { clipId: resizeState.clipId, changes: { duration: clampedDuration, speed: clampedSpeed } },
-            ];
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({ clipId: resizeState.clipId, changes: { duration: clampedDuration, speed: clampedSpeed } });
             if (resizeState.rippleClips) {
               for (const c of resizeState.rippleClips) {
-                batchUpdates.push({ clipId: c.id, changes: { startTime: c.originalStartTime + delta } });
+                batchBufferRef.current.push({ clipId: c.id, changes: { startTime: c.originalStartTime + delta } });
               }
             }
-            batchUpdateClips(batchUpdates);
+            batchUpdateClips(batchBufferRef.current);
           } else {
             const shrink = -dt; // dragging right (shrink) -> shrink > 0, dragging left (expand) -> shrink < 0
             
@@ -814,7 +813,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const clampedDuration = sourceContentDuration / clampedSpeed;
             const shift = resizeState.originalDuration - clampedDuration;
 
-            batchUpdateClips([{
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({
               clipId: resizeState.clipId,
               changes: {
                 startTime: resizeState.originalStartTime + shift,
@@ -823,7 +823,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                 trimStart: resizeState.originalTrimStart,
                 trimEnd: resizeState.originalTrimEnd,
               }
-            }]);
+            });
+            batchUpdateClips(batchBufferRef.current);
           }
           return;
         }
@@ -848,15 +849,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               ? getRampedTrimEndForRightResize(clip, clamped, sourceDuration)
               : resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed;
 
-            const batchUpdates: { clipId: string; changes: Partial<TimelineClip> }[] = [
-              { clipId: resizeState.clipId, changes: { duration: clamped, trimEnd: Math.max(0, newTrimEnd) } },
-            ];
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({ clipId: resizeState.clipId, changes: { duration: clamped, trimEnd: Math.max(0, newTrimEnd) } });
             if (resizeState.rippleClips) {
               for (const c of resizeState.rippleClips) {
-                batchUpdates.push({ clipId: c.id, changes: { startTime: c.originalStartTime + delta } });
+                batchBufferRef.current.push({ clipId: c.id, changes: { startTime: c.originalStartTime + delta } });
               }
             }
-            batchUpdateClips(batchUpdates);
+            batchUpdateClips(batchBufferRef.current);
           } else {
             const shrink = dt; // dragging right (shrink) -> dt > 0, dragging left (expand) -> dt < 0
             const newDuration = Math.max(0.1, resizeState.originalDuration - shrink);
@@ -878,15 +878,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               ? getRampedTrimStartForLeftResize(clip, -deltaDuration)
               : resizeState.originalTrimStart - deltaDuration * clip.speed;
 
-            const batchUpdates: { clipId: string; changes: Partial<TimelineClip> }[] = [
-              { clipId: resizeState.clipId, changes: { duration: clampedDuration, trimStart: Math.max(0, newTrimStart) } },
-            ];
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({ clipId: resizeState.clipId, changes: { duration: clampedDuration, trimStart: Math.max(0, newTrimStart) } });
             if (resizeState.rippleClips) {
               for (const c of resizeState.rippleClips) {
-                batchUpdates.push({ clipId: c.id, changes: { startTime: c.originalStartTime + deltaDuration } });
+                batchBufferRef.current.push({ clipId: c.id, changes: { startTime: c.originalStartTime + deltaDuration } });
               }
             }
-            batchUpdateClips(batchUpdates);
+            batchUpdateClips(batchBufferRef.current);
           }
           return;
         }
@@ -934,7 +933,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               ? getRampedTrimStartForLeftResize(sib as any, delta)
               : sib.originalTrimStart + (delta * sib.speed);
 
-            batchUpdateClips([{
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({
               clipId: sib.id,
               changes: {
                 startTime: sib.originalStartTime + delta,
@@ -949,7 +949,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                   ? getRampedTrimEndForRightResize(clip, clamped, sourceDuration)
                   : resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed),
               }
-            }]);
+            });
+            batchUpdateClips(batchBufferRef.current);
           }
         } else {
           const shrink = -dt;
@@ -999,7 +1000,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               ? getRampedTrimStartForLeftResize(clip, shift)
               : resizeState.originalTrimStart + shift * clip.speed;
 
-            batchUpdateClips([{
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({
               clipId: sib.id,
               changes: {
                 duration: sib.originalDuration + shift,
@@ -1012,7 +1014,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                 duration: clamped,
                 trimStart: Math.max(0, newTrimStart),
               }
-            }]);
+            });
+            batchUpdateClips(batchBufferRef.current);
           }
         }
       });
@@ -1064,13 +1067,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           }
         }
         
-        batchUpdateClips([{
+        batchBufferRef.current.length = 0;
+        batchBufferRef.current.push({
           clipId: clip.id,
           changes: {
             trimStart: newTrimStart,
             trimEnd: newTrimEnd,
           }
-        }]);
+        });
+        batchUpdateClips(batchBufferRef.current);
       });
     }
 
@@ -1111,13 +1116,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         newStartTime = Math.max(minStartTime, Math.min(newStartTime, maxStartTime));
         const actualDt = newStartTime - slideState.originalStartTime;
         
-        // P1 FIX: Reuse slideBatchRef buffer instead of allocating a new array each frame
-        slideBatchRef.current.length = 0;
-        slideBatchRef.current.push({ clipId: clip.id, changes: { startTime: newStartTime } });
+        batchBufferRef.current.length = 0;
+        batchBufferRef.current.push({ clipId: clip.id, changes: { startTime: newStartTime } });
         
         if (leftSib && slideState.adjacentClips.left) {
           const sibOriginal = slideState.adjacentClips.left;
-          slideBatchRef.current.push({
+          batchBufferRef.current.push({
             clipId: leftSib.id,
             changes: {
               duration: sibOriginal.originalDuration + actualDt,
@@ -1128,7 +1132,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         
         if (rightSib && slideState.adjacentClips.right) {
           const sibOriginal = slideState.adjacentClips.right;
-          slideBatchRef.current.push({
+          batchBufferRef.current.push({
             clipId: rightSib.id,
             changes: {
               startTime: sibOriginal.originalStartTime + actualDt,
@@ -1138,7 +1142,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           });
         }
         
-        batchUpdateClips(slideBatchRef.current);
+        batchUpdateClips(batchBufferRef.current);
       });
     }
   };

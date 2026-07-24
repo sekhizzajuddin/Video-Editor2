@@ -60,6 +60,8 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
     audioPoolRef.current.forEach((audio, id) => {
       if (!activeIds.has(id)) {
         audio.pause();
+        audio.src = '';
+        audioPoolRef.current.delete(id);
       }
     });
 
