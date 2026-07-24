@@ -21,8 +21,9 @@ const env: any = (() => {
   if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
     return (import.meta as any).env;
   }
-  if (typeof process !== 'undefined' && (process as any).env) {
-    return (process as any).env;
+  // eslint-disable-next-line no-restricted-globals
+  if (typeof (globalThis as any).process !== 'undefined' && (globalThis as any).process?.env) {
+    return (globalThis as any).process.env;
   }
   return {};
 })();

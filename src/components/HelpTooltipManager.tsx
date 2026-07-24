@@ -6,7 +6,7 @@ export const HelpTooltipManager: React.FC = () => {
   const [tooltipPos, setTooltipPos] = useState<{ x: number, y: number } | null>(null);
   const { setShowHelpMenu, showHelpMenu } = useEditorStore();
   const hoveredHelpIdRef = useRef<string | null>(null);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTooltipVisibleRef = useRef<boolean>(false);
 
   useEffect(() => {

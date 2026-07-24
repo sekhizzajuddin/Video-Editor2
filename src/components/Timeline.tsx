@@ -150,7 +150,20 @@ export function Timeline() {
   useAudioScrubbing(timelineState.isScrubbing, timelineState.scrubTime);
 
   // ── Ruler calculations ────────────────────────────────────────────────
-  
+
+  // P1 FIX: Memoize PIP parent lookup — avoids O(N×M) tracks.find/clips.find
+  // on every Timeline render. Only recomputes when pip state/tracks change.
+  const pipData = useMemo(() => {
+    if (!activePipWindowId) return null;
+    const activePip = (pipWindows || {})[activePipWindowId];
+    if (!activePip) return null;
+    const track = tracks.find(t => t.clips?.some(c => c.id === activePip.parentClipId));
+    if (!track) return null;
+    const parentClip = track.clips?.find(c => c.id === activePip.parentClipId);
+    if (!parentClip) return null;
+    return { activePip, parentClip };
+  }, [activePipWindowId, pipWindows, tracks]);
+
   const sortedMarkers = useMemo(() => [...markers].sort((a, b) => a.time - b.time), [markers]);
 
   const rulerData = useMemo(() => {
@@ -433,40 +446,32 @@ export function Timeline() {
                 })()}
 
                 {/* ── PIP Floating Window ──────────────────────── */}
-                {activePipWindowId && (() => {
-                  const activePip = (pipWindows || {})[activePipWindowId];
-                  if (!activePip) return null;
-                  const track = tracks.find(t => t.clips?.some(c => c.id === activePip.parentClipId));
-                  if (!track) return null;
-                  const parentClip = track.clips?.find(c => c.id === activePip.parentClipId);
-                  if (!parentClip) return null;
-                  return (
-                    <PipFloatingWindow
-                      key={activePip.id}
-                      pipWindow={activePip}
-                      parentClip={parentClip}
-                      zoomLevel={zoomLevel}
-                      onClose={() => setActivePipWindow(null)}
-                      tracks={tracks}
-                      selectedClipIds={selectedClipIds}
-                      draggingClipId={draggingClipId}
-                      activeTool={activeTool}
-                      hoverCutClipId={hoverCutClipId}
-                      hoverCutX={hoverCutX}
-                      handleDragOver={dropHandlers.handleDragOver}
-                      handleDrop={dropHandlers.handleDrop}
-                      setHoveredTrackId={setHoveredTrackId}
-                      setDropPreview={setDropPreview}
-                      setContextMenu={setContextMenu}
-                      handleClipMouseDown={dragHandlers.handleClipMouseDown}
-                      setHoverCutX={setHoverCutX}
-                      setHoverCutClipId={setHoverCutClipId}
-                      selectTrack={selectTrack}
-                      selectClip={selectClip}
-                      selectTransition={selectTransition}
-                    />
-                  );
-                })()}
+                {pipData && (
+                  <PipFloatingWindow
+                    key={pipData.activePip.id}
+                    pipWindow={pipData.activePip}
+                    parentClip={pipData.parentClip}
+                    zoomLevel={zoomLevel}
+                    onClose={() => setActivePipWindow(null)}
+                    tracks={tracks}
+                    selectedClipIds={selectedClipIds}
+                    draggingClipId={draggingClipId}
+                    activeTool={activeTool}
+                    hoverCutClipId={hoverCutClipId}
+                    hoverCutX={hoverCutX}
+                    handleDragOver={dropHandlers.handleDragOver}
+                    handleDrop={dropHandlers.handleDrop}
+                    setHoveredTrackId={setHoveredTrackId}
+                    setDropPreview={setDropPreview}
+                    setContextMenu={setContextMenu}
+                    handleClipMouseDown={dragHandlers.handleClipMouseDown}
+                    setHoverCutX={setHoverCutX}
+                    setHoverCutClipId={setHoverCutClipId}
+                    selectTrack={selectTrack}
+                    selectClip={selectClip}
+                    selectTransition={selectTransition}
+                  />
+                )}
 
                 {/* Snap indicator line */}
                 {snapLine !== null && (

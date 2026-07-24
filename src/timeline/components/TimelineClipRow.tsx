@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Film, Music, Image, Sparkles, Type, Plus } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem, EditorState, PipWindow } from '@/types';
@@ -431,7 +431,11 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   );
 });
 
-export function TimelineClipRow({
+// ─────────────────────────────────────────────────────────────────────────────
+// P0 FIX: Wrap TimelineClipRow in React.memo to prevent re-renders when
+// unrelated Timeline state changes (zoom, hover, tool, playhead, etc.)
+// ─────────────────────────────────────────────────────────────────────────────
+export const TimelineClipRow = React.memo(function TimelineClipRow({
   track,
   tracks,
   zoomLevel,
@@ -464,15 +468,40 @@ export function TimelineClipRow({
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
   const allPipWindows = useEditorStore((s) => s.pipWindows);
   
-  const getMediaSafe = (clip: TimelineClip): MediaItem => {
-    return mediaLibrary.find((m) => m.id === clip.mediaId) ?? ({
-      id: clip.mediaId,
-      name: 'Unknown',
-      type: 'video' as const,
-      duration: 30,
-      url: '',
-      createdAt: Date.now()
-    } as MediaItem);
+  // ── P0 FIX: Build O(1) lookup maps instead of O(N) .find() per clip ──────
+  const mediaMap = useMemo(
+    () => new Map(mediaLibrary.map((m) => [m.id, m])),
+    [mediaLibrary]
+  );
+
+  const pipByParent = useMemo(() => {
+    const map = new Map<string, PipWindow[]>();
+    Object.values(allPipWindows || {}).forEach((p) => {
+      const id = (p as any)?.parentClipId;
+      if (!id) return;
+      const existing = map.get(id);
+      if (existing) {
+        existing.push(p as PipWindow);
+      } else {
+        map.set(id, [p as PipWindow]);
+      }
+    });
+    return map;
+  }, [allPipWindows]);
+
+  // ── P0 FIX: Hoist transition sort out of inline IIFE, memoised per track ─
+  const sortedClips = useMemo(
+    () => [...(track.clips || [])].sort((a, b) => a.startTime - b.startTime),
+    [track.clips]
+  );
+
+  const defaultMedia: MediaItem = {
+    id: '',
+    name: 'Unknown',
+    type: 'video' as const,
+    duration: 30,
+    url: '',
+    createdAt: Date.now(),
   };
 
   return (
@@ -534,12 +563,14 @@ export function TimelineClipRow({
 
       {/* ── Clips ──────────────────────────────────────── */}
       {(track.clips || []).map((clip) => {
-        const media = getMediaSafe(clip);
+        // P0 FIX: O(1) map lookup instead of O(N) .find() per clip per render
+        const media = mediaMap.get(clip.mediaId) ?? defaultMedia;
         const isSelected = selectedClipIds.includes(clip.id);
         const isDragging = draggingClipId === clip.id;
 
         const hasOverlap = checkOverlapAt(track, clip.startTime, clip.duration, clip.id);
-        const clipPipWindows = Object.values(allPipWindows || {}).filter(p => p && (p as any).parentClipId === clip.id);
+        // P0 FIX: O(1) map lookup instead of O(M) .filter() per clip per render
+        const clipPipWindows = pipByParent.get(clip.id) ?? [];
 
         return (
           <TimelineClipItem
@@ -572,57 +603,54 @@ export function TimelineClipRow({
 
 
 
-      {/* ── Transitions Layer ───────────────────────────── */}
-      {!track.locked && (() => {
-        const sortedClips = [...(track.clips || [])].sort((a, b) => a.startTime - b.startTime);
-        return sortedClips.map((clip, idx) => {
-          if (idx === 0) return null;
-          const prevClip = sortedClips[idx - 1];
-          const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
+      {/* ── Transitions Layer (uses memoised sortedClips) ───────────────────── */}
+      {!track.locked && sortedClips.map((clip, idx) => {
+        if (idx === 0) return null;
+        const prevClip = sortedClips[idx - 1];
+        const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
+        
+        if (Math.abs(gap) < 0.034) {
+          const intersectionTime = clip.startTime;
+          const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
           
-          if (Math.abs(gap) < 0.034) {
-            const intersectionTime = clip.startTime;
-            const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
-            
-            if (!hasTransition && !showTransitionLayer) return null;
-            
-            const transition = clip.transitionIn || prevClip.transitionOut;
-            const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
-            const activePosition = clip.transitionIn ? 'in' : 'out';
-            const duration = transition?.duration ?? 1.0;
-            const alignment = transition?.params?.alignment as 'center' | 'left' | 'right' || 'center';
-            
-            const widthSec = hasTransition ? duration : 0.4;
-            const widthPx = Math.max(16, widthSec * zoomLevel);
-            
-            let leftSec = intersectionTime - widthSec / 2;
-            if (alignment === 'left') {
-              leftSec = intersectionTime;
-            } else if (alignment === 'right') {
-              leftSec = intersectionTime - widthSec;
-            }
-            const leftPx = leftSec * zoomLevel;
-            
-            const isSelected = selectedTransitionClipId === activeClipId;
-            
-            return (
-              <TransitionTarget
-                key={`trans-${clip.id}`}
-                clipId={activeClipId}
-                position={activePosition}
-                trackId={track.id}
-                left={leftPx}
-                width={widthPx}
-                hasTransition={hasTransition}
-                transitionName={transition?.name}
-                isSelected={isSelected}
-                zoomLevel={zoomLevel}
-              />
-            );
+          if (!hasTransition && !showTransitionLayer) return null;
+          
+          const transition = clip.transitionIn || prevClip.transitionOut;
+          const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
+          const activePosition = clip.transitionIn ? 'in' : 'out';
+          const duration = transition?.duration ?? 1.0;
+          const alignment = transition?.params?.alignment as 'center' | 'left' | 'right' || 'center';
+          
+          const widthSec = hasTransition ? duration : 0.4;
+          const widthPx = Math.max(16, widthSec * zoomLevel);
+          
+          let leftSec = intersectionTime - widthSec / 2;
+          if (alignment === 'left') {
+            leftSec = intersectionTime;
+          } else if (alignment === 'right') {
+            leftSec = intersectionTime - widthSec;
           }
-          return null;
-        });
-      })()}
+          const leftPx = leftSec * zoomLevel;
+          
+          const isSelected = selectedTransitionClipId === activeClipId;
+          
+          return (
+            <TransitionTarget
+              key={`trans-${clip.id}`}
+              clipId={activeClipId}
+              position={activePosition}
+              trackId={track.id}
+              left={leftPx}
+              width={widthPx}
+              hasTransition={hasTransition}
+              transitionName={transition?.name}
+              isSelected={isSelected}
+              zoomLevel={zoomLevel}
+            />
+          );
+        }
+        return null;
+      })}
     </div>
   );
-}
+});

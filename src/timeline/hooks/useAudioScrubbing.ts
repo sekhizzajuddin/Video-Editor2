@@ -41,12 +41,16 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
         return;
     }
 
+    // P0 FIX: Build mediaMap once per scrub tick (O(N)) instead of calling
+    // mediaLibrary.find() inside the filter loop (O(N×M) per tick).
+    const mediaLibrary = useEditorStore.getState().mediaLibrary;
+    const mediaMap = new Map(mediaLibrary.map(m => [m.id, m]));
+
     const activeClips = tracks
       .filter((t) => !t.muted)
       .flatMap((t) => t.clips)
       .filter((c) => {
-        const mediaLibrary = useEditorStore.getState().mediaLibrary;
-        const media = mediaLibrary.find((m) => m.id === c.mediaId);
+        const media = mediaMap.get(c.mediaId);
         if (!media || (media.type !== 'audio' && media.type !== 'video')) return false;
         return scrubTime >= c.startTime && scrubTime <= c.startTime + c.duration;
       });
@@ -59,10 +63,9 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
       }
     });
 
-    // Play active clips
+    // Play active clips — reuse mediaMap so no second find() loop needed
     activeClips.forEach((clip) => {
-      const mediaLibrary = useEditorStore.getState().mediaLibrary;
-      const media = mediaLibrary.find((m) => m.id === clip.mediaId);
+      const media = mediaMap.get(clip.mediaId);
       if (!media) return;
       if (!media.url) return;
 

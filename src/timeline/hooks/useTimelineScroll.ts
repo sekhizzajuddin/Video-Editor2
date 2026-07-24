@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 
 interface UseTimelineScrollDeps {
@@ -13,20 +13,29 @@ export function useTimelineScroll({
   trackHeadersRef,
 }: UseTimelineScrollDeps) {
   
+  // P1 FIX: rAF-throttle the scroll handler so the Zustand store is updated at most
+  // once per animation frame (~16ms) instead of on every raw scroll event.
+  const scrollRafRef = useRef<number | null>(null);
+
   const handleScroll = useCallback(() => {
-    if (trackContainerRef.current) {
+    if (!trackContainerRef.current) return;
+    if (scrollRafRef.current !== null) return; // already scheduled
+
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
       const target = trackContainerRef.current;
+      if (!target) return;
       // Sync ruler immediately via DOM
       if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== target.scrollLeft) {
         rulerContainerRef.current.scrollLeft = target.scrollLeft;
       }
-      // Update store immediately; since timeline no longer selects scrollLeft, this won't trigger re-renders
+      // Update store — since timeline no longer selects scrollLeft this won't trigger re-renders
       useEditorStore.getState().setScrollLeft(target.scrollLeft);
       // Sync vertical scroll to headers
       if (trackHeadersRef.current && trackHeadersRef.current.scrollTop !== target.scrollTop) {
         trackHeadersRef.current.scrollTop = target.scrollTop;
       }
-    }
+    });
   }, [trackContainerRef, rulerContainerRef, trackHeadersRef]);
 
   const handleHeadersScroll = useCallback(() => {

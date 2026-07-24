@@ -91,6 +91,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
   const dragRafIdRef = useRef<number | null>(null);
   const resizeRafIdRef = useRef<number | null>(null);
+  // P1 FIX: Reuse mutable slide-batch buffer to avoid GC pressure from fresh
+  // array allocations at 60Hz during slide drag operations.
+  const slideBatchRef = useRef<Array<{clipId: string; changes: Partial<TimelineClip>}>>([]); 
 
 
   const {
@@ -1108,15 +1111,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         newStartTime = Math.max(minStartTime, Math.min(newStartTime, maxStartTime));
         const actualDt = newStartTime - slideState.originalStartTime;
         
-        // FIX: Batch all slide updates into a single store.setState() notification
-        // Previously 3 separate updateClip() calls cascaded into 3+ store notifications per frame
-        const slideBatch: Array<{clipId: string; changes: Partial<TimelineClip>}> = [
-          { clipId: clip.id, changes: { startTime: newStartTime } }
-        ];
+        // P1 FIX: Reuse slideBatchRef buffer instead of allocating a new array each frame
+        slideBatchRef.current.length = 0;
+        slideBatchRef.current.push({ clipId: clip.id, changes: { startTime: newStartTime } });
         
         if (leftSib && slideState.adjacentClips.left) {
           const sibOriginal = slideState.adjacentClips.left;
-          slideBatch.push({
+          slideBatchRef.current.push({
             clipId: leftSib.id,
             changes: {
               duration: sibOriginal.originalDuration + actualDt,
@@ -1127,7 +1128,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         
         if (rightSib && slideState.adjacentClips.right) {
           const sibOriginal = slideState.adjacentClips.right;
-          slideBatch.push({
+          slideBatchRef.current.push({
             clipId: rightSib.id,
             changes: {
               startTime: sibOriginal.originalStartTime + actualDt,
@@ -1137,7 +1138,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           });
         }
         
-        batchUpdateClips(slideBatch);
+        batchUpdateClips(slideBatchRef.current);
       });
     }
   };
