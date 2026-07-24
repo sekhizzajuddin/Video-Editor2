@@ -119,7 +119,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
             }}
             className="absolute top-0 w-3 h-3 -ml-1.5 cursor-pointer z-30 group"
             style={{ left: `${marker.time * zoomLevel}px` }}
-            title={`${marker.name} (${marker.time.toFixed(2)}s)`}
+            title={`${marker.name} (${(marker?.time ?? 0).toFixed(2)}s)`}
           >
             <div
               className="w-2.5 h-2.5 rotate-45 border border-white group-hover:scale-125 transition-transform shadow-md"

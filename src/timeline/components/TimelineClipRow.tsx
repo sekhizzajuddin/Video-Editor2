@@ -381,9 +381,9 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
           {clip.speedRamp && clip.speedRamp.length >= 2 ? (
             <span className="bg-amber-500/20 text-amber-300 px-1 py-px rounded-sm font-semibold">Ramped</span>
           ) : clip.speed !== 1.0 ? (
-            <span className="bg-blue-500/20 text-blue-300 px-1 py-px rounded-sm font-semibold">{clip.speed.toFixed(1)}x</span>
+            <span className="bg-blue-500/20 text-blue-300 px-1 py-px rounded-sm font-semibold">{(clip?.speed ?? 1).toFixed(1)}x</span>
           ) : null}
-          <span>{Math.max(0.1, clip.duration).toFixed(1)}s</span>
+          <span>{(Math.max(0.1, clip?.duration ?? 0.1)).toFixed(1)}s</span>
         </div>
       </div>
 

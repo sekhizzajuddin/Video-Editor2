@@ -1056,7 +1056,7 @@ export function PropertiesPanel() {
             <div className="flex justify-between items-center">
               <label className="text-xs text-white font-medium">Duration</label>
               <span className="text-xs font-mono text-purple-300">
-                {selectedTransition.duration.toFixed(1)}s
+                {(selectedTransition?.duration ?? 0.5).toFixed(1)}s
               </span>
             </div>
             <div className="flex items-center gap-3">
@@ -1065,7 +1065,7 @@ export function PropertiesPanel() {
                 min={0.1}
                 max={5.0}
                 step={0.1}
-                value={selectedTransition.duration}
+                value={(selectedTransition?.duration ?? 0.5)}
                 onChange={(e) => {
                   let val = parseFloat(e.target.value);
                   const maxDur = selectedTransitionClip.duration / 2;
@@ -4902,7 +4902,7 @@ export function PropertiesPanel() {
                               <div className="flex items-center gap-1">
                                 <span className="text-[#888]">Time:</span>
                                 {isBoundary ? (
-                                  <span className="text-white font-mono">{kf.sourceTime.toFixed(1)}s</span>
+                                  <span className="text-white font-mono">{(kf?.sourceTime ?? 0).toFixed(1)}s</span>
                                 ) : (
                                   <input
                                     type="number"
@@ -5004,7 +5004,7 @@ export function PropertiesPanel() {
                 <div>
                   <label className="text-[10px] text-[#a0a0a0] block mb-1">Duration</label>
                   <div className="px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white">
-                    {selectedClip.duration.toFixed(2)}s
+                    {(selectedClip?.duration ?? 0).toFixed(2)}s
                   </div>
                 </div>
                 <div>
@@ -5511,7 +5511,7 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Fade In duration</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipAudio.fadeIn.toFixed(1)}s</span>
+                      <span className="font-mono text-[#a0a0a0]">{(clipAudio?.fadeIn ?? 0).toFixed(1)}s</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -5533,7 +5533,7 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Fade Out duration</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipAudio.fadeOut.toFixed(1)}s</span>
+                      <span className="font-mono text-[#a0a0a0]">{(clipAudio?.fadeOut ?? 0).toFixed(1)}s</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input

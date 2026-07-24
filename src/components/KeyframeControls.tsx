@@ -246,7 +246,7 @@ export const KeyframeMiniTimeline: React.FC<KeyframeMiniTimelineProps> = ({
           return (
             <g 
               key={i}
-              transform={`translate(${x}%, 10)`}
+              style={{ transform: `translate(${x}%, 10px)` }}
               onClick={(e) => {
                 e.stopPropagation();
                 if (onSelectKeyframe) onSelectKeyframe(i);

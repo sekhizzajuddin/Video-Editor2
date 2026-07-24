@@ -159,7 +159,7 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
                         <h4 className="text-xs font-bold text-white">{tmpl.name}</h4>
                       </div>
                       <span className="text-[10px] text-teal-400 font-mono font-semibold">
-                        At {suggestion.start.toFixed(1)}s - {(suggestion.start + (tmpl.defaultDuration || 4)).toFixed(1)}s
+                        At {(suggestion?.start ?? 0).toFixed(1)}s - {(suggestion.start + (tmpl.defaultDuration || 4)).toFixed(1)}s
                       </span>
                     </div>
 

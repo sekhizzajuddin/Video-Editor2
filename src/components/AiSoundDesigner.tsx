@@ -746,7 +746,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
             {option ? option.name : cue.query}
           </span>
           <span className="text-[8px] font-mono opacity-70 ml-1 shrink-0">
-            {option ? `${option.duration.toFixed(0)}s` : 'N/A'}
+            {option ? `${(option?.duration ?? 0).toFixed(0)}s` : 'N/A'}
           </span>
         </div>
 
@@ -925,7 +925,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                       {activeCue.type === 'bgm' ? '🎵 BGM' : '⚡ SFX'}
                     </span>
                     <span className="text-[9px] font-mono text-[#707070]">
-                      {activeCue.start.toFixed(2)}s → {activeCue.end.toFixed(2)}s
+                      {(activeCue?.start ?? 0).toFixed(2)}s → {(activeCue?.end ?? 0).toFixed(2)}s
                     </span>
                   </div>
                   <div className="space-y-1 my-1">
@@ -980,8 +980,8 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                       <div className="flex items-center justify-between">
                         <p className="text-[9px] text-[#707070] mb-1">Trim Selection (drag waveform):</p>
                         <div className="flex items-center gap-3 text-[9px] font-mono">
-                          <span>Start: <span className="text-white">{activeCue.trimOffset.toFixed(2)}s</span></span>
-                          <span>Duration: <span className="text-white">{activeCue.trimDuration.toFixed(2)}s</span></span>
+                          <span>Start: <span className="text-white">{(activeCue?.trimOffset ?? 0).toFixed(2)}s</span></span>
+                          <span>Duration: <span className="text-white">{(activeCue?.trimDuration ?? 0).toFixed(2)}s</span></span>
                         </div>
                       </div>
                       <WaveformViewer
@@ -1083,7 +1083,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="text-[10px] font-semibold text-white truncate">{option.name}</div>
-                              <div className="text-[8px] text-[#707070]">{option.duration.toFixed(1)}s · {option.tags.slice(0, 3).join(', ')}</div>
+                              <div className="text-[8px] text-[#707070]">{(option?.duration ?? 0).toFixed(1)}s · {option.tags.slice(0, 3).join(', ')}</div>
                             </div>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleAuditionOption(option, audKey); }}
