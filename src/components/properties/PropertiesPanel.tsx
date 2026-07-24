@@ -1,4 +1,4 @@
-import {
+﻿import {
   Move3D,
   Palette,
   Gauge,
@@ -46,7 +46,7 @@ import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } 
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
-import { SequenceProperties } from './properties/SequenceProperties';
+import { SequenceProperties } from './SequenceProperties';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -540,11 +540,11 @@ export function PropertiesPanel() {
       // 1. Retrieve the file binary from IndexedDB (first priority, bypasses sandbox/CORS)
       let audioBlob: Blob | null = null;
       try {
-        if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Retrieving file from IndexedDB for ID:', selectedClip.mediaId);
+        if (import.meta.env.DEV) console.log('[AI Separation] Retrieving file from IndexedDB for ID:', selectedClip.mediaId);
         const dbFile = await getFileFromDB(selectedClip.mediaId);
         if (dbFile) {
           audioBlob = dbFile;
-          if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Successfully retrieved file binary from IndexedDB:', dbFile.name, dbFile.size);
+          if (import.meta.env.DEV) console.log('[AI Separation] Successfully retrieved file binary from IndexedDB:', dbFile.name, dbFile.size);
         }
       } catch (dbErr) {
         console.warn('[AI Separation] Failed to load from IndexedDB, falling back to fetch...', dbErr);
@@ -553,7 +553,7 @@ export function PropertiesPanel() {
       if (!audioBlob) {
         // Fallback: Fetch the clip's local audio/video file as binary if not in DB
         try {
-          if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Fetching audio source from URL:', clipUrl);
+          if (import.meta.env.DEV) console.log('[AI Separation] Fetching audio source from URL:', clipUrl);
           const fileResponse = await fetch(clipUrl);
           if (!fileResponse.ok) throw new Error(`HTTP error! status: ${fileResponse.status}`);
           audioBlob = await fileResponse.blob();
@@ -567,7 +567,7 @@ export function PropertiesPanel() {
         }
       }
 
-      if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Decoding audio buffer...');
+      if (import.meta.env.DEV) console.log('[AI Separation] Decoding audio buffer...');
       const audioCtx = new AudioContext();
       let audioBuffer: AudioBuffer;
       try {
@@ -577,13 +577,13 @@ export function PropertiesPanel() {
         await audioCtx.close();
       }
 
-      if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Running local Demucs AI separation (WASM/WebGPU)...');
+      if (import.meta.env.DEV) console.log('[AI Separation] Running local Demucs AI separation (WASM/WebGPU)...');
       const { vocals, backgroundMusic } = await aiVocalSeparator.separateAudioBuffer(audioBuffer, (progress) => {
         // You could update a progress state here if you added one to editorStore
-        if (process.env.NODE_ENV !== 'production') console.log(`[AI Separation Progress] ${(progress * 100).toFixed(1)}%`);
+        if (import.meta.env.DEV) console.log(`[AI Separation Progress] ${(progress * 100).toFixed(1)}%`);
       });
 
-      if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Converting stems to Blobs...');
+      if (import.meta.env.DEV) console.log('[AI Separation] Converting stems to Blobs...');
       const vocalsUrl = await aiVocalSeparator.audioBufferToBlobUrl(vocals);
       const instrumentsUrl = await aiVocalSeparator.audioBufferToBlobUrl(backgroundMusic);
       
@@ -1953,7 +1953,7 @@ export function PropertiesPanel() {
                   onClick={async () => {
                     if (!selectedClip) return;
                     // Dynamic import to avoid heavy loads if not used
-                    const { generateSmartReframeKeyframes } = await import('../utils/smartReframe');
+                    const { generateSmartReframeKeyframes } = await import('@/utils/smartReframe');
                     const aspect = useEditorStore.getState().aspectRatio;
                     const newAnimations = generateSmartReframeKeyframes(selectedClip, aspect as any);
                     updateClip(selectedClip.id, { animations: newAnimations });

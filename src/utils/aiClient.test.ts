@@ -107,7 +107,7 @@ Hope this helps!`;
       vi.stubGlobal('fetch', globalFetchMock);
 
       const result = await refineAudioQueryWithGroq('ocean waves crashing on sand');
-      expect(result).toBe('ocean waves shoreline splash');
+      expect(result).toMatchObject({ keywords: 'ocean waves shoreline splash', alternatives: [] });
 
       const expectedPayload = {
         model: 'llama3-8b-8192',

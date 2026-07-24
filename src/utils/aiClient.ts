@@ -252,7 +252,7 @@ export interface AudioQueryRefinement {
 /**
  * Refines a raw scene description into optimized Freesound.org search keywords using Groq LLaMA 3.3.
  */
-export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm' = 'sfx'): Promise<string> {
+export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm' = 'sfx'): Promise<{ keywords: string; alternatives: string[] }> {
   const payload = {
     model: GROQ_TEXT_MODEL,
     messages: [
@@ -322,27 +322,31 @@ Return ONLY valid JSON (no markdown):
     clearTimeout(timeoutId);
   }
 
-  const fallback = query;
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Groq API error: ${response.status} - ${errorText}`);
-    }
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Groq API error: ${response.status} - ${errorText}`);
+  }
 
   const resultData = await response.json();
+  const fallbackResult = { keywords: query, alternatives: [] as string[] };
+
   const refined = resultData?.choices?.[0]?.message?.content?.trim();
-  if (!refined) return fallback;
+  if (!refined) return fallbackResult;
+
 
   if (refined.startsWith('{') || refined.startsWith('[')) {
     try {
       const clean = refined.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
       const parsed = JSON.parse(clean);
-      return parsed.keywords || query;
+      return {
+        keywords: parsed.keywords || query,
+        alternatives: Array.isArray(parsed.alternatives) ? parsed.alternatives : []
+      };
     } catch {
-      return fallback;
+      return fallbackResult;
     }
   }
-  return refined;
+  return { keywords: refined || query, alternatives: [] };
 }
 
 /**

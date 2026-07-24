@@ -1187,7 +1187,7 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        if (process.env.NODE_ENV !== 'production') console.log("Audio captured, ready to process size:", audioBlob.size);
+        if (import.meta.env.DEV) console.log("Audio captured, ready to process size:", audioBlob.size);
         sendMessage("Transcribe and execute my voice command (Simulated)");
       };
 

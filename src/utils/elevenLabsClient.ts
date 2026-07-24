@@ -51,7 +51,7 @@ export async function generateCombinedSfx(
 
   const finalAudioBlobs: Blob[] = [];
   
-  if (process.env.NODE_ENV !== 'production') console.log(`[ElevenLabs] Generating ${allCues.length} sound effects.`);
+  if (import.meta.env.DEV) console.log(`[ElevenLabs] Generating ${allCues.length} sound effects.`);
 
   for (let i = 0; i < allCues.length; i++) {
     const cue = allCues[i];
@@ -60,7 +60,7 @@ export async function generateCombinedSfx(
     // Enhanced prompt for better SFX generation
     const prompt = `${cue.query}, ${durationSecs} seconds long, high quality sound effect, professional audio`;
     
-    if (process.env.NODE_ENV !== 'production') console.log(`[ElevenLabs] Generating cue ${i + 1}/${allCues.length}: "${cue.query}"`);
+    if (import.meta.env.DEV) console.log(`[ElevenLabs] Generating cue ${i + 1}/${allCues.length}: "${cue.query}"`);
     
     try {
       const audioBlob = await callElevenLabsProxy(prompt, durationSecs);
