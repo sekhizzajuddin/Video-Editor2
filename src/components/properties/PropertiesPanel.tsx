@@ -46,7 +46,7 @@ import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } 
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
-import { SequenceProperties } from './SequenceProperties';
+import { SequenceProperties } from './properties/SequenceProperties';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -399,8 +399,9 @@ export function PropertiesPanel() {
         let refinedQuery = cue.query;
         let alternatives: string[] = [];
         try {
-        refinedQuery = await refineAudioQueryWithGroq(cue.query, cue.type as 'sfx' | 'bgm');
-        alternatives = [];
+          const refinedObj = await refineAudioQueryWithGroq(cue.query, cue.type as 'sfx' | 'bgm');
+          refinedQuery = refinedObj.keywords;
+          alternatives = refinedObj.alternatives;
         } catch (groqErr) {
           console.warn('Groq query refinement failed, falling back to original query:', groqErr);
         }
@@ -539,11 +540,11 @@ export function PropertiesPanel() {
       // 1. Retrieve the file binary from IndexedDB (first priority, bypasses sandbox/CORS)
       let audioBlob: Blob | null = null;
       try {
-        console.log('[AI Separation] Retrieving file from IndexedDB for ID:', selectedClip.mediaId);
+        if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Retrieving file from IndexedDB for ID:', selectedClip.mediaId);
         const dbFile = await getFileFromDB(selectedClip.mediaId);
         if (dbFile) {
           audioBlob = dbFile;
-          console.log('[AI Separation] Successfully retrieved file binary from IndexedDB:', dbFile.name, dbFile.size);
+          if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Successfully retrieved file binary from IndexedDB:', dbFile.name, dbFile.size);
         }
       } catch (dbErr) {
         console.warn('[AI Separation] Failed to load from IndexedDB, falling back to fetch...', dbErr);
@@ -552,7 +553,7 @@ export function PropertiesPanel() {
       if (!audioBlob) {
         // Fallback: Fetch the clip's local audio/video file as binary if not in DB
         try {
-          console.log('[AI Separation] Fetching audio source from URL:', clipUrl);
+          if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Fetching audio source from URL:', clipUrl);
           const fileResponse = await fetch(clipUrl);
           if (!fileResponse.ok) throw new Error(`HTTP error! status: ${fileResponse.status}`);
           audioBlob = await fileResponse.blob();
@@ -566,7 +567,7 @@ export function PropertiesPanel() {
         }
       }
 
-      console.log('[AI Separation] Decoding audio buffer...');
+      if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Decoding audio buffer...');
       const audioCtx = new AudioContext();
       let audioBuffer: AudioBuffer;
       try {
@@ -576,13 +577,13 @@ export function PropertiesPanel() {
         await audioCtx.close();
       }
 
-      console.log('[AI Separation] Running local Demucs AI separation (WASM/WebGPU)...');
+      if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Running local Demucs AI separation (WASM/WebGPU)...');
       const { vocals, backgroundMusic } = await aiVocalSeparator.separateAudioBuffer(audioBuffer, (progress) => {
         // You could update a progress state here if you added one to editorStore
-        console.log(`[AI Separation Progress] ${(progress * 100).toFixed(1)}%`);
+        if (process.env.NODE_ENV !== 'production') console.log(`[AI Separation Progress] ${(progress * 100).toFixed(1)}%`);
       });
 
-      console.log('[AI Separation] Converting stems to Blobs...');
+      if (process.env.NODE_ENV !== 'production') console.log('[AI Separation] Converting stems to Blobs...');
       const vocalsUrl = await aiVocalSeparator.audioBufferToBlobUrl(vocals);
       const instrumentsUrl = await aiVocalSeparator.audioBufferToBlobUrl(backgroundMusic);
       
@@ -1952,7 +1953,7 @@ export function PropertiesPanel() {
                   onClick={async () => {
                     if (!selectedClip) return;
                     // Dynamic import to avoid heavy loads if not used
-                    const { generateSmartReframeKeyframes } = await import('@/utils/smartReframe');
+                    const { generateSmartReframeKeyframes } = await import('../utils/smartReframe');
                     const aspect = useEditorStore.getState().aspectRatio;
                     const newAnimations = generateSmartReframeKeyframes(selectedClip, aspect as any);
                     updateClip(selectedClip.id, { animations: newAnimations });
@@ -4818,6 +4819,14 @@ export function PropertiesPanel() {
                             const tempEngine = new SpeedRampEngine(ramp);
                             const sourceEnd = maxDuration - selectedClip.trimEnd;
                             const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
+                            console.log('[PRESET CLICK]', preset.id);
+                            console.log('[PRESET CLICK] selectedClip.id:', selectedClip.id);
+                            console.log('[PRESET CLICK] selectedClip.duration (old):', selectedClip.duration);
+                            console.log('[PRESET CLICK] mediaItem found?:', !!mediaItem, 'maxDuration:', maxDuration);
+                            console.log('[PRESET CLICK] trimStart:', selectedClip.trimStart, 'trimEnd:', selectedClip.trimEnd);
+                            console.log('[PRESET CLICK] sourceEnd:', sourceEnd);
+                            console.log('[PRESET CLICK] newDuration (calculated):', newDuration);
+                            console.log('[PRESET CLICK] ramp:', JSON.stringify(ramp));
                             updateClip(selectedClip.id, { 
                               speedRamp: ramp,
                               duration: Math.max(0.1, newDuration)

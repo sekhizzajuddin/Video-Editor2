@@ -120,32 +120,56 @@ export function TimelineModals({
     setContextMenu(null);
   };
 
+  // Track whether ANY context-menu is open without including the menu objects in
+  // the effect deps (which would re-add listeners on every state update).
+  const menuOpenRef = React.useRef(false);
+  const setContextMenuRef = React.useRef(setContextMenu);
+  const setMarkerContextMenuRef = React.useRef(setMarkerContextMenu);
+  React.useEffect(() => { setContextMenuRef.current = setContextMenu; }, [setContextMenu]);
+  React.useEffect(() => { setMarkerContextMenuRef.current = setMarkerContextMenu; }, [setMarkerContextMenu]);
+
   React.useEffect(() => {
-    if (!contextMenu && !markerContextMenu) return;
+    const isOpen = !!(contextMenu || markerContextMenu);
 
-    const handleGlobalMouseDown = (e: MouseEvent) => {
-      if (e.target instanceof Element && e.target.closest('.timeline-context-menu')) {
-        return;
-      }
-      // Close context menus on outside click.
-      setContextMenu(null);
-      setMarkerContextMenu(null);
-    };
+    if (isOpen && !menuOpenRef.current) {
+      // First open — attach listeners once
+      menuOpenRef.current = true;
 
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setContextMenu(null);
-        setMarkerContextMenu(null);
-      }
-    };
+      const handleGlobalMouseDown = (e: MouseEvent) => {
+        if (e.target instanceof Element && e.target.closest('.timeline-context-menu')) return;
+        setContextMenuRef.current(null);
+        setMarkerContextMenuRef.current(null);
+      };
 
-    window.addEventListener('mousedown', handleGlobalMouseDown, true);
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => {
-      window.removeEventListener('mousedown', handleGlobalMouseDown, true);
-      window.removeEventListener('keydown', handleGlobalKeyDown);
-    };
-  }, [contextMenu, markerContextMenu, setContextMenu, setMarkerContextMenu]);
+      const handleGlobalKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          setContextMenuRef.current(null);
+          setMarkerContextMenuRef.current(null);
+        }
+      };
+
+      window.addEventListener('mousedown', handleGlobalMouseDown, true);
+      window.addEventListener('keydown', handleGlobalKeyDown);
+
+      // Store cleanup handles on the ref so the detach effect can remove them
+      (menuOpenRef as any)._mouseDown = handleGlobalMouseDown;
+      (menuOpenRef as any)._keyDown = handleGlobalKeyDown;
+    } else if (!isOpen && menuOpenRef.current) {
+      // All menus closed — remove listeners
+      menuOpenRef.current = false;
+      window.removeEventListener('mousedown', (menuOpenRef as any)._mouseDown, true);
+      window.removeEventListener('keydown', (menuOpenRef as any)._keyDown);
+    }
+  }, [contextMenu, markerContextMenu]);
+
+  // Cleanup on unmount
+  React.useEffect(() => () => {
+    if (menuOpenRef.current) {
+      window.removeEventListener('mousedown', (menuOpenRef as any)._mouseDown, true);
+      window.removeEventListener('keydown', (menuOpenRef as any)._keyDown);
+    }
+  }, []);
+
 
   return (
     <>

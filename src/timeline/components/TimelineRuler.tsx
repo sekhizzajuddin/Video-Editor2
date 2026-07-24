@@ -28,7 +28,7 @@ interface TimelineRulerProps {
   handleRulerMouseDown: (e: React.MouseEvent) => void;
 }
 
-export function TimelineRuler({
+export const TimelineRuler = React.memo(function TimelineRuler({
   rulerContainerRef,
   timelineWidth,
   zoomLevel,
@@ -147,4 +147,4 @@ export function TimelineRuler({
       </div>
     </div>
   );
-}
+});

@@ -1,4 +1,4 @@
-import * as ort from 'onnxruntime-web';
+﻿import * as ort from 'onnxruntime-web';
 // @ts-ignore
 import { DemucsProcessor } from 'demucs-web';
 
@@ -19,7 +19,7 @@ class AIVocalSeparator {
       ort,
       onProgress: (progress: number) => {
         this.currentProgress = progress;
-        console.log(`[Demucs AI] Processing progress: ${(progress * 100).toFixed(1)}%`);
+        if (process.env.NODE_ENV !== 'production') console.log(`[Demucs AI] Processing progress: ${(progress * 100).toFixed(1)}%`);
       },
     });
   }
@@ -30,14 +30,14 @@ class AIVocalSeparator {
   async loadModel(onProgress?: (progress: number) => void) {
     if (this.isModelLoaded && this.processor) return;
 
-    console.log('[Demucs AI] Loading AI Model...');
+    if (process.env.NODE_ENV !== 'production') console.log('[Demucs AI] Loading AI Model...');
     if (onProgress) onProgress(0.1); // Simulate start of download
     
     try {
       await this.processor!.loadModel(MODEL_URL);
       this.isModelLoaded = true;
       if (onProgress) onProgress(1.0);
-      console.log('[Demucs AI] AI Model loaded successfully.');
+      if (process.env.NODE_ENV !== 'production') console.log('[Demucs AI] AI Model loaded successfully.');
     } catch (error) {
       console.error('[Demucs AI] Failed to load model:', error);
       throw new Error('Failed to load AI Vocal Separation model.');
@@ -53,7 +53,7 @@ class AIVocalSeparator {
       await this.loadModel(onProgress);
     }
 
-    console.log('[Demucs AI] Starting separation...');
+    if (process.env.NODE_ENV !== 'production') console.log('[Demucs AI] Starting separation...');
     
     // Get raw audio data (Left and Right channels)
     let leftChannel: Float32Array;
@@ -101,7 +101,7 @@ class AIVocalSeparator {
       bgmBuffer.copyToChannel(bgmLeft, 0);
       bgmBuffer.copyToChannel(bgmRight, 1);
 
-      console.log('[Demucs AI] Separation complete!');
+      if (process.env.NODE_ENV !== 'production') console.log('[Demucs AI] Separation complete!');
 
       return {
         vocals: vocalsBuffer,

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+﻿import { useState, useCallback, useRef, useEffect } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { aiToolRegistry, executeAITool, requiresConfirmation } from '../utils/aiToolRegistry';
 import { AiTrainingOrchestrator } from '../utils/ai-training/AiTrainingOrchestrator';
@@ -1187,7 +1187,7 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        console.log("Audio captured, ready to process size:", audioBlob.size);
+        if (process.env.NODE_ENV !== 'production') console.log("Audio captured, ready to process size:", audioBlob.size);
         sendMessage("Transcribe and execute my voice command (Simulated)");
       };
 

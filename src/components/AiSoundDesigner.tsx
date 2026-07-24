@@ -43,8 +43,14 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
     mediaId: null
   };
 
-  // ── Find video source ──────────────────────────────────────
-  const media = clip.mediaId ? useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId) : null;
+  // ── Find video source (O(1) map lookup instead of O(N) array scan) ──
+  const media = clip.mediaId
+    ? (() => {
+        const lib = useEditorStore.getState().mediaLibrary;
+        const map = new Map(lib.map((m) => [m.id, m]));
+        return map.get(clip.mediaId) ?? null;
+      })()
+    : null;
   const videoUrl = media?.url;
 
   // ── Store state for whole timeline preview ────────────────
