@@ -399,9 +399,8 @@ export function PropertiesPanel() {
         let refinedQuery = cue.query;
         let alternatives: string[] = [];
         try {
-          const refinedObj = await refineAudioQueryWithGroq(cue.query, cue.type as 'sfx' | 'bgm');
-          refinedQuery = refinedObj.keywords;
-          alternatives = refinedObj.alternatives;
+        refinedQuery = await refineAudioQueryWithGroq(cue.query, cue.type as 'sfx' | 'bgm');
+        alternatives = [];
         } catch (groqErr) {
           console.warn('Groq query refinement failed, falling back to original query:', groqErr);
         }

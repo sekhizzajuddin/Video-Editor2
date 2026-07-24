@@ -34,5 +34,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["**/*.backup.*", "**/*_Original_*", "**/*.test.*"]
 }

@@ -11,7 +11,7 @@ export function getGroqKey(): string {
 // ─── Model constants ─────────────────────────────────────────────────────────
 const GEMINI_VISION_MODEL = 'gemini-3.1-flash-lite';          // current stable GA model, good free tier
 const GROQ_VISION_MODEL   = 'meta-llama/llama-4-scout-17b-16e-instruct'; // Valid Groq vision model
-const GROQ_TEXT_MODEL     = 'openai/gpt-oss-20b';        // Best Groq reasoning / text model
+const GROQ_TEXT_MODEL     = 'llama3-8b-8192';        // Best Groq reasoning / text model
 
 /** Safely strip a data-URI prefix (e.g. "data:image/jpeg;base64,") from a base64 string. */
 function stripDataUri(b64: string): string {
@@ -199,10 +199,12 @@ CRITICAL OUTPUT RULES:
     clear();
   }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`[${provider.toUpperCase()} Vision] HTTP ${response.status}: ${errorText}`);
-  }
+    if (!response.ok) {
+      const errorText = await response.text();
+      const providerName = provider === 'gemini' ? 'Gemini' : 'Groq';
+      throw new Error(`${providerName} API error: ${response.status} - ${errorText}`);
+    }
+
 
   const resultData = await response.json();
   let text = '';
@@ -216,15 +218,17 @@ CRITICAL OUTPUT RULES:
     throw new Error(`${provider.toUpperCase()} Vision returned an empty response. The image may be too large or content was blocked.`);
   }
 
-  try {
-    const clean = text.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
-    const parsed = JSON.parse(clean);
-    const cues = Array.isArray(parsed) ? parsed : (parsed.cues ?? []);
-    if (!Array.isArray(cues)) throw new Error('Response cues is not an array');
+    try {
+      // Extract the first JSON object or array from possibly wrapped markdown
+      const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+      const jsonCandidate = jsonMatch ? jsonMatch[0] : text;
+      const clean = jsonCandidate.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
+      const parsed = JSON.parse(clean);
+      const cues = Array.isArray(parsed) ? parsed : (parsed.cues ?? []);
+      if (!Array.isArray(cues)) throw new Error('Response cues is not an array');
 
-    // Ensure at least one BGM exists — inject a default if AI forgot
-    const hasBgm = cues.some((c: any) => c.type === 'bgm');
-    if (!hasBgm && segmentDuration > 3) {
+    // If no cues returned and segment is long enough, inject a default BGM cue
+    if (cues.length === 0 && segmentDuration > 3) {
       cues.unshift({
         start: 0,
         end: segmentDuration,
@@ -248,7 +252,7 @@ export interface AudioQueryRefinement {
 /**
  * Refines a raw scene description into optimized Freesound.org search keywords using Groq LLaMA 3.3.
  */
-export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm' = 'sfx'): Promise<AudioQueryRefinement> {
+export async function refineAudioQueryWithGroq(query: string, type: 'sfx' | 'bgm' = 'sfx'): Promise<string> {
   const payload = {
     model: GROQ_TEXT_MODEL,
     messages: [
@@ -318,27 +322,27 @@ Return ONLY valid JSON (no markdown):
     clearTimeout(timeoutId);
   }
 
-  const fallback = { keywords: query, alternatives: [] };
+  const fallback = query;
 
-  if (!response.ok) {
-    console.warn(`[Groq Query Refine] HTTP ${response.status}. Using original query as fallback.`);
-    return fallback;
-  }
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Groq API error: ${response.status} - ${errorText}`);
+    }
 
   const resultData = await response.json();
   const refined = resultData?.choices?.[0]?.message?.content?.trim();
   if (!refined) return fallback;
 
-  try {
-    const clean = refined.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
-    const parsed = JSON.parse(clean);
-    return {
-      keywords: parsed.keywords || query,
-      alternatives: parsed.alternatives || []
-    };
-  } catch (e) {
-    return fallback;
+  if (refined.startsWith('{') || refined.startsWith('[')) {
+    try {
+      const clean = refined.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
+      const parsed = JSON.parse(clean);
+      return parsed.keywords || query;
+    } catch {
+      return fallback;
+    }
   }
+  return refined;
 }
 
 /**
@@ -555,10 +559,11 @@ Return ONLY this JSON format, no markdown:
     clear();
   }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`[${provider.toUpperCase()} Motion Graphics] HTTP ${response.status}: ${errorText}`);
-  }
+    if (!response.ok) {
+      const errorText = await response.text();
+      const providerName = provider === 'gemini' ? 'Gemini' : 'Groq';
+      throw new Error(`${providerName} API error: ${response.status} - ${errorText}`);
+    }
 
   const resultData = await response.json();
   let text = '';
