@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { TimelineClip, TimelineTrack } from '@/types';
 import { synthesizeProceduralSFX } from '../sfxSynth';
@@ -70,14 +70,7 @@ export function useTimelineAI({ timelineState }: UseTimelineAIDeps) {
   } = timelineState;
 
   const handleOpenSfxGenerator = useCallback(async (clipId: string) => {
-    let targetClip: TimelineClip | null = null;
-    for (const track of tracks) {
-      const found = track.clips.find(c => c.id === clipId);
-      if (found) {
-        targetClip = found;
-        break;
-      }
-    }
+    const targetClip = findClipDeep(useEditorStore.getState(), clipId)?.clip || null;
     if (!targetClip) return;
 
     const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);
@@ -236,14 +229,7 @@ Return your response ONLY as a JSON object with these two fields:
   const handleAutoCueSFX = useCallback(async () => {
     if (!sfxAutoCueClipId) return;
 
-    let targetClip: TimelineClip | null = null;
-    for (const track of tracks) {
-      const found = track.clips.find(c => c.id === sfxAutoCueClipId);
-      if (found) {
-        targetClip = found;
-        break;
-      }
-    }
+    const targetClip = findClipDeep(useEditorStore.getState(), sfxAutoCueClipId)?.clip || null;
     if (!targetClip) return;
 
     const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);
@@ -449,16 +435,7 @@ Return your response ONLY as a JSON array of objects:
   }, [sfxAutoCueClipId, sfxAutoCueMode, sfxUserDescription, tracks, mediaLibrary, addClip, setIsAnalyzingAutoCue, setAutoCueProgress, setSfxAutoCueClipId, setSfxUserDescription]);
 
   const handleGenerateSubtitles = useCallback(async (clipId: string, mode: 'standard' | 'dynamic') => {
-    let targetClip: TimelineClip | null = null;
-    const liveTracks = useEditorStore.getState().tracks;
-    for (const track of liveTracks) {
-      const found = track.clips.find(c => c.id === clipId);
-      if (found) {
-        targetClip = found;
-        break;
-      }
-    }
-
+    const targetClip = findClipDeep(useEditorStore.getState(), clipId)?.clip || null;
     if (!targetClip) return;
 
     const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);

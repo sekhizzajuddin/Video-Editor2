@@ -147,6 +147,7 @@ export function ExportModal() {
       }
     } catch (_) {}
 
+
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     chunksRef.current = [];

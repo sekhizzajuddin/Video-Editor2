@@ -42,11 +42,11 @@ export function PreviewCanvasOverlay({
   videoElements,
   containerRef
 }: InteractiveCanvasOverlayProps) {
+  const currentTime = useEditorStore(s => s.currentTime);
   const {
     tracks,
     selectedClipId,
     pipWindows,
-    currentTime,
     mediaLibrary,
     updateClip: storeUpdateClip,
     canvasTransformMode,
@@ -58,7 +58,6 @@ export function PreviewCanvasOverlay({
     tracks: s.tracks,
     selectedClipId: s.selectedClipId,
     pipWindows: s.pipWindows,
-    currentTime: s.currentTime,
     mediaLibrary: s.mediaLibrary,
     updateClip: s.updateClip,
     canvasTransformMode: s.canvasTransformMode,

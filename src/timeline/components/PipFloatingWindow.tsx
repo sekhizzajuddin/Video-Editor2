@@ -33,7 +33,7 @@ interface PipFloatingWindowProps {
   selectTransition: (id: string | null) => void;
 }
 
-export function PipFloatingWindow({
+export const PipFloatingWindow = React.memo(function PipFloatingWindow({
   pipWindow,
   parentClip,
   zoomLevel,
@@ -121,31 +121,44 @@ export function PipFloatingWindow({
     useEditorStore.getState().startTransaction();
   };
 
+  const dragRafRef = useRef<number | null>(null);
   useEffect(() => {
     if (isDragging) {
       const handleMouseMove = (e: MouseEvent) => {
-        const dx = e.clientX - startXRef.current;
-        const dt = dx / zoomLevel;
-        const initialAbsoluteStart = parentClip.startTime + startRelTimeRef.current;
-        let newAbsoluteStart = initialAbsoluteStart + dt;
-        // Limit start time to parent clip's range, ensuring the PIP doesn't start before parent clip
-        newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd, newAbsoluteStart));
-        const newRelativeStart = newAbsoluteStart - parentClip.startTime;
+        if (dragRafRef.current !== null) return;
+        const clientX = e.clientX;
+        dragRafRef.current = requestAnimationFrame(() => {
+          dragRafRef.current = null;
+          const dx = clientX - startXRef.current;
+          const dt = dx / zoomLevel;
+          const initialAbsoluteStart = parentClip.startTime + startRelTimeRef.current;
+          let newAbsoluteStart = initialAbsoluteStart + dt;
+          newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd, newAbsoluteStart));
+          const newRelativeStart = newAbsoluteStart - parentClip.startTime;
 
-        updatePipWindowStartTime(pipWindow.id, newRelativeStart);
+          updatePipWindowStartTime(pipWindow.id, newRelativeStart);
+        });
       };
       const handleMouseUp = () => {
+        if (dragRafRef.current !== null) {
+          cancelAnimationFrame(dragRafRef.current);
+          dragRafRef.current = null;
+        }
         setIsDragging(false);
         useEditorStore.getState().endTransaction();
       };
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
       return () => {
+        if (dragRafRef.current !== null) {
+          cancelAnimationFrame(dragRafRef.current);
+          dragRafRef.current = null;
+        }
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, pipWindow.id, pipWindow.duration, zoomLevel, parentClip.startTime, parentEnd]);
+  }, [isDragging, pipWindow.id, pipWindow.duration, zoomLevel, parentClip.startTime, parentEnd, updatePipWindowStartTime]);
 
   // Handles drag to resize PIP duration
   const handleResizeStart = (e: React.MouseEvent) => {
@@ -156,31 +169,45 @@ export function PipFloatingWindow({
     useEditorStore.getState().startTransaction();
   };
 
+  const resizeRafRef = useRef<number | null>(null);
   useEffect(() => {
     if (isResizing) {
       const handleMouseMove = (e: MouseEvent) => {
-        const dx = e.clientX - startXRef.current;
-        const dt = dx / zoomLevel;
-        
-        const absoluteStartTime = parentClip.startTime + (pipWindow.relativeStartTime || 0);
-        const maxDuration = parentEnd - absoluteStartTime;
-        let newDuration = Math.max(0.5, startDurationRef.current + dt);
-        newDuration = Math.min(maxDuration, Math.min(600, newDuration));
-        
-        updatePipWindowDuration(pipWindow.id, newDuration);
+        if (resizeRafRef.current !== null) return;
+        const clientX = e.clientX;
+        resizeRafRef.current = requestAnimationFrame(() => {
+          resizeRafRef.current = null;
+          const dx = clientX - startXRef.current;
+          const dt = dx / zoomLevel;
+          
+          const absoluteStartTime = parentClip.startTime + (pipWindow.relativeStartTime || 0);
+          const maxDuration = parentEnd - absoluteStartTime;
+          let newDuration = Math.max(0.5, startDurationRef.current + dt);
+          newDuration = Math.min(maxDuration, Math.min(600, newDuration));
+          
+          updatePipWindowDuration(pipWindow.id, newDuration);
+        });
       };
       const handleMouseUp = () => {
+        if (resizeRafRef.current !== null) {
+          cancelAnimationFrame(resizeRafRef.current);
+          resizeRafRef.current = null;
+        }
         setIsResizing(false);
         useEditorStore.getState().endTransaction();
       };
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
       return () => {
+        if (resizeRafRef.current !== null) {
+          cancelAnimationFrame(resizeRafRef.current);
+          resizeRafRef.current = null;
+        }
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isResizing, pipWindow.id, pipWindow.relativeStartTime, zoomLevel, parentClip.startTime, parentEnd]);
+  }, [isResizing, pipWindow.id, pipWindow.relativeStartTime, zoomLevel, parentClip.startTime, parentEnd, updatePipWindowDuration]);
 
   // Handle drop media inside PIP
   const handlePipContainerDrop = (e: React.DragEvent) => {
@@ -500,4 +527,4 @@ export function PipFloatingWindow({
       )}
     </div>
   );
-}
+});
