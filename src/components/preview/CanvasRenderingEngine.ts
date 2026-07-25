@@ -769,6 +769,37 @@ export async function renderCanvasEngine({
     }
   }
 
+  // Also collect active clips inside PiP Windows attached to active timeline clips
+  const activePipWindows = useEditorStore.getState().pipWindows || {};
+  if (activePipWindows && Object.keys(activePipWindows).length > 0) {
+    for (const pip of Object.values(activePipWindows) as any[]) {
+      if (!pip || !pip.tracks) continue;
+      let parentClip: any = null;
+      for (const t of tracks) {
+        parentClip = t.clips.find((c: any) => c.id === pip.parentClipId);
+        if (parentClip) break;
+      }
+      if (!parentClip || parentClip.disabled) continue;
+
+      const pipAbsStart = parentClip.startTime + (pip.relativeStartTime || 0);
+      if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+        for (const pTrack of pip.tracks) {
+          if (pTrack.hidden) continue;
+          for (const pClip of pTrack.clips) {
+            const pAbsStart = pipAbsStart + pClip.startTime;
+            if (!pClip.disabled && currentTime >= pAbsStart && currentTime < pAbsStart + pClip.duration) {
+              const syntheticClip = {
+                ...pClip,
+                startTime: pAbsStart,
+              };
+              drawQueue.push({ clip: syntheticClip, layer: 200 + (pTrack.type === 'text' ? 100 : 0) });
+            }
+          }
+        }
+      }
+    }
+  }
+
   if (drawQueue.length > 1) {
     drawQueue.sort((a, b) => a.layer - b.layer);
   }

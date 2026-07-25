@@ -1,4 +1,4 @@
-import { TimelineClip } from '@/types';
+import { TimelineClip, TimelineTrack, PipWindow } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { extractFramesFromVideo } from './frameExtractor';
 import { TEXT_TEMPLATES } from './textTemplates';
@@ -13,6 +13,8 @@ export interface KineticTypographyOptions {
   styleSelection?: string;
   animationSelection?: string;
   provider?: 'gemini' | 'groq';
+  typoType?: 'word' | 'sentence' | 'hybrid';
+  referenceScript?: string;
 }
 
 export async function generateKineticTypography(
@@ -71,6 +73,9 @@ export async function generateKineticTypography(
 
   const userStyle = options.styleSelection || 'random';
   const userAnim = options.animationSelection || 'random';
+  const refScriptInstruction = options.referenceScript
+    ? `\n\nUSER-PROVIDED GROUND-TRUTH REFERENCE SCRIPT:\n"${options.referenceScript}"\n\nCRITICAL INSTRUCTION FOR GROUND-TRUTH REFERENCE SCRIPT:\n- The user has provided the exact ground-truth script spoken in the video/audio.\n- You MUST use the exact words, spelling, and order from this reference script for the "text" properties of the generated typography objects.\n- Align each word from the reference script to its corresponding spoken audio timestamp.\n- This corrects any phonetic transcription errors from automated speech recognition.`
+    : '';
 
   // ─── Shared high-quality prompt for typography generation ──────────────────
   const prompt = `You are a world-class Kinetic Typography Director and Motion Graphics Designer.
@@ -83,7 +88,7 @@ PRIMARY TASK: Generate a JSON array of text animation clips, STRICTLY WORD-BY-WO
 
 SCRIPT & LANGUAGE:
 - ${scriptInstruction}
-${casingInstruction ? `- ${casingInstruction}` : ''}
+${casingInstruction ? `- ${casingInstruction}` : ''}${refScriptInstruction}
 
 DESIGNING AN EMOTIONALLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL RULES):
 1. SEMANTIC WEIGHT: Identify KEY emotional/emphatic words (nouns, verbs like 'NEVER', 'EXPLODE', 'LOVE', 'ROKNA').
@@ -121,7 +126,7 @@ For each word, define:
 - "animationOut": Choose from:
   Basic: 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight'
   Cinematic: 'elastic', 'splitReveal', 'revealWipe', 'rollUp', 'scaleFlip', 'zoomBlur', 'glitch', 'letterSpacing'
-- "stylePreset": Choose from: 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
+- "stylePreset": Choose from: 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
 
 Output ONLY a valid JSON array, no markdown, no explanation:
 [{"text":"Wow","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":52,"y":48,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
@@ -252,7 +257,7 @@ ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
       const finalStyle = userStyle !== 'random' ? userStyle : (item.stylePreset || 'Bubble Caption');
       const finalAnimIn = userAnim !== 'random' ? userAnim : (item.animationIn || 'slideUp');
 
-      processedClips.push({
+processedClips.push({
         ...item,
         text: wordText,
         stylePreset: finalStyle,
@@ -263,56 +268,297 @@ ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
     });
   }
 
-  // 4. Create new text clips and insert them above the current video track
-  const newClips: TimelineClip[] = processedClips.map((item: any) => {
-    const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (item.stylePreset || '').toLowerCase());
-    const fontSz = item.fontSize || 60;
-    const fontFam = item.fontFamily || 'Anton';
-    const clr = item.color || '#ffffff';
+  // 4. Generate clips according to selected typography mode (word, sentence, or hybrid)
+  const typoMode = options.typoType || 'hybrid';
+  const newClips: TimelineClip[] = [];
+  const newPipWindowsMap: Record<string, PipWindow> = {};
 
-    const textSettings: any = {
-      text: item.text,
-      fontSize: preset ? (preset.settings.fontSize ? Math.round(preset.settings.fontSize * 0.9) : fontSz) : fontSz,
-      fontFamily: preset?.settings.fontFamily || fontFam,
-      color: preset?.settings.color || clr,
-      backgroundColor: preset?.settings.backgroundColor || 'transparent',
-      bold: preset ? (preset.settings.bold !== undefined ? preset.settings.bold : true) : true,
-      italic: preset ? (preset.settings.italic || false) : false,
-      underline: preset ? (preset.settings.underline || false) : false,
-      shadow: preset ? (preset.settings.shadow !== undefined ? preset.settings.shadow : true) : true,
-      shadowColor: preset?.settings.shadowColor || '#000000',
-      shadowBlur: preset?.settings.shadowBlur || 10,
-      textAlign: 'center',
-      animation: {
-        in: item.animationIn === 'pop' ? 'zoom' : (item.animationIn || 'slideUp'),
-        out: item.animationOut || 'fadeOut',
-        inDuration: 0.1,
-        outDuration: 0.1
+  if (typoMode === 'word') {
+    // ── Mode 1: Word by Word ───────────────────────────────────
+    processedClips.forEach((item: any) => {
+      const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (item.stylePreset || '').toLowerCase());
+      const fontSz = item.fontSize || 60;
+      const fontFam = item.fontFamily || 'Anton';
+      const clr = item.color || '#ffffff';
+
+      const textSettings: any = {
+        text: item.text,
+        fontSize: preset ? (preset.settings.fontSize ? Math.round(preset.settings.fontSize * 0.9) : fontSz) : fontSz,
+        fontFamily: preset?.settings.fontFamily || fontFam,
+        color: preset?.settings.color || clr,
+        backgroundColor: preset?.settings.backgroundColor || 'transparent',
+        bold: preset ? (preset.settings.bold !== undefined ? preset.settings.bold : true) : true,
+        italic: preset ? (preset.settings.italic || false) : false,
+        underline: preset ? (preset.settings.underline || false) : false,
+        shadow: preset ? (preset.settings.shadow !== undefined ? preset.settings.shadow : true) : true,
+        shadowColor: preset?.settings.shadowColor || '#000000',
+        shadowBlur: 10,
+        textAlign: 'center',
+        animation: {
+          in: item.animationIn === 'pop' ? 'zoom' : (item.animationIn || 'slideUp'),
+          out: item.animationOut || 'fadeOut',
+          inDuration: 0.1,
+          outDuration: 0.1
+        }
+      };
+
+      if (preset?.settings.strokeColor) {
+        textSettings.strokeColor = preset.settings.strokeColor;
+        textSettings.strokeWidth = preset.settings.strokeWidth || 2;
       }
-    };
 
-    if (preset?.settings.strokeColor) {
-      textSettings.strokeColor = preset.settings.strokeColor;
-      textSettings.strokeWidth = preset.settings.strokeWidth || 2;
-    }
+      newClips.push({
+        id: uuidv4(),
+        mediaId: 'generator:kinetic',
+        trackId: '',
+        startTime: clip.startTime + item.start,
+        duration: Math.max(0.1, item.end - item.start),
+        trimStart: 0,
+        trimEnd: Math.max(0.1, item.end - item.start),
+        opacity: 1,
+        transform: { x: Math.round((item.x - 50) * 8.54), y: Math.round((item.y - 50) * 4.8), scale: 100, rotation: 0 },
+        speed: 1,
+        effects: [],
+        textSettings
+      });
+    });
+  } else if (typoMode === 'sentence') {
+    // ── Mode 2: Sentence by Sentence ───────────────────────────
+    const sentenceGroups: any[][] = [];
+    let currentGrp: any[] = [];
 
-    return {
-      id: uuidv4(),
-      mediaId: 'generator:kinetic',
-      trackId: '',
-      startTime: clip.startTime + item.start,
-      duration: Math.max(0.1, item.end - item.start),
-      trimStart: 0,
-      trimEnd: Math.max(0.1, item.end - item.start),
-      opacity: 1,
-      transform: { x: Math.round((item.x - 50) * 8.54), y: Math.round((item.y - 50) * 4.8), scale: 100, rotation: 0 },
-      speed: 1,
-      effects: [],
-      textSettings
-    };
-  });
+    processedClips.forEach((w: any, idx: number) => {
+      currentGrp.push(w);
+      const endsPunct = /[.?!;:]$/.test(w.text);
+      const nextW = processedClips[idx + 1];
+      const pause = nextW ? (nextW.start - w.end) > 0.4 : true;
+      const maxW = currentGrp.length >= 7;
 
-  // Find or create a text track
+      if (endsPunct || pause || maxW || idx === processedClips.length - 1) {
+        sentenceGroups.push([...currentGrp]);
+        currentGrp = [];
+      }
+    });
+
+    sentenceGroups.forEach((grp) => {
+      if (grp.length === 0) return;
+      const sentenceText = grp.map(w => w.text).join(' ');
+      const sStart = grp[0].start;
+      const sEnd = grp[grp.length - 1].end;
+      const sDuration = Math.max(0.2, sEnd - sStart);
+      const firstW = grp[0];
+
+      newClips.push({
+        id: uuidv4(),
+        mediaId: 'generator:kinetic-sentence',
+        trackId: '',
+        startTime: clip.startTime + sStart,
+        duration: sDuration,
+        trimStart: 0,
+        trimEnd: sDuration,
+        opacity: 1,
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        speed: 1,
+        effects: [],
+        textSettings: {
+          text: sentenceText,
+          fontSize: 54,
+          fontFamily: firstW.fontFamily || 'Inter',
+          color: firstW.color || '#ffffff',
+          backgroundColor: 'transparent',
+          bold: true,
+          italic: false,
+          underline: false,
+          shadow: true,
+          shadowColor: '#000000',
+          shadowBlur: 10,
+          textAlign: 'center',
+          animation: {
+            in: firstW.animationIn || 'slideUp',
+            out: 'fadeOut',
+            inDuration: 0.15,
+            outDuration: 0.15
+          }
+        }
+      });
+    });
+  } else {
+    // ── Mode 3: Hybrid (Complete Sentence via PiP Multi-Tracks) ──
+    const sentenceGroups: any[][] = [];
+    let currentGrp: any[] = [];
+
+    processedClips.forEach((w: any, idx: number) => {
+      currentGrp.push(w);
+      const endsPunct = /[.?!;:]$/.test(w.text);
+      const nextW = processedClips[idx + 1];
+      const pause = nextW ? (nextW.start - w.end) > 0.4 : true;
+      const maxW = currentGrp.length >= 8;
+
+      if (endsPunct || pause || maxW || idx === processedClips.length - 1) {
+        sentenceGroups.push([...currentGrp]);
+        currentGrp = [];
+      }
+    });
+
+    sentenceGroups.forEach((grp) => {
+      if (grp.length === 0) return;
+      const fullSentenceText = grp.map(w => w.text).join(' ');
+      const sStart = grp[0].start;
+      const sEnd = grp[grp.length - 1].end;
+      const sDuration = Math.max(0.2, sEnd - sStart);
+
+      const primaryClipId = uuidv4();
+      const pipId = uuidv4();
+
+      // Main timeline primary text container clip for this sentence
+      const primaryClip: TimelineClip = {
+        id: primaryClipId,
+        mediaId: 'generator:kinetic-hybrid-sentence',
+        trackId: '',
+        startTime: clip.startTime + sStart,
+        duration: sDuration,
+        trimStart: 0,
+        trimEnd: sDuration,
+        opacity: 1,
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        speed: 1,
+        effects: [],
+        pipWindowIds: [pipId],
+        textSettings: {
+          text: fullSentenceText,
+          fontSize: 1,
+          fontFamily: 'Inter',
+          color: 'transparent',
+          backgroundColor: 'transparent',
+          bold: false,
+          italic: false,
+          underline: false,
+          shadow: false,
+          textAlign: 'center'
+        }
+      };
+      newClips.push(primaryClip);
+
+      // Create PiP window with multi-tracks for words
+      const pipTracks: TimelineTrack[] = [];
+      const newPip: PipWindow = {
+        id: pipId,
+        parentClipId: primaryClipId,
+        relativeStartTime: 0,
+        tracks: pipTracks,
+        duration: sDuration,
+        zIndex: Object.keys(store.pipWindows || {}).length + Object.keys(newPipWindowsMap).length + 1
+      };
+
+      // Smart Non-Overlapping Layout Calculation for Sentence Words
+      const totalChars = fullSentenceText.length;
+      const fontSize = Math.min(54, Math.max(36, Math.floor(680 / Math.max(1, totalChars * 0.52))));
+      const charWidth = fontSize * 0.52;
+      const spaceWidth = fontSize * 0.35;
+      const lineHeight = fontSize * 1.35;
+      const maxLineWidth = 720; // max line width inside canvas
+
+      const lines: { word: any; width: number }[][] = [[]];
+      let currentLineWidth = 0;
+
+      grp.forEach((w) => {
+        const wWidth = Math.round(w.text.length * charWidth);
+        if (lines[lines.length - 1].length > 0 && currentLineWidth + spaceWidth + wWidth > maxLineWidth) {
+          lines.push([]);
+          currentLineWidth = 0;
+        }
+        lines[lines.length - 1].push({ word: w, width: wWidth });
+        currentLineWidth += (lines[lines.length - 1].length === 1 ? 0 : spaceWidth) + wWidth;
+      });
+
+      const totalSentenceHeight = lines.length * lineHeight;
+      const startY = -totalSentenceHeight / 2 + lineHeight / 2;
+
+      lines.forEach((line, lineIdx) => {
+        const lineW = line.reduce((sum, item) => sum + item.width, 0) + (line.length - 1) * spaceWidth;
+        let currentX = -lineW / 2;
+        const lineY = Math.round(startY + lineIdx * lineHeight);
+
+        line.forEach(({ word, width }) => {
+          const posX = Math.round(currentX + width / 2);
+          const posY = lineY;
+          currentX += width + spaceWidth;
+
+          const wordRelStart = Math.max(0, word.start - sStart);
+          // CRITICAL: End time inside PiP equals sentence duration (so words remain visible until sentence ends)
+          const wordDuration = Math.max(0.1, sDuration - wordRelStart);
+
+          const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (word.stylePreset || '').toLowerCase());
+          const wordColor = preset?.settings.color || word.color || '#fbbf24';
+
+          const wordClip: TimelineClip = {
+            id: uuidv4(),
+            mediaId: 'generator:kinetic-word',
+            trackId: '',
+            startTime: wordRelStart,
+            duration: wordDuration,
+            trimStart: 0,
+            trimEnd: wordDuration,
+            opacity: 1,
+            transform: {
+              x: posX,
+              y: posY,
+              scale: 100,
+              rotation: 0
+            },
+            speed: 1,
+            effects: [],
+            animations: {
+              'transform.scale': [
+                { time: 0, value: 135, easing: 'easeOut' },
+                { time: 0.12, value: 100, easing: 'easeOut' }
+              ],
+              'opacity': [
+                { time: 0, value: 0, easing: 'linear' },
+                { time: 0.06, value: 1, easing: 'linear' }
+              ]
+            },
+            textSettings: {
+              text: word.text,
+              fontSize: fontSize,
+              fontFamily: preset?.settings.fontFamily || word.fontFamily || 'Inter',
+              color: wordColor,
+              backgroundColor: 'transparent',
+              bold: true,
+              italic: false,
+              underline: false,
+              shadow: true,
+              shadowColor: '#000000',
+              shadowBlur: 12,
+              textAlign: 'center',
+              animation: {
+                in: word.animationIn || 'bounce',
+                out: 'fadeOut',
+                inDuration: 0.1,
+                outDuration: 0.1
+              }
+            }
+          };
+
+          const pTrackId = uuidv4();
+          wordClip.trackId = pTrackId;
+          pipTracks.push({
+            id: pTrackId,
+            name: `Word (${word.text})`,
+            type: 'text',
+            clips: [wordClip],
+            locked: false,
+            muted: false,
+            hidden: false
+          });
+        });
+      });
+
+      newPipWindowsMap[pipId] = newPip;
+    });
+  }
+
+  // Find or create a text track on the main timeline
   let textTrack = store.tracks.find(t => t.type === 'text' && !t.hidden);
   let newTracks = [...store.tracks];
 
@@ -336,13 +582,17 @@ ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
     newTracks.push(newTrack);
   }
 
-  useEditorStore.setState({ tracks: newTracks });
+  const updatedPipWindows = {
+    ...(store.pipWindows || {}),
+    ...newPipWindowsMap
+  };
+
+  useEditorStore.setState({ tracks: newTracks, pipWindows: updatedPipWindows });
   onProgress(100);
 }
 
 /**
  * Generates evenly-spaced placeholder word entries as a fallback when audio is unavailable.
- * This prevents the Groq path from hard-crashing when audio extraction fails (e.g. video-only files).
  */
 function generateFallbackTypography(duration: number, _prompt: string): any[] {
   // Estimate ~3 words per second for a typical speaker

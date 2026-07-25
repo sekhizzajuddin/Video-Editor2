@@ -69,7 +69,7 @@ export const TEXT_TEMPLATES: TextTemplatePreset[] = [
   { name: 'Retro VHS Play', style: 'text-base font-mono text-cyan-300 drop-shadow-[1px_1px_0_#e11d48]', settings: { fontSize: 24, color: '#67e8f9', shadow: true, shadowColor: '#be185d', shadowBlur: 1, fontFamily: 'Courier New' } },
   { name: 'Terminal Prompt', style: 'text-base font-mono text-green-300', settings: { fontSize: 24, color: '#86efac', fontFamily: 'Courier New' } },
 
-  // ── Social Media (41-50) ──
+  // ── Social Media & Viral Captions (41-54) ──
   { name: 'YouTube Subscribe', style: 'px-2 py-0.5 bg-red-600 text-white font-bold rounded-lg text-[10px] uppercase', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#dc2626', fontFamily: 'Roboto', animationPreset: 'subscribe' } },
   { name: 'Instagram Follow', style: 'px-2 py-0.5 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white font-bold rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#ec4899', fontFamily: 'Inter' } },
   { name: 'TikTok Handle', style: 'px-2 py-0.5 bg-black text-white font-bold border border-cyan-400 rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#000000', strokeColor: '#22d3ee', strokeWidth: 1, fontFamily: 'Oswald' } },
@@ -79,5 +79,11 @@ export const TEXT_TEMPLATES: TextTemplatePreset[] = [
   { name: 'Meme Text Bottom', style: 'text-xl font-extrabold text-white uppercase stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#ffffff', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Impact' } },
   { name: 'Comic Style', style: 'text-xl font-extrabold text-yellow-300 italic drop-shadow-[1px_1px_0_#000]', settings: { fontSize: 32, bold: true, color: '#fde047', italic: true, shadow: true, shadowColor: '#000000', shadowBlur: 1, fontFamily: 'Inter' } },
   { name: 'Glitch Cyber', style: 'text-xl font-black text-cyan-300 tracking-wide', settings: { fontSize: 32, bold: true, color: '#67e8f9', fontFamily: 'Oswald' } },
-  { name: 'Bubble Caption', style: 'px-2 py-0.5 bg-[#f8fafc] text-[#0f172a] rounded-lg border border-[#cbd5e1] text-[10px]', settings: { fontSize: 22, color: '#0f172a', backgroundColor: '#f8fafc', fontFamily: 'Inter' } }
+  { name: 'Bubble Caption', style: 'px-2 py-0.5 bg-[#f8fafc] text-[#0f172a] rounded-lg border border-[#cbd5e1] text-[10px]', settings: { fontSize: 22, color: '#0f172a', backgroundColor: '#f8fafc', fontFamily: 'Inter' } },
+
+  // ── Pro Viral Kinetic Typography Presets (45-48) ──
+  { name: 'MrBeast Hype', style: 'text-2xl font-black text-yellow-400 stroke-black stroke-[2px]', settings: { fontSize: 44, bold: true, color: '#facc15', strokeColor: '#000000', strokeWidth: 3, shadow: true, shadowColor: '#000000', shadowBlur: 10, fontFamily: 'Anton' } },
+  { name: 'Alex Hormozi Impact', style: 'px-3 py-1 bg-black text-cyan-400 font-extrabold text-2xl uppercase rounded', settings: { fontSize: 42, bold: true, color: '#00f0ff', backgroundColor: '#000000', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Impact' } },
+  { name: 'Modern Shorts Pill', style: 'px-3 py-1 bg-slate-900/90 text-white font-bold text-xl rounded-xl border border-sky-400/50', settings: { fontSize: 36, bold: true, color: '#ffffff', backgroundColor: 'rgba(15, 23, 42, 0.88)', strokeColor: '#38bdf8', strokeWidth: 1, fontFamily: 'Outfit' } },
+  { name: 'Neon Cyberpunk', style: 'text-2xl font-black text-rose-500 drop-shadow-[0_0_15px_rgba(244,63,94,0.9)]', settings: { fontSize: 42, bold: true, color: '#f43f5e', shadow: true, shadowColor: '#f43f5e', shadowBlur: 16, strokeColor: '#ffffff', strokeWidth: 1, fontFamily: 'Oswald' } }
 ];

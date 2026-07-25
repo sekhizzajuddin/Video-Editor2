@@ -44,6 +44,7 @@ import {
   Plus,
   Globe,
   Scissors,
+  FileText,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore } from '@/store/editorStore';
@@ -605,6 +606,9 @@ export function MediaPanel() {
   const [kineticTypoStyle, setKineticTypoStyle] = useState<string>('random');
   const [kineticTypoAnimation, setKineticTypoAnimation] = useState<string>('random');
   const [kineticTypoProvider, setKineticTypoProvider] = useState<'gemini' | 'groq'>('groq');
+  const [kineticTypoType, setKineticTypoType] = useState<'word' | 'sentence' | 'hybrid'>('hybrid');
+  const [referenceScript, setReferenceScript] = useState('');
+  const [showReferenceInput, setShowReferenceInput] = useState(false);
 
   // AI SFX Generator States
   const [sfxVisionProvider, setSfxVisionProvider] = useState<'gemini' | 'groq'>('gemini');
@@ -684,7 +688,9 @@ export function MediaPanel() {
           casing: englishCasing,
           styleSelection: kineticTypoStyle,
           animationSelection: kineticTypoAnimation,
-          provider: kineticTypoProvider
+          provider: kineticTypoProvider,
+          typoType: kineticTypoType,
+          referenceScript: referenceScript.trim()
         },
         (p) => setKineticTypoProgress(p)
       );
@@ -2363,6 +2369,63 @@ export function MediaPanel() {
                         <option value="groq">Groq (Faster, Advanced NLP & Timing)</option>
                         <option value="gemini">Gemini (Analyzes Scene Video Frames)</option>
                       </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
+                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center">
+                        Typography Type
+                        <span className="px-1.5 py-0.5 rounded text-[8px] bg-teal-500/20 text-teal-400 font-bold border border-teal-500/30 uppercase">
+                          {kineticTypoType}
+                        </span>
+                      </label>
+                      <select
+                        value={kineticTypoType}
+                        onChange={(e) => setKineticTypoType(e.target.value as 'word' | 'sentence' | 'hybrid')}
+                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full font-medium"
+                      >
+                        <option value="hybrid">Hybrid (Complete Sentence via PiP, Words Animate In)</option>
+                        <option value="word">Word by Word (Separate Clip Per Word)</option>
+                        <option value="sentence">Sentence by Sentence (Full Sentence Clips)</option>
+                      </select>
+                      <p className="text-[10px] text-[#888] leading-tight mt-0.5">
+                        {kineticTypoType === 'hybrid' && "Full sentence is displayed while words animate in at spoken timing using PiP multi-tracks without overlap."}
+                        {kineticTypoType === 'word' && "Individual word clips placed on timeline as each word is spoken."}
+                        {kineticTypoType === 'sentence' && "Complete sentence text clips added to timeline for each spoken sentence."}
+                      </p>
+                    </div>
+
+                    {/* Reference Script Input (Optional Ground-Truth Text) */}
+                    <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
+                      <div className="flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setShowReferenceInput(!showReferenceInput)}
+                          className="text-xs text-teal-400 hover:text-teal-300 font-semibold flex items-center gap-1.5 focus:outline-none transition-colors"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          {showReferenceInput ? 'Hide Reference Script' : '+ Add Reference Script (Optional)'}
+                        </button>
+                        {referenceScript.trim() && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 font-mono">
+                            Script Added
+                          </span>
+                        )}
+                      </div>
+
+                      {showReferenceInput && (
+                        <div className="space-y-1.5 animate-fadeIn">
+                          <textarea
+                            value={referenceScript}
+                            onChange={(e) => setReferenceScript(e.target.value)}
+                            placeholder="Paste or type your exact ground-truth transcript/script here..."
+                            rows={3}
+                            className="w-full bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 font-mono resize-none"
+                          />
+                          <p className="text-[10px] text-[#888] leading-tight">
+                            Provides exact ground-truth words to AI. Helps if audio has strong accents or background noise so timeline text uses your exact words.
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     {(kineticTypoScript === 'english' || kineticTypoScript === 'roman_urdu_hindi') && (
