@@ -4,3 +4,4 @@ export { VolumeSection } from './VolumeSection';
 export { PanSection } from './PanSection';
 export { EQSection } from './EQSection';
 export { AutoVoiceTuneSection } from './AutoVoiceTuneSection';
+export { AutoDuckingSection } from './AutoDuckingSection';

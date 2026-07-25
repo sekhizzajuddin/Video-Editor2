@@ -9,10 +9,12 @@ import {
   BlurSection,
   FadedFilmSection,
   VignetteSection,
+  ColorGradeTransferSection,
 } from './color';
 
 interface ColorTabProps {
   selectedClip: TimelineClip;
+  selectedClipIds?: string[];
   TimelineClipFilters: any;
   collapsedSections: Record<string, boolean>;
   toggleSection: (section: string) => void;
@@ -22,6 +24,8 @@ interface ColorTabProps {
 }
 
 export function ColorTab({
+  selectedClip,
+  selectedClipIds = [],
   TimelineClipFilters,
   collapsedSections,
   toggleSection,
@@ -31,6 +35,11 @@ export function ColorTab({
 }: ColorTabProps) {
   return (
     <div className="space-y-3">
+      <ColorGradeTransferSection
+        selectedClip={selectedClip}
+        selectedClipIds={selectedClipIds}
+      />
+
       <ColorSectionContainer
         title="Basic Correction"
         sectionKey="colorBasic"

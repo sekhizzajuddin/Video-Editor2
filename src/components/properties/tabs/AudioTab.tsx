@@ -5,6 +5,7 @@ import {
   PanSection,
   EQSection,
   AutoVoiceTuneSection,
+  AutoDuckingSection,
 } from './audio';
 
 interface AudioTabProps {
@@ -85,6 +86,11 @@ export function AudioTab({
         selectedClipIds={selectedClipIds}
         isAnalyzingVoice={isAnalyzingVoice}
         handleAutoVoiceTune={handleAutoVoiceTune}
+      />
+
+      <AutoDuckingSection
+        selectedClip={selectedClip}
+        handleAudioChange={handleAudioChange}
       />
     </div>
   );

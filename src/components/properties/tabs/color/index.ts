@@ -8,3 +8,4 @@ export { BlurSection } from './BlurSection';
 export { FadedFilmSection } from './FadedFilmSection';
 export { VignetteSection } from './VignetteSection';
 export { ColorSectionContainer } from './ColorSectionContainer';
+export { ColorGradeTransferSection } from './ColorGradeTransferSection';

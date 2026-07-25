@@ -123,6 +123,13 @@ export interface ClipAudioSettings {
   compression?: number; // 0 to 100 (default 0) — Dynamic range compression %
   deEsser?: number;     // 0 to 100 (default 0) — Sibilance reduction %
   warmth?: number;      // -100 to 100 (default 0) — Low-mid warmth/body
+  // AI Auto Audio Ducking (Music vs Voice Sync)
+  ducking?: {
+    enabled: boolean;
+    duckVolume: number;   // 5 to 50% (default 20% background volume during speech)
+    fadeDuration: number; // 100 to 500 ms (default 200 ms)
+    threshold?: number;   // sensitivity threshold
+  };
   // AI Vocal / BGM Separation (Demucs)
   aiVocalSeparation?: {
     isProcessed: boolean;   // True if AI has generated the stems
@@ -411,6 +418,7 @@ export interface TimelineClip {
   lumaKey?: ClipLumaKeySettings;
   kenBurns?: ClipKenBurnsSettings;
   lut?: ClipLutSettings;
+  lutFilter?: ClipLutSettings;
   mask?: ClipMaskSettings;
   pipWindowIds?: string[]; // Array of PIP window IDs attached to this clip
   // Sequencer / Interpolation (Gap #2 + #3)
