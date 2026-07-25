@@ -177,6 +177,13 @@ interface EditorActions {
   setAIVideoGenerationState: (state: any) => void;
   setScopeSettings: (settings: ScopeSettings) => void;
   setMuteTimelineAudio: (mute: boolean) => void;
+  setProjectFileHandle: (handle: any) => void;
+  addOrUpdateVirtualCameraKeyframe: (time: number, x: number, y: number, scale?: number) => void;
+  setVirtualCameraEnabled: (enabled: boolean) => void;
+  setVirtualCameraAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
+  copyColorGrade: (clipId: string) => void;
+  pasteColorGrade: (clipId: string) => void;
+  applyColorGradeToAll: (clipId: string) => void;
   // Media Library
   addMedia: (item: MediaItem, file?: File) => void;
   removeMedia: (id: string) => void;
@@ -374,6 +381,7 @@ const initialState: EditorState = {
   pipWindows: {},
   sequences: [],
   activePipWindowId: null,
+  colorClipboard: null,
   selectedTransitionClipId: null,
   selectedKeyframeLines: [],
   selectedTrackId: null,
@@ -3122,7 +3130,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Project
   setProjectInfo: (id, name) => set({ projectId: id, projectName: name }),
-  setProjectFileHandle: (handle) => set({ projectFileHandle: handle }),
+  setProjectFileHandle: (handle: any) => set({ projectFileHandle: handle }),
   resetProject: async (clearDB = false) => {
     if (saveTimeoutId) {
       clearTimeout(saveTimeoutId);
@@ -3887,7 +3895,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().recalcTotalDuration();
   },
 
-  copyColorGrade: (clipId) => {
+  copyColorGrade: (clipId: string) => {
     const state = get();
     let clip: any = null;
     for (const track of state.tracks) {
@@ -3912,7 +3920,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
   },
 
-  pasteColorGrade: (clipId) => {
+  pasteColorGrade: (clipId: string) => {
     const state = get();
     const clipboard = state.colorClipboard;
     if (!clipboard) return;
@@ -3938,7 +3946,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Paste Color Grade');
   },
 
-  applyColorGradeToAll: (sourceClipId) => {
+  applyColorGradeToAll: (sourceClipId: string) => {
     const state = get();
     let sourceClip: any = null;
     for (const track of state.tracks) {

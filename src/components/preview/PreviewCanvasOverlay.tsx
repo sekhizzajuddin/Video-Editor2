@@ -457,8 +457,8 @@ export function PreviewCanvasOverlay({
       }
       
       if (dragState.type === 'virtualCamera') {
-        const dx = (clientX - dragState.startX) / (viewport.zoom * 854);
-        const dy = (clientY - dragState.startY) / (viewport.zoom * 480);
+        const dx = (e.clientX - dragState.startX) / (viewport.zoom * 854);
+        const dy = (e.clientY - dragState.startY) / (viewport.zoom * 480);
         const newX = dragState.initVirtualCamera!.x + dx;
         const newY = dragState.initVirtualCamera!.y + dy;
         addOrUpdateVirtualCameraKeyframe(currentTime, newX, newY);
