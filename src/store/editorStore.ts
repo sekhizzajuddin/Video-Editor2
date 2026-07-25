@@ -2958,9 +2958,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(snapshot);
+      const trimmedHistory = newHistory.slice(-50);
       return {
-        history: newHistory.slice(-50),
-        historyIndex: newHistory.length - 1,
+        history: trimmedHistory,
+        historyIndex: trimmedHistory.length - 1,
       };
     });
     // Debounced auto-save to IndexedDB

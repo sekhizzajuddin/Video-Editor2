@@ -144,39 +144,41 @@ async function renderTimelineAudioToWav(
   const audioCtx = new AudioContext();
   let decodedCount = 0;
 
-  for (const clip of clips) {
-    const media = mediaLibrary.find(m => m.id === clip.mediaId);
-    if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
+  try {
+    for (const clip of clips) {
+      const media = mediaLibrary.find(m => m.id === clip.mediaId);
+      if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
 
-    try {
-      const resp = await fetch(media.url);
-      const arrayBuf = await resp.arrayBuffer();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+      try {
+        const resp = await fetch(media.url);
+        const arrayBuf = await resp.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
 
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.playbackRate.value = clip.speed;
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.playbackRate.value = clip.speed;
 
-      const gainNode = ctx.createGain();
-      const clipVolume = clip.audioSettings?.muted ? 0 : (clip.audioSettings?.volume !== undefined ? Math.pow(10, clip.audioSettings.volume / 20) : 1.0);
-      gainNode.gain.value = clipVolume * clip.trackVolume;
+        const gainNode = ctx.createGain();
+        const clipVolume = clip.audioSettings?.muted ? 0 : (clip.audioSettings?.volume !== undefined ? Math.pow(10, clip.audioSettings.volume / 20) : 1.0);
+        gainNode.gain.value = clipVolume * clip.trackVolume;
 
-      source.connect(gainNode);
-      gainNode.connect(ctx.destination);
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
 
-      const offsetInSource = clip.trimStart;
-      const duration = clip.duration;
+        const offsetInSource = clip.trimStart;
+        const duration = clip.duration;
+        
+        source.start(clip.startTime, offsetInSource, duration * clip.speed);
+      } catch (e) {
+        console.warn('Failed to decode audio for clip:', clip.id, e);
+      }
       
-      source.start(clip.startTime, offsetInSource, duration * clip.speed);
-    } catch (e) {
-      console.warn('Failed to decode audio for clip:', clip.id, e);
+      decodedCount++;
+      onProgress(Math.floor((decodedCount / clips.length) * 80));
     }
-    
-    decodedCount++;
-    onProgress(Math.floor((decodedCount / clips.length) * 80));
+  } finally {
+    await audioCtx.close().catch(() => {});
   }
-  
-  audioCtx.close();
 
   onProgress(85);
   const renderedBuffer = await ctx.startRendering();
