@@ -454,6 +454,11 @@ const initialState: EditorState = {
   aiVideoResultUrl: null,
   perRatioFramingEnabled: true,
   perRatioFraming: {},
+  virtualCamera: {
+    enabled: false,
+    aspectRatio: '9:16',
+    keyframes: { '16:9': [], '9:16': [], '1:1': [], '4:3': [] },
+  },
 };
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
@@ -498,6 +503,23 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setScopeSettings: (settings: ScopeSettings) => set({ scopeSettings: settings }),
 
   setPerRatioFramingEnabled: (enabled: boolean) => set({ perRatioFramingEnabled: enabled }),
+  setVirtualCameraEnabled: (enabled: boolean) => set((state) => ({ virtualCamera: { ...state.virtualCamera, enabled } })),
+  setVirtualCameraAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => set((state) => ({ virtualCamera: { ...state.virtualCamera, aspectRatio: ratio } })),
+  addOrUpdateVirtualCameraKeyframe: (time: number, x: number, y: number, scale?: number) => set((state) => {
+    const ratio = state.virtualCamera.aspectRatio;
+    const currentKeyframes = state.virtualCamera.keyframes[ratio] || [];
+    const existing = currentKeyframes.find(k => Math.abs(k.time - time) < 0.05);
+    let newKeyframes = [...currentKeyframes];
+    if (existing) {
+      const idx = newKeyframes.indexOf(existing);
+      newKeyframes[idx] = { ...existing, x, y };
+      if (scale !== undefined) newKeyframes[idx].scale = scale;
+    } else {
+      newKeyframes.push({ time, x, y, scale });
+      newKeyframes.sort((a, b) => a.time - b.time);
+    }
+    return { virtualCamera: { ...state.virtualCamera, keyframes: { ...state.virtualCamera.keyframes, [ratio]: newKeyframes } } };
+  }),
   updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => {
     set((state) => {
       const ratioFraming = state.perRatioFraming[ratio] || {};
@@ -3845,6 +3867,102 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedClipIds: []
     });
     get().recalcTotalDuration();
+  },
+
+  copyColorGrade: (clipId) => {
+    const state = get();
+    let clip: any = null;
+    for (const track of state.tracks) {
+      clip = track.clips.find(c => c.id === clipId);
+      if (clip) break;
+    }
+    if (!clip && state.pipWindows) {
+      for (const pipId in state.pipWindows) {
+        for (const track of state.pipWindows[pipId].tracks) {
+          clip = track.clips.find(c => c.id === clipId);
+          if (clip) break;
+        }
+        if (clip) break;
+      }
+    }
+    if (!clip) return;
+    set({
+      colorClipboard: {
+        colorFilters: clip.colorFilters ? JSON.parse(JSON.stringify(clip.colorFilters)) : undefined,
+        lutFilter: clip.lutFilter ? JSON.parse(JSON.stringify(clip.lutFilter)) : undefined,
+      }
+    });
+  },
+
+  pasteColorGrade: (clipId) => {
+    const state = get();
+    const clipboard = state.colorClipboard;
+    if (!clipboard) return;
+
+    set((s) => ({
+      tracks: mapTracksDeep(s, (track, pipId) => {
+        return {
+          ...track,
+          clips: track.clips.map(c => {
+            if (c.id === clipId) {
+              return {
+                ...c,
+                colorFilters: clipboard.colorFilters ? JSON.parse(JSON.stringify(clipboard.colorFilters)) : c.colorFilters,
+                lutFilter: clipboard.lutFilter ? JSON.parse(JSON.stringify(clipboard.lutFilter)) : c.lutFilter,
+              };
+            }
+            return c;
+          })
+        };
+      }).tracks,
+      pipWindows: mapTracksDeep(s, (track, pipId) => track).pipWindows
+    }));
+    get().saveSnapshot('Paste Color Grade');
+  },
+
+  applyColorGradeToAll: (sourceClipId) => {
+    const state = get();
+    let sourceClip: any = null;
+    for (const track of state.tracks) {
+      sourceClip = track.clips.find(c => c.id === sourceClipId);
+      if (sourceClip) break;
+    }
+    if (!sourceClip && state.pipWindows) {
+      for (const pipId in state.pipWindows) {
+        for (const track of state.pipWindows[pipId].tracks) {
+          sourceClip = track.clips.find(c => c.id === sourceClipId);
+          if (sourceClip) break;
+        }
+        if (sourceClip) break;
+      }
+    }
+    if (!sourceClip) return;
+    
+    const colorFilters = sourceClip.colorFilters ? JSON.parse(JSON.stringify(sourceClip.colorFilters)) : undefined;
+    const lutFilter = sourceClip.lutFilter ? JSON.parse(JSON.stringify(sourceClip.lutFilter)) : undefined;
+
+    set((s) => ({
+      tracks: mapTracksDeep(s, (track, pipId) => {
+        return {
+          ...track,
+          clips: track.clips.map(c => {
+            // Only apply to video/image clips, skipping audio/text
+            const media = s.mediaLibrary.find(m => m.id === c.mediaId);
+            const isVisual = media && (media.type === 'video' || media.type === 'image' || media.type === 'compound');
+            if (isVisual) {
+              return {
+                ...c,
+                colorFilters: colorFilters ? JSON.parse(JSON.stringify(colorFilters)) : c.colorFilters,
+                lutFilter: lutFilter ? JSON.parse(JSON.stringify(lutFilter)) : c.lutFilter,
+              };
+            }
+            return c;
+          })
+        };
+      }).tracks,
+      pipWindows: mapTracksDeep(s, (track, pipId) => track).pipWindows
+    }));
+    get().saveSnapshot('Apply Color Grade to All');
   }
 }));
 

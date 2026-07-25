@@ -50,6 +50,8 @@ export function PreviewCanvasOverlay({
   const useProxies = useEditorStore(s => s.useProxies);
   const activePropertiesTab = useEditorStore(s => s.activePropertiesTab);
   const storeUpdateClip = useEditorStore(s => s.updateClip);
+  const virtualCamera = useEditorStore(s => s.virtualCamera);
+  const addOrUpdateVirtualCameraKeyframe = useEditorStore(s => s.addOrUpdateVirtualCameraKeyframe);
 
   const { tracks, pipWindows, mediaLibrary } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
@@ -71,6 +73,7 @@ export function PreviewCanvasOverlay({
     baseH?: number;
     initCorners?: LocalCornerPoints;
     initMask?: any;
+    initVirtualCamera?: { x: number; y: number };
   } | null>(null);
   
   const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
@@ -450,6 +453,15 @@ export function PreviewCanvasOverlay({
           },
           animations
         });
+        return;
+      }
+      
+      if (dragState.type === 'virtualCamera') {
+        const dx = (clientX - dragState.startX) / (viewport.zoom * 854);
+        const dy = (clientY - dragState.startY) / (viewport.zoom * 480);
+        const newX = dragState.initVirtualCamera!.x + dx;
+        const newY = dragState.initVirtualCamera!.y + dy;
+        addOrUpdateVirtualCameraKeyframe(currentTime, newX, newY);
         return;
       }
 
@@ -1017,7 +1029,102 @@ export function PreviewCanvasOverlay({
     return canvas.toDataURL();
   }, [selectionMask, mediaItem]);
 
-  if (!activeClip) return null;
+  const renderVirtualCamera = () => {
+    if (!virtualCamera.enabled) return null;
+    const currentCamPos = { x: 0, y: 0 };
+    const currentKeyframes = virtualCamera.keyframes[virtualCamera.aspectRatio] || [];
+    if (currentKeyframes.length > 0) {
+      const sorted = [...currentKeyframes].sort((a, b) => a.time - b.time);
+      let before = sorted[0];
+      let after = sorted[sorted.length - 1];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (sorted[i].time <= currentTime && sorted[i + 1].time >= currentTime) {
+          before = sorted[i];
+          after = sorted[i + 1];
+          break;
+        }
+      }
+      if (before === after || currentTime <= before.time) {
+        currentCamPos.x = before.x;
+        currentCamPos.y = before.y;
+      } else if (currentTime >= after.time) {
+        currentCamPos.x = after.x;
+        currentCamPos.y = after.y;
+      } else {
+        const t = (currentTime - before.time) / (after.time - before.time);
+        currentCamPos.x = before.x + (after.x - before.x) * t;
+        currentCamPos.y = before.y + (after.y - before.y) * t;
+      }
+    }
+    
+    let targetW = 854;
+    let targetH = 480;
+    if (virtualCamera.aspectRatio === '9:16') {
+      targetW = 480 * (9/16);
+      targetH = 480;
+    } else if (virtualCamera.aspectRatio === '1:1') {
+      targetW = 480;
+      targetH = 480;
+    } else if (virtualCamera.aspectRatio === '4:3') {
+      targetW = 480 * (4/3);
+      targetH = 480;
+    }
+    
+    const absX = (currentCamPos.x * 854) + 427;
+    const absY = (currentCamPos.y * 480) + 240;
+
+    return (
+      <g 
+        transform={`translate(${absX}, ${absY}) scale(${viewport.zoom})`}
+        className="pointer-events-auto cursor-move focus:outline-none"
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          setDragState({
+            type: 'virtualCamera',
+            startX: e.clientX,
+            startY: e.clientY,
+            initTransform: {},
+            initCrop: {},
+            initVirtualCamera: { x: currentCamPos.x, y: currentCamPos.y }
+          });
+        }}
+      >
+        <rect
+          x={-targetW / 2}
+          y={-targetH / 2}
+          width={targetW}
+          height={targetH}
+          fill="transparent"
+          stroke="transparent"
+          strokeWidth={20 / viewport.zoom}
+        />
+        <rect
+          x={-targetW / 2}
+          y={-targetH / 2}
+          width={targetW}
+          height={targetH}
+          fill="rgba(251, 191, 36, 0.05)"
+          stroke="#fbbf24"
+          strokeWidth={2 / viewport.zoom}
+          strokeDasharray="8,4"
+        />
+        <circle cx="0" cy="0" r={4 / viewport.zoom} fill="#fbbf24" />
+      </g>
+    );
+  };
+
+  if (!activeClip) {
+    if (!virtualCamera.enabled) return null;
+    return (
+      <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
+        <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
+          <g transform={`translate(${854 / 2 + viewport.x - 854 / 2 * viewport.zoom}, ${480 / 2 + viewport.y - 480 / 2 * viewport.zoom})`}>
+            {renderVirtualCamera()}
+          </g>
+        </svg>
+      </div>
+    );
+  }
 
   let viewW = 854;
   let viewH = 480;
@@ -1523,6 +1630,8 @@ export function PreviewCanvasOverlay({
                         opacity={0.6}
                       />
                     </g>
+                    
+
 
                     {mask.type === 'rectangle' && (
                       <circle
@@ -1737,6 +1846,11 @@ export function PreviewCanvasOverlay({
               />
             ))}
           </g>
+
+          <g transform={`translate(${totalX - viewport.x}, ${totalY - viewport.y})`}>
+            {renderVirtualCamera()}
+          </g>
+          
           <defs>
             <style>{`
               @keyframes marching-ants {

@@ -38,6 +38,7 @@ import { compileStoryboard } from '@/utils/storyboardCompiler';
 import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini, AIMotionGraphicSuggestion } from '@/utils/aiClient';
 import { searchFreesound } from '@/utils/audioSearchClient';
 import { aiVocalSeparator } from '@/utils/aiVocalSeparator';
+import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
 import { AiSoundDesigner } from '@/components/AiSoundDesigner';
 import { AiMotionGraphicsDesigner } from '@/components/AiMotionGraphicsDesigner';
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
@@ -278,6 +279,10 @@ export function PropertiesPanel() {
     updateSubtitle,
     deleteSubtitle,
     selectSubtitle,
+    colorClipboard,
+    copyColorGrade,
+    pasteColorGrade,
+    applyColorGradeToAll,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     selectedClipId: s.selectedClipId,
@@ -308,6 +313,10 @@ export function PropertiesPanel() {
     updateSubtitle: s.updateSubtitle,
     deleteSubtitle: s.deleteSubtitle,
     selectSubtitle: s.selectSubtitle,
+    colorClipboard: s.colorClipboard,
+    copyColorGrade: s.copyColorGrade,
+    pasteColorGrade: s.pasteColorGrade,
+    applyColorGradeToAll: s.applyColorGradeToAll,
   })));
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
@@ -332,6 +341,8 @@ export function PropertiesPanel() {
   const [freesoundApiKey, setFreesoundApiKey] = useState(() => sessionStorage.getItem('procut_freesound_key') || '');
 
   const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
+  const [isDuckingAudio, setIsDuckingAudio] = useState(false);
+  const [duckingProgress, setDuckingProgress] = useState(0);
   const [audioAnalyzeProgress, setAudioAnalyzeProgress] = useState('');
   const [soundDesignerCues, setSoundDesignerCues] = useState<any[] | null>(null);
   const [showSoundDesigner, setShowSoundDesigner] = useState(false);
@@ -342,12 +353,41 @@ export function PropertiesPanel() {
   const [motionGraphicsSuggestions, setMotionGraphicsSuggestions] = useState<AIMotionGraphicSuggestion[] | null>(null);
   const [showMotionGraphicsDesigner, setShowMotionGraphicsDesigner] = useState(false);
 
+  const handleAudioDucking = async () => {
+    if (!selectedClip || !selectedClip.mediaId) return;
+    setIsDuckingAudio(true);
+    setDuckingProgress(0);
+    
+    try {
+      // Find all clips currently on the main timeline
+      // Also include pip windows if necessary, but we'll stick to main timeline tracks for now.
+      const allClips = tracks.flatMap(t => t.clips || []);
+      const keyframes = await analyzeAndDuckAudio(selectedClip, allClips, mediaLibrary, 0.3, (p) => {
+        setDuckingProgress(Math.round(p));
+      });
+      
+      if (keyframes && keyframes.length > 0) {
+        // Apply keyframes
+        const updatedAnimations = { ...selectedClip.animations, 'audio.volume': keyframes };
+        storeUpdateClip(selectedClip.id, { animations: updatedAnimations });
+        alert(`Successfully generated ducking volume keyframes based on ${keyframes.length} anchor points.`);
+      } else {
+        alert("No overlapping audio clips with vocals detected. Ducking not required.");
+      }
+    } catch (e: any) {
+      console.error("Error generating audio ducking:", e);
+      alert("Failed to analyze audio for ducking.");
+    } finally {
+      setIsDuckingAudio(false);
+    }
+  };
+
   const handleAiSoundDesign = async () => {
     if (!selectedClip) return;
 
     const videoEl = videoElements.get(selectedClip.id);
     if (!videoEl) {
-      toast.error('Video player is not loaded yet. Try seeking or playing first.');
+      alert('Video player is not loaded yet. Try seeking or playing first.');
       return;
     }
 
@@ -3704,6 +3744,36 @@ export function PropertiesPanel() {
 
         {activePropertiesTab === 'color' && (
           <div className="space-y-3">
+            {selectedClip && (
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2 flex items-center justify-between gap-2">
+                <div className="flex gap-2 w-full">
+                  <button
+                    onClick={() => copyColorGrade(selectedClip.id)}
+                    className="flex-1 px-2 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-xs text-white rounded transition-colors"
+                  >
+                    Copy Grade
+                  </button>
+                  <button
+                    onClick={() => pasteColorGrade(selectedClip.id)}
+                    disabled={!colorClipboard}
+                    className="flex-1 px-2 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] disabled:bg-[#1a1a1a] disabled:text-[#666] text-xs text-white rounded transition-colors"
+                  >
+                    Paste Grade
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Apply this clip's color grade to all other video/image clips?")) {
+                        applyColorGradeToAll(selectedClip.id);
+                      }
+                    }}
+                    className="flex-1 px-2 py-1.5 bg-amber-600/20 hover:bg-amber-600/40 text-amber-500 border border-amber-600/30 text-xs rounded transition-colors"
+                  >
+                    Apply to All
+                  </button>
+                </div>
+              </div>
+            )}
+            
             {/* Basic Correction Section */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
@@ -5082,6 +5152,41 @@ export function PropertiesPanel() {
 
         {activePropertiesTab === 'audio' && (
           <div className="space-y-3">
+            {/* AI Auto Audio Ducking */}
+            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
+              <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs text-white font-semibold">AI Auto Audio Ducking</span>
+                </div>
+                <p className="text-[11px] text-[#90e0b0]">
+                  Analyze parallel clips for vocals using Demucs AI, and automatically generate ducking volume keyframes on this clip.
+                </p>
+
+                {isDuckingAudio ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                    <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
+                    <span className="text-[10px] text-emerald-400 font-medium">
+                      Separating and Analyzing Vocals ({duckingProgress}%)...
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleAudioDucking}
+                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Analyze & Duck Audio
+                  </button>
+                )}
+                
+                {selectedClip.animations?.['audio.volume'] && selectedClip.animations['audio.volume'].length > 0 && (
+                  <p className="text-[9px] text-emerald-400 mt-2 text-center">
+                    ✓ Volume keyframes applied. You can remove them using the Volume keyframe clear button below.
+                  </p>
+                )}
+              </div>
+            )}
+            
             {/* AI Sound Designer */}
             {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
               <div className="bg-amber-950/20 border border-amber-500/30 rounded p-3 space-y-3">

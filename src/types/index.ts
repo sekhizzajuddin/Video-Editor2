@@ -537,6 +537,19 @@ export interface SubtitleItem {
 }
 
 // Editor State
+export interface VirtualCameraKeyframe {
+  time: number;
+  x: number;
+  y: number;
+  scale?: number;
+}
+
+export interface VirtualCamera {
+  enabled: boolean;
+  aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
+  keyframes: Record<'16:9' | '9:16' | '1:1' | '4:3', VirtualCameraKeyframe[]>;
+}
+
 export interface EditorState {
   projectId: string;
   projectName: string;
@@ -578,6 +591,7 @@ export interface EditorState {
   aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
   perRatioFramingEnabled: boolean;
   perRatioFraming: Record<string, Record<string, { x: number; y: number; scale?: number }>>;
+  virtualCamera: VirtualCamera;
 
   // Timeline Zoom & Scroll
   zoomLevel: number;     // pixels per second
@@ -585,6 +599,7 @@ export interface EditorState {
 
   // Tools
   activeTool: EditorTool;
+  colorClipboard: { colorFilters?: ClipColorFilters; lutFilter?: ClipLutSettings } | null;
 
   // UI State
   showProgressBar: boolean;
@@ -671,7 +686,9 @@ export interface EditorActions {
   setScopeSettings: (settings: ScopeSettings) => void;
   setPerRatioFramingEnabled: (enabled: boolean) => void;
   updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => void;
-  setMuteTimelineAudio: (mute: boolean) => void;
+  setVirtualCameraEnabled: (enabled: boolean) => void;
+  setVirtualCameraAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
+  addOrUpdateVirtualCameraKeyframe: (time: number, x: number, y: number, scale?: number) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
   setProjectInfo: (id: string, name: string) => void;
   resetProject: () => void;
@@ -691,6 +708,10 @@ export interface EditorActions {
   addTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx', mediaId: string, startTime: number, duration: number) => void;
   removeTrackFromPip: (pipId: string, trackId: string) => void;
   reorderPipTrack: (pipId: string, trackIndex: number, direction: 'up' | 'down') => void;
+  
+  copyColorGrade: (clipId: string) => void;
+  pasteColorGrade: (clipId: string) => void;
+  applyColorGradeToAll: (sourceClipId: string) => void;
 }
 
 export interface EditorSnapshot {

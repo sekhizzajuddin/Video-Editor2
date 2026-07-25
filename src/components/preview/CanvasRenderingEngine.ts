@@ -201,6 +201,40 @@ export async function renderCanvasEngine({
 
   ctx.translate(offsetX, offsetY);
 
+  // --- Virtual Camera Pan & Scan ---
+  const virtualCamera = useEditorStore.getState().virtualCamera;
+  if (isExporting && virtualCamera?.enabled) {
+    let camX = 0;
+    let camY = 0;
+    const currentKeyframes = virtualCamera.keyframes[aspectRatio as '16:9' | '9:16' | '1:1' | '4:3'] || [];
+    if (currentKeyframes.length > 0) {
+      const sorted = [...currentKeyframes].sort((a, b) => a.time - b.time);
+      let before = sorted[0];
+      let after = sorted[sorted.length - 1];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (sorted[i].time <= currentTime && sorted[i + 1].time >= currentTime) {
+          before = sorted[i];
+          after = sorted[i + 1];
+          break;
+        }
+      }
+      if (before === after || currentTime <= before.time) {
+        camX = before.x;
+        camY = before.y;
+      } else if (currentTime >= after.time) {
+        camX = after.x;
+        camY = after.y;
+      } else {
+        const t = (currentTime - before.time) / (after.time - before.time);
+        camX = before.x + (after.x - before.x) * t;
+        camY = before.y + (after.y - before.y) * t;
+      }
+    }
+    // Shift the world opposite to the camera's movement to keep the framed region in the center crop box
+    ctx.translate(-camX * 854, -camY * 480);
+  }
+  // ---------------------------------
+
   const videoTracks = tracks
     .filter((t) => t.type === 'video' && !t.hidden)
     .sort((a, b) => {
@@ -753,6 +787,16 @@ export async function renderCanvasEngine({
           oCtx.filter = 'none';
 
           if (!skipExpensiveFX) {
+            if (clip.aiBackground?.enabled) {
+              await applyAiBackgroundMask(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                sourceElement,
+                clip.aiBackground.edgeBlur ?? 0,
+                clip.aiBackground.modelSelection ?? 0
+              );
+            }
             if (clip.chromaKey?.enabled) {
               applyChromaKeyOnData(
                 oCtx,
@@ -832,12 +876,181 @@ export async function renderCanvasEngine({
     } else if (mediaItem.type === 'text' || clip.textSettings || clip.mediaId === 'text-placeholder') {
       anyClipDrawn = true;
       const ts = clip.textSettings || { text: 'Text', fontSize: 48, fontFamily: 'sans-serif', color: '#ffffff' };
+      
+      // Calculate animation progress (0.0 to 1.0)
+      let animScaleX = 1;
+      let animScaleY = 1;
+      let animOpacity = 1;
+      let animOffsetX = 0;
+      let animOffsetY = 0;
+      
+      if (ts.animation) {
+        const inDuration = ts.animation.inDuration || 0.1;
+        const outDuration = ts.animation.outDuration || 0.1;
+        
+        const timeSinceStart = currentTime - clip.startTime;
+        const timeUntilEnd = (clip.startTime + clip.duration) - currentTime;
+        
+        // Handle IN animation
+        if (timeSinceStart < inDuration && timeSinceStart >= 0) {
+          const progress = timeSinceStart / inDuration; // 0 to 1
+          
+          switch (ts.animation.in) {
+            case 'fadeIn':
+              animOpacity = progress;
+              break;
+            case 'zoom':
+              animScaleX = progress;
+              animScaleY = progress;
+              animOpacity = progress;
+              break;
+            case 'bounce':
+              animScaleX = animScaleY = 1 - Math.cos(progress * Math.PI * 2) * (1 - progress) * 0.5;
+              break;
+            case 'slideUp':
+              animOffsetY = (1 - progress) * 100;
+              animOpacity = progress;
+              break;
+            case 'slideDown':
+              animOffsetY = -(1 - progress) * 100;
+              animOpacity = progress;
+              break;
+            case 'slideLeft':
+              animOffsetX = (1 - progress) * 100;
+              animOpacity = progress;
+              break;
+            case 'slideRight':
+              animOffsetX = -(1 - progress) * 100;
+              animOpacity = progress;
+              break;
+            case 'elastic':
+              const p = progress;
+              animScaleX = animScaleY = Math.pow(2, -10 * p) * Math.sin((p * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+              break;
+            case 'scaleFlip':
+              animScaleY = progress;
+              break;
+            case 'zoomBlur':
+              animScaleX = animScaleY = 1 + (1 - progress); 
+              animOpacity = progress;
+              break;
+          }
+        } 
+        // Handle OUT animation
+        else if (timeUntilEnd < outDuration && timeUntilEnd >= 0) {
+          const progress = 1 - (timeUntilEnd / outDuration); // 0 to 1
+          
+          switch (ts.animation.out) {
+            case 'fadeOut':
+              animOpacity = 1 - progress;
+              break;
+            case 'zoom':
+              animScaleX = 1 - progress;
+              animScaleY = 1 - progress;
+              animOpacity = 1 - progress;
+              break;
+            case 'slideUp':
+              animOffsetY = -(progress * 100);
+              animOpacity = 1 - progress;
+              break;
+            case 'slideDown':
+              animOffsetY = progress * 100;
+              animOpacity = 1 - progress;
+              break;
+            case 'slideLeft':
+              animOffsetX = -(progress * 100);
+              animOpacity = 1 - progress;
+              break;
+            case 'slideRight':
+              animOffsetX = progress * 100;
+              animOpacity = 1 - progress;
+              break;
+          }
+        }
+      }
+
       ctx.save();
-      ctx.font = `${ts.fontSize || 48}px ${ts.fontFamily || 'sans-serif'}`;
-      ctx.fillStyle = ts.color || '#ffffff';
+      ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+      ctx.translate(animOffsetX, animOffsetY);
+      ctx.scale(animScaleX, animScaleY);
+
+      const fontStyle = [];
+      if (ts.italic) fontStyle.push('italic');
+      if (ts.bold) fontStyle.push('bold');
+      
+      const fontWeightStyle = fontStyle.join(' ');
+      ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${ts.fontSize || 48}px ${ts.fontFamily || 'sans-serif'}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(ts.text || 'Text', 0, 0);
+      
+      let textToRender = ts.text || 'Text';
+      if (ts.animation && ts.animation.in === 'typewriter') {
+         const inDuration = ts.animation.inDuration || 0.1;
+         const timeSinceStart = currentTime - clip.startTime;
+         if (timeSinceStart < inDuration && timeSinceStart >= 0) {
+            const progress = timeSinceStart / inDuration;
+            const charsToShow = Math.ceil(textToRender.length * progress);
+            textToRender = textToRender.substring(0, charsToShow);
+         }
+      }
+
+      const metrics = ctx.measureText(textToRender);
+      const textWidth = metrics.width;
+      const textHeight = ts.fontSize || 48;
+      const paddingX = textHeight * 0.5;
+      const paddingY = textHeight * 0.3;
+
+      if (ts.backgroundColor && ts.backgroundColor !== 'transparent') {
+        ctx.fillStyle = ts.backgroundColor;
+        const bgX = -(textWidth / 2) - paddingX;
+        const bgY = -(textHeight / 2) - paddingY;
+        const bgW = textWidth + paddingX * 2;
+        const bgH = textHeight + paddingY * 2;
+        const radius = Math.min(8, bgH / 4);
+        
+        ctx.beginPath();
+        ctx.moveTo(bgX + radius, bgY);
+        ctx.lineTo(bgX + bgW - radius, bgY);
+        ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
+        ctx.lineTo(bgX + bgW, bgY + bgH - radius);
+        ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
+        ctx.lineTo(bgX + radius, bgY + bgH);
+        ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
+        ctx.lineTo(bgX, bgY + radius);
+        ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      if (ts.shadow) {
+        ctx.shadowColor = ts.shadowColor || 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = ts.shadowBlur !== undefined ? ts.shadowBlur : 10;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
+      } else {
+        ctx.shadowColor = 'transparent';
+      }
+
+      if (ts.strokeColor && ts.strokeWidth) {
+        ctx.strokeStyle = ts.strokeColor;
+        ctx.lineWidth = ts.strokeWidth;
+        ctx.strokeText(textToRender, 0, 0);
+      }
+
+      ctx.fillStyle = ts.color || '#ffffff';
+      ctx.fillText(textToRender, 0, 0);
+
+      if (ts.underline) {
+         ctx.shadowColor = 'transparent';
+         ctx.beginPath();
+         ctx.strokeStyle = ts.color || '#ffffff';
+         ctx.lineWidth = Math.max(1, textHeight / 15);
+         const lineY = textHeight * 0.45;
+         ctx.moveTo(-(textWidth / 2), lineY);
+         ctx.lineTo((textWidth / 2), lineY);
+         ctx.stroke();
+      }
+
       ctx.restore();
     }
 

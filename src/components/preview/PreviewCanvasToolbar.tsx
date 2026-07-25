@@ -33,8 +33,6 @@ interface PreviewCanvasToolbarHeaderProps {
   setAspectRatio: (ar: '16:9' | '9:16' | '1:1' | '4:3') => void;
   showGrid: boolean;
   setShowGrid: (show: boolean) => void;
-  isPopoutOpen: boolean;
-  onTogglePopout: () => void;
   viewportZoom: number;
   onResetZoom: () => void;
   onFitZoom: () => void;
@@ -53,8 +51,6 @@ export function PreviewCanvasHeaderToolbar({
   setAspectRatio,
   showGrid,
   setShowGrid,
-  isPopoutOpen,
-  onTogglePopout,
   viewportZoom,
   onResetZoom,
   onFitZoom,
@@ -67,7 +63,15 @@ export function PreviewCanvasHeaderToolbar({
   showSettingsPanel,
   setShowSettingsPanel,
 }: PreviewCanvasToolbarHeaderProps) {
-  const { settings, updateSettings, perRatioFramingEnabled, setPerRatioFramingEnabled } = useEditorStore();
+  const { 
+    settings, 
+    updateSettings, 
+    perRatioFramingEnabled, 
+    setPerRatioFramingEnabled,
+    virtualCamera,
+    setVirtualCameraEnabled,
+    setVirtualCameraAspectRatio 
+  } = useEditorStore();
 
   return (
     <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-[#2e2e2e] select-none text-xs">
@@ -110,15 +114,31 @@ export function PreviewCanvasHeaderToolbar({
           <Grid className="w-3.5 h-3.5" />
         </button>
 
-        <button
-          onClick={onTogglePopout}
-          title={isPopoutOpen ? 'Close Floating Window' : 'Pop out Canvas Window'}
-          className={`p-1 rounded transition-colors ${
-            isPopoutOpen ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-[#888] hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1 border-l border-[#333] pl-2 ml-1">
+          <button
+            onClick={() => setVirtualCameraEnabled(!virtualCamera.enabled)}
+            title={virtualCamera.enabled ? 'Disable Smart Reframe (Virtual Camera)' : 'Smart Reframe / Pan & Scan Overlay'}
+            className={`p-1 rounded transition-colors ${
+              virtualCamera.enabled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-[#888] hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+          
+          {virtualCamera.enabled && (
+            <select
+              value={virtualCamera.aspectRatio}
+              onChange={(e) => setVirtualCameraAspectRatio(e.target.value as any)}
+              className="bg-[#2a2a2a] text-amber-400 border border-amber-500/40 rounded px-2 py-0.5 text-[10px] focus:outline-none font-medium ml-1"
+              aria-label="Smart Reframe Target Aspect Ratio"
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Center: Zoom / View Status */}

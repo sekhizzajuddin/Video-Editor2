@@ -126,7 +126,6 @@ export function PreviewCanvasContainer() {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [showThumbnailModal, setShowThumbnailModal] = useState(false);
   const [thumbnailImageData, setThumbnailImageData] = useState<string | null>(null);
-  const [isPopoutOpen, setIsPopoutOpen] = useState(false);
   const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [adaptiveQuality, setAdaptiveQuality] = useState<'high' | 'medium' | 'low'>('high');
@@ -746,8 +745,6 @@ export function PreviewCanvasContainer() {
         setAspectRatio={setAspectRatio}
         showGrid={showGrid}
         setShowGrid={setShowGrid}
-        isPopoutOpen={isPopoutOpen}
-        onTogglePopout={() => setIsPopoutOpen(!isPopoutOpen)}
         viewportZoom={viewport.zoom}
         onResetZoom={() => setViewport((v) => ({ ...v, zoom: 1 }))}
         onFitZoom={() => setViewport({ x: 0, y: 0, zoom: 1 })}
