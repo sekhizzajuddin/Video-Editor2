@@ -306,6 +306,8 @@ interface EditorActions {
   // Computed: recalculate total duration from all clips
   recalcTotalDuration: () => void;
   setAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
+  setPerRatioFramingEnabled: (enabled: boolean) => void;
+  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => void;
   reframeProject: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
 
   // Transitions
@@ -450,6 +452,8 @@ const initialState: EditorState = {
   aiVideoProgress: 0,
   aiVideoJobId: null,
   aiVideoResultUrl: null,
+  perRatioFramingEnabled: true,
+  perRatioFraming: {},
 };
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
@@ -492,6 +496,26 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   setAIVideoGenerationState: (state: any) => set((prev: any) => ({ ...prev, ...state })),
   setScopeSettings: (settings: ScopeSettings) => set({ scopeSettings: settings }),
+
+  setPerRatioFramingEnabled: (enabled: boolean) => set({ perRatioFramingEnabled: enabled }),
+  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => {
+    set((state) => {
+      const ratioFraming = state.perRatioFraming[ratio] || {};
+      const currentClipFraming = ratioFraming[clipId] || { x: 0, y: 0 };
+      return {
+        perRatioFraming: {
+          ...state.perRatioFraming,
+          [ratio]: {
+            ...ratioFraming,
+            [clipId]: {
+              ...currentClipFraming,
+              ...framing,
+            },
+          },
+        },
+      };
+    });
+  },
 
   setSubtitles: (subtitles: SubtitleItem[]) => {
     set({ subtitles });
@@ -1294,10 +1318,30 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
+      let updatedPerRatioFraming = state.perRatioFraming;
+      if (state.perRatioFramingEnabled && updates.transform) {
+        const ratio = state.aspectRatio;
+        const currentRatioMap = updatedPerRatioFraming[ratio] || {};
+        const currentClipMap = currentRatioMap[clipId] || {};
+        updatedPerRatioFraming = {
+          ...updatedPerRatioFraming,
+          [ratio]: {
+            ...currentRatioMap,
+            [clipId]: {
+              ...currentClipMap,
+              ...(updates.transform.x !== undefined ? { x: updates.transform.x } : {}),
+              ...(updates.transform.y !== undefined ? { y: updates.transform.y } : {}),
+              ...(updates.transform.scale !== undefined ? { scale: updates.transform.scale } : {}),
+            },
+          },
+        };
+      }
+
       return { 
         tracks, 
         pipWindows,
         mediaLibrary: updatedMediaLibrary,
+        perRatioFraming: updatedPerRatioFraming,
       };
     });
     get().recalcTotalDuration();

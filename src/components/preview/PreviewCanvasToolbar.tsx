@@ -67,7 +67,7 @@ export function PreviewCanvasHeaderToolbar({
   showSettingsPanel,
   setShowSettingsPanel,
 }: PreviewCanvasToolbarHeaderProps) {
-  const { settings, updateSettings } = useEditorStore();
+  const { settings, updateSettings, perRatioFramingEnabled, setPerRatioFramingEnabled } = useEditorStore();
 
   return (
     <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-[#2e2e2e] select-none text-xs">
@@ -76,7 +76,7 @@ export function PreviewCanvasHeaderToolbar({
         <select
           value={aspectRatio}
           onChange={(e) => setAspectRatio(e.target.value as any)}
-          className="bg-[#2a2a2a] text-white border border-[#3e3e3e] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-amber-500"
+          className="bg-[#2a2a2a] text-white border border-[#3e3e3e] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-amber-500 font-medium"
           aria-label="Aspect Ratio"
         >
           <option value="16:9">16:9 Widescreen</option>
@@ -84,6 +84,21 @@ export function PreviewCanvasHeaderToolbar({
           <option value="1:1">1:1 Square</option>
           <option value="4:3">4:3 Standard</option>
         </select>
+
+        <label
+          className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-[#3e3e3e] bg-[#252525] hover:bg-[#2e2e2e] cursor-pointer text-[11px] select-none transition-colors"
+          title="Remember separate video canvas framing & position for each screen aspect ratio (16:9, 9:16, 1:1)"
+        >
+          <input
+            type="checkbox"
+            checked={perRatioFramingEnabled}
+            onChange={(e) => setPerRatioFramingEnabled(e.target.checked)}
+            className="w-3 h-3 accent-amber-500 rounded cursor-pointer"
+          />
+          <span className={perRatioFramingEnabled ? 'text-amber-400 font-medium' : 'text-[#a0a0a0]'}>
+            Remember Framing
+          </span>
+        </label>
 
         <button
           onClick={() => setShowGrid(!showGrid)}

@@ -411,10 +411,22 @@ export async function renderCanvasEngine({
     let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity']);
     const localTime = currentTime - clip.startTime;
 
-    const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
-    const aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
-    const aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
+    let aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
+    let aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
+    let aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
     const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+
+    // ── Per-Aspect-Ratio Custom Framing Overrides ────────────────────────
+    const perRatioFramingState = useEditorStore.getState().perRatioFraming;
+    const perRatioFramingEnabled = useEditorStore.getState().perRatioFramingEnabled;
+    const currentAspectRatio = useEditorStore.getState().aspectRatio;
+
+    if (perRatioFramingEnabled && perRatioFramingState[currentAspectRatio]?.[clip.id]) {
+      const customFraming = perRatioFramingState[currentAspectRatio][clip.id];
+      if (customFraming.x !== undefined) aX += customFraming.x;
+      if (customFraming.y !== undefined) aY += customFraming.y;
+      if (customFraming.scale !== undefined) aScale *= (customFraming.scale / 100);
+    }
 
     const aCropTop = getAnimatedValue(clip.crop?.top || 0, currentTime, clip.startTime, clip.animations?.['crop.top']);
     const aCropBot = getAnimatedValue(clip.crop?.bottom || 0, currentTime, clip.startTime, clip.animations?.['crop.bottom']);

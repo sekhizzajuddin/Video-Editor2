@@ -576,6 +576,8 @@ export interface EditorState {
   inPoint: number | null;
   outPoint: number | null;
   aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
+  perRatioFramingEnabled: boolean;
+  perRatioFraming: Record<string, Record<string, { x: number; y: number; scale?: number }>>;
 
   // Timeline Zoom & Scroll
   zoomLevel: number;     // pixels per second
@@ -667,6 +669,8 @@ export interface EditorState {
 export interface EditorActions {
   setAIVideoGenerationState: (state: Partial<Pick<EditorState, 'aiVideoIsGenerating' | 'aiVideoProgress' | 'aiVideoJobId' | 'aiVideoResultUrl'>>) => void;
   setScopeSettings: (settings: ScopeSettings) => void;
+  setPerRatioFramingEnabled: (enabled: boolean) => void;
+  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => void;
   setMuteTimelineAudio: (mute: boolean) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
   setProjectInfo: (id: string, name: string) => void;
