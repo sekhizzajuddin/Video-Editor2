@@ -1,4 +1,4 @@
-﻿import {
+import {
   Move3D,
   Palette,
   Gauge,
@@ -6282,14 +6282,29 @@ export function PropertiesPanel() {
             {/* ── Timeline FX Settings ── */}
             {selectedClip.fxSettings && (
               <div className="flex flex-col gap-3 bg-[#1e1e1e] rounded p-3 border border-rose-500/20">
-                <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider">Timeline FX</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider">Timeline FX</p>
+                  <button
+                    onClick={() => updateClip(selectedClip.id, { fxSettings: undefined })}
+                    className="text-[9px] text-red-400/70 hover:text-red-400 px-1.5 py-0.5 rounded border border-red-500/20 hover:border-red-500/40 transition-colors"
+                  >
+                    Remove FX
+                  </button>
+                </div>
+
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] text-[#a0a0a0]">Effect Type</label>
                   <select
                     value={selectedClip.fxSettings.type}
                     onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, type: e.target.value as any } })}
-                    className="bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-rose-500"
+                    className="bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-rose-500 font-medium"
                   >
+                    <option value="subject_outline_flash">✨ Subject Outline Flash (AI Human Extract)</option>
+                    <option value="rhythmic_mirror">🔄 Rhythmic Mirror Flip (Action/Walking)</option>
+                    <option value="action_zoom_pulse">💥 Action Zoom Pulse (Rhythm Bump)</option>
+                    <option value="action_strobe">⚡ Impact Strobe Flash</option>
+                    <option value="action_shake">📳 Action Shake & RGB Jitter</option>
+                    <option value="quadrant_kaleidoscope">🔳 4-Way Mirror Quadrant</option>
                     <option value="vfx_breakdown">VFX Breakdown</option>
                     <option value="bw_to_color">B&W to Color</option>
                     <option value="glitch">Glitch</option>
@@ -6299,13 +6314,191 @@ export function PropertiesPanel() {
                     <option value="neon_glow">Neon Glow</option>
                     <option value="rgb_split">RGB Split</option>
                     <option value="pixelate">Pixelate</option>
-                    <option value="mirror">Mirror</option>
+                    <option value="mirror">Standard Mirror</option>
                     <option value="zoom_blur">Zoom Blur</option>
                     <option value="lens_flare">Lens Flare</option>
                     <option value="night_vision">Night Vision</option>
                     <option value="thermal">Thermal</option>
                   </select>
                 </div>
+
+                {/* ── Customized Controls for Subject Outline Flash ── */}
+                {selectedClip.fxSettings.type === 'subject_outline_flash' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0]">Neon Glow Color</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={selectedClip.fxSettings.outlineColor || '#00f0ff'}
+                          onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, outlineColor: e.target.value } })}
+                          className="w-7 h-7 rounded border border-[#3e3e3e] bg-transparent cursor-pointer"
+                        />
+                        <div className="flex gap-1">
+                          {['#00f0ff', '#f43f5e', '#facc15', '#a855f7', '#22c55e', '#ffffff'].map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, outlineColor: c } })}
+                              className="w-4 h-4 rounded-full border border-white/20 transition-transform hover:scale-110"
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                        Flash Speed
+                        <span className="font-mono text-cyan-400">{selectedClip.fxSettings.strobeSpeed ?? 8} Hz</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="16"
+                        step="1"
+                        value={selectedClip.fxSettings.strobeSpeed ?? 8}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, strobeSpeed: Number(e.target.value) } })}
+                        className="flex-1 accent-cyan-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                        Outline Stroke Width
+                        <span className="font-mono text-cyan-400">{selectedClip.fxSettings.outlineWidth ?? 3} px</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        step="1"
+                        value={selectedClip.fxSettings.outlineWidth ?? 3}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, outlineWidth: Number(e.target.value) } })}
+                        className="flex-1 accent-cyan-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                        Neon Glow Radius
+                        <span className="font-mono text-cyan-400">{selectedClip.fxSettings.glowBlur ?? 14} px</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="2"
+                        max="30"
+                        step="2"
+                        value={selectedClip.fxSettings.glowBlur ?? 14}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, glowBlur: Number(e.target.value) } })}
+                        className="flex-1 accent-cyan-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Customized Controls for Rhythmic Mirror Flip ── */}
+                {selectedClip.fxSettings.type === 'rhythmic_mirror' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                        Mirror Flip Speed
+                        <span className="font-mono text-amber-400">Every {selectedClip.fxSettings.flipInterval ?? 0.5}s</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="2.0"
+                        step="0.1"
+                        value={selectedClip.fxSettings.flipInterval ?? 0.5}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipInterval: Number(e.target.value) } })}
+                        className="flex-1 accent-amber-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0]">Flip Axis</label>
+                      <select
+                        value={selectedClip.fxSettings.flipAxis ?? 'horizontal'}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipAxis: e.target.value as any } })}
+                        className="bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1"
+                      >
+                        <option value="horizontal">Horizontal Flip (Walking Scene)</option>
+                        <option value="vertical">Vertical Flip</option>
+                        <option value="alternate">Alternate Both Axes</option>
+                      </select>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs select-none cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedClip.fxSettings.impactFlash !== false}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, impactFlash: e.target.checked } })}
+                        className="w-3.5 h-3.5 accent-amber-500 rounded"
+                      />
+                      <span className="text-[11px] text-[#d0d0d0]">Flash Impact Burst on Flip</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* ── Customized Controls for Action Zoom Pulse ── */}
+                {selectedClip.fxSettings.type === 'action_zoom_pulse' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                        Pulse Frequency (Speed)
+                        <span className="font-mono text-cyan-400">{selectedClip.fxSettings.pulseSpeed ?? 2} Hz</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="5.0"
+                        step="0.5"
+                        value={selectedClip.fxSettings.pulseSpeed ?? 2}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, pulseSpeed: Number(e.target.value) } })}
+                        className="flex-1 accent-cyan-500"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                        Zoom Amplitude
+                        <span className="font-mono text-cyan-400">+{selectedClip.fxSettings.pulseDepth ?? 20}%</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="5"
+                        max="50"
+                        step="5"
+                        value={selectedClip.fxSettings.pulseDepth ?? 20}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, pulseDepth: Number(e.target.value) } })}
+                        className="flex-1 accent-cyan-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Customized Controls for Impact Strobe ── */}
+                {selectedClip.fxSettings.type === 'action_strobe' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                        Strobe Speed
+                        <span className="font-mono text-yellow-300">{selectedClip.fxSettings.strobeSpeed ?? 8} Hz</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="2"
+                        max="16"
+                        step="1"
+                        value={selectedClip.fxSettings.strobeSpeed ?? 8}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, strobeSpeed: Number(e.target.value) } })}
+                        className="flex-1 accent-yellow-400"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] text-[#a0a0a0]">Intensity — {selectedClip.fxSettings.intensity ?? 100}%</label>
                   <input type="range" min="0" max="100"

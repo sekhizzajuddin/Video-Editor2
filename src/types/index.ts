@@ -225,9 +225,20 @@ export interface ClipTextSettings {
 }
 
 export interface ClipFxSettings {
-  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | string;
+  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'rhythmic_mirror' | 'action_zoom_pulse' | 'action_strobe' | 'action_shake' | 'quadrant_kaleidoscope' | 'subject_outline_flash' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | string;
   intensity: number;    // 0 to 100
   wipeAngle?: number;   // 0 to 360 (for wipes)
+  // ── Action FX parameters ──
+  flipInterval?: number;   // seconds per mirror flip (e.g. 0.5s, 1.0s)
+  flipAxis?: 'horizontal' | 'vertical' | 'alternate';
+  impactFlash?: boolean;
+  pulseSpeed?: number;     // Hz or beats per sec
+  pulseDepth?: number;     // scale percentage bump (10-50%)
+  strobeSpeed?: number;    // Hz
+  strobeColor?: string;    // hex or 'white'
+  outlineColor?: string;
+  outlineWidth?: number;
+  glowBlur?: number;
 }
 
 export type ParticleEffectType =

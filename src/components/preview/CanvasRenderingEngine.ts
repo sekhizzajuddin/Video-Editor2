@@ -19,6 +19,7 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatTime } from '@/utils/time';
 import { applyLutToCanvas } from '@/utils/lutParser';
+import { applyAiBackgroundMask, applySubjectNeonOutlineFlash } from '@/utils/aiBackground';
 import { drawSubscribeAnimation } from '@/utils/socialAnimations';
 import {
   getCachedImage,
@@ -505,21 +506,73 @@ export async function renderCanvasEngine({
       }
     }
 
+    let fxFlipH = false;
+    let fxFlipV = false;
+    let fxFlashBrightness = 0;
+    let fxActionScaleMultiplier = 1;
+    let fxShakeX = 0;
+    let fxShakeY = 0;
+
+    if (clip.fxSettings) {
+      const fxType = clip.fxSettings.type;
+      const fxRelTime = Math.max(0, currentTime - clip.startTime);
+
+      if (fxType === 'rhythmic_mirror') {
+        const interval = clip.fxSettings.flipInterval || 0.5;
+        const cycleIdx = Math.floor(fxRelTime / interval);
+        const axis = clip.fxSettings.flipAxis || 'horizontal';
+
+        if (axis === 'horizontal') {
+          fxFlipH = (cycleIdx % 2 === 1);
+        } else if (axis === 'vertical') {
+          fxFlipV = (cycleIdx % 2 === 1);
+        } else if (axis === 'alternate') {
+          fxFlipH = (cycleIdx % 2 === 1);
+          fxFlipV = (Math.floor(cycleIdx / 2) % 2 === 1);
+        }
+
+        // Impact Flash on the first 0.06s frame of each mirror flip cycle
+        if (clip.fxSettings.impactFlash !== false) {
+          const timeInCycle = fxRelTime - (cycleIdx * interval);
+          if (timeInCycle < 0.06) {
+            fxFlashBrightness = (1 - (timeInCycle / 0.06)) * 40; // +40% exposure burst
+          }
+        }
+      } else if (fxType === 'action_zoom_pulse') {
+        const speed = clip.fxSettings.pulseSpeed || 2; // Hz
+        const depth = (clip.fxSettings.pulseDepth || 20) / 100;
+        const wave = Math.max(0, Math.sin(fxRelTime * Math.PI * 2 * speed));
+        fxActionScaleMultiplier = 1 + (wave * depth);
+      } else if (fxType === 'action_strobe') {
+        const speed = clip.fxSettings.strobeSpeed || 8; // Hz
+        const wave = Math.sin(fxRelTime * Math.PI * 2 * speed);
+        if (wave > 0.4) {
+          fxFlashBrightness = 60; // bright strobe burst
+        }
+      } else if (fxType === 'action_shake') {
+        const intensity = (clip.fxSettings.intensity || 50) / 100;
+        fxShakeX = (Math.sin(fxRelTime * 45) * 12 + (Math.random() - 0.5) * 10) * intensity;
+        fxShakeY = (Math.cos(fxRelTime * 55) * 12 + (Math.random() - 0.5) * 10) * intensity;
+      }
+    }
+
     if (!hasPerspectiveWarp) {
-      let tx = cx;
-      let ty = cy;
+      let tx = cx + fxShakeX;
+      let ty = cy + fxShakeY;
       if (extraTransform?.translateX !== undefined) tx += extraTransform.translateX;
       if (extraTransform?.translateY !== undefined) ty += extraTransform.translateY;
 
       ctx.translate(tx, ty);
       ctx.translate(aX, aY);
 
-      let finalScale = aScale / 100;
+      let finalScale = (aScale / 100) * fxActionScaleMultiplier;
       if (extraTransform?.scale !== undefined) {
         finalScale *= extraTransform.scale;
       }
-      const scaleX = finalScale * (clip.transform?.flipH ? -1 : 1);
-      const scaleY = finalScale * (clip.transform?.flipV ? -1 : 1);
+      const isFlippedH = (clip.transform?.flipH ? 1 : 0) ^ (fxFlipH ? 1 : 0);
+      const isFlippedV = (clip.transform?.flipV ? 1 : 0) ^ (fxFlipV ? 1 : 0);
+      const scaleX = finalScale * (isFlippedH ? -1 : 1);
+      const scaleY = finalScale * (isFlippedV ? -1 : 1);
       ctx.scale(scaleX, scaleY);
       ctx.rotate((aRot * Math.PI) / 180);
     }
@@ -527,7 +580,7 @@ export async function renderCanvasEngine({
     const filters = {
       temperature: getAnimatedValue(clip.colorFilters?.temperature ?? 0, currentTime, clip.startTime, clip.animations?.['color.temperature']),
       tint: getAnimatedValue(clip.colorFilters?.tint ?? 0, currentTime, clip.startTime, clip.animations?.['color.tint']),
-      exposure: getAnimatedValue(clip.colorFilters?.exposure ?? 0, currentTime, clip.startTime, clip.animations?.['color.exposure']),
+      exposure: getAnimatedValue(clip.colorFilters?.exposure ?? 0, currentTime, clip.startTime, clip.animations?.['color.exposure']) + fxFlashBrightness,
       contrast: getAnimatedValue(clip.colorFilters?.contrast ?? 100, currentTime, clip.startTime, clip.animations?.['color.contrast']),
       saturation: getAnimatedValue(clip.colorFilters?.saturation ?? 100, currentTime, clip.startTime, clip.animations?.['color.saturation']),
       blur: getAnimatedValue(clip.colorFilters?.blur ?? 0, currentTime, clip.startTime, clip.animations?.['color.blur']),
@@ -740,6 +793,25 @@ export async function renderCanvasEngine({
             drawPerspectiveTexture(ctx, offCanvas, corners);
           } else {
             ctx.drawImage(offCanvas, dx, dy, dw, dh);
+          }
+
+          if (clip.fxSettings?.type === 'subject_outline_flash') {
+            const sourceEl = videoEl || imageEl || offCanvas;
+            if (sourceEl) {
+              await applySubjectNeonOutlineFlash(
+                ctx,
+                W,
+                H,
+                sourceEl,
+                {
+                  color: clip.fxSettings.outlineColor || '#00f0ff',
+                  strokeWidth: clip.fxSettings.outlineWidth || 3,
+                  glowBlur: clip.fxSettings.glowBlur || 14,
+                  flashSpeed: clip.fxSettings.strobeSpeed || 8,
+                  currentTime: currentTime
+                }
+              );
+            }
           }
         }
       } else {

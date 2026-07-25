@@ -1,6 +1,6 @@
 import { Waves } from 'lucide-react';
 import React from 'react';
-import { Film, Sun, Tv2, Radio, Monitor, Flame, ScanLine, Hexagon, FlipHorizontal, ZoomIn, Aperture, Eye, Focus, Grid3X3, Droplets, CloudSnow, CloudRain, Star, Sparkles, Wind, Leaf, Heart, Code2, Clapperboard, Zap } from 'lucide-react';
+import { Film, Sun, Tv2, Radio, Monitor, Flame, ScanLine, Hexagon, FlipHorizontal, ZoomIn, Aperture, Eye, Focus, Grid3X3, Droplets, CloudSnow, CloudRain, Star, Sparkles, Wind, Leaf, Heart, Code2, Clapperboard, Zap, Activity } from 'lucide-react';
 
 export const TRANSITIONS = [
   { name: 'Fade', color: 'from-amber-500/20 to-transparent', preview: 'Fade in/out between clips' },
@@ -32,6 +32,12 @@ export const TRANSITIONS = [
 ];
 
 export const FX_EFFECTS = [
+  { name: 'Subject Outline Flash', icon: ScanLine,      color: 'text-cyan-400',   type: 'subject_outline_flash', desc: 'Extracts human body outline & flashes glowing neon energy' },
+  { name: 'Rhythmic Mirror Flip', icon: FlipHorizontal, color: 'text-amber-400',  type: 'rhythmic_mirror',    desc: 'Auto-flips subject every second/beat for action & walking scenes' },
+  { name: 'Action Zoom Pulse',   icon: ZoomIn,         color: 'text-cyan-400',   type: 'action_zoom_pulse',  desc: 'Pulsing rhythm zoom bump on every beat/second' },
+  { name: 'Impact Strobe',       icon: Zap,            color: 'text-yellow-300', type: 'action_strobe',      desc: 'High-energy white/color strobe flash pulse' },
+  { name: 'Action Shake',        icon: Activity,       color: 'text-rose-500',   type: 'action_shake',       desc: 'Violent camera vibration with RGB color split' },
+  { name: '4-Way Mirror Quad',   icon: Grid3X3,        color: 'text-indigo-400', type: 'quadrant_kaleidoscope', desc: '4-quadrant symmetric kaleidoscope mirror' },
   { name: 'VFX Breakdown',       icon: Clapperboard, color: 'text-purple-400',  type: 'vfx_breakdown',    desc: 'Cinematic before→after color wipe' },
   { name: 'B&W to Color',        icon: Sun,          color: 'text-cyan-400',    type: 'bw_to_color',      desc: 'Desaturate to vivid color reveal' },
   { name: 'Glitch',              icon: Tv2,          color: 'text-rose-400',    type: 'glitch',           desc: 'Digital corruption distortion' },
@@ -124,4 +130,3 @@ export const PARTICLE_EFFECTS: Array<{
     defaultSettings: { amount: 40,  speed: 80,  intensity: 90, size: 100, gravity: 80,  wind: 0,   spread: 0,   lifetime: 120, color: '#00ff41', colorVariance: 10, glow: true,  turbulence: 0  },
   },
 ];
-
