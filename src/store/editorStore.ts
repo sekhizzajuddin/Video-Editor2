@@ -25,16 +25,32 @@ const debouncedSaveProject = (state: any) => {
     clearTimeout(saveTimeoutId);
   }
   useEditorStore.setState({ hasUnsavedChanges: true });
-  saveTimeoutId = setTimeout(() => {
-    const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences } = state;
-    saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows, sequences } as any).then(() => {
-      useEditorStore.setState({ hasUnsavedChanges: false });
+  saveTimeoutId = setTimeout(async () => {
+    const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences, projectFileHandle } = state;
+    
+    // Always save to IndexedDB as a fallback backup
+    try {
+      await saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows, sequences } as any);
       if (projectId !== 'default') {
-        saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
+        await saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() });
       }
-    }).catch((err) =>
-      console.error('Failed to auto-save project:', err)
-    );
+      useEditorStore.setState({ hasUnsavedChanges: false });
+    } catch (err) {
+      console.error('Failed to auto-save project to IndexedDB:', err);
+    }
+
+    // If an OS file handle exists, auto-save to disk instantly
+    if (projectFileHandle) {
+      try {
+        const { serializeProjectData, saveProjectToHandle } = await import('@/utils/fileSystemAccess');
+        const fileContent = serializeProjectData(state);
+        await saveProjectToHandle(projectFileHandle, fileContent);
+      } catch (err) {
+        console.error('Failed to auto-save to OS file handle:', err);
+        // We could notify the user here if we wanted to
+      }
+    }
+
     saveTimeoutId = null;
   }, 5000);
 };
@@ -348,6 +364,7 @@ const defaultTracks = createEmptyTracks();
 const initialState: EditorState = {
   projectId: 'default',
   projectName: 'Untitled Project',
+  projectFileHandle: null,
   mediaLibrary: [],
   folders: [],
   tracks: defaultTracks,
@@ -3105,6 +3122,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Project
   setProjectInfo: (id, name) => set({ projectId: id, projectName: name }),
+  setProjectFileHandle: (handle) => set({ projectFileHandle: handle }),
   resetProject: async (clearDB = false) => {
     if (saveTimeoutId) {
       clearTimeout(saveTimeoutId);

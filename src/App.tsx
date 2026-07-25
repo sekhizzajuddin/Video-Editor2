@@ -16,6 +16,7 @@ import { HelpModal } from '@/components/HelpModal';
 import { HelpTooltipManager } from '@/components/HelpTooltipManager';
 import { WelcomeScreen } from '@/components/WelcomeScreen';
 import { AiCopilot } from '@/components/AiCopilot';
+import { FileHandlerInitializer } from '@/components/FileHandlerInitializer';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -613,7 +614,8 @@ function App() {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Modals & Global Handlers */}
+      <FileHandlerInitializer />
       <ExportModal />
       <SettingsModal />
       <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />

@@ -69,6 +69,7 @@ import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
+import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
 
 export function TopToolbar() {
   const {
@@ -135,100 +136,63 @@ export function TopToolbar() {
 
   const projectFileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSaveProjectFile = () => {
+  const handleSaveProjectFile = async () => {
     const state = useEditorStore.getState();
-
-    // Clean up blob URLs since they are session-specific
-    const cleanMediaLibrary = state.mediaLibrary.map(item => ({
-      ...item,
-      url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
-      thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
-      frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
-    }));
-
-    // FIX C9: Include all critical state fields that were previously missing
-    const projectData = {
-      version: '1.1.0',
-      tracks: state.tracks,
-      mediaLibrary: cleanMediaLibrary,
-      currentTime: state.currentTime,
-      aspectRatio: state.aspectRatio,
-      volume: state.volume,
-      isMuted: state.isMuted,
-      inPoint: state.inPoint,
-      outPoint: state.outPoint,
-      zoomLevel: state.zoomLevel,
-      settings: state.settings,
-    };
-
-    const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `project_${Date.now()}.procut`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (state.projectFileHandle) {
+      try {
+        const fileContent = serializeProjectData(state);
+        await saveProjectToHandle(state.projectFileHandle, fileContent);
+        useEditorStore.setState({ hasUnsavedChanges: false });
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "Project saved successfully." }}));
+      } catch (err) {
+        console.error('Failed to save to handle:', err);
+        const handle = await saveProjectAs();
+        if (handle) useEditorStore.getState().setProjectFileHandle(handle);
+      }
+    } else {
+      const handle = await saveProjectAs();
+      if (handle) useEditorStore.getState().setProjectFileHandle(handle);
+    }
     setShowFileMenu(false);
   };
 
-  const handleOpenProjectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target?.result as string);
-
-        // FIX H11: Validate structure before overwriting state
-        if (!data || typeof data !== 'object') {
-          alert('Invalid project file: not a valid JSON object.');
-          return;
-        }
-        if (!Array.isArray(data.tracks)) {
-          alert('Invalid project file: missing or invalid "tracks" array.');
-          return;
-        }
-        if (!Array.isArray(data.mediaLibrary)) {
-          alert('Invalid project file: missing or invalid "mediaLibrary" array.');
-          return;
-        }
-
-        const loadedTracks = data.tracks;
-
-        useEditorStore.setState({
-          tracks: loadedTracks,
-          mediaLibrary: data.mediaLibrary,
-          currentTime: typeof data.currentTime === 'number' ? data.currentTime : 0,
-          aspectRatio: data.aspectRatio || '16:9',
-          // FIX C9 (load): Restore previously-missing state fields
-          volume: typeof data.volume === 'number' ? data.volume : 1,
-          isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : false,
-          inPoint: typeof data.inPoint === 'number' ? data.inPoint : null,
-          outPoint: typeof data.outPoint === 'number' ? data.outPoint : null,
-          zoomLevel: typeof data.zoomLevel === 'number' ? data.zoomLevel : 100,
-          ...(data.settings ? { settings: { ...useEditorStore.getState().settings, ...data.settings } } : {}),
-          history: [
-            {
-              tracks: JSON.parse(JSON.stringify(loadedTracks)),
-              currentTime: typeof data.currentTime === 'number' ? data.currentTime : 0,
-            }
-          ],
-          historyIndex: 0,
-        });
-
-        useEditorStore.getState().recalcTotalDuration();
-        alert('Project loaded! Please re-import local media files to relink them.');
-      } catch (err) {
-        console.error('Error parsing project file:', err);
-        alert('Failed to parse project file. The file may be corrupted.');
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+  const handleSaveProjectAs = async () => {
+    const handle = await saveProjectAs();
+    if (handle) useEditorStore.getState().setProjectFileHandle(handle);
     setShowFileMenu(false);
+  };
+
+  const handleOpenProjectFile = async (e: any) => {
+    if ('showOpenFilePicker' in window) {
+      if (e && e.preventDefault) e.preventDefault();
+      const handle = await openProjectFile();
+      if (handle) useEditorStore.getState().setProjectFileHandle(handle);
+      setShowFileMenu(false);
+      return;
+    }
+
+    // Fallback for browsers without File System Access API
+    if (e && e.target && e.target.files) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target?.result as string);
+          loadProjectData(data);
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Project loaded! Please re-import local media files to relink them.', type: 'success' }}));
+        } catch (err) {
+          console.error('Error parsing project file:', err);
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Failed to parse project file. The file may be corrupted.', type: 'error' }}));
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+      setShowFileMenu(false);
+    } else {
+      projectFileInputRef.current?.click();
+    }
   };
 
   const handleZoomToFit = () => {
@@ -329,10 +293,16 @@ export function TopToolbar() {
                 onClick={handleSaveProjectFile}
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
-                <Save className="w-3.5 h-3.5 text-amber-400" /> Save Project File
+                <Save className="w-3.5 h-3.5 text-amber-400" /> Save Project
               </button>
               <button
-                onClick={() => projectFileInputRef.current?.click()}
+                onClick={handleSaveProjectAs}
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+              >
+                <Save className="w-3.5 h-3.5 text-amber-400 opacity-70" /> Save Project As...
+              </button>
+              <button
+                onClick={(e) => handleOpenProjectFile(e as any)}
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
                 <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File

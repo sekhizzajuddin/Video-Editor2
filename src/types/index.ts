@@ -553,6 +553,7 @@ export interface VirtualCamera {
 export interface EditorState {
   projectId: string;
   projectName: string;
+  projectFileHandle: any | null; // FileSystemFileHandle reference for auto-saving
   showTeleprompter: boolean;
   showHelpMenu: boolean;
   activeHelpSection: string | null;
@@ -691,6 +692,7 @@ export interface EditorActions {
   addOrUpdateVirtualCameraKeyframe: (time: number, x: number, y: number, scale?: number) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
   setProjectInfo: (id: string, name: string) => void;
+  setProjectFileHandle: (handle: any) => void;
   resetProject: () => void;
   setTracks: (tracks: TimelineTrack[]) => void;
   setSubtitles: (subtitles: SubtitleItem[]) => void;
