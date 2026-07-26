@@ -326,7 +326,7 @@ export function PropertiesPanel() {
   const [voiceTuneResults, setVoiceTuneResults] = useState<VoiceTuneResult[]>([]);
   const [isTracking, setIsTracking] = useState(false);
   const [trackProgress, setTrackProgress] = useState(0);
-  const { videoElements } = useMediaPlayback();
+  const { videoElements } = useMediaPlayback(false);
 
   // Environment variables fallbacks
   // @ts-ignore

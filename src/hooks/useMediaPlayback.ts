@@ -11,7 +11,7 @@
  *  - Frame-accurate scrubbing for video
  */
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue } from '@/utils/keyframes';
@@ -142,10 +142,31 @@ function findClipById(clipId: string) {
   return null;
 }
 
-export function useMediaPlayback(): MediaPlaybackResult {
-  const poolRef = useRef<Map<string, MediaElement>>(new Map());
-  const videoMapRef = useRef<Map<string, HTMLVideoElement>>(new Map());
-  const resultRef = useRef<MediaPlaybackResult>({ videoElements: new Map() });
+// Global singletons for media playback DOM elements and audio routing to prevent duplicate instances
+const globalMediaPool = new Map<string, MediaElement>();
+const globalVideoMap = new Map<string, HTMLVideoElement>();
+const globalPlaybackResult: MediaPlaybackResult = { videoElements: globalVideoMap };
+
+let primaryControllerId: number | null = null;
+let nextControllerId = 1;
+
+export function useMediaPlayback(isController: boolean = true): MediaPlaybackResult {
+  const poolRef = useRef<Map<string, MediaElement>>(globalMediaPool);
+  const videoMapRef = useRef<Map<string, HTMLVideoElement>>(globalVideoMap);
+  const resultRef = useRef<MediaPlaybackResult>(globalPlaybackResult);
+
+  const [instanceId] = useState(() => {
+    const id = nextControllerId++;
+    if (isController && primaryControllerId === null) {
+      primaryControllerId = id;
+    }
+    return id;
+  });
+
+  const isPrimary = isController && (primaryControllerId === null || primaryControllerId === instanceId);
+  if (isController && primaryControllerId === null) {
+    primaryControllerId = instanceId;
+  }
 
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
@@ -157,8 +178,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
   const isExporting = useEditorStore((s) => s.isExporting);
 
-
-
   // Keep track of expected playback time to detect manual user seeks
   const lastTimeRef = useRef<number>(currentTime);
   const lastRealTimeRef = useRef<number>(performance.now());
@@ -169,7 +188,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const pendingSeeksRef = useRef<Map<string, number>>(new Map());
 
   // Trigger a custom event on window so PreviewCanvas can redraw immediately on async frame seek
-  
   const triggerRedraw = useCallback(() => {
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
   }, []);
@@ -188,15 +206,15 @@ export function useMediaPlayback(): MediaPlaybackResult {
     return mediaContainer;
   };
 
-
   // Sync master stream to store once
   useEffect(() => {
+    if (!isPrimary) return;
     // ensure it's created
     getMasterAudioCtx();
     if (masterAudioDestination) {
       useEditorStore.getState().setMasterAudioStream(masterAudioDestination.stream);
     }
-  }, []);
+  }, [isPrimary]);
 
   // Build set of active clips
   const activeClips = useCallback(() => {
@@ -311,6 +329,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const MAX_PER_CLIP_FRAME_CACHE = 8; // max cached frames per individual clip
 
   useEffect(() => {
+    if (!isPrimary) return;
     const ct = useEditorStore.getState().currentTime;
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio' }>();
     for (const track of tracks) {
@@ -492,6 +511,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const lastVideoSyncRef = useRef<number>(0);
 
   useEffect(() => {
+    if (!isPrimary) return;
     const syncPlayback = async () => {
       const now = performance.now();
       const syncInterval = isPlaying ? 33 : 0;
@@ -654,6 +674,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
   // Cleanup orphaned track analysers
   useEffect(() => {
+    if (!isPrimary) return;
     const activeTrackIds = new Set(tracks.map(t => t.id));
     for (const [trackId, analyser] of trackAnalysers.entries()) {
       if (!activeTrackIds.has(trackId)) {
@@ -661,10 +682,11 @@ export function useMediaPlayback(): MediaPlaybackResult {
         trackAnalysers.delete(trackId);
       }
     }
-  }, [tracks]);
+  }, [tracks, isPrimary]);
 
   // Reactively sync audio parameters (volume, EQ, pitch, etc.) for all clips in the pool
   useEffect(() => {
+    if (!isPrimary) return;
     const pool = poolRef.current;
     const clips = activeClips();
     const playingIds = new Set(clips.map((c) => c.clipId));
@@ -1047,7 +1069,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
   // On seek (when not playing), update video elements for frame display
   useEffect(() => {
-    if (isPlaying) return;
+    if (!isPrimary || isPlaying) return;
 
     const pool = poolRef.current;
     const clips = activeClips();
@@ -1083,6 +1105,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
   // DIRECT Zustand subscription for instant video element seeking during scrubbing (bypasses React render cycle)
   // This ensures video elements start seeking IMMEDIATELY when store state changes, without waiting for React re-render
   useEffect(() => {
+    if (!isPrimary) return;
     let lastScrubSeekTime = 0;
     
     const unsub = useEditorStore.subscribe((state) => {
@@ -1159,6 +1182,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
   const MAX_LOADED_VIDEOS = 4;
 
   useEffect(() => {
+    if (!isPrimary) return;
     const pool = poolRef.current;
     if (isExporting) {
       // During export, load all video elements to ensure frame-accurate rendering
@@ -1248,43 +1272,46 @@ export function useMediaPlayback(): MediaPlaybackResult {
   // Cleanup all on unmount
   useEffect(() => {
     return () => {
-      const pool = poolRef.current;
-      for (const [, entry] of pool) {
-        entry.el.pause();
-        if (entry.type === 'video') {
-          const el = entry.el as any;
-          if (el._handleSeeked) {
-            el.removeEventListener('seeked', el._handleSeeked);
+      if (primaryControllerId === instanceId) {
+        primaryControllerId = null;
+        const pool = poolRef.current;
+        for (const [, entry] of pool) {
+          entry.el.pause();
+          if (entry.type === 'video') {
+            const el = entry.el as any;
+            if (el._handleSeeked) {
+              el.removeEventListener('seeked', el._handleSeeked);
+            }
+            el.removeEventListener('timeupdate', stableTriggerRedraw);
+            el.removeEventListener('canplay', stableTriggerRedraw);
           }
-          el.removeEventListener('timeupdate', stableTriggerRedraw);
-          el.removeEventListener('canplay', stableTriggerRedraw);
-        }
-        if (entry.separationGraph) {
-          try { entry.separationGraph.input.disconnect(); } catch (e) {}
-        }
-        if (entry.pitchNode) {
-          try { entry.pitchNode.disconnect(); } catch (e) {}
-        }
-        if (entry.gainNode) {
-          try { entry.gainNode.disconnect(); } catch (e) {}
-        }
-        if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
+          if (entry.separationGraph) {
+            try { entry.separationGraph.input.disconnect(); } catch (e) {}
+          }
+          if (entry.pitchNode) {
+            try { entry.pitchNode.disconnect(); } catch (e) {}
+          }
+          if (entry.gainNode) {
+            try { entry.gainNode.disconnect(); } catch (e) {}
+          }
+          if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
 
-        if (entry.feedbackNode) {
-          try { entry.feedbackNode.disconnect(); } catch(e) {}
-        }
-        if (entry.delayNode) {
-          try { entry.delayNode.disconnect(); } catch(e) {}
-        }
+          if (entry.feedbackNode) {
+            try { entry.feedbackNode.disconnect(); } catch(e) {}
+          }
+          if (entry.delayNode) {
+            try { entry.delayNode.disconnect(); } catch(e) {}
+          }
 
-        entry.el.src = '';
-        entry.el.remove();
+          entry.el.src = '';
+          entry.el.remove();
+        }
+        pool.clear();
+        videoMapRef.current.clear();
+        pendingSeeksRef.current.clear();
       }
-      pool.clear();
-      videoMapRef.current.clear();
-      pendingSeeksRef.current.clear();
     };
-  }, [triggerRedraw]);
+  }, [triggerRedraw, instanceId]);
 
   useEffect(() => {
     resultRef.current.videoElements = videoMapRef.current;

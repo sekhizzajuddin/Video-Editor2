@@ -109,7 +109,7 @@ export function PreviewCanvasContainer() {
   );
 
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
-  const { videoElements } = useMediaPlayback();
+  const { videoElements } = useMediaPlayback(true);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
