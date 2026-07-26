@@ -34,7 +34,7 @@ import {
   ParticlePool,
   LocalCornerPoints
 } from '@/utils/canvasEffects';
-import { FrameCacheEntry } from '@/hooks/useMediaPlayback';
+import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
 
 export interface RenderCanvasParams {
@@ -50,7 +50,6 @@ export interface RenderCanvasParams {
     selectedClipId: string | null;
     mediaLibrary: MediaItem[];
     videoElements: Map<string, HTMLVideoElement>;
-    frameCache: Map<string, FrameCacheEntry[]>;
     viewport: { x: number; y: number; zoom: number };
     settings: any;
     showGrid: boolean;
@@ -99,7 +98,6 @@ export async function renderCanvasEngine({
     tracks: tracksRaw,
     mediaLibrary: mediaLibraryRaw,
     videoElements,
-    frameCache: frameCacheRaw,
     viewport,
     settings,
     showGrid,
@@ -112,7 +110,6 @@ export async function renderCanvasEngine({
 
   const tracks = tracksRaw as TimelineTrack[];
   const mediaLibrary = mediaLibraryRaw as MediaItem[];
-  const frameCache = frameCacheRaw as Map<string, FrameCacheEntry[]>;
   const hasClips = tracks.some((t) => t.clips.length > 0);
 
   if (!canvas) return;
@@ -690,52 +687,9 @@ export async function renderCanvasEngine({
         }
       }
 
-      // For video clips when NOT playing: always try to use the closest cached ImageBitmap.
-      // This is critical for smooth scrubbing — the cached bitmap is available instantly
-      // while the HTML5 video element may still be mid-seek (async decoder).
-      let cachedBitmap: ImageBitmap | null = null;
-      if (mediaItem.type === 'video' && !isPlaying) {
-        const clipCache = frameCache.get(clip.id);
-        if (clipCache && clipCache.length > 0) {
-          const mediaTime = getMediaTimeForClip({
-            id: clip.id, startTime: clip.startTime,
-            duration: clip.duration, trimStart: clip.trimStart,
-            speed: clip.speed, speedRamp: (clip as any).speedRamp
-          }, currentTime);
-          const roundedTime = Math.round(mediaTime * 30) / 30;
-
-          let bestFrame: FrameCacheEntry | null = null;
-          let minDiff = Infinity;
-          for (const f of clipCache) {
-            const diff = Math.abs(f.time - roundedTime);
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestFrame = f;
-            }
-          }
-
-          if (bestFrame) {
-            // Use the cached frame when:
-            // - video is still seeking (async decoder hasn't finished)
-            // - video readyState is too low (no decoded frame available)
-            // - cached frame is closer to the target time than the video's current position
-            const videoReady = videoEl && videoEl.readyState >= 2 && !videoEl.seeking;
-            const videoDrift = videoEl ? Math.abs(videoEl.currentTime - mediaTime) : Infinity;
-            if (!videoReady || minDiff <= videoDrift) {
-              cachedBitmap = bestFrame.bitmap;
-              // Only use bitmap dimensions if we don't already have video element dimensions.
-              // Using bitmap dimensions when the video element already provided them would cause
-              // size mismatches (the 'objects shrink automatically' bug) because bitmaps may be
-              // captured at a different resolution than the video's native dimensions.
-              if (!hasRealMedia) {
-                vw = bestFrame.bitmap.width;
-                vh = bestFrame.bitmap.height;
-              }
-              hasRealMedia = true;
-            }
-          }
-        }
-      }
+      // For video clips, we draw directly from the video element to the canvas.
+      // This is fast and hardware accelerated in modern browsers.
+      // We removed the ImageBitmap frame caching to save RAM and decoder overload.
 
       const scaleToFit = Math.min(W / vw, H / vh);
       dw = vw * scaleToFit;
@@ -745,9 +699,7 @@ export async function renderCanvasEngine({
 
       if (hasRealMedia) {
         anyClipDrawn = true;
-        let sourceElement: CanvasImageSource = cachedBitmap
-          ? cachedBitmap
-          : (mediaItem.type === 'video' ? videoEl : imageEl)!;
+        let sourceElement: CanvasImageSource = (mediaItem.type === 'video' ? videoEl : imageEl)!;
 
         const clipW = dw * (1 - cLeft - cRight);
         const clipH = dh * (1 - cTop - cBot);

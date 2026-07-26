@@ -109,7 +109,7 @@ export function PreviewCanvasContainer() {
   );
 
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
-  const { videoElements, frameCache } = useMediaPlayback();
+  const { videoElements } = useMediaPlayback();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -205,7 +205,6 @@ export function PreviewCanvasContainer() {
     selectedClipId,
     mediaLibrary,
     videoElements,
-    frameCache,
     imageRevision,
     requestRedraw,
     viewport,
@@ -230,7 +229,6 @@ export function PreviewCanvasContainer() {
       selectedClipId,
       mediaLibrary,
       videoElements,
-      frameCache,
       imageRevision,
       requestRedraw,
       viewport,
@@ -253,7 +251,6 @@ export function PreviewCanvasContainer() {
       prev.tracksSignature !== tracksSignature ||
       prev.imageRevision !== imageRevision ||
       prev.videoElements !== videoElements ||
-      prev.frameCache !== frameCache ||
       prev.viewport !== viewport ||
       prev.isPlaying !== isPlaying ||
       prev.aspectRatio !== aspectRatio ||
@@ -278,7 +275,6 @@ export function PreviewCanvasContainer() {
         selectedClipId,
         mediaLibrary,
         videoElements,
-        frameCache,
         imageRevision,
         requestRedraw,
         viewport,
@@ -302,7 +298,6 @@ export function PreviewCanvasContainer() {
     selectedClipId,
     mediaLibrary,
     videoElements,
-    frameCache,
     imageRevision,
     requestRedraw,
     viewport,

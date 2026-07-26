@@ -111,14 +111,8 @@ interface MediaElement {
  * Returns a Map of clipId → HTMLVideoElement for the preview canvas
  * to draw video frames from.
  */
-export interface FrameCacheEntry {
-  time: number;
-  bitmap: ImageBitmap;
-}
-
 export interface MediaPlaybackResult {
   videoElements: Map<string, HTMLVideoElement>;
-  frameCache: Map<string, FrameCacheEntry[]>;
 }
 
 function findClipById(clipId: string) {
@@ -151,9 +145,7 @@ function findClipById(clipId: string) {
 export function useMediaPlayback(): MediaPlaybackResult {
   const poolRef = useRef<Map<string, MediaElement>>(new Map());
   const videoMapRef = useRef<Map<string, HTMLVideoElement>>(new Map());
-  // Frame cache: clipId → sorted array of {time, bitmap} for instant scrubbing
-  const frameCacheRef = useRef<Map<string, FrameCacheEntry[]>>(new Map());
-  const resultRef = useRef<MediaPlaybackResult>({ videoElements: new Map(), frameCache: new Map() });
+  const resultRef = useRef<MediaPlaybackResult>({ videoElements: new Map() });
 
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
@@ -398,64 +390,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
 
         // Seeked handler that checks for subsequent pending seeks before triggering redraw
         const handleSeeked = () => {
-          // Cache this decoded frame as ImageBitmap for instant scrubbing
-          if (el.videoWidth > 0 && el.readyState >= 2) {
-            const capturedTime = el.currentTime;
-            createImageBitmap(el).then(bitmap => {
-              if (!poolRef.current.has(clipId) && !pendingSeeksRef.current.has(clipId)) {
-                bitmap.close();
-                return;
-              }
-              let clipCache = frameCacheRef.current.get(clipId);
-              if (!clipCache) {
-                clipCache = [];
-                frameCacheRef.current.set(clipId, clipCache);
-              }
-              const roundedTime = Math.round(capturedTime * 30) / 30;
-              const existingKf = clipCache.findIndex(f => Math.abs(f.time - roundedTime) < 0.015);
-              if (existingKf >= 0) {
-                clipCache[existingKf].bitmap.close();
-                clipCache[existingKf] = { time: roundedTime, bitmap };
-              } else {
-                clipCache.push({ time: roundedTime, bitmap });
-                clipCache.sort((a, b) => a.time - b.time);
-              }
-              // PERFORMANCE FIX: Per-clip eviction (reduced from 120 to 8)
-              if (clipCache.length > MAX_PER_CLIP_FRAME_CACHE) {
-                const evictCt = useEditorStore.getState().currentTime;
-                clipCache.sort((a, b) => Math.abs(b.time - evictCt) - Math.abs(a.time - evictCt));
-                const removed = clipCache.shift();
-                removed?.bitmap.close();
-                clipCache.sort((a, b) => a.time - b.time);
-              }
-              // PERFORMANCE FIX: Global eviction — cap total frames across all clips
-              let totalFrames = 0;
-              for (const frames of frameCacheRef.current.values()) totalFrames += frames.length;
-              if (totalFrames > MAX_GLOBAL_FRAME_CACHE) {
-                const evictCt = useEditorStore.getState().currentTime;
-                // Find the clip with the most distant frame and evict it
-                let worstDist = -1;
-                let worstClipId = '';
-                let worstIdx = -1;
-                for (const [cId, frames] of frameCacheRef.current) {
-                  for (let i = 0; i < frames.length; i++) {
-                    const dist = Math.abs(frames[i].time - evictCt);
-                    if (dist > worstDist) {
-                      worstDist = dist;
-                      worstClipId = cId;
-                      worstIdx = i;
-                    }
-                  }
-                }
-                if (worstIdx >= 0 && worstClipId) {
-                  const frames = frameCacheRef.current.get(worstClipId)!;
-                  const [removed] = frames.splice(worstIdx, 1);
-                  removed?.bitmap.close();
-                }
-              }
-            }).catch(() => {});
-          }
-
           triggerRedraw();
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
@@ -549,9 +483,6 @@ export function useMediaPlayback(): MediaPlaybackResult {
         entry.el.remove();
         pool.delete(clipId);
         videoMap.delete(clipId);
-        const frames = frameCacheRef.current.get(clipId);
-        if (frames) frames.forEach(f => { try { f.bitmap.close(); } catch(e) {} });
-        frameCacheRef.current.delete(clipId);
         pendingSeeksRef.current.delete(clipId);
       }
     }
@@ -1159,8 +1090,8 @@ export function useMediaPlayback(): MediaPlaybackResult {
       
       const newTime = state.currentTime;
       const now = performance.now();
-      // Throttle video element seeking to ~60fps to avoid overloading the decoder
-      if (now - lastScrubSeekTime < 16) return;
+      // Throttle video element seeking to ~20fps to avoid overloading the hardware decoder during scrubs
+      if (now - lastScrubSeekTime < 50) return;
       lastScrubSeekTime = now;
       
       const pool = poolRef.current;
@@ -1277,10 +1208,17 @@ export function useMediaPlayback(): MediaPlaybackResult {
     // Sort by distance (closest first) and only load the nearest MAX_LOADED_VIDEOS
     videoEntries.sort((a, b) => a.dist - b.dist);
 
+    const getProximityWindow = (mediaItem: any) => {
+      const height = mediaItem.height || 1080;
+      if (height >= 2160) return 5;  // 4K: only 5 sec
+      if (height >= 1080) return 10; // 1080p: 10 sec
+      return 15; // 720p or lower: 15 sec
+    };
+
     const loadedCount = { current: 0 };
     for (const ve of videoEntries) {
       const el = ve.entry.el as HTMLVideoElement;
-      const isNear = ve.dist < 10; // within 10 seconds
+      const isNear = ve.dist <= getProximityWindow(ve.media);
       const canLoad = loadedCount.current < MAX_LOADED_VIDEOS;
       
       if (isNear && canLoad) {
@@ -1344,14 +1282,14 @@ export function useMediaPlayback(): MediaPlaybackResult {
       }
       pool.clear();
       videoMapRef.current.clear();
-      frameCacheRef.current.forEach(frames => frames.forEach(f => { try { f.bitmap.close(); } catch(e) {} }));
-      frameCacheRef.current.clear();
       pendingSeeksRef.current.clear();
     };
   }, [triggerRedraw]);
 
-  resultRef.current.videoElements = videoMapRef.current;
-  resultRef.current.frameCache = frameCacheRef.current;
+  useEffect(() => {
+    resultRef.current.videoElements = videoMapRef.current;
+  }, [stableTriggerRedraw]);
+
   return resultRef.current;
 }
 
