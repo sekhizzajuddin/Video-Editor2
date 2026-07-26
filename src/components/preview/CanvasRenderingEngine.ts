@@ -68,6 +68,8 @@ export interface RenderCanvasParams {
   };
 }
 
+const MAX_POOL_CANVASES = 12;
+
 export function getOrCreateCanvas(
   offscreenPool: Map<string, HTMLCanvasElement>,
   key: string,
@@ -76,7 +78,16 @@ export function getOrCreateCanvas(
 ): HTMLCanvasElement {
   let canvas = offscreenPool.get(key);
   if (!canvas) {
+    if (offscreenPool.size >= MAX_POOL_CANVASES) {
+      const firstKey = offscreenPool.keys().next().value;
+      if (firstKey && firstKey !== 'composite') {
+        offscreenPool.delete(firstKey);
+      }
+    }
     canvas = document.createElement('canvas');
+    offscreenPool.set(key, canvas);
+  } else {
+    offscreenPool.delete(key);
     offscreenPool.set(key, canvas);
   }
   if (Math.abs(canvas.width - w) > 0.5) canvas.width = Math.max(1, Math.round(w));
@@ -594,8 +605,10 @@ export async function renderCanvasEngine({
         }
       } else if (fxType === 'action_shake') {
         const intensity = (clip.fxSettings.intensity || 50) / 100;
-        fxShakeX = (Math.sin(fxRelTime * 45) * 12 + (Math.random() - 0.5) * 10) * intensity;
-        fxShakeY = (Math.cos(fxRelTime * 55) * 12 + (Math.random() - 0.5) * 10) * intensity;
+        const seed = Math.sin(fxRelTime * 12.9898) * 43758.5453;
+        const pseudoRand = seed - Math.floor(seed);
+        fxShakeX = (Math.sin(fxRelTime * 45) * 12 + (pseudoRand - 0.5) * 10) * intensity;
+        fxShakeY = (Math.cos(fxRelTime * 55) * 12 + (pseudoRand - 0.5) * 10) * intensity;
       }
     }
 
@@ -707,7 +720,7 @@ export async function renderCanvasEngine({
         if (clipW > 0 && clipH > 0) {
           const offCanvasKey = `clip_${clip.id}_${Math.round(dw)}x${Math.round(dh)}`;
           const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, dw * DOWNSCALE, dh * DOWNSCALE);
-          const oCtx = offCanvas.getContext('2d', { willReadFrequently: true })!;
+          const oCtx = offCanvas.getContext('2d')!;
           oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
 
           oCtx.save();
@@ -722,7 +735,8 @@ export async function renderCanvasEngine({
           if (saturation !== 100) cssFilters.push(`saturate(${Math.max(0, saturation)}%)`);
           if (blur > 0) cssFilters.push(`blur(${blur}px)`);
 
-          if (cssFilters.length > 0) {
+          const hasFilters = cssFilters.length > 0;
+          if (hasFilters) {
             oCtx.filter = cssFilters.join(' ');
           }
 
@@ -736,7 +750,9 @@ export async function renderCanvasEngine({
           const odh = dh * (1 - cTop - cBot);
 
           oCtx.drawImage(sourceElement, sx, sy, sw, sh, odx, ody, odw, odh);
-          oCtx.filter = 'none';
+          if (hasFilters) {
+            oCtx.filter = 'none';
+          }
 
           if (!skipExpensiveFX) {
             if (clip.aiBackground?.enabled) {
@@ -1050,11 +1066,24 @@ export async function renderCanvasEngine({
   }
 
   if (drawQueue.length > 1) {
-    drawQueue.sort((a, b) => a.layer - b.layer);
+    let needsSort = false;
+    for (let i = 1; i < drawQueue.length; i++) {
+      if (drawQueue[i].layer < drawQueue[i - 1].layer) {
+        needsSort = true;
+        break;
+      }
+    }
+    if (needsSort) {
+      drawQueue.sort((a, b) => a.layer - b.layer);
+    }
   }
 
   for (const item of drawQueue) {
-    await drawSingleClip(item.clip);
+    if (isPlaying) {
+      drawSingleClip(item.clip);
+    } else {
+      await drawSingleClip(item.clip);
+    }
   }
 
   if (!anyClipDrawn && !hasClips) {
@@ -1220,17 +1249,19 @@ export async function renderCanvasEngine({
     mainCtx.drawImage(composite, 0, 0);
   }
 
-  if (!lastFrameCanvasRef.current) {
-    lastFrameCanvasRef.current = document.createElement('canvas');
-  }
-  const snapCanvas = lastFrameCanvasRef.current;
-  if (snapCanvas.width !== canvas.width || snapCanvas.height !== canvas.height) {
-    snapCanvas.width = canvas.width;
-    snapCanvas.height = canvas.height;
-  }
-  const snapCtx = snapCanvas.getContext('2d');
-  if (snapCtx) {
-    snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
-    snapCtx.drawImage(composite, 0, 0);
+  if (!isPlaying || isExporting) {
+    if (!lastFrameCanvasRef.current) {
+      lastFrameCanvasRef.current = document.createElement('canvas');
+    }
+    const snapCanvas = lastFrameCanvasRef.current;
+    if (snapCanvas.width !== canvas.width || snapCanvas.height !== canvas.height) {
+      snapCanvas.width = canvas.width;
+      snapCanvas.height = canvas.height;
+    }
+    const snapCtx = snapCanvas.getContext('2d');
+    if (snapCtx) {
+      snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
+      snapCtx.drawImage(composite, 0, 0);
+    }
   }
 }
