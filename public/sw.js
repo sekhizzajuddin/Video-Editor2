@@ -34,8 +34,8 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Bypass caching for WebSockets, Puter APIs, or local editor backend APIs
-  if (e.request.url.includes('socket.io') || e.request.url.includes('api.puter.com') || e.request.url.includes('/api/')) {
+  // Bypass caching for WebSockets, Puter APIs, local editor backend APIs, or media range requests
+  if (e.request.url.includes('socket.io') || e.request.url.includes('api.puter.com') || e.request.url.includes('/api/') || e.request.headers.get('range')) {
     return;
   }
 

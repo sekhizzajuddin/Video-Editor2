@@ -311,4 +311,17 @@ export default defineConfig({
       "@openreel/core": path.resolve(__dirname, "./packages/core/src"),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-icons': ['lucide-react'],
+          'vendor-ui': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-tabs', '@radix-ui/react-slider', '@radix-ui/react-tooltip', 'recharts'],
+          'vendor-ai': ['onnxruntime-web'],
+          'vendor-media': ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
+        },
+      },
+    },
+  },
 });

@@ -521,6 +521,19 @@ export const findClipDeep = (state: EditorState, clipId: string) => {
   return null;
 };
 
+export const findClipInTracks = (tracks: TimelineTrack[], clipId: string | null | undefined): TimelineClip | undefined => {
+  if (!tracks || !clipId) return undefined;
+  for (let i = 0; i < tracks.length; i++) {
+    const clips = tracks[i].clips;
+    if (clips) {
+      for (let j = 0; j < clips.length; j++) {
+        if (clips[j] && clips[j].id === clipId) return clips[j];
+      }
+    }
+  }
+  return undefined;
+};
+
 export const useEditorStore = create<EditorState & EditorActions>((set, get) => ({
   ...initialState,
 
@@ -2200,7 +2213,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // audio clip on the first available (or new) audio track, at the same position.
   unlinkAudio: (clipId) => {
     const { tracks, mediaLibrary } = get();
-    const videoClip = tracks.flatMap((t) => t.clips || []).find((c) => c.id === clipId);
+    const videoClip = findClipInTracks(tracks, clipId);
     if (!videoClip) return;
 
     const media = mediaLibrary.find((m) => m.id === videoClip.mediaId);
@@ -2307,7 +2320,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   breakLinkConnection: (clipId) => {
     set((state) => {
-      const clip = state.tracks.flatMap((t) => t.clips || []).find((c) => c.id === clipId);
+      const clip = findClipInTracks(state.tracks, clipId);
       if (!clip) return {};
       const linkedClipId = clip.linkedClipId;
 
@@ -3437,7 +3450,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     };
     
     set((state) => {
-      const clip = state.tracks.flatMap(t => t.clips || []).find(c => c && c.id === clipId);
+      const clip = findClipInTracks(state.tracks, clipId);
       if (!clip) return {};
       
       const newTracks = state.tracks.map(t => {
@@ -3845,15 +3858,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Compound Clips
   enterCompoundClip: (clipId) => {
     const { tracks, timelineStack, mediaLibrary, pipWindows } = get();
-    let clip = tracks.flatMap(t => t.clips || []).find(c => c.id === clipId);
-    
-    // Check PIP tracks if not found in main tracks
-    if (!clip) {
-      for (const pipId in (pipWindows || {})) {
-        clip = pipWindows[pipId].tracks.flatMap(t => t.clips || []).find(c => c.id === clipId);
-        if (clip) break;
-      }
-    }
+    const clip = findClipDeep(get(), clipId)?.clip;
     
     if (!clip || !clip.mediaId) return;
     

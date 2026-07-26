@@ -409,12 +409,12 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       {/* ── Diamond Markers for PIP Windows ────────────────────────── */}
       {trackType === 'video' && clipPipWindows && clipPipWindows.length > 0 && (
         <div className="absolute -bottom-1.5 left-0 right-0 h-0 z-50 pointer-events-none">
-          {clipPipWindows.map(pip => {
+          {clipPipWindows.map((pip, idx) => {
             if (!pip) return null;
             const relX = (pip.relativeStartTime || 0) * zoomLevel;
             return (
               <div 
-                key={pip.id || Math.random().toString()}
+                key={pip.id || `pip-fallback-${idx}`}
                 className="absolute w-3 h-3 bg-cyan-400 border border-cyan-200 rotate-45 shadow-[0_0_8px_rgba(34,211,238,0.8)] pointer-events-auto cursor-pointer hover:bg-cyan-300 transition-colors"
                 style={{ left: `${relX - 6}px`, top: '-6px' }}
                 title="PIP Window (Click to open)"

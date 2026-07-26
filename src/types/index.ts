@@ -68,6 +68,7 @@ export interface ClipTransform {
   perspectiveCorners?: CornerPoints;
   perspectiveTrackingData?: { time: number; corners: CornerPoints }[];
   blendMode?: GlobalCompositeOperation; // compositor blend modes
+  blendIntensity?: number; // 0 to 100 percentage of blend mode mixing, default 100
   flipH?: boolean;
   flipV?: boolean;
 }

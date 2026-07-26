@@ -11,9 +11,9 @@ interface KeyframeControlProps {
   clipId: string;
   onAddKeyframe: (time: number, value: number) => void;
   onRemoveKeyframe: (time: number) => void;
-  onUpdateEasing: (time: number, easing: PropertyKeyframe['easing']) => void;
-  onJumpToNext: () => void;
-  onJumpToPrev: () => void;
+  onUpdateEasing?: (time: number, easing: PropertyKeyframe['easing']) => void;
+  onJumpToNext?: () => void;
+  onJumpToPrev?: () => void;
 }
 
 export const KeyframeControl: React.FC<KeyframeControlProps> = ({
@@ -66,7 +66,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onJumpToPrev();
+          onJumpToPrev?.();
         }}
         disabled={!prevKf}
         className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
@@ -119,7 +119,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onJumpToNext();
+          onJumpToNext?.();
         }}
         disabled={!nextKf}
         className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
@@ -141,7 +141,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
               if (newEasing === 'bezier') {
                 setShowBezierEditor(true);
               } else {
-                onUpdateEasing(keyframe!.time, newEasing);
+                onUpdateEasing?.(keyframe!.time, newEasing);
               }
             }}
             className="bg-[#1e1e1e] border border-[#3e3e3e] text-[9px] text-[#a0a0a0] hover:text-white rounded px-1 outline-none cursor-pointer w-16"
@@ -179,7 +179,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
           initialValue={keyframe.bezier || { x: 0.5, y: 0, inX: 0.5, inY: 1 }}
           onClose={() => setShowBezierEditor(false)}
           onApply={(newBezier) => {
-            onUpdateEasing(keyframe.time, 'bezier');
+            onUpdateEasing?.(keyframe.time, 'bezier');
             handleUpdateBezier(keyframe.time, newBezier);
           }}
         />

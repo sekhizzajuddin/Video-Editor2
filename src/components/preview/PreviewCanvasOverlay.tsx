@@ -47,6 +47,8 @@ export function PreviewCanvasOverlay({
   const canvasTransformMode = useEditorStore(s => s.canvasTransformMode);
   const setCanvasTransformMode = useEditorStore(s => s.setCanvasTransformMode);
   const aspectRatio = useEditorStore(s => s.aspectRatio);
+  const perRatioFraming = useEditorStore(s => s.perRatioFraming);
+  const perRatioFramingEnabled = useEditorStore(s => s.perRatioFramingEnabled);
   const useProxies = useEditorStore(s => s.useProxies);
   const activePropertiesTab = useEditorStore(s => s.activePropertiesTab);
   const storeUpdateClip = useEditorStore(s => s.updateClip);
@@ -135,10 +137,17 @@ export function PreviewCanvasOverlay({
     }
   }
 
-  const aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']) : 0;
-  const aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']) : 0;
-  const aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']) : 100;
+  let aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']) : 0;
+  let aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']) : 0;
+  let aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']) : 100;
   const aRot = activeClip ? getAnimatedValue(activeClip.transform.rotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']) : 0;
+
+  if (activeClip && perRatioFramingEnabled && perRatioFraming[aspectRatio]?.[activeClip.id]) {
+    const customFraming = perRatioFraming[aspectRatio][activeClip.id];
+    if (customFraming.x !== undefined) aX += customFraming.x;
+    if (customFraming.y !== undefined) aY += customFraming.y;
+    if (customFraming.scale !== undefined) aScale *= (customFraming.scale / 100);
+  }
 
   const aCropLeft = activeClip ? getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']) : 0;
   const aCropTop = activeClip ? getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']) : 0;
@@ -970,8 +979,8 @@ export function PreviewCanvasOverlay({
 
   const getRenderedSelectionPoints = () => {
     if (!activeClip || !mediaItem) return '';
-    let imageW = 1920;
-    let imageH = 1080;
+    let imageW = mediaItem.width || 1920;
+    let imageH = mediaItem.height || 1080;
     const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
     if (img && img.naturalWidth > 0) {
       imageW = img.naturalWidth;
@@ -981,8 +990,8 @@ export function PreviewCanvasOverlay({
     let vw = 854;
     let vh = 480;
     if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
-      vw = 1920;
-      vh = 1080;
+      vw = mediaItem.width || 1920;
+      vh = mediaItem.height || 1080;
     }
     let scaleToFit = 1;
     if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
@@ -1000,8 +1009,8 @@ export function PreviewCanvasOverlay({
 
   const maskDataUrl = useMemo(() => {
     if (!selectionMask || !mediaItem) return null;
-    let imageW = 1920;
-    let imageH = 1080;
+    let imageW = mediaItem.width || 1920;
+    let imageH = mediaItem.height || 1080;
     const img = getCachedImage(mediaItem.id, mediaItem.url as string, () => {});
     if (img && img.naturalWidth > 0) {
       imageW = img.naturalWidth;
@@ -1140,8 +1149,8 @@ export function PreviewCanvasOverlay({
   const offsetX = (854 - viewW) / 2;
   const offsetY = (480 - viewH) / 2;
 
-  let vw = 1920;
-  let vh = 1080;
+  let vw = mediaItem?.width || 1920;
+  let vh = mediaItem?.height || 1080;
   if (mediaItem?.type === 'video') {
     const v = videoElements.get(activeClip.id);
     if (v && v.videoWidth > 0) {

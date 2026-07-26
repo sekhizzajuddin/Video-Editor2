@@ -1,4 +1,4 @@
-﻿import { X, Download, Sparkles, AlertCircle } from 'lucide-react';
+import { X, Download, Sparkles, AlertCircle } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -113,6 +113,9 @@ export function ExportModal() {
 
   // Cleanup function
   const cleanup = useCallback(() => {
+    if (!recorderRef.current && !streamRef.current && !videoStreamRef.current && !timeoutRef.current && batchTimeoutsRef.current.length === 0 && !abortControllerRef.current && !useEditorStore.getState().isExporting) {
+      return;
+    }
     if (recorderRef.current) {
       recorderRef.current.ondataavailable = null;
       recorderRef.current.onstop = null;
@@ -153,13 +156,15 @@ export function ExportModal() {
     chunksRef.current = [];
     playbackStartedRef.current = false;
     // FIX M12: restore canvas BEFORE calling setIsExporting(false) to avoid flicker
-    if (previewCanvas) {
+    if (previewCanvas && useEditorStore.getState().isExporting) {
       const previewWidth = useEditorStore.getState().settings.previewQuality === 'quarter' ? 213 : useEditorStore.getState().settings.previewQuality === 'half' ? 427 : 854;
       const previewHeight = useEditorStore.getState().settings.previewQuality === 'quarter' ? 120 : useEditorStore.getState().settings.previewQuality === 'half' ? 240 : 480;
       previewCanvas.width = previewWidth;
       previewCanvas.height = previewHeight;
     }
-    setIsExporting(false);
+    if (useEditorStore.getState().isExporting) {
+      setIsExporting(false);
+    }
   }, [setIsExporting, previewCanvas]);
 
   // Watch currentTime to update progress and stop recording at end

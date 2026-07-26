@@ -33,6 +33,20 @@ interface PipFloatingWindowProps {
   selectTransition: (id: string | null) => void;
 }
 
+const PipPlayhead = React.memo(({ parentStartTime, pipRelativeStartTime, pipDuration, zoomLevel }: { parentStartTime: number, pipRelativeStartTime?: number, pipDuration: number, zoomLevel: number }) => {
+  const currentTime = useEditorStore(s => s.currentTime);
+  const pipAbsStart = parentStartTime + (pipRelativeStartTime || 0);
+  if (currentTime >= pipAbsStart && currentTime <= pipAbsStart + pipDuration) {
+    return (
+      <div 
+        className="absolute top-0 bottom-0 w-px bg-red-500 z-50 pointer-events-none"
+        style={{ left: `${(currentTime - pipAbsStart) * zoomLevel}px` }}
+      />
+    );
+  }
+  return null;
+});
+
 export const PipFloatingWindow = React.memo(function PipFloatingWindow({
   pipWindow,
   parentClip,
@@ -66,7 +80,6 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     addTrackToPip,
     addEmptyTrackToPip,
     mediaLibrary,
-    currentTime,
     selectedClipId,
   } = useEditorStore(useShallow(s => ({
     updatePipWindowStartTime: s.updatePipWindowStartTime,
@@ -77,7 +90,6 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     addTrackToPip: s.addTrackToPip,
     addEmptyTrackToPip: s.addEmptyTrackToPip,
     mediaLibrary: s.mediaLibrary,
-    currentTime: s.currentTime,
     selectedClipId: s.selectedClipId,
   })));
 
@@ -369,18 +381,12 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           </div>
         ) : (
           <div className="relative w-full h-full flex flex-col gap-1">
-            {(() => {
-              const pipAbsStart = parentClip.startTime + (pipWindow.relativeStartTime || 0);
-              if (currentTime >= pipAbsStart && currentTime <= pipAbsStart + pipWindow.duration) {
-                return (
-                  <div 
-                    className="absolute top-0 bottom-0 w-px bg-red-500 z-50 pointer-events-none"
-                    style={{ left: `${(currentTime - pipAbsStart) * zoomLevel}px` }}
-                  />
-                );
-              }
-              return null;
-            })()}
+            <PipPlayhead
+              parentStartTime={parentClip.startTime}
+              pipRelativeStartTime={pipWindow.relativeStartTime}
+              pipDuration={pipWindow.duration}
+              zoomLevel={zoomLevel}
+            />
              {(pipWindow.tracks || []).map((track, idx) => {
                // Render track type icon
                const TrackIcon = () => {

@@ -17,7 +17,7 @@ import {
   Loader2,
   Link,
 } from 'lucide-react';
-import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { TimelineTrack, TimelineMarker } from '@/types';
 import type { TimelineState } from '../hooks/useTimelineState';
@@ -104,7 +104,7 @@ export function TimelineModals({
   };
 
   const handleZIndexChange = (clipId: string, action: 'front' | 'back' | 'forward' | 'backward') => {
-    const clip = tracks.flatMap(t => t.clips).find(c => c.id === clipId);
+    const clip = findClipInTracks(tracks, clipId);
     
     if (!clip) return;
     const currentZ = clip.zIndex || 0;
@@ -211,7 +211,7 @@ export function TimelineModals({
                   className="w-full text-left px-3 py-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
                   onClick={() => {
                     const state = useEditorStore.getState();
-                    const clip = state.tracks.flatMap(t => t.clips || []).find(c => c.id === contextMenu.clipId);
+                    const clip = findClipInTracks(state.tracks, contextMenu.clipId);
                     if (clip) {
                       const relativeStart = Math.max(0, state.currentTime - clip.startTime);
                       state.createPipWindow(contextMenu.clipId, relativeStart);

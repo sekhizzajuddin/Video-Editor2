@@ -3338,7 +3338,7 @@ export function PropertiesPanel() {
                 </div>
               </button>
               {!collapsedSections['blendMode'] && (
-                <div className="px-2.5 pb-2.5">
+                <div className="px-2.5 pb-2.5 space-y-3">
                   <select
                     value={selectedClip.transform.blendMode || 'source-over'}
                     onChange={(e) => {
@@ -3347,29 +3347,77 @@ export function PropertiesPanel() {
                     }}
                     className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 capitalize cursor-pointer"
                   >
-                    {[
-                      'source-over',
-                      'multiply',
-                      'screen',
-                      'overlay',
-                      'darken',
-                      'lighten',
-                      'color-dodge',
-                      'color-burn',
-                      'hard-light',
-                      'soft-light',
-                      'difference',
-                      'exclusion',
-                      'hue',
-                      'saturation',
-                      'color',
-                      'luminosity'
-                    ].map((mode) => (
-                      <option key={mode} value={mode}>
-                        {mode.replace('-', ' ')}
-                      </option>
-                    ))}
+                    <optgroup label="Normal (Default)" className="bg-[#141414] text-gray-300 font-bold">
+                      <option value="source-over">Normal</option>
+                    </optgroup>
+                    <optgroup label="Darken (Subtract Light)" className="bg-[#141414] text-gray-300 font-bold">
+                      <option value="multiply">Multiply</option>
+                      <option value="darken">Darken</option>
+                      <option value="color-burn">Color Burn</option>
+                    </optgroup>
+                    <optgroup label="Lighten (Add Light)" className="bg-[#141414] text-gray-300 font-bold">
+                      <option value="screen">Screen</option>
+                      <option value="lighten">Lighten</option>
+                      <option value="color-dodge">Color Dodge</option>
+                    </optgroup>
+                    <optgroup label="Contrast (High Dynamic)" className="bg-[#141414] text-gray-300 font-bold">
+                      <option value="overlay">Overlay</option>
+                      <option value="hard-light">Hard Light</option>
+                      <option value="soft-light">Soft Light</option>
+                    </optgroup>
+                    <optgroup label="Inversion & Cancellation" className="bg-[#141414] text-gray-300 font-bold">
+                      <option value="difference">Difference</option>
+                      <option value="exclusion">Exclusion</option>
+                    </optgroup>
+                    <optgroup label="Color & HSL Grading" className="bg-[#141414] text-gray-300 font-bold">
+                      <option value="hue">Hue</option>
+                      <option value="saturation">Saturation</option>
+                      <option value="color">Color</option>
+                      <option value="luminosity">Luminosity</option>
+                    </optgroup>
                   </select>
+
+                  {/* Blend Intensity Slider with Keyframe Control */}
+                  <div className="space-y-1.5 pt-2 border-t border-[#3e3e3e]/30">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Blend Intensity (%)</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[#a0a0a0]">
+                          {Math.round(getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity'))}%
+                        </span>
+                        <KeyframeControl
+                          propertyKey="transform.blendIntensity"
+                          value={getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity')}
+                          keyframes={animations['transform.blendIntensity'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['transform.blendIntensity'] || [], time, val, { easing: 'linear' });
+                            updateClip(selectedClip.id, { animations: { ...animations, 'transform.blendIntensity': newKf } });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['transform.blendIntensity'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, { animations: { ...animations, 'transform.blendIntensity': newKf } });
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity')}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setPropVal('transform.blendIntensity', val, {
+                          transform: { ...selectedClip.transform, blendIntensity: val }
+                        });
+                      }}
+                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      className="w-full h-1 bg-[#1e1e1e] rounded-lg accent-amber-500 cursor-pointer"
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -4142,18 +4190,40 @@ export function PropertiesPanel() {
                         </div>
                         {/* Intensity slider */}
                         <div className="space-y-1">
-                          <div className="flex justify-between text-[11px]">
+                          <div className="flex justify-between items-center text-[11px]">
                             <span className="text-[#a0a0a0]">Intensity</span>
-                            <span className="font-mono text-[#a0a0a0]">{selectedClip.lut.intensity}%</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[#a0a0a0]">
+                                {Math.round(getPropVal(selectedClip.lut.intensity ?? 100, 'lut.intensity'))}%
+                              </span>
+                              <KeyframeControl
+                                propertyKey="lut.intensity"
+                                value={getPropVal(selectedClip.lut.intensity ?? 100, 'lut.intensity')}
+                                keyframes={animations['lut.intensity'] || []}
+                                currentTime={localTime}
+                                clipId={selectedClip.id}
+                                onAddKeyframe={(time, val) => {
+                                  const newKf = addOrUpdateKeyframe(animations['lut.intensity'] || [], time, val, { easing: 'linear' });
+                                  updateClip(selectedClip.id, { animations: { ...animations, 'lut.intensity': newKf } });
+                                }}
+                                onRemoveKeyframe={(time) => {
+                                  const newKf = (animations['lut.intensity'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                                  updateClip(selectedClip.id, { animations: { ...animations, 'lut.intensity': newKf } });
+                                }}
+                              />
+                            </div>
                           </div>
                           <input
                             type="range"
                             min={0}
                             max={100}
-                            value={selectedClip.lut.intensity}
-                            onChange={(e) => updateClip(selectedClip.id, {
-                              lut: { ...selectedClip.lut!, intensity: Number(e.target.value) }
-                            })}
+                            value={getPropVal(selectedClip.lut.intensity ?? 100, 'lut.intensity')}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setPropVal('lut.intensity', val, {
+                                lut: { ...selectedClip.lut!, intensity: val }
+                              });
+                            }}
                             onMouseUp={() => useEditorStore.getState().saveSnapshot()}
                             className="w-full h-1 bg-gradient-to-r from-[#3e3e3e] to-emerald-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
                           />
@@ -4246,18 +4316,37 @@ export function PropertiesPanel() {
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="block text-[10px] text-[#a0a0a0] font-medium">Edge Feather (Soften)</label>
-                      <span className="text-[10px] text-cyan-400 font-mono">{(selectedClip.aiBackground.edgeBlur ?? 0)}px</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-cyan-400 font-mono">
+                          {getPropVal(selectedClip.aiBackground.edgeBlur ?? 0, 'aiBackground.edgeBlur')}px
+                        </span>
+                        <KeyframeControl
+                          propertyKey="aiBackground.edgeBlur"
+                          value={getPropVal(selectedClip.aiBackground.edgeBlur ?? 0, 'aiBackground.edgeBlur')}
+                          keyframes={animations['aiBackground.edgeBlur'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['aiBackground.edgeBlur'] || [], time, val, { easing: 'linear' });
+                            updateClip(selectedClip.id, { animations: { ...animations, 'aiBackground.edgeBlur': newKf } });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['aiBackground.edgeBlur'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, { animations: { ...animations, 'aiBackground.edgeBlur': newKf } });
+                          }}
+                        />
+                      </div>
                     </div>
                     <input
                       type="range"
                       min={0}
                       max={20}
                       step={0.5}
-                      value={selectedClip.aiBackground.edgeBlur ?? 0}
+                      value={getPropVal(selectedClip.aiBackground.edgeBlur ?? 0, 'aiBackground.edgeBlur')}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
                         const existing = selectedClip.aiBackground!;
-                        updateClip(selectedClip.id, {
+                        setPropVal('aiBackground.edgeBlur', val, {
                           aiBackground: { ...existing, edgeBlur: val }
                         });
                       }}
@@ -4413,17 +4502,35 @@ export function PropertiesPanel() {
                       <div className="space-y-1">
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Threshold</span>
-                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.threshold ?? 30}%</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.chromaKey?.threshold ?? 30, 'chromaKey.threshold'))}%</span>
+                            <KeyframeControl
+                              propertyKey="chromaKey.threshold"
+                              value={getPropVal(selectedClip.chromaKey?.threshold ?? 30, 'chromaKey.threshold')}
+                              keyframes={animations['chromaKey.threshold'] || []}
+                              currentTime={localTime}
+                              clipId={selectedClip.id}
+                              onAddKeyframe={(time, val) => {
+                                const newKf = addOrUpdateKeyframe(animations['chromaKey.threshold'] || [], time, val, { easing: 'linear' });
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.threshold': newKf } });
+                              }}
+                              onRemoveKeyframe={(time) => {
+                                const newKf = (animations['chromaKey.threshold'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.threshold': newKf } });
+                              }}
+                            />
+                          </div>
                         </div>
                         <input
                           type="range"
                           min={1}
                           max={100}
-                          value={selectedClip.chromaKey?.threshold ?? 30}
+                          value={getPropVal(selectedClip.chromaKey?.threshold ?? 30, 'chromaKey.threshold')}
                           onChange={(e) => {
+                            const val = Number(e.target.value);
                             const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
-                            updateClip(selectedClip.id, {
-                              chromaKey: { ...existing, threshold: Number(e.target.value) }
+                            setPropVal('chromaKey.threshold', val, {
+                              chromaKey: { ...existing, threshold: val }
                             });
                           }}
                           onMouseUp={() => useEditorStore.getState().saveSnapshot()}
@@ -4439,17 +4546,35 @@ export function PropertiesPanel() {
                       <div className="space-y-1">
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Softness / Spill</span>
-                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.softness ?? 10}%</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.chromaKey?.softness ?? 10, 'chromaKey.softness'))}%</span>
+                            <KeyframeControl
+                              propertyKey="chromaKey.softness"
+                              value={getPropVal(selectedClip.chromaKey?.softness ?? 10, 'chromaKey.softness')}
+                              keyframes={animations['chromaKey.softness'] || []}
+                              currentTime={localTime}
+                              clipId={selectedClip.id}
+                              onAddKeyframe={(time, val) => {
+                                const newKf = addOrUpdateKeyframe(animations['chromaKey.softness'] || [], time, val, { easing: 'linear' });
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.softness': newKf } });
+                              }}
+                              onRemoveKeyframe={(time) => {
+                                const newKf = (animations['chromaKey.softness'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.softness': newKf } });
+                              }}
+                            />
+                          </div>
                         </div>
                         <input
                           type="range"
                           min={0}
                           max={100}
-                          value={selectedClip.chromaKey?.softness ?? 10}
+                          value={getPropVal(selectedClip.chromaKey?.softness ?? 10, 'chromaKey.softness')}
                           onChange={(e) => {
+                            const val = Number(e.target.value);
                             const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
-                            updateClip(selectedClip.id, {
-                              chromaKey: { ...existing, softness: Number(e.target.value) }
+                            setPropVal('chromaKey.softness', val, {
+                              chromaKey: { ...existing, softness: val }
                             });
                           }}
                           onMouseUp={() => useEditorStore.getState().saveSnapshot()}
@@ -4461,17 +4586,35 @@ export function PropertiesPanel() {
                       <div className="space-y-1">
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Spill Suppression</span>
-                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.spillSuppression ?? 0}%</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.chromaKey?.spillSuppression ?? 0, 'chromaKey.spillSuppression'))}%</span>
+                            <KeyframeControl
+                              propertyKey="chromaKey.spillSuppression"
+                              value={getPropVal(selectedClip.chromaKey?.spillSuppression ?? 0, 'chromaKey.spillSuppression')}
+                              keyframes={animations['chromaKey.spillSuppression'] || []}
+                              currentTime={localTime}
+                              clipId={selectedClip.id}
+                              onAddKeyframe={(time, val) => {
+                                const newKf = addOrUpdateKeyframe(animations['chromaKey.spillSuppression'] || [], time, val, { easing: 'linear' });
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.spillSuppression': newKf } });
+                              }}
+                              onRemoveKeyframe={(time) => {
+                                const newKf = (animations['chromaKey.spillSuppression'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.spillSuppression': newKf } });
+                              }}
+                            />
+                          </div>
                         </div>
                         <input
                           type="range"
                           min={0}
                           max={100}
-                          value={selectedClip.chromaKey?.spillSuppression ?? 0}
+                          value={getPropVal(selectedClip.chromaKey?.spillSuppression ?? 0, 'chromaKey.spillSuppression')}
                           onChange={(e) => {
+                            const val = Number(e.target.value);
                             const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10, spillSuppression: 0, edgeFeather: 0 };
-                            updateClip(selectedClip.id, {
-                              chromaKey: { ...existing, spillSuppression: Number(e.target.value) }
+                            setPropVal('chromaKey.spillSuppression', val, {
+                              chromaKey: { ...existing, spillSuppression: val }
                             });
                           }}
                           onMouseUp={() => useEditorStore.getState().saveSnapshot()}
@@ -4485,18 +4628,36 @@ export function PropertiesPanel() {
                       <div className="space-y-1">
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Edge Feather</span>
-                          <span className="font-mono text-[#a0a0a0]">{selectedClip.chromaKey?.edgeFeather ?? 0}px</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[#a0a0a0]">{getPropVal(selectedClip.chromaKey?.edgeFeather ?? 0, 'chromaKey.edgeFeather')}px</span>
+                            <KeyframeControl
+                              propertyKey="chromaKey.edgeFeather"
+                              value={getPropVal(selectedClip.chromaKey?.edgeFeather ?? 0, 'chromaKey.edgeFeather')}
+                              keyframes={animations['chromaKey.edgeFeather'] || []}
+                              currentTime={localTime}
+                              clipId={selectedClip.id}
+                              onAddKeyframe={(time, val) => {
+                                const newKf = addOrUpdateKeyframe(animations['chromaKey.edgeFeather'] || [], time, val, { easing: 'linear' });
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.edgeFeather': newKf } });
+                              }}
+                              onRemoveKeyframe={(time) => {
+                                const newKf = (animations['chromaKey.edgeFeather'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                                updateClip(selectedClip.id, { animations: { ...animations, 'chromaKey.edgeFeather': newKf } });
+                              }}
+                            />
+                          </div>
                         </div>
                         <input
                           type="range"
                           min={0}
                           max={20}
                           step={0.5}
-                          value={selectedClip.chromaKey?.edgeFeather ?? 0}
+                          value={getPropVal(selectedClip.chromaKey?.edgeFeather ?? 0, 'chromaKey.edgeFeather')}
                           onChange={(e) => {
+                            const val = Number(e.target.value);
                             const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10, spillSuppression: 0, edgeFeather: 0 };
-                            updateClip(selectedClip.id, {
-                              chromaKey: { ...existing, edgeFeather: Number(e.target.value) }
+                            setPropVal('chromaKey.edgeFeather', val, {
+                              chromaKey: { ...existing, edgeFeather: val }
                             });
                           }}
                           onMouseUp={() => useEditorStore.getState().saveSnapshot()}
@@ -4573,17 +4734,35 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Threshold</span>
-                      <span className="font-mono text-[#a0a0a0]">{selectedClip.lumaKey?.threshold ?? 100}%</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.lumaKey?.threshold ?? 100, 'lumaKey.threshold'))}%</span>
+                        <KeyframeControl
+                          propertyKey="lumaKey.threshold"
+                          value={getPropVal(selectedClip.lumaKey?.threshold ?? 100, 'lumaKey.threshold')}
+                          keyframes={animations['lumaKey.threshold'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['lumaKey.threshold'] || [], time, val, { easing: 'linear' });
+                            updateClip(selectedClip.id, { animations: { ...animations, 'lumaKey.threshold': newKf } });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['lumaKey.threshold'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, { animations: { ...animations, 'lumaKey.threshold': newKf } });
+                          }}
+                        />
+                      </div>
                     </div>
                     <input
                       type="range"
                       min={0}
                       max={100}
-                      value={selectedClip.lumaKey?.threshold ?? 100}
+                      value={getPropVal(selectedClip.lumaKey?.threshold ?? 100, 'lumaKey.threshold')}
                       onChange={(e) => {
+                        const val = Number(e.target.value);
                         const existing = selectedClip.lumaKey ?? { enabled: true, type: 'light', threshold: 100, softness: 10 };
-                        updateClip(selectedClip.id, {
-                          lumaKey: { ...existing, threshold: Number(e.target.value) }
+                        setPropVal('lumaKey.threshold', val, {
+                          lumaKey: { ...existing, threshold: val }
                         });
                       }}
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}
@@ -4595,17 +4774,35 @@ export function PropertiesPanel() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Softness / Spill</span>
-                      <span className="font-mono text-[#a0a0a0]">{selectedClip.lumaKey?.softness ?? 10}%</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.lumaKey?.softness ?? 10, 'lumaKey.softness'))}%</span>
+                        <KeyframeControl
+                          propertyKey="lumaKey.softness"
+                          value={getPropVal(selectedClip.lumaKey?.softness ?? 10, 'lumaKey.softness')}
+                          keyframes={animations['lumaKey.softness'] || []}
+                          currentTime={localTime}
+                          clipId={selectedClip.id}
+                          onAddKeyframe={(time, val) => {
+                            const newKf = addOrUpdateKeyframe(animations['lumaKey.softness'] || [], time, val, { easing: 'linear' });
+                            updateClip(selectedClip.id, { animations: { ...animations, 'lumaKey.softness': newKf } });
+                          }}
+                          onRemoveKeyframe={(time) => {
+                            const newKf = (animations['lumaKey.softness'] || []).filter(k => Math.abs(k.time - time) > 0.03);
+                            updateClip(selectedClip.id, { animations: { ...animations, 'lumaKey.softness': newKf } });
+                          }}
+                        />
+                      </div>
                     </div>
                     <input
                       type="range"
                       min={0}
                       max={100}
-                      value={selectedClip.lumaKey?.softness ?? 10}
+                      value={getPropVal(selectedClip.lumaKey?.softness ?? 10, 'lumaKey.softness')}
                       onChange={(e) => {
+                        const val = Number(e.target.value);
                         const existing = selectedClip.lumaKey ?? { enabled: true, type: 'light', threshold: 100, softness: 10 };
-                        updateClip(selectedClip.id, {
-                          lumaKey: { ...existing, softness: Number(e.target.value) }
+                        setPropVal('lumaKey.softness', val, {
+                          lumaKey: { ...existing, softness: val }
                         });
                       }}
                       onMouseUp={() => useEditorStore.getState().saveSnapshot()}

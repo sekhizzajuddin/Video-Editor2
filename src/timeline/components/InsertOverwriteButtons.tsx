@@ -3,27 +3,29 @@ import { ArrowLeftToLine, ArrowRightToLine } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 
-export function InsertOverwriteButtons() {
-  const { insertClip, overwriteClip, selectedClipId, tracks, currentTime } = useEditorStore(useShallow(s => ({ insertClip: s.insertClip, overwriteClip: s.overwriteClip, selectedClipId: s.selectedClipId, tracks: s.tracks, currentTime: s.currentTime })));
+export const InsertOverwriteButtons = React.memo(function InsertOverwriteButtons() {
+  const { insertClip, overwriteClip, selectedClipId } = useEditorStore(useShallow(s => ({ insertClip: s.insertClip, overwriteClip: s.overwriteClip, selectedClipId: s.selectedClipId })));
   
   const handleInsert = () => {
     if (!selectedClipId) return;
     
-    const clip = findClipDeep(useEditorStore.getState(), selectedClipId)?.clip;
+    const state = useEditorStore.getState();
+    const clip = findClipDeep(state, selectedClipId)?.clip;
     if (!clip) return;
     
     // Create a copy of the clip to insert
-    insertClip({ ...clip, id: crypto.randomUUID() }, currentTime, clip.trackId);
+    insertClip({ ...clip, id: crypto.randomUUID() }, state.currentTime, clip.trackId);
   };
   
   const handleOverwrite = () => {
     if (!selectedClipId) return;
     
-    const clip = findClipDeep(useEditorStore.getState(), selectedClipId)?.clip;
+    const state = useEditorStore.getState();
+    const clip = findClipDeep(state, selectedClipId)?.clip;
     if (!clip) return;
     
     // Create a copy of the clip to overwrite
-    overwriteClip({ ...clip, id: crypto.randomUUID() }, currentTime, clip.trackId);
+    overwriteClip({ ...clip, id: crypto.randomUUID() }, state.currentTime, clip.trackId);
   };
   
   return (
@@ -46,4 +48,4 @@ export function InsertOverwriteButtons() {
       </button>
     </div>
   );
-}
+});

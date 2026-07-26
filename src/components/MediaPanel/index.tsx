@@ -47,7 +47,7 @@ import {
   FileText,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
-import { useEditorStore, getAllClipsDeep } from '@/store/editorStore';
+import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
@@ -378,7 +378,7 @@ export function MediaPanel() {
   const handleTemplateClick = (tmpl: any) => {
     if (tmpl.type === 'video') {
       const { selectedClipId, currentTime } = useEditorStore.getState();
-      let targetClip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+      let targetClip = findClipInTracks(tracks, selectedClipId);
       
       if (!targetClip) {
         const videoTrack = tracks.find(t => t.type === 'video');
@@ -665,7 +665,7 @@ export function MediaPanel() {
 
   const handleGenerateKineticTypography = async () => {
     const { selectedClipId, tracks } = useEditorStore.getState();
-    let targetClip = tracks.flatMap(t => t.clips).find(c => c.id === selectedClipId);
+    let targetClip = findClipInTracks(tracks, selectedClipId);
     
     if (!targetClip) {
       const { currentTime } = useEditorStore.getState();

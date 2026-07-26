@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { getRampedTrimEndForRightResize, getRampedTrimStartForLeftResize, getSpeedRampEngine } from '@/utils/speedRamp';
@@ -15,8 +15,7 @@ const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime:
   if (draggedClips.length <= 1) return true;
   
   const clipsWithTime = draggedClips.map(dc => {
-     const allClips = tracks?.flatMap(t => t.clips || []) || [];
-     const c = allClips.find(x => x?.id === dc.id);
+     const c = findClipInTracks(tracks, dc.id);
      return { start: dc.originalStartTime, end: dc.originalStartTime + (c?.duration || 0) };
   });
   
@@ -513,10 +512,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               .map((c) => c.id);
           }
         } else {
-          matchingIds = latestTracks
-            .flatMap((t) => t.clips)
-            .filter((c) => c.startTime >= thresholdTime)
-            .map((c) => c.id);
+          matchingIds = [];
+          for (const t of latestTracks) {
+            for (const c of t.clips || []) {
+              if (c.startTime >= thresholdTime) matchingIds.push(c.id);
+            }
+          }
         }
 
         selectClips(matchingIds);
@@ -553,10 +554,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               .map((c) => c.id);
           }
         } else {
-          matchingIds = latestTracks
-            .flatMap((t) => t.clips)
-            .filter((c) => c.startTime <= thresholdTime)
-            .map((c) => c.id);
+          matchingIds = [];
+          for (const t of latestTracks) {
+            for (const c of t.clips || []) {
+              if (c.startTime <= thresholdTime) matchingIds.push(c.id);
+            }
+          }
         }
 
         selectClips(matchingIds);

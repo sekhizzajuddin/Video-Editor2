@@ -90,8 +90,10 @@ export function getOrCreateCanvas(
     offscreenPool.delete(key);
     offscreenPool.set(key, canvas);
   }
-  if (Math.abs(canvas.width - w) > 0.5) canvas.width = Math.max(1, Math.round(w));
-  if (Math.abs(canvas.height - h) > 0.5) canvas.height = Math.max(1, Math.round(h));
+  const targetW = Math.max(1, Math.round(w));
+  const targetH = Math.max(1, Math.round(h));
+  if (canvas.width !== targetW) canvas.width = targetW;
+  if (canvas.height !== targetH) canvas.height = targetH;
   return canvas;
 }
 
@@ -479,10 +481,14 @@ export async function renderCanvasEngine({
     const aRotY = getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY']);
 
     const hasPerspectiveWarp = !!(clip.transform.perspectivePin || Math.abs(aRotX) > 0.01 || Math.abs(aRotY) > 0.01);
+    const aBlendIntensity = Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'])));
+    const blendMode = clip.transform.blendMode || 'source-over';
+    const totalAlpha = aOpacity * opacityMultiplier;
+    const needsDualBlend = blendMode !== 'source-over' && aBlendIntensity < 100;
 
     ctx.save();
-    ctx.globalAlpha = aOpacity * opacityMultiplier;
-    ctx.globalCompositeOperation = clip.transform.blendMode || 'source-over';
+    ctx.globalAlpha = needsDualBlend ? (totalAlpha * (aBlendIntensity / 100)) : totalAlpha;
+    ctx.globalCompositeOperation = blendMode;
 
     const cx = W / 2;
     const cy = H / 2;
@@ -756,35 +762,42 @@ export async function renderCanvasEngine({
 
           if (!skipExpensiveFX) {
             if (clip.aiBackground?.enabled) {
+              const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
               await applyAiBackgroundMask(
                 oCtx,
                 offCanvas.width,
                 offCanvas.height,
                 sourceElement,
-                clip.aiBackground.edgeBlur ?? 0,
+                animEdgeBlur,
                 clip.aiBackground.modelSelection ?? 0
               );
             }
             if (clip.chromaKey?.enabled) {
+              const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold']);
+              const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness']);
+              const animSpill = getAnimatedValue(clip.chromaKey.spillSuppression ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.spillSuppression']);
+              const animFeather = getAnimatedValue(clip.chromaKey.edgeFeather ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.edgeFeather']);
               applyChromaKeyOnData(
                 oCtx,
                 offCanvas.width,
                 offCanvas.height,
                 clip.chromaKey.color,
-                clip.chromaKey.threshold,
-                clip.chromaKey.softness,
-                clip.chromaKey.spillSuppression ?? 0,
-                clip.chromaKey.edgeFeather ?? 0
+                animThresh,
+                animSoft,
+                animSpill,
+                animFeather
               );
             }
             if (clip.lumaKey?.enabled) {
+              const animThresh = getAnimatedValue(clip.lumaKey.threshold, currentTime, clip.startTime, clip.animations?.['lumaKey.threshold']);
+              const animSoft = getAnimatedValue(clip.lumaKey.softness, currentTime, clip.startTime, clip.animations?.['lumaKey.softness']);
               applyLumaKeyOnData(
                 oCtx,
                 offCanvas.width,
                 offCanvas.height,
                 clip.lumaKey.type,
-                clip.lumaKey.threshold,
-                clip.lumaKey.softness
+                animThresh,
+                animSoft
               );
             }
             if (filters.shadows || filters.midtones || filters.highlights) {
@@ -800,8 +813,18 @@ export async function renderCanvasEngine({
             if (filters.temperature !== 0 || filters.tint !== 0 || filters.fadedFilm !== 0 || filters.vignette !== 0) {
               applyColorOverlays(oCtx, 0, 0, offCanvas.width, offCanvas.height, filters);
             }
-            if (clip.lutFilter?.enabled && clip.lutFilter.lutUrl) {
-              applyLutToCanvas(oCtx, offCanvas.width, offCanvas.height, clip.lutFilter.lutUrl, clip.lutFilter.intensity ?? 100);
+            const lutData = useEditorStore.getState().mediaLibrary.find(
+              (m) => m.id === (clip.lut?.mediaId || clip.lutFilter?.mediaId)
+            )?.lutData;
+            if (lutData) {
+              const baseIntensity = clip.lut?.intensity ?? clip.lutFilter?.intensity ?? 100;
+              const animIntensity = getAnimatedValue(
+                baseIntensity,
+                currentTime,
+                clip.startTime,
+                clip.animations?.['lut.intensity'] || clip.animations?.['lutFilter.intensity']
+              );
+              applyLutToCanvas(oCtx, offCanvas.width, offCanvas.height, lutData, animIntensity);
             }
           }
 
@@ -812,6 +835,18 @@ export async function renderCanvasEngine({
           }
 
           oCtx.restore();
+
+          if (needsDualBlend) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
+            if (corners) {
+              drawPerspectiveTexture(ctx, offCanvas, corners);
+            } else {
+              ctx.drawImage(offCanvas, dx, dy, dw, dh);
+            }
+            ctx.restore();
+          }
 
           if (corners) {
             drawPerspectiveTexture(ctx, offCanvas, corners);

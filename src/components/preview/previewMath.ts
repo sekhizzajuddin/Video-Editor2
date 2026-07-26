@@ -10,6 +10,25 @@
  */
 
 import { getAnimatedValue } from '@/utils/keyframes';
+import { useEditorStore } from '@/store/editorStore';
+
+/**
+ * Helper to get active perRatioFraming adjustments for a clip
+ */
+function getPerRatioFraming(clipId: string, aX: number, aY: number, aScale: number) {
+  try {
+    const state = useEditorStore.getState();
+    if (state.perRatioFramingEnabled && state.perRatioFraming[state.aspectRatio]?.[clipId]) {
+      const framing = state.perRatioFraming[state.aspectRatio][clipId];
+      if (framing.x !== undefined) aX += framing.x;
+      if (framing.y !== undefined) aY += framing.y;
+      if (framing.scale !== undefined) aScale *= (framing.scale / 100);
+    }
+  } catch (e) {
+    // ignore outside store context
+  }
+  return { aX, aY, aScale };
+}
 
 /**
  * Calculates base and scaled dimensions for a given clip based on media type & viewport size.
@@ -25,12 +44,9 @@ export function getClipDimensions(
   let vw = W;
   let vh = H;
   
-  if (mediaItem?.type === 'video') {
-    vw = 1920;
-    vh = 1080;
-  } else if (mediaItem?.type === 'image') {
-    vw = 1920;
-    vh = 1080;
+  if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+    vw = mediaItem.width || 1920;
+    vh = mediaItem.height || 1080;
   } else if (mediaItem?.type === 'text' || clip.textSettings || clip.mediaId === 'text-placeholder') {
     const ts = clip.textSettings;
     if (ts) {
@@ -54,7 +70,10 @@ export function getClipDimensions(
   const baseW = vw * scaleToFit;
   const baseH = vh * scaleToFit;
   
-  const scale = clip.transform?.scale ?? 100;
+  let scale = clip.transform?.scale ?? 100;
+  const framed = getPerRatioFraming(clip.id, 0, 0, scale);
+  scale = framed.aScale;
+
   return {
     width: baseW * (scale / 100),
     height: baseH * (scale / 100),
@@ -72,10 +91,15 @@ export function screenToImageCoords(
   baseH: number,
   currentTime: number
 ) {
-  const aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
-  const aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
-  const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
+  let aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
+  let aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
+  let aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
   const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+
+  const framed = getPerRatioFraming(clip.id, aX, aY, aScale);
+  aX = framed.aX;
+  aY = framed.aY;
+  aScale = framed.aScale;
 
   // 1. Translate back by clip center offset
   const tx = mx - aX;
@@ -109,10 +133,15 @@ export function imageToScreenCoords(
   baseH: number,
   currentTime: number
 ) {
-  const aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
-  const aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
-  const aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
+  let aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
+  let aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
+  let aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
   const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+
+  const framed = getPerRatioFraming(clip.id, aX, aY, aScale);
+  aX = framed.aX;
+  aY = framed.aY;
+  aScale = framed.aScale;
 
   // 1. Map to center-origin
   const cx = ix - baseW / 2;

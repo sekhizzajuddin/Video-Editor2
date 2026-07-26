@@ -13,7 +13,7 @@
  */
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { TimelineTrack, MediaItem } from '@/types';
@@ -707,7 +707,7 @@ export function PreviewCanvasContainer() {
       : 480;
 
   const cursorStyle = useMemo(() => {
-    const sc = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+    const sc = findClipInTracks(tracks, selectedClipId);
     return activeTool === 'hand'
       ? isPanning.current
         ? 'grabbing'
@@ -763,7 +763,7 @@ export function PreviewCanvasContainer() {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onClick={(e) => {
-          const selClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+          const selClip = findClipInTracks(tracks, selectedClipId);
           if (selClip?.particleSettings && (e.ctrlKey || e.altKey)) {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100;

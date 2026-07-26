@@ -17,12 +17,30 @@ import { HelpTooltipManager } from '@/components/HelpTooltipManager';
 import { WelcomeScreen } from '@/components/WelcomeScreen';
 import { AiCopilot } from '@/components/AiCopilot';
 import { FileHandlerInitializer } from '@/components/FileHandlerInitializer';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 import { saveAutosaveToDB } from '@/utils/projectPersistence';
 import { Toaster } from '@/components/ui/sonner';
 import './App.css';
+
+let lastShortcutsRef: Record<string, string> | null = null;
+let lastInvertedMap: Record<string, string> = {};
+
+function getActionForKey(pressed: string, customShortcuts: Record<string, string> | undefined): string | undefined {
+  const currentShortcuts = customShortcuts || {};
+  if (lastShortcutsRef !== currentShortcuts) {
+    lastShortcutsRef = currentShortcuts;
+    lastInvertedMap = {};
+    for (const def of DEFAULT_SHORTCUTS) {
+      const keyCombo = currentShortcuts[def.id] !== undefined ? currentShortcuts[def.id] : def.defaultKey;
+      if (keyCombo) {
+        lastInvertedMap[keyCombo.toLowerCase()] = def.id;
+      }
+    }
+  }
+  return lastInvertedMap[pressed.toLowerCase()];
+}
 
 function App() {
   const {
@@ -141,14 +159,8 @@ function App() {
       if (!pressed) return;
 
       const currentSettings = useEditorStore.getState().settings;
-      const customShortcuts = currentSettings.keyboardShortcuts || {};
-      const shortcutsMap: Record<string, string> = {};
-      for (const def of DEFAULT_SHORTCUTS) {
-        shortcutsMap[def.id] = customShortcuts[def.id] !== undefined ? customShortcuts[def.id] : def.defaultKey;
-      }
-
-      // Find if the pressed combination is assigned to an action
-      const actionId = Object.entries(shortcutsMap).find(([_, keyCombo]) => keyCombo.toLowerCase() === pressed.toLowerCase())?.[0];
+      const customShortcuts = currentSettings.keyboardShortcuts;
+      const actionId = getActionForKey(pressed, customShortcuts);
 
       if (!actionId) return;
 
@@ -217,25 +229,29 @@ function App() {
           setActiveTool('rateStretch');
           break;
         case 'select_all_clips_forward': {
-          const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+          const selectedClip = findClipInTracks(tracks, selectedClipId);
           if (selectedClip) {
             const refTime = selectedClip.startTime;
-            const matchingIds = tracks
-              .flatMap((t) => t.clips)
-              .filter((c) => c.startTime >= refTime)
-              .map((c) => c.id);
+            const matchingIds: string[] = [];
+            for (const t of tracks) {
+              for (const c of t.clips || []) {
+                if (c.startTime >= refTime) matchingIds.push(c.id);
+              }
+            }
             selectClips(matchingIds);
           }
           break;
         }
         case 'select_all_clips_backward': {
-          const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId);
+          const selectedClip = findClipInTracks(tracks, selectedClipId);
           if (selectedClip) {
             const refTime = selectedClip.startTime;
-            const matchingIds = tracks
-              .flatMap((t) => t.clips)
-              .filter((c) => c.startTime <= refTime)
-              .map((c) => c.id);
+            const matchingIds: string[] = [];
+            for (const t of tracks) {
+              for (const c of t.clips || []) {
+                if (c.startTime <= refTime) matchingIds.push(c.id);
+              }
+            }
             selectClips(matchingIds);
           }
           break;
@@ -295,7 +311,7 @@ function App() {
           if (state.selectedClipIds && state.selectedClipIds.length > 0) {
             let splitted = false;
             state.selectedClipIds.forEach(id => {
-              const c = tracks.flatMap(tr => tr.clips).find(x => x.id === id);
+              const c = findClipInTracks(tracks, id);
               if (c && t > c.startTime && t < c.startTime + c.duration) {
                 splitClip(id, t);
                 splitted = true;
@@ -523,7 +539,7 @@ function App() {
                             if (state.selectedClipIds && state.selectedClipIds.length > 0) {
                               let splitted = false;
                               state.selectedClipIds.forEach(id => {
-                                const c = tracks.flatMap(tr => tr.clips).find(x => x.id === id);
+                                const c = findClipInTracks(tracks, id);
                                 if (c && t > c.startTime && t < c.startTime + c.duration) {
                                   splitClip(id, t);
                                   splitted = true;

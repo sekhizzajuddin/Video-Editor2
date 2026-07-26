@@ -4,6 +4,7 @@ import {
   ChevronLeft, ChevronRight, SkipBack, SkipForward, Film
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { AICueResult, analyzeAudioWithGemini } from '@/utils/aiClient';
 import { AudioOption, searchFreesound } from '@/utils/audioSearchClient';
 import { WaveformViewer } from './WaveformViewer';
@@ -34,7 +35,23 @@ function fmt(s: number): string {
 }
 
 export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mode = 'search' }: AiSoundDesignerProps) {
-  const { tracks, addMedia, addClip, addTrack } = useEditorStore();
+  const {
+    tracks, addMedia, addClip, addTrack,
+    isPlaying: globalIsPlaying, seek, togglePlayback, previewCanvas,
+    muteTimelineAudio, setMuteTimelineAudio
+  } = useEditorStore(useShallow((s) => ({
+    tracks: s.tracks,
+    addMedia: s.addMedia,
+    addClip: s.addClip,
+    addTrack: s.addTrack,
+    isPlaying: s.isPlaying,
+    seek: s.seek,
+    togglePlayback: s.togglePlayback,
+    previewCanvas: s.previewCanvas,
+    muteTimelineAudio: s.muteTimelineAudio,
+    setMuteTimelineAudio: s.setMuteTimelineAudio,
+  })));
+  const globalCurrentTime = useEditorStore((s) => s.currentTime);
 
   const clip = clipProp || {
     duration: 10,
@@ -47,21 +64,12 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   const media = clip.mediaId
     ? (() => {
         const lib = useEditorStore.getState().mediaLibrary;
-        const map = new Map(lib.map((m) => [m.id, m]));
-        return map.get(clip.mediaId) ?? null;
+        return lib.find((m) => m.id === clip.mediaId) ?? null;
       })()
     : null;
   const videoUrl = media?.url;
 
   // ── Store state for whole timeline preview ────────────────
-  const globalIsPlaying = useEditorStore((s) => s.isPlaying);
-  const globalCurrentTime = useEditorStore((s) => s.currentTime);
-  const seek = useEditorStore((s) => s.seek);
-  const togglePlayback = useEditorStore((s) => s.togglePlayback);
-  const previewCanvas = useEditorStore((s) => s.previewCanvas);
-  const muteTimelineAudio = useEditorStore((s) => s.muteTimelineAudio);
-  const setMuteTimelineAudio = useEditorStore((s) => s.setMuteTimelineAudio);
-
   const isWholeTimelineMode = clip.mediaId === null;
 
   // ── Local state ────────────────────────────────────────────

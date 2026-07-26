@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { aiToolRegistry, executeAITool, requiresConfirmation } from '../utils/aiToolRegistry';
 import { AiTrainingOrchestrator } from '../utils/ai-training/AiTrainingOrchestrator';
@@ -126,7 +126,10 @@ export const useAiCopilot = () => {
   // timer handles it. This prevents ping-pong retry storms.
   const retryTimerRef = useRef<any>(null);
 
-  const editorStore = useEditorStore();
+  // Proxy store access to read current state dynamically without triggering re-renders on 60Hz playback updates
+  const editorStore = useMemo(() => new Proxy({} as ReturnType<typeof useEditorStore.getState>, {
+    get: (_, prop: string) => (useEditorStore.getState() as any)[prop],
+  }), []);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -169,40 +172,24 @@ export const useAiCopilot = () => {
     };
   }, []);
 
-  const conversationContextRef = useRef<ConversationContext>({
-    selectedClipIds: [],
-    currentTime: 0,
-    projectContext: {
-      name: '',
-      totalDuration: 0,
-      trackCount: 0,
-      clipCount: 0
+  const conversationContextRef = useMemo(() => ({
+    get current(): ConversationContext {
+      const state = useEditorStore.getState();
+      return {
+        selectedClipIds: state.selectedClipIds,
+        currentTime: state.currentTime,
+        projectContext: {
+          name: state.projectName,
+          totalDuration: state.totalDuration,
+          trackCount: state.tracks.length,
+          clipCount: state.tracks.reduce((sum, t) => sum + t.clips.length, 0)
+        },
+        recentActions: trainingModule.getRecentActions(),
+        userIntent: messages.length > 0 ? messages[messages.length - 1].content : undefined
+      };
     },
-    recentActions: []
-  });
-
-  useEffect(() => {
-    conversationContextRef.current = {
-      selectedClipIds: editorStore.selectedClipIds,
-      currentTime: editorStore.currentTime,
-      projectContext: {
-        name: editorStore.projectName,
-        totalDuration: editorStore.totalDuration,
-        trackCount: editorStore.tracks.length,
-        clipCount: editorStore.tracks.reduce((sum, t) => sum + t.clips.length, 0)
-      },
-      recentActions: trainingModule.getRecentActions(),
-      userIntent: messages.length > 0 ? messages[messages.length - 1].content : undefined
-    };
-  }, [
-    editorStore.selectedClipIds.length,
-    editorStore.currentTime,
-    editorStore.projectName,
-    editorStore.totalDuration,
-    editorStore.tracks.length,
-    editorStore.tracks.reduce((sum, t) => sum + t.clips.length, 0),
-    messages.length
-  ]);
+    set current(_val: ConversationContext) { /* ignore manual overrides to stay in sync with state */ }
+  }), [messages]);
 
   // Phase 2: Workflow executor helper (creates an executor bound to current state)
   const buildExecutor = useCallback((): WorkflowExecutor | null => {
