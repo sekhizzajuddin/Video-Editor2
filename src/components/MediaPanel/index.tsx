@@ -47,7 +47,7 @@ import {
   FileText,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, getAllClipsDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
@@ -314,6 +314,7 @@ export function MediaPanel() {
     loadProjectTemplate,
     // Click-to-apply store helpers
     tracks,
+    pipWindows,
     addTrack,
     addClip,
     updateClip,
@@ -344,6 +345,7 @@ export function MediaPanel() {
     deleteProjectTemplate: s.deleteProjectTemplate,
     loadProjectTemplate: s.loadProjectTemplate,
     tracks: s.tracks,
+    pipWindows: s.pipWindows,
     addTrack: s.addTrack,
     addClip: s.addClip,
     updateClip: s.updateClip,
@@ -366,6 +368,11 @@ export function MediaPanel() {
   const [syncEveryNBeats, setSyncEveryNBeats] = useState(4);
   const [syncTransitionType, setSyncTransitionType] = useState('dissolve');
   const [isSyncing, setIsSyncing] = useState(false);
+
+  const usedMediaIds = useMemo(() => {
+    const clips = getAllClipsDeep({ tracks, pipWindows } as any);
+    return new Set(clips.map(c => c.mediaId).filter(Boolean));
+  }, [tracks, pipWindows]);
 
   // Click-to-apply fallback handlers
   const handleTemplateClick = (tmpl: any) => {
@@ -1409,7 +1416,7 @@ export function MediaPanel() {
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
                       onClick={() => setPreviewItem(media)}
-                      className={`${getMediaColor(media.type)} border rounded overflow-hidden cursor-grab hover:brightness-110 transition-all group relative`}
+                      className={`${getMediaColor(media.type)} border rounded overflow-hidden cursor-grab hover:brightness-110 transition-all group relative ${usedMediaIds.has(media.id) ? 'ring-2 ring-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : ''}`}
                     >
                       {/* Thumbnail */}
                       <div className="h-16 relative bg-black/20">
@@ -1488,7 +1495,7 @@ export function MediaPanel() {
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
                       onClick={() => setPreviewItem(media)}
-                      className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] cursor-grab border-b border-[#3e3e3e] transition-colors group"
+                      className={`flex items-center gap-2 p-2 hover:bg-[#3e3e3e] cursor-grab border-b border-[#3e3e3e] transition-colors group ${usedMediaIds.has(media.id) ? 'bg-blue-500/10 shadow-[inset_0_0_15px_rgba(59,130,246,0.2)] border-l-2 border-l-blue-500' : ''}`}
                     >
                       {/* Thumbnail in list view */}
                       <div className="w-10 h-7 rounded overflow-hidden bg-black/30 shrink-0 flex items-center justify-center">

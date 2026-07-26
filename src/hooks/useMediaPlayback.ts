@@ -310,20 +310,34 @@ export function useMediaPlayback(): MediaPlaybackResult {
     return result;
   }, [tracks, currentTime]);
 
-  // Ensure media elements exist for all timeline clips
+  // PERFORMANCE: Only create media elements for clips NEAR the playhead (within 15s).
+  // Previously this created elements for ALL clips on the timeline, causing 10-12 simultaneous
+  // HTMLVideoElements + audio graphs that exhausted the browser's hardware video decoder limit
+  // (4-8 max) and consumed massive RAM.
+  const ELEMENT_PROXIMITY_WINDOW = 15; // seconds
+  const MAX_GLOBAL_FRAME_CACHE = 30; // max cached ImageBitmaps across ALL clips (was 120 per clip)
+  const MAX_PER_CLIP_FRAME_CACHE = 8; // max cached frames per individual clip
+
   useEffect(() => {
+    const ct = useEditorStore.getState().currentTime;
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio' }>();
     for (const track of tracks) {
       for (const clip of track.clips) {
+        if (track.hidden) continue;
         const media = mediaLibrary.find((m) => m.id === clip.mediaId);
         if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
-          neededClips.set(clip.id, {
-            mediaId: clip.mediaId,
-            type: media.type,
-          });
+          // Only create elements for clips near the playhead or audio clips (audio is lightweight)
+          const isNearPlayhead = media.type === 'audio' || 
+            (ct >= clip.startTime - ELEMENT_PROXIMITY_WINDOW && ct < clip.startTime + clip.duration + ELEMENT_PROXIMITY_WINDOW);
+          if (isNearPlayhead) {
+            neededClips.set(clip.id, {
+              mediaId: clip.mediaId,
+              type: media.type,
+            });
+          }
         }
       }
-      // 3. Collect nested PIP clips
+      // Collect nested PIP clips (only near playhead)
       const pipWindows = useEditorStore.getState().pipWindows || {};
       for (const clip of track.clips) {
         const clipPips = Object.values(pipWindows).filter(p => p.parentClipId === clip.id);
@@ -332,10 +346,15 @@ export function useMediaPlayback(): MediaPlaybackResult {
             for (const pipClip of pipTrack.clips) {
               const media = mediaLibrary.find((m) => m.id === pipClip.mediaId);
               if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
-                neededClips.set(pipClip.id, {
-                  mediaId: pipClip.mediaId,
-                  type: media.type,
-                });
+                const absStart = clip.startTime + pip.relativeStartTime + pipClip.startTime;
+                const isNearPlayhead = media.type === 'audio' ||
+                  (ct >= absStart - ELEMENT_PROXIMITY_WINDOW && ct < absStart + pipClip.duration + ELEMENT_PROXIMITY_WINDOW);
+                if (isNearPlayhead) {
+                  neededClips.set(pipClip.id, {
+                    mediaId: pipClip.mediaId,
+                    type: media.type,
+                  });
+                }
               }
             }
           }
@@ -401,13 +420,38 @@ export function useMediaPlayback(): MediaPlaybackResult {
                 clipCache.push({ time: roundedTime, bitmap });
                 clipCache.sort((a, b) => a.time - b.time);
               }
-              // Temporal Eviction: Evict frames furthest from currentTime
-              if (clipCache.length > 120) {
-                const ct = useEditorStore.getState().currentTime;
-                clipCache.sort((a, b) => Math.abs(b.time - ct) - Math.abs(a.time - ct));
+              // PERFORMANCE FIX: Per-clip eviction (reduced from 120 to 8)
+              if (clipCache.length > MAX_PER_CLIP_FRAME_CACHE) {
+                const evictCt = useEditorStore.getState().currentTime;
+                clipCache.sort((a, b) => Math.abs(b.time - evictCt) - Math.abs(a.time - evictCt));
                 const removed = clipCache.shift();
                 removed?.bitmap.close();
                 clipCache.sort((a, b) => a.time - b.time);
+              }
+              // PERFORMANCE FIX: Global eviction — cap total frames across all clips
+              let totalFrames = 0;
+              for (const frames of frameCacheRef.current.values()) totalFrames += frames.length;
+              if (totalFrames > MAX_GLOBAL_FRAME_CACHE) {
+                const evictCt = useEditorStore.getState().currentTime;
+                // Find the clip with the most distant frame and evict it
+                let worstDist = -1;
+                let worstClipId = '';
+                let worstIdx = -1;
+                for (const [cId, frames] of frameCacheRef.current) {
+                  for (let i = 0; i < frames.length; i++) {
+                    const dist = Math.abs(frames[i].time - evictCt);
+                    if (dist > worstDist) {
+                      worstDist = dist;
+                      worstClipId = cId;
+                      worstIdx = i;
+                    }
+                  }
+                }
+                if (worstIdx >= 0 && worstClipId) {
+                  const frames = frameCacheRef.current.get(worstClipId)!;
+                  const [removed] = frames.splice(worstIdx, 1);
+                  removed?.bitmap.close();
+                }
               }
             }).catch(() => {});
           }
@@ -446,7 +490,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
         // el.load() not called here — proximity preloader will manage it
         
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
-        initAudioGraph(entry);
+        // PERFORMANCE FIX: Audio graph is now initialized LAZILY when the clip becomes active,
+        // not eagerly on element creation. This prevents 240+ audio nodes from being created
+        // for 12 clips that aren't even playing.
         pool.set(clipId, entry);
         videoMapRef.current.set(clipId, el);
       } else if (info.type === 'audio') {
@@ -459,12 +505,12 @@ export function useMediaPlayback(): MediaPlaybackResult {
         el.load(); // Force the browser to start fetching the audio
         
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'audio' };
-        initAudioGraph(entry);
+        // PERFORMANCE FIX: Audio graph deferred to when clip is active
         pool.set(clipId, entry);
       }
     }
 
-    // Remove elements that are no longer on the timeline
+    // Remove elements that are no longer needed (either removed from timeline or moved far from playhead)
     for (const [clipId, entry] of pool) {
       if (!neededClips.has(clipId)) {
         entry.el.pause();
@@ -509,7 +555,7 @@ export function useMediaPlayback(): MediaPlaybackResult {
         pendingSeeksRef.current.delete(clipId);
       }
     }
-  }, [tracks, mediaLibrary, stableTriggerRedraw]);
+  }, [tracks, mediaLibrary, currentTime, stableTriggerRedraw]);
 
   // Sync playback state — play / pause / seek
   const lastVideoSyncRef = useRef<number>(0);
@@ -543,6 +589,10 @@ export function useMediaPlayback(): MediaPlaybackResult {
         const isActiveAndPlaying = !!clip && isPlaying;
   
         if (isActiveAndPlaying) {
+          // PERFORMANCE FIX: Lazily initialize audio graph on first activation
+          if (!entry.sourceNode) {
+            initAudioGraph(entry);
+          }
           connectAudioNode(entry);
         } else {
           disconnectAudioNode(entry);
@@ -1174,6 +1224,9 @@ export function useMediaPlayback(): MediaPlaybackResult {
   }, []);
 
   // Dynamically load/unload video sources based on proximity to currentTime to prevent decoder starvation
+  // PERFORMANCE FIX: Added MAX_LOADED_VIDEOS cap to prevent exceeding browser's hardware decoder limit
+  const MAX_LOADED_VIDEOS = 4;
+
   useEffect(() => {
     const pool = poolRef.current;
     if (isExporting) {
@@ -1199,38 +1252,50 @@ export function useMediaPlayback(): MediaPlaybackResult {
       return;
     }
 
+    // Collect all video entries with their distance from playhead
+    const videoEntries: { clipId: string; entry: MediaElement; dist: number; absStart: number; clipDuration: number; media: any }[] = [];
     for (const [clipId, entry] of pool) {
       if (entry.type !== 'video') continue;
-      const el = entry.el as HTMLVideoElement;
       
-      // Find the clip to get its track and timing
       const foundNode = findClipById(clipId);
       const clipTrack = foundNode ? foundNode.track : null;
       const clipObj = foundNode ? foundNode.clip : null;
       
-      if (!clipObj || !clipTrack) continue;
+      if (!clipObj || !clipTrack || clipTrack.hidden) continue;
       
       const media = mediaLibrary.find((m) => m.id === entry.mediaId);
-      if (!media || !media.url) continue;
+      if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
       
-      const isPendingRestore = media.url === 'PENDING_RESTORE';
       const absStart = foundNode ? foundNode.absStartTime : clipObj.startTime;
-      // Load if within 60 seconds of playhead, otherwise unload
-      const isNear = !clipTrack.hidden && currentTime >= absStart - 60 && currentTime < absStart + clipObj.duration + 60;
+      const clipEnd = absStart + clipObj.duration;
+      // Distance: 0 if playhead is inside clip, otherwise distance to nearest edge
+      const dist = currentTime >= absStart && currentTime < clipEnd ? 0 : Math.min(Math.abs(currentTime - absStart), Math.abs(currentTime - clipEnd));
       
-      if (isNear && !isPendingRestore) {
-        const targetSrc = media.url;
+      videoEntries.push({ clipId, entry, dist, absStart, clipDuration: clipObj.duration, media });
+    }
+
+    // Sort by distance (closest first) and only load the nearest MAX_LOADED_VIDEOS
+    videoEntries.sort((a, b) => a.dist - b.dist);
+
+    const loadedCount = { current: 0 };
+    for (const ve of videoEntries) {
+      const el = ve.entry.el as HTMLVideoElement;
+      const isNear = ve.dist < 10; // within 10 seconds
+      const canLoad = loadedCount.current < MAX_LOADED_VIDEOS;
+      
+      if (isNear && canLoad) {
+        const targetSrc = ve.media.url;
         
         if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
           el.src = targetSrc;
-          const pendingTime = pendingSeeksRef.current.get(clipId);
+          const pendingTime = pendingSeeksRef.current.get(ve.clipId);
           if (pendingTime !== undefined) {
              el.currentTime = pendingTime;
-             pendingSeeksRef.current.delete(clipId);
+             pendingSeeksRef.current.delete(ve.clipId);
           }
           el.load();
         }
-
+        loadedCount.current++;
       } else {
         if (el.src !== '') {
           el.removeAttribute('src');
