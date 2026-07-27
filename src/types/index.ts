@@ -349,6 +349,29 @@ export interface ClipLumaKeySettings {
   softness: number;   // 0 to 100
 }
 
+export type ObjectRemovalMode = 'content_aware' | 'patch_replace' | 'blur_conceal' | 'pixelate';
+export type ObjectRemovalShape = 'rectangle' | 'ellipse' | 'polygon';
+
+export interface ClipObjectRemovalSettings {
+  enabled: boolean;
+  mode: ObjectRemovalMode;
+  shape: ObjectRemovalShape;
+  x: number;          // Center X in % (0 to 100, default 50)
+  y: number;          // Center Y in % (0 to 100, default 50)
+  width: number;      // Width in % (1 to 100, default 20)
+  height: number;     // Height in % (1 to 100, default 20)
+  rotation: number;   // -180 to 180 degrees (default 0)
+  feather: number;    // Edge feathering softness in px (0 to 50, default 10)
+  opacity: number;    // Removal strength / mixing opacity (0 to 100, default 100)
+  stretchStrength?: number; // For content_aware: inward color stretch intensity (1 to 100, default 80)
+  patchSourceX?: number;    // For patch_replace: reference sampling X % (0 to 100, default 30)
+  patchSourceY?: number;    // For patch_replace: reference sampling Y % (0 to 100, default 30)
+  showHighlight?: boolean;  // Highlight target area with outline during placement
+  temporalSmoothing?: boolean; // Frame-to-frame stabilization for video
+  quality?: 'preview' | 'export'; // Fast preview vs studio export quality
+  points?: { x: number; y: number }[]; // For custom polygon lasso bounding
+}
+
 export interface ClipKenBurnsSettings {
   enabled: boolean;
   startScale: number;
@@ -417,6 +440,7 @@ export interface TimelineClip {
   aiBackground?: ClipAiBackgroundSettings;
   chromaKey?: ClipChromaKeySettings;
   lumaKey?: ClipLumaKeySettings;
+  objectRemoval?: ClipObjectRemovalSettings;
   kenBurns?: ClipKenBurnsSettings;
   lut?: ClipLutSettings;
   lutFilter?: ClipLutSettings;

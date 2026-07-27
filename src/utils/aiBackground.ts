@@ -65,15 +65,18 @@ const initInstance = (resolve: () => void) => {
 };
 
 // We need a mechanism to resolve segmentation per frame because MediaPipe uses an async callback `onResults`.
-let pendingResolves: Array<(mask: ImageBitmap | HTMLCanvasElement) => void> = [];
+let pendingResolves: Array<(mask: ImageBitmap | HTMLCanvasElement | null) => void> = [];
+let lastSegmentationMask: ImageBitmap | HTMLCanvasElement | null = null;
+let isProcessingSegmentation = false;
 
 const onResults = (results: any) => {
+  isProcessingSegmentation = false;
   const resolve = pendingResolves.shift();
-  if (resolve && results.segmentationMask) {
-    // The mask is a grayscale image where the subject is white (255) and background is black (0)
-    resolve(results.segmentationMask);
-  } else if (resolve) {
-    resolve(null as any);
+  if (results.segmentationMask) {
+    lastSegmentationMask = results.segmentationMask;
+  }
+  if (resolve) {
+    resolve(lastSegmentationMask || null);
   }
 };
 
@@ -91,20 +94,27 @@ export async function segmentFrame(
 
   if (!selfieSegmentationInstance) return null;
 
+  // If inference is already currently computing a frame (during fast video playback),
+  // immediately return the last known segmentation mask to maintain smooth 60 FPS without frame lag or queue piling.
+  if (isProcessingSegmentation && lastSegmentationMask) {
+    return lastSegmentationMask;
+  }
+
   // Update model selection dynamically based on request
   selfieSegmentationInstance.setOptions({
     modelSelection
   });
 
   return new Promise((resolve) => {
-    // MediaPipe processes the frame and fires the callback
+    isProcessingSegmentation = true;
     pendingResolves.push(resolve);
     selfieSegmentationInstance.send({ image: imageElement }).catch((err: any) => {
       console.error('Error sending frame to MediaPipe:', err);
+      isProcessingSegmentation = false;
       const idx = pendingResolves.indexOf(resolve);
       if (idx > -1) {
         pendingResolves.splice(idx, 1);
-        resolve(null as any);
+        resolve(lastSegmentationMask || null);
       }
     });
   });

@@ -48,6 +48,7 @@ import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { SequenceProperties } from './SequenceProperties';
+import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -1424,7 +1425,8 @@ export function PropertiesPanel() {
           x: getPropVal(selectedClip.transform.x, 'transform.x'),
           y: getPropVal(selectedClip.transform.y, 'transform.y'),
           scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
-          rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
+          rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation'),
+          blendIntensity: getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity')
         },
         crop: {
           top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
@@ -1473,12 +1475,13 @@ export function PropertiesPanel() {
          deleteMasterKeyframe(selectedClip.id, closest);
        }
     } else {
-       const currentVals = {
+        const currentVals = {
           transform: {
             x: getPropVal(selectedClip.transform.x, 'transform.x'),
             y: getPropVal(selectedClip.transform.y, 'transform.y'),
             scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
-            rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation')
+            rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation'),
+            blendIntensity: getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity')
           },
           crop: {
             top: getPropVal(selectedClip.crop?.top || 0, 'crop.top'),
@@ -1887,11 +1890,11 @@ export function PropertiesPanel() {
                   <div
                     onClick={(e) => {
                       e.stopPropagation();
-                      updateClip(selectedClip.id, { transform: { ...selectedClip.transform, blendMode: 'source-over' } });
+                      updateClip(selectedClip.id, { transform: { ...selectedClip.transform, blendMode: 'source-over', blendIntensity: 100 } });
                       useEditorStore.getState().saveSnapshot();
                     }}
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
-                    title="Reset Blend Mode"
+                    title="Reset Blend Mode & Intensity"
                   >
                     <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
                   </div>
@@ -2541,6 +2544,7 @@ export function PropertiesPanel() {
                 </div>
               )}
             </div>
+            <ObjectRemovalPanel selectedClip={selectedClip} />
     </div>
   );
 

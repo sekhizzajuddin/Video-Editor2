@@ -3,6 +3,7 @@ import {
   AIMotionGraphicsSection,
   EffectsListSection,
   ChromaKeySection,
+  ObjectRemovalSection,
 } from './effects';
 
 interface EffectsTabProps {
@@ -40,6 +41,7 @@ export function EffectsTab({
 
       <EffectsListSection selectedClip={selectedClip} />
       <ChromaKeySection selectedClip={selectedClip} />
+      <ObjectRemovalSection selectedClip={selectedClip} />
     </div>
   );
 }

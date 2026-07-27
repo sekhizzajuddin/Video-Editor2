@@ -20,6 +20,7 @@ import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatTime } from '@/utils/time';
 import { applyLutToCanvas } from '@/utils/lutParser';
 import { applyAiBackgroundMask, applySubjectNeonOutlineFlash } from '@/utils/aiBackground';
+import { applyObjectRemoval } from '@/utils/objectRemoval';
 import { drawSubscribeAnimation } from '@/utils/socialAnimations';
 import {
   getCachedImage,
@@ -144,7 +145,7 @@ export async function renderCanvasEngine({
   }
   if (!compositeCtxRef.current) return;
   const ctx = compositeCtxRef.current;
-  const skipExpensiveFX = isPlaying;
+  const skipExpensiveFX = false; // Ensure AI background removal, chroma key, and particles render during active video playback
 
   const now = performance.now();
   const lastTime = lastParticleTimeRef.current ?? now;
@@ -487,7 +488,7 @@ export async function renderCanvasEngine({
     const needsDualBlend = blendMode !== 'source-over' && aBlendIntensity < 100;
 
     ctx.save();
-    ctx.globalAlpha = needsDualBlend ? (totalAlpha * (aBlendIntensity / 100)) : totalAlpha;
+    ctx.globalAlpha = totalAlpha * (aBlendIntensity / 100);
     ctx.globalCompositeOperation = blendMode;
 
     const cx = W / 2;
@@ -798,6 +799,18 @@ export async function renderCanvasEngine({
                 clip.lumaKey.type,
                 animThresh,
                 animSoft
+              );
+            }
+            if (clip.objectRemoval?.enabled) {
+              applyObjectRemoval(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                clip.objectRemoval,
+                currentTime,
+                clip.startTime,
+                offCanvas,
+                clip.animations
               );
             }
             if (filters.shadows || filters.midtones || filters.highlights) {
