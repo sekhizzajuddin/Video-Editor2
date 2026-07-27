@@ -1,5 +1,6 @@
 import { ImageIcon, Sparkles } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { toast } from 'sonner';
 
 interface ThumbnailTabProps {
   selectedClip?: any;
@@ -40,7 +41,7 @@ export function ThumbnailTab({ selectedClip }: ThumbnailTabProps) {
           onClick={() => {
             const canvas = document.querySelector('.preview-canvas') as HTMLCanvasElement;
             if (!canvas) {
-              alert("Preview canvas not found!");
+              toast.warning("Preview canvas not found!");
               return;
             }
             const dataUrl = canvas.toDataURL('image/jpeg', 0.95);

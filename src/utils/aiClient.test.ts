@@ -98,7 +98,7 @@ Hope this helps!`;
           choices: [
             {
               message: {
-                content: 'ocean waves shoreline splash'
+                content: '{"keywords": "ocean waves shoreline splash", "alternatives": []}'
               }
             }
           ]
@@ -114,14 +114,30 @@ Hope this helps!`;
         messages: [
           {
             role: 'system',
-            content: 'You are a search query optimizer. Return ONLY the requested tags/keywords separated by space. Do not write any conversational text, explanations, or quotes.'
+            content: `You are an expert audio library search optimizer for Freesound.org.\nYour ONLY job is to convert a sound description into a primary query (1-3 words) and 3 alternative queries.\n\nCRITICAL RULES FOR FREESOUND:\n1. Freesound uses exact text matching. Using long specific phrases will return ZERO results.\n2. You MUST use 1 to 3 broad, generic nouns/tags max per query (e.g., "city night", "rain").\n3. NEVER use full sentences or highly descriptive adjectives.\n\nSFX KEYWORDS:\n- Use 1 or 2 generic nouns for the physical sound.\n\nReturn ONLY valid JSON (no markdown):\n{\n  "keywords": "primary 1-3 words",\n  "alternatives": ["alt1", "alt2", "alt3"]\n}`
           },
           {
             role: 'user',
-            content: 'You are a search query optimizer for audio assets.\nGiven this sound design description: "ocean waves crashing on sand", return 3-5 optimized tags/keywords for searching sound effects on Freesound.org.\nFor example, "ocean waves crashing on sand" should become "waves ocean seashore water splash".\nReturn ONLY the optimized keywords separated by spaces. Do NOT include any explanations, markdown, or headers.'
+            content: 'Convert this sound effect/SFX description to Freesound.org search keywords:\n"ocean waves crashing on sand"'
           }
         ],
-        temperature: 0.1
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'refinement_schema',
+            strict: false,
+            schema: {
+              type: 'object',
+              properties: {
+                keywords: { type: 'string' },
+                alternatives: { type: 'array', items: { type: 'string' } }
+              },
+              required: ['keywords', 'alternatives']
+            }
+          }
+        },
+        temperature: 0.1,
+        max_tokens: 150
       };
 
       const [calledUrl, calledOptions] = globalFetchMock.mock.calls[0] as [string, RequestInit];

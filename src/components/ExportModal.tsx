@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { formatSimpleTime } from '@/utils/time';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { toast } from 'sonner';
 
 const ffmpeg = new FFmpeg();
 
@@ -649,14 +650,31 @@ export function ExportModal() {
               className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${platform === 'local' ? 'bg-[#3e3e3e] text-white' : 'text-[#a0a0a0] hover:text-[#d0d0d0]'}`}
             >Local Export</button>
             <button
-              onClick={() => setPlatform('youtube')}
+              onClick={() => {
+                setPlatform('youtube');
+                toast.info('Selected YouTube preset optimization');
+              }}
               className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${platform === 'youtube' ? 'bg-red-600/90 text-white' : 'text-[#a0a0a0] hover:text-[#d0d0d0]'}`}
             >YouTube</button>
             <button
-              onClick={() => setPlatform('tiktok')}
+              onClick={() => {
+                setPlatform('tiktok');
+                toast.info('Selected TikTok vertical optimization');
+              }}
               className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${platform === 'tiktok' ? 'bg-cyan-600/90 text-white' : 'text-[#a0a0a0] hover:text-[#d0d0d0]'}`}
             >TikTok</button>
           </div>
+
+          {platform !== 'local' && (
+            <div className={`p-2.5 rounded text-xs border ${platform === 'youtube' ? 'bg-red-950/20 border-red-500/30 text-red-200' : 'bg-cyan-950/20 border-cyan-500/30 text-cyan-200'} flex items-center gap-2`}>
+              <span className="text-sm font-semibold">{platform === 'youtube' ? '📺' : '📱'}</span>
+              <p className="flex-1 leading-snug">
+                {platform === 'youtube'
+                  ? 'Applies YouTube / Shorts codec recommendations (H.264/AAC, standard high color bitrate). Export file locally for studio upload; direct OAuth publish is scheduled in Roadmap.'
+                  : 'Applies TikTok vertical optimization (9:16 target formatting, loudness normalization). Export file locally; direct TikTok API upload is scheduled in Roadmap.'}
+              </p>
+            </div>
+          )}
 
           {/* Project Info */}
           <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">

@@ -120,10 +120,12 @@ export async function fetchWithKeyFailover(
   }
 
   // If we reach here, we had no local key to fall back on, so throw/return the original error
-  if (firstError instanceof Response) {
-    return firstError;
-  } else if (firstError) {
+  if (firstError instanceof Response || (firstError && typeof firstError.status === 'number' && typeof firstError.ok === 'boolean')) {
+    return firstError as Response;
+  } else if (firstError instanceof Error) {
     throw firstError;
+  } else if (firstError) {
+    throw new Error(typeof firstError === 'string' ? firstError : JSON.stringify(firstError));
   }
 
   throw new Error(`[${provider.toUpperCase()}] No API key configured. Please set one in the environment or Settings Modal.`);

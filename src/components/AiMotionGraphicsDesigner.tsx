@@ -3,6 +3,7 @@ import { Sparkles, X, Loader2 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { AIMotionGraphicSuggestion } from '@/utils/aiClient';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
+import { toast } from 'sonner';
 
 interface AiMotionGraphicsProps {
   clip: any;
@@ -39,7 +40,7 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
     }
 
     if (!textTrack) {
-      alert('Could not find or create a text track on the timeline.');
+      toast.warning('Could not find or create a text track on the timeline.');
       setIsApplying(false);
       return;
     }
@@ -94,7 +95,7 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
       onClose();
     } catch (err) {
       console.error('Failed to apply suggested motion graphics:', err);
-      alert('Failed to apply motion graphics.');
+      toast.error('Failed to apply motion graphics.');
     } finally {
       useEditorStore.getState().endTransaction();
       setIsApplying(false);

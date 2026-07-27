@@ -61,7 +61,7 @@ const previewTTS = async () => {
 
         client.onError = (err) => {
           console.error('Gemini TTS preview error:', err);
-          alert('Failed to preview Gemini voice.');
+          toast.error('Failed to preview Gemini voice.');
           setIsGeneratingTTS(false);
           client.disconnect();
         };
@@ -109,7 +109,7 @@ const previewTTS = async () => {
         };
         audio.onerror = (e) => {
           console.error('Edge TTS preview error:', e);
-          alert('Failed to preview Edge natural voice. Falling back to standard system voice.');
+          toast.error('Failed to preview Edge natural voice. Falling back to standard system voice.');
           setIsGeneratingTTS(false);
           if (ttsAudioRef.current === audio) {
             ttsAudioRef.current = null;
@@ -156,7 +156,7 @@ const previewTTS = async () => {
           };
         } catch (err) {
           console.error('Puter TTS preview error:', err);
-          alert('Failed to preview neural voice. Falling back to standard system voice.');
+          toast.error('Failed to preview neural voice. Falling back to standard system voice.');
           setIsGeneratingTTS(false);
           // Fallback to standard
           window.speechSynthesis.cancel();
@@ -338,7 +338,7 @@ const generateTTS = async () => {
       audioEl.addEventListener('error', settle, { once: true });
     } catch (err: any) {
       console.error('TTS Generation error:', err);
-      alert(`Failed to generate TTS audio: ${err.message || 'Unknown error'}`);
+      toast.error(`Failed to generate TTS audio: ${err.message || 'Unknown error'}`);
       setIsGeneratingTTS(false);
     }
   };

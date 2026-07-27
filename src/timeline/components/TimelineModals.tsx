@@ -21,6 +21,7 @@ import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorSt
 import { useShallow } from 'zustand/react/shallow';
 import type { TimelineTrack, TimelineMarker } from '@/types';
 import type { TimelineState } from '../hooks/useTimelineState';
+import { toast } from 'sonner';
 
 interface TimelineModalsProps {
   timelineState: TimelineState;
@@ -194,7 +195,7 @@ export function TimelineModals({
                   if (state.clipboardData || state.clipboardClip) {
                     state.pasteClip();
                   } else {
-                    alert('Clipboard is empty.');
+                    toast.warning('Clipboard is empty.');
                   }
                   setContextMenu(null);
                 }}

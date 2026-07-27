@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
+import { toast } from 'sonner';
 
 export function useVoiceoverRecording() {
   const {
@@ -64,9 +65,32 @@ export function useVoiceoverRecording() {
         recorder.onstop = async () => {
           const blob = new Blob(audioChunksRef.current, { type: mimeType });
           const elapsed = (Date.now() - recordingStartTimeMsRef.current) / 1000;
-          const finalDuration = Math.max(0.5, elapsed);
-
           const audioUrl = URL.createObjectURL(blob);
+
+          // Fix timing drift by probing exact decoded duration with WebM Infinity workaround
+          const probedDuration = await new Promise<number>((resolve) => {
+            const audio = new Audio(audioUrl);
+            const timer = setTimeout(() => resolve(elapsed), 1500);
+            audio.onloadedmetadata = () => {
+              if (audio.duration === Infinity) {
+                audio.currentTime = 1e101;
+                audio.ontimeupdate = () => {
+                  audio.ontimeupdate = null;
+                  clearTimeout(timer);
+                  resolve(isFinite(audio.duration) && audio.duration > 0 ? audio.duration : elapsed);
+                };
+              } else {
+                clearTimeout(timer);
+                resolve(isFinite(audio.duration) && audio.duration > 0 ? audio.duration : elapsed);
+              }
+            };
+            audio.onerror = () => {
+              clearTimeout(timer);
+              resolve(elapsed);
+            };
+          });
+
+          const finalDuration = Math.max(0.5, Number(probedDuration.toFixed(2)));
           const mediaId = `recorded_voiceover_${Date.now()}`;
 
           const peaks: number[] = [];
@@ -135,7 +159,7 @@ export function useVoiceoverRecording() {
         play();
       } catch (err) {
         console.error('Microphone access denied or voiceover recording failed:', err);
-        alert('Failed to access microphone. Please check your system/browser permissions.');
+        toast.error('Failed to access microphone. Please check your system/browser permissions.');
       }
     } else {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {

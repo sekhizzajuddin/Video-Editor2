@@ -437,6 +437,21 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             (el as any)._rvfcHandle = (el as any).requestVideoFrameCallback(onVideoFrame);
           };
           (el as any)._rvfcHandle = (el as any).requestVideoFrameCallback(onVideoFrame);
+
+          // rAF fallback when tab regains focus or visibility changes (Audit Item #39)
+          const onVisibilityChange = () => {
+            if (!document.hidden && poolRef.current.has(clipId)) {
+              requestAnimationFrame(() => {
+                triggerRedraw();
+                if ((el as any)._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
+                  (el as any).cancelVideoFrameCallback((el as any)._rvfcHandle);
+                }
+                (el as any)._rvfcHandle = (el as any).requestVideoFrameCallback(onVideoFrame);
+              });
+            }
+          };
+          document.addEventListener('visibilitychange', onVisibilityChange);
+          (el as any)._onVisibilityChange = onVisibilityChange;
         }
 
         getMediaContainer().appendChild(el);
@@ -478,6 +493,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           if (el._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
             el.cancelVideoFrameCallback(el._rvfcHandle);
             el._rvfcHandle = null;
+          }
+          if (el._onVisibilityChange) {
+            document.removeEventListener('visibilitychange', el._onVisibilityChange);
+            el._onVisibilityChange = null;
           }
         }
         if (entry.separationGraph) {

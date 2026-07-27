@@ -5,6 +5,7 @@ import { probeFile } from '@/utils/mediaProbe';
 import { getAutosavesFromDB, deleteAutosaveFromDB, restoreSnapshotMedia } from '@/utils/projectPersistence';
 import { clearPreviewCaches } from '@/utils/canvasEffects';
 import { DEFAULT_SHORTCUTS, getShortcutString, SHORTCUT_PROFILES } from '@/utils/keyboardShortcuts';
+import { toast } from 'sonner';
 
 export function SettingsModal() {
   const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings, aspectRatio, reframeProject, showProgressBar, useProxies, setUseProxies, setShowProgressBar, progressBarColor, setProgressBarColor, progressBarHeight, setProgressBarHeight } = useEditorStore();
@@ -69,7 +70,7 @@ export function SettingsModal() {
       setShowSettingsModal(false);
     } catch (err) {
       console.error("Failed to restore autosave:", err);
-      alert("Failed to restore autosave.");
+      toast.error("Failed to restore autosave.");
     }
   };
   const [recordingActionId, setRecordingActionId] = useState<string | null>(null);
@@ -541,8 +542,8 @@ export function SettingsModal() {
                             try {
                               const json = JSON.parse(re.target?.result as string);
                               updateSettings({ keyboardShortcuts: json });
-                              alert("Shortcuts imported successfully.");
-                            } catch (err) { alert("Invalid JSON file"); }
+                              toast.success("Shortcuts imported successfully.");
+                            } catch (err) { toast.error("Invalid JSON file"); }
                           };
                           reader.readAsText(file);
                         };
@@ -778,7 +779,7 @@ export function SettingsModal() {
                     <button 
                       onClick={() => {
                         clearPreviewCaches();
-                        alert('Preview image cache cleared successfully!');
+                        toast.success('Preview image cache cleared successfully!');
                       }}
                       className="px-3 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors"
                     >

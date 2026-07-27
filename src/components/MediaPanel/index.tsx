@@ -899,14 +899,14 @@ export function MediaPanel() {
 
       const parsed = parseSRT(text);
       if (parsed.length === 0) {
-        alert("Failed to parse SRT or file is empty.");
+        toast.error("Failed to parse SRT or file is empty.");
         return;
       }
 
       const store = useEditorStore.getState();
       store.importSubtitles(parsed);
       store.recalcTotalDuration?.(); // If it exists
-      alert(`Imported ${parsed.length} subtitles onto a new 'Subtitles' track!`);
+      toast.warning(`Imported ${parsed.length} subtitles onto a new 'Subtitles' track!`);
     };
 
     reader.readAsText(file);
@@ -2791,7 +2791,7 @@ export function MediaPanel() {
               <button
                 onClick={() => {
                   if (!syncTargetTrack || !syncAudioClip) {
-                    alert('Please select both an Audio clip and a Video track!');
+                    toast.error('Please select both an Audio clip and a Video track!');
                     return;
                   }
                   setIsSyncing(true);

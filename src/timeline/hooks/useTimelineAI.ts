@@ -5,6 +5,7 @@ import type { TimelineClip, TimelineTrack } from '@/types';
 import { synthesizeProceduralSFX } from '../sfxSynth';
 import { parseTransliteratedResponse } from '../timelineUtils';
 import type { TimelineState } from './useTimelineState';
+import { toast } from 'sonner';
 
 interface UseTimelineAIDeps {
   timelineState: TimelineState;
@@ -24,16 +25,16 @@ async function handlePuterError(err: any, taskName: string): Promise<void> {
       if (confirmSignIn) {
         try {
           await puter.auth.signIn();
-          alert("Successfully logged in! Please try your request again.");
+          toast.success("Successfully logged in! Please try your request again.");
         } catch (authErr) {
           console.error('Puter auth failed:', authErr);
         }
       }
     } else {
-      alert(`${taskName} failed: ${err.message || 'Unknown error'}`);
+      toast.error(`${taskName} failed: ${err.message || 'Unknown error'}`);
     }
   } else {
-    alert(`${taskName} failed: ${err.message || 'Unknown error'}`);
+    toast.error(`${taskName} failed: ${err.message || 'Unknown error'}`);
   }
 }
 
@@ -234,7 +235,7 @@ Return your response ONLY as a JSON object with these two fields:
 
     const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);
     if (!mediaItem || !mediaItem.url) {
-      alert('Media source file not found.');
+      toast.warning('Media source file not found.');
       return;
     }
 
@@ -425,7 +426,7 @@ Return your response ONLY as a JSON array of objects:
 
       setSfxAutoCueClipId(null);
       setSfxUserDescription('');
-      alert(`Successfully generated and auto-placed ${cuePoints.length} sound effects!`);
+      toast.success(`Successfully generated and auto-placed ${cuePoints.length} sound effects!`);
     } catch (err: any) {
       await handlePuterError(err, 'Auto-Cue Sound Effects');
     } finally {
@@ -440,7 +441,7 @@ Return your response ONLY as a JSON array of objects:
 
     const mediaItem = mediaLibrary.find(m => m.id === targetClip!.mediaId);
     if (!mediaItem || !mediaItem.url) {
-      alert('Media source file not found.');
+      toast.warning('Media source file not found.');
       return;
     }
 

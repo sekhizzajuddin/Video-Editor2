@@ -370,13 +370,13 @@ export function PropertiesPanel() {
         // Apply keyframes
         const updatedAnimations = { ...selectedClip.animations, 'audio.volume': keyframes };
         storeUpdateClip(selectedClip.id, { animations: updatedAnimations });
-        alert(`Successfully generated ducking volume keyframes based on ${keyframes.length} anchor points.`);
+        toast.success(`Successfully generated ducking volume keyframes based on ${keyframes.length} anchor points.`);
       } else {
-        alert("No overlapping audio clips with vocals detected. Ducking not required.");
+        toast.error("No overlapping audio clips with vocals detected. Ducking not required.");
       }
     } catch (e: any) {
       console.error("Error generating audio ducking:", e);
-      alert("Failed to analyze audio for ducking.");
+      toast.error("Failed to analyze audio for ducking.");
     } finally {
       setIsDuckingAudio(false);
     }
@@ -387,7 +387,7 @@ export function PropertiesPanel() {
 
     const videoEl = videoElements.get(selectedClip.id);
     if (!videoEl) {
-      alert('Video player is not loaded yet. Try seeking or playing first.');
+      toast.warning('Video player is not loaded yet. Try seeking or playing first.');
       return;
     }
 
@@ -3894,13 +3894,13 @@ export function PropertiesPanel() {
                           }
 
                           if (!bgClip) {
-                            alert("No background video clip found to track! Add a video on a lower track first.");
+                            toast.warning("No background video clip found to track! Add a video on a lower track first.");
                             return;
                           }
 
                           const videoEl = videoElements.get(bgClip.id);
                           if (!videoEl) {
-                            alert("Background video player is not loaded yet. Try playing/seeking first.");
+                            toast.warning("Background video player is not loaded yet. Try playing/seeking first.");
                             return;
                           }
 
@@ -3952,9 +3952,9 @@ export function PropertiesPanel() {
                               animations: newAnimations
                             });
 
-                            alert("Motion tracking completed successfully! Keyframes generated.");
+                            toast.success("Motion tracking completed successfully! Keyframes generated.");
                           } catch (e: any) {
-                            alert(`Motion tracking failed: ${e.message || e}`);
+                            toast.error(`Motion tracking failed: ${e.message || e}`);
                           } finally {
                             setIsTracking(false);
                           }
@@ -7001,7 +7001,7 @@ export function PropertiesPanel() {
                 onClick={() => {
                    const canvas = document.querySelector('.preview-canvas') as HTMLCanvasElement;
                    if (!canvas) {
-                     alert("Preview canvas not found!");
+                     toast.warning("Preview canvas not found!");
                      return;
                    }
                    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);

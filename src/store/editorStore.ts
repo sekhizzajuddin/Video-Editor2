@@ -24,10 +24,17 @@ const debouncedSaveProject = (state: any) => {
   if (saveTimeoutId) {
     clearTimeout(saveTimeoutId);
   }
+  const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences, projectFileHandle } = state;
+  const hasAnyMedia = mediaLibrary && mediaLibrary.length > 0;
+  const hasAnyClips = tracks && tracks.some((t: any) => t.clips && t.clips.length > 0);
+  const hasAnyExtras = (subtitles && subtitles.length > 0) || (markers && markers.length > 0) || (beatMarkers && beatMarkers.length > 0) || (pipWindows && Object.keys(pipWindows).length > 0);
+  
+  if (!hasAnyMedia && !hasAnyClips && !hasAnyExtras && projectId === 'default') {
+    return; // Skip auto-saving empty default projects on startup
+  }
+
   useEditorStore.setState({ hasUnsavedChanges: true });
   saveTimeoutId = setTimeout(async () => {
-    const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences, projectFileHandle } = state;
-    
     // Always save to IndexedDB as a fallback backup
     try {
       await saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows, sequences } as any);
@@ -538,7 +545,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   ...initialState,
 
   setAIVideoGenerationState: (state: any) => set((prev: any) => ({ ...prev, ...state })),
-  setScopeSettings: (settings: ScopeSettings) => set({ scopeSettings: settings }),
+  setScopeSettings: (settings: ScopeSettings) => set({ scopeSettings: settings, showScopes: settings.enabled }),
 
   setPerRatioFramingEnabled: (enabled: boolean) => set({ perRatioFramingEnabled: enabled }),
   setVirtualCameraEnabled: (enabled: boolean) => set((state) => ({ virtualCamera: { ...state.virtualCamera, enabled } })),
@@ -2606,7 +2613,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setActiveMediaTab: (tab) => set({ activeMediaTab: tab }),
   setActivePropertiesTab: (tab) => set({ activePropertiesTab: tab }),
   setShowExportModal: (show) => set({ showExportModal: show }),
-  setShowScopes: (show) => set({ showScopes: show }),
+  setShowScopes: (show) => set((state) => ({ showScopes: show, scopeSettings: { ...state.scopeSettings, enabled: show } })),
   setIsExporting: (isExporting) => set({ isExporting }),
   setExportFps: (exportFps) => set({ exportFps }),
   setExportDimensions: (exportWidth, exportHeight) => set({ exportWidth, exportHeight }),

@@ -14,10 +14,10 @@ const handleDetectBeats = useCallback(async (media: MediaItem) => {
     try {
       const result = await detectBeats(media.url);
       addBeatMarkers(media.id, result.beats);
-      alert(`✅ Found ${result.beats.length} beats — ~${result.bpm} BPM (confidence: ${Math.round(result.confidence * 100)}%)\n\nBeat markers added to the timeline ruler.`);
+      toast.warning(`✅ Found ${result.beats.length} beats — ~${result.bpm} BPM (confidence: ${Math.round(result.confidence * 100)}%)\n\nBeat markers added to the timeline ruler.`);
     } catch (err) {
       console.error('Beat detection failed:', err);
-      alert('Beat detection failed. Make sure the clip has valid audio.');
+      toast.error('Beat detection failed. Make sure the clip has valid audio.');
     } finally {
       setDetectingBeatId(null);
     }
