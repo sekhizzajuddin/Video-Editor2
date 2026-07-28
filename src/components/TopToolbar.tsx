@@ -70,6 +70,7 @@ import type { EditorTool } from '@/types';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
+import { setActiveProject } from '@/utils/projectPersistence';
 
 export function TopToolbar() {
   const {
@@ -217,7 +218,7 @@ export function TopToolbar() {
     }
     await resetProject();
     useEditorStore.getState().setProjectInfo('default', '');
-    import('@/utils/projectPersistence').then(m => m.setActiveProject('default'));
+    setActiveProject('default');
     setShowFileMenu(false);
   };
 
@@ -311,8 +312,7 @@ export function TopToolbar() {
                 onClick={async () => { 
                   await useEditorStore.getState().resetProject();
                   useEditorStore.getState().setProjectInfo('default', '');
-                  const m = await import('@/utils/projectPersistence');
-                  m.setActiveProject('default');
+                  setActiveProject('default');
                   setShowFileMenu(false); 
                 }}
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"

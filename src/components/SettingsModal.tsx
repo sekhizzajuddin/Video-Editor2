@@ -748,6 +748,25 @@ export function SettingsModal() {
                   </div>
 
                   <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Monitor className="w-4 h-4 text-purple-400" />
+                      <span className="text-xs text-white font-medium">Preview Gating & Short-Circuit</span>
+                    </div>
+                    <select
+                      value={settings.previewMode || 'auto'}
+                      onChange={(e) => updateSettings({ previewMode: e.target.value as any })}
+                      className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="auto">Auto (engine short-circuits on heavy FX)</option>
+                      <option value="fast">Fast (downscale 2×, skip heavy CPU loops)</option>
+                      <option value="high">High Quality (always render full FX)</option>
+                    </select>
+                    <p className="text-[10px] text-[#808080] mt-1.5">
+                      Controls whether high-cost CPU effects (AI background, Object removal, Chroma key) are short-circuited during active video playback to lock 60 FPS.
+                    </p>
+                  </div>
+
+                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
                         <Monitor className="w-4 h-4 text-emerald-400" />

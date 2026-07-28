@@ -9,6 +9,9 @@ import { useEditorStore } from '@/store/editorStore';
 export function useMediaImport() {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [progressText, setProgressText] = useState('Importing media...');
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [currentFileName, setCurrentFileName] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const addMedia = useEditorStore(state => state.addMedia);
@@ -16,10 +19,16 @@ export function useMediaImport() {
   const processFiles = async (files: File[]) => {
     if (files.length === 0) return;
     setIsUploading(true);
+    setProgressPercent(5);
     let successCount = 0;
     
     try {
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setCurrentFileName(file.name);
+        setProgressText(`Importing ${i + 1} of ${files.length}: ${file.name}`);
+        setProgressPercent(Math.round(((i + 0.2) / files.length) * 100));
+
         if (!file.type.startsWith('video/') && !file.type.startsWith('audio/') && !file.type.startsWith('image/')) {
           toast.error(`Unsupported file type: ${file.name}`);
           continue;
@@ -38,6 +47,7 @@ export function useMediaImport() {
         
         addMedia(mediaItem);
         successCount++;
+        setProgressPercent(Math.round(((i + 1) / files.length) * 100));
       }
       
       if (successCount > 0) {
@@ -47,7 +57,11 @@ export function useMediaImport() {
       console.error('Import error:', err);
       toast.error('Failed to import media');
     } finally {
-      setIsUploading(false);
+      setTimeout(() => {
+        setIsUploading(false);
+        setProgressPercent(0);
+        setCurrentFileName('');
+      }, 400);
     }
   };
 
@@ -84,6 +98,9 @@ export function useMediaImport() {
   return {
     isDragging,
     isUploading,
+    progressText,
+    progressPercent,
+    currentFileName,
     fileInputRef,
     handleDragOver,
     handleDragLeave,

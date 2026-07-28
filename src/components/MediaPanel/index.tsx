@@ -62,8 +62,8 @@ import { MOTION_TEMPLATES, MotionTemplate } from '@/utils/motionTemplates';
 import { captureCanvasChunk } from '@/utils/canvasCapture';
 import { analyzeCanvasChunkWithGemini } from '@/utils/aiClient';
 import { generateCombinedSfx } from '@/utils/elevenLabsClient';
-import { AiSoundDesigner } from '../AiSoundDesigner';
-import { AIGeneratorModal } from '../AIGeneratorModal';
+const AiSoundDesigner = React.lazy(() => import('../AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
+const AIGeneratorModal = React.lazy(() => import('../AIGeneratorModal').then(m => ({ default: m.AIGeneratorModal })));
 // Timeline FX — dragged to FX tracks. type field maps to PreviewCanvas fxType.
 // Color Correction — dragged to a video/image clip to apply that preset
 // Particle Effects — dragged to a video/image/FX clip
@@ -74,6 +74,7 @@ import { formatDuration, formatSimpleTime, formatSize, getMediaColor, getMediaIc
 import { useMediaImport } from "@/hooks/media/useMediaImport";
 import { useTTS } from "@/hooks/media/useTTS";
 import { useAudioFeatures } from "@/hooks/media/useAudioFeatures";
+import { UploadProgressOverlay } from '@/components/ui/UploadProgressOverlay';
 
 export const TemplatePreviewCard = React.memo(function TemplatePreviewCard({ tmpl, onDragStart, onClick }: TemplatePreviewCardProps) {
   const [isHovered, setIsHovered] = useState(false);
@@ -297,7 +298,7 @@ export function MediaPanel() {
   const [isLocalImporting, setIsLocalImporting] = useState(false);
     const { detectingBeatId, handleDetectBeats } = useAudioFeatures();
     const { ttsText, setTtsText, ttsLanguage, setTtsLanguage, ttsRate, setTtsRate, ttsPitch, setTtsPitch, ttsEngine, setTtsEngine, ttsVoice, setTtsVoice, isGeneratingTTS, ttsAudioRef, previewTTS, generateTTS } = useTTS();
-    const { isDragging, isUploading: importing, fileInputRef, handleDragOver, handleDragLeave, handleDrop, handleFileSelect } = useMediaImport();
+    const { isDragging, isUploading: importing, progressText: hookProgressText, progressPercent: hookProgressPercent, currentFileName: hookCurrentFileName, fileInputRef, handleDragOver, handleDragLeave, handleDrop, handleFileSelect } = useMediaImport();
   const {
     mediaLibrary,
     activeMediaTab,
@@ -1201,35 +1202,14 @@ export function MediaPanel() {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden flex flex-col relative">
-        {/* Drag-drop overlay */}
-        {isDragOver && (
-          <div className="absolute inset-0 z-50 bg-amber-500/10 border-2 border-dashed border-amber-500 flex items-center justify-center rounded">
-            <div className="text-center">
-              <Upload className="w-8 h-8 text-amber-400 mx-auto mb-2" />
-              <p className="text-sm text-amber-300 font-medium">Drop files to import</p>
-              <p className="text-xs text-amber-400/60 mt-1">Video, Audio, or Image files</p>
-            </div>
-          </div>
-        )}
-
-        {/* Import progress */}
-        {importing && (
-          <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 space-y-1.5 shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 overflow-hidden">
-                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                <span className="text-[10px] text-amber-300 truncate font-medium">{importProgress}</span>
-              </div>
-              <span className="text-[10px] text-amber-400 font-mono shrink-0">{Math.round(importProgressPct)}%</span>
-            </div>
-            <div className="w-full h-1 bg-amber-950 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 rounded-full transition-all duration-300 ease-out"
-                style={{ width: `${importProgressPct}%` }}
-              />
-            </div>
-          </div>
-        )}
+        {/* Drag-drop overlay & Upload progress */}
+        <UploadProgressOverlay
+          isDragging={isDragOver || isDragging}
+          isUploading={importing || isLocalImporting || importProgressPct > 0}
+          progressText={hookProgressText || importProgress || 'Importing media files...'}
+          progressPercent={hookProgressPercent || importProgressPct}
+          fileName={hookCurrentFileName}
+        />
 
         {activeMediaTab === 'project' && (
           <>
@@ -1987,11 +1967,8 @@ export function MediaPanel() {
                 <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                   <button
                     onClick={() => {
-                      const txt = prompt("Enter text content:", "New Text");
-                      if (txt) {
-                        addTextMedia(txt);
-                        toast.success("Text asset created! Drag it to timeline or click '+' to add.");
-                      }
+                      addTextMedia("New Text");
+                      toast.success("Created 'New Text' asset! Drag it to timeline or click '+' to add.");
                     }}
                     className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors mb-3 shrink-0 shadow"
                   >
@@ -3086,22 +3063,26 @@ export function MediaPanel() {
 
       {/* AI Video Generator Modal */}
       {showAIGeneratorModal && (
-        <AIGeneratorModal onClose={() => setShowAIGeneratorModal(false)} />
+        <React.Suspense fallback={null}>
+          <AIGeneratorModal onClose={() => setShowAIGeneratorModal(false)} />
+        </React.Suspense>
       )}
 
       {/* AI SFX Designer Modal */}
       {showAiSfxModal && sfxGeneratedCues && (
-        <AiSoundDesigner
-          onClose={() => setShowAiSfxModal(false)}
-          mode="generate"
-          clip={{
-            duration: useEditorStore.getState().totalDuration || 10,
-            trimStart: 0,
-            startTime: sfxChunkStartTime,
-            mediaId: null
-          }}
-          cues={sfxGeneratedCues}
-        />
+        <React.Suspense fallback={null}>
+          <AiSoundDesigner
+            onClose={() => setShowAiSfxModal(false)}
+            mode="generate"
+            clip={{
+              duration: useEditorStore.getState().totalDuration || 10,
+              trimStart: 0,
+              startTime: sfxChunkStartTime,
+              mediaId: null
+            }}
+            cues={sfxGeneratedCues}
+          />
+        </React.Suspense>
       )}
     </div>
   );

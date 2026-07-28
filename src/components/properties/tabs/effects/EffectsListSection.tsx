@@ -1,5 +1,6 @@
 import type { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
+import { Sparkles } from 'lucide-react';
 
 interface EffectsListSectionProps {
   selectedClip: TimelineClip;
@@ -134,9 +135,15 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
           ))}
         </div>
       ) : (
-        <p className="text-[11px] text-[#808080] py-2 text-center border border-dashed border-[#3e3e3e] rounded bg-[#1f1f1f]/40">
-          No active effects applied to this clip
-        </p>
+        <div className="flex flex-col items-center justify-center py-6 border border-dashed border-[#3e3e3e] rounded bg-gradient-to-b from-[#1a1a1a]/40 to-transparent">
+          <Sparkles className="w-6 h-6 text-[#3a3a3a] mb-2" />
+          <p className="text-[11px] text-[#808080] text-center">
+            No active effects applied to this clip
+          </p>
+          <p className="text-[9px] text-[#5a5a5a] text-center mt-1">
+            Add chroma key, object removal, or color filters below
+          </p>
+        </div>
       )}
     </div>
   );

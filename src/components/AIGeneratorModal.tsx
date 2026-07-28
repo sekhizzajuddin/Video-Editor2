@@ -5,6 +5,7 @@ import { OpenRouterModel } from '../types';
 import { useEditorStore } from '../store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
+import { enhancePromptWithGemini } from '../utils/aiClient';
 
 interface AIGeneratorModalProps {
   onClose: () => void;
@@ -100,7 +101,6 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
     }
     setIsEnhancing(true);
     try {
-      const { enhancePromptWithGemini } = await import('../utils/aiClient');
       const enhanced = await enhancePromptWithGemini(prompt, geminiApiKey);
       setPrompt(enhanced);
       toast.success('Prompt enhanced!');

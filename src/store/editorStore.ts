@@ -18,6 +18,7 @@ import type {
 import { getMediaTimeForClip, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
+import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
 
 let saveTimeoutId: any = null;
 const debouncedSaveProject = (state: any) => {
@@ -49,7 +50,6 @@ const debouncedSaveProject = (state: any) => {
     // If an OS file handle exists, auto-save to disk instantly
     if (projectFileHandle) {
       try {
-        const { serializeProjectData, saveProjectToHandle } = await import('@/utils/fileSystemAccess');
         const fileContent = serializeProjectData(state);
         await saveProjectToHandle(projectFileHandle, fileContent);
       } catch (err) {
@@ -400,6 +400,7 @@ const initialState: EditorState = {
     snapEnabled: true,
     defaultDuration: 5,
     previewQuality: 'full',
+    previewMode: 'auto',
     showThumbnails: true,
     hardwareAcceleration: true,
     keyboardShortcuts: {},

@@ -146,11 +146,14 @@ export async function renderCanvasEngine({
   if (!compositeCtxRef.current) return;
   const ctx = compositeCtxRef.current;
   const previewQuality = settings?.previewQuality ?? useEditorStore.getState().settings?.previewQuality ?? 'full';
-  // Phase 2C: Quality-2 Short-Circuit Integration for granular preview-mode gating.
-  // When active playback is running (not exporting), short-circuit CPU-heavy per-pixel operations
-  // based on the selected preview quality ('half' or 'quarter') to preserve framerate during stacked FX editing.
-  const skipExpensiveFX = !isExporting && isPlaying && previewQuality === 'quarter';
-  const skipUltraHeavyFX = !isExporting && isPlaying && (previewQuality === 'quarter' || previewQuality === 'half');
+  const previewMode = settings?.previewMode ?? useEditorStore.getState().settings?.previewMode ?? 'auto';
+  // Phase 3 Theme A2: Quality-2/3 Short-Circuit Integration for granular preview-mode gating.
+  const isAutoFast =
+    previewMode === 'auto' &&
+    isPlaying &&
+    (tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId || c.aiBackground?.enabled || c.objectRemoval?.enabled))));
+  const skipExpensiveFX = !isExporting && isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter');
+  const skipUltraHeavyFX = !isExporting && isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half');
 
   const now = performance.now();
   const lastTime = lastParticleTimeRef.current ?? now;
@@ -815,17 +818,42 @@ export async function renderCanvasEngine({
                 animSoft
               );
             }
-            if (clip.objectRemoval?.enabled && !skipUltraHeavyFX) {
-              applyObjectRemoval(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                clip.objectRemoval,
-                currentTime,
-                clip.startTime,
-                offCanvas,
-                clip.animations
-              );
+            if (clip.objectRemoval?.enabled) {
+              const useDownscaledPreview = (skipUltraHeavyFX || previewMode === 'fast') && clip.objectRemoval.quality === 'preview';
+              if (!useDownscaledPreview && !skipUltraHeavyFX) {
+                applyObjectRemoval(
+                  oCtx,
+                  offCanvas.width,
+                  offCanvas.height,
+                  clip.objectRemoval,
+                  currentTime,
+                  clip.startTime,
+                  offCanvas,
+                  clip.animations
+                );
+              } else if (useDownscaledPreview) {
+                // Downscale 2x pass for fast interactive preview of object removal
+                const previewW = Math.max(1, offCanvas.width >> 1);
+                const previewH = Math.max(1, offCanvas.height >> 1);
+                const tmp = getOrCreateCanvas(offscreenCanvasPool.current, `objr_${clip.id}_preview`, previewW, previewH);
+                const tctx = tmp.getContext('2d');
+                if (tctx) {
+                  tctx.clearRect(0, 0, previewW, previewH);
+                  tctx.drawImage(offCanvas, 0, 0, previewW, previewH);
+                  applyObjectRemoval(
+                    tctx,
+                    previewW,
+                    previewH,
+                    clip.objectRemoval,
+                    currentTime,
+                    clip.startTime,
+                    tmp,
+                    clip.animations
+                  );
+                  oCtx.imageSmoothingEnabled = true;
+                  oCtx.drawImage(tmp, 0, 0, offCanvas.width, offCanvas.height);
+                }
+              }
             }
             if (filters.shadows || filters.midtones || filters.highlights) {
               applyColorGradingWheelsOnData(

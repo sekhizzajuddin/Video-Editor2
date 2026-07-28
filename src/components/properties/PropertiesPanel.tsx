@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
-import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
+import { useState, useRef, useEffect, useCallback, Fragment, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import { Client } from '@gradio/client';
@@ -39,8 +39,8 @@ import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGra
 import { searchFreesound } from '@/utils/audioSearchClient';
 import { aiVocalSeparator } from '@/utils/aiVocalSeparator';
 import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
-import { AiSoundDesigner } from '@/components/AiSoundDesigner';
-import { AiMotionGraphicsDesigner } from '@/components/AiMotionGraphicsDesigner';
+const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
+const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
 import { getSpeedAtPosition, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
 import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } from '@/types';
@@ -7122,19 +7122,23 @@ export function PropertiesPanel() {
       </div>
 
       {showSoundDesigner && soundDesignerCues && selectedClip && (
-        <AiSoundDesigner
-          clip={selectedClip}
-          cues={soundDesignerCues}
-          onClose={() => setShowSoundDesigner(false)}
-        />
+        <Suspense fallback={null}>
+          <AiSoundDesigner
+            clip={selectedClip}
+            cues={soundDesignerCues}
+            onClose={() => setShowSoundDesigner(false)}
+          />
+        </Suspense>
       )}
 
       {showMotionGraphicsDesigner && motionGraphicsSuggestions && selectedClip && (
-        <AiMotionGraphicsDesigner
-          clip={selectedClip}
-          suggestions={motionGraphicsSuggestions}
-          onClose={() => setShowMotionGraphicsDesigner(false)}
-        />
+        <Suspense fallback={null}>
+          <AiMotionGraphicsDesigner
+            clip={selectedClip}
+            suggestions={motionGraphicsSuggestions}
+            onClose={() => setShowMotionGraphicsDesigner(false)}
+          />
+        </Suspense>
       )}
 
 

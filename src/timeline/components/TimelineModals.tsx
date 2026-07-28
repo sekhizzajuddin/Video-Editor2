@@ -97,9 +97,10 @@ export function TimelineModals({
   const handleEditMarker = (markerId: string) => {
     const marker = markers.find(m => m.id === markerId);
     if (!marker) return;
-    const newName = prompt('Rename marker:', marker.name);
-    if (newName !== null) {
+    const newName = window.prompt('Rename marker:', marker.name);
+    if (newName !== null && newName.trim() !== '') {
       updateMarker(markerId, { name: newName });
+      toast.success(`Marker renamed to "${newName}"`);
     }
     setMarkerContextMenu(null);
   };

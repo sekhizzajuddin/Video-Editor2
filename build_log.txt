@@ -1,0 +1,108 @@
+
+> video-editor@1.0.0 build
+> tsc -b && vite build
+
+[36mvite v7.3.5 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32m✓[39m 1951 modules transformed.
+rendering chunks...
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/projectPersistence.ts is dynamically imported by D:/Video-Editor/src/components/TopToolbar.tsx, D:/Video-Editor/src/components/TopToolbar.tsx, D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/App.tsx, D:/Video-Editor/src/components/MediaPanel/index.tsx, D:/Video-Editor/src/components/SettingsModal.tsx, D:/Video-Editor/src/components/WelcomeScreen.tsx, D:/Video-Editor/src/components/preview/PreviewCanvasOverlay.tsx, D:/Video-Editor/src/components/properties/PropertiesPanel.tsx, D:/Video-Editor/src/hooks/media/useMediaImport.ts, D:/Video-Editor/src/store/editorStore.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/mediaProbe.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/MediaPanel/index.tsx, D:/Video-Editor/src/components/SettingsModal.tsx, D:/Video-Editor/src/components/TopToolbar.tsx, D:/Video-Editor/src/hooks/media/useMediaImport.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/fileSystemAccess.ts is dynamically imported by D:/Video-Editor/src/store/editorStore.ts but also statically imported by D:/Video-Editor/src/components/FileHandlerInitializer.tsx, D:/Video-Editor/src/components/TopToolbar.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/srtParser.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/MediaPanel/index.tsx, D:/Video-Editor/src/utils/autoCaptions.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/lutParser.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/MediaPanel/index.tsx, D:/Video-Editor/src/components/preview/CanvasRenderingEngine.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/motionTemplates.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/AiMotionGraphicsDesigner.tsx, D:/Video-Editor/src/components/MediaPanel/index.tsx, D:/Video-Editor/src/timeline/hooks/useTimelineDrop.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/canvasCapture.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/MediaPanel/index.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/aiClient.ts is dynamically imported by D:/Video-Editor/src/components/AIGeneratorModal.tsx but also statically imported by D:/Video-Editor/src/components/AiSoundDesigner.tsx, D:/Video-Editor/src/components/MediaPanel/index.tsx, D:/Video-Editor/src/components/properties/PropertiesPanel.tsx, D:/Video-Editor/src/utils/autoCaptions.ts, D:/Video-Editor/src/utils/geminiLiveClient.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/openRouterVideo.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/AIGeneratorModal.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/textTemplates.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/MediaPanel/index.tsx, D:/Video-Editor/src/components/properties/PropertiesPanel.tsx, D:/Video-Editor/src/components/properties/tabs/text/TextStylePresetsSection.tsx, D:/Video-Editor/src/utils/kineticTypography.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/beatDetection.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/hooks/media/useAudioFeatures.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/canvasEffects.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/SettingsModal.tsx, D:/Video-Editor/src/components/preview/CanvasRenderingEngine.ts, D:/Video-Editor/src/components/preview/PreviewCanvasOverlay.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/scopeAnalyzer.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/ScopesPanel.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/motionTracker.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/properties/PropertiesPanel.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/storyboardCompiler.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/properties/PropertiesPanel.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/autoColor.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/properties/PropertiesPanel.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/bezierPresets.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/BezierEditorModal.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/components/ExportModal.tsx is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/App.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/aiToolRegistry.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/hooks/useAiCopilot.ts, D:/Video-Editor/src/utils/ai-copilot/WorkflowExecutor.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/ai-copilot/NLUEngine.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/hooks/useAiCopilot.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/ai-copilot/MemoryStore.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/hooks/useAiCopilot.ts, D:/Video-Editor/src/utils/ai-copilot/VoiceCommandParser.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/ai-copilot/RateLimiter.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/components/AiCopilot.tsx, D:/Video-Editor/src/hooks/useAiCopilot.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) D:/Video-Editor/src/utils/ai-copilot/WorkflowExecutor.ts is dynamically imported by D:/Video-Editor/src/utils/ai-copilot/testDefinitions.ts but also statically imported by D:/Video-Editor/src/hooks/useAiCopilot.ts, dynamic import will not move module into another chunk.
+[39m
+computing gzip size...
+[2mdist/[22m[32mindex.html                                            [39m[1m[2m     1.60 kB[22m[1m[22m[2m │ gzip:     0.67 kB[22m
+[2mdist/[22m[32massets/worker-BAOIWoxA.js                             [39m[1m[2m     2.53 kB[22m[1m[22m
+[2mdist/[22m[32massets/transition_demo_a-C6j1BYn0.webp                [39m[1m[2m   137.84 kB[22m[1m[22m
+[2mdist/[22m[32massets/transition_demo_b-Bny7Nvrx.webp                [39m[1m[2m   197.47 kB[22m[1m[22m
+[2mdist/[22m[32massets/ort-wasm-simd-threaded.asyncify-CvvOzbbq.wasm  [39m[1m[2m24,254.95 kB[22m[1m[22m[2m │ gzip: 5,966.53 kB[22m
+[2mdist/[22m[32massets/ort-wasm-simd-threaded.jsep-DC5y_g6C.wasm      [39m[1m[2m26,827.54 kB[22m[1m[22m[2m │ gzip: 6,326.62 kB[22m
+[2mdist/[22m[35massets/index-BDiGvO74.css                             [39m[1m[2m   172.50 kB[22m[1m[22m[2m │ gzip:    26.49 kB[22m
+[2mdist/[22m[36massets/smartReframe-CoJxtc1t.js                       [39m[1m[2m     0.39 kB[22m[1m[22m[2m │ gzip:     0.28 kB[22m
+[2mdist/[22m[36massets/waveformRenderer-B9mlZc_g.js                   [39m[1m[2m     1.04 kB[22m[1m[22m[2m │ gzip:     0.57 kB[22m
+[2mdist/[22m[36massets/groqClient-cy5IlNQI.js                         [39m[1m[2m     1.31 kB[22m[1m[22m[2m │ gzip:     0.71 kB[22m
+[2mdist/[22m[36massets/socialAnimations-DYwjmCTq.js                   [39m[1m[2m     1.61 kB[22m[1m[22m[2m │ gzip:     0.80 kB[22m
+[2mdist/[22m[36massets/audioSplitter-BqSfkRmM.js                      [39m[1m[2m     1.89 kB[22m[1m[22m[2m │ gzip:     0.99 kB[22m
+[2mdist/[22m[36massets/frameExtractor-CMsvni2c.js                     [39m[1m[2m     2.10 kB[22m[1m[22m[2m │ gzip:     0.84 kB[22m
+[2mdist/[22m[36massets/huggingFaceClient-BJ-zYvQO.js                  [39m[1m[2m     2.15 kB[22m[1m[22m[2m │ gzip:     1.17 kB[22m
+[2mdist/[22m[36massets/geminiLiveClient-jy_BvIyt.js                   [39m[1m[2m     3.15 kB[22m[1m[22m[2m │ gzip:     1.29 kB[22m
+[2mdist/[22m[36massets/autoCaptions-BzKAMtk8.js                       [39m[1m[2m     3.81 kB[22m[1m[22m[2m │ gzip:     2.07 kB[22m
+[2mdist/[22m[36massets/vendor-media-m3sXFh_d.js                       [39m[1m[2m     4.51 kB[22m[1m[22m[2m │ gzip:     1.90 kB[22m
+[2mdist/[22m[36massets/audioSeparation-CuhPPWvn.js                    [39m[1m[2m     6.16 kB[22m[1m[22m[2m │ gzip:     2.13 kB[22m
+[2mdist/[22m[36massets/vendor-ui-B3Lb_Y5t.js                          [39m[1m[2m     6.83 kB[22m[1m[22m[2m │ gzip:     2.69 kB[22m
+[2mdist/[22m[36massets/kineticTypography-CLqkPkBD.js                  [39m[1m[2m    16.76 kB[22m[1m[22m[2m │ gzip:     7.30 kB[22m
+[2mdist/[22m[36massets/vendor-icons-DzNeE0Oe.js                       [39m[1m[2m    38.25 kB[22m[1m[22m[2m │ gzip:    13.20 kB[22m
+[2mdist/[22m[36massets/ort.webgpu.bundle.min-DFaXX46o.js              [39m[1m[2m   111.81 kB[22m[1m[22m[2m │ gzip:    37.44 kB[22m
+[2mdist/[22m[36massets/vendor-ai-CDVs9eIX.js                          [39m[1m[2m   401.49 kB[22m[1m[22m[2m │ gzip:   110.06 kB[22m
+[2mdist/[22m[36massets/index-Cst--n-S.js                              [39m[1m[33m 1,501.63 kB[39m[22m[2m │ gzip:   408.00 kB[22m
+[33m
+(!) Some chunks are larger than 1000 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+[32m✓ built in 26.57s[39m

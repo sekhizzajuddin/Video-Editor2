@@ -550,7 +550,7 @@ export interface TimelineMarker {
   time: number;
   name: string;
   color: string; // Hex color code
-  type?: 'standard' | 'sponsor' | 'chapter';
+  type?: 'standard' | 'sponsor' | 'chapter' | 'beat' | 'ad' | string;
 }
 
 export interface SubtitleItem {
@@ -682,6 +682,7 @@ export interface EditorState {
     snapEnabled: boolean;
     defaultDuration: number;
     previewQuality: 'full' | 'half' | 'quarter';
+    previewMode?: 'auto' | 'fast' | 'high';
     showThumbnails: boolean;
     hardwareAcceleration: boolean;
     showSafeZones?: boolean;

@@ -1,4 +1,10 @@
 import type { AISelfTestResult } from '../../types';
+import * as projectPersistenceMod from '../projectPersistence';
+import { aiToolRegistry } from '../aiToolRegistry';
+import { WorkflowExecutor } from './WorkflowExecutor';
+import { nluEngine } from './NLUEngine';
+import { RateLimiter } from './RateLimiter';
+import { memoryStore } from './MemoryStore';
 
 export type TestCategory =
   | 'import'
@@ -1047,7 +1053,7 @@ const metaTests: TestDefinition[] = [
     category: 'meta',
     runner: async () => {
       try {
-        const m = await import('../projectPersistence');
+        const m = projectPersistenceMod;
         return Object.keys(m || {}).length > 0
           ? ok('projectPersistence module loaded')
           : fail('Module empty');
@@ -1107,8 +1113,7 @@ const metaTests: TestDefinition[] = [
     category: 'meta',
     runner: async () => {
       try {
-        const m = await import('../aiToolRegistry');
-        const tools = m?.aiToolRegistry ?? [];
+        const tools = aiToolRegistry ?? [];
         return tools.length > 0
           ? ok(`Registry contains ${tools.length} tools`)
           : fail('Empty registry');
@@ -1138,7 +1143,6 @@ const metaTests: TestDefinition[] = [
     category: 'meta',
     runner: async () => {
       try {
-        const { WorkflowExecutor } = await import('./WorkflowExecutor');
         const exec = new WorkflowExecutor({
           apiKey: 'test',
           requestConfirmation: async () => true,
@@ -1155,7 +1159,6 @@ const metaTests: TestDefinition[] = [
     category: 'meta',
     runner: async () => {
       try {
-        const { nluEngine } = await import('./NLUEngine');
         const result1 = nluEngine.parse('play');
         const result2 = nluEngine.parse('first do X then do Y');
         return result1 && result2
@@ -1172,7 +1175,6 @@ const metaTests: TestDefinition[] = [
     category: 'meta',
     runner: async () => {
       try {
-        const { RateLimiter } = await import('./RateLimiter');
         const rl = new RateLimiter({ maxRpm: 5, retryDelayMs: 1000 });
         const initial = rl.canMakeCall();
         for (let i = 0; i < 5; i++) rl.recordCall();
@@ -1191,7 +1193,6 @@ const metaTests: TestDefinition[] = [
     category: 'meta',
     runner: async () => {
       try {
-        const { memoryStore } = await import('./MemoryStore');
         const beforeAction = memoryStore.getLastAction();
         memoryStore.recordAction({
           toolName: 'noop',

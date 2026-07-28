@@ -3,6 +3,15 @@ import type { TimelineMarker } from '@/types';
 import { RULER_HEIGHT } from '../timelineConstants';
 import { RulerPlayhead } from './PlayheadComponents';
 
+const MARKER_ICONS: Record<string, { color: string; symbol: string; label: string }> = {
+  chapter:   { color: '#06b6d4', symbol: '◆', label: 'Chapter' },
+  sponsor:   { color: '#facc15', symbol: '$', label: 'Sponsor' },
+  beat:      { color: '#a855f7', symbol: '♫', label: 'Beat' },
+  ad:        { color: '#ef4444', symbol: '⏵', label: 'Ad Break' },
+  standard:  { color: '#9ca3af', symbol: '◆', label: 'Marker' },
+  default:   { color: '#9ca3af', symbol: '◆', label: 'Marker' },
+};
+
 export interface RulerMarker {
   time: number;
   label: string;
@@ -101,36 +110,46 @@ export const TimelineRuler = React.memo(function TimelineRuler({
         )}
 
         {/* Render markers */}
-        {sortedMarkers.map((marker) => (
-          <div
-            key={marker.id}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setMarkerContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                markerId: marker.id,
-              });
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              seek(marker.time);
-            }}
-            className="absolute top-0 w-3 h-3 -ml-1.5 cursor-pointer z-30 group"
-            style={{ left: `${marker.time * zoomLevel}px` }}
-            title={`${marker.name} (${(marker?.time ?? 0).toFixed(2)}s)`}
-          >
+        {sortedMarkers.map((marker) => {
+          const cfg = MARKER_ICONS[marker.type ?? 'standard'] ?? MARKER_ICONS.default;
+          return (
             <div
-              className="w-2.5 h-2.5 rotate-45 border border-white group-hover:scale-125 transition-transform shadow-md"
-              style={{ backgroundColor: marker.color }}
-            />
-            {/* Hover Tooltip */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#141414] border border-[#3e3e3e] text-[9px] text-white px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-              {marker.name}
+              key={marker.id}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMarkerContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  markerId: marker.id,
+                });
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                seek(marker.time);
+              }}
+              className="absolute top-0 bottom-0 pointer-events-auto cursor-pointer z-30 group"
+              style={{ left: `${marker.time * zoomLevel}px` }}
+              title={`${cfg.label}: ${marker.name} (${(marker?.time ?? 0).toFixed(2)}s)`}
+            >
+              <div
+                className="absolute top-0.5 -translate-x-1/2 px-1 py-0.5 rounded text-[8px] font-bold text-white shadow-md flex items-center gap-0.5 border border-white/40 group-hover:scale-110 transition-transform"
+                style={{ backgroundColor: marker.color || cfg.color }}
+              >
+                <span>{cfg.symbol}</span>
+              </div>
+              {/* Vertical guideline on ruler */}
+              <div
+                className="absolute top-4 bottom-0 left-0 -translate-x-1/2 w-[1px] opacity-70 group-hover:opacity-100 transition-opacity"
+                style={{ backgroundColor: marker.color || cfg.color }}
+              />
+              {/* Hover Tooltip */}
+              <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-[#141414] border border-[#3e3e3e] text-[9px] text-white px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+                <span className="font-semibold text-amber-400 mr-1">[{cfg.label}]</span> {marker.name}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Audio beat markers */}
         {beatMarkers.map((bm, idx) => (

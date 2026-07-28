@@ -1,22 +1,22 @@
-import { useEffect, useCallback, useRef, useState } from 'react';
+import React, { useEffect, useCallback, useRef, useState, Suspense } from 'react';
 import { Music, MousePointer2, ArrowRightToLine, ArrowLeftToLine, ArrowLeftRight, Timer, Scissors, Hand, ZoomIn, Undo2, Redo2, Sparkles } from 'lucide-react';
 import type { EditorTool } from '@/types';
 import { TopToolbar } from '@/components/TopToolbar';
-import { MediaPanel } from '@/components/MediaPanel';
 import { PreviewCanvas } from '@/components/PreviewCanvas';
-import { ScopesPanel } from '@/components/ScopesPanel';
-import { PropertiesPanel } from '@/components/PropertiesPanel';
-import { Timeline } from '@/components/Timeline';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { AudioMixer } from '@/components/AudioMixer';
-import { ExportModal } from '@/components/ExportModal';
-import { SettingsModal } from '@/components/SettingsModal';
-import { TeleprompterModal } from '@/components/TeleprompterModal';
-import { HelpModal } from '@/components/HelpModal';
 import { HelpTooltipManager } from '@/components/HelpTooltipManager';
-import { WelcomeScreen } from '@/components/WelcomeScreen';
-import { AiCopilot } from '@/components/AiCopilot';
 import { FileHandlerInitializer } from '@/components/FileHandlerInitializer';
+
+const MediaPanel = React.lazy(() => import('@/components/MediaPanel').then(m => ({ default: m.MediaPanel })));
+const ScopesPanel = React.lazy(() => import('@/components/ScopesPanel').then(m => ({ default: m.ScopesPanel })));
+const PropertiesPanel = React.lazy(() => import('@/components/PropertiesPanel').then(m => ({ default: m.PropertiesPanel })));
+const Timeline = React.lazy(() => import('@/components/Timeline').then(m => ({ default: m.Timeline })));
+const AudioMixer = React.lazy(() => import('@/components/AudioMixer').then(m => ({ default: m.AudioMixer })));
+const ExportModal = React.lazy(() => import('@/components/ExportModal').then(m => ({ default: m.ExportModal })));
+const SettingsModal = React.lazy(() => import('@/components/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const TeleprompterModal = React.lazy(() => import('@/components/TeleprompterModal').then(m => ({ default: m.TeleprompterModal })));
+const WelcomeScreen = React.lazy(() => import('@/components/WelcomeScreen').then(m => ({ default: m.WelcomeScreen })));
+const AiCopilot = React.lazy(() => import('@/components/AiCopilot').then(m => ({ default: m.AiCopilot })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -71,9 +71,13 @@ function App() {
     updateSettings,
     showTeleprompter,
     setShowTeleprompter,
+    showExportModal,
+    showSettingsModal,
     projectId,
     selectedClipIds,
   } = useEditorStore(useShallow(s => ({
+    showExportModal: s.showExportModal,
+    showSettingsModal: s.showSettingsModal,
     togglePlayback: s.togglePlayback,
     activeTool: s.activeTool,
     setActiveTool: s.setActiveTool,
@@ -461,7 +465,11 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-surface-900 text-white overflow-hidden select-none">
-      {projectId === 'default' && <WelcomeScreen />}
+      {projectId === 'default' && (
+        <Suspense fallback={null}>
+          <WelcomeScreen />
+        </Suspense>
+      )}
       {/* Top Toolbar */}
       <TopToolbar />
 
@@ -472,7 +480,9 @@ function App() {
           className="shrink-0 overflow-hidden"
           style={{ width: leftWidth }}
         >
-          <MediaPanel />
+          <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
+            <MediaPanel />
+          </Suspense>
         </div>
 
         {/* Left Resize Handle */}
@@ -486,7 +496,9 @@ function App() {
           {/* Preview Canvas */}
           <div className="flex-1 overflow-hidden relative">
             <PreviewCanvas />
-            <ScopesPanel />
+            <Suspense fallback={null}>
+              <ScopesPanel />
+            </Suspense>
           </div>
 
           {/* Timeline Resize Handle */}
@@ -606,10 +618,14 @@ function App() {
             <div className="flex-1 overflow-hidden relative">
               {bottomTab === 'timeline' ? (
                 <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-[#1a1a1a] font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
-                  <Timeline />
+                  <Suspense fallback={<div className="w-full h-full bg-[#1a1a1a]" />}>
+                    <Timeline />
+                  </Suspense>
                 </ErrorBoundary>
               ) : (
-                <AudioMixer />
+                <Suspense fallback={null}>
+                  <AudioMixer />
+                </Suspense>
               )}
             </div>
           </div>
@@ -626,18 +642,34 @@ function App() {
           className="shrink-0 overflow-hidden"
           style={{ width: rightWidth }}
         >
-          <PropertiesPanel />
+          <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
+            <PropertiesPanel />
+          </Suspense>
         </div>
       </div>
 
       {/* Modals & Global Handlers */}
       <FileHandlerInitializer />
-      <ExportModal />
-      <SettingsModal />
-      <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />
+      {showExportModal && (
+        <Suspense fallback={null}>
+          <ExportModal />
+        </Suspense>
+      )}
+      {showSettingsModal && (
+        <Suspense fallback={null}>
+          <SettingsModal />
+        </Suspense>
+      )}
+      {showTeleprompter && (
+        <Suspense fallback={null}>
+          <TeleprompterModal isOpen={showTeleprompter} onClose={() => setShowTeleprompter(false)} />
+        </Suspense>
+      )}
       {showCopilot ? (
         <ErrorBoundary fallback={<div />} key="ai-copilot">
-          <AiCopilot onClose={() => setShowCopilot(false)} />
+          <Suspense fallback={null}>
+            <AiCopilot onClose={() => setShowCopilot(false)} />
+          </Suspense>
         </ErrorBoundary>
       ) : (
         <button
