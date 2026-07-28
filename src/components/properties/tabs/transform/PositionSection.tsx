@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { addOrUpdateKeyframe } from '@/utils/keyframes';
 import type { TimelineClip, ClipAnimations } from '@/types';
+import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 
 interface PositionSectionProps {
   selectedClip: TimelineClip;
@@ -40,7 +41,7 @@ export function PositionSection({
               e.stopPropagation();
               setPropVal('transform.x', 0, { transform: { ...selectedClip.transform, x: 0 } });
               setPropVal('transform.y', 0, { transform: { ...selectedClip.transform, y: 0 } });
-              useEditorStore.getState().saveSnapshot();
+              scheduleSaveSnapshot();
             }}
             className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
             title="Reset Position"
@@ -106,7 +107,7 @@ export function PositionSection({
               type="number"
               value={Math.round(getPropVal(selectedClip.transform.x, 'transform.x'))}
               onChange={(e) => setPropVal('transform.x', Number(e.target.value), { transform: { ...selectedClip.transform, x: Number(e.target.value) } })}
-              onBlur={() => useEditorStore.getState().saveSnapshot()}
+              onBlur={() => scheduleSaveSnapshot()}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
               }}
@@ -164,7 +165,7 @@ export function PositionSection({
               type="number"
               value={Math.round(getPropVal(selectedClip.transform.y, 'transform.y'))}
               onChange={(e) => setPropVal('transform.y', Number(e.target.value), { transform: { ...selectedClip.transform, y: Number(e.target.value) } })}
-              onBlur={() => useEditorStore.getState().saveSnapshot()}
+              onBlur={() => scheduleSaveSnapshot()}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
               }}

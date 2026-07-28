@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { addOrUpdateKeyframe } from '@/utils/keyframes';
 import type { TimelineClip, ClipAnimations } from '@/types';
+import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 
 interface RotationSectionProps {
   selectedClip: TimelineClip;
@@ -41,7 +42,7 @@ export function RotationSection({
               setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
               setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
               setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-              useEditorStore.getState().saveSnapshot();
+              scheduleSaveSnapshot();
             }}
             className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
             title="Reset Rotation"
@@ -111,10 +112,10 @@ export function RotationSection({
                 value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
                 title="Double-click to reset to 0°"
                 onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
-                onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                onMouseUp={() => scheduleSaveSnapshot()}
                 onDoubleClick={() => {
                   setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                  useEditorStore.getState().saveSnapshot();
+                  scheduleSaveSnapshot();
                 }}
                 className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
               />
@@ -126,7 +127,7 @@ export function RotationSection({
                   let next = cur + 45;
                   if (next > 180) next = -180;
                   setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
-                  useEditorStore.getState().saveSnapshot();
+                  scheduleSaveSnapshot();
                 }}
               >
                 {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
@@ -188,10 +189,10 @@ export function RotationSection({
                 value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
                 title="Double-click to reset to 0°"
                 onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
-                onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                onMouseUp={() => scheduleSaveSnapshot()}
                 onDoubleClick={() => {
                   setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                  useEditorStore.getState().saveSnapshot();
+                  scheduleSaveSnapshot();
                 }}
                 className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
               />
@@ -203,7 +204,7 @@ export function RotationSection({
                   let next = cur + 45;
                   if (next > 180) next = -180;
                   setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
-                  useEditorStore.getState().saveSnapshot();
+                  scheduleSaveSnapshot();
                 }}
               >
                 {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
@@ -265,10 +266,10 @@ export function RotationSection({
                 value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
                 title="Double-click to reset to 0°"
                 onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
-                onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                onMouseUp={() => scheduleSaveSnapshot()}
                 onDoubleClick={() => {
                   setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                  useEditorStore.getState().saveSnapshot();
+                  scheduleSaveSnapshot();
                 }}
                 className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
               />
@@ -280,7 +281,7 @@ export function RotationSection({
                   let next = cur + 45;
                   if (next > 180) next = -180;
                   setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
-                  useEditorStore.getState().saveSnapshot();
+                  scheduleSaveSnapshot();
                 }}
               >
                 {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°

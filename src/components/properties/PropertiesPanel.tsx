@@ -49,6 +49,7 @@ import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { SequenceProperties } from './SequenceProperties';
 import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
+import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -136,7 +137,7 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
     }
 
     onChange({ hue: newHue, saturation: newSat, lift });
-    useEditorStore.getState().saveSnapshot();
+    scheduleSaveSnapshot();
   };
 
   return (
@@ -203,7 +204,7 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
           max={100}
           value={lift}
           onChange={(e) => onChange({ hue, saturation: sat, lift: Number(e.target.value) })}
-          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+          onMouseUp={() => scheduleSaveSnapshot()}
           onDoubleClick={() => onChange({ hue, saturation: sat, lift: 0 })}
           title="Double-click to reset lift to 0"
           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -728,7 +729,7 @@ export function PropertiesPanel() {
         }
       });
 
-      useEditorStore.getState().saveSnapshot?.('AI Stem Separation');
+      scheduleSaveSnapshot?.('AI Stem Separation');
       toast.success('AI Vocal Separation complete! Stems added to timeline.');
     } catch (err: any) {
       console.error('[AI Separation] Error:', err);
@@ -885,7 +886,7 @@ export function PropertiesPanel() {
           storeUpdateClip(liveClip.id, {
             chromaKey: { ...existing, color }
           });
-          useEditorStore.getState().saveSnapshot('Chroma Color Picked');
+          scheduleSaveSnapshot('Chroma Color Picked');
           toast.success(`🎨 Color picked: ${color}`);
         }
       } else {
@@ -962,7 +963,7 @@ export function PropertiesPanel() {
 
     const handleMouseUp = () => {
       setDraggingIndex(null);
-      useEditorStore.getState().saveSnapshot();
+      scheduleSaveSnapshot();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -1012,7 +1013,7 @@ export function PropertiesPanel() {
       speedRamp: sortedRamp,
       duration: Math.max(0.1, newDuration)
     }, { ripple: true });
-    useEditorStore.getState().saveSnapshot();
+    scheduleSaveSnapshot();
   };
 
   const toggleSection = (section: string) => {
@@ -1543,7 +1544,7 @@ export function PropertiesPanel() {
         [key]: defaultVal,
       },
     });
-    useEditorStore.getState().saveSnapshot();
+    scheduleSaveSnapshot();
   };
 
   const defaultAudioSettings: ClipAudioSettings = {
@@ -1585,7 +1586,7 @@ export function PropertiesPanel() {
         },
       });
       if (['muted', 'preservePitch', 'humanize', 'vocalSeparation'].includes(key)) {
-        useEditorStore.getState().saveSnapshot();
+        scheduleSaveSnapshot();
       }
     }
   };
@@ -1609,7 +1610,7 @@ export function PropertiesPanel() {
         },
       });
     }
-    useEditorStore.getState().saveSnapshot();
+    scheduleSaveSnapshot();
   };
 
   
@@ -1664,7 +1665,7 @@ export function PropertiesPanel() {
             volume: clampedVolume,
           },
         });
-        useEditorStore.getState().saveSnapshot('Normalize Audio');
+        scheduleSaveSnapshot('Normalize Audio');
       }
     } catch (err) {
       console.error('Audio normalization failed:', err);
@@ -1859,7 +1860,7 @@ export function PropertiesPanel() {
           });
         }
 
-        useEditorStore.getState().saveSnapshot('Auto Voice Tune');
+        scheduleSaveSnapshot('Auto Voice Tune');
         setVoiceTuneResults(results);
         setShowTunedToast(true);
 
@@ -1891,7 +1892,7 @@ export function PropertiesPanel() {
                     onClick={(e) => {
                       e.stopPropagation();
                       updateClip(selectedClip.id, { transform: { ...selectedClip.transform, blendMode: 'source-over', blendIntensity: 100 } });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                     title="Reset Blend Mode & Intensity"
@@ -1911,7 +1912,7 @@ export function PropertiesPanel() {
                     value={selectedClip.transform.blendMode || 'source-over'}
                     onChange={(e) => {
                       updateClip(selectedClip.id, { transform: { ...selectedClip.transform, blendMode: e.target.value as GlobalCompositeOperation } });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 capitalize cursor-pointer"
                   >
@@ -1982,7 +1983,7 @@ export function PropertiesPanel() {
                           transform: { ...selectedClip.transform, blendIntensity: val }
                         });
                       }}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      onMouseUp={() => scheduleSaveSnapshot()}
                       className="w-full h-1 bg-[#1e1e1e] rounded-lg accent-amber-500 cursor-pointer"
                     />
                   </div>
@@ -2015,7 +2016,7 @@ export function PropertiesPanel() {
                     updateClip(selectedClip.id, {
                       aiBackground: { ...existing, enabled }
                     });
-                    useEditorStore.getState().saveSnapshot('Toggle AI Background');
+                    scheduleSaveSnapshot('Toggle AI Background');
                   }}
                   className="rounded bg-[#2a2a2a] border-[#3e3e3e] text-cyan-500 focus:ring-0 focus:ring-offset-0"
                 />
@@ -2035,7 +2036,7 @@ export function PropertiesPanel() {
                         updateClip(selectedClip.id, {
                           aiBackground: { ...existing, modelSelection: val }
                         });
-                        useEditorStore.getState().saveSnapshot('Change AI Background Quality');
+                        scheduleSaveSnapshot('Change AI Background Quality');
                       }}
                       className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
                     >
@@ -2082,7 +2083,7 @@ export function PropertiesPanel() {
                           aiBackground: { ...existing, edgeBlur: val }
                         });
                       }}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot('Change AI Background Blur')}
+                      onMouseUp={() => scheduleSaveSnapshot('Change AI Background Blur')}
                       className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
                     />
                   </div>
@@ -2120,7 +2121,7 @@ export function PropertiesPanel() {
                         updateClip(selectedClip.id, {
                           chromaKey: { ...existing, enabled: e.target.checked }
                         });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-emerald-500 focus:ring-0 focus:ring-offset-0"
                     />
@@ -2141,7 +2142,7 @@ export function PropertiesPanel() {
                                 updateClip(selectedClip.id, {
                                   chromaKey: { ...existing, color: preset.hex }
                                 });
-                                useEditorStore.getState().saveSnapshot();
+                                scheduleSaveSnapshot();
                               }}
                               className={`flex items-center gap-1 px-2 py-1 rounded border text-[10px] transition-colors ${
                                 selectedClip.chromaKey?.color?.toLowerCase() === preset.hex.toLowerCase()
@@ -2188,7 +2189,7 @@ export function PropertiesPanel() {
                                 chromaKey: { ...existing, color: e.target.value }
                               });
                             }}
-                            onBlur={() => useEditorStore.getState().saveSnapshot()}
+                            onBlur={() => scheduleSaveSnapshot()}
                             className="w-6 h-6 bg-transparent border-0 rounded cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border [&::-webkit-color-swatch]:border-[#3e3e3e] [&::-webkit-color-swatch]:rounded"
                           />
 
@@ -2218,7 +2219,7 @@ export function PropertiesPanel() {
                                 updateClip(selectedClip.id, {
                                   chromaKey: { ...existing, color }
                                 });
-                                useEditorStore.getState().saveSnapshot();
+                                scheduleSaveSnapshot();
                                 toast.success(`Auto-detected: ${color}`);
                               }
                             }}
@@ -2265,7 +2266,7 @@ export function PropertiesPanel() {
                               chromaKey: { ...existing, threshold: val }
                             });
                           }}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                         <div className="flex justify-between text-[9px] text-[#5a5a5a]">
@@ -2309,7 +2310,7 @@ export function PropertiesPanel() {
                               chromaKey: { ...existing, softness: val }
                             });
                           }}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                       </div>
@@ -2349,7 +2350,7 @@ export function PropertiesPanel() {
                               chromaKey: { ...existing, spillSuppression: val }
                             });
                           }}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           title="Reduces green/blue fringe on subject edges"
                           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -2392,7 +2393,7 @@ export function PropertiesPanel() {
                               chromaKey: { ...existing, edgeFeather: val }
                             });
                           }}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           title="Softens the edges of the keyed area"
                           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -2429,7 +2430,7 @@ export function PropertiesPanel() {
                         updateClip(selectedClip.id, {
                           lumaKey: { ...existing, enabled: e.target.checked }
                         });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-amber-500 focus:ring-0 focus:ring-offset-0"
                     />
@@ -2448,7 +2449,7 @@ export function PropertiesPanel() {
                             updateClip(selectedClip.id, {
                               lumaKey: { ...existing, type }
                             });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className={`flex-1 py-1 text-[11px] rounded border ${
                             (selectedClip.lumaKey?.type || 'light') === type
@@ -2497,7 +2498,7 @@ export function PropertiesPanel() {
                           lumaKey: { ...existing, threshold: val }
                         });
                       }}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      onMouseUp={() => scheduleSaveSnapshot()}
                       className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                   </div>
@@ -2537,7 +2538,7 @@ export function PropertiesPanel() {
                           lumaKey: { ...existing, softness: val }
                         });
                       }}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                      onMouseUp={() => scheduleSaveSnapshot()}
                       className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                   </div>
@@ -2597,7 +2598,7 @@ export function PropertiesPanel() {
                   muted: !currentMuted
                 };
                 storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
-                useEditorStore.getState().saveSnapshot();
+                scheduleSaveSnapshot();
               }}
               title={selectedClip.audioSettings?.muted ? "Unmute Clip" : "Mute Clip"}
               className={`p-1.5 rounded transition-colors ${
@@ -2670,7 +2671,7 @@ export function PropertiesPanel() {
                     const aspect = useEditorStore.getState().aspectRatio;
                     const newAnimations = generateSmartReframeKeyframes(selectedClip, aspect as any);
                     updateClip(selectedClip.id, { animations: newAnimations });
-                    useEditorStore.getState().saveSnapshot('Smart Reframe');
+                    scheduleSaveSnapshot('Smart Reframe');
                   }}
                   className="w-full py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-medium transition-colors shadow-md shadow-cyan-950/50"
                 >
@@ -2735,7 +2736,7 @@ export function PropertiesPanel() {
                         e.stopPropagation();
                         setPropVal('transform.x', 0, { transform: { ...selectedClip.transform, x: 0 } });
                         setPropVal('transform.y', 0, { transform: { ...selectedClip.transform, y: 0 } });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Position"
@@ -2801,7 +2802,7 @@ export function PropertiesPanel() {
                         type="number"
                         value={Math.round(getPropVal(selectedClip.transform.x, 'transform.x'))}
                         onChange={(e) => setPropVal('transform.x', Number(e.target.value), { transform: { ...selectedClip.transform, x: Number(e.target.value) } })}
-                        onBlur={() => useEditorStore.getState().saveSnapshot()}
+                        onBlur={() => scheduleSaveSnapshot()}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                         }}
@@ -2859,7 +2860,7 @@ export function PropertiesPanel() {
                         type="number"
                         value={Math.round(getPropVal(selectedClip.transform.y, 'transform.y'))}
                         onChange={(e) => setPropVal('transform.y', Number(e.target.value), { transform: { ...selectedClip.transform, y: Number(e.target.value) } })}
-                        onBlur={() => useEditorStore.getState().saveSnapshot()}
+                        onBlur={() => scheduleSaveSnapshot()}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                         }}
@@ -2882,7 +2883,7 @@ export function PropertiesPanel() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Scale"
@@ -2950,10 +2951,10 @@ export function PropertiesPanel() {
                         value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
                         title="Double-click to reset to 100%"
                         onChange={(e) => setPropVal('transform.scale', Number(e.target.value), { transform: { ...selectedClip.transform, scale: Number(e.target.value) } })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => {
                           setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
@@ -2965,7 +2966,7 @@ export function PropertiesPanel() {
                           const cur = getPropVal(selectedClip.transform.scale, 'transform.scale');
                           let next = steps.find(s => s > cur) ?? steps[0];
                           setPropVal('transform.scale', next, { transform: { ...selectedClip.transform, scale: next } });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                       >
                         {Math.round(getPropVal(selectedClip.transform.scale, 'transform.scale'))}%
@@ -2989,7 +2990,7 @@ export function PropertiesPanel() {
                         setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
                         setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
                         setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Rotation"
@@ -3059,10 +3060,10 @@ export function PropertiesPanel() {
                           value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
                           title="Double-click to reset to 0°"
                           onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -3074,7 +3075,7 @@ export function PropertiesPanel() {
                             let next = cur + 45;
                             if (next > 180) next = -180;
                             setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                         >
                           {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
@@ -3136,10 +3137,10 @@ export function PropertiesPanel() {
                           value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
                           title="Double-click to reset to 0°"
                           onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -3151,7 +3152,7 @@ export function PropertiesPanel() {
                             let next = cur + 45;
                             if (next > 180) next = -180;
                             setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                         >
                           {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
@@ -3213,10 +3214,10 @@ export function PropertiesPanel() {
                           value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
                           title="Double-click to reset to 0°"
                           onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -3228,7 +3229,7 @@ export function PropertiesPanel() {
                             let next = cur + 45;
                             if (next > 180) next = -180;
                             setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                         >
                           {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
@@ -3251,7 +3252,7 @@ export function PropertiesPanel() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setPropVal('opacity', 1, { opacity: 1 });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Opacity"
@@ -3320,10 +3321,10 @@ export function PropertiesPanel() {
                         value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
                         title="Double-click to reset to 100%"
                         onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => {
                           setPropVal('opacity', 1, { opacity: 1 });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
@@ -3335,7 +3336,7 @@ export function PropertiesPanel() {
                           const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
                           let next = steps.find(s => s > cur) ?? steps[0];
                           setPropVal('opacity', next / 100, { opacity: next / 100 });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                       >
                         {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%
@@ -3359,7 +3360,7 @@ export function PropertiesPanel() {
                         setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
                         setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
                         setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Rotation"
@@ -3429,10 +3430,10 @@ export function PropertiesPanel() {
                           value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
                           title="Double-click to reset to 0°"
                           onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -3444,7 +3445,7 @@ export function PropertiesPanel() {
                             let next = cur + 45;
                             if (next > 180) next = -180;
                             setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                         >
                           {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
@@ -3506,10 +3507,10 @@ export function PropertiesPanel() {
                           value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
                           title="Double-click to reset to 0°"
                           onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -3521,7 +3522,7 @@ export function PropertiesPanel() {
                             let next = cur + 45;
                             if (next > 180) next = -180;
                             setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                         >
                           {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
@@ -3583,10 +3584,10 @@ export function PropertiesPanel() {
                           value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
                           title="Double-click to reset to 0°"
                           onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -3598,7 +3599,7 @@ export function PropertiesPanel() {
                             let next = cur + 45;
                             if (next > 180) next = -180;
                             setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                         >
                           {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
@@ -3621,7 +3622,7 @@ export function PropertiesPanel() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setPropVal('opacity', 1, { opacity: 1 });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Opacity"
@@ -3690,10 +3691,10 @@ export function PropertiesPanel() {
                         value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
                         title="Double-click to reset to 100%"
                         onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => {
                           setPropVal('opacity', 1, { opacity: 1 });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
@@ -3705,7 +3706,7 @@ export function PropertiesPanel() {
                           const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
                           let next = steps.find(s => s > cur) ?? steps[0];
                           setPropVal('opacity', next / 100, { opacity: next / 100 });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                       >
                         {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%
@@ -3735,7 +3736,7 @@ export function PropertiesPanel() {
                       updateClip(selectedClip.id, {
                         transform: { ...selectedClip.transform, flipH: !cur }
                       });
-                      useEditorStore.getState().saveSnapshot('Flip Horizontal');
+                      scheduleSaveSnapshot('Flip Horizontal');
                     }}
                     className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
                       selectedClip.transform.flipH ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
@@ -3749,7 +3750,7 @@ export function PropertiesPanel() {
                       updateClip(selectedClip.id, {
                         transform: { ...selectedClip.transform, flipV: !cur }
                       });
-                      useEditorStore.getState().saveSnapshot('Flip Vertical');
+                      scheduleSaveSnapshot('Flip Vertical');
                     }}
                     className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
                       selectedClip.transform.flipV ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
@@ -3815,7 +3816,7 @@ export function PropertiesPanel() {
                           };
                         }
                         updateClip(selectedClip.id, updates);
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="rounded border-[#3e3e3e] text-amber-500 bg-[#1e1e1e] focus:ring-0 focus:ring-offset-0"
                     />
@@ -3857,7 +3858,7 @@ export function PropertiesPanel() {
                             },
                             animations: newAnimations
                           });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                         className="w-full py-1 mt-1 text-[10px] text-amber-500 border border-amber-500/30 rounded hover:bg-amber-500/10 transition-colors"
                       >
@@ -4001,7 +4002,7 @@ export function PropertiesPanel() {
                       setPropVal('crop.right', 0, { crop: { top: 0, bottom: 0, left: 0, right: 0 } });
                       setPropVal('crop.top', 0, { crop: { top: 0, bottom: 0, left: 0, right: 0 } });
                       setPropVal('crop.bottom', 0, { crop: { top: 0, bottom: 0, left: 0, right: 0 } });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                     title="Reset Crop"
@@ -4047,10 +4048,10 @@ export function PropertiesPanel() {
                             }
                             setPropVal(propKey, newVal, { crop: proposedCrop });
                           }}
-                          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                          onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
                             setPropVal(propKey, 0, { crop: { ...currentCrop, [edge]: 0 } });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -4103,7 +4104,7 @@ export function PropertiesPanel() {
                         const steps = label === 'Scale' ? [50, 100, 150, 200, 300, 400] : [0, 50, 100, 200, -200, -100, -50];
                         let next = steps.find(s => s > value) ?? steps[0];
                         onChange(next);
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                     >
                       {value > 0 && label !== 'Scale' ? `+${value}` : value}{label === 'Scale' ? '%' : '%'}
@@ -4112,8 +4113,8 @@ export function PropertiesPanel() {
                   <input
                     type="range" min={min} max={max} step={step} value={value}
                     onChange={e => onChange(Number(e.target.value))}
-                    onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                    onDoubleClick={() => { onChange(label === 'Scale' ? 100 : 0); useEditorStore.getState().saveSnapshot(); }}
+                    onMouseUp={() => scheduleSaveSnapshot()}
+                    onDoubleClick={() => { onChange(label === 'Scale' ? 100 : 0); scheduleSaveSnapshot(); }}
                     title={`Double-click to reset`}
                     className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-500"
                   />
@@ -4133,7 +4134,7 @@ export function PropertiesPanel() {
                     </div>
                     <div className="flex items-center gap-2">
                       <div
-                        onClick={e => { e.stopPropagation(); updateKb({ enabled: !isKbEnabled }); useEditorStore.getState().saveSnapshot(); }}
+                        onClick={e => { e.stopPropagation(); updateKb({ enabled: !isKbEnabled }); scheduleSaveSnapshot(); }}
                         className="flex items-center gap-1 px-2 py-0.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] transition-colors"
                         title={isKbEnabled ? 'Disable Ken Burns' : 'Enable Ken Burns'}
                       >
@@ -4167,7 +4168,7 @@ export function PropertiesPanel() {
                             startScale: kbVal.endScale, startPanX: kbVal.endPanX, startPanY: kbVal.endPanY,
                             endScale: kbVal.startScale, endPanX: kbVal.startPanX, endPanY: kbVal.startPanY,
                           });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                         className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] hover:text-white transition-colors"
                         title="Swap Start and End states"
@@ -4192,7 +4193,7 @@ export function PropertiesPanel() {
                         <div className="relative">
                           <select
                             value={kbVal.easing}
-                            onChange={e => { updateKb({ easing: e.target.value as ClipKenBurnsSettings['easing'] }); useEditorStore.getState().saveSnapshot(); }}
+                            onChange={e => { updateKb({ easing: e.target.value as ClipKenBurnsSettings['easing'] }); scheduleSaveSnapshot(); }}
                             className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-[11px] text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer"
                           >
                             <option value="linear">Linear</option>
@@ -4218,7 +4219,7 @@ export function PropertiesPanel() {
                           ].map(preset => (
                             <button
                               key={preset.label}
-                              onClick={() => { updateKb({ enabled: true, ...preset.patch }); useEditorStore.getState().saveSnapshot(); }}
+                              onClick={() => { updateKb({ enabled: true, ...preset.patch }); scheduleSaveSnapshot(); }}
                               className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#2a2a2a] border border-[#3e3e3e] hover:border-emerald-500/40 rounded text-[10px] text-white transition-colors text-center truncate"
                             >
                               {preset.label}
@@ -4240,7 +4241,7 @@ export function PropertiesPanel() {
           const updateMask = (updates: any) => {
             updateClip(selectedClip.id, { mask: { ...mask, ...updates } });
           };
-          const handleMouseUp = () => useEditorStore.getState().saveSnapshot();
+          const handleMouseUp = () => scheduleSaveSnapshot();
 
           const Slider = ({ label, value, min, max, unit, prop }: { label: string, value: number, min: number, max: number, unit: string, prop: string }) => (
             <div className="space-y-1">
@@ -4416,7 +4417,7 @@ export function PropertiesPanel() {
                         max={100}
                         value={getPropVal(clipFilters.temperature, 'color.temperature')}
                         onChange={(e) => handleFilterChange('temperature', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('temperature')}
                         title="Double-click to reset to 0"
                         className="flex-1 h-1 bg-gradient-to-r from-blue-500 via-[#3e3e3e] to-orange-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
@@ -4439,7 +4440,7 @@ export function PropertiesPanel() {
                         max={100}
                         value={getPropVal(clipFilters.tint, 'color.tint')}
                         onChange={(e) => handleFilterChange('tint', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('tint')}
                         title="Double-click to reset to 0"
                         className="flex-1 h-1 bg-gradient-to-r from-green-500 via-[#3e3e3e] to-pink-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
@@ -4478,7 +4479,7 @@ export function PropertiesPanel() {
                             ...suggested
                           }
                         });
-                        useEditorStore.getState().saveSnapshot('Auto Color');
+                        scheduleSaveSnapshot('Auto Color');
                       }}
                       className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-medium rounded-md shadow-sm transition-all flex items-center gap-1.5"
                     >
@@ -4502,7 +4503,7 @@ export function PropertiesPanel() {
                         max={100}
                         value={getPropVal(clipFilters.exposure, 'color.exposure')}
                         onChange={(e) => handleFilterChange('exposure', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('exposure')}
                         title="Double-click to reset to 0"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -4523,7 +4524,7 @@ export function PropertiesPanel() {
                         max={200}
                         value={getPropVal(clipFilters.contrast, 'color.contrast')}
                         onChange={(e) => handleFilterChange('contrast', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('contrast')}
                         title="Double-click to reset to 100%"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -4544,7 +4545,7 @@ export function PropertiesPanel() {
                         max={200}
                         value={getPropVal(clipFilters.saturation, 'color.saturation')}
                         onChange={(e) => handleFilterChange('saturation', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('saturation')}
                         title="Double-click to reset to 100%"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -4565,7 +4566,7 @@ export function PropertiesPanel() {
                         max={20}
                         value={getPropVal(clipFilters.blur, 'color.blur')}
                         onChange={(e) => handleFilterChange('blur', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('blur')}
                         title="Double-click to reset to 0px"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -4604,7 +4605,7 @@ export function PropertiesPanel() {
                         max={100}
                         value={getPropVal(clipFilters.fadedFilm, 'color.fadedFilm')}
                         onChange={(e) => handleFilterChange('fadedFilm', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('fadedFilm')}
                         title="Double-click to reset to 0%"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -4627,7 +4628,7 @@ export function PropertiesPanel() {
                         max={100}
                         value={getPropVal(clipFilters.vignette, 'color.vignette')}
                         onChange={(e) => handleFilterChange('vignette', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('vignette')}
                         title="Double-click to reset to 0"
                         className="flex-1 h-1 bg-gradient-to-r from-white via-[#3e3e3e] to-black rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
@@ -4657,7 +4658,7 @@ export function PropertiesPanel() {
                           highlights: { hue: 0, saturation: 0, lift: 0 },
                         } as any
                       });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                     title="Reset All Wheels"
@@ -4745,7 +4746,7 @@ export function PropertiesPanel() {
                           <button
                             onClick={() => {
                               updateClip(selectedClip.id, { lut: undefined });
-                              useEditorStore.getState().saveSnapshot();
+                              scheduleSaveSnapshot();
                             }}
                             className="text-[9px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded bg-red-400/10 hover:bg-red-400/20 transition-colors shrink-0"
                           >
@@ -4788,7 +4789,7 @@ export function PropertiesPanel() {
                                 lut: { ...selectedClip.lut!, intensity: val }
                               });
                             }}
-                            onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                            onMouseUp={() => scheduleSaveSnapshot()}
                             className="w-full h-1 bg-gradient-to-r from-[#3e3e3e] to-emerald-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
                           />
                         </div>
@@ -4809,7 +4810,7 @@ export function PropertiesPanel() {
                             } else {
                               updateClip(selectedClip.id, { lut: { mediaId: v, intensity: selectedClip.lut?.intensity ?? 100 } });
                             }
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="w-full bg-[#1e1e1e] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                         >
@@ -4857,7 +4858,7 @@ export function PropertiesPanel() {
                       state.seek(selectedClip.startTime + newDuration - 0.1);
                     }
                   }}
-                  onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                  onMouseUp={() => scheduleSaveSnapshot()}
                   onDoubleClick={() => {
                     if (isRamped) return;
                     const newSpeed = 1.0;
@@ -4867,7 +4868,7 @@ export function PropertiesPanel() {
                       speed: newSpeed,
                       duration: newDuration,
                     }, { ripple: true });
-                    useEditorStore.getState().saveSnapshot();
+                    scheduleSaveSnapshot();
                   }}
                   className={`flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full ${
                     isRamped
@@ -4902,7 +4903,7 @@ export function PropertiesPanel() {
                     } else {
                       updateClip(selectedClip.id, { speedRamp: undefined }, { ripple: true });
                     }
-                    useEditorStore.getState().saveSnapshot();
+                    scheduleSaveSnapshot();
                   }}
                   className="rounded border-[#3e3e3e] bg-[#1e1e1e] text-amber-500 focus:ring-0 cursor-pointer h-4 w-4"
                 />
@@ -5058,7 +5059,7 @@ export function PropertiesPanel() {
                                   speedRamp: ramp,
                                   duration: Math.max(0.1, newDuration)
                                 }, { ripple: true });
-                                useEditorStore.getState().saveSnapshot();
+                                scheduleSaveSnapshot();
                               }
                             }}
                           >
@@ -5113,7 +5114,7 @@ export function PropertiesPanel() {
                               speedRamp: ramp,
                               duration: Math.max(0.1, newDuration)
                             }, { ripple: true });
-                            useEditorStore.getState().saveSnapshot();
+                            scheduleSaveSnapshot();
                           }}
                           className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#333] border border-[#3e3e3e] rounded text-[10px] text-white transition-colors text-center truncate focus:outline-none"
                         >
@@ -5136,7 +5137,7 @@ export function PropertiesPanel() {
                             speedRamp: ramp,
                             duration: Math.max(0.1, newDuration)
                           }, { ripple: true });
-                          useEditorStore.getState().saveSnapshot();
+                          scheduleSaveSnapshot();
                         }}
                         className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-red-950/40 hover:border-red-900 border border-[#3e3e3e] rounded text-[10px] text-[#ff6b6b] transition-colors text-center focus:outline-none"
                       >
@@ -5172,7 +5173,7 @@ export function PropertiesPanel() {
                                     speedRamp: ramp,
                                     duration: Math.max(0.1, newDuration)
                                   }, { ripple: true });
-                                  useEditorStore.getState().saveSnapshot();
+                                  scheduleSaveSnapshot();
                                 }}
                                 className="text-red-400 hover:text-red-500 disabled:opacity-30 disabled:pointer-events-none transition-colors focus:outline-none"
                                 title="Delete Keyframe"
@@ -5210,7 +5211,7 @@ export function PropertiesPanel() {
                                         duration: Math.max(0.1, newDuration)
                                       }, { ripple: true });
                                     }}
-                                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                                    onBlur={() => scheduleSaveSnapshot()}
                                     className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
                                   />
                                 )}
@@ -5235,7 +5236,7 @@ export function PropertiesPanel() {
                                       duration: Math.max(0.1, newDuration)
                                     }, { ripple: true });
                                   }}
-                                  onBlur={() => useEditorStore.getState().saveSnapshot()}
+                                  onBlur={() => scheduleSaveSnapshot()}
                                   className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
                                 />
                               </div>
@@ -5258,7 +5259,7 @@ export function PropertiesPanel() {
                                       speedRamp: ramp,
                                       duration: Math.max(0.1, newDuration)
                                     }, { ripple: true });
-                                    useEditorStore.getState().saveSnapshot();
+                                    scheduleSaveSnapshot();
                                   }}
                                   className="bg-black text-white text-[8px] border border-[#3e3e3e] rounded px-1 py-0.5 focus:outline-none"
                                 >
@@ -5300,7 +5301,7 @@ export function PropertiesPanel() {
                         startTime: Number(e.target.value),
                       })
                     }
-                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                    onBlur={() => scheduleSaveSnapshot()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
@@ -5328,7 +5329,7 @@ export function PropertiesPanel() {
                         trimStart: val,
                       });
                     }}
-                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                    onBlur={() => scheduleSaveSnapshot()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
@@ -5350,7 +5351,7 @@ export function PropertiesPanel() {
                         trimEnd: val,
                       });
                     }}
-                    onBlur={() => useEditorStore.getState().saveSnapshot()}
+                    onBlur={() => scheduleSaveSnapshot()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
@@ -5607,7 +5608,7 @@ export function PropertiesPanel() {
                         max={12}
                         value={getPropVal(clipAudio.volume, 'audio.volume')}
                         onChange={(e) => handleAudioChange('volume', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('volume')}
                         title="Double-click to reset to 0 dB"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5649,7 +5650,7 @@ export function PropertiesPanel() {
                         max={100}
                         value={getPropVal(clipAudio.pan, 'audio.pan')}
                         onChange={(e) => handleAudioChange('pan', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('pan')}
                         title="Double-click to reset to Center"
                         className="flex-1 h-1 bg-gradient-to-r from-blue-500 via-[#3e3e3e] to-red-500 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
@@ -5712,7 +5713,7 @@ export function PropertiesPanel() {
                         step={1}
                         value={clipAudio.pitch}
                         onChange={(e) => handleAudioChange('pitch', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('pitch')}
                         title="Double-click to reset to 0 semitones"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5735,7 +5736,7 @@ export function PropertiesPanel() {
                         max={100}
                         value={clipAudio.voiceFormant}
                         onChange={(e) => handleAudioChange('voiceFormant', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('voiceFormant')}
                         title="Double-click to reset to Default"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5756,7 +5757,7 @@ export function PropertiesPanel() {
                         type="range" min={-100} max={100}
                         value={clipAudio.warmth ?? 0}
                         onChange={(e) => handleAudioChange('warmth', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('warmth')}
                         title="Double-click to reset. Adds low-mid body to thin AI voices."
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5777,7 +5778,7 @@ export function PropertiesPanel() {
                         type="range" min={0} max={100}
                         value={clipAudio.compression ?? 0}
                         onChange={(e) => handleAudioChange('compression', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('compression')}
                         title="Double-click to turn off. Evens out loud and quiet parts."
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5798,7 +5799,7 @@ export function PropertiesPanel() {
                         type="range" min={0} max={100}
                         value={clipAudio.deEsser ?? 0}
                         onChange={(e) => handleAudioChange('deEsser', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('deEsser')}
                         title="Double-click to turn off. Reduces harsh S and Sh sibilance sounds."
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-red-400 [&::-webkit-slider-thumb]:rounded-full"
@@ -5838,7 +5839,7 @@ export function PropertiesPanel() {
                         step={0.1}
                         value={clipAudio.fadeIn}
                         onChange={(e) => handleAudioChange('fadeIn', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('fadeIn')}
                         title="Double-click to reset to 0s"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5860,7 +5861,7 @@ export function PropertiesPanel() {
                         step={0.1}
                         value={clipAudio.fadeOut}
                         onChange={(e) => handleAudioChange('fadeOut', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('fadeOut')}
                         title="Double-click to reset to 0s"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5902,7 +5903,7 @@ export function PropertiesPanel() {
                         step={1}
                         value={clipAudio.denoise ?? 0}
                         onChange={(e) => handleAudioChange('denoise', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('denoise')}
                         title="Double-click to reset to 0%"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5946,7 +5947,7 @@ export function PropertiesPanel() {
                         max={15}
                         value={clipAudio.bass}
                         onChange={(e) => handleAudioChange('bass', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('bass')}
                         title="Double-click to reset to 0 dB"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -5969,7 +5970,7 @@ export function PropertiesPanel() {
                         max={15}
                         value={clipAudio.mid ?? 0}
                         onChange={(e) => handleAudioChange('mid', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('mid')}
                         title="Double-click to reset to 0 dB"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-yellow-400 [&::-webkit-slider-thumb]:rounded-full"
@@ -5992,7 +5993,7 @@ export function PropertiesPanel() {
                         max={15}
                         value={clipAudio.treble}
                         onChange={(e) => handleAudioChange('treble', Number(e.target.value))}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('treble')}
                         title="Double-click to reset to 0 dB"
                         className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
@@ -6130,7 +6131,7 @@ export function PropertiesPanel() {
                 <textarea
                   value={selectedClip.textSettings.text}
                   onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, text: e.target.value } })}
-                  onBlur={() => useEditorStore.getState().saveSnapshot()}
+                  onBlur={() => scheduleSaveSnapshot()}
                   className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
                 />
               </div>
@@ -6158,7 +6159,7 @@ export function PropertiesPanel() {
                             animationPreset: tmpl.settings.animationPreset || undefined,
                           }
                         });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                         toast.success(`Applied style "${tmpl.name}"`);
                       }}
                       className="p-2 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-left truncate transition-colors text-[10px] text-white flex items-center justify-center font-semibold"
@@ -6176,7 +6177,7 @@ export function PropertiesPanel() {
                   value={selectedClip.textSettings.fontFamily || 'Inter'}
                   onChange={(e) => {
                     updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontFamily: e.target.value } });
-                    useEditorStore.getState().saveSnapshot();
+                    scheduleSaveSnapshot();
                   }}
                   className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer"
                 >
@@ -6205,8 +6206,8 @@ export function PropertiesPanel() {
                     max="150"
                     value={selectedClip.textSettings.fontSize}
                     onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontSize: Number(e.target.value) } })}
-                    onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                    onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
+                    onMouseUp={() => scheduleSaveSnapshot()}
+                    onTouchEnd={() => scheduleSaveSnapshot()}
                     className="flex-1 accent-amber-500"
                   />
                   <span className="text-xs text-white w-8 text-right">{selectedClip.textSettings.fontSize}</span>
@@ -6221,7 +6222,7 @@ export function PropertiesPanel() {
                       type="color"
                       value={selectedClip.textSettings.color || '#ffffff'}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, color: e.target.value } })}
-                      onBlur={() => useEditorStore.getState().saveSnapshot()}
+                      onBlur={() => scheduleSaveSnapshot()}
                       className="w-6 h-6 rounded bg-transparent cursor-pointer"
                     />
                     <span className="text-xs text-white uppercase">{selectedClip.textSettings.color}</span>
@@ -6235,13 +6236,13 @@ export function PropertiesPanel() {
                       type="color"
                       value={selectedClip.textSettings.backgroundColor === 'transparent' ? '#000000' : selectedClip.textSettings.backgroundColor}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: e.target.value } })}
-                      onBlur={() => useEditorStore.getState().saveSnapshot()}
+                      onBlur={() => scheduleSaveSnapshot()}
                       className="w-6 h-6 rounded bg-transparent cursor-pointer"
                     />
                     <button 
                       onClick={() => {
                         updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: 'transparent' } });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="text-[10px] bg-[#3e3e3e] hover:bg-[#5e5e5e] px-2 py-1 rounded text-white transition-colors"
                     >
@@ -6259,7 +6260,7 @@ export function PropertiesPanel() {
                       type="color"
                       value={selectedClip.textSettings.strokeColor || '#000000'}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, strokeColor: e.target.value } })}
-                      onBlur={() => useEditorStore.getState().saveSnapshot()}
+                      onBlur={() => scheduleSaveSnapshot()}
                       className="w-6 h-6 rounded bg-transparent cursor-pointer"
                     />
                     <span className="text-xs text-white uppercase">{selectedClip.textSettings.strokeColor || '#000000'}</span>
@@ -6275,8 +6276,8 @@ export function PropertiesPanel() {
                       max="20"
                       value={selectedClip.textSettings.strokeWidth || 0}
                       onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, strokeWidth: Number(e.target.value) } })}
-                      onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                      onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
+                      onMouseUp={() => scheduleSaveSnapshot()}
+                      onTouchEnd={() => scheduleSaveSnapshot()}
                       className="flex-1 accent-amber-500"
                     />
                     <span className="text-xs text-white w-5 text-right">{selectedClip.textSettings.strokeWidth || 0}</span>
@@ -6291,7 +6292,7 @@ export function PropertiesPanel() {
                     checked={selectedClip.textSettings.bold}
                     onChange={(e) => {
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, bold: e.target.checked } });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
@@ -6303,7 +6304,7 @@ export function PropertiesPanel() {
                     checked={selectedClip.textSettings.italic}
                     onChange={(e) => {
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, italic: e.target.checked } });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
@@ -6319,7 +6320,7 @@ export function PropertiesPanel() {
                       key={align}
                       onClick={() => {
                         updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, textAlign: align } });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className={`flex-1 py-1.5 text-xs rounded border transition-colors capitalize ${
                         (selectedClip.textSettings as any).textAlign === align || (!((selectedClip.textSettings as any).textAlign) && align === 'center')
@@ -6340,7 +6341,7 @@ export function PropertiesPanel() {
                     checked={selectedClip.textSettings.shadow}
                     onChange={(e) => {
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadow: e.target.checked } });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
@@ -6353,7 +6354,7 @@ export function PropertiesPanel() {
                         type="color"
                         value={selectedClip.textSettings.shadowColor || '#000000'}
                         onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadowColor: e.target.value } })}
-                        onBlur={() => useEditorStore.getState().saveSnapshot()}
+                        onBlur={() => scheduleSaveSnapshot()}
                         className="w-5 h-5 rounded bg-transparent cursor-pointer"
                       />
                       <input
@@ -6362,8 +6363,8 @@ export function PropertiesPanel() {
                         max="30"
                         value={selectedClip.textSettings.shadowBlur}
                         onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadowBlur: Number(e.target.value) } })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                        onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
+                        onTouchEnd={() => scheduleSaveSnapshot()}
                         className="flex-1 accent-amber-500"
                       />
                     </div>
@@ -6378,7 +6379,7 @@ export function PropertiesPanel() {
                     checked={selectedClip.textSettings.threeD}
                     onChange={(e) => {
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeD: e.target.checked } });
-                      useEditorStore.getState().saveSnapshot();
+                      scheduleSaveSnapshot();
                     }}
                     className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
                   />
@@ -6394,8 +6395,8 @@ export function PropertiesPanel() {
                         max="20"
                         value={selectedClip.textSettings.threeDDepth}
                         onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeDDepth: Number(e.target.value) } })}
-                        onMouseUp={() => useEditorStore.getState().saveSnapshot()}
-                        onTouchEnd={() => useEditorStore.getState().saveSnapshot()}
+                        onMouseUp={() => scheduleSaveSnapshot()}
+                        onTouchEnd={() => scheduleSaveSnapshot()}
                         className="flex-1 accent-amber-500"
                       />
                       <span className="text-[10px] text-white w-6">{selectedClip.textSettings.threeDDepth}px</span>
@@ -6422,7 +6423,7 @@ export function PropertiesPanel() {
                             animation: { ...anim, in: e.target.value as any }
                           }
                         });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
                     >
@@ -6466,7 +6467,7 @@ export function PropertiesPanel() {
                               }
                             });
                           }}
-                          onBlur={() => useEditorStore.getState().saveSnapshot()}
+                          onBlur={() => scheduleSaveSnapshot()}
                           className="w-12 px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
                         />
                         <span className="text-[10px] text-[#a0a0a0]">sec</span>
@@ -6489,7 +6490,7 @@ export function PropertiesPanel() {
                             animation: { ...anim, out: e.target.value as any }
                           }
                         });
-                        useEditorStore.getState().saveSnapshot();
+                        scheduleSaveSnapshot();
                       }}
                       className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
                     >
@@ -6531,7 +6532,7 @@ export function PropertiesPanel() {
                               }
                             });
                           }}
-                          onBlur={() => useEditorStore.getState().saveSnapshot()}
+                          onBlur={() => scheduleSaveSnapshot()}
                           className="w-12 px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
                         />
                         <span className="text-[10px] text-[#a0a0a0]">sec</span>
@@ -7003,7 +7004,7 @@ export function PropertiesPanel() {
 
               <button
                 onClick={() => {
-                   const canvas = document.querySelector('.preview-canvas') as HTMLCanvasElement;
+                   const canvas = document.querySelector('#preview-canvas, .preview-canvas') as HTMLCanvasElement;
                    if (!canvas) {
                      toast.warning("Preview canvas not found!");
                      return;

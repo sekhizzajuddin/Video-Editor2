@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { addOrUpdateKeyframe } from '@/utils/keyframes';
 import type { TimelineClip, ClipAnimations } from '@/types';
+import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 
 interface ScaleSectionProps {
   selectedClip: TimelineClip;
@@ -39,7 +40,7 @@ export function ScaleSection({
             onClick={(e) => {
               e.stopPropagation();
               setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
-              useEditorStore.getState().saveSnapshot();
+              scheduleSaveSnapshot();
             }}
             className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
             title="Reset Scale"
@@ -107,10 +108,10 @@ export function ScaleSection({
               value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
               title="Double-click to reset to 100%"
               onChange={(e) => setPropVal('transform.scale', Number(e.target.value), { transform: { ...selectedClip.transform, scale: Number(e.target.value) } })}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+              onMouseUp={() => scheduleSaveSnapshot()}
               onDoubleClick={() => {
                 setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
-                useEditorStore.getState().saveSnapshot();
+                scheduleSaveSnapshot();
               }}
               className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
@@ -122,7 +123,7 @@ export function ScaleSection({
                 const cur = getPropVal(selectedClip.transform.scale, 'transform.scale');
                 let next = steps.find(s => s > cur) ?? steps[0];
                 setPropVal('transform.scale', next, { transform: { ...selectedClip.transform, scale: next } });
-                useEditorStore.getState().saveSnapshot();
+                scheduleSaveSnapshot();
               }}
             >
               {Math.round(getPropVal(selectedClip.transform.scale, 'transform.scale'))}%

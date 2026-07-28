@@ -39,7 +39,7 @@ export function ThumbnailTab({ selectedClip }: ThumbnailTabProps) {
 
         <button
           onClick={() => {
-            const canvas = document.querySelector('.preview-canvas') as HTMLCanvasElement;
+            const canvas = document.querySelector('#preview-canvas, .preview-canvas') as HTMLCanvasElement;
             if (!canvas) {
               toast.warning("Preview canvas not found!");
               return;

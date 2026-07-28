@@ -177,10 +177,13 @@ export function PreviewCanvasContainer() {
   }, [allClips]);
 
   useEffect(() => {
-    const allClipIds = new Set(allClips.map((c) => `clip_${c.id}`));
+    const activeClipIds = new Set(allClips.map((c) => c.id));
     for (const key of offscreenCanvasPool.current.keys()) {
-      if (key.startsWith('clip_') && !allClipIds.has(key)) {
-        offscreenCanvasPool.current.delete(key);
+      if (key.startsWith('clip_')) {
+        const isOwnedByActiveClip = Array.from(activeClipIds).some((id) => key.includes(id));
+        if (!isOwnedByActiveClip) {
+          offscreenCanvasPool.current.delete(key);
+        }
       }
     }
   }, [allClips]);
@@ -790,7 +793,7 @@ export function PreviewCanvasContainer() {
           ref={canvasRef}
           width={activeCanvasWidth}
           height={activeCanvasHeight}
-          className={`pointer-events-none ${
+          className={`preview-canvas pointer-events-none ${
             isFullscreen
               ? 'absolute inset-0 w-full h-full object-contain bg-black'
               : 'w-full h-full object-contain'

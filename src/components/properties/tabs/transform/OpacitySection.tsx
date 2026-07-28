@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { addOrUpdateKeyframe } from '@/utils/keyframes';
 import type { TimelineClip, ClipAnimations } from '@/types';
+import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 
 interface OpacitySectionProps {
   selectedClip: TimelineClip;
@@ -39,7 +40,7 @@ export function OpacitySection({
             onClick={(e) => {
               e.stopPropagation();
               setPropVal('opacity', 1, { opacity: 1 });
-              useEditorStore.getState().saveSnapshot();
+              scheduleSaveSnapshot();
             }}
             className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
             title="Reset Opacity"
@@ -108,10 +109,10 @@ export function OpacitySection({
               value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
               title="Double-click to reset to 100%"
               onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
-              onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+              onMouseUp={() => scheduleSaveSnapshot()}
               onDoubleClick={() => {
                 setPropVal('opacity', 1, { opacity: 1 });
-                useEditorStore.getState().saveSnapshot();
+                scheduleSaveSnapshot();
               }}
               className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
@@ -123,7 +124,7 @@ export function OpacitySection({
                 const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
                 let next = steps.find(s => s > cur) ?? steps[0];
                 setPropVal('opacity', next / 100, { opacity: next / 100 });
-                useEditorStore.getState().saveSnapshot();
+                scheduleSaveSnapshot();
               }}
             >
               {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%

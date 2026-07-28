@@ -6,6 +6,7 @@
 
 import React, { useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 
 export interface ColorWheelProps {
   label: string;
@@ -78,7 +79,7 @@ export function ColorWheel({ label, value, onChange, accentColor }: ColorWheelPr
     }
 
     onChange({ hue: newHue, saturation: newSat, lift });
-    useEditorStore.getState().saveSnapshot();
+    scheduleSaveSnapshot();
   };
 
   return (
@@ -145,7 +146,7 @@ export function ColorWheel({ label, value, onChange, accentColor }: ColorWheelPr
           max={100}
           value={lift}
           onChange={(e) => onChange({ hue, saturation: sat, lift: Number(e.target.value) })}
-          onMouseUp={() => useEditorStore.getState().saveSnapshot()}
+          onMouseUp={() => scheduleSaveSnapshot()}
           onDoubleClick={() => onChange({ hue, saturation: sat, lift: 0 })}
           title="Double-click to reset lift to 0"
           className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"

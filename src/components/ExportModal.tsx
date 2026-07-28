@@ -6,6 +6,7 @@ import { formatSimpleTime } from '@/utils/time';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { toast } from 'sonner';
+import { defaultExportPipeline } from '@/export/ExportPipeline';
 
 const ffmpeg = new FFmpeg();
 
@@ -67,6 +68,7 @@ export function ExportModal() {
   const [fps, setFps] = useState('30');
   const [quality, setQuality] = useState('high');
   const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('webm'); // Default to webm — most reliable
+  const [useHardwareEncoder, setUseHardwareEncoder] = useState<boolean>(true);
   const [resolution, setResolution] = useState('720p');
   const [batchTargets, setBatchTargets] = useState<('16:9' | '9:16' | '1:1' | '4:3')[]>(['16:9']);
   const batchTargetsRef = useRef<string[]>(['16:9']);
@@ -376,6 +378,65 @@ export function ExportModal() {
     setConversionProgress(0);
     setErrorMsg(null);
     setStatusMsg('Preparing...');
+
+    // Check if WebCodecs hardware GPU encoding can process this MP4 export instantaneously
+    if (exportFormat === 'mp4' && useHardwareEncoder) {
+      const bitsPerSecond = quality === 'max' ? 12_000_000 : quality === 'high' ? 6_000_000 : 3_000_000;
+      const pipelineOpts = {
+        width,
+        height,
+        fps: parseInt(fps),
+        format: 'mp4' as const,
+        quality: quality as any,
+        bitrate: bitsPerSecond,
+        startAt,
+        endAt,
+        useHardwareEncoder: true,
+        canvas: previewCanvas,
+        audioStream: masterAudioStream,
+        onProgress: (prog: any) => {
+          setProgress(prog.percentage);
+          if (prog.message) setStatusMsg(prog.message);
+        },
+        setStatusMsg,
+      };
+
+      const selectedBackend = await defaultExportPipeline.selectBestBackend(pipelineOpts);
+      if (selectedBackend.type === 'webcodecs') {
+        try {
+          const { promise } = defaultExportPipeline.start(pipelineOpts);
+          const result = await promise;
+          triggerDownload(result.blob, 'mp4');
+          updateStatus('done');
+          setStatusMsg('MP4 export complete (WebCodecs GPU)!');
+          isExportingRef.current = false;
+          setIsExporting(false);
+
+          const tId = setTimeout(() => {
+            if (currentBatchIndexRef.current < batchTargetsRef.current.length - 1) {
+              setCurrentBatchIndex(prev => prev + 1);
+              updateStatus('idle');
+              setIsExporting(false);
+              const tId2 = setTimeout(() => {
+                useEditorStore.getState().setAspectRatio(batchTargetsRef.current[currentBatchIndexRef.current] as any);
+                const tId3 = setTimeout(() => handleExport(), 500);
+                batchTimeoutsRef.current.push(tId3);
+              }, 100);
+              batchTimeoutsRef.current.push(tId2);
+            } else {
+              setShowExportModal(false);
+              setIsExporting(false);
+              updateStatus('idle');
+              setCurrentBatchIndex(0);
+            }
+          }, 2000);
+          batchTimeoutsRef.current.push(tId);
+          return;
+        } catch (err: any) {
+          console.warn('[Export] WebCodecs GPU encoding exception, failing over to standard stream recorder...', err);
+        }
+      }
+    }
 
     // Create video stream from canvas
     const videoStream = previewCanvas.captureStream(parseInt(fps));
@@ -743,6 +804,22 @@ export function ExportModal() {
                 </button>
               ))}
             </div>
+            {/* Hardware GPU Acceleration Option */}
+            {exportFormat === 'mp4' && typeof window.VideoEncoder !== 'undefined' && (
+              <div className="mt-2.5 flex items-center gap-2 px-3 py-2 bg-zinc-900/70 border border-zinc-800/80 rounded-md">
+                <input
+                  type="checkbox"
+                  id="hardware-encoder"
+                  checked={useHardwareEncoder}
+                  disabled={isExporting}
+                  onChange={(e) => setUseHardwareEncoder(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
+                />
+                <label htmlFor="hardware-encoder" className="text-xs text-zinc-300 cursor-pointer flex-1">
+                  Use native GPU Hardware Encoder (<span className="text-amber-400 font-semibold">WebCodecs</span>)
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Resolution & Aspect Ratio */}

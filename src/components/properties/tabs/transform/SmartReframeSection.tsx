@@ -1,5 +1,6 @@
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineClip } from '@/types';
+import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 
 interface SmartReframeSectionProps {
   selectedClip: TimelineClip;
@@ -31,7 +32,7 @@ export function SmartReframeSection({ selectedClip, updateClip }: SmartReframeSe
           const aspect = useEditorStore.getState().aspectRatio;
           const newAnimations = generateSmartReframeKeyframes(selectedClip, aspect as any);
           updateClip(selectedClip.id, { animations: newAnimations });
-          useEditorStore.getState().saveSnapshot('Smart Reframe');
+          scheduleSaveSnapshot('Smart Reframe');
         }}
         className="w-full py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-medium transition-colors shadow-md shadow-cyan-950/50"
       >

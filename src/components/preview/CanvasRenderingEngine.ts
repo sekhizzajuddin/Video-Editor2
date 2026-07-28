@@ -145,7 +145,12 @@ export async function renderCanvasEngine({
   }
   if (!compositeCtxRef.current) return;
   const ctx = compositeCtxRef.current;
-  const skipExpensiveFX = false; // Ensure AI background removal, chroma key, and particles render during active video playback
+  const previewQuality = settings?.previewQuality ?? useEditorStore.getState().settings?.previewQuality ?? 'full';
+  // Phase 2C: Quality-2 Short-Circuit Integration for granular preview-mode gating.
+  // When active playback is running (not exporting), short-circuit CPU-heavy per-pixel operations
+  // based on the selected preview quality ('half' or 'quarter') to preserve framerate during stacked FX editing.
+  const skipExpensiveFX = !isExporting && isPlaying && previewQuality === 'quarter';
+  const skipUltraHeavyFX = !isExporting && isPlaying && (previewQuality === 'quarter' || previewQuality === 'half');
 
   const now = performance.now();
   const lastTime = lastParticleTimeRef.current ?? now;
@@ -391,26 +396,29 @@ export async function renderCanvasEngine({
       const state = useEditorStore.getState();
       const sourceClip = findClipDeep(state, mask.matteSourceClipId);
       if (sourceClip) {
-        inMatteRendering = true;
-        maskCtx.restore();
-        maskCtx.save();
-        await drawSingleClip(sourceClip, 1, undefined, maskCtx);
-        
-        const matteData = maskCtx.getImageData(0, 0, ow, oh);
-        const pixels = matteData.data;
-        for (let i = 0; i < pixels.length; i += 4) {
-          const r = pixels[i];
-          const g = pixels[i + 1];
-          const b = pixels[i + 2];
-          const a = pixels[i + 3];
-          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-          pixels[i + 3] = (lum / 255) * a;
-          pixels[i] = 255;
-          pixels[i + 1] = 255;
-          pixels[i + 2] = 255;
+        try {
+          inMatteRendering = true;
+          maskCtx.restore();
+          maskCtx.save();
+          await drawSingleClip(sourceClip, 1, undefined, maskCtx);
+          
+          const matteData = maskCtx.getImageData(0, 0, ow, oh);
+          const pixels = matteData.data;
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i];
+            const g = pixels[i + 1];
+            const b = pixels[i + 2];
+            const a = pixels[i + 3];
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            pixels[i + 3] = (lum / 255) * a;
+            pixels[i] = 255;
+            pixels[i + 1] = 255;
+            pixels[i + 2] = 255;
+          }
+          maskCtx.putImageData(matteData, 0, 0);
+        } finally {
+          inMatteRendering = false;
         }
-        maskCtx.putImageData(matteData, 0, 0);
-        inMatteRendering = false;
       }
     }
     
@@ -726,6 +734,12 @@ export async function renderCanvasEngine({
 
         if (clipW > 0 && clipH > 0) {
           const offCanvasKey = `clip_${clip.id}_${Math.round(dw)}x${Math.round(dh)}`;
+          const prefix = `clip_${clip.id}_`;
+          for (const k of offscreenCanvasPool.current.keys()) {
+            if (k.startsWith(prefix) && k !== offCanvasKey) {
+              offscreenCanvasPool.current.delete(k);
+            }
+          }
           const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, dw * DOWNSCALE, dh * DOWNSCALE);
           const oCtx = offCanvas.getContext('2d')!;
           oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
@@ -762,7 +776,7 @@ export async function renderCanvasEngine({
           }
 
           if (!skipExpensiveFX) {
-            if (clip.aiBackground?.enabled) {
+            if (clip.aiBackground?.enabled && !skipUltraHeavyFX) {
               const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
               await applyAiBackgroundMask(
                 oCtx,
@@ -801,7 +815,7 @@ export async function renderCanvasEngine({
                 animSoft
               );
             }
-            if (clip.objectRemoval?.enabled) {
+            if (clip.objectRemoval?.enabled && !skipUltraHeavyFX) {
               applyObjectRemoval(
                 oCtx,
                 offCanvas.width,
@@ -845,6 +859,8 @@ export async function renderCanvasEngine({
             // With DOWNSCALE=1.0, offCanvas dimensions match logical dimensions,
             // so the mask can be applied directly without transform manipulation.
             await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations);
+          } else {
+            offscreenCanvasPool.current.delete('clip_mask_temp_' + clip.id);
           }
 
           oCtx.restore();

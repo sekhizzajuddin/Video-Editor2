@@ -22,9 +22,9 @@ function getScratchCanvas(width: number, height: number): { canvas: HTMLCanvasEl
     scratchCanvas = document.createElement('canvas');
     scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true })!;
   }
-  if (scratchCanvas.width !== width || scratchCanvas.height !== height) {
-    scratchCanvas.width = width;
-    scratchCanvas.height = height;
+  if (scratchCanvas.width < width || scratchCanvas.height < height) {
+    scratchCanvas.width = Math.max(width, Math.ceil(width / 256) * 256);
+    scratchCanvas.height = Math.max(height, Math.ceil(height / 256) * 256);
   }
   return { canvas: scratchCanvas, ctx: scratchCtx! };
 }
@@ -34,9 +34,9 @@ function getTempCanvas(width: number, height: number): { canvas: HTMLCanvasEleme
     tempCanvas = document.createElement('canvas');
     tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
   }
-  if (tempCanvas.width !== width || tempCanvas.height !== height) {
-    tempCanvas.width = width;
-    tempCanvas.height = height;
+  if (tempCanvas.width < width || tempCanvas.height < height) {
+    tempCanvas.width = Math.max(width, Math.ceil(width / 256) * 256);
+    tempCanvas.height = Math.max(height, Math.ceil(height / 256) * 256);
   }
   return { canvas: tempCanvas, ctx: tempCtx! };
 }
@@ -249,13 +249,15 @@ function applyContentAwareStretch(
     }
   }
 
-  // Apply Gaussian feather blur for smooth Laplacian blending
-  const blurRadius = Math.max(2, feather * 0.5);
-  stCtx.filter = `blur(${blurRadius}px)`;
-  stCtx.globalCompositeOperation = 'source-over';
-  stCtx.globalAlpha = 1.0;
-  stCtx.drawImage(stCanvas, 0, 0);
-  stCtx.filter = 'none';
+  // Apply Gaussian feather blur for smooth Laplacian blending (short-circuited in preview quality)
+  if (settings.quality !== 'preview') {
+    const blurRadius = Math.max(2, feather * 0.5);
+    stCtx.filter = `blur(${blurRadius}px)`;
+    stCtx.globalCompositeOperation = 'source-over';
+    stCtx.globalAlpha = 1.0;
+    stCtx.drawImage(stCanvas, 0, 0);
+    stCtx.filter = 'none';
+  }
 
   // Composite back onto destination canvas with shape masking and edge feathering
   ctx.save();
@@ -329,8 +331,8 @@ function applyPatchReplace(
   ptCtx.clearRect(0, 0, patchW, patchH);
   ptCtx.drawImage(sourceCanvas, srcSX, srcSY, srcSW, srcSH, 0, 0, srcSW, srcSH);
 
-  // Apply very slight softening for seamless boundary matching
-  if (feather > 0) {
+  // Apply very slight softening for seamless boundary matching (skip in preview mode)
+  if (feather > 0 && settings.quality !== 'preview') {
     ptCtx.filter = `blur(${Math.max(1, feather * 0.2)}px)`;
     ptCtx.drawImage(ptCanvas, 0, 0);
     ptCtx.filter = 'none';
@@ -418,11 +420,23 @@ function applyBlurConceal(
     bcCtx.drawImage(smallCanvas, 0, 0, smallW, smallH, 0, 0, boxW, boxH);
     bcCtx.imageSmoothingEnabled = true;
   } else {
-    // High-intensity Gaussian blur concealer
-    const blurAmount = Math.max(12, Math.min(w, h) / 6);
-    bcCtx.filter = `blur(${blurAmount}px)`;
-    bcCtx.drawImage(bcCanvas, 0, 0);
-    bcCtx.filter = 'none';
+    // High-intensity blur concealer (short-circuit to ultra-fast hardware scaling blur in preview mode)
+    if (settings.quality === 'preview') {
+      const smallW = Math.max(1, Math.floor(boxW / 4));
+      const smallH = Math.max(1, Math.floor(boxH / 4));
+      const { canvas: smallCanvas, ctx: smallCtx } = getScratchCanvas(smallW, smallH);
+      smallCtx.imageSmoothingEnabled = true;
+      smallCtx.clearRect(0, 0, smallW, smallH);
+      smallCtx.drawImage(bcCanvas, 0, 0, boxW, boxH, 0, 0, smallW, smallH);
+      bcCtx.imageSmoothingEnabled = true;
+      bcCtx.clearRect(0, 0, boxW, boxH);
+      bcCtx.drawImage(smallCanvas, 0, 0, smallW, smallH, 0, 0, boxW, boxH);
+    } else {
+      const blurAmount = Math.max(12, Math.min(w, h) / 6);
+      bcCtx.filter = `blur(${blurAmount}px)`;
+      bcCtx.drawImage(bcCanvas, 0, 0);
+      bcCtx.filter = 'none';
+    }
   }
 
   // Composite with soft feathered edges

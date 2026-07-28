@@ -206,6 +206,17 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     return mediaContainer;
   };
 
+  // Eagerly guarantee master audio context is initialized so masterAudioStream is never null during export (Issue 1)
+  if (typeof window !== 'undefined') {
+    getMasterAudioCtx();
+    if (masterAudioDestination) {
+      const store = useEditorStore.getState();
+      if (!store.masterAudioStream && masterAudioDestination.stream) {
+        store.setMasterAudioStream(masterAudioDestination.stream);
+      }
+    }
+  }
+
   // Sync master stream to store once
   useEffect(() => {
     if (!isPrimary) return;
@@ -1768,4 +1779,59 @@ function createSeparationGraph(audioCtx: AudioContext): SeparationGraph {
     sideGain,
     bypassGain
   };
+}
+
+/**
+ * Synchronous seek helper for WebCodecs and frame-accurate exports (Issue 4).
+ * Ensures all video elements active at targetTime have finished seeking before returning.
+ */
+export async function synchronousSeek(targetTime: number): Promise<void> {
+  const store = useEditorStore.getState();
+  store.seek(targetTime);
+
+  const tracks = store.tracks || [];
+  const promises: Promise<void>[] = [];
+
+  for (const track of tracks) {
+    if (track.muted || track.hidden || track.type !== 'video') continue;
+    for (const clip of (track.clips || [])) {
+      if (targetTime >= clip.startTime && targetTime <= clip.startTime + clip.duration) {
+        const v = globalVideoMap.get(clip.id);
+        if (v && v.readyState >= 1) {
+          const mediaTime = clip.trimStart + (targetTime - clip.startTime) * (clip.speed || 1);
+          if (Math.abs(v.currentTime - mediaTime) > 0.01 || v.seeking) {
+            promises.push(
+              new Promise<void>((resolve) => {
+                const handler = () => {
+                  v.removeEventListener('seeked', handler);
+                  resolve();
+                };
+                v.addEventListener('seeked', handler, { once: true });
+                v.currentTime = mediaTime;
+                setTimeout(resolve, 200); // hard timeout to prevent deadlocks
+              })
+            );
+          }
+        }
+      }
+    }
+  }
+  if (promises.length > 0) {
+    await Promise.all(promises);
+  }
+}
+
+/**
+ * Safe cloned live audio stream getter for export pipelines (Issue 1).
+ * Clones the master audio destination stream to avoid stale handle errors.
+ */
+export async function getLiveAudioStream(): Promise<MediaStream | null> {
+  if (typeof window !== 'undefined') {
+    getMasterAudioCtx();
+  }
+  const master = useEditorStore.getState().masterAudioStream || (masterAudioDestination ? masterAudioDestination.stream : null);
+  if (!master || master.getAudioTracks().length === 0) {
+    return null;
+  }
+  return master.clone();
 }
