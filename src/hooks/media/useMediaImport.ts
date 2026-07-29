@@ -3,6 +3,7 @@ import { useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
+import { storeMediaHandle } from '@/utils/mediaFileHandle';
 import { MediaItem } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 
@@ -16,12 +17,15 @@ export function useMediaImport() {
   
   const addMedia = useEditorStore(state => state.addMedia);
 
-  const processFiles = async (files: File[]) => {
+  const processFiles = async (
+    files: File[],
+    handles?: (FileSystemFileHandle | null)[],
+  ) => {
     if (files.length === 0) return;
     setIsUploading(true);
     setProgressPercent(5);
     let successCount = 0;
-    
+
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -39,17 +43,27 @@ export function useMediaImport() {
         }
 
         const mediaItem = await probeFile(file);
-        
-        // Save to IndexedDB if it's not a text type
+        const handle = handles?.[i] ?? null;
+
+        // Store handle first (cheap, no copy). On Chrome/Edge this enables
+        // SSD streaming later via the windowed cache.
         if (mediaItem.type !== 'text') {
+          try {
+            await storeMediaHandle(mediaItem.id, file, handle ?? undefined);
+          } catch {
+            // ignore — we still fall back to IDB
+          }
+          // Keep IDB as a fallback so projects survive browser restarts even
+          // when handles become invalid. The windowed cache prevents the full
+          // blob from being held in RAM at playback time.
           await saveFileToDB(mediaItem.id, file);
         }
-        
+
         addMedia(mediaItem);
         successCount++;
         setProgressPercent(Math.round(((i + 1) / files.length) * 100));
       }
-      
+
       if (successCount > 0) {
         toast.success(`Imported ${successCount} file${successCount > 1 ? 's' : ''}`);
       }
@@ -82,8 +96,36 @@ export function useMediaImport() {
     e.stopPropagation();
     setIsDragging(false);
 
-    const files = Array.from(e.dataTransfer.files);
-    await processFiles(files);
+    const files: File[] = [];
+    const handles: (FileSystemFileHandle | null)[] = [];
+
+    // Try to capture persistent handles from the drop event.
+    // Chromium 86+ exposes getAsFileSystemHandle() — when available we keep
+    // a disk reference so playback can stream without loading the whole file.
+    for (const item of Array.from(e.dataTransfer.items)) {
+      if (item.kind !== 'file') continue;
+      if ('getAsFileSystemHandle' in item) {
+        try {
+          const h = await (item as any).getAsFileSystemHandle();
+          if (h && h.kind === 'file') {
+            const f = await h.getFile();
+            files.push(f);
+            handles.push(h);
+            continue;
+          }
+        } catch {
+          // fall through to plain file
+        }
+      }
+      const f = item.getAsFile();
+      if (f) {
+        files.push(f);
+        handles.push(null);
+      }
+    }
+
+    if (files.length === 0) return;
+    await processFiles(files, handles);
   }, []);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -10,7 +10,7 @@
  * - EditorStore: Updates canvas aspect ratio, grid overlays, and preview quality settings.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Play,
   Pause,
@@ -298,6 +298,30 @@ export function PreviewCanvasTransportControls({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const speedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 
+  // Smooth time display: low-pass filter the currentTime so the on-screen
+  // timecode advances smoothly instead of stepping in 1-frame increments.
+  // Display-only — the seek input below still uses the raw value.
+  const displayedTimeRef = useRef(currentTime);
+  const [, forceUpdate] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const target = currentTime;
+      const cur = displayedTimeRef.current;
+      const diff = target - cur;
+      // Snap if close, otherwise ease toward target (≈ 0.25 per frame).
+      displayedTimeRef.current =
+        Math.abs(diff) < 0.001 ? target : cur + diff * 0.25;
+      if (Math.abs(diff) >= 0.001) {
+        forceUpdate((n) => (n + 1) & 0xffff);
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [currentTime]);
+  const displayTime = displayedTimeRef.current;
+
   const progressPercent = Math.min(100, Math.max(0, (currentTime / (totalDuration || 1)) * 100));
   const progressBarStyle = { width: `${progressPercent}%` };
   const scrubThumbStyle = { left: `${progressPercent}%` };
@@ -338,7 +362,7 @@ export function PreviewCanvasTransportControls({
         {/* Left: Time Display */}
         <div className="flex items-center gap-2 min-w-[90px]">
           <span className="text-[10px] font-mono text-[#a0a0a0] tabular-nums select-text">
-            {String(Math.floor(currentTime / 60)).padStart(2, '0')}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
+            {String(Math.floor(displayTime / 60)).padStart(2, '0')}:{String(Math.floor(displayTime % 60)).padStart(2, '0')}<span className="text-[#666]">.{String(Math.floor((displayTime % 1) * 100)).padStart(2, '0')}</span>
             <span className="text-[#555]"> / {String(Math.floor(totalDuration / 60)).padStart(2, '0')}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
           </span>
         </div>

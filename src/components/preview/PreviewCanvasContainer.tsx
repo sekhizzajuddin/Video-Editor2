@@ -34,6 +34,7 @@ export function PreviewCanvasContainer() {
 
   const {
     isPlaying,
+    isScrubbing,
     totalDuration,
     isMuted,
     volume,
@@ -71,6 +72,7 @@ export function PreviewCanvasContainer() {
   } = useEditorStore(
     useShallow((s) => ({
       isPlaying: s.isPlaying,
+      isScrubbing: s.isScrubbing,
       totalDuration: s.totalDuration,
       isMuted: s.isMuted,
       volume: s.volume,
@@ -127,7 +129,7 @@ export function PreviewCanvasContainer() {
   const [showThumbnailModal, setShowThumbnailModal] = useState(false);
   const [thumbnailImageData, setThumbnailImageData] = useState<string | null>(null);
   const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
-  const [isScrubbing, setIsScrubbing] = useState(false);
+  const setIsScrubbing = useEditorStore((s) => s.setIsScrubbing);
   const [adaptiveQuality, setAdaptiveQuality] = useState<'high' | 'medium' | 'low'>('high');
   const lastScrubTimeRef = useRef<number>(0);
 
@@ -220,6 +222,7 @@ export function PreviewCanvasContainer() {
     showGrid,
     canvasBgColor,
     isPlaying,
+    isScrubbing,
     aspectRatio,
     isExporting,
     exportWidth,
@@ -244,6 +247,7 @@ export function PreviewCanvasContainer() {
       showGrid,
       canvasBgColor,
       isPlaying,
+      isScrubbing,
       aspectRatio,
       isExporting,
       exportWidth,
@@ -261,6 +265,7 @@ export function PreviewCanvasContainer() {
       prev.videoElements !== videoElements ||
       prev.viewport !== viewport ||
       prev.isPlaying !== isPlaying ||
+      prev.isScrubbing !== isScrubbing ||
       prev.aspectRatio !== aspectRatio ||
       prev.isExporting !== isExporting ||
       prev.exportWidth !== exportWidth ||
@@ -290,6 +295,7 @@ export function PreviewCanvasContainer() {
         showGrid,
         canvasBgColor,
         isPlaying,
+        isScrubbing,
         aspectRatio,
         isExporting,
         exportWidth,
@@ -313,6 +319,7 @@ export function PreviewCanvasContainer() {
     showGrid,
     canvasBgColor,
     isPlaying,
+    isScrubbing,
     aspectRatio,
     isExporting,
     exportWidth,
@@ -362,8 +369,20 @@ export function PreviewCanvasContainer() {
       }
     };
     window.addEventListener('procut-frame-updated', handleFrameUpdate);
-    return () => window.removeEventListener('procut-frame-updated', handleFrameUpdate);
-  }, []);
+
+    // CapCut-feel: when the playhead drag ends, force a single high-quality
+    // full-resolution redraw. During drag we render at quarter-res for 60 fps;
+    // on release we want a crisp, sharp final frame.
+    const handleScrubFinalize = () => {
+      requestRedraw();
+    };
+    window.addEventListener('procut-scrub-finalize', handleScrubFinalize);
+
+    return () => {
+      window.removeEventListener('procut-frame-updated', handleFrameUpdate);
+      window.removeEventListener('procut-scrub-finalize', handleScrubFinalize);
+    };
+  }, [requestRedraw]);
 
   // Direct Zustand subscription: immediately flag framePending when currentTime
   // or tracks change during scrubbing/editing. This bypasses React's async render
@@ -396,6 +415,7 @@ export function PreviewCanvasContainer() {
   const renderCanvas = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const fresh = useEditorStore.getState();
     await renderCanvasEngine({
       canvas,
       compositeCtxRef,
@@ -403,6 +423,7 @@ export function PreviewCanvasContainer() {
       particlePoolsRef,
       lastParticleTimeRef,
       lastFrameCanvasRef,
+      isScrubbing: fresh.isScrubbing,
       renderDeps: renderDepsRef.current,
     });
   }, []);
@@ -530,6 +551,7 @@ export function PreviewCanvasContainer() {
         deps.selectedClipId = freshState.selectedClipId;
         deps.mediaLibrary = freshState.mediaLibrary;
         deps.isPlaying = freshState.isPlaying;
+        deps.isScrubbing = freshState.isScrubbing;
 
         renderCanvasRef.current()
           .catch((err: unknown) => {

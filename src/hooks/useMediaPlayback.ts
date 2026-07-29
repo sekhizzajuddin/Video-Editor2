@@ -15,6 +15,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue } from '@/utils/keyframes';
+import { getWindowedMediaURL, evictMediaWindow } from '@/utils/ramWindowedBlobCache';
 
 // Global master audio context for combining all tracks into a single MediaStream for Export
 let masterAudioCtx: AudioContext | null = null;
@@ -544,6 +545,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     if (!isPrimary) return;
     const syncPlayback = async () => {
       const now = performance.now();
+      const isScrubbing = useEditorStore.getState().isScrubbing;
       const syncInterval = isPlaying ? 33 : 0;
       if (now - lastVideoSyncRef.current < syncInterval) return;
       lastVideoSyncRef.current = now;
@@ -552,18 +554,28 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const clips = activeClips();
 
       const playingIds = new Set(clips.map((c) => c.clipId));
-  
+
       const elapsedRealTime = (now - lastRealTimeRef.current) / 1000;
       const expectedPlaybackTime = lastTimeRef.current + elapsedRealTime * playbackSpeed;
-  
+
       // Detect if playback has just started, or if the user performed a manual seek
       const playStarted = isPlaying && !wasPlayingRef.current;
       const userSeeked = !isPlaying || Math.abs(currentTime - expectedPlaybackTime) > 0.01;
       const forceSeek = playStarted || userSeeked;
-  
+
       lastTimeRef.current = currentTime;
       lastRealTimeRef.current = now;
       wasPlayingRef.current = isPlaying;
+
+      // During scrubbing, force-pause every media element so no audio bleeds through.
+      // The visual frame still updates because the engine draws from currentTime
+      // on each RAF tick — the HTMLMediaElement is only used for audio decoding.
+      if (isScrubbing) {
+        for (const [, entry] of pool) {
+          if (!entry.el.paused) entry.el.pause();
+        }
+        return; // skip the rest of the sync loop while scrubbing
+      }
   
       for (const [clipId, entry] of pool) {
         const clip = clips.find((c) => c.clipId === clipId);
@@ -1238,7 +1250,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     }
 
     // Collect all video entries with their distance from playhead
-    const videoEntries: { clipId: string; entry: MediaElement; dist: number; absStart: number; clipDuration: number; media: any }[] = [];
+    const videoEntries: { clipId: string; entry: MediaElement; dist: number; absStart: number; clipDuration: number; media: any; clipObj: any }[] = [];
     for (const [clipId, entry] of pool) {
       if (entry.type !== 'video') continue;
       
@@ -1256,7 +1268,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // Distance: 0 if playhead is inside clip, otherwise distance to nearest edge
       const dist = currentTime >= absStart && currentTime < clipEnd ? 0 : Math.min(Math.abs(currentTime - absStart), Math.abs(currentTime - clipEnd));
       
-      videoEntries.push({ clipId, entry, dist, absStart, clipDuration: clipObj.duration, media });
+      videoEntries.push({ clipId, entry, dist, absStart, clipDuration: clipObj.duration, media, clipObj });
     }
 
     // Sort by distance (closest first) and only load the nearest MAX_LOADED_VIDEOS
@@ -1274,19 +1286,37 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const el = ve.entry.el as HTMLVideoElement;
       const isNear = ve.dist <= getProximityWindow(ve.media);
       const canLoad = loadedCount.current < MAX_LOADED_VIDEOS;
-      
+
       if (isNear && canLoad) {
         const targetSrc = ve.media.url;
-        
-        if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
-          el.src = targetSrc;
-          const pendingTime = pendingSeeksRef.current.get(ve.clipId);
-          if (pendingTime !== undefined) {
-             el.currentTime = pendingTime;
-             pendingSeeksRef.current.delete(ve.clipId);
-          }
-          el.load();
-        }
+
+        // Use the 30s windowed cache for the video src. This keeps RAM bounded
+        // even for hour-long 4K timelines — only the playhead window is in memory.
+        // The windowed cache resolves to a Blob URL (cheap to assign).
+        const localTime =
+          Math.max(0, currentTime - ve.absStart) * (ve.clipObj?.speed ?? 1) +
+          (ve.clipObj?.trimStart ?? 0);
+        getWindowedMediaURL(ve.entry.mediaId, localTime)
+          .then((windowedUrl) => {
+            if (!windowedUrl) return;
+            if (el.src !== windowedUrl && !el.src.endsWith(windowedUrl)) {
+              el.src = windowedUrl;
+              const pendingTime = pendingSeeksRef.current.get(ve.clipId);
+              if (pendingTime !== undefined) {
+                el.currentTime = pendingTime;
+                pendingSeeksRef.current.delete(ve.clipId);
+              }
+              el.load();
+            }
+          })
+          .catch(() => {
+            // Fallback to the legacy full-file URL on any cache failure.
+            if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
+              el.src = targetSrc;
+              el.load();
+            }
+          });
+
         loadedCount.current++;
       } else {
         if (el.src !== '') {
@@ -1335,6 +1365,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
           entry.el.src = '';
           entry.el.remove();
+          evictMediaWindow(entry.mediaId);
         }
         pool.clear();
         videoMapRef.current.clear();

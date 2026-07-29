@@ -103,11 +103,24 @@ export function useTimelineState() {
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
 
   // Playhead scrubbing and cut tool states
-  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [isScrubbingLocal, setIsScrubbingLocal] = useState(false);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [scrubMouseX, setScrubMouseX] = useState<number>(0);
   const [hoverCutClipId, setHoverCutClipId] = useState<string | null>(null);
   const [hoverCutX, setHoverCutX] = useState<number | null>(null);
+
+  // Mirror isScrubbing to the global store so the rendering engine,
+  // audio engine, and useMediaPlayback can react with quality-2 rendering
+  // and silent audio (CapCut behavior).
+  const setGlobalScrubbing = useEditorStore((s) => s.setIsScrubbing);
+  const setIsScrubbing = useCallback(
+    (v: boolean) => {
+      setIsScrubbingLocal(v);
+      setGlobalScrubbing(v);
+    },
+    [setGlobalScrubbing],
+  );
+  const isScrubbing = isScrubbingLocal;
 
   // Context menus
   const [contextMenu, _setContextMenu] = useState<ContextMenuState | null>(null);

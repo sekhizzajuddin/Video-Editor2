@@ -257,6 +257,7 @@ interface EditorActions {
   setTotalDuration: (duration: number) => void;
   setInPoint: (time: number | null) => void;
   setOutPoint: (time: number | null) => void;
+  setIsScrubbing: (scrubbing: boolean) => void;
 
   // Tools
   setActiveTool: (tool: EditorTool) => void;
@@ -415,6 +416,7 @@ const initialState: EditorState = {
   hasUnsavedChanges: false,
   currentTime: 0,
   isPlaying: false,
+  isScrubbing: false,
   totalDuration: 0,
   playbackSpeed: 1,
   playbackDirection: 1,
@@ -2584,6 +2586,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }));
   },
   seek: (time) => set({ currentTime: Math.max(0, time) }),
+  setIsScrubbing: (scrubbing) => set({ isScrubbing: scrubbing }),
   setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
   setPlaybackDirection: (dir, speed = 1) => {
     if (dir === 0) {

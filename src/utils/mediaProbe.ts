@@ -86,14 +86,11 @@ export async function probeVideo(
   const thumbTime = Math.min(1, duration * 0.1);
   const thumbnail = await captureVideoFrame(video, thumbTime, 320);
 
-  // Extract frame strip for timeline (8-16 evenly spaced frames)
-  const frameCount = Math.min(16, Math.max(6, Math.floor(duration * 2)));
-  const frameStrip: string[] = [];
-  for (let i = 0; i < frameCount; i++) {
-    const t = (i / (frameCount - 1)) * (duration - 0.1);
-    const frame = await captureVideoFrame(video, t, 120);
-    frameStrip.push(frame);
-  }
+  // Lazy frame strip — extracted on demand by the timeline component when the
+  // clip is first visible. Import time stays fast and memory stays low.
+  // The timeline calls `generateFrameStripOnDemand()` which decodes the video
+  // via the existing media pool.
+  const frameStrip: string[] | undefined = undefined;
 
   // Try to extract audio waveform from the video
   let waveformPeaks: number[] | undefined;
@@ -236,6 +233,42 @@ export function detectMediaType(file: File): MediaType {
   if (file.type.startsWith('video/')) return 'video';
   if (file.type.startsWith('audio/')) return 'audio';
   return 'image';
+}
+
+/**
+ * Lazily generate a frame strip from a video URL.
+ * Called by the timeline when a clip first becomes visible, so import stays
+ * fast and the per-clip memory footprint stays small (one ~120-byte JPEG per
+ * frame instead of one decoded frame buffer).
+ */
+export async function generateFrameStripOnDemand(
+  url: string,
+  duration: number,
+  count = 8,
+  maxWidth = 120
+): Promise<string[]> {
+  const video = document.createElement('video');
+  video.preload = 'auto';
+  video.muted = true;
+  video.crossOrigin = 'anonymous';
+
+  await new Promise<void>((resolve, reject) => {
+    video.onloadedmetadata = () => resolve();
+    video.onerror = () => reject(new Error('Failed to load video for frame strip'));
+    video.src = url;
+  });
+
+  const strip: string[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const t = (i / Math.max(1, count - 1)) * Math.max(0, duration - 0.1);
+      strip.push(await captureVideoFrame(video, t, maxWidth));
+    }
+  } finally {
+    video.src = '';
+    video.load();
+  }
+  return strip;
 }
 
 /**

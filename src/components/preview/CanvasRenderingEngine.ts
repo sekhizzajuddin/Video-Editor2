@@ -47,6 +47,7 @@ export interface RenderCanvasParams {
   particlePoolsRef: React.MutableRefObject<Map<string, ParticlePool>>;
   lastParticleTimeRef: React.MutableRefObject<number | null>;
   lastFrameCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  isScrubbing?: boolean;
   renderDeps: {
     currentTime: number;
     tracks: TimelineTrack[];
@@ -58,6 +59,7 @@ export interface RenderCanvasParams {
     showGrid: boolean;
     canvasBgColor: string;
     isPlaying: boolean;
+    isScrubbing?: boolean;
     aspectRatio: string;
     isExporting: boolean;
     exportWidth?: number;
@@ -107,6 +109,7 @@ export async function renderCanvasEngine({
   particlePoolsRef,
   lastParticleTimeRef,
   lastFrameCanvasRef,
+  isScrubbing: isScrubbingParam,
   renderDeps
 }: RenderCanvasParams) {
   const currentTime = renderDeps.currentTime;
@@ -127,6 +130,7 @@ export async function renderCanvasEngine({
   const tracks = tracksRaw as TimelineTrack[];
   const mediaLibrary = mediaLibraryRaw as MediaItem[];
   const hasClips = tracks.some((t) => t.clips.length > 0);
+  const isScrubbing = isScrubbingParam ?? renderDeps.isScrubbing ?? false;
 
   if (!canvas) return;
 
@@ -159,14 +163,17 @@ export async function renderCanvasEngine({
     previewMode === 'auto' &&
     isPlaying &&
     (tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId))));
-  const skipExpensiveFX = !isExporting && isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter');
-  const skipUltraHeavyFX = !isExporting && isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half');
+  // Scrubbing forces quality-2 path so heavy FX (chroma, LUT, AI bg) are skipped,
+  // making playhead drag feel CapCut-smooth.
+  const skipExpensiveFX = !isExporting && (isScrubbing || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter')));
+  const skipUltraHeavyFX = !isExporting && (isScrubbing || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half')));
 
   const now = performance.now();
   const lastTime = lastParticleTimeRef.current ?? now;
   lastParticleTimeRef.current = now;
   let rawDelta = 0;
-  if (isPlaying && lastParticleTimeRef.current !== null) {
+  // Particles freeze during scrub — they're heavy and look jarring anyway.
+  if (isPlaying && !isScrubbing && lastParticleTimeRef.current !== null) {
     rawDelta = now - lastTime;
     if (rawDelta > 300) {
       rawDelta = 16.67;

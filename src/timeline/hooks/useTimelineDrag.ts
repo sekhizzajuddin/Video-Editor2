@@ -1167,6 +1167,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     if (isScrubbing) {
       setIsScrubbing(false);
       setScrubTime(null);
+      // CapCut-feel: dispatch one full-quality redraw event on release
+      window.dispatchEvent(new CustomEvent('procut-scrub-finalize'));
     }
     if (dragState) {
       const draggedIds = dragState.draggedClips?.map((c) => c.id) || [];
