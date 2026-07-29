@@ -73,7 +73,7 @@ export interface RenderCanvasParams {
   };
 }
 
-const MAX_POOL_CANVASES = 12;
+const MAX_POOL_CANVASES = 16;
 
 export function getOrCreateCanvas(
   offscreenPool: Map<string, HTMLCanvasElement>,
@@ -84,14 +84,20 @@ export function getOrCreateCanvas(
   let canvas = offscreenPool.get(key);
   if (!canvas) {
     if (offscreenPool.size >= MAX_POOL_CANVASES) {
-      const firstKey = offscreenPool.keys().next().value;
-      if (firstKey && firstKey !== 'composite') {
-        offscreenPool.delete(firstKey);
+      // Evict least-recently-used entry (FIFO of Map iteration order, which
+      // we maintain by delete-then-set below). Never evict the composite
+      // canvas which is the final drawing target.
+      for (const k of offscreenPool.keys()) {
+        if (k !== 'composite' && !k.startsWith('clip_mask_temp_')) {
+          offscreenPool.delete(k);
+          break;
+        }
       }
     }
     canvas = document.createElement('canvas');
     offscreenPool.set(key, canvas);
   } else {
+    // Touch: re-insert to mark as most-recently-used.
     offscreenPool.delete(key);
     offscreenPool.set(key, canvas);
   }
@@ -165,8 +171,12 @@ export async function renderCanvasEngine({
     (tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId))));
   // Scrubbing forces quality-2 path so heavy FX (chroma, LUT, AI bg) are skipped,
   // making playhead drag feel CapCut-smooth.
-  const skipExpensiveFX = !isExporting && (isScrubbing || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter')));
-  const skipUltraHeavyFX = !isExporting && (isScrubbing || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half')));
+  // Adaptive performance downgrade: if rolling FPS dropped below 50 for >1.5s,
+  // also skip heavy FX until FPS recovers.
+  const perfDowngraded = useEditorStore.getState().perfDowngraded;
+  const adaptiveSlowdown = !isExporting && perfDowngraded && isPlaying;
+  const skipExpensiveFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter')));
+  const skipUltraHeavyFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half')));
 
   const now = performance.now();
   const lastTime = lastParticleTimeRef.current ?? now;

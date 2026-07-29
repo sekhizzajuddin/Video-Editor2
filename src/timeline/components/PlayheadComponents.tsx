@@ -114,7 +114,10 @@ export function PlaybackAutoScroller({
     // We subscribe to the store manually rather than re-rendering this component
     // on every currentTime update.
     return useEditorStore.subscribe((state) => {
-      if (!state.isPlaying) return;
+      // Auto-scroll during both playback AND scrubbing so the playhead stays
+      // in view. During scrub, scrolling is throttled to ~30 Hz via the
+      // lastStoreSyncRef gate below to avoid jank.
+      if (!state.isPlaying && !state.isScrubbing) return;
       const container = trackContainerRef.current;
       if (!container) return;
 
@@ -139,14 +142,18 @@ export function PlaybackAutoScroller({
         // Only update if moved by >1px
         if (Math.abs(targetScroll - lastScrollRef.current) < 1) return;
         lastScrollRef.current = targetScroll;
-        
-        container.scrollLeft = targetScroll;
-        
-        // Sync to store at 10Hz (100ms) for persistence to avoid broadcast storm
+
+        // Throttle DOM scroll to 30 Hz to avoid jank during fast scrubs.
+        // The actual currentTime is unaffected — only the visual viewport moves.
         const now = performance.now();
+        if (now - lastStoreSyncRef.current < 33) return;
+        lastStoreSyncRef.current = now;
+
+        container.scrollLeft = targetScroll;
+
+        // Sync to store at 10Hz (100ms) for persistence to avoid broadcast storm
         if (now - lastStoreSyncRef.current > 100) {
           useEditorStore.getState().setScrollLeft(targetScroll);
-          lastStoreSyncRef.current = now;
         }
       }
     });

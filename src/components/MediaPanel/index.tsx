@@ -52,6 +52,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
+import { storeMediaHandle } from '@/utils/mediaFileHandle';
 import { parseSRT } from '@/utils/srtParser';
 import demoA from '../../assets/transition_demo_a.webp';
 import demoB from '../../assets/transition_demo_b.webp';
@@ -932,9 +933,19 @@ export function MediaPanel() {
             URL.revokeObjectURL(match.thumbnail);
           }
           const objectUrl = URL.createObjectURL(file);
-          
+
           // Save file to IndexedDB
           await saveFileToDB(match.id, file);
+
+          // Capture a persistent file handle when possible (Chromium 86+).
+          // <input type="file"> does not expose FileSystemFileHandle directly,
+          // but we attempt the property anyway in case future browsers allow it.
+          const possibleHandle = (file as unknown as { handle?: FileSystemFileHandle }).handle;
+          try {
+            await storeMediaHandle(match.id, file, possibleHandle);
+          } catch {
+            // ignore — IDB fallback path still works
+          }
 
           // Update the media library URL
           useEditorStore.setState((state) => ({
@@ -959,7 +970,7 @@ export function MediaPanel() {
     // Refresh state in editor store
     useEditorStore.getState().recalcTotalDuration();
     useEditorStore.getState().saveSnapshot();
-    
+
     // Dispatch event to notify PreviewCanvas to redraw
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
 

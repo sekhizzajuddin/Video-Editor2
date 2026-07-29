@@ -4,6 +4,9 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { getAutosavesFromDB, deleteAutosaveFromDB, restoreSnapshotMedia } from '@/utils/projectPersistence';
 import { clearPreviewCaches } from '@/utils/canvasEffects';
+import { getStorageReport, startStorageMonitor } from '@/utils/storageMonitor';
+import { clearImageBitmapPool, getImageBitmapPoolStats } from '@/utils/imageBitmapPool';
+import { clearAllMediaWindows } from '@/utils/ramWindowedBlobCache';
 import { DEFAULT_SHORTCUTS, getShortcutString, SHORTCUT_PROFILES } from '@/utils/keyboardShortcuts';
 import { toast } from 'sonner';
 
@@ -795,7 +798,7 @@ export function SettingsModal() {
                     <p className="text-[10px] text-[#a0a0a0] mb-2">
                       Clear cached preview files to free up disk space
                     </p>
-                    <button 
+                    <button
                       onClick={() => {
                         clearPreviewCaches();
                         toast.success('Preview image cache cleared successfully!');
@@ -804,6 +807,17 @@ export function SettingsModal() {
                     >
                       Clear Cache
                     </button>
+                  </div>
+
+                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                    <div className="flex items-center gap-2 mb-2">
+                      <HardDrive className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs text-white font-medium">Storage Health</span>
+                    </div>
+                    <p className="text-[10px] text-[#a0a0a0] mb-2">
+                      Browser storage quota + RAM cache usage. Streams from SSD when possible.
+                    </p>
+                    <StorageHealthWidget />
                   </div>
 
                   <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
@@ -906,6 +920,112 @@ export function SettingsModal() {
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * StorageHealthWidget — live storage quota + RAM cache usage.
+ * Polls storage.estimate() and the windowed cache stats every 5s while open.
+ */
+function StorageHealthWidget() {
+  const [report, setReport] = useState<{
+    quotaMB: number;
+    usedMB: number;
+    percent: number;
+    windowCache: { entries: number; maxEntries: number; windowSeconds: number };
+    bitmapPixelsMB: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const r = await getStorageReport();
+      const bitmap = getImageBitmapPoolStats();
+      if (cancelled) return;
+      setReport({
+        quotaMB: r?.quotaMB ?? 0,
+        usedMB: r?.usedMB ?? 0,
+        percent: r?.percent ?? 0,
+        windowCache: r?.windowCache ?? { entries: 0, maxEntries: 0, windowSeconds: 0 },
+        bitmapPixelsMB: bitmap.pixelsMB,
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  // Subscribe to storage warnings.
+  useEffect(() => {
+    const handle = startStorageMonitor((r) => {
+      toast.warning(
+        `Storage ${r.percent}% full (${r.usedMB} MB / ${r.quotaMB} MB). Consider clearing preview caches.`,
+      );
+    }, 60_000);
+    return handle.stop;
+  }, []);
+
+  if (!report) return <div className="text-[10px] text-[#666]">Loading...</div>;
+
+  const percent = Math.min(100, report.percent);
+  const color =
+    percent >= 90 ? 'bg-red-500' : percent >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+
+  return (
+    <div className="space-y-2">
+      <div>
+        <div className="flex justify-between text-[10px] text-[#a0a0a0] mb-1">
+          <span>Browser Storage</span>
+          <span>
+            {report.usedMB} MB / {report.quotaMB} MB
+          </span>
+        </div>
+        <div className="h-1.5 bg-[#1a1a1a] rounded overflow-hidden">
+          <div
+            className={`h-full ${color} transition-all duration-300`}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+        <div className="text-[9px] text-[#666] mt-0.5">{percent}% used</div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-[10px]">
+        <div className="bg-[#1a1a1a] rounded px-2 py-1.5">
+          <div className="text-[#808080]">RAM Window</div>
+          <div className="text-white">
+            {report.windowCache.entries}/{report.windowCache.maxEntries}
+          </div>
+          <div className="text-[9px] text-[#666]">±{report.windowCache.windowSeconds}s each</div>
+        </div>
+        <div className="bg-[#1a1a1a] rounded px-2 py-1.5">
+          <div className="text-[#808080]">Bitmap Cache</div>
+          <div className="text-white">{report.bitmapPixelsMB} MB</div>
+          <div className="text-[9px] text-[#666]">capped at 64 MB</div>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => {
+            clearImageBitmapPool();
+            toast.success('ImageBitmap cache cleared.');
+          }}
+          className="px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors"
+        >
+          Clear Bitmaps
+        </button>
+        <button
+          onClick={() => {
+            clearAllMediaWindows();
+            toast.success('RAM windowed cache cleared.');
+          }}
+          className="px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors"
+        >
+          Clear RAM Cache
+        </button>
       </div>
     </div>
   );

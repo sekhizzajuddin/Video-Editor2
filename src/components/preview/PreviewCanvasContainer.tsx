@@ -23,6 +23,7 @@ import { ParticlePool } from '@/utils/canvasEffects';
 import { addOrUpdateKeyframe } from '@/utils/keyframes';
 import { renderCanvasEngine } from './CanvasRenderingEngine';
 import { getRenderQualitySettings, optimizeCanvasContext, debouncedScrub } from './RenderingOptimizations';
+import { subscribePerformance, isDowngraded } from '@/utils/performanceMonitor';
 import { PreviewCanvasOverlay } from './PreviewCanvasOverlay';
 import {
   PreviewCanvasHeaderToolbar,
@@ -195,6 +196,18 @@ export function PreviewCanvasContainer() {
 
   const [imageRevision, setImageRevision] = useState(0);
   const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
+
+  // Adaptive performance: subscribe to the rolling-FPS monitor. When frames
+  // are sustained-slow, flip the store flag so the engine downgrades quality.
+  useEffect(() => {
+    const unsub = subscribePerformance(() => {
+      const cur = useEditorStore.getState().perfDowngraded;
+      if (cur !== isDowngraded()) {
+        useEditorStore.getState().setPerfDowngraded(isDowngraded());
+      }
+    });
+    return unsub;
+  }, []);
 
   // Subscribe to time changes for particle pool reset
   const prevTimeRef = useRef(currentTime);

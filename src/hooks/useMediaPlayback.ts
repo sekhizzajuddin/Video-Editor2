@@ -1374,6 +1374,46 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     };
   }, [triggerRedraw, instanceId]);
 
+  // S1.3 — Hard pause when tab hidden: fully pause all media elements and
+  // cancel their requestVideoFrameCallback handles so the browser releases
+  // decoders + audio decode threads. Restored on tab visible.
+  useEffect(() => {
+    if (!isPrimary) return;
+    const onVisibility = () => {
+      const pool = poolRef.current;
+      if (document.hidden) {
+        // Pause everything; cache current state so we can resume identically
+        for (const [, entry] of pool) {
+          if (!entry.el.paused) entry.el.pause();
+          // Cancel requestVideoFrameCallback to release the decoder thread
+          const el = entry.el as any;
+          if (el._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
+            try { el.cancelVideoFrameCallback(el._rvfcHandle); } catch {}
+            el._rvfcHandle = null;
+          }
+        }
+      } else {
+        // Resume only the playhead's active elements; the proximity loader
+        // will re-attach sources on the next tick.
+        for (const [, entry] of pool) {
+          if (entry.type === 'video') {
+            const el = entry.el as any;
+            if ('requestVideoFrameCallback' in el) {
+              const onVideoFrame = () => {
+                if (!poolRef.current.has(entry.clipId)) return;
+                stableTriggerRedraw();
+                el._rvfcHandle = (el as any).requestVideoFrameCallback(onVideoFrame);
+              };
+              el._rvfcHandle = (el as any).requestVideoFrameCallback(onVideoFrame);
+            }
+          }
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [isPrimary, stableTriggerRedraw]);
+
   useEffect(() => {
     resultRef.current.videoElements = videoMapRef.current;
   }, [stableTriggerRedraw]);

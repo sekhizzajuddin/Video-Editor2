@@ -615,6 +615,7 @@ export interface EditorState {
   currentTime: number;
   isPlaying: boolean;
   isScrubbing: boolean;
+  perfDowngraded: boolean;
   totalDuration: number;
   playbackSpeed: number;
   playbackDirection?: number; // -1, 0, +1
