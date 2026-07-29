@@ -32,9 +32,14 @@ import {
   applyChromaKeyOnData,
   applyLumaKeyOnData,
   applyColorGradingWheelsOnData,
+  applyFxEffect,
+  applyCurvesToImageData,
+  buildCurveLUT,
+  isCurveActive,
   ParticlePool,
   LocalCornerPoints
 } from '@/utils/canvasEffects';
+import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCurveActive as isCurveOn } from '@/utils/curvesEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
 
@@ -148,10 +153,15 @@ export async function renderCanvasEngine({
   const previewQuality = settings?.previewQuality ?? useEditorStore.getState().settings?.previewQuality ?? 'full';
   const previewMode = settings?.previewMode ?? useEditorStore.getState().settings?.previewMode ?? 'auto';
   // Phase 3 Theme A2: Quality-2/3 Short-Circuit Integration for granular preview-mode gating.
+  // NOTE: Both c.aiBackground?.enabled and c.objectRemoval?.enabled are intentionally
+  // EXCLUDED from isAutoFast. These features handle their own playback optimization
+  // via humanDetection.ts (temporal caching, scene-change detection, downscaled inference).
+  // Including them here creates a circular dependency where enabling the feature causes
+  // it to skip itself during playback.
   const isAutoFast =
     previewMode === 'auto' &&
     isPlaying &&
-    (tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId || c.aiBackground?.enabled || c.objectRemoval?.enabled))));
+    (tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId))));
   const skipExpensiveFX = !isExporting && isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter');
   const skipUltraHeavyFX = !isExporting && isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half');
 
@@ -778,18 +788,24 @@ export async function renderCanvasEngine({
             oCtx.filter = 'none';
           }
 
+          // AI Background Removal — runs independently of skipExpensiveFX because
+          // it manages its own playback optimization via humanDetection.ts
+          if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
+            const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
+            await applyAiBackgroundMask(
+              oCtx,
+              offCanvas.width,
+              offCanvas.height,
+              sourceElement,
+              animEdgeBlur,
+              clip.aiBackground.modelSelection ?? 0,
+              clip.aiBackground.playbackQuality ?? 'balanced',
+              isPlaying,
+              clip.id
+            );
+          }
+
           if (!skipExpensiveFX) {
-            if (clip.aiBackground?.enabled && !skipUltraHeavyFX) {
-              const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
-              await applyAiBackgroundMask(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                sourceElement,
-                animEdgeBlur,
-                clip.aiBackground.modelSelection ?? 0
-              );
-            }
             if (clip.chromaKey?.enabled) {
               const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold']);
               const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness']);
@@ -818,42 +834,22 @@ export async function renderCanvasEngine({
                 animSoft
               );
             }
+            // Object Removal — intentionally left inside skipExpensiveFX but now
+            // uses temporal caching via humanDetection.ts for playback optimization.
+            // This is safe because objectRemoval was removed from isAutoFast above.
             if (clip.objectRemoval?.enabled) {
-              const useDownscaledPreview = (skipUltraHeavyFX || previewMode === 'fast') && clip.objectRemoval.quality === 'preview';
-              if (!useDownscaledPreview && !skipUltraHeavyFX) {
-                applyObjectRemoval(
-                  oCtx,
-                  offCanvas.width,
-                  offCanvas.height,
-                  clip.objectRemoval,
-                  currentTime,
-                  clip.startTime,
-                  offCanvas,
-                  clip.animations
-                );
-              } else if (useDownscaledPreview) {
-                // Downscale 2x pass for fast interactive preview of object removal
-                const previewW = Math.max(1, offCanvas.width >> 1);
-                const previewH = Math.max(1, offCanvas.height >> 1);
-                const tmp = getOrCreateCanvas(offscreenCanvasPool.current, `objr_${clip.id}_preview`, previewW, previewH);
-                const tctx = tmp.getContext('2d');
-                if (tctx) {
-                  tctx.clearRect(0, 0, previewW, previewH);
-                  tctx.drawImage(offCanvas, 0, 0, previewW, previewH);
-                  applyObjectRemoval(
-                    tctx,
-                    previewW,
-                    previewH,
-                    clip.objectRemoval,
-                    currentTime,
-                    clip.startTime,
-                    tmp,
-                    clip.animations
-                  );
-                  oCtx.imageSmoothingEnabled = true;
-                  oCtx.drawImage(tmp, 0, 0, offCanvas.width, offCanvas.height);
-                }
-              }
+              applyObjectRemoval(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                clip.objectRemoval,
+                currentTime,
+                clip.startTime,
+                offCanvas,
+                clip.animations,
+                isPlaying,
+                clip.id
+              );
             }
             if (filters.shadows || filters.midtones || filters.highlights) {
               applyColorGradingWheelsOnData(
@@ -864,6 +860,22 @@ export async function renderCanvasEngine({
                 filters.midtones,
                 filters.highlights
               );
+            }
+
+            const curvesData = clip.colorFilters?.curves;
+            if (curvesData && (isCurveOn(curvesData.rgb) || isCurveOn(curvesData.r) || isCurveOn(curvesData.g) || isCurveOn(curvesData.b) || isCurveOn(curvesData.luma))) {
+              const rgbLut = isCurveOn(curvesData.rgb) ? buildLUT(curvesData.rgb) : new Uint8ClampedArray(256).map((_, i) => i);
+              const rLut = isCurveOn(curvesData.r) ? buildLUT(curvesData.r) : null;
+              const gLut = isCurveOn(curvesData.g) ? buildLUT(curvesData.g) : null;
+              const bLut = isCurveOn(curvesData.b) ? buildLUT(curvesData.b) : null;
+              const lumaLut = isCurveOn(curvesData.luma) ? buildLUT(curvesData.luma) : null;
+              try {
+                const imgData = oCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+                applyCurves(imgData, rgbLut, rLut, gLut, bLut, lumaLut);
+                oCtx.putImageData(imgData, 0, 0);
+              } catch (e) {
+                console.warn('Curves apply failed:', e);
+              }
             }
             if (filters.temperature !== 0 || filters.tint !== 0 || filters.fadedFilm !== 0 || filters.vignette !== 0) {
               applyColorOverlays(oCtx, 0, 0, offCanvas.width, offCanvas.height, filters);
@@ -880,6 +892,20 @@ export async function renderCanvasEngine({
                 clip.animations?.['lut.intensity'] || clip.animations?.['lutFilter.intensity']
               );
               applyLutToCanvas(oCtx, offCanvas.width, offCanvas.height, lutData, animIntensity);
+            }
+
+            if (clip.fxSettings && !skipExpensiveFX) {
+              const fxIntensity = clip.fxSettings.intensity ?? 100;
+              const fxRelTime = Math.max(0, currentTime - clip.startTime);
+              applyFxEffect(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                clip.fxSettings.type,
+                fxIntensity,
+                fxRelTime,
+                isPlaying
+              );
             }
           }
 

@@ -9,6 +9,7 @@
 
 import type { ClipObjectRemovalSettings } from '@/types';
 import { getAnimatedValue } from '@/utils/keyframes';
+import { detectSceneChange } from './humanDetection';
 
 // Scratch canvases for offscreen compositing (reused across frames to prevent GC pauses)
 let scratchCanvas: HTMLCanvasElement | null = null;
@@ -43,6 +44,7 @@ function getTempCanvas(width: number, height: number): { canvas: HTMLCanvasEleme
 
 // Feather gradient cache to avoid regenerating radial gradients every frame
 const featherGradientCache = new Map<string, CanvasGradient>();
+const temporalInpaintCache = new Map<string, { canvas: HTMLCanvasElement; frameCount: number; settingsHash: string }>();
 
 /**
  * Interpolate settings from keyframes at current timeline time
@@ -485,7 +487,9 @@ export function applyObjectRemoval(
   currentTime: number,
   clipStartTime: number,
   sourceCanvas: HTMLCanvasElement | CanvasImageSource,
-  animations?: any
+  animations?: any,
+  isPlaying: boolean = false,
+  clipId: string = '_default'
 ): void {
   if (!settings || !settings.enabled) return;
 
@@ -503,18 +507,67 @@ export function applyObjectRemoval(
     return;
   }
 
-  // Execute algorithm based on mode
-  switch (interpolated.mode) {
-    case 'content_aware':
-      applyContentAwareStretch(ctx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
-      break;
-    case 'patch_replace':
-      applyPatchReplace(ctx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
-      break;
-    case 'blur_conceal':
-    case 'pixelate':
-      applyBlurConceal(ctx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
-      break;
+  if (isPlaying && settings.temporalSmoothing !== false) {
+    const settingsHash = `${interpolated.mode}_${interpolated.x.toFixed(1)}_${interpolated.y.toFixed(1)}_${interpolated.width.toFixed(1)}_${interpolated.height.toFixed(1)}_${interpolated.rotation.toFixed(1)}`;
+    const sceneChanged = detectSceneChange(clipId + '_objr', sourceCanvas as HTMLCanvasElement);
+    
+    let cacheEntry = temporalInpaintCache.get(clipId);
+    if (!sceneChanged && cacheEntry && cacheEntry.settingsHash === settingsHash && cacheEntry.frameCount < 3) {
+      ctx.drawImage(cacheEntry.canvas, 0, 0);
+      cacheEntry.frameCount++;
+      
+      if (interpolated.showHighlight) {
+        drawHighlightOverlay(ctx, bounds, interpolated, clipWidth, clipHeight);
+      }
+      return;
+    }
+    
+    if (!cacheEntry) {
+      const cacheCanvas = document.createElement('canvas');
+      cacheCanvas.width = clipWidth;
+      cacheCanvas.height = clipHeight;
+      cacheEntry = { canvas: cacheCanvas, frameCount: 0, settingsHash };
+      temporalInpaintCache.set(clipId, cacheEntry);
+    } else if (cacheEntry.canvas.width !== clipWidth || cacheEntry.canvas.height !== clipHeight) {
+      cacheEntry.canvas.width = clipWidth;
+      cacheEntry.canvas.height = clipHeight;
+    }
+    
+    cacheEntry.settingsHash = settingsHash;
+    cacheEntry.frameCount = 0;
+    
+    const cacheCtx = cacheEntry.canvas.getContext('2d', { willReadFrequently: true });
+    if (cacheCtx) {
+      cacheCtx.clearRect(0, 0, clipWidth, clipHeight);
+      
+      switch (interpolated.mode) {
+        case 'content_aware':
+          applyContentAwareStretch(cacheCtx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+          break;
+        case 'patch_replace':
+          applyPatchReplace(cacheCtx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+          break;
+        case 'blur_conceal':
+        case 'pixelate':
+          applyBlurConceal(cacheCtx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+          break;
+      }
+      ctx.drawImage(cacheEntry.canvas, 0, 0);
+    }
+  } else {
+    // Execute algorithm based on mode directly
+    switch (interpolated.mode) {
+      case 'content_aware':
+        applyContentAwareStretch(ctx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+        break;
+      case 'patch_replace':
+        applyPatchReplace(ctx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+        break;
+      case 'blur_conceal':
+      case 'pixelate':
+        applyBlurConceal(ctx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+        break;
+    }
   }
 
   // Draw visual helper guide outline if highlight mode is enabled
@@ -532,4 +585,5 @@ export function clearObjectRemovalCache(): void {
   scratchCtx = null;
   tempCanvas = null;
   tempCtx = null;
+  temporalInpaintCache.clear();
 }

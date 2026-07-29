@@ -105,6 +105,13 @@ export interface ClipColorFilters {
   shadows?: ColorWheelAdjustment;
   midtones?: ColorWheelAdjustment;
   highlights?: ColorWheelAdjustment;
+  curves?: {
+    rgb?: { points: Array<{ x: number; y: number; id: string }> };
+    r?: { points: Array<{ x: number; y: number; id: string }> };
+    g?: { points: Array<{ x: number; y: number; id: string }> };
+    b?: { points: Array<{ x: number; y: number; id: string }> };
+    luma?: { points: Array<{ x: number; y: number; id: string }> };
+  };
 }
 
 export interface ClipAudioSettings {
@@ -331,6 +338,7 @@ export interface ClipAiBackgroundSettings {
   enabled: boolean;
   edgeBlur: number;
   modelSelection?: 0 | 1; // 0 for general (high quality), 1 for landscape (fast)
+  playbackQuality?: 'full' | 'balanced' | 'performance'; // Controls inference strategy during playback
 }
 
 export interface ClipChromaKeySettings {

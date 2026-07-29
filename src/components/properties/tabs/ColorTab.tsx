@@ -11,6 +11,8 @@ import {
   VignetteSection,
   ColorGradeTransferSection,
 } from './color';
+import { CurvesEditor } from './color/CurvesEditor';
+import { useEditorStore } from '@/store/editorStore';
 
 interface ColorTabProps {
   selectedClip: TimelineClip;
@@ -33,6 +35,17 @@ export function ColorTab({
   handleFilterChange,
   handleFilterReset,
 }: ColorTabProps) {
+  const updateClip = useEditorStore((s) => s.updateClip);
+
+  const handleCurvesChange = (curves: TimelineClip['colorFilters'] extends infer T ? T extends { curves?: infer C } ? C : never : never) => {
+    updateClip(selectedClip.id, {
+      colorFilters: {
+        ...selectedClip.colorFilters!,
+        curves,
+      },
+    });
+  };
+
   return (
     <div className="space-y-3">
       <ColorGradeTransferSection
@@ -70,6 +83,18 @@ export function ColorTab({
           saturation={getPropVal(TimelineClipFilters.saturation, 'color.saturation')}
           onChange={(val) => handleFilterChange('saturation', val)}
           onReset={() => handleFilterReset('saturation')}
+        />
+      </ColorSectionContainer>
+
+      <ColorSectionContainer
+        title="Curves (Pro)"
+        sectionKey="colorCurves"
+        collapsedSections={collapsedSections}
+        toggleSection={toggleSection}
+      >
+        <CurvesEditor
+          curves={selectedClip.colorFilters?.curves}
+          onChange={handleCurvesChange as any}
         />
       </ColorSectionContainer>
 

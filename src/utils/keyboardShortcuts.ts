@@ -32,6 +32,8 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcutDef[] = [
   { id: 'tool_track_select', label: 'Track Select Forward', category: 'Tools Selection', defaultKey: 'a' },
   { id: 'tool_track_select_backward', label: 'Track Select Backward', category: 'Tools Selection', defaultKey: 'Shift+a' },
   { id: 'tool_rate_stretch', label: 'Rate Stretch Tool', category: 'Tools Selection', defaultKey: 'r' },
+  { id: 'tool_slip', label: 'Slip Tool', category: 'Tools Selection', defaultKey: 'y' },
+  { id: 'tool_slide', label: 'Slide Tool', category: 'Tools Selection', defaultKey: 'u' },
 
   // Timeline Editing
   { id: 'split_clip', label: 'Split Clip at Playhead', category: 'Timeline Editing', defaultKey: 'Ctrl+k' },
@@ -44,6 +46,9 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcutDef[] = [
   { id: 'paste_clip_base', label: 'Paste Clip (Base)', category: 'Timeline Editing', defaultKey: 'Ctrl+Shift+V' },
   { id: 'paste_clip_style', label: 'Paste Style', category: 'Timeline Editing', defaultKey: 'Ctrl+Alt+V' },
   { id: 'duplicate_clip', label: 'Duplicate Selected Clip', category: 'Timeline Editing', defaultKey: 'Ctrl+d' },
+  { id: 'lift_clip', label: 'Lift Clip (Close Gap on Track)', category: 'Timeline Editing', defaultKey: 'Shift+;' },
+  { id: 'extract_clip', label: 'Extract Clip (Close Gap All Tracks)', category: 'Timeline Editing', defaultKey: ',' },
+  { id: 'replace_with_clip', label: 'Replace Clip with Media...', category: 'Timeline Editing', defaultKey: '' },
   { id: 'select_all_clips_forward', label: 'Select Clips Forward', category: 'Timeline Editing', defaultKey: 'Alt+ArrowRight' },
   { id: 'select_all_clips_backward', label: 'Select Clips Backward', category: 'Timeline Editing', defaultKey: 'Alt+ArrowLeft' },
   { id: 'zoom_timeline_in', label: 'Zoom Timeline In', category: 'Timeline Editing', defaultKey: 'Ctrl+=' },

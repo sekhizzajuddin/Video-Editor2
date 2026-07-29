@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useRef, useState, Suspense } from 'react';
-import { Music, MousePointer2, ArrowRightToLine, ArrowLeftToLine, ArrowLeftRight, Timer, Scissors, Hand, ZoomIn, Undo2, Redo2, Sparkles } from 'lucide-react';
+import { Music, MousePointer2, ArrowRightToLine, ArrowLeftToLine, ArrowLeftRight, Timer, Scissors, Hand, ZoomIn, Undo2, Redo2, Sparkles, SlidersHorizontal, MoveHorizontal } from 'lucide-react';
 import type { EditorTool } from '@/types';
 import { TopToolbar } from '@/components/TopToolbar';
 import { PreviewCanvas } from '@/components/PreviewCanvas';
@@ -54,6 +54,8 @@ function App() {
     pasteClip,
     cutClip,
     duplicateClip,
+    liftClip,
+    extractClip,
     undo,
     redo,
     zoomIn,
@@ -99,6 +101,8 @@ function App() {
     selectedTransitionClipId: s.selectedTransitionClipId,
     removeTransition: s.removeTransition,
     removeSelectedKeyframeLines: s.removeSelectedKeyframeLines,
+    liftClip: s.liftClip,
+    extractClip: s.extractClip,
     settings: s.settings,
     workspaceLayout: s.workspaceLayout,
     setWorkspaceLayout: s.setWorkspaceLayout,
@@ -232,6 +236,12 @@ function App() {
         case 'tool_rate_stretch':
           setActiveTool('rateStretch');
           break;
+        case 'tool_slip':
+          setActiveTool('slip');
+          break;
+        case 'tool_slide':
+          setActiveTool('slide');
+          break;
         case 'select_all_clips_forward': {
           const selectedClip = findClipInTracks(tracks, selectedClipId);
           if (selectedClip) {
@@ -340,6 +350,54 @@ function App() {
           }
           break;
         }
+        case 'lift_clip': {
+          const state = useEditorStore.getState();
+          const targetId = state.selectedClipIds[0] || state.selectedClipId;
+          if (targetId) {
+            liftClip(targetId);
+          } else {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Select a clip first.', type: 'warning' }}));
+          }
+          break;
+        }
+        case 'extract_clip': {
+          const state = useEditorStore.getState();
+          const targetId = state.selectedClipIds[0] || state.selectedClipId;
+          if (targetId) {
+            extractClip(targetId);
+          } else {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Select a clip first.', type: 'warning' }}));
+          }
+          break;
+        }
+        case 'replace_with_clip': {
+          const state = useEditorStore.getState();
+          const targetId = state.selectedClipIds[0] || state.selectedClipId;
+          if (!targetId) {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Select a clip to replace first.', type: 'warning' }}));
+            break;
+          }
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'video/*,audio/*,image/*';
+          input.onchange = async (e: Event) => {
+            const target = e.target as HTMLInputElement;
+            const file = target.files?.[0];
+            if (!file) return;
+            try {
+              const { probeFile } = await import('@/utils/mediaProbe');
+              const mediaItem = await probeFile(file);
+              state.addMedia(mediaItem, file);
+              setTimeout(() => {
+                useEditorStore.getState().replaceClipMedia(targetId, mediaItem.id);
+              }, 100);
+            } catch {
+              window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Failed to import file.', type: 'error' }}));
+            }
+          };
+          input.click();
+          break;
+        }
       }
     },
     [
@@ -364,6 +422,8 @@ function App() {
       cutClip,
       selectClips,
       selectedClipIds,
+      liftClip,
+      extractClip,
     ]
   );
 
@@ -379,6 +439,13 @@ function App() {
   }, []);
 
   // Load project on mount is removed since WelcomeScreen handles it
+
+  // Restore custom fonts from localStorage on startup
+  useEffect(() => {
+    import('@/utils/fontManager').then(({ restoreCustomFonts }) => {
+      restoreCustomFonts().catch((err) => console.warn('Font restore failed:', err));
+    });
+  }, []);
 
   // Fetch API keys from Vercel environment at runtime if available
   useEffect(() => {
@@ -458,6 +525,8 @@ function App() {
     { id: 'trackSelectBackward', icon: ArrowLeftToLine, label: 'Track Select Backward', shortcut: 'Shift+A' },
     { id: 'ripple', icon: ArrowLeftRight, label: 'Ripple Edit', shortcut: 'B' },
     { id: 'rateStretch', icon: Timer, label: 'Rate Stretch', shortcut: 'R' },
+    { id: 'slip', icon: SlidersHorizontal, label: 'Slip Tool', shortcut: 'Y' },
+    { id: 'slide', icon: MoveHorizontal, label: 'Slide Tool', shortcut: 'U' },
     { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
     { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },
     { id: 'zoom', icon: ZoomIn, label: 'Zoom', shortcut: 'Z' },

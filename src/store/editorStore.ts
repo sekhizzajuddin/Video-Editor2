@@ -217,6 +217,9 @@ interface EditorActions {
   selectSubtitle: (id: string | null) => void;
   addTextMedia: (text: string) => void;
   rippleDeleteClip: (clipId: string) => void;
+  liftClip: (clipId: string) => void;
+  extractClip: (clipId: string) => void;
+  replaceClipMedia: (clipId: string, newMediaId: string) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>, options?: { ripple?: boolean }) => void;
   batchUpdateClips: (updates: { clipId: string; changes: Partial<TimelineClip> }[]) => void;
@@ -718,6 +721,161 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (currentTime > start) {
       seek(Math.max(0, start));
     }
+  },
+
+  liftClip: (clipId: string) => {
+    let deletedDuration = 0;
+    let deletedStart = 0;
+    let deletedTrackId: string | null = null;
+    let deletedPipId: string | null = null;
+    let isPip = false;
+
+    set((state) => {
+      const found = findClipDeep(state, clipId);
+      if (!found) return {};
+      isPip = found.isPip;
+      deletedPipId = found.pipId;
+      deletedStart = found.clip.startTime;
+      deletedDuration = found.clip.duration;
+      deletedTrackId = found.clip.trackId;
+
+      const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+        const matches = (pipId === deletedPipId) && (track.id === deletedTrackId);
+        if (!matches) return track;
+        return {
+          ...track,
+          clips: track.clips
+            .filter((c) => c.id !== clipId)
+            .map((c) =>
+              c.startTime >= deletedStart + deletedDuration
+                ? { ...c, startTime: c.startTime - deletedDuration }
+                : c
+            ),
+        };
+      });
+
+      const newSelectedClipId =
+        state.selectedClipId === clipId ? null : state.selectedClipId;
+      const newSelectedClipIds = state.selectedClipIds.filter((id) => id !== clipId);
+
+      return {
+        tracks,
+        pipWindows,
+        selectedClipId: newSelectedClipId,
+        selectedClipIds: newSelectedClipIds,
+      };
+    });
+
+    get().recalcTotalDuration();
+    get().saveSnapshot('Lift Clip');
+  },
+
+  extractClip: (clipId: string) => {
+    let deletedDuration = 0;
+    let deletedStart = 0;
+
+    set((state) => {
+      const found = findClipDeep(state, clipId);
+      if (!found) return {};
+      deletedStart = found.clip.startTime;
+      deletedDuration = found.clip.duration;
+
+      const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+        const matches =
+          found.isPip === (pipId !== null) &&
+          (found.isPip ? pipId === found.pipId : true) &&
+          track.id === found.track.id;
+        if (!matches && !found.isPip) {
+          return track.locked
+            ? track
+            : {
+                ...track,
+                clips: track.clips.map((c) =>
+                  c.startTime >= deletedStart + deletedDuration
+                    ? { ...c, startTime: c.startTime - deletedDuration }
+                    : c
+                ),
+              };
+        }
+        if (!matches) return track;
+        return {
+          ...track,
+          clips: track.clips
+            .filter((c) => c.id !== clipId)
+            .map((c) =>
+              c.startTime >= deletedStart + deletedDuration
+                ? { ...c, startTime: c.startTime - deletedDuration }
+                : c
+            ),
+        };
+      });
+
+      const newSelectedClipId =
+        state.selectedClipId === clipId ? null : state.selectedClipId;
+      const newSelectedClipIds = state.selectedClipIds.filter((id) => id !== clipId);
+
+      return {
+        tracks,
+        pipWindows,
+        selectedClipId: newSelectedClipId,
+        selectedClipIds: newSelectedClipIds,
+      };
+    });
+
+    get().recalcTotalDuration();
+    get().saveSnapshot('Extract Clip');
+  },
+
+  replaceClipMedia: (clipId: string, newMediaId: string) => {
+    set((state) => {
+      const found = findClipDeep(state, clipId);
+      if (!found) return {};
+      const oldClip = found.clip;
+      const newMedia = state.mediaLibrary.find((m) => m.id === newMediaId);
+      if (!newMedia) return {};
+
+      const oldMedia = state.mediaLibrary.find((m) => m.id === oldClip.mediaId);
+      const oldIsVideo = oldMedia?.type === 'video';
+      const newIsVideo = newMedia.type === 'video';
+
+      let updates: Partial<TimelineClip> = { mediaId: newMediaId };
+
+      if (newIsVideo && oldIsVideo) {
+        updates.trimStart = 0;
+        updates.trimEnd = 0;
+        updates.speed = oldClip.speed;
+        const sourceDur = newMedia.duration;
+        updates.duration = Math.max(0.1, Math.min(oldClip.duration, sourceDur));
+      } else if (newMedia.type === 'image') {
+        updates.trimStart = 0;
+        updates.trimEnd = 0;
+        updates.duration = oldClip.duration || 5;
+      } else if (newMedia.type === 'audio') {
+        updates.trimStart = 0;
+        updates.trimEnd = 0;
+        updates.duration = Math.min(oldClip.duration, newMedia.duration);
+      }
+
+      const newId = generateId();
+      const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+        const matches =
+          (found.isPip ? pipId === found.pipId : pipId === null) &&
+          track.id === found.track.id;
+        if (!matches) return track;
+        return {
+          ...track,
+          clips: track.clips.map((c) =>
+            c.id === clipId
+              ? { ...c, ...updates, id: c.id }
+              : c
+          ),
+        };
+      });
+
+      return { tracks, pipWindows };
+    });
+    get().recalcTotalDuration();
+    get().saveSnapshot('Replace Clip Media');
   },
 
   // Media Library

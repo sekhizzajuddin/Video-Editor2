@@ -854,3 +854,363 @@ export function applyColorGradingWheelsOnData(
     console.warn('Color grading wheels calculation error:', e);
   }
 }
+
+export function applyFxEffect(
+  oCtx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  fxType: string,
+  intensity: number,
+  relTime: number,
+  isPlaying: boolean
+) {
+  const norm = intensity / 100;
+  try {
+    const imgData = oCtx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    switch (fxType) {
+      case 'vfx_breakdown': {
+        const split = 8 * norm;
+        const tmp = new Uint8ClampedArray(data);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const sx = Math.min(w - 1, Math.max(0, Math.floor(x - split)));
+            const i = (y * w + x) * 4;
+            const si = (y * w + sx) * 4;
+            data[i] = tmp[si];
+            data[i + 2] = tmp[i + 2];
+          }
+        }
+        break;
+      }
+      case 'bw_to_color': {
+        const progress = Math.min(1, relTime / 0.6);
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i], g = data[i + 1], b = data[i + 2];
+          const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+          data[i] = luma * (1 - progress) + r * progress;
+          data[i + 1] = luma * (1 - progress) + g * progress;
+          data[i + 2] = luma * (1 - progress) + b * progress;
+        }
+        break;
+      }
+      case 'glitch': {
+        const bandH = Math.floor(h / 20);
+        const shift = (Math.sin(relTime * 12) * 20 * norm) | 0;
+        const tmp = new Uint8ClampedArray(data);
+        for (let b = 0; b < 20; b++) {
+          if (Math.random() < 0.3) continue;
+          const y0 = b * bandH;
+          for (let y = y0; y < y0 + bandH && y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              const sx = (x + shift + w) % w;
+              const i = (y * w + x) * 4;
+              const si = (y * w + sx) * 4;
+              data[i] = tmp[si];
+              data[i + 1] = tmp[si + 1];
+              data[i + 2] = tmp[si + 2];
+            }
+          }
+        }
+        break;
+      }
+      case 'old_film': {
+        const grain = 30 * norm;
+        const sepia = 0.3 * norm;
+        const flicker = 1 + (Math.sin(relTime * 8) * 0.05 * norm);
+        for (let i = 0; i < data.length; i += 4) {
+          const noise = (Math.random() - 0.5) * grain;
+          let r = data[i], g = data[i + 1], b = data[i + 2];
+          r = (r * (1 - sepia) + r * 0.393 + g * 0.769 + b * 0.189) * flicker + noise;
+          g = (g * (1 - sepia) + r * 0.349 + g * 0.686 + b * 0.168) * flicker + noise;
+          b = (b * (1 - sepia) + r * 0.272 + g * 0.534 + b * 0.131) * flicker + noise;
+          data[i] = Math.min(255, Math.max(0, r));
+          data[i + 1] = Math.min(255, Math.max(0, g));
+          data[i + 2] = Math.min(255, Math.max(0, b));
+        }
+        break;
+      }
+      case 'vhs': {
+        const scanH = 2;
+        const noise = 25 * norm;
+        for (let y = 0; y < h; y += scanH * 2) {
+          for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            const n = (Math.random() - 0.5) * noise;
+            data[i] = Math.min(255, Math.max(0, data[i] + n));
+            data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + n));
+            data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + n));
+          }
+        }
+        // RGB split
+        const split = 3 * norm;
+        const tmp = new Uint8ClampedArray(data);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const sx = Math.min(w - 1, Math.max(0, Math.floor(x - split)));
+            const ex = Math.min(w - 1, Math.max(0, Math.floor(x + split)));
+            const i = (y * w + x) * 4;
+            data[i] = tmp[(y * w + sx) * 4];
+            data[i + 2] = tmp[(y * w + ex) * 4 + 2];
+          }
+        }
+        break;
+      }
+      case 'cinematic_bars': {
+        const barH = Math.floor(h * 0.107 * norm);
+        for (let x = 0; x < w; x++) {
+          for (let y = 0; y < barH; y++) {
+            const i = (y * w + x) * 4;
+            data[i] = data[i + 1] = data[i + 2] = 0;
+            const i2 = ((h - 1 - y) * w + x) * 4;
+            data[i2] = data[i2 + 1] = data[i2 + 2] = 0;
+          }
+        }
+        break;
+      }
+      case 'neon_glow': {
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i], g = data[i + 1], b = data[i + 2];
+          const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (luma > 128) {
+            data[i] = Math.min(255, r + (255 - r) * 0.6 * norm);
+            data[i + 1] = Math.min(255, g + (255 - g) * 0.5 * norm);
+            data[i + 2] = Math.min(255, b + (255 - b) * 0.7 * norm);
+          }
+        }
+        break;
+      }
+      case 'rgb_split': {
+        const split = 5 * norm;
+        const tmp = new Uint8ClampedArray(data);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const sx = Math.min(w - 1, Math.max(0, Math.floor(x - split)));
+            const ex = Math.min(w - 1, Math.max(0, Math.floor(x + split)));
+            const i = (y * w + x) * 4;
+            data[i] = tmp[(y * w + sx) * 4];
+            data[i + 2] = tmp[(y * w + ex) * 4 + 2];
+          }
+        }
+        break;
+      }
+      case 'pixelate': {
+        const blocks = Math.max(2, Math.floor(40 / (norm + 0.1)));
+        const bw = Math.floor(w / blocks);
+        const bh = Math.floor(h / blocks);
+        for (let by = 0; by < bh; by++) {
+          for (let bx = 0; bx < bw; bx++) {
+            let sr = 0, sg = 0, sb = 0, sa = 0, count = 0;
+            for (let y = by * blocks; y < (by + 1) * blocks && y < h; y++) {
+              for (let x = bx * blocks; x < (bx + 1) * blocks && x < w; x++) {
+                const i = (y * w + x) * 4;
+                sr += data[i]; sg += data[i + 1]; sb += data[i + 2]; sa += data[i + 3];
+                count++;
+              }
+            }
+            if (count === 0) continue;
+            const ar = sr / count, ag = sg / count, ab = sb / count, aa = sa / count;
+            for (let y = by * blocks; y < (by + 1) * blocks && y < h; y++) {
+              for (let x = bx * blocks; x < (bx + 1) * blocks && x < w; x++) {
+                const i = (y * w + x) * 4;
+                data[i] = ar; data[i + 1] = ag; data[i + 2] = ab; data[i + 3] = aa;
+              }
+            }
+          }
+        }
+        break;
+      }
+      case 'mirror': {
+        const halfW = Math.floor(w / 2);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < halfW; x++) {
+            const i = (y * w + x) * 4;
+            const mi = (y * w + (w - 1 - x)) * 4;
+            data[mi] = data[i];
+            data[mi + 1] = data[i + 1];
+            data[mi + 2] = data[i + 2];
+            data[mi + 3] = data[i + 3];
+          }
+        }
+        break;
+      }
+      case 'zoom_blur': {
+        const cx = w / 2, cy = h / 2;
+        const maxR = Math.sqrt(cx * cx + cy * cy);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const dx = x - cx, dy = y - cy;
+            const r = Math.sqrt(dx * dx + dy * dy);
+            const blur = (r / maxR) * 8 * norm;
+            if (blur < 1) continue;
+            let sr = 0, sg = 0, sb = 0, count = 0;
+            for (let i = -blur; i <= blur; i += 2) {
+              const sx = Math.floor(x + (dx / r) * i);
+              const sy = Math.floor(y + (dy / r) * i);
+              if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+                const idx = (sy * w + sx) * 4;
+                sr += data[idx]; sg += data[idx + 1]; sb += data[idx + 2];
+                count++;
+              }
+            }
+            if (count > 0) {
+              const idx = (y * w + x) * 4;
+              data[idx] = sr / count;
+              data[idx + 1] = sg / count;
+              data[idx + 2] = sb / count;
+            }
+          }
+        }
+        break;
+      }
+      case 'lens_flare': {
+        const cx = w * 0.7, cy = h * 0.3;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const dx = x - cx, dy = y - cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const flare = Math.max(0, 1 - dist / (w * 0.5)) * 0.7 * norm;
+            const i = (y * w + x) * 4;
+            data[i] = Math.min(255, data[i] + 255 * flare);
+            data[i + 1] = Math.min(255, data[i + 1] + 220 * flare);
+            data[i + 2] = Math.min(255, data[i + 2] + 150 * flare);
+          }
+        }
+        break;
+      }
+      case 'night_vision': {
+        for (let i = 0; i < data.length; i += 4) {
+          const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          const boost = Math.min(255, luma * 2.5);
+          data[i] = boost * 0.1;
+          data[i + 1] = boost;
+          data[i + 2] = boost * 0.1;
+        }
+        break;
+      }
+      case 'thermal': {
+        for (let i = 0; i < data.length; i += 4) {
+          const luma = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+          data[i] = luma < 0.33 ? 0 : luma < 0.66 ? 255 * (luma - 0.33) * 3 : 255;
+          data[i + 1] = luma < 0.33 ? 255 * luma * 3 : luma < 0.66 ? 255 : 255 * (1 - (luma - 0.66) * 3);
+          data[i + 2] = luma < 0.33 ? 255 * luma * 3 : 0;
+        }
+        break;
+      }
+      case 'posterize': {
+        const levels = Math.max(2, Math.floor(8 - norm * 6));
+        const step = 255 / (levels - 1);
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = Math.round(data[i] / step) * step;
+          data[i + 1] = Math.round(data[i + 1] / step) * step;
+          data[i + 2] = Math.round(data[i + 2] / step) * step;
+        }
+        break;
+      }
+      case 'dreamy_blur': {
+        const tmp = new Uint8ClampedArray(data);
+        const r = 4 * norm;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            let sr = 0, sg = 0, sb = 0, count = 0;
+            for (let dy = -r; dy <= r; dy += 2) {
+              for (let dx = -r; dx <= r; dx += 2) {
+                const nx = x + dx, ny = y + dy;
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                  const i = (ny * w + nx) * 4;
+                  sr += tmp[i]; sg += tmp[i + 1]; sb += tmp[i + 2];
+                  count++;
+                }
+              }
+            }
+            const i = (y * w + x) * 4;
+            const br = sr / count, bg = sg / count, bb = sb / count;
+            data[i] = br + (tmp[i] - br) * 0.3;
+            data[i + 1] = bg + (tmp[i + 1] - bg) * 0.3;
+            data[i + 2] = bb + (tmp[i + 2] - bb) * 0.3;
+          }
+        }
+        break;
+      }
+      case 'fisheye': {
+        const cx = w / 2, cy = h / 2;
+        const maxR = Math.min(cx, cy);
+        const strength = 0.4 * norm;
+        const tmp = new Uint8ClampedArray(data);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const dx = x - cx, dy = y - cy;
+            const r = Math.sqrt(dx * dx + dy * dy);
+            if (r > maxR) continue;
+            const theta = Math.atan2(dy, dx);
+            const newR = maxR * Math.pow(r / maxR, 1 - strength);
+            const sx = Math.floor(cx + Math.cos(theta) * newR);
+            const sy = Math.floor(cy + Math.sin(theta) * newR);
+            if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+              const i = (y * w + x) * 4;
+              const si = (sy * w + sx) * 4;
+              data[i] = tmp[si];
+              data[i + 1] = tmp[si + 1];
+              data[i + 2] = tmp[si + 2];
+            }
+          }
+        }
+        break;
+      }
+      case 'vignette_burn': {
+        const cx = w / 2, cy = h / 2;
+        const maxR = Math.sqrt(cx * cx + cy * cy);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const r = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+            const factor = Math.max(0, 1 - (r / maxR) * 1.5) * norm;
+            const i = (y * w + x) * 4;
+            data[i] = data[i] * factor;
+            data[i + 1] = data[i + 1] * factor;
+            data[i + 2] = data[i + 2] * factor;
+          }
+        }
+        break;
+      }
+      case 'gameboy': {
+        const palette = [15, 56, 99, 255];
+        for (let i = 0; i < data.length; i += 4) {
+          const luma = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+          const idx = luma < 0.25 ? 0 : luma < 0.5 ? 1 : luma < 0.75 ? 2 : 3;
+          const v = palette[idx];
+          data[i] = 0;
+          data[i + 1] = v;
+          data[i + 2] = v * 0.4;
+        }
+        break;
+      }
+      case 'quadrant_kaleidoscope': {
+        const halfW = Math.floor(w / 2);
+        const halfH = Math.floor(h / 2);
+        const tmp = new Uint8ClampedArray(data);
+        for (let y = 0; y < halfH; y++) {
+          for (let x = 0; x < halfW; x++) {
+            const i = (y * w + x) * 4;
+            for (let q = 0; q < 4; q++) {
+              const rx = q === 1 || q === 3 ? w - 1 - x : x;
+              const ry = q === 2 || q === 3 ? h - 1 - y : y;
+              const oi = (ry * w + rx) * 4;
+              if (oi !== i) {
+                data[oi] = tmp[i];
+                data[oi + 1] = tmp[i + 1];
+                data[oi + 2] = tmp[i + 2];
+                data[oi + 3] = tmp[i + 3];
+              }
+            }
+          }
+        }
+        break;
+      }
+    }
+
+    oCtx.putImageData(imgData, 0, 0);
+  } catch (e) {
+    console.warn('FX effect error:', fxType, e);
+  }
+}

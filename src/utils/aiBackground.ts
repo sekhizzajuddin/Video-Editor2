@@ -1,7 +1,48 @@
+import {
+  detectHumanPresence,
+  detectSceneChange,
+  shouldUseCachedMask,
+  getCachedMask,
+  setCachedMask,
+  markInferencePerformed,
+  mustForceResegment,
+  downscaleForInference,
+  invalidateMaskCache,
+} from './humanDetection';
+
 let selfieSegmentationInstance: any = null;
 let isInitializing = false;
 let initializationPromise: Promise<void> | null = null;
-let sharedMaskCanvas: HTMLCanvasElement | null = null;
+
+// Per-clip canvas pools to prevent shared canvas corruption across multiple clips
+const maskCanvasPool = new Map<string, HTMLCanvasElement>();
+const edgeCanvasPool = new Map<string, HTMLCanvasElement>();
+
+function getMaskCanvas(clipId: string, width: number, height: number): HTMLCanvasElement {
+  let canvas = maskCanvasPool.get(clipId);
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    maskCanvasPool.set(clipId, canvas);
+  }
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  return canvas;
+}
+
+function getEdgeCanvas(clipId: string, width: number, height: number): HTMLCanvasElement {
+  let canvas = edgeCanvasPool.get(clipId);
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    edgeCanvasPool.set(clipId, canvas);
+  }
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  return canvas;
+}
 
 /**
  * Dynamically loads the MediaPipe Selfie Segmentation library.
@@ -68,11 +109,23 @@ const initInstance = (resolve: () => void) => {
 let pendingResolves: Array<(mask: ImageBitmap | HTMLCanvasElement | null) => void> = [];
 let lastSegmentationMask: ImageBitmap | HTMLCanvasElement | null = null;
 let isProcessingSegmentation = false;
+let processingStartTime = 0; // Watchdog: timestamp when processing started
+
+// Deadlock watchdog timeout (ms). If isProcessingSegmentation stays true
+// longer than this, force-reset it to prevent permanent lockout.
+const PROCESSING_TIMEOUT_MS = 2000;
 
 const onResults = (results: any) => {
   isProcessingSegmentation = false;
+  processingStartTime = 0;
   const resolve = pendingResolves.shift();
   if (results.segmentationMask) {
+    // Dispose previous ImageBitmap to prevent GPU memory leak
+    if (lastSegmentationMask && lastSegmentationMask !== results.segmentationMask && 'close' in lastSegmentationMask) {
+      try {
+        (lastSegmentationMask as ImageBitmap).close();
+      } catch { /* already closed */ }
+    }
     lastSegmentationMask = results.segmentationMask;
   }
   if (resolve) {
@@ -94,6 +147,16 @@ export async function segmentFrame(
 
   if (!selfieSegmentationInstance) return null;
 
+  // Deadlock watchdog: if processing has been stuck for too long, force-reset
+  if (isProcessingSegmentation && processingStartTime > 0) {
+    const elapsed = performance.now() - processingStartTime;
+    if (elapsed > PROCESSING_TIMEOUT_MS) {
+      console.warn(`MediaPipe processing stuck for ${Math.round(elapsed)}ms — force resetting.`);
+      isProcessingSegmentation = false;
+      processingStartTime = 0;
+    }
+  }
+
   // If inference is already currently computing a frame (during fast video playback),
   // immediately return the last known segmentation mask to maintain smooth 60 FPS without frame lag or queue piling.
   if (isProcessingSegmentation && lastSegmentationMask) {
@@ -107,10 +170,12 @@ export async function segmentFrame(
 
   return new Promise((resolve) => {
     isProcessingSegmentation = true;
+    processingStartTime = performance.now();
     pendingResolves.push(resolve);
     selfieSegmentationInstance.send({ image: imageElement }).catch((err: any) => {
       console.error('Error sending frame to MediaPipe:', err);
       isProcessingSegmentation = false;
+      processingStartTime = 0;
       const idx = pendingResolves.indexOf(resolve);
       if (idx > -1) {
         pendingResolves.splice(idx, 1);
@@ -122,6 +187,12 @@ export async function segmentFrame(
 
 /**
  * Applies the AI Background removal to a target canvas context.
+ * 
+ * Enhanced with human detection integration:
+ * - When isPlaying=true, uses temporal caching, scene-change detection, and
+ *   downscaled inference to maintain smooth playback frame rates.
+ * - When paused or exporting, runs full-quality inference on every frame.
+ * - All state is isolated per-clip via clipId to prevent mask bleed.
  */
 export async function applyAiBackgroundMask(
   ctx: CanvasRenderingContext2D,
@@ -129,22 +200,72 @@ export async function applyAiBackgroundMask(
   height: number,
   sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,
   edgeBlur: number = 0,
-  modelSelection: 0 | 1 = 0
+  modelSelection: 0 | 1 = 0,
+  playbackQuality: 'full' | 'balanced' | 'performance' = 'balanced',
+  isPlaying: boolean = false,
+  clipId: string = '_default'
 ) {
   try {
-    const mask = await segmentFrame(sourceElement, modelSelection);
+    let mask: ImageBitmap | HTMLCanvasElement | null = null;
+
+    if (isPlaying && playbackQuality !== 'full') {
+      // ── Playback optimization path ──
+
+      // 1. Check temporal mask cache first — reuse recent mask if within frame budget
+      if (shouldUseCachedMask(clipId, playbackQuality)) {
+        const cached = getCachedMask(clipId);
+        if (cached) {
+          mask = cached;
+        }
+      }
+
+      // 2. If no cached mask, check if we must force re-segmentation (monotonic ceiling)
+      if (!mask) {
+        const forceReseg = mustForceResegment(clipId, playbackQuality);
+        const sceneChanged = detectSceneChange(clipId, sourceElement);
+
+        if (!forceReseg && !sceneChanged && lastSegmentationMask) {
+          // Scene is stable AND we haven't hit the monotonic ceiling — reuse last mask
+          mask = lastSegmentationMask;
+          setCachedMask(clipId, mask);
+        } else {
+          // 3. Quick skin-tone pre-check: skip inference if no human detected
+          const humanDetected = detectHumanPresence(sourceElement);
+
+          if (!humanDetected) {
+            // No human visible — return without masking (show full frame)
+            return;
+          }
+
+          // 4. Run inference on downscaled frame for performance
+          const inferenceScale = playbackQuality === 'performance' ? 0.35 : 0.5;
+          const downscaled = downscaleForInference(sourceElement, inferenceScale);
+          mask = await segmentFrame(downscaled, modelSelection);
+          
+          // Mark that we actually ran ML inference — reset the monotonic counter
+          markInferencePerformed(clipId);
+          
+          // Update clip-isolated cache
+          if (mask) {
+            setCachedMask(clipId, mask);
+          }
+        }
+      }
+    } else {
+      // ── Paused / Export / Full quality path — always run full inference ──
+      mask = await segmentFrame(sourceElement, modelSelection);
+      if (mask) {
+        markInferencePerformed(clipId);
+        setCachedMask(clipId, mask);
+      }
+    }
+
     if (!mask) return;
 
-    // Reuse the shared offscreen canvas to avoid GC thrashing in the rendering loop
-    if (!sharedMaskCanvas) {
-      sharedMaskCanvas = document.createElement('canvas');
-    }
-    if (sharedMaskCanvas.width !== width || sharedMaskCanvas.height !== height) {
-      sharedMaskCanvas.width = width;
-      sharedMaskCanvas.height = height;
-    }
+    // Use per-clip offscreen canvas to avoid cross-clip corruption
+    const maskCanvas = getMaskCanvas(clipId, width, height);
     
-    const mCtx = sharedMaskCanvas.getContext('2d');
+    const mCtx = maskCanvas.getContext('2d');
     if (!mCtx) return;
 
     // Clear previous mask contents
@@ -163,15 +284,13 @@ export async function applyAiBackgroundMask(
 
     // Now apply the mask to the target context
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(sharedMaskCanvas, 0, 0, width, height);
+    ctx.drawImage(maskCanvas, 0, 0, width, height);
     ctx.globalCompositeOperation = 'source-over'; // reset
 
   } catch (err) {
     console.error('Error applying AI background mask:', err);
   }
 }
-
-let sharedEdgeCanvas: HTMLCanvasElement | null = null;
 
 /**
  * Smart Subject Human Outline Extractor & Neon Flash Engine
@@ -189,47 +308,37 @@ export async function applySubjectNeonOutlineFlash(
     glowBlur?: number;
     flashSpeed?: number;
     currentTime?: number;
+    clipId?: string;
   } = {}
 ) {
   try {
+    const clipId = options.clipId || '_neon_default';
     const mask = await segmentFrame(sourceElement, 1); // 1 = fast landscape model
     if (!mask) return;
 
-    if (!sharedMaskCanvas) {
-      sharedMaskCanvas = document.createElement('canvas');
-    }
-    if (sharedMaskCanvas.width !== width || sharedMaskCanvas.height !== height) {
-      sharedMaskCanvas.width = width;
-      sharedMaskCanvas.height = height;
-    }
+    const maskCanvas = getMaskCanvas(clipId, width, height);
 
-    const mCtx = sharedMaskCanvas.getContext('2d');
+    const mCtx = maskCanvas.getContext('2d');
     if (!mCtx) return;
 
     mCtx.clearRect(0, 0, width, height);
     mCtx.drawImage(mask, 0, 0, width, height);
 
-    if (!sharedEdgeCanvas) {
-      sharedEdgeCanvas = document.createElement('canvas');
-    }
-    if (sharedEdgeCanvas.width !== width || sharedEdgeCanvas.height !== height) {
-      sharedEdgeCanvas.width = width;
-      sharedEdgeCanvas.height = height;
-    }
+    const edgeCanvas = getEdgeCanvas(clipId, width, height);
 
-    const eCtx = sharedEdgeCanvas.getContext('2d');
+    const eCtx = edgeCanvas.getContext('2d');
     if (!eCtx) return;
 
     const strokeW = options.strokeWidth || 3;
     eCtx.clearRect(0, 0, width, height);
 
     // Extract boundary contours via offset difference blending
-    eCtx.drawImage(sharedMaskCanvas, 0, 0, width, height);
+    eCtx.drawImage(maskCanvas, 0, 0, width, height);
     eCtx.globalCompositeOperation = 'difference';
-    eCtx.drawImage(sharedMaskCanvas, strokeW, 0, width, height);
-    eCtx.drawImage(sharedMaskCanvas, -strokeW, 0, width, height);
-    eCtx.drawImage(sharedMaskCanvas, 0, strokeW, width, height);
-    eCtx.drawImage(sharedMaskCanvas, 0, -strokeW, width, height);
+    eCtx.drawImage(maskCanvas, strokeW, 0, width, height);
+    eCtx.drawImage(maskCanvas, -strokeW, 0, width, height);
+    eCtx.drawImage(maskCanvas, 0, strokeW, width, height);
+    eCtx.drawImage(maskCanvas, 0, -strokeW, width, height);
     eCtx.globalCompositeOperation = 'source-over';
 
     // Calculate strobe flash pulse
@@ -253,9 +362,21 @@ export async function applySubjectNeonOutlineFlash(
     ctx.globalAlpha = alpha;
     ctx.shadowBlur = options.glowBlur || 14;
     ctx.shadowColor = outlineColor;
-    ctx.drawImage(sharedEdgeCanvas, 0, 0, width, height);
+    ctx.drawImage(edgeCanvas, 0, 0, width, height);
     ctx.restore();
   } catch (err) {
     console.error('Error applying Subject Neon Outline Flash:', err);
   }
+}
+
+/**
+ * Clean up per-clip canvas pools. Call on project unload.
+ */
+export function cleanupAiBackgroundResources(): void {
+  maskCanvasPool.clear();
+  edgeCanvasPool.clear();
+  lastSegmentationMask = null;
+  isProcessingSegmentation = false;
+  processingStartTime = 0;
+  pendingResolves = [];
 }

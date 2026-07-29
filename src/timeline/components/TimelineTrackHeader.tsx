@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Lock,
   Unlock,
@@ -15,6 +15,7 @@ import {
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, EditorState } from '@/types';
 import { getTrackHeight } from '../trackGeometry';
+import { TrackContextMenu } from '@/components/track/TrackContextMenu';
 
 interface TimelineTrackHeaderProps {
   track: TimelineTrack;
@@ -49,6 +50,7 @@ export function TimelineTrackHeader({
 
   handleVoiceoverRecordingToggle,
 }: TimelineTrackHeaderProps) {
+  const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; trackId: string } | null>(null);
   const linkedFxTrack = tracks.find(t => t.type === 'fx' && t.linkedTrackId === track.id);
   const isLinkedToTrack = track.type === 'fx' && track.linkedTrackId;
   const linkedTargetTrackName = isLinkedToTrack ? tracks.find(t => t.id === track.linkedTrackId)?.name : '';
@@ -75,12 +77,19 @@ export function TimelineTrackHeader({
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTrackContextMenu({ x: e.clientX, y: e.clientY, trackId: track.id });
+  };
+
   return (
     <div
       draggable
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onContextMenu={handleContextMenu}
       className={`flex items-center px-2 border-b border-[#3e3e3e] ${
         selectedTrackId === track.id ? 'bg-[#3e3e3e]' : ''
       }`}
@@ -211,6 +220,15 @@ export function TimelineTrackHeader({
           </button>
         )}
       </div>
+
+      {trackContextMenu && (
+        <TrackContextMenu
+          x={trackContextMenu.x}
+          y={trackContextMenu.y}
+          trackId={trackContextMenu.trackId}
+          onClose={() => setTrackContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

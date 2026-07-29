@@ -16,6 +16,12 @@ import {
   X,
   Loader2,
   Link,
+  Replace,
+  ArrowRight,
+  ArrowLeftRight,
+  Volume2,
+  VolumeX,
+  Repeat,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -377,6 +383,81 @@ export function TimelineModals({
                     <Box className="w-3.5 h-3.5 text-amber-400" />
                     Copy (Whole)
                   </button>
+                  <button
+                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      useEditorStore.getState().duplicateClip();
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Repeat className="w-3.5 h-3.5 text-blue-400" />
+                    Duplicate Clip
+                  </button>
+                  <div className="h-px bg-[#3e3e3e] my-1" />
+                  <button
+                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      useEditorStore.getState().liftClip(contextMenu.clipId);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <ArrowRight className="w-3.5 h-3.5 text-cyan-400" />
+                    Lift (Close Gap on Track)
+                    <span className="ml-auto text-[9px] text-[#6a6a6a] font-mono">Shift+;</span>
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      useEditorStore.getState().extractClip(contextMenu.clipId);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5 text-cyan-400" />
+                    Extract (Close Gap All Tracks)
+                    <span className="ml-auto text-[9px] text-[#6a6a6a] font-mono">,</span>
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'video/*,audio/*,image/*';
+                      input.onchange = async (e: any) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          const { probeFile } = await import('@/utils/mediaProbe');
+                          const mediaItem = await probeFile(file);
+                          useEditorStore.getState().addMedia(mediaItem, file);
+                          setTimeout(() => {
+                            useEditorStore.getState().replaceClipMedia(contextMenu.clipId, mediaItem.id);
+                          }, 100);
+                        } catch (err) {
+                          toast.error('Failed to import file.');
+                        }
+                      };
+                      input.click();
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Replace className="w-3.5 h-3.5 text-amber-400" />
+                    Replace with Media...
+                  </button>
+                  {(() => {
+                    const clip = findClipInTracks(tracks, contextMenu.clipId);
+                    return clip ? (
+                      <button
+                        className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                        onClick={() => {
+                          useEditorStore.getState().updateClip(contextMenu.clipId, { disabled: !clip.disabled });
+                          setContextMenu(null);
+                        }}
+                      >
+                        {clip.disabled ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Volume2 className="w-3.5 h-3.5 text-amber-400" />}
+                        {clip.disabled ? 'Unmute Clip' : 'Mute Clip'}
+                      </button>
+                    ) : null;
+                  })()}
                   <div className="h-px bg-[#3e3e3e] my-1" />
                   <button
                     className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
@@ -387,6 +468,16 @@ export function TimelineModals({
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     Delete Clip
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                    onClick={() => {
+                      useEditorStore.getState().rippleDeleteClip(contextMenu.clipId);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Ripple Delete
                   </button>
             </>
           )}

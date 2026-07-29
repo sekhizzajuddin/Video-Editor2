@@ -474,23 +474,10 @@ export function MediaPanel() {
        attempts++;
     }
 
-    const FX_TYPE_MAP: Record<string, string> = {
-      'VFX Breakdown':     'vfx_breakdown',
-      'B&W to Color':      'bw_to_color',
-      'Glitch':            'glitch',
-      'Old Film':          'old_film',
-      'VHS':               'vhs',
-      'Cinematic Bars':    'cinematic_bars',
-      'Neon Glow':         'neon_glow',
-      'RGB Split':         'rgb_split',
-      'Pixelate':          'pixelate',
-      'Mirror':            'mirror',
-      'Zoom Blur':         'zoom_blur',
-      'Lens Flare':        'lens_flare',
-      'Night Vision':      'night_vision',
-      'Thermal':           'thermal',
-    };
-    const fxType = FX_TYPE_MAP[effect.name] ?? effect.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const FX_TYPE_MAP: Record<string, string> = Object.fromEntries(
+      FX_EFFECTS.map((fx) => [fx.name, fx.type])
+    );
+    const fxType = FX_TYPE_MAP[effect.name] ?? effect.type ?? effect.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const fxMediaId = `fx_media_${Math.random().toString(36).substr(2, 9)}`;
     const fxClipId = `fx_clip_${Math.random().toString(36).substr(2, 9)}`;
     

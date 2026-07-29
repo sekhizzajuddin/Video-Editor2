@@ -71,6 +71,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
 import { setActiveProject } from '@/utils/projectPersistence';
+import { RecentProjectsModal } from './RecentProjectsModal';
 
 export function TopToolbar() {
   const {
@@ -102,6 +103,7 @@ export function TopToolbar() {
   const [showEditMenu, setShowEditMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const [showRecentModal, setShowRecentModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -309,12 +311,7 @@ export function TopToolbar() {
                 <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File
               </button>
               <button
-                onClick={async () => { 
-                  await useEditorStore.getState().resetProject();
-                  useEditorStore.getState().setProjectInfo('default', '');
-                  setActiveProject('default');
-                  setShowFileMenu(false); 
-                }}
+                onClick={() => { setShowRecentModal(true); setShowFileMenu(false); }}
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
                 <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recent Projects
@@ -521,6 +518,12 @@ export function TopToolbar() {
         accept=".procut"
         onChange={handleOpenProjectFile}
         className="hidden"
+      />
+
+      <RecentProjectsModal
+        isOpen={showRecentModal}
+        onClose={() => setShowRecentModal(false)}
+        onSelect={() => {}}
       />
 
     </div>

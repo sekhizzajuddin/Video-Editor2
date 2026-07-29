@@ -2045,6 +2045,28 @@ export function PropertiesPanel() {
                     </select>
                   </div>
 
+                  {/* Playback Quality */}
+                  <div>
+                    <label className="block text-[10px] text-[#a0a0a0] mb-1 font-medium">Playback Quality</label>
+                    <select
+                      value={selectedClip.aiBackground.playbackQuality ?? 'balanced'}
+                      onChange={(e) => {
+                        const val = e.target.value as 'full' | 'balanced' | 'performance';
+                        const existing = selectedClip.aiBackground!;
+                        updateClip(selectedClip.id, {
+                          aiBackground: { ...existing, playbackQuality: val }
+                        });
+                        scheduleSaveSnapshot('Change AI Background Playback Quality');
+                      }}
+                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="full">Full (Every Frame — Best Quality)</option>
+                      <option value="balanced">Balanced (Smart Caching — Recommended)</option>
+                      <option value="performance">Performance (Aggressive Caching — Fastest)</option>
+                    </select>
+                    <p className="text-[9px] text-[#707070] mt-1">Controls how often AI re-analyzes the frame during playback. Exports always use full quality.</p>
+                  </div>
+
                   {/* Edge Feather */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
@@ -6643,6 +6665,11 @@ export function PropertiesPanel() {
                     <option value="lens_flare">Lens Flare</option>
                     <option value="night_vision">Night Vision</option>
                     <option value="thermal">Thermal</option>
+                    <option value="posterize">Posterize</option>
+                    <option value="dreamy_blur">Dreamy Blur</option>
+                    <option value="fisheye">Fisheye Lens</option>
+                    <option value="vignette_burn">Vignette Burn</option>
+                    <option value="gameboy">Retro GameBoy</option>
                   </select>
                 </div>
 

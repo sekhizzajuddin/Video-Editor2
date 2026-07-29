@@ -338,6 +338,46 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         }
       }
 
+      // ── Direct File Drop from OS ──
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const files = Array.from(e.dataTransfer.files);
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const startTime = Math.max(0, x / zoomLevel);
+
+        (async () => {
+          const { probeFile } = await import('@/utils/mediaProbe');
+          for (const file of files) {
+            try {
+              const mediaItem = await probeFile(file);
+              useEditorStore.getState().addMedia(mediaItem, file);
+              const isText = mediaItem.type === 'text';
+              const newClip: TimelineClip = {
+                id: generateId(),
+                mediaId: mediaItem.id,
+                trackId,
+                startTime,
+                duration: isText ? 3 : (mediaItem.type === 'image' ? 5 : Math.min(10, mediaItem.duration)),
+                trimStart: 0,
+                trimEnd: 0,
+                transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+                opacity: 1,
+                speed: 1,
+                effects: [],
+              };
+              useEditorStore.getState().addClip(newClip);
+              toast.success(`Imported: ${file.name}`);
+            } catch (err) {
+              console.error('Failed to import dropped file', err);
+              toast.error(`Failed to import ${file.name}`);
+            }
+          }
+          setHoveredTrackId(null);
+          setDropPreview(null);
+        })();
+        return;
+      }
+
       // ── Media Item Drop ──
       const mediaId = e.dataTransfer.getData('application/procut-media');
       if (!mediaId) return;
@@ -414,8 +454,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const hasParticle = e.dataTransfer.types.includes('application/procut-particle');
       const hasTransition = e.dataTransfer.types.includes('application/procut-transition');
       const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
-      
-      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate) && trackIdx >= 0) {
+      const hasFiles = e.dataTransfer.types.includes('Files');
+
+      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && trackIdx >= 0) {
         const dropTime = Math.max(0, x / zoomLevel);
 
         let approxDuration = 5;
@@ -436,6 +477,10 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
               approxDuration = m.type === 'image' ? 5 : Math.min(10, m.duration);
             }
           }
+        } else if (hasFiles) {
+          mediaType = 'file';
+          mediaName = 'Drop file(s)';
+          approxDuration = 5;
         } else if (hasEffect) {
           mediaType = 'fx';
           mediaName = 'VFX Effect';
