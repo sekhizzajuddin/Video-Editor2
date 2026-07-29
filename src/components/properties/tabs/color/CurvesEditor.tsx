@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Plus, RotateCcw } from 'lucide-react';
+import type { ClipColorFilters } from '@/types';
 
 interface CurvePoint {
   x: number;

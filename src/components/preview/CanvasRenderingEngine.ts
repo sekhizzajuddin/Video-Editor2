@@ -33,9 +33,6 @@ import {
   applyLumaKeyOnData,
   applyColorGradingWheelsOnData,
   applyFxEffect,
-  applyCurvesToImageData,
-  buildCurveLUT,
-  isCurveActive,
   ParticlePool,
   LocalCornerPoints
 } from '@/utils/canvasEffects';
