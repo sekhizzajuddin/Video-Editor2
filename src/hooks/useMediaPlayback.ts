@@ -15,7 +15,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue } from '@/utils/keyframes';
-import { getWindowedMediaURL, evictMediaWindow } from '@/utils/ramWindowedBlobCache';
+import { resolveMediaFile } from '@/utils/mediaFileHandle';
 
 // Global master audio context for combining all tracks into a single MediaStream for Export
 let masterAudioCtx: AudioContext | null = null;
@@ -1290,33 +1290,47 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       if (isNear && canLoad) {
         const targetSrc = ve.media.url;
 
-        // Use the 30s windowed cache for the video src. This keeps RAM bounded
-        // even for hour-long 4K timelines — only the playhead window is in memory.
-        // The windowed cache resolves to a Blob URL (cheap to assign).
-        const localTime =
-          Math.max(0, currentTime - ve.absStart) * (ve.clipObj?.speed ?? 1) +
-          (ve.clipObj?.trimStart ?? 0);
-        getWindowedMediaURL(ve.entry.mediaId, localTime)
-          .then((windowedUrl) => {
-            if (!windowedUrl) return;
-            if (el.src !== windowedUrl && !el.src.endsWith(windowedUrl)) {
-              el.src = windowedUrl;
-              const pendingTime = pendingSeeksRef.current.get(ve.clipId);
-              if (pendingTime !== undefined) {
-                el.currentTime = pendingTime;
-                pendingSeeksRef.current.delete(ve.clipId);
+        // PENDING_RESTORE means the URL was cleared on project reload and
+        // needs to be re-resolved from the persistent handle / IDB store.
+        // For freshly imported media, media.url is a live blob: URL the
+        // browser can range-request efficiently — we never want to slice
+        // the file ourselves because MP4 containers need their moov atom.
+        if (targetSrc === 'PENDING_RESTORE' || !targetSrc) {
+          resolveMediaFile(ve.entry.mediaId)
+            .then((file) => (file ? URL.createObjectURL(file) : null))
+            .then((restoredUrl) => {
+              if (!restoredUrl) return;
+              if (el.src !== restoredUrl && !el.src.endsWith(restoredUrl)) {
+                el.src = restoredUrl;
+                el.load();
+                // Persist the restored URL so subsequent renders skip this path
+                useEditorStore.setState((state) => ({
+                  mediaLibrary: state.mediaLibrary.map((m) =>
+                    m.id === ve.entry.mediaId ? { ...m, url: restoredUrl } : m,
+                  ),
+                }));
+                const pendingTime = pendingSeeksRef.current.get(ve.clipId);
+                if (pendingTime !== undefined) {
+                  el.currentTime = pendingTime;
+                  pendingSeeksRef.current.delete(ve.clipId);
+                }
               }
-              el.load();
-            }
-          })
-          .catch(() => {
-            // Fallback to the legacy full-file URL on any cache failure.
-            if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
-              el.src = targetSrc;
-              el.load();
-            }
-          });
-
+            })
+            .catch(() => {
+              // Could not resolve — leave element unloaded
+            });
+        } else if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
+          // Live blob URL — assign directly. The browser issues range
+          // requests internally and only fetches what the decoder needs,
+          // so RAM stays bounded without our manual slicing.
+          el.src = targetSrc;
+          const pendingTime = pendingSeeksRef.current.get(ve.clipId);
+          if (pendingTime !== undefined) {
+            el.currentTime = pendingTime;
+            pendingSeeksRef.current.delete(ve.clipId);
+          }
+          el.load();
+        }
         loadedCount.current++;
       } else {
         if (el.src !== '') {
@@ -1365,7 +1379,6 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
           entry.el.src = '';
           entry.el.remove();
-          evictMediaWindow(entry.mediaId);
         }
         pool.clear();
         videoMapRef.current.clear();
