@@ -22,7 +22,6 @@ import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
 import { saveAutosaveToDB } from '@/utils/projectPersistence';
 import { Toaster } from '@/components/ui/sonner';
-import { useGlobalDeselect } from '@/hooks/useGlobalDeselect';
 import './App.css';
 
 let lastShortcutsRef: Record<string, string> | null = null;
@@ -486,11 +485,6 @@ function App() {
 
     return () => clearInterval(interval);
   }, [settings.autosave]);
-
-  // Click-outside deselect: clear clip/track selection when user clicks
-  // outside any editor surface. See useGlobalDeselect.ts for the surface
-  // allowlist. Capped at 12 ancestor levels for O(1) cost.
-  useGlobalDeselect();
 
   // Resize handlers
   useEffect(() => {

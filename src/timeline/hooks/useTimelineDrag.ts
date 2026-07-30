@@ -668,21 +668,22 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const handleTimelineClick = useCallback(
     (e: React.MouseEvent) => {
       if (activeTool === 'split') return;
-      const hasSelection = selectedClipId !== null || 
-                          selectedClipIds.length > 0 || 
-                          selectedTransitionClipId !== null || 
-                          selectedTrackId !== null;
+      // Single-click deselect inside the track area only. The clip's own
+      // onClick calls e.stopPropagation() so this handler fires only when
+      // the user clicks on empty timeline space. We don't move the playhead
+      // here (that's the ruler's job) — we just clear selection.
+      const hasSelection =
+        selectedClipId !== null ||
+        selectedClipIds.length > 0 ||
+        selectedTransitionClipId !== null ||
+        selectedTrackId !== null;
+      if (!hasSelection) return;
       selectClip(null);
+      selectClips([]);
       selectTransition(null);
       selectTrack(null);
-
-      const rect = trackContainerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const scroll = trackContainerRef.current?.scrollLeft || 0;
-      const x = e.clientX - rect.left + scroll;
-      seek(Math.max(0, x / zoomLevel));
     },
-    [activeTool, zoomLevel, seek, selectClip, selectTransition, selectTrack, selectedClipId, selectedClipIds, selectedTransitionClipId, selectedTrackId, trackContainerRef],
+    [activeTool, selectClip, selectClips, selectTransition, selectTrack, selectedClipId, selectedClipIds, selectedTransitionClipId, selectedTrackId],
   );
 
   const handleRulerMouseDown = useCallback(

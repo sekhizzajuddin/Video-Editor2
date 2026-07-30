@@ -310,7 +310,7 @@ export function Timeline() {
 
             <div
               ref={trackContainerRef}
-              className="flex-1 overflow-auto relative timeline-track-workspace"
+              className="procut-timeline-tracks flex-1 overflow-auto relative timeline-track-workspace"
               onClick={dragHandlers.handleTimelineClick}
               onScroll={scrollHandlers.handleScroll}
             >

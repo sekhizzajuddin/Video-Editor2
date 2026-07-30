@@ -1,4 +1,5 @@
 import React from 'react';
+import { useEditorStore } from '@/store/editorStore';
 import type { TimelineMarker } from '@/types';
 import { RULER_HEIGHT } from '../timelineConstants';
 import { RulerPlayhead } from './PlayheadComponents';
@@ -50,12 +51,36 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   setMarkerContextMenu,
   handleRulerMouseDown,
 }: TimelineRulerProps) {
+  // Double-click on the ruler (not on a marker) deselects any active clip/track/transition.
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    // Don't deselect when double-clicking a marker — its onClick handler already
+    // moves the playhead and that's a deliberate user action.
+    const target = e.target as HTMLElement;
+    const isMarker =
+      target.closest('[data-timeline-marker="true"]') !== null ||
+      target.closest('.procut-timeline-marker') !== null;
+    if (isMarker) return;
+    const state = useEditorStore.getState();
+    if (
+      state.selectedClipId !== null ||
+      (state.selectedClipIds && state.selectedClipIds.length > 0) ||
+      state.selectedTransitionClipId !== null ||
+      state.selectedTrackId !== null
+    ) {
+      state.selectClip(null);
+      state.selectClips([]);
+      state.selectTransition(null);
+      state.selectTrack(null);
+    }
+  };
+
   return (
     <div
       ref={rulerContainerRef}
-      className="bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer select-none"
+      className="procut-timeline-ruler bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer select-none"
       style={{ height: RULER_HEIGHT }}
       onMouseDown={handleRulerMouseDown}
+      onDoubleClick={handleDoubleClick}
     >
       <div
         className="absolute top-0 left-0 h-full"
@@ -115,6 +140,10 @@ export const TimelineRuler = React.memo(function TimelineRuler({
           return (
             <div
               key={marker.id}
+              data-timeline-marker="true"
+              className="procut-timeline-marker absolute top-0 bottom-0 pointer-events-auto cursor-pointer z-30 group"
+              style={{ left: `${marker.time * zoomLevel}px` }}
+              title={`${cfg.label}: ${marker.name} (${(marker?.time ?? 0).toFixed(2)}s)`}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -128,9 +157,23 @@ export const TimelineRuler = React.memo(function TimelineRuler({
                 e.stopPropagation();
                 seek(marker.time);
               }}
-              className="absolute top-0 bottom-0 pointer-events-auto cursor-pointer z-30 group"
-              style={{ left: `${marker.time * zoomLevel}px` }}
-              title={`${cfg.label}: ${marker.name} (${(marker?.time ?? 0).toFixed(2)}s)`}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                // Double-clicking a marker also deselects; user wants to
+                // focus on the marker, not the active clip.
+                const state = useEditorStore.getState();
+                if (
+                  state.selectedClipId !== null ||
+                  (state.selectedClipIds && state.selectedClipIds.length > 0) ||
+                  state.selectedTransitionClipId !== null ||
+                  state.selectedTrackId !== null
+                ) {
+                  state.selectClip(null);
+                  state.selectClips([]);
+                  state.selectTransition(null);
+                  state.selectTrack(null);
+                }
+              }}
             >
               <div
                 className="absolute top-0.5 -translate-x-1/2 px-1 py-0.5 rounded text-[8px] font-bold text-white shadow-md flex items-center gap-0.5 border border-white/40 group-hover:scale-110 transition-transform"
