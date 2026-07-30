@@ -478,6 +478,15 @@ export function PreviewCanvasOverlay({
         let newX = x + dx;
         let newY = y + dy;
 
+        // Pixel snap: round to whole pixels by default, 0.5 with Shift, raw with Alt
+        if (!e.altKey && !e.shiftKey) {
+          newX = Math.round(newX);
+          newY = Math.round(newY);
+        } else if (e.shiftKey) {
+          newX = Math.round(newX * 2) / 2;
+          newY = Math.round(newY * 2) / 2;
+        }
+
         const newGuides: { axis: 'x' | 'y'; position: number }[] = [];
         const snapThreshold = 12;
 
@@ -652,22 +661,77 @@ export function PreviewCanvasOverlay({
         const my = (e.clientY - rect.top) * scaleY;
         let angle = Math.atan2(my - cy, mx - cx) * (180 / Math.PI);
         angle += 90;
-        rotation = Math.round(angle);
+        // CapCut-style rotation snap: Shift -> 15° increments, Alt -> 1° (fine), no modifier -> 0.5°
+        if (e.shiftKey) {
+          rotation = Math.round(angle / 15) * 15;
+        } else if (e.altKey) {
+          rotation = angle;
+        } else {
+          rotation = Math.round(angle * 2) / 2;
+        }
         getNewAnimations('transform.rotation', rotation);
+      } else if (
+        dragState.type === 'resize-t' ||
+        dragState.type === 'resize-b' ||
+        dragState.type === 'resize-l' ||
+        dragState.type === 'resize-r'
+      ) {
+        // Edge-resize: project delta onto the clip's local (un-rotated) frame and
+        // adjust the uniform scale based on the dominant axis. Shift locks aspect.
+        const theta = (-rotation * Math.PI) / 180;
+        const invScale = 100 / scale;
+        const localDx = ((dx * Math.cos(theta) - dy * Math.sin(theta)) * invScale) / 1;
+        const localDy = ((dx * Math.sin(theta) + dy * Math.cos(theta)) * invScale) / 1;
+
+        let dxAxis = 0;
+        let dyAxis = 0;
+        if (dragState.type === 'resize-l') dxAxis = -localDx;
+        if (dragState.type === 'resize-r') dxAxis = localDx;
+        if (dragState.type === 'resize-t') dyAxis = -localDy;
+        if (dragState.type === 'resize-b') dyAxis = localDy;
+
+        const sx = (baseW + dxAxis * 2) / baseW;
+        const sy = (baseH + dyAxis * 2) / baseH;
+
+        // Aspect lock: use the dominant axis when Shift is held
+        const aspectLocked = e.shiftKey;
+        let finalScale: number;
+        if (aspectLocked) {
+          finalScale = Math.max(sx, sy) * 100;
+        } else if (Math.abs(dxAxis) > Math.abs(dyAxis)) {
+          finalScale = sx * 100;
+        } else {
+          finalScale = sy * 100;
+        }
+
+        scale = Math.max(10, Math.min(1000, finalScale));
+        if (!e.altKey) scale = Math.round(scale * 10) / 10;
+        getNewAnimations('transform.scale', scale);
       } else {
+        // Corner resize (resize-tl/tr/bl/br)
         const cx = 427 + x;
         const cy = 240 + y;
         const mx = (e.clientX - rect.left) * scaleX;
         const my = (e.clientY - rect.top) * scaleY;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
-        
+
         const wSpan = baseW * (1 - (crop.left + crop.right) / 100) / 2;
         const hSpan = baseH * (1 - (crop.top + crop.bottom) / 100) / 2;
-        
+
         const origDist = Math.sqrt(wSpan ** 2 + hSpan ** 2) * (dragState.initTransform.scale / 100);
         const scaleDelta = dist / origDist;
         scale = dragState.initTransform.scale * scaleDelta;
-        scale = Math.max(10, Math.min(1000, Math.round(scale)));
+        // Aspect lock for corners: when Shift, derive from dominant axis
+        if (e.shiftKey) {
+          const initScale = dragState.initTransform.scale;
+          const initCrop = dragState.initCrop || { left: 0, top: 0, right: 0, bottom: 0 };
+          const wRatio = (baseW * (1 - (initCrop.left + initCrop.right) / 100)) / baseW;
+          const hRatio = (baseH * (1 - (initCrop.top + initCrop.bottom) / 100)) / baseH;
+          const sx = (baseW + Math.abs(mx - cx) * 2 - baseW * wRatio) / (baseW * wRatio);
+          const sy = (baseH + Math.abs(my - cy) * 2 - baseH * hRatio) / (baseH * hRatio);
+          scale = initScale * Math.max(sx, sy);
+        }
+        scale = Math.max(10, Math.min(1000, e.altKey ? scale : Math.round(scale * 10) / 10));
         getNewAnimations('transform.scale', scale);
       }
 
@@ -1707,6 +1771,7 @@ export function PreviewCanvasOverlay({
 
                 {activePropertiesTab === 'mask' && mask.enabled ? null : imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
                   <>
+                    {/* Move bounding box (transparent, captures pointer for moving) */}
                     <rect
                       x={-baseW / 2}
                       y={-baseH / 2}
@@ -1720,6 +1785,19 @@ export function PreviewCanvasOverlay({
                       onMouseDown={(e) => handleMouseDown(e, 'move')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'move')}
                     />
+
+                    {/* Dashed rotation arc connecting the rotation handle to the top edge */}
+                    <path
+                      d={`M ${-baseW / 4},${-baseH / 2} A ${baseW / 4},${baseW / 4} 0 0 1 ${baseW / 4},${-baseH / 2}`}
+                      fill="none"
+                      stroke="#fbbf24"
+                      strokeWidth={1.5 / viewport.zoom}
+                      strokeDasharray="4 3"
+                      opacity={0.7}
+                      className="pointer-events-none"
+                    />
+
+                    {/* Rotation handle line + circle */}
                     <line
                       x1={0}
                       y1={-baseH / 2}
@@ -1743,14 +1821,56 @@ export function PreviewCanvasOverlay({
                       onKeyDown={(e) => handleHandleKeyDown(e, 'rot')}
                     >
                       <title>Rotate</title>
-                    </circle>
+                   </circle>
+
+                    {/* Center crosshair (helps identify clip center for snapping) */}
+                    <g className="pointer-events-none" opacity={0.65}>
+                      <line x1={-6 / viewport.zoom} y1={0} x2={6 / viewport.zoom} y2={0} stroke="#fbbf24" strokeWidth={1 / viewport.zoom} />
+                      <line x1={0} y1={-6 / viewport.zoom} x2={0} y2={6 / viewport.zoom} stroke="#fbbf24" strokeWidth={1 / viewport.zoom} />
+                   </g>
+
+                    {/* Edge mid-handles (N, S, E, W) */}
+                    {[
+                      { dir: 't', cx: 0, cy: -baseH / 2, cursor: 'ns-resize' },
+                      { dir: 'b', cx: 0, cy: baseH / 2, cursor: 'ns-resize' },
+                      { dir: 'l', cx: -baseW / 2, cy: 0, cursor: 'ew-resize' },
+                      { dir: 'r', cx: baseW / 2, cy: 0, cursor: 'ew-resize' },
+                    ].map(({ dir, cx: hx, cy: hy, cursor }) => {
+                      const isHoriz = dir === 't' || dir === 'b';
+                      const w = isHoriz ? 14 / viewport.zoom : 6 / viewport.zoom;
+                      const h = isHoriz ? 6 / viewport.zoom : 14 / viewport.zoom;
+                      return (
+                        <rect
+                          key={`edge-${dir}`}
+                          x={hx - w / 2}
+                          y={hy - h / 2}
+                          width={w}
+                          height={h}
+                          rx={2 / viewport.zoom}
+                          fill="#fbbf24"
+                          stroke="#141414"
+                          strokeWidth={1.5 / viewport.zoom}
+                          className="pointer-events-auto focus:outline-none focus:stroke-white focus:stroke-2"
+                          style={{ cursor }}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Resize edge ${dir.toUpperCase()}`}
+                          onMouseDown={(e) => handleMouseDown(e, `resize-${dir}`)}
+                          onKeyDown={(e) => handleHandleKeyDown(e, `resize-${dir}`)}
+                        />
+                      );
+                    })}
+
+                    {/* Corner handles (TL, TR, BL, BR) */}
                     {[-1, 1].map((rx) =>
                       [-1, 1].map((ry) => (
-                        <circle
+                        <rect
                           key={`${rx}-${ry}`}
-                          cx={(rx * baseW) / 2}
-                          cy={(ry * baseH) / 2}
-                          r={6 / viewport.zoom}
+                          x={(rx * baseW) / 2 - 6 / viewport.zoom}
+                          y={(ry * baseH) / 2 - 6 / viewport.zoom}
+                          width={12 / viewport.zoom}
+                          height={12 / viewport.zoom}
+                          rx={2 / viewport.zoom}
                           fill="#fbbf24"
                           stroke="#141414"
                           strokeWidth={1.5 / viewport.zoom}
@@ -1770,7 +1890,7 @@ export function PreviewCanvasOverlay({
                         />
                       )),
                     )}
-                  </>
+                 </>
                 ) : (
                   <>
                     <rect
