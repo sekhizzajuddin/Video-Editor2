@@ -1,4 +1,3 @@
-import { applyAiBackgroundMask } from './aiBackground';
 import { applyLutToCanvas } from './lutParser';
 import type { ClipParticleSettings } from '@/types';
 

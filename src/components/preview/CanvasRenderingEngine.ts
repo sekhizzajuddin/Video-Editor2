@@ -817,20 +817,38 @@ export async function renderCanvasEngine({
           }
 
           // AI Background Removal — runs independently of skipExpensiveFX because
-          // it manages its own playback optimization via humanDetection.ts
+          // it manages its own playback optimization via humanDetection.ts.
+          // Uses @imgly/background-removal under the hood (no CORS issues).
           if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
             const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
-            await applyAiBackgroundMask(
-              oCtx,
-              offCanvas.width,
-              offCanvas.height,
-              sourceElement,
-              animEdgeBlur,
-              clip.aiBackground.modelSelection ?? 0,
-              clip.aiBackground.playbackQuality ?? 'balanced',
-              isPlaying,
-              clip.id
-            );
+            // During scrub, fire-and-forget — don't block the RAF tick.
+            // The mask will arrive within a frame or two; skipExpensiveFX
+            // is already on for heavy FX during scrub so the visual is OK.
+            if (isScrubbing) {
+              void applyAiBackgroundMask(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                sourceElement,
+                animEdgeBlur,
+                clip.aiBackground.modelSelection ?? 0,
+                clip.aiBackground.playbackQuality ?? 'balanced',
+                isPlaying,
+                clip.id
+              );
+            } else {
+              await applyAiBackgroundMask(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                sourceElement,
+                animEdgeBlur,
+                clip.aiBackground.modelSelection ?? 0,
+                clip.aiBackground.playbackQuality ?? 'balanced',
+                isPlaying,
+                clip.id
+              );
+            }
           }
 
           if (!skipExpensiveFX) {

@@ -50,6 +50,7 @@ import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeCont
 import { SequenceProperties } from './SequenceProperties';
 import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
+import { loadBackgroundRemover } from '@/utils/aiBackground';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -2017,6 +2018,15 @@ export function PropertiesPanel() {
                       aiBackground: { ...existing, enabled }
                     });
                     scheduleSaveSnapshot('Toggle AI Background');
+                    // Pre-load the @imgly/background-removal model in the
+                    // background so the first frame doesn't take 2-5s to
+                    // load. The model is ~5MB and runs locally via onnx.
+                    if (enabled) {
+                      loadBackgroundRemover().catch(() => {
+                        // Error is already logged; user will see the model
+                        // failure on the next frame.
+                      });
+                    }
                   }}
                   className="rounded bg-[#2a2a2a] border-[#3e3e3e] text-cyan-500 focus:ring-0 focus:ring-offset-0"
                 />

@@ -1,39 +1,35 @@
 /**
  * humanDetection.ts
- * 
- * Lightweight, high-performance human presence detection and temporal mask caching
- * module for optimizing AI background removal and object removal during video playback.
- * 
- * This module provides:
- * 1. Fast skin-tone detection using YCbCr color space to determine if a human is likely in frame
- * 2. Scene change detection via luminance histogram comparison to avoid redundant ML inference
- * 3. Temporal mask caching to reuse valid segmentation masks across similar frames
- * 4. Downscaled inference support to reduce MediaPipe processing time during playback
- * 
- * All state is isolated per-clip via clipId keys to prevent mask bleed across
- * multiple clips/tracks in picture-in-picture or multi-track compositions.
- * 
- * Connected to:
- * - aiBackground.ts: Provides pre-check and optimization layer before MediaPipe inference
- * - objectRemoval.ts: Provides scene-change detection for temporal inpaint caching
- * - CanvasRenderingEngine.ts: Indirectly optimizes rendering pipeline throughput
+ *
+ * Lightweight human-presence heuristics + temporal mask caching for the AI
+ * background-removal pipeline.
+ *
+ * Provides:
+ *   1. Skin-tone detection in YCbCr space — fast pre-check to skip ML
+ *      inference when no human is in frame.
+ *   2. Scene-change detection via luminance histogram chi-squared distance —
+ *      avoids redundant inference on stable frames.
+ *   3. Temporal mask caching — re-uses the alpha mask across frames. Masks
+ *      are cached at SOURCE resolution (full canvas) so re-compositing gives
+ *      crisp edges without up-scaling artifacts.
+ *   4. Downscaled inference support — inference runs on a small canvas for
+ *      speed, but the cached mask is re-drawn at full resolution before
+ *      compositing.
+ *
+ * All state is isolated per-clip via clipId to prevent mask bleed across
+ * multiple clips/tracks.
  */
 
-// ─── Per-Clip State Isolation ───────────────────────────────────────────────
-// All detection state is keyed by clipId to prevent mask bleed when multiple
-// clips have AI background or object removal enabled simultaneously.
-
 interface ClipDetectionState {
-  // Temporal mask cache
-  cachedMask: ImageBitmap | HTMLCanvasElement | null;
+  // Temporal mask cache — kept at the LAST USED resolution, not downscaled.
+  cachedMask: HTMLCanvasElement | null;
   cachedMaskTimestamp: number;
   cachedMaskFrameCount: number;
-  
-  // Monotonic frame counter — forces re-segmentation after N frames even if
-  // scene-change detection says "stable". This breaks the infinite cache-hit
-  // loop where setCachedMask reset cachedMaskFrameCount to 0 forever.
+
+  // Monotonic counter — forces re-segmentation after N frames even if
+  // scene-change detection says "stable".
   monotoneFramesSinceInference: number;
-  
+
   // Scene change detection
   previousHistogram: Uint32Array | null;
 }
@@ -55,68 +51,64 @@ function getClipState(clipId: string): ClipDetectionState {
   return state;
 }
 
-// How many frames a cached mask can be reused before forcing a re-segment
-const BALANCED_CACHE_FRAMES = 3;   // Re-segment every 3rd frame
-const PERFORMANCE_CACHE_FRAMES = 6; // Re-segment every 6th frame
+// Re-segment every Nth frame in playback for performance.
+const BALANCED_CACHE_FRAMES = 3;
+const PERFORMANCE_CACHE_FRAMES = 6;
 
-// Maximum frames before forcing re-segmentation regardless of scene stability.
-// This is the hard ceiling that breaks the infinite cache-reuse loop.
-const BALANCED_MAX_STALE_FRAMES = 9;    // Force re-segment at most every 9 frames
-const PERFORMANCE_MAX_STALE_FRAMES = 18; // Force re-segment at most every 18 frames
+// Hard ceiling: force re-segmentation regardless of scene stability.
+const BALANCED_MAX_STALE_FRAMES = 9;
+const PERFORMANCE_MAX_STALE_FRAMES = 18;
 
-// ─── Temporal Mask Cache (Per-Clip) ─────────────────────────────────────────
+// ─── Temporal Mask Cache ────────────────────────────────────────────────────
 
-/**
- * Returns the currently cached segmentation mask for a clip, or null if no cache exists.
- */
-export function getCachedMask(clipId: string): ImageBitmap | HTMLCanvasElement | null {
-  return getClipState(clipId).cachedMask;
+export function getCachedMaskCanvas(
+  clipId: string,
+  width: number,
+  height: number
+): HTMLCanvasElement | null {
+  const state = getClipState(clipId);
+  if (!state.cachedMask) return null;
+  // If the cached mask resolution differs from the requested one, upscale it
+  // onto a new canvas at the requested resolution so the caller gets exactly
+  // what it needs. This prevents halo artifacts when re-compositing.
+  if (state.cachedMask.width !== width || state.cachedMask.height !== height) {
+    const upscaled = document.createElement('canvas');
+    upscaled.width = width;
+    upscaled.height = height;
+    const ctx = upscaled.getContext('2d');
+    if (!ctx) return null;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(state.cachedMask, 0, 0, width, height);
+    // Replace the cache with the new resolution so future reads are O(1)
+    // upscaled.dispose?.(); // canvas has no dispose
+    state.cachedMask = upscaled;
+  }
+  return state.cachedMask;
 }
 
-/**
- * Stores a new segmentation mask in the temporal cache for a clip.
- * Properly disposes of previous ImageBitmap to prevent GPU memory leaks.
- */
-export function setCachedMask(clipId: string, mask: ImageBitmap | HTMLCanvasElement | null): void {
+export function cacheMaskCanvas(clipId: string, mask: HTMLCanvasElement | null): void {
   const state = getClipState(clipId);
-  
-  // Dispose previous ImageBitmap to prevent GPU memory leak
-  if (state.cachedMask && state.cachedMask !== mask && 'close' in state.cachedMask) {
-    try {
-      (state.cachedMask as ImageBitmap).close();
-    } catch { /* already closed */ }
-  }
-  
   state.cachedMask = mask;
   state.cachedMaskTimestamp = performance.now();
   state.cachedMaskFrameCount = 0;
-  // NOTE: Do NOT reset monotoneFramesSinceInference here — that counter
-  // is only reset when actual ML inference runs (in aiBackground.ts).
+  // NOTE: monotoneFramesSinceInference is reset only by markInferencePerformed()
+  // — setCachedMask may be called from non-inference paths (cache reuse) and
+  // must not reset the ceiling counter.
 }
 
-/**
- * Marks that actual ML inference was performed for this clip.
- * Resets the monotonic stale-frame counter.
- */
 export function markInferencePerformed(clipId: string): void {
   const state = getClipState(clipId);
   state.monotoneFramesSinceInference = 0;
 }
 
-/**
- * Increments the frame counter for the cached mask and returns whether
- * the cache is still valid for the given playback quality mode.
- * 
- * @returns true if cached mask should be reused (skip inference), false if re-segmentation needed
- */
 export function shouldUseCachedMask(
   clipId: string,
   playbackQuality: 'full' | 'balanced' | 'performance'
 ): boolean {
   const state = getClipState(clipId);
-  
   if (!state.cachedMask) return false;
-  if (playbackQuality === 'full') return false; // Always re-segment in full quality
+  if (playbackQuality === 'full') return false;
 
   state.cachedMaskFrameCount++;
   state.monotoneFramesSinceInference++;
@@ -124,55 +116,57 @@ export function shouldUseCachedMask(
   const maxFrames = playbackQuality === 'performance'
     ? PERFORMANCE_CACHE_FRAMES
     : BALANCED_CACHE_FRAMES;
-
   return state.cachedMaskFrameCount < maxFrames;
 }
 
-/**
- * Checks if the monotonic stale-frame counter has exceeded the hard ceiling,
- * meaning we MUST force a re-segmentation regardless of scene stability.
- */
 export function mustForceResegment(
   clipId: string,
   playbackQuality: 'full' | 'balanced' | 'performance'
 ): boolean {
   if (playbackQuality === 'full') return true;
-  
   const state = getClipState(clipId);
   const maxStale = playbackQuality === 'performance'
     ? PERFORMANCE_MAX_STALE_FRAMES
     : BALANCED_MAX_STALE_FRAMES;
-
   return state.monotoneFramesSinceInference >= maxStale;
 }
 
-/**
- * Invalidates the temporal mask cache for a clip (e.g., on scene change).
- * Properly disposes of ImageBitmap to prevent GPU memory leaks.
- */
-export function invalidateMaskCache(clipId: string): void {
-  const state = getClipState(clipId);
-  
-  // Dispose ImageBitmap before clearing reference
-  if (state.cachedMask && 'close' in state.cachedMask) {
-    try {
-      (state.cachedMask as ImageBitmap).close();
-    } catch { /* already closed */ }
+export function invalidateMaskCache(clipId?: string): void {
+  if (clipId) {
+    const state = clipStates.get(clipId);
+    if (state) {
+      state.cachedMask = null;
+      state.cachedMaskTimestamp = 0;
+      state.cachedMaskFrameCount = 0;
+      state.monotoneFramesSinceInference = 0;
+    }
+  } else {
+    for (const state of clipStates.values()) {
+      state.cachedMask = null;
+      state.cachedMaskTimestamp = 0;
+      state.cachedMaskFrameCount = 0;
+      state.monotoneFramesSinceInference = 0;
+    }
   }
-  
-  state.cachedMask = null;
-  state.cachedMaskTimestamp = 0;
-  state.cachedMaskFrameCount = 0;
-  state.monotoneFramesSinceInference = 0;
 }
 
-// ─── Scene Change Detection (Per-Clip) ──────────────────────────────────────
+// Backward-compatible ImageBitmap cache aliases (legacy callers may still use these)
+export function getCachedMask(clipId: string): HTMLCanvasElement | null {
+  return getClipState(clipId).cachedMask;
+}
+export function setCachedMask(
+  clipId: string,
+  mask: HTMLCanvasElement | null
+): void {
+  cacheMaskCanvas(clipId, mask);
+}
 
-// Shared canvas for histogram/skin-tone sampling (tiny resolution)
+// ─── Scene Change Detection ─────────────────────────────────────────────────
+
 let sampleCanvas: HTMLCanvasElement | null = null;
 let sampleCtx: CanvasRenderingContext2D | null = null;
 const SAMPLE_WIDTH = 64;
-const SAMPLE_HEIGHT = 36; // 16:9 aspect
+const SAMPLE_HEIGHT = 36;
 
 function ensureSampleCanvas(): CanvasRenderingContext2D | null {
   if (!sampleCanvas) {
@@ -184,38 +178,23 @@ function ensureSampleCanvas(): CanvasRenderingContext2D | null {
   return sampleCtx;
 }
 
-/**
- * Computes a simplified luminance histogram (16 bins) from a tiny downscaled snapshot.
- * Used for fast scene change detection between frames.
- */
 function computeLuminanceHistogram(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap
 ): Uint32Array {
   const ctx = ensureSampleCanvas();
   if (!ctx) return new Uint32Array(16);
-
   ctx.drawImage(source, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
   const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
   const data = imageData.data;
-
   const histogram = new Uint32Array(16);
   for (let i = 0; i < data.length; i += 4) {
-    // ITU-R BT.601 luminance
     const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
     const bin = Math.min(15, (lum / 256) * 16 | 0);
     histogram[bin]++;
   }
-
   return histogram;
 }
 
-/**
- * Detects whether a significant scene change has occurred between the current
- * frame and the previously analyzed frame for a specific clip, using luminance
- * histogram chi-squared distance.
- * 
- * @returns true if the scene has changed significantly (should re-segment)
- */
 export function detectSceneChange(
   clipId: string,
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
@@ -223,13 +202,10 @@ export function detectSceneChange(
 ): boolean {
   const state = getClipState(clipId);
   const currentHistogram = computeLuminanceHistogram(source);
-
   if (!state.previousHistogram) {
     state.previousHistogram = currentHistogram;
-    return true; // First frame — always process
+    return true;
   }
-
-  // Chi-squared distance between histograms
   let chiSq = 0;
   const totalPixels = SAMPLE_WIDTH * SAMPLE_HEIGHT;
   for (let i = 0; i < 16; i++) {
@@ -239,36 +215,43 @@ export function detectSceneChange(
       chiSq += ((observed - expected) ** 2) / (expected + observed);
     }
   }
-
-  // Normalize by total pixel count
   const normalizedDist = chiSq / totalPixels;
-
   state.previousHistogram = currentHistogram;
-
   return normalizedDist > threshold;
 }
 
 // ─── Skin-Tone Detection (Human Presence Heuristic) ─────────────────────────
 
+interface DetectionResult {
+  hasHuman: boolean;
+  /** Bounding box of the most skin-dense region (0..1 normalized). */
+  bbox?: { x: number; y: number; w: number; h: number };
+  /** Total skin pixel ratio (0..1) — useful for debugging. */
+  skinRatio: number;
+}
+
 /**
  * Fast heuristic to detect whether a human is likely present in the frame
- * by analyzing skin-tone pixel density in YCbCr color space.
- * 
- * This runs in < 1ms on a 64x36 downscaled sample and can be used to
- * skip expensive MediaPipe inference entirely when no human is visible.
- * 
- * YCbCr skin-tone ranges (widened to cover Fitzpatrick types I–VI):
- * - Cb: 70–135  (widened from 77–127 to reduce dark skin false negatives)
- * - Cr: 125–180 (widened from 133–173 to reduce dark skin false negatives)
- * 
- * @returns true if human presence is likely (>1.5% skin-tone pixels detected)
+ * by analyzing skin-tone pixel density in YCbCr color space, with a grid-based
+ * bounding-box estimate to localize the human region.
+ *
+ * This runs in < 1ms on a 64x36 downscaled sample. The result is used to:
+ *   1. Skip expensive ML inference when no human is visible
+ *   2. Constrain ML inference to a small region around the human (faster + more
+ *      accurate than running on the whole frame).
+ *
+ * YCbCr skin-tone ranges covering Fitzpatrick types I–VI:
+ *   - Cb: 70–135  (widened from 77–127 for dark skin)
+ *   - Cr: 125–180 (widened from 133–173 for dark skin)
+ *
+ * @returns DetectionResult — hasHuman, optional bbox, skinRatio.
  */
 export function detectHumanPresence(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
-  minSkinRatio: number = 0.015
-): boolean {
+  minSkinRatio: number = 0.012
+): DetectionResult {
   const ctx = ensureSampleCanvas();
-  if (!ctx) return true; // Fail open — assume human present if we can't check
+  if (!ctx) return { hasHuman: true, skinRatio: 0 }; // Fail open
 
   ctx.drawImage(source, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
   const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
@@ -277,42 +260,78 @@ export function detectHumanPresence(
   let skinPixels = 0;
   const totalPixels = SAMPLE_WIDTH * SAMPLE_HEIGHT;
 
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
+  // Grid-based bbox: divide the sample into a 4×4 grid, find the densest cell
+  // with skin, then expand to neighboring cells with skin pixels. This gives
+  // a rough but useful bbox that constrains ML inference to the human region.
+  const GRID = 4;
+  const cellW = SAMPLE_WIDTH / GRID;
+  const cellH = SAMPLE_HEIGHT / GRID;
+  const cellSkin = new Uint32Array(GRID * GRID);
 
-    // Convert RGB to YCbCr
-    // Y  =  0.299R + 0.587G + 0.114B
-    // Cb = -0.169R - 0.331G + 0.500B + 128
-    // Cr =  0.500R - 0.419G - 0.081B + 128
-    const cb = -0.169 * r - 0.331 * g + 0.500 * b + 128;
-    const cr = 0.500 * r - 0.419 * g - 0.081 * b + 128;
+  for (let y = 0; y < SAMPLE_HEIGHT; y++) {
+    for (let x = 0; x < SAMPLE_WIDTH; x++) {
+      const i = (y * SAMPLE_WIDTH + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const cb = -0.169 * r - 0.331 * g + 0.500 * b + 128;
+      const cr = 0.500 * r - 0.419 * g - 0.081 * b + 128;
 
-    // Widened skin-tone detection thresholds covering Fitzpatrick types I-VI
-    if (cb >= 70 && cb <= 135 && cr >= 125 && cr <= 180) {
-      skinPixels++;
+      // Skin tone: Cb in [70, 135], Cr in [125, 180]
+      if (cb >= 70 && cb <= 135 && cr >= 125 && cr <= 180) {
+        skinPixels++;
+        const gx = Math.min(GRID - 1, Math.floor(x / cellW));
+        const gy = Math.min(GRID - 1, Math.floor(y / cellH));
+        cellSkin[gy * GRID + gx]++;
+      }
     }
   }
 
-  return (skinPixels / totalPixels) >= minSkinRatio;
+  const skinRatio = skinPixels / totalPixels;
+  if (skinRatio < minSkinRatio) {
+    return { hasHuman: false, skinRatio };
+  }
+
+  // Find the densest grid cell, expand bbox to all cells with >5% skin density.
+  let maxCell = 0;
+  let maxCellIdx = 0;
+  for (let i = 0; i < cellSkin.length; i++) {
+    if (cellSkin[i] > maxCell) {
+      maxCell = cellSkin[i];
+      maxCellIdx = i;
+    }
+  }
+  const threshold = Math.max(2, maxCell * 0.2);
+  let minX = GRID, minY = GRID, maxX = -1, maxY = -1;
+  for (let gy = 0; gy < GRID; gy++) {
+    for (let gx = 0; gx < GRID; gx++) {
+      if (cellSkin[gy * GRID + gx] >= threshold) {
+        if (gx < minX) minX = gx;
+        if (gy < minY) minY = gy;
+        if (gx > maxX) maxX = gx;
+        if (gy > maxY) maxY = gy;
+      }
+    }
+  }
+  if (maxX < 0) maxX = maxCellIdx % GRID;
+  if (minX > maxX) minX = maxX;
+
+  return {
+    hasHuman: true,
+    skinRatio,
+    bbox: {
+      x: minX / GRID,
+      y: minY / GRID,
+      w: (maxX - minX + 1) / GRID,
+      h: (maxY - minY + 1) / GRID,
+    },
+  };
 }
 
 // ─── Downscaled Inference Support ───────────────────────────────────────────
+
 let downscaleCanvas: HTMLCanvasElement | null = null;
 
-/**
- * Creates a downscaled version of the source element for faster
- * MediaPipe inference during playback. The resulting canvas can be passed
- * to segmentFrame() instead of the full-resolution source.
- * 
- * Maintains aspect ratio correctly by applying the same scale factor to
- * both dimensions, with a minimum total pixel count floor to prevent
- * excessively tiny canvases.
- * 
- * @param scale - Downscale factor (0.5 = half resolution, default for balanced mode)
- * @returns A downscaled canvas element for inference
- */
 export function downscaleForInference(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   scale: number = 0.5
@@ -328,11 +347,9 @@ export function downscaleForInference(
       ? (source as HTMLImageElement).naturalHeight
       : source.height;
 
-  // Apply uniform scale to maintain aspect ratio
   let targetW = Math.round(sourceWidth * scale);
   let targetH = Math.round(sourceHeight * scale);
-  
-  // Ensure minimum pixel count (14400 = ~120x120 equivalent) without distorting aspect ratio
+
   const minPixels = 14400;
   const currentPixels = targetW * targetH;
   if (currentPixels < minPixels && currentPixels > 0) {
@@ -340,8 +357,6 @@ export function downscaleForInference(
     targetW = Math.round(targetW * upscaleFactor);
     targetH = Math.round(targetH * upscaleFactor);
   }
-  
-  // Absolute minimums to prevent zero-dimension canvases
   targetW = Math.max(16, targetW);
   targetH = Math.max(16, targetH);
 
@@ -352,43 +367,22 @@ export function downscaleForInference(
     downscaleCanvas.width = targetW;
     downscaleCanvas.height = targetH;
   }
-
   const ctx = downscaleCanvas.getContext('2d');
-  if (ctx) {
-    ctx.drawImage(source, 0, 0, targetW, targetH);
-  }
-
+  if (ctx) ctx.drawImage(source, 0, 0, targetW, targetH);
   return downscaleCanvas;
 }
 
-/**
- * Resets all internal state for a specific clip. Call when the user disables
- * the feature or when switching clips to prevent stale mask bleed.
- */
+// ─── Reset ──────────────────────────────────────────────────────────────────
+
 export function resetClipDetectionState(clipId: string): void {
-  const state = clipStates.get(clipId);
-  if (state) {
-    // Dispose ImageBitmap before clearing
-    if (state.cachedMask && 'close' in state.cachedMask) {
-      try {
-        (state.cachedMask as ImageBitmap).close();
-      } catch { /* already closed */ }
-    }
-    clipStates.delete(clipId);
-  }
+  clipStates.delete(clipId);
 }
 
-/**
- * Resets ALL clip detection states. Call on project unload or full cleanup.
- */
 export function resetAllDetectionState(): void {
-  for (const [clipId] of clipStates) {
-    resetClipDetectionState(clipId);
-  }
   clipStates.clear();
 }
 
-// Legacy alias for backward compatibility (resets all state)
+// Legacy alias
 export function resetHumanDetectionState(): void {
   resetAllDetectionState();
 }
