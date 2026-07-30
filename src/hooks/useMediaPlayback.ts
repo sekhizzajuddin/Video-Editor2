@@ -1149,23 +1149,29 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   useEffect(() => {
     if (!isPrimary) return;
     let lastScrubSeekTime = 0;
-    
+
     const unsub = useEditorStore.subscribe((state) => {
       if (state.isPlaying) return;
-      
+
       const newTime = state.currentTime;
       const now = performance.now();
       // Throttle video element seeking to ~20fps to avoid overloading the hardware decoder during scrubs
       if (now - lastScrubSeekTime < 50) return;
       lastScrubSeekTime = now;
-      
+
       const pool = poolRef.current;
       if (!pool || pool.size === 0) return;
-      
+
       // Read fresh state directly from store to avoid stale closures
       const freshMediaLibrary = useEditorStore.getState().mediaLibrary;
       const freshTracks = useEditorStore.getState().tracks;
-      
+
+      // PERF: build mediaMap once per scrub tick — was O(N) per clip.
+      const mediaMap = new Map<string, any>();
+      for (let i = 0; i < freshMediaLibrary.length; i++) {
+        mediaMap.set(freshMediaLibrary[i].id, freshMediaLibrary[i]);
+      }
+
       // Build active clips from fresh tracks
       const clipsArr: Array<{ clipId: string; mediaId: string; clipStart: number; clipDuration: number; trimStart: number; speed: number; speedRamp?: any }> = [];
       for (const track of freshTracks) {
@@ -1186,13 +1192,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         }
       }
-      
+
       for (const clip of clipsArr) {
         const entry = pool.get(clip.clipId);
         if (!entry || entry.type !== 'video') continue;
-        
+
         const el = entry.el as HTMLVideoElement;
-        const mediaItem = freshMediaLibrary.find((m) => m.id === clip.mediaId);
+        // PERF: O(1) lookup via mediaMap built above.
+        const mediaItem = mediaMap.get(clip.mediaId);
         const maxDuration = mediaItem ? mediaItem.duration : 10000;
         const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
           id: clip.clipId,
@@ -1202,7 +1209,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           speed: clip.speed,
           speedRamp: clip.speedRamp
         }, newTime)));
-        
+
         if (el.seeking) {
           pendingSeeksRef.current.set(clip.clipId, mediaTime);
         } else {

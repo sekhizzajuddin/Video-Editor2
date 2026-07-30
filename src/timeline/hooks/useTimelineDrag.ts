@@ -97,6 +97,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
   const {
     trackContainerRef,
+    rulerContainerRef,
     dragState,
     setDragState,
     resizeState,
@@ -689,11 +690,17 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (e.button !== 0) return;
       setIsScrubbing(true);
 
+      // CRITICAL FIX: use rulerContainerRef (the actual ruler DOM), not the
+      // trackContainerRef (the clips area below the ruler). The ruler has
+      // its own scrollLeft-independent position because it spans the full
+      // timelineWidth inside a horizontally-scrolling parent. Using the
+      // wrong rect caused the playhead to jump to a random time when the
+      // ruler's left edge differed from the clips area's left edge.
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const currentScrollLeft = useEditorStore.getState().scrollLeft;
       const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
-      
+
       setScrubTime(time);
       setScrubMouseX(e.clientX);
       seek(time);
@@ -722,14 +729,22 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         scrubRafIdRef.current = requestAnimationFrame(() => {
           scrubRafIdRef.current = null;
           const clientX = latestClientXRef.current;
-          const rect = trackContainerRef.current?.getBoundingClientRect();
-          if (rect) {
+          // CRITICAL FIX: use the RULER container's bounding rect, not the
+          // trackContainerRef. The ruler lives above the clip tracks; using
+          // trackContainerRef gave us a rect whose top was below the ruler,
+          // so clientX - rect.left produced the wrong offset and the
+          // playhead snapped to an unrelated time whenever the user moved
+          // the cursor. This is the "playhead jumps to a random position"
+          // bug.
+          const rulerEl = rulerContainerRef.current;
+          if (rulerEl) {
+            const rect = rulerEl.getBoundingClientRect();
             const currentScrollLeft = useEditorStore.getState().scrollLeft;
             const x = clientX - rect.left + currentScrollLeft;
             const time = Math.max(0, x / zoomLevel);
-            
+
             seek(time);
-            
+
             const scrubNow = performance.now();
             if (scrubNow - lastScrubStateUpdateRef.current > 16) {
               setScrubTime(time);

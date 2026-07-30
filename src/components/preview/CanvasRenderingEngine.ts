@@ -172,11 +172,22 @@ export async function renderCanvasEngine({
   // Scrubbing forces quality-2 path so heavy FX (chroma, LUT, AI bg) are skipped,
   // making playhead drag feel CapCut-smooth.
   // Adaptive performance downgrade: if rolling FPS dropped below 50 for >1.5s,
-  // also skip heavy FX until FPS recovers.
-  const perfDowngraded = useEditorStore.getState().perfDowngraded;
+  // PERF: snapshot store state ONCE per frame. Previously drawSingleClip
+  // called useEditorStore.getState() 3× per clip per frame — expensive when
+  // 10 tracks × 5 clips = 150 store reads per render.
+  const storeState = useEditorStore.getState();
+  const perfDowngraded = storeState.perfDowngraded;
   const adaptiveSlowdown = !isExporting && perfDowngraded && isPlaying;
   const skipExpensiveFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter')));
   const skipUltraHeavyFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half')));
+
+  // PERF: build mediaMap once per render. mediaLibrary.find() per clip was
+  // an O(N×M) hot loop. With 5 clips × 50 media items, that's 250 comparisons
+  // per frame — measurable on slow devices.
+  const mediaMap = new Map<string, MediaItem>();
+  for (let i = 0; i < mediaLibraryRaw.length; i++) {
+    mediaMap.set(mediaLibraryRaw[i].id, mediaLibraryRaw[i]);
+  }
 
   const now = performance.now();
   const lastTime = lastParticleTimeRef.current ?? now;
@@ -473,7 +484,8 @@ export async function renderCanvasEngine({
   ) => {
     const ctx = targetCtx || compositeCtxRef.current;
     if (!ctx) return;
-    let mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
+    // PERF: O(1) lookup via mediaMap built once per render (was mediaLibrary.find = O(N)).
+    let mediaItem = mediaMap.get(clip.mediaId);
     if (!mediaItem) {
       if (clip.mediaId === 'text-placeholder' || clip.textSettings || clip.id?.startsWith('clip_subtitle') || clip.id?.startsWith('clip_typo')) {
         mediaItem = {
@@ -497,9 +509,11 @@ export async function renderCanvasEngine({
     const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
 
     // ── Per-Aspect-Ratio Custom Framing Overrides ────────────────────────
-    const perRatioFramingState = useEditorStore.getState().perRatioFraming;
-    const perRatioFramingEnabled = useEditorStore.getState().perRatioFramingEnabled;
-    const currentAspectRatio = useEditorStore.getState().aspectRatio;
+    // PERF: read from the snapshot captured at frame start (was 3 store
+    // reads per clip per frame).
+    const perRatioFramingState = storeState.perRatioFraming;
+    const perRatioFramingEnabled = storeState.perRatioFramingEnabled;
+    const currentAspectRatio = storeState.aspectRatio;
 
     if (perRatioFramingEnabled && perRatioFramingState[currentAspectRatio]?.[clip.id]) {
       const customFraming = perRatioFramingState[currentAspectRatio][clip.id];
@@ -894,9 +908,7 @@ export async function renderCanvasEngine({
             if (filters.temperature !== 0 || filters.tint !== 0 || filters.fadedFilm !== 0 || filters.vignette !== 0) {
               applyColorOverlays(oCtx, 0, 0, offCanvas.width, offCanvas.height, filters);
             }
-            const lutData = useEditorStore.getState().mediaLibrary.find(
-              (m) => m.id === (clip.lut?.mediaId || clip.lutFilter?.mediaId)
-            )?.lutData;
+            const lutData = mediaMap.get(clip.lut?.mediaId || clip.lutFilter?.mediaId)?.lutData;
             if (lutData) {
               const baseIntensity = clip.lut?.intensity ?? clip.lutFilter?.intensity ?? 100;
               const animIntensity = getAnimatedValue(
@@ -1167,7 +1179,8 @@ export async function renderCanvasEngine({
   }
 
   // Also collect active clips inside PiP Windows attached to active timeline clips
-  const activePipWindows = useEditorStore.getState().pipWindows || {};
+  // PERF: read pipWindows from the snapshot captured at frame start.
+  const activePipWindows = storeState.pipWindows || {};
   if (activePipWindows && Object.keys(activePipWindows).length > 0) {
     for (const pip of Object.values(activePipWindows) as any[]) {
       if (!pip || !pip.tracks) continue;
@@ -1210,12 +1223,19 @@ export async function renderCanvasEngine({
     }
   }
 
-  for (const item of drawQueue) {
-    if (isPlaying) {
-      drawSingleClip(item.clip);
-    } else {
-      await drawSingleClip(item.clip);
+  // PERF: parallelize clip draws. Sequential awaits for 10 clips at 16ms each
+  // = 160ms per frame (5 dropped frames at 60fps). We fire every drawSingleClip
+  // and await only during playback (when we have time to wait) or at end of
+  // scrub (when next frame is queued via framePendingRef).
+  if (isScrubbing) {
+    // During scrub the renderer kicks off draws without awaiting; the awaits
+    // complete into the next frame's paint which is fine because we're already
+    // capping quality (skipExpensiveFX = true during scrub).
+    for (const item of drawQueue) {
+      void drawSingleClip(item.clip);
     }
+  } else {
+    await Promise.all(drawQueue.map((item) => drawSingleClip(item.clip)));
   }
 
   if (!anyClipDrawn && !hasClips) {
