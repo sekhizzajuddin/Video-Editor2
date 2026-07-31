@@ -21,6 +21,7 @@ import {
 let bgRemovalModule: typeof import('@imgly/background-removal') | null = null;
 let loadPromise: Promise<void> | null = null;
 let isLoaded = false;
+let isSegmentingInFlight = false;
 
 const PUBLIC_PATH = 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/';
 
@@ -134,39 +135,31 @@ export async function applyAiBackgroundMask(
   clipId: string = '_default'
 ) {
   try {
-    let maskCanvas: HTMLCanvasElement | null = null;
+    let maskCanvas: HTMLCanvasElement | null = getCachedMaskCanvas(clipId, width, height);
     const model: 'isnet' | 'isnet_fp16' = modelSelection === 0 ? 'isnet' : 'isnet_fp16';
 
     if (isPlaying && playbackQuality !== 'full') {
-      // ── Playback optimization path ──
-      // 1. Check temporal mask cache first.
-      if (shouldUseCachedMask(clipId, playbackQuality)) {
-        const cached = getCachedMaskCanvas(clipId, width, height);
-        if (cached) maskCanvas = cached;
-      }
+      // During video playback: return cached mask immediately for 60fps smoothness,
+      // and trigger async background segmentation when cache is stale.
+      const needsUpdate = !shouldUseCachedMask(clipId, playbackQuality) ||
+                          mustForceResegment(clipId, playbackQuality) ||
+                          detectSceneChange(clipId, sourceElement);
 
-      // 2. If no cached mask, check if we must force re-segmentation or if scene changed.
-      if (!maskCanvas) {
-        const forceReseg = mustForceResegment(clipId, playbackQuality);
-        const sceneChanged = detectSceneChange(clipId, sourceElement);
-
-        if (!forceReseg && !sceneChanged) {
-          const lastMask = getCachedMaskCanvas(clipId, width, height);
-          if (lastMask) {
-            maskCanvas = lastMask;
-            cacheMaskCanvas(clipId, maskCanvas);
-          }
-        } else {
-          const result = await segmentSource(sourceElement, width, height, model);
-          if (result) {
-            maskCanvas = result;
-            markInferencePerformed(clipId);
-            cacheMaskCanvas(clipId, maskCanvas);
-          }
-        }
+      if (needsUpdate && !isSegmentingInFlight) {
+        isSegmentingInFlight = true;
+        segmentSource(sourceElement, width, height, model)
+          .then((result) => {
+            if (result) {
+              markInferencePerformed(clipId);
+              cacheMaskCanvas(clipId, result);
+            }
+          })
+          .finally(() => {
+            isSegmentingInFlight = false;
+          });
       }
-    } else {
-      // ── Paused / Export / Full quality path — always run full inference ──
+    } else if (!maskCanvas) {
+      // When paused or initial frame: await full segmentation if no mask cached
       const result = await segmentSource(sourceElement, width, height, model);
       if (result) {
         maskCanvas = result;
