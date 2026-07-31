@@ -883,7 +883,7 @@ export function PreviewCanvasOverlay({
       if (!blob) throw new Error('Failed to create blob for cropping');
 
       const resultBlob = await removeBackground(blob, {
-        publicPath: 'https://static.imgly.com/@imgly/background-removal-data/1.4.0/dist/',
+        publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
         progress: (key: string, current: number, total: number) => {}
       });
 
