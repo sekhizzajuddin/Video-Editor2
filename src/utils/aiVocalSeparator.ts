@@ -1,9 +1,9 @@
-﻿import * as ort from 'onnxruntime-web';
+import * as ort from 'onnxruntime-web';
 // @ts-ignore
 import { DemucsProcessor } from 'demucs-web';
 
 // Ensure WebAssembly backend uses the correct paths from a CDN to avoid Vite bundling issues
-ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
 ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
 
 // Default model URL (htdemucs embedded model)
