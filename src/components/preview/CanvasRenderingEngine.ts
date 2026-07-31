@@ -165,10 +165,19 @@ export async function renderCanvasEngine({
   // via humanDetection.ts (temporal caching, scene-change detection, downscaled inference).
   // Including them here creates a circular dependency where enabling the feature causes
   // it to skip itself during playback.
+  const activeVideoClipCount = tracks
+    .filter((t) => t.type === 'video' && !t.hidden)
+    .reduce((count, track) => {
+      const hasActive = track.clips.some(
+        (c) => !c.disabled && currentTime >= c.startTime && currentTime < c.startTime + c.duration
+      );
+      return count + (hasActive ? 1 : 0);
+    }, 0);
+
   const isAutoFast =
     previewMode === 'auto' &&
     isPlaying &&
-    (tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId))));
+    (activeVideoClipCount > 1 || tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId))));
   // Scrubbing forces quality-2 path so heavy FX (chroma, LUT, AI bg) are skipped,
   // making playhead drag feel CapCut-smooth.
   // Adaptive performance downgrade: if rolling FPS dropped below 50 for >1.5s,

@@ -17,6 +17,19 @@ import {
   resetAllDetectionState,
 } from './humanDetection';
 
+import * as ortModule from 'onnxruntime-web';
+
+// Polyfill onnxruntime-web ESM interop so @imgly's (await import("onnxruntime-web")).default works cleanly
+if (typeof window !== 'undefined') {
+  const ortObj: any = (ortModule as any).default || ortModule;
+  if (ortObj && !ortObj.default) {
+    try {
+      ortObj.default = ortObj;
+    } catch (e) {}
+  }
+  (window as any).ort = ortObj;
+}
+
 // Lazy-loaded so the 5MB+ model only downloads when the feature is enabled
 let bgRemovalModule: typeof import('@imgly/background-removal') | null = null;
 let loadPromise: Promise<void> | null = null;

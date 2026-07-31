@@ -332,11 +332,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     return result;
   }, [tracks, currentTime]);
 
-  // PERFORMANCE: Only create media elements for clips NEAR the playhead (within 15s).
-  // Previously this created elements for ALL clips on the timeline, causing 10-12 simultaneous
-  // HTMLVideoElements + audio graphs that exhausted the browser's hardware video decoder limit
-  // (4-8 max) and consumed massive RAM.
-  const ELEMENT_PROXIMITY_WINDOW = 15; // seconds
+  // PERFORMANCE: Only create media elements for clips NEAR the playhead.
+  // Video elements are kept within 5s window to avoid browser hardware decoder exhaustion (4-8 max).
+  // Audio clips use 15s window since WebAudio is lightweight.
+  const VIDEO_PROXIMITY_WINDOW = 5; // seconds
+  const AUDIO_PROXIMITY_WINDOW = 15; // seconds
   const MAX_GLOBAL_FRAME_CACHE = 30; // max cached ImageBitmaps across ALL clips (was 120 per clip)
   const MAX_PER_CLIP_FRAME_CACHE = 8; // max cached frames per individual clip
 
@@ -349,9 +349,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (track.hidden) continue;
         const media = mediaLibrary.find((m) => m.id === clip.mediaId);
         if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
-          // Only create elements for clips near the playhead or audio clips (audio is lightweight)
-          const isNearPlayhead = media.type === 'audio' || 
-            (ct >= clip.startTime - ELEMENT_PROXIMITY_WINDOW && ct < clip.startTime + clip.duration + ELEMENT_PROXIMITY_WINDOW);
+          const prox = media.type === 'video' ? VIDEO_PROXIMITY_WINDOW : AUDIO_PROXIMITY_WINDOW;
+          const isNearPlayhead = (ct >= clip.startTime - prox && ct < clip.startTime + clip.duration + prox);
           if (isNearPlayhead) {
             neededClips.set(clip.id, {
               mediaId: clip.mediaId,
@@ -370,8 +369,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               const media = mediaLibrary.find((m) => m.id === pipClip.mediaId);
               if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
                 const absStart = clip.startTime + pip.relativeStartTime + pipClip.startTime;
-                const isNearPlayhead = media.type === 'audio' ||
-                  (ct >= absStart - ELEMENT_PROXIMITY_WINDOW && ct < absStart + pipClip.duration + ELEMENT_PROXIMITY_WINDOW);
+                const prox = media.type === 'video' ? VIDEO_PROXIMITY_WINDOW : AUDIO_PROXIMITY_WINDOW;
+                const isNearPlayhead = (ct >= absStart - prox && ct < absStart + pipClip.duration + prox);
                 if (isNearPlayhead) {
                   neededClips.set(pipClip.id, {
                     mediaId: pipClip.mediaId,
@@ -634,12 +633,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const direction = useEditorStore.getState().playbackDirection ?? 1;
         const isReversing = direction < 0;
 
-        // Relaxed drift limit (250ms) during normal playback to avoid stuttering/seeking loops.
-        // During force-seeking (play start, user seek, first activation) or reverse playback, we use a tighter limit.
-        const driftLimit = isReversing ? 0.02 : 0.25;
+        // Relaxed drift limit (450ms) during normal forward playback to avoid stuttering/seeking loops.
+        // During force-seeking (play start, user seek, first activation) or reverse playback, we use tighter limits.
+        const driftLimit = isReversing ? 0.02 : 0.45;
 
         if (clipForceSeek || drift > driftLimit) {
-          const forceSeekThreshold = !isPlaying ? 0.005 : (isReversing ? 0.02 : 0.05); // 50ms
+          const forceSeekThreshold = !isPlaying ? 0.005 : (isReversing ? 0.02 : 0.15); // 150ms during live play
           const threshold = clipForceSeek ? forceSeekThreshold : driftLimit;
           if (drift > threshold) {
             if (entry.el.seeking) {
