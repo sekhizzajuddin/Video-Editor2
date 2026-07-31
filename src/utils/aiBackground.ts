@@ -78,12 +78,14 @@ export const loadBackgroundRemover = (): Promise<void> => {
       bgRemovalModule = await import('@imgly/background-removal');
       // Preload the medium model so the first frame doesn't block. The isnet
       // model is loaded lazily on first segmentForeground() call if requested.
-      await bgRemovalModule.default.preload({
-        model: 'medium',
-        // 'isnet' for highest quality human segmentation. 'isnet' is a model
-        // specifically tuned for human portrait segmentation, which matches
-        // our use case better than the general 'isnet-general-use'.
-      });
+      // @imgly/background-removal v1.7 exports `preload` as a named export
+      // (there is no default export). Call it directly on the module.
+      const preloadFn = bgRemovalModule.preload ?? (bgRemovalModule as any).default?.preload;
+      if (preloadFn) {
+        await preloadFn({
+          model: 'medium',
+        });
+      }
       isLoaded = true;
     } catch (err) {
       console.error('[aiBackground] Failed to load @imgly/background-removal:', err);
@@ -117,7 +119,11 @@ async function segmentSource(
     // @imgly takes an HTMLImageElement | Blob | URL string. For our use case
     // we want to draw the current video frame into an offscreen canvas at
     // a downscaled resolution (faster inference) and pass that canvas.
-    const blob = await bgRemovalModule.default.removeBackground(source as any, {
+    // @imgly/background-removal v1.7 exports `removeBackground` as a named
+    // export (there is no default export).
+    const removeBgFn = bgRemovalModule.removeBackground ?? (bgRemovalModule as any).default?.removeBackground;
+    if (!removeBgFn) throw new Error('@imgly/background-removal: removeBackground function not found');
+    const blob = await removeBgFn(source as any, {
       model,
       output: { format: 'image/png', quality: 0.9 },
     });

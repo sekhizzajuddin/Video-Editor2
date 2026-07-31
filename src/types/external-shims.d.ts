@@ -146,6 +146,11 @@ declare module '@gradio/client' {
 
 declare module '@imgly/background-removal' {
   export const removeBackground: any;
+  export const removeForeground: any;
+  export const segmentForeground: any;
+  export const preload: any;
+  export const alphamask: any;
+  export const applySegmentationMask: any;
   export const load: any;
   export const config: any;
   const __default__: any;
