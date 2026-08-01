@@ -830,10 +830,9 @@ export async function renderCanvasEngine({
           // Uses @imgly/background-removal under the hood (no CORS issues).
           if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
             const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
-            // During scrub, fire-and-forget — don't block the RAF tick.
-            // The mask will arrive within a frame or two; skipExpensiveFX
-            // is already on for heavy FX during scrub so the visual is OK.
-            if (isScrubbing) {
+            // During scrub or live playback, fire-and-forget — don't block the RAF tick.
+            // The mask will arrive asynchronously via Web Worker without freezing the playhead.
+            if ((isScrubbing || isPlaying) && !isExporting) {
               void applyAiBackgroundMask(
                 oCtx,
                 offCanvas.width,

@@ -67,7 +67,8 @@ export const loadBackgroundRemover = (): Promise<void> => {
       if (preloadFn) {
         await preloadFn({
           model: 'isnet_fp16',
-          publicPath: PUBLIC_PATH
+          publicPath: PUBLIC_PATH,
+          proxyToWorker: true,
         });
       }
       isLoaded = true;
@@ -128,6 +129,7 @@ async function segmentSource(
     const blob = await removeBgFn(inputBlob, {
       model,
       publicPath: PUBLIC_PATH,
+      proxyToWorker: true,
       output: { format: 'image/png', quality: 0.9 },
     });
 
@@ -164,22 +166,24 @@ export async function applyAiBackgroundMask(
     let maskCanvas: HTMLCanvasElement | null = getCachedMaskCanvas(clipId, width, height);
     const model: 'isnet' | 'isnet_fp16' = modelSelection === 0 ? 'isnet' : 'isnet_fp16';
 
-    if (isPlaying && playbackQuality !== 'full') {
+    if (isPlaying) {
       // During video playback: return cached mask immediately for 60fps smoothness,
-      // and trigger async background segmentation when cache is stale.
+      // and trigger async background segmentation via Web Worker without stalling UI.
       const needsUpdate = !shouldUseCachedMask(clipId, playbackQuality) ||
                           mustForceResegment(clipId, playbackQuality) ||
                           detectSceneChange(clipId, sourceElement);
 
       if (needsUpdate && !isSegmentingInFlight) {
         isSegmentingInFlight = true;
-        segmentSource(sourceElement, width, height, model)
+        // Use fast fp16 model during live playing to avoid overloading worker
+        segmentSource(sourceElement, width, height, 'isnet_fp16')
           .then((result) => {
             if (result) {
               markInferencePerformed(clipId);
               cacheMaskCanvas(clipId, result);
             }
           })
+          .catch(() => {})
           .finally(() => {
             isSegmentingInFlight = false;
           });

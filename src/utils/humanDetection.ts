@@ -52,12 +52,12 @@ function getClipState(clipId: string): ClipDetectionState {
 }
 
 // Re-segment every Nth frame in playback for performance.
-const BALANCED_CACHE_FRAMES = 3;
-const PERFORMANCE_CACHE_FRAMES = 6;
+const BALANCED_CACHE_FRAMES = 12;
+const PERFORMANCE_CACHE_FRAMES = 24;
 
 // Hard ceiling: force re-segmentation regardless of scene stability.
-const BALANCED_MAX_STALE_FRAMES = 9;
-const PERFORMANCE_MAX_STALE_FRAMES = 18;
+const BALANCED_MAX_STALE_FRAMES = 30;
+const PERFORMANCE_MAX_STALE_FRAMES = 60;
 
 // ─── Temporal Mask Cache ────────────────────────────────────────────────────
 
