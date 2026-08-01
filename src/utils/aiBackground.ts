@@ -100,19 +100,32 @@ async function segmentSource(
     const removeBgFn = bgRemovalModule.removeBackground ?? (bgRemovalModule as any).default?.removeBackground;
     if (!removeBgFn) throw new Error('@imgly/background-removal: removeBackground function not found');
 
-    // Normalize source to HTMLCanvasElement or HTMLImageElement if it's a Video or ImageBitmap
-    let inputSource: HTMLCanvasElement | HTMLImageElement = source as any;
-    if (!(source instanceof HTMLImageElement) && !(source instanceof HTMLCanvasElement)) {
-      const tempInCanvas = getAlphaCanvas('_temp_convert_input', targetWidth, targetHeight);
-      const tempInCtx = tempInCanvas.getContext('2d', { willReadFrequently: true });
-      if (tempInCtx) {
-        tempInCtx.clearRect(0, 0, targetWidth, targetHeight);
-        tempInCtx.drawImage(source, 0, 0, targetWidth, targetHeight);
-        inputSource = tempInCanvas;
-      }
+    // @imgly/background-removal strictly requires a Blob, URL, string, or NdArray.
+    // Passing HTMLCanvasElement, HTMLVideoElement, or HTMLImageElement directly causes
+    // "TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))" on e.shape.
+    let inputCanvas: HTMLCanvasElement;
+    if (source instanceof HTMLCanvasElement && source.width === targetWidth && source.height === targetHeight) {
+      inputCanvas = source;
+    } else {
+      inputCanvas = getAlphaCanvas('_temp_convert_input', targetWidth, targetHeight);
+      const tempInCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
+      if (!tempInCtx) return null;
+      tempInCtx.clearRect(0, 0, targetWidth, targetHeight);
+      tempInCtx.drawImage(source, 0, 0, targetWidth, targetHeight);
     }
 
-    const blob = await removeBgFn(inputSource as any, {
+    const inputBlob = await new Promise<Blob | null>((resolve) => {
+      inputCanvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          inputCanvas.toBlob(resolve, 'image/png');
+        }
+      }, 'image/webp', 0.85);
+    });
+    if (!inputBlob) return null;
+
+    const blob = await removeBgFn(inputBlob, {
       model,
       publicPath: PUBLIC_PATH,
       output: { format: 'image/png', quality: 0.9 },
