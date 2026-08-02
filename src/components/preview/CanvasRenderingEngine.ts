@@ -841,7 +841,7 @@ export async function renderCanvasEngine({
                 animEdgeBlur,
                 clip.aiBackground.modelSelection ?? 0,
                 clip.aiBackground.playbackQuality ?? 'balanced',
-                isPlaying,
+                true,
                 clip.id
               );
             } else {
@@ -853,7 +853,7 @@ export async function renderCanvasEngine({
                 animEdgeBlur,
                 clip.aiBackground.modelSelection ?? 0,
                 clip.aiBackground.playbackQuality ?? 'balanced',
-                isPlaying,
+                false,
                 clip.id
               );
             }
