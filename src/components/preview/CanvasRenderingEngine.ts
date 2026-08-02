@@ -825,26 +825,12 @@ export async function renderCanvasEngine({
             oCtx.filter = 'none';
           }
 
-          // AI Background Removal — runs independently of skipExpensiveFX because
-          // it manages its own playback optimization via humanDetection.ts.
-          // Uses @imgly/background-removal under the hood (no CORS issues).
+          // AI Background Removal — always non-blocking during interactive preview.
+          // Only awaits during export to guarantee frame-accurate masks.
           if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
             const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
-            // During scrub or live playback, fire-and-forget — don't block the RAF tick.
-            // The mask will arrive asynchronously via Web Worker without freezing the playhead.
-            if ((isScrubbing || isPlaying) && !isExporting) {
-              void applyAiBackgroundMask(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                sourceElement,
-                animEdgeBlur,
-                clip.aiBackground.modelSelection ?? 0,
-                clip.aiBackground.playbackQuality ?? 'balanced',
-                true,
-                clip.id
-              );
-            } else {
+            if (isExporting) {
+              // Export: block until we have an exact mask for this frame
               await applyAiBackgroundMask(
                 oCtx,
                 offCanvas.width,
@@ -854,6 +840,21 @@ export async function renderCanvasEngine({
                 clip.aiBackground.modelSelection ?? 0,
                 clip.aiBackground.playbackQuality ?? 'balanced',
                 false,
+                clip.id
+              );
+            } else {
+              // Interactive (playing, scrubbing, OR paused): fire-and-forget.
+              // The mask arrives asynchronously; cached masks draw instantly.
+              // This prevents the render loop from hanging for 2-10s on model load/inference.
+              void applyAiBackgroundMask(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                sourceElement,
+                animEdgeBlur,
+                clip.aiBackground.modelSelection ?? 0,
+                clip.aiBackground.playbackQuality ?? 'balanced',
+                true,
                 clip.id
               );
             }
@@ -999,12 +1000,12 @@ export async function renderCanvasEngine({
                 flashSpeed: clip.fxSettings.strobeSpeed || 8,
                 currentTime: currentTime,
                 clipId: `neon_${clip.id}`,
-                isPlaying: isPlaying || isScrubbing,
+                isPlaying: !isExporting,
               };
-              if ((isPlaying || isScrubbing) && !isExporting) {
-                void applySubjectNeonOutlineFlash(ctx, W, H, sourceEl, neonOpts);
-              } else {
+              if (isExporting) {
                 await applySubjectNeonOutlineFlash(ctx, W, H, sourceEl, neonOpts);
+              } else {
+                void applySubjectNeonOutlineFlash(ctx, W, H, sourceEl, neonOpts);
               }
             }
           }

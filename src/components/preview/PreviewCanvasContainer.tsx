@@ -29,6 +29,7 @@ import {
   PreviewCanvasHeaderToolbar,
   PreviewCanvasTransportControls,
 } from './PreviewCanvasToolbar';
+import { setOnMaskReadyCallback } from '@/utils/aiBackground';
 
 export function PreviewCanvasContainer() {
   const currentTime = useEditorStore.getState().currentTime;
@@ -141,6 +142,15 @@ export function PreviewCanvasContainer() {
       compositeCtxRef.current = null;
       lastFrameCanvasRef.current = null;
     };
+  }, []);
+
+  // Wire up AI background mask callback: when the Web Worker finishes computing
+  // a mask, schedule a canvas repaint so the result appears immediately.
+  useEffect(() => {
+    setOnMaskReadyCallback(() => {
+      framePendingRef.current = true;
+    });
+    return () => setOnMaskReadyCallback(null);
   }, []);
 
   const allClips = useMemo(() => tracks.flatMap((t) => t.clips || []), [tracks]);
