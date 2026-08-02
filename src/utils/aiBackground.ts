@@ -202,24 +202,6 @@ async function segmentSource(
   }
 }
 
-// ── Mask Polarity ────────────────────────────────────────────────────────────
-
-function ensureCorrectMaskPolarity(maskCanvas: HTMLCanvasElement): void {
-  const ctx = maskCanvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return;
-  const imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-  const data = imageData.data;
-  let opaquePixels = 0;
-  let transparentPixels = 0;
-  for (let i = 3; i < data.length; i += 16) {
-    if (data[i] > 128) opaquePixels++; else transparentPixels++;
-  }
-  if (transparentPixels > opaquePixels * 2) {
-    for (let i = 3; i < data.length; i += 4) data[i] = 255 - data[i];
-    ctx.putImageData(imageData, 0, 0);
-  }
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getVideoCurrentTime(sourceElement: any): number {
@@ -283,7 +265,7 @@ export async function applyAiBackgroundMask(
         segmentSource(snapCanvas, snapW, snapH, 'isnet_fp16')
           .then((result) => {
             if (result) {
-              ensureCorrectMaskPolarity(result);
+
               maskCacheMap.set(clipId, {
                 maskCanvas: result,
                 lastUpdateTimestamp: performance.now(),
@@ -308,7 +290,6 @@ export async function applyAiBackgroundMask(
         const model = modelSelection === 0 ? 'isnet' : 'isnet_fp16';
         const result = await segmentSource(sourceElement, width, height, model);
         if (result) {
-          ensureCorrectMaskPolarity(result);
           maskCanvas = result;
           maskCacheMap.set(clipId, {
             maskCanvas: result,
@@ -389,7 +370,7 @@ export async function applySubjectNeonOutlineFlash(
         segmentSource(infCanvas, snapW, snapH, 'isnet_fp16')
           .then((result) => {
             if (result) {
-              ensureCorrectMaskPolarity(result);
+
               maskCacheMap.set(clipId, {
                 maskCanvas: result,
                 lastUpdateTimestamp: performance.now(),
@@ -407,7 +388,6 @@ export async function applySubjectNeonOutlineFlash(
       if (!maskCanvas || timeMoved) {
         const result = await segmentSource(sourceElement, width, height, 'isnet_fp16');
         if (result) {
-          ensureCorrectMaskPolarity(result);
           maskCanvas = result;
           maskCacheMap.set(clipId, {
             maskCanvas: result,
