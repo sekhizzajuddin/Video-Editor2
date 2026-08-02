@@ -51,7 +51,7 @@ import { SequenceProperties } from './SequenceProperties';
 import { AIMotionGraphicsSection } from './tabs/effects';
 import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
-import { loadBackgroundRemover, cleanupClipBackgroundState } from '@/utils/aiBackground';
+import { loadBackgroundRemover, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -569,6 +569,17 @@ export function PropertiesPanel() {
 
   const [isSeparating, setIsSeparating] = useState(false);
   const [isNormalizing, setIsNormalizing] = useState(false);
+  const [bgAnalysisStatus, setBgAnalysisStatus] = useState<any>({ status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
+
+  useEffect(() => {
+    if (!selectedClip || !selectedClip.aiBackground?.enabled) {
+      setBgAnalysisStatus({ status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
+      return;
+    }
+    return subscribeClipBackgroundAnalysis(selectedClip.id, (st) => {
+      setBgAnalysisStatus({ ...st });
+    });
+  }, [selectedClip?.id, selectedClip?.aiBackground?.enabled]);
 
   const handleAiSeparate = async () => {
     if (!selectedClip || isSeparating) return;
@@ -2019,14 +2030,20 @@ export function PropertiesPanel() {
                       aiBackground: { ...existing, enabled }
                     });
                     scheduleSaveSnapshot('Toggle AI Background');
-                    // Pre-load the @imgly/background-removal model in the
-                    // background so the first frame doesn't take 2-5s to
-                    // load. The model is ~5MB and runs locally via onnx.
+                    // Pre-load the @imgly/background-removal model and start pre-computing
+                    // frame alpha masks in background for 60 FPS real-time playback.
                     if (enabled) {
-                      loadBackgroundRemover().catch(() => {
-                        // Error is already logged; user will see the model
-                        // failure on the next frame.
-                      });
+                      loadBackgroundRemover().catch(() => {});
+                      const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                      if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {
+                        startClipBackgroundAnalysis(
+                          selectedClip.id,
+                          mediaItem.url || '',
+                          selectedClip.trimStart || 0,
+                          selectedClip.duration || 5,
+                          existing.modelSelection || 0
+                        );
+                      }
                     } else {
                       cleanupClipBackgroundState(selectedClip.id);
                     }
@@ -2038,6 +2055,46 @@ export function PropertiesPanel() {
 
               {selectedClip.aiBackground?.enabled && (
                 <div className="mt-3.5 pt-3 border-t border-[#2d2d2d] space-y-3">
+                  {/* Real-time 60 FPS Pre-render Cache Card */}
+                  <div className="p-2.5 bg-[#252a2e] rounded border border-cyan-500/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-semibold text-cyan-400 flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${bgAnalysisStatus.status === 'analyzing' ? 'bg-amber-400 animate-pulse' : bgAnalysisStatus.status === 'completed' ? 'bg-green-400' : 'bg-cyan-500'}`} />
+                        {bgAnalysisStatus.status === 'analyzing' ? 'AI Pre-rendering Masks...' : bgAnalysisStatus.status === 'completed' ? 'Real-Time 60 FPS Cache Ready' : 'Pre-calculate for 60 FPS Playback'}
+                      </span>
+                      {bgAnalysisStatus.status === 'analyzing' && (
+                        <span className="text-[10px] font-mono text-[#a0a0a0]">{bgAnalysisStatus.progress}% ({bgAnalysisStatus.processedFrames}/{bgAnalysisStatus.totalFrames})</span>
+                      )}
+                    </div>
+                    {bgAnalysisStatus.status === 'analyzing' && (
+                      <div className="w-full bg-[#1a1a1a] h-1.5 rounded-full overflow-hidden">
+                        <div className="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full transition-all duration-300" style={{ width: `${bgAnalysisStatus.progress}%` }} />
+                      </div>
+                    )}
+                    <p className="text-[9px] text-[#8e98a0] leading-relaxed">
+                      {bgAnalysisStatus.status === 'analyzing' ? 'Generating alpha masks per frame. Prepared frames play instantaneously without AI latency.' : bgAnalysisStatus.status === 'completed' ? 'All frame masks are cached in GPU textures. Video plays smoothly at real-time speeds.' : 'Pre-compute masks for seamless real-time playback without inference drops.'}
+                    </p>
+                    {bgAnalysisStatus.status !== 'analyzing' && (
+                      <button
+                        onClick={() => {
+                          const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                          if (mediaItem && mediaItem.url) {
+                            cleanupClipBackgroundState(selectedClip.id);
+                            startClipBackgroundAnalysis(
+                              selectedClip.id,
+                              mediaItem.url,
+                              selectedClip.trimStart || 0,
+                              selectedClip.duration || 5,
+                              selectedClip.aiBackground?.modelSelection || 0
+                            );
+                          }
+                        }}
+                        className="w-full py-1 bg-[#1f2933] hover:bg-[#283542] border border-cyan-500/30 text-cyan-300 rounded text-[10px] transition-colors font-medium text-center"
+                      >
+                        {bgAnalysisStatus.status === 'completed' ? '⚡ Re-analyze Clip' : '⚡ Pre-compute Masks Now'}
+                      </button>
+                    )}
+                  </div>
                   {/* Quality Mode */}
                   <div>
                     <label className="block text-[10px] text-[#a0a0a0] mb-1 font-medium">Segmentation Quality</label>
@@ -2050,6 +2107,17 @@ export function PropertiesPanel() {
                           aiBackground: { ...existing, modelSelection: val }
                         });
                         scheduleSaveSnapshot('Change AI Background Quality');
+                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                        if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {
+                          cleanupClipBackgroundState(selectedClip.id);
+                          startClipBackgroundAnalysis(
+                            selectedClip.id,
+                            mediaItem.url || '',
+                            selectedClip.trimStart || 0,
+                            selectedClip.duration || 5,
+                            val
+                          );
+                        }
                       }}
                       className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
                     >
