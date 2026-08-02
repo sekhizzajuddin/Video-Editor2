@@ -889,17 +889,15 @@ export function PreviewCanvasOverlay({
 
       const resultImg = new Image();
       const resultUrl = URL.createObjectURL(resultBlob);
-      await new Promise((resolve, reject) => {
-        resultImg.onload = () => {
-          URL.revokeObjectURL(resultUrl);
-          resolve(null);
-        };
-        resultImg.onerror = (e) => {
-          URL.revokeObjectURL(resultUrl);
-          reject(e);
-        };
-        resultImg.src = resultUrl;
-      });
+      try {
+        await new Promise((resolve, reject) => {
+          resultImg.onload = () => resolve(null);
+          resultImg.onerror = reject;
+          resultImg.src = resultUrl;
+        });
+      } finally {
+        URL.revokeObjectURL(resultUrl);
+      }
 
       const fullMaskCanvas = document.createElement('canvas');
       fullMaskCanvas.width = imageW;
@@ -1099,8 +1097,11 @@ export function PreviewCanvasOverlay({
       }
     }
     ctx.putImageData(imgData, 0, 0);
-    return canvas.toDataURL();
-  }, [selectionMask, mediaItem]);
+    const dataUrl = canvas.toDataURL();
+    canvas.width = 0;
+    canvas.height = 0;
+    return dataUrl;
+  }, [selectionMask, mediaItem?.id, mediaItem?.width, mediaItem?.height]);
 
   const renderVirtualCamera = () => {
     if (!virtualCamera.enabled) return null;

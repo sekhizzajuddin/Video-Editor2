@@ -1,6 +1,7 @@
 import type { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { Sparkles } from 'lucide-react';
+import { cleanupClipBackgroundState } from '@/utils/aiBackground';
 
 interface EffectsListSectionProps {
   selectedClip: TimelineClip;
@@ -52,6 +53,7 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
         updateClip(selectedClip.id, {
           aiBackground: { ...selectedClip.aiBackground!, enabled: false }
         });
+        cleanupClipBackgroundState(selectedClip.id);
       }
     });
   }
@@ -97,6 +99,9 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
   }
 
   const handleClearAll = () => {
+    if (selectedClip.aiBackground?.enabled) {
+      cleanupClipBackgroundState(selectedClip.id);
+    }
     updateClip(selectedClip.id, {
       ...(selectedClip.chromaKey ? { chromaKey: { ...selectedClip.chromaKey, enabled: false } } : {}),
       ...(selectedClip.lumaKey ? { lumaKey: { ...selectedClip.lumaKey, enabled: false } } : {}),

@@ -3,6 +3,13 @@
  *
  * AI background removal using @imgly/background-removal (ONNX, runs locally,
  * no CDN/CORS issues, supports images + video frames).
+ *
+ * Key fixes:
+ * 1. No shared working canvases → no cross-clip mask bleed / race conditions.
+ * 2. Mask validation with automatic inversion detection.
+ * 3. Throttled scene-change detection (avoids playback hangs).
+ * 4. Async segmentation only updates cache, never touches live canvas.
+ * 5. Proper cleanup hooks for clip deletion / effect toggle.
  */
 
 import {
@@ -15,6 +22,7 @@ import {
   invalidateMaskCache,
   resetClipDetectionState,
   resetAllDetectionState,
+  shouldDetectSceneChange,
 } from './humanDetection';
 
 import * as ortModule from 'onnxruntime-web';
@@ -34,11 +42,11 @@ if (typeof window !== 'undefined') {
 let bgRemovalModule: typeof import('@imgly/background-removal') | null = null;
 let loadPromise: Promise<void> | null = null;
 let isLoaded = false;
-let isSegmentingInFlight = false;
+const segmentingInFlight = new Set<string>();
 
 const PUBLIC_PATH = 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/';
 
-// Pre-allocated canvases per clip to avoid GC pressure
+// Pre-allocated canvases per clip for blur / edge processing only
 const alphaCanvasPool = new Map<string, HTMLCanvasElement>();
 
 function getAlphaCanvas(clipId: string, width: number, height: number): HTMLCanvasElement {
@@ -85,6 +93,7 @@ export const loadBackgroundRemover = (): Promise<void> => {
  * Run inference on an image/video frame. Returns an HTMLCanvasElement
  * containing the subject with a transparent background at the source's
  * natural resolution.
+ * Uses a unique canvas per call (no shared state → no races).
  */
 async function segmentSource(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
@@ -101,19 +110,14 @@ async function segmentSource(
     const removeBgFn = bgRemovalModule.removeBackground ?? (bgRemovalModule as any).default?.removeBackground;
     if (!removeBgFn) throw new Error('@imgly/background-removal: removeBackground function not found');
 
-    // @imgly/background-removal strictly requires a Blob, URL, string, or NdArray.
-    // Passing HTMLCanvasElement, HTMLVideoElement, or HTMLImageElement directly causes
-    // "TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))" on e.shape.
-    let inputCanvas: HTMLCanvasElement;
-    if (source instanceof HTMLCanvasElement && source.width === targetWidth && source.height === targetHeight) {
-      inputCanvas = source;
-    } else {
-      inputCanvas = getAlphaCanvas('_temp_convert_input', targetWidth, targetHeight);
-      const tempInCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
-      if (!tempInCtx) return null;
-      tempInCtx.clearRect(0, 0, targetWidth, targetHeight);
-      tempInCtx.drawImage(source, 0, 0, targetWidth, targetHeight);
-    }
+    // Prepare input canvas at target resolution
+    const inputCanvas = document.createElement('canvas');
+    inputCanvas.width = targetWidth;
+    inputCanvas.height = targetHeight;
+    const tempInCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
+    if (!tempInCtx) return null;
+    tempInCtx.clearRect(0, 0, targetWidth, targetHeight);
+    tempInCtx.drawImage(source, 0, 0, targetWidth, targetHeight);
 
     const inputBlob = await new Promise<Blob | null>((resolve) => {
       inputCanvas.toBlob((blob) => {
@@ -133,11 +137,16 @@ async function segmentSource(
       output: { format: 'image/png', quality: 0.9 },
     });
 
-    // Decode the blob back into an ImageBitmap for fast compositing.
+    // Decode the blob into an ImageBitmap, then draw to a unique canvas.
     const bitmap = await createImageBitmap(blob);
-    const canvas = getAlphaCanvas('_temp_segment', targetWidth, targetHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
     const ctx = canvas.getContext('2d', { willReadFrequently: false });
-    if (!ctx) return null;
+    if (!ctx) {
+      bitmap.close();
+      return null;
+    }
     ctx.clearRect(0, 0, targetWidth, targetHeight);
     ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
     bitmap.close();
@@ -149,7 +158,35 @@ async function segmentSource(
 }
 
 /**
+ * Validate that the mask has the correct polarity (subject opaque, background transparent).
+ * If the mask appears inverted (more transparent than opaque), invert it in-place.
+ * This handles edge cases where the model or encoding produces reversed alpha.
+ */
+function ensureCorrectMaskPolarity(maskCanvas: HTMLCanvasElement): void {
+  const ctx = maskCanvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+  const imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+  const data = imageData.data;
+  let opaquePixels = 0;
+  let transparentPixels = 0;
+  // Sample every 4th pixel for speed
+  for (let i = 3; i < data.length; i += 16) {
+    if (data[i] > 128) opaquePixels++;
+    else transparentPixels++;
+  }
+  if (transparentPixels > opaquePixels * 2) {
+    // Mask appears inverted (background opaque, subject transparent) → invert alpha
+    for (let i = 3; i < data.length; i += 4) {
+      data[i] = 255 - data[i];
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+}
+
+/**
  * Public API: apply AI background removal to a canvas context.
+ * During playback: applies CACHED mask synchronously, triggers async re-segmentation in background.
+ * When paused/exporting: awaits fresh segmentation if no valid cache exists.
  */
 export async function applyAiBackgroundMask(
   ctx: CanvasRenderingContext2D,
@@ -163,44 +200,60 @@ export async function applyAiBackgroundMask(
   clipId: string = '_default'
 ) {
   try {
-    let maskCanvas: HTMLCanvasElement | null = getCachedMaskCanvas(clipId, width, height);
-    const model: 'isnet' | 'isnet_fp16' = modelSelection === 0 ? 'isnet' : 'isnet_fp16';
+    // STEP 1: Try to get a usable cached mask
+    let maskCanvas = getCachedMaskCanvas(clipId, width, height);
 
+    // STEP 2: Decide whether to trigger background re-segmentation
     if (isPlaying) {
-      // During video playback: return cached mask immediately for 60fps smoothness,
-      // and trigger async background segmentation via Web Worker without stalling UI.
+      // Throttled scene-change detection (runs ~once every 12 frames max)
+      const sceneChanged = shouldDetectSceneChange(clipId, 12)
+        ? detectSceneChange(clipId, sourceElement)
+        : false;
+
       const needsUpdate = !shouldUseCachedMask(clipId, playbackQuality) ||
                           mustForceResegment(clipId, playbackQuality) ||
-                          detectSceneChange(clipId, sourceElement);
+                          sceneChanged;
 
-      if (needsUpdate && !isSegmentingInFlight) {
-        isSegmentingInFlight = true;
-        // Use fast fp16 model during live playing to avoid overloading worker
-        segmentSource(sourceElement, width, height, 'isnet_fp16')
+      if (needsUpdate && !segmentingInFlight.has(clipId)) {
+        segmentingInFlight.add(clipId);
+        // Capture frame snapshot to avoid stale sourceElement during async processing
+        const inferenceCanvas = document.createElement('canvas');
+        inferenceCanvas.width = width;
+        inferenceCanvas.height = height;
+        const inferCtx = inferenceCanvas.getContext('2d');
+        if (inferCtx) {
+          inferCtx.drawImage(sourceElement, 0, 0, width, height);
+        }
+
+        // Fast fp16 model during live playing
+        segmentSource(inferenceCanvas, width, height, 'isnet_fp16')
           .then((result) => {
             if (result) {
+              ensureCorrectMaskPolarity(result);
               markInferencePerformed(clipId);
               cacheMaskCanvas(clipId, result);
             }
           })
           .catch(() => {})
           .finally(() => {
-            isSegmentingInFlight = false;
+            segmentingInFlight.delete(clipId);
           });
       }
     } else if (!maskCanvas) {
-      // When paused or initial frame: await full segmentation if no mask cached
+      // Paused / exporting: block until fresh segmentation completes
+      const model = modelSelection === 0 ? 'isnet' : 'isnet_fp16';
       const result = await segmentSource(sourceElement, width, height, model);
       if (result) {
+        ensureCorrectMaskPolarity(result);
         maskCanvas = result;
         markInferencePerformed(clipId);
         cacheMaskCanvas(clipId, maskCanvas);
       }
     }
 
+    // STEP 3: Apply mask SYNCHRONOUSLY (using cache if available)
     if (!maskCanvas) return;
 
-    // Apply the alpha mask to the target context using destination-in.
     if (edgeBlur > 0) {
       const blurredCanvas = getAlphaCanvas(`${clipId}_blur`, width, height);
       const bCtx = blurredCanvas.getContext('2d');
@@ -239,19 +292,45 @@ export async function applySubjectNeonOutlineFlash(
     flashSpeed?: number;
     currentTime?: number;
     clipId?: string;
+    isPlaying?: boolean;
   } = {}
 ) {
   try {
     const clipId = options.clipId || '_neon_default';
-    const model: 'isnet' | 'isnet_fp16' = 'isnet_fp16';
-    const result = await segmentSource(sourceElement, width, height, model);
-    if (!result) return;
+    const isPlaying = options.isPlaying || false;
+    let maskCanvas = getCachedMaskCanvas(clipId, width, height);
+    
+    if (isPlaying) {
+      const needsUpdate = !maskCanvas || mustForceResegment(clipId, 'balanced');
+      if (needsUpdate && !segmentingInFlight.has(clipId)) {
+        segmentingInFlight.add(clipId);
+        const infCanvas = document.createElement('canvas');
+        infCanvas.width = width;
+        infCanvas.height = height;
+        const infCtx = infCanvas.getContext('2d');
+        if (infCtx) infCtx.drawImage(sourceElement, 0, 0, width, height);
+        segmentSource(infCanvas, width, height, 'isnet_fp16')
+          .then((result) => {
+            if (result) {
+              ensureCorrectMaskPolarity(result);
+              markInferencePerformed(clipId);
+              cacheMaskCanvas(clipId, result);
+            }
+          })
+          .catch(() => {})
+          .finally(() => { segmentingInFlight.delete(clipId); });
+      }
+    } else if (!maskCanvas) {
+      const result = await segmentSource(sourceElement, width, height, 'isnet_fp16');
+      if (result) {
+        ensureCorrectMaskPolarity(result);
+        markInferencePerformed(clipId);
+        cacheMaskCanvas(clipId, result);
+        maskCanvas = result;
+      }
+    }
 
-    const maskCanvas = getAlphaCanvas(clipId, width, height);
-    const mCtx = maskCanvas.getContext('2d');
-    if (!mCtx) return;
-    mCtx.clearRect(0, 0, width, height);
-    mCtx.drawImage(result, 0, 0, width, height);
+    if (!maskCanvas) return;
 
     const edgeCanvas = getAlphaCanvas(`${clipId}_edge`, width, height);
     const eCtx = edgeCanvas.getContext('2d');
@@ -292,6 +371,7 @@ export async function applySubjectNeonOutlineFlash(
 
 /**
  * Clean up per-clip canvas pools and cache state.
+ * Must be called when a clip with AI background is deleted, or the effect is disabled.
  */
 export function cleanupAiBackgroundResources(): void {
   alphaCanvasPool.clear();
@@ -299,9 +379,11 @@ export function cleanupAiBackgroundResources(): void {
 }
 
 export function cleanupClipBackgroundState(clipId: string): void {
-  const maskCanvas = alphaCanvasPool.get(clipId);
-  if (maskCanvas) {
-    alphaCanvasPool.delete(clipId);
+  // Clean up all pooled canvases for this clip
+  for (const key of alphaCanvasPool.keys()) {
+    if (key.startsWith(clipId)) {
+      alphaCanvasPool.delete(key);
+    }
   }
   resetClipDetectionState(clipId);
 }

@@ -23,6 +23,7 @@
 interface ClipDetectionState {
   // Temporal mask cache — kept at the LAST USED resolution, not downscaled.
   cachedMask: HTMLCanvasElement | null;
+  rescaledMask?: HTMLCanvasElement | null;
   cachedMaskTimestamp: number;
   cachedMaskFrameCount: number;
 
@@ -32,6 +33,9 @@ interface ClipDetectionState {
 
   // Scene change detection
   previousHistogram: Uint32Array | null;
+
+  // Throttle counter for expensive scene-change histogram readback.
+  sceneCheckCounter: number;
 }
 
 const clipStates = new Map<string, ClipDetectionState>();
@@ -41,10 +45,12 @@ function getClipState(clipId: string): ClipDetectionState {
   if (!state) {
     state = {
       cachedMask: null,
+      rescaledMask: null,
       cachedMaskTimestamp: 0,
       cachedMaskFrameCount: 0,
       monotoneFramesSinceInference: 0,
       previousHistogram: null,
+      sceneCheckCounter: 0,
     };
     clipStates.set(clipId, state);
   }
@@ -68,21 +74,25 @@ export function getCachedMaskCanvas(
 ): HTMLCanvasElement | null {
   const state = getClipState(clipId);
   if (!state.cachedMask) return null;
-  // If the cached mask resolution differs from the requested one, upscale it
+  // If the cached mask resolution differs from the requested one, rescale it
   // onto a new canvas at the requested resolution so the caller gets exactly
   // what it needs. This prevents halo artifacts when re-compositing.
   if (state.cachedMask.width !== width || state.cachedMask.height !== height) {
-    const upscaled = document.createElement('canvas');
-    upscaled.width = width;
-    upscaled.height = height;
-    const ctx = upscaled.getContext('2d');
+    if (!state.rescaledMask) {
+      state.rescaledMask = document.createElement('canvas');
+    }
+    const rescaled = state.rescaledMask;
+    if (rescaled.width !== width || rescaled.height !== height) {
+      rescaled.width = width;
+      rescaled.height = height;
+    }
+    const ctx = rescaled.getContext('2d');
     if (!ctx) return null;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
+    ctx.clearRect(0, 0, width, height);
     ctx.drawImage(state.cachedMask, 0, 0, width, height);
-    // Replace the cache with the new resolution so future reads are O(1)
-    // upscaled.dispose?.(); // canvas has no dispose
-    state.cachedMask = upscaled;
+    return rescaled;
   }
   return state.cachedMask;
 }
@@ -90,6 +100,7 @@ export function getCachedMaskCanvas(
 export function cacheMaskCanvas(clipId: string, mask: HTMLCanvasElement | null): void {
   const state = getClipState(clipId);
   state.cachedMask = mask;
+  state.rescaledMask = null;
   state.cachedMaskTimestamp = performance.now();
   state.cachedMaskFrameCount = 0;
   // NOTE: monotoneFramesSinceInference is reset only by markInferencePerformed()
@@ -136,6 +147,7 @@ export function invalidateMaskCache(clipId?: string): void {
     const state = clipStates.get(clipId);
     if (state) {
       state.cachedMask = null;
+      state.rescaledMask = null;
       state.cachedMaskTimestamp = 0;
       state.cachedMaskFrameCount = 0;
       state.monotoneFramesSinceInference = 0;
@@ -143,6 +155,7 @@ export function invalidateMaskCache(clipId?: string): void {
   } else {
     for (const state of clipStates.values()) {
       state.cachedMask = null;
+      state.rescaledMask = null;
       state.cachedMaskTimestamp = 0;
       state.cachedMaskFrameCount = 0;
       state.monotoneFramesSinceInference = 0;
@@ -218,6 +231,19 @@ export function detectSceneChange(
   const normalizedDist = chiSq / totalPixels;
   state.previousHistogram = currentHistogram;
   return normalizedDist > threshold;
+}
+
+// Throttled wrapper that limits histogram-based scene-change checks to at most
+// once every N frames per clip. Without this the 64x36 readback runs on every
+// render tick, which causes severe playback hangs on long timelines.
+export function shouldDetectSceneChange(clipId: string, everyNFrames: number = 12): boolean {
+  const state = getClipState(clipId);
+  state.sceneCheckCounter = (state.sceneCheckCounter || 0) + 1;
+  if (state.sceneCheckCounter >= everyNFrames) {
+    state.sceneCheckCounter = 0;
+    return true;
+  }
+  return false;
 }
 
 // ─── Skin-Tone Detection (Human Presence Heuristic) ─────────────────────────

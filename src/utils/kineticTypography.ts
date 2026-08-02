@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { extractFramesFromVideo } from './frameExtractor';
 import { TEXT_TEMPLATES } from './textTemplates';
 import { transcribeAudioWithGroq, analyzeReasoningWithGroq } from './groqClient';
+import { scheduleSaveSnapshot } from './snapshotScheduler';
 
 const uuidv4 = () => crypto.randomUUID();
 
@@ -357,7 +358,7 @@ processedClips.push({
         trimStart: 0,
         trimEnd: sDuration,
         opacity: 1,
-        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        transform: { x: 0, y: 160, scale: 100, rotation: 0 },
         speed: 1,
         effects: [],
         textSettings: {
@@ -588,6 +589,7 @@ processedClips.push({
   };
 
   useEditorStore.setState({ tracks: newTracks, pipWindows: updatedPipWindows });
+  scheduleSaveSnapshot('Generate Kinetic Typography');
   onProgress(100);
 }
 

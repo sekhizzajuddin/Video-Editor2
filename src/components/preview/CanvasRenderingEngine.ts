@@ -88,7 +88,7 @@ export function getOrCreateCanvas(
       // we maintain by delete-then-set below). Never evict the composite
       // canvas which is the final drawing target.
       for (const k of offscreenPool.keys()) {
-        if (k !== 'composite' && !k.startsWith('clip_mask_temp_')) {
+        if (k !== 'composite') {
           offscreenPool.delete(k);
           break;
         }
@@ -992,19 +992,20 @@ export async function renderCanvasEngine({
           if (clip.fxSettings?.type === 'subject_outline_flash') {
             const sourceEl = videoEl || imageEl || offCanvas;
             if (sourceEl) {
-              await applySubjectNeonOutlineFlash(
-                ctx,
-                W,
-                H,
-                sourceEl,
-                {
-                  color: clip.fxSettings.outlineColor || '#00f0ff',
-                  strokeWidth: clip.fxSettings.outlineWidth || 3,
-                  glowBlur: clip.fxSettings.glowBlur || 14,
-                  flashSpeed: clip.fxSettings.strobeSpeed || 8,
-                  currentTime: currentTime
-                }
-              );
+              const neonOpts = {
+                color: clip.fxSettings.outlineColor || '#00f0ff',
+                strokeWidth: clip.fxSettings.outlineWidth || 3,
+                glowBlur: clip.fxSettings.glowBlur || 14,
+                flashSpeed: clip.fxSettings.strobeSpeed || 8,
+                currentTime: currentTime,
+                clipId: `neon_${clip.id}`,
+                isPlaying: isPlaying || isScrubbing,
+              };
+              if ((isPlaying || isScrubbing) && !isExporting) {
+                void applySubjectNeonOutlineFlash(ctx, W, H, sourceEl, neonOpts);
+              } else {
+                await applySubjectNeonOutlineFlash(ctx, W, H, sourceEl, neonOpts);
+              }
             }
           }
         }

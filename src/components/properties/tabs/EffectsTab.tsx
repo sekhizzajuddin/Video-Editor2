@@ -36,6 +36,7 @@ export function EffectsTab({
           isAnalyzingMotionGraphics={isAnalyzingMotionGraphics}
           motionGraphicsAnalyzeProgress={motionGraphicsAnalyzeProgress}
           handleAiMotionGraphicsDesign={handleAiMotionGraphicsDesign}
+          selectedClip={selectedClip}
         />
       )}
 

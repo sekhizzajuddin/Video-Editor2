@@ -19,6 +19,7 @@ import { getMediaTimeForClip, getMediaTimeAtPosition, getSpeedRampEngine, SpeedR
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
+import { cleanupClipBackgroundState } from '@/utils/aiBackground';
 
 let saveTimeoutId: any = null;
 const debouncedSaveProject = (state: any) => {
@@ -1375,6 +1376,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         });
       });
       const idsToRemove = Array.from(idsToRemoveSet);
+      idsToRemove.forEach((id) => cleanupClipBackgroundState(id));
 
       const deletedClips = state.tracks.flatMap(t => t.clips || []).filter(c => idsToRemove.includes(c.id));
 
