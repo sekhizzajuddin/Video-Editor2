@@ -132,14 +132,17 @@ export const loadBackgroundRemover = (): Promise<void> => {
 // ── Segmentation ─────────────────────────────────────────────────────────────
 
 /**
- * Run inference on a downscaled snapshot (max 384px).
+ * Run inference on a Blob. The caller is responsible for capturing the snapshot
+ * and converting it to a Blob BEFORE calling this function. This ensures the
+ * snapshot is frozen (Blobs are immutable) and immune to canvas overwrite races.
+ *
  * With the forced ONNX proxy, the heavy WASM inference runs in ONNX Runtime's
  * internal Web Worker. Main-thread cost: ~5-10ms (image resize + pixel loop).
  */
-async function segmentSource(
-  source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
-  targetWidth: number,
-  targetHeight: number,
+async function segmentBlob(
+  inputBlob: Blob,
+  inferW: number,
+  inferH: number,
   model: 'isnet' | 'isnet_fp16' = 'isnet_fp16'
 ): Promise<HTMLCanvasElement | null> {
   if (!bgRemovalModule) {
@@ -151,39 +154,15 @@ async function segmentSource(
     const removeBgFn = bgRemovalModule.removeBackground ?? (bgRemovalModule as any).default?.removeBackground;
     if (!removeBgFn) throw new Error('@imgly/background-removal: removeBackground function not found');
 
-    // Downscale to max 384px — keeps toBlob() < 1ms and ONNX inference 20-40x faster
-    const maxDim = 384;
-    const scale = Math.min(1, maxDim / Math.max(targetWidth, targetHeight));
-    const inferW = Math.max(64, Math.round(targetWidth * scale));
-    const inferH = Math.max(64, Math.round(targetHeight * scale));
-
-    // Use pooled canvas for the snapshot to avoid GC pressure
-    const inputCanvas = getPooledCanvas('_infer_input', inferW, inferH);
-    const tempInCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
-    if (!tempInCtx) return null;
-    tempInCtx.clearRect(0, 0, inferW, inferH);
-    tempInCtx.drawImage(source, 0, 0, inferW, inferH);
-
-    const inputBlob = await new Promise<Blob | null>((resolve) => {
-      inputCanvas.toBlob((blob) => {
-        if (blob) {
-          resolve(blob);
-        } else {
-          inputCanvas.toBlob(resolve, 'image/png');
-        }
-      }, 'image/jpeg', 0.85);
-    });
-    if (!inputBlob) return null;
-
     // Run inference — with our proxy override, ONNX WASM runs in a background worker
-    const blob = await removeBgFn(inputBlob, {
+    const resultBlob = await removeBgFn(inputBlob, {
       model,
       publicPath: PUBLIC_PATH,
       proxyToWorker: true,
       output: { format: 'image/png', quality: 0.9 },
     });
 
-    const bitmap = await createImageBitmap(blob);
+    const bitmap = await createImageBitmap(resultBlob);
     const resultCanvas = document.createElement('canvas');
     resultCanvas.width = inferW;
     resultCanvas.height = inferH;
@@ -197,9 +176,46 @@ async function segmentSource(
     bitmap.close();
     return resultCanvas;
   } catch (err) {
-    console.error('[aiBackground] segmentSource error:', err);
+    console.error('[aiBackground] segmentBlob error:', err);
     return null;
   }
+}
+
+/**
+ * Capture a snapshot from a source element, downscale to max 384px, and
+ * immediately freeze it into a Blob. The Blob is immutable — no race condition
+ * with pooled canvas overwrites.
+ */
+function captureSnapshotBlob(
+  source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+  targetWidth: number,
+  targetHeight: number
+): Promise<{ blob: Blob; w: number; h: number } | null> {
+  const maxDim = 384;
+  const scale = Math.min(1, maxDim / Math.max(targetWidth, targetHeight));
+  const inferW = Math.max(64, Math.round(targetWidth * scale));
+  const inferH = Math.max(64, Math.round(targetHeight * scale));
+
+  const snapCanvas = getPooledCanvas('_snap_capture', inferW, inferH);
+  const snapCtx = snapCanvas.getContext('2d');
+  if (!snapCtx) return Promise.resolve(null);
+  snapCtx.clearRect(0, 0, inferW, inferH);
+  snapCtx.drawImage(source, 0, 0, inferW, inferH);
+
+  // Freeze the snapshot into an immutable Blob immediately.
+  // toBlob is async but fires synchronously from the current canvas state.
+  return new Promise<{ blob: Blob; w: number; h: number } | null>((resolve) => {
+    snapCanvas.toBlob((blob) => {
+      if (blob) {
+        resolve({ blob, w: inferW, h: inferH });
+      } else {
+        // Fallback to PNG if JPEG fails
+        snapCanvas.toBlob((pngBlob) => {
+          resolve(pngBlob ? { blob: pngBlob, w: inferW, h: inferH } : null);
+        }, 'image/png');
+      }
+    }, 'image/jpeg', 0.85);
+  });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -219,6 +235,8 @@ function getVideoCurrentTime(sourceElement: any): number {
  * Interactive (isPlaying=true): Fire-and-forget async segmentation with throttling.
  *   The render loop never waits for inference — it composites the cached mask
  *   and moves on. When a fresh mask arrives, notifyMaskReady() triggers a repaint.
+ *   CRITICAL: The LAST cached mask is ALWAYS composited even while a new one
+ *   is being computed, so the background removal effect never "disappears".
  *
  * Export (isPlaying=false): Awaits segmentation for frame-accurate masks.
  */
@@ -244,42 +262,46 @@ export async function applyAiBackgroundMask(
 
     if (isPlaying) {
       // ── INTERACTIVE: non-blocking fire-and-forget ──
-      const shouldRefresh = !maskCanvas ||
-        (performance.now() - (cached?.lastUpdateTimestamp || 0) > updateIntervalMs);
+      // Always composite the LAST cached mask (even stale). Only fire a new
+      // segmentation request if enough time has elapsed AND no request is in flight.
+      const elapsed = performance.now() - (cached?.lastUpdateTimestamp || 0);
+      const shouldRefresh = !maskCanvas || elapsed > updateIntervalMs;
 
       if (shouldRefresh && !segmentingInFlight.has(clipId)) {
         segmentingInFlight.add(clipId);
 
-        // Capture a fast 384px snapshot (< 1ms)
-        const snapScale = Math.min(1, 384 / Math.max(width, height));
-        const snapW = Math.max(64, Math.round(width * snapScale));
-        const snapH = Math.max(64, Math.round(height * snapScale));
-        const snapCanvas = getPooledCanvas(`${clipId}_snapshot`, snapW, snapH);
-        const snapCtx = snapCanvas.getContext('2d');
-        if (snapCtx) {
-          snapCtx.clearRect(0, 0, snapW, snapH);
-          snapCtx.drawImage(sourceElement, 0, 0, snapW, snapH);
-        }
-
-        // Fire-and-forget — the Promise runs in the background via ONNX's proxy worker
-        segmentSource(snapCanvas, snapW, snapH, 'isnet_fp16')
-          .then((result) => {
-            if (result) {
-
-              maskCacheMap.set(clipId, {
-                maskCanvas: result,
-                lastUpdateTimestamp: performance.now(),
-                lastVideoTime: getVideoCurrentTime(sourceElement),
-              });
-              notifyMaskReady();
+        // Capture snapshot and freeze to Blob immediately (< 2ms at 384px).
+        // The Blob is immutable — immune to pooled canvas overwrite races.
+        captureSnapshotBlob(sourceElement, width, height)
+          .then((snap) => {
+            if (!snap) {
+              segmentingInFlight.delete(clipId);
+              return;
             }
+            // Run segmentation in background (ONNX proxy worker handles the heavy work)
+            return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16')
+              .then((result) => {
+                if (result) {
+                  maskCacheMap.set(clipId, {
+                    maskCanvas: result,
+                    lastUpdateTimestamp: performance.now(),
+                    lastVideoTime: getVideoCurrentTime(sourceElement),
+                  });
+                  // Signal the render loop to repaint with the new mask
+                  notifyMaskReady();
+                }
+              });
           })
-          .catch(() => {})
+          .catch((err) => {
+            console.warn('[aiBackground] Playback segmentation error:', err);
+          })
           .finally(() => {
             segmentingInFlight.delete(clipId);
           });
       }
-      // Fall through — composite whatever cached mask we have (may be null on first frame)
+      // Fall through — composite whatever cached mask we have.
+      // If no mask yet (first frame), maskCanvas is null and we skip compositing
+      // (the video shows unmasked until the first mask arrives — typically 1-3s).
 
     } else {
       // ── EXPORT / PAUSED: await for frame-accurate mask ──
@@ -288,14 +310,17 @@ export async function applyAiBackgroundMask(
 
       if (!maskCanvas || timeMoved) {
         const model = modelSelection === 0 ? 'isnet' : 'isnet_fp16';
-        const result = await segmentSource(sourceElement, width, height, model);
-        if (result) {
-          maskCanvas = result;
-          maskCacheMap.set(clipId, {
-            maskCanvas: result,
-            lastUpdateTimestamp: performance.now(),
-            lastVideoTime: currentVideoTime,
-          });
+        const snap = await captureSnapshotBlob(sourceElement, width, height);
+        if (snap) {
+          const result = await segmentBlob(snap.blob, snap.w, snap.h, model);
+          if (result) {
+            maskCanvas = result;
+            maskCacheMap.set(clipId, {
+              maskCanvas: result,
+              lastUpdateTimestamp: performance.now(),
+              lastVideoTime: currentVideoTime,
+            });
+          }
         }
       }
     }
@@ -357,27 +382,23 @@ export async function applySubjectNeonOutlineFlash(
       if (shouldRefresh && !segmentingInFlight.has(clipId)) {
         segmentingInFlight.add(clipId);
 
-        const snapScale = Math.min(1, 384 / Math.max(width, height));
-        const snapW = Math.max(64, Math.round(width * snapScale));
-        const snapH = Math.max(64, Math.round(height * snapScale));
-        const infCanvas = getPooledCanvas(`${clipId}_neon_snap`, snapW, snapH);
-        const infCtx = infCanvas.getContext('2d');
-        if (infCtx) {
-          infCtx.clearRect(0, 0, snapW, snapH);
-          infCtx.drawImage(sourceElement, 0, 0, snapW, snapH);
-        }
-
-        segmentSource(infCanvas, snapW, snapH, 'isnet_fp16')
-          .then((result) => {
-            if (result) {
-
-              maskCacheMap.set(clipId, {
-                maskCanvas: result,
-                lastUpdateTimestamp: performance.now(),
-                lastVideoTime: getVideoCurrentTime(sourceElement),
-              });
-              notifyMaskReady();
+        captureSnapshotBlob(sourceElement, width, height)
+          .then((snap) => {
+            if (!snap) {
+              segmentingInFlight.delete(clipId);
+              return;
             }
+            return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16')
+              .then((result) => {
+                if (result) {
+                  maskCacheMap.set(clipId, {
+                    maskCanvas: result,
+                    lastUpdateTimestamp: performance.now(),
+                    lastVideoTime: getVideoCurrentTime(sourceElement),
+                  });
+                  notifyMaskReady();
+                }
+              });
           })
           .catch(() => {})
           .finally(() => { segmentingInFlight.delete(clipId); });
@@ -386,14 +407,17 @@ export async function applySubjectNeonOutlineFlash(
       const timeMoved = currentVideoTime >= 0 &&
         Math.abs(currentVideoTime - (cached?.lastVideoTime ?? -1)) > 0.04;
       if (!maskCanvas || timeMoved) {
-        const result = await segmentSource(sourceElement, width, height, 'isnet_fp16');
-        if (result) {
-          maskCanvas = result;
-          maskCacheMap.set(clipId, {
-            maskCanvas: result,
-            lastUpdateTimestamp: performance.now(),
-            lastVideoTime: currentVideoTime,
-          });
+        const snap = await captureSnapshotBlob(sourceElement, width, height);
+        if (snap) {
+          const result = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+          if (result) {
+            maskCanvas = result;
+            maskCacheMap.set(clipId, {
+              maskCanvas: result,
+              lastUpdateTimestamp: performance.now(),
+              lastVideoTime: currentVideoTime,
+            });
+          }
         }
       }
     }
