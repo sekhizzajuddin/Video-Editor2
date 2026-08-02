@@ -58,12 +58,15 @@ function getClipState(clipId: string): ClipDetectionState {
 }
 
 // Re-segment every Nth frame in playback for performance.
-const BALANCED_CACHE_FRAMES = 12;
-const PERFORMANCE_CACHE_FRAMES = 24;
+// Reduced from 12/24 to 3/5 — moving subjects drift out of a stale mask within
+// ~3 frames, so longer reuse produces visibly wrong background removal.
+const BALANCED_CACHE_FRAMES = 3;
+const PERFORMANCE_CACHE_FRAMES = 5;
 
 // Hard ceiling: force re-segmentation regardless of scene stability.
-const BALANCED_MAX_STALE_FRAMES = 30;
-const PERFORMANCE_MAX_STALE_FRAMES = 60;
+// Reduced so masks stay in sync with fast-moving subjects.
+const BALANCED_MAX_STALE_FRAMES = 8;
+const PERFORMANCE_MAX_STALE_FRAMES = 15;
 
 // ─── Temporal Mask Cache ────────────────────────────────────────────────────
 
@@ -123,6 +126,22 @@ export function shouldUseCachedMask(
 
   state.cachedMaskFrameCount++;
   state.monotoneFramesSinceInference++;
+
+  const maxFrames = playbackQuality === 'performance'
+    ? PERFORMANCE_CACHE_FRAMES
+    : BALANCED_CACHE_FRAMES;
+  return state.cachedMaskFrameCount < maxFrames;
+}
+
+// Pure read-only variant — does NOT mutate state. Use when you only want to
+// check the cache validity without consuming a "frame slot".
+export function peekCachedMaskValid(
+  clipId: string,
+  playbackQuality: 'full' | 'balanced' | 'performance'
+): boolean {
+  const state = getClipState(clipId);
+  if (!state.cachedMask) return false;
+  if (playbackQuality === 'full') return false;
 
   const maxFrames = playbackQuality === 'performance'
     ? PERFORMANCE_CACHE_FRAMES
