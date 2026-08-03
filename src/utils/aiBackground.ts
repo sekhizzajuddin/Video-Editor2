@@ -26,51 +26,60 @@ import * as ortModule from 'onnxruntime-web';
 import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
 
 // ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
-let mediaPipeSegmenter: any = null;
-let mediaPipeInitPromise: Promise<any> | null = null;
+let mediaPipeGeneralSegmenter: any = null;
+let mediaPipeLandscapeSegmenter: any = null;
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
 
 /**
- * Preload the MediaPipe GPU Selfie Segmenter model (~250KB - 2MB).
- * Runs inference on WebGL GPU in 3-8ms per frame.
+ * Preload MediaPipe GPU Segmenter.
+ * 'landscape' uses 16:9 widescreen TFLite model for high accuracy on video clips.
+ * 'general' uses 256x256 square model.
  */
-export async function loadMediaPipeSegmenter(): Promise<any> {
-  if (mediaPipeSegmenter) return mediaPipeSegmenter;
-  if (mediaPipeInitPromise) return mediaPipeInitPromise;
+export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' = 'landscape'): Promise<any> {
+  if (modelType === 'landscape' && mediaPipeLandscapeSegmenter) return mediaPipeLandscapeSegmenter;
+  if (modelType === 'general' && mediaPipeGeneralSegmenter) return mediaPipeGeneralSegmenter;
 
-  mediaPipeInitPromise = (async () => {
-    try {
-      const vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-      );
-      const segmenter = await ImageSegmenter.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
-          delegate: 'GPU',
-        },
-        runningMode: 'IMAGE',
-        outputCategoryMask: false,
-        outputConfidenceMasks: true,
-      });
-      mediaPipeSegmenter = segmenter;
-      return segmenter;
-    } catch (err) {
-      console.warn('[aiBackground] MediaPipe GPU Segmenter load failed, falling back to @imgly:', err);
-      mediaPipeInitPromise = null;
-      return null;
-    }
-  })();
-  return mediaPipeInitPromise;
+  try {
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+    );
+    const modelAssetPath = modelType === 'landscape'
+      ? 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite'
+      : 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+
+    const segmenter = await ImageSegmenter.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath,
+        delegate: 'GPU',
+      },
+      runningMode: 'IMAGE',
+      outputCategoryMask: false,
+      outputConfidenceMasks: true,
+    });
+
+    if (modelType === 'landscape') mediaPipeLandscapeSegmenter = segmenter;
+    else mediaPipeGeneralSegmenter = segmenter;
+
+    return segmenter;
+  } catch (err) {
+    console.warn('[aiBackground] MediaPipe GPU Segmenter load failed, falling back to @imgly:', err);
+    return null;
+  }
 }
 
 /**
  * Run MediaPipe Selfie Segmenter directly on a Video/Canvas/Image element.
- * Extremely fast: ~3-8ms execution time on WebGL GPU.
+ * Applies Smoothstep Hermite S-Curve for High-Accuracy anti-aliased matte edges.
  */
 export async function segmentSourceWithMediaPipe(
-  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap
+  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
+  modelType: 'general' | 'landscape' = 'landscape'
 ): Promise<ImageBitmap | null> {
-  const segmenter = await loadMediaPipeSegmenter();
+  const segmenter = await loadMediaPipeSegmenter(modelType);
   if (!segmenter) return null;
 
   try {
@@ -88,9 +97,13 @@ export async function segmentSourceWithMediaPipe(
     const imgData = new ImageData(w, h);
     const data32 = new Uint32Array(imgData.data.buffer);
 
+    // High-Accuracy Smoothstep Matte Refinement:
+    // Anti-aliases hair and edge boundaries while removing background noise halos
     for (let i = 0; i < floatArray.length; i++) {
       const conf = floatArray[i];
-      const alpha = conf > 0.5 ? 255 : Math.round(conf * 255);
+      // Hermite S-Curve: smooth transition between 0.15 (bg cutoff) and 0.75 (solid subject)
+      const alphaVal = smoothstep(0.15, 0.75, conf);
+      const alpha = Math.round(alphaVal * 255);
       data32[i] = (alpha << 24) | 0x00FFFFFF;
     }
 
@@ -410,7 +423,7 @@ export async function startClipBackgroundAnalysis(
   videoUrl: string,
   startTime: number,
   duration: number,
-  _modelSelection: 0 | 1 = 0  // Ignored for pre-analysis — always fp16 for speed
+  modelSelection: 0 | 1 | 2 = 1  // Default 1: HD Landscape 16:9 High-Accuracy MediaPipe
 ): Promise<void> {
   const existing = analysisProgressMap.get(clipId);
   if (existing && existing.status === 'analyzing') {
@@ -498,10 +511,14 @@ export async function startClipBackgroundAnalysis(
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 360;
 
-      // ── Step 1: Try ultra-fast MediaPipe GPU segmenter (~5ms per frame) ──
-      let bitmap: ImageBitmap | null = await segmentSourceWithMediaPipe(video);
+      // ── Step 1: High Accuracy MediaPipe GPU Segmenter (modelSelection 0: General, 1: HD Landscape 16:9) ──
+      let bitmap: ImageBitmap | null = null;
+      if (modelSelection === 0 || modelSelection === 1) {
+        const mpType = modelSelection === 0 ? 'general' : 'landscape';
+        bitmap = await segmentSourceWithMediaPipe(video, mpType);
+      }
 
-      // ── Step 2: Fallback to @imgly ONNX segmenter if MediaPipe is unavailable ──
+      // ── Step 2: Fallback or Ultra Studio ONNX IS-Net model (modelSelection === 2) ──
       if (!bitmap) {
         const snap = await captureSnapshotBlob(video, w, h, 256);
         if (snap) {

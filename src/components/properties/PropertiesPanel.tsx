@@ -2100,12 +2100,12 @@ export function PropertiesPanel() {
                   <div>
                     <label className="block text-[10px] text-[#a0a0a0] mb-1 font-medium">Segmentation Quality</label>
                     <select
-                      value={selectedClip.aiBackground.modelSelection ?? 0}
+                      value={selectedClip.aiBackground.modelSelection ?? 1}
                       onChange={(e) => {
-                        const val = Number(e.target.value) as 0 | 1;
+                        const val = Number(e.target.value) as 0 | 1 | 2;
                         const existing = selectedClip.aiBackground!;
                         updateClip(selectedClip.id, {
-                          aiBackground: { ...existing, modelSelection: val }
+                          aiBackground: { ...existing, modelSelection: val as any }
                         });
                         scheduleSaveSnapshot('Change AI Background Quality');
                         const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
@@ -2120,10 +2120,11 @@ export function PropertiesPanel() {
                           );
                         }
                       }}
-                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
+                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500 font-medium"
                     >
-                      <option value={0}>High Quality (Precise General Model)</option>
-                      <option value={1}>Standard / Fast (Landscape Model)</option>
+                      <option value={1}>✨ High Accuracy HD (16:9 Landscape + Hair Matting)</option>
+                      <option value={0}>⚡ Fast (Standard GPU Model)</option>
+                      <option value={2}>💎 Ultra Studio (Deep IS-Net Pixel U-Net)</option>
                     </select>
                   </div>
 
