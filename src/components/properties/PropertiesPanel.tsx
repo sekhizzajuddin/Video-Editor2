@@ -51,7 +51,7 @@ import { SequenceProperties } from './SequenceProperties';
 import { AIMotionGraphicsSection } from './tabs/effects';
 import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
-import { loadBackgroundRemover, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
+import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -2033,6 +2033,7 @@ export function PropertiesPanel() {
                     // Pre-load the @imgly/background-removal model and start pre-computing
                     // frame alpha masks in background for 60 FPS real-time playback.
                     if (enabled) {
+                      loadMediaPipeSegmenter().catch(() => {});
                       loadBackgroundRemover().catch(() => {});
                       const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
                       if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {

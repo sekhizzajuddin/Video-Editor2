@@ -23,6 +23,86 @@
  */
 
 import * as ortModule from 'onnxruntime-web';
+import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
+
+// ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
+let mediaPipeSegmenter: ImageSegmenter | null = null;
+let mediaPipeInitPromise: Promise<ImageSegmenter | null> | null = null;
+
+/**
+ * Preload the MediaPipe GPU Selfie Segmenter model (~250KB - 2MB).
+ * Runs inference on WebGL GPU in 3-8ms per frame.
+ */
+export async function loadMediaPipeSegmenter(): Promise<ImageSegmenter | null> {
+  if (mediaPipeSegmenter) return mediaPipeSegmenter;
+  if (mediaPipeInitPromise) return mediaPipeInitPromise;
+
+  mediaPipeInitPromise = (async () => {
+    try {
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+      );
+      const segmenter = await ImageSegmenter.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+          delegate: 'GPU',
+        },
+        runningMode: 'IMAGE',
+        outputCategoryMask: false,
+        outputConfidenceMasks: true,
+      });
+      mediaPipeSegmenter = segmenter;
+      return segmenter;
+    } catch (err) {
+      console.warn('[aiBackground] MediaPipe GPU Segmenter load failed, falling back to @imgly:', err);
+      mediaPipeInitPromise = null;
+      return null;
+    }
+  })();
+  return mediaPipeInitPromise;
+}
+
+/**
+ * Run MediaPipe Selfie Segmenter directly on a Video/Canvas/Image element.
+ * Extremely fast: ~3-8ms execution time on WebGL GPU.
+ */
+export async function segmentSourceWithMediaPipe(
+  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap
+): Promise<ImageBitmap | null> {
+  const segmenter = await loadMediaPipeSegmenter();
+  if (!segmenter) return null;
+
+  try {
+    const result = segmenter.segment(source as any);
+    if (!result || !result.confidenceMasks || result.confidenceMasks.length === 0) {
+      result?.close();
+      return null;
+    }
+
+    const confidenceMask = result.confidenceMasks[0];
+    const floatArray = confidenceMask.getAsFloat32Array();
+    const w = confidenceMask.width;
+    const h = confidenceMask.height;
+
+    const imgData = new ImageData(w, h);
+    const data32 = new Uint32Array(imgData.data.buffer);
+
+    for (let i = 0; i < floatArray.length; i++) {
+      const conf = floatArray[i];
+      const alpha = conf > 0.5 ? 255 : Math.round(conf * 255);
+      data32[i] = (alpha << 24) | 0x00FFFFFF;
+    }
+
+    const bitmap = await createImageBitmap(imgData);
+    confidenceMask.close();
+    result.close();
+    return bitmap;
+  } catch (err) {
+    console.error('[aiBackground] MediaPipe segmentation error:', err);
+    return null;
+  }
+}
 
 // ── CRITICAL FIX: Force ONNX WASM proxy ON ──────────────────────────────────
 // This intercepts the library's `ort.env.wasm.proxy = false` assignment and
@@ -418,19 +498,24 @@ export async function startClipBackgroundAnalysis(
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 360;
 
-      // Capture at reduced resolution (256px vs 384px) — mask is just alpha
-      const snap = await captureSnapshotBlob(video, w, h, 256);
-      if (snap) {
-        // Direct Blob → ImageBitmap (no intermediate canvas)
-        const bitmap = await segmentBlobToImageBitmap(snap.blob, model);
-        if (bitmap) {
-          // Fill this keyframe AND ~5 neighboring cache slots with the SAME
-          // ImageBitmap reference. Zero extra memory, O(1) playback lookup.
-          for (let f = 0; f < fillRatio; f++) {
-            const fillKey = keyframeKey + f;
-            if (fillKey < totalCacheSlots + timeToKey(startTime)) {
-              maskMap.set(fillKey, bitmap);
-            }
+      // ── Step 1: Try ultra-fast MediaPipe GPU segmenter (~5ms per frame) ──
+      let bitmap: ImageBitmap | null = await segmentSourceWithMediaPipe(video);
+
+      // ── Step 2: Fallback to @imgly ONNX segmenter if MediaPipe is unavailable ──
+      if (!bitmap) {
+        const snap = await captureSnapshotBlob(video, w, h, 256);
+        if (snap) {
+          bitmap = await segmentBlobToImageBitmap(snap.blob, model);
+        }
+      }
+
+      if (bitmap) {
+        // Fill this keyframe AND ~5 neighboring cache slots with the SAME
+        // ImageBitmap reference. Zero extra memory, O(1) playback lookup.
+        for (let f = 0; f < fillRatio; f++) {
+          const fillKey = keyframeKey + f;
+          if (fillKey < totalCacheSlots + timeToKey(startTime)) {
+            maskMap.set(fillKey, bitmap);
           }
         }
       }
@@ -562,27 +647,32 @@ export async function applyAiBackgroundMask(
       if (shouldRefresh && !segmentingInFlight.has(clipId)) {
         segmentingInFlight.add(clipId);
 
-        // Capture snapshot and freeze to Blob immediately (< 2ms at 384px).
-        // The Blob is immutable — immune to pooled canvas overwrite races.
-        captureSnapshotBlob(sourceElement, width, height)
-          .then((snap) => {
-            if (!snap) {
-              segmentingInFlight.delete(clipId);
-              return;
+        // Try ultra-fast MediaPipe GPU segmentation directly on element first
+        segmentSourceWithMediaPipe(sourceElement as any)
+          .then(async (mpBitmap) => {
+            if (mpBitmap) {
+              const resCanvas = document.createElement('canvas');
+              resCanvas.width = width;
+              resCanvas.height = height;
+              const rCtx = resCanvas.getContext('2d');
+              if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
+              mpBitmap.close();
+              return resCanvas;
             }
-            // Run segmentation in background (ONNX proxy worker handles the heavy work)
-            return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16')
-              .then((result) => {
-                if (result) {
-                  maskCacheMap.set(clipId, {
-                    maskCanvas: result,
-                    lastUpdateTimestamp: performance.now(),
-                    lastVideoTime: getVideoCurrentTime(sourceElement),
-                  });
-                  // Signal the render loop to repaint with the new mask
-                  notifyMaskReady();
-                }
+            // Fallback to snapshot + ONNX segmenter
+            const snap = await captureSnapshotBlob(sourceElement, width, height);
+            if (!snap) return null;
+            return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+          })
+          .then((result) => {
+            if (result) {
+              maskCacheMap.set(clipId, {
+                maskCanvas: result,
+                lastUpdateTimestamp: performance.now(),
+                lastVideoTime: getVideoCurrentTime(sourceElement),
               });
+              notifyMaskReady();
+            }
           })
           .catch((err) => {
             console.warn('[aiBackground] Playback segmentation error:', err);
