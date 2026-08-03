@@ -2025,7 +2025,7 @@ export function PropertiesPanel() {
                   checked={selectedClip.aiBackground?.enabled || false}
                   onChange={(e) => {
                     const enabled = e.target.checked;
-                    const existing = selectedClip.aiBackground ?? { enabled: false, edgeBlur: 0, modelSelection: 0 };
+                    const existing = selectedClip.aiBackground ?? { enabled: false, edgeBlur: 0, modelSelection: 1 };
                     updateClip(selectedClip.id, {
                       aiBackground: { ...existing, enabled }
                     });
@@ -2042,7 +2042,7 @@ export function PropertiesPanel() {
                           mediaItem.url || '',
                           selectedClip.trimStart || 0,
                           selectedClip.duration || 5,
-                          existing.modelSelection || 0
+                          existing.modelSelection ?? 1
                         );
                       }
                     } else {
@@ -2086,7 +2086,7 @@ export function PropertiesPanel() {
                               mediaItem.url,
                               selectedClip.trimStart || 0,
                               selectedClip.duration || 5,
-                              selectedClip.aiBackground?.modelSelection || 0
+                              selectedClip.aiBackground?.modelSelection ?? 1
                             );
                           }
                         }}
@@ -2105,7 +2105,7 @@ export function PropertiesPanel() {
                         const val = Number(e.target.value) as 0 | 1 | 2;
                         const existing = selectedClip.aiBackground!;
                         updateClip(selectedClip.id, {
-                          aiBackground: { ...existing, modelSelection: val as any }
+                          aiBackground: { ...existing, modelSelection: val }
                         });
                         scheduleSaveSnapshot('Change AI Background Quality');
                         const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);

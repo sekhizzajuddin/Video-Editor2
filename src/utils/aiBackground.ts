@@ -98,11 +98,14 @@ export async function segmentSourceWithMediaPipe(
     const data32 = new Uint32Array(imgData.data.buffer);
 
     // High-Accuracy Smoothstep Matte Refinement:
-    // Anti-aliases hair and edge boundaries while removing background noise halos
+    // Anti-aliases hair and edge boundaries while removing background noise halos.
+    // Different thresholds are applied based on model precision to avoid edge tearing.
+    const lowerEdge = modelType === 'landscape' ? 0.25 : 0.20;
+    const upperEdge = modelType === 'landscape' ? 0.80 : 0.75;
     for (let i = 0; i < floatArray.length; i++) {
       const conf = floatArray[i];
-      // Hermite S-Curve: smooth transition between 0.15 (bg cutoff) and 0.75 (solid subject)
-      const alphaVal = smoothstep(0.15, 0.75, conf);
+      // Hermite S-Curve: smooth transition between calibrated background cutoff and solid subject
+      const alphaVal = smoothstep(lowerEdge, upperEdge, conf);
       const alpha = Math.round(alphaVal * 255);
       data32[i] = (alpha << 24) | 0x00FFFFFF;
     }
@@ -455,12 +458,14 @@ export async function startClipBackgroundAnalysis(
 
     const actualDuration = Math.min(isFinite(video.duration) ? Math.max(0.1, video.duration - startTime) : duration, duration);
 
-    // ── Temporal Keyframe Strategy ──────────────────────────────────────────
-    // Only run ONNX inference at KEYFRAME_INFERENCE_FPS (4/sec).
-    // Fill intermediate cache slots (at MASK_CACHE_FPS=20/sec) with the same
-    // ImageBitmap reference. Playback lookup stays smooth at 20 FPS granularity.
-    const totalKeyframes = Math.max(1, Math.ceil(actualDuration * KEYFRAME_INFERENCE_FPS));
-    const fillRatio = Math.round(MASK_CACHE_FPS / KEYFRAME_INFERENCE_FPS); // ~5
+    // ── High-Accuracy Temporal Keyframe Strategy ───────────────────────────
+    // For MediaPipe GPU models (modelSelection 0 or 1), inference runs in ~5ms per frame.
+    // We sample at full 20 FPS so there is zero temporal skipping or ghosting during motion.
+    // For Ultra Studio IS-Net (modelSelection 2), we sample at 10 FPS for fluid movement
+    // while keeping background analysis rapid via the ONNX proxy worker.
+    const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
+    const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
+    const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
     const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
 
     if (!preRenderedMaskCache.has(clipId)) {
@@ -476,7 +481,7 @@ export async function startClipBackgroundAnalysis(
       // Abort gracefully if job was cancelled or clip state cleaned up
       if (analysisProgressMap.get(clipId)?.status !== 'analyzing') break;
 
-      const targetTime = startTime + (i / KEYFRAME_INFERENCE_FPS);
+      const targetTime = startTime + (i / inferenceFps);
       if (targetTime > video.duration) break;
 
       const keyframeKey = timeToKey(targetTime);
@@ -520,14 +525,17 @@ export async function startClipBackgroundAnalysis(
 
       // ── Step 2: Fallback or Ultra Studio ONNX IS-Net model (modelSelection === 2) ──
       if (!bitmap) {
-        const snap = await captureSnapshotBlob(video, w, h, 256);
+        // For Ultra Studio mode (modelSelection === 2), use high resolution (768px) to preserve fine hair,
+        // glasses, and contour precision. For fallback from MediaPipe, use 512px.
+        const maxDim = modelSelection === 2 ? 768 : 512;
+        const snap = await captureSnapshotBlob(video, w, h, maxDim);
         if (snap) {
           bitmap = await segmentBlobToImageBitmap(snap.blob, model);
         }
       }
 
       if (bitmap) {
-        // Fill this keyframe AND ~5 neighboring cache slots with the SAME
+        // Fill this keyframe AND neighboring cache slots with the SAME
         // ImageBitmap reference. Zero extra memory, O(1) playback lookup.
         for (let f = 0; f < fillRatio; f++) {
           const fillKey = keyframeKey + f;
@@ -603,7 +611,7 @@ export async function applyAiBackgroundMask(
   height: number,
   sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,
   edgeBlur: number = 0,
-  modelSelection: 0 | 1 = 0,
+  modelSelection: 0 | 1 | 2 = 1,
   playbackQuality: 'full' | 'balanced' | 'performance' = 'balanced',
   isPlaying: boolean = false,
   clipId: string = '_default'
@@ -664,23 +672,28 @@ export async function applyAiBackgroundMask(
       if (shouldRefresh && !segmentingInFlight.has(clipId)) {
         segmentingInFlight.add(clipId);
 
-        // Try ultra-fast MediaPipe GPU segmentation directly on element first
-        segmentSourceWithMediaPipe(sourceElement as any)
-          .then(async (mpBitmap) => {
-            if (mpBitmap) {
-              const resCanvas = document.createElement('canvas');
-              resCanvas.width = width;
-              resCanvas.height = height;
-              const rCtx = resCanvas.getContext('2d');
-              if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
-              mpBitmap.close();
-              return resCanvas;
-            }
-            // Fallback to snapshot + ONNX segmenter
-            const snap = await captureSnapshotBlob(sourceElement, width, height);
-            if (!snap) return null;
-            return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-          })
+        const segmentPromise = (modelSelection === 0 || modelSelection === 1)
+          ? segmentSourceWithMediaPipe(sourceElement as any, modelSelection === 0 ? 'general' : 'landscape')
+              .then(async (mpBitmap) => {
+                if (mpBitmap) {
+                  const resCanvas = document.createElement('canvas');
+                  resCanvas.width = width;
+                  resCanvas.height = height;
+                  const rCtx = resCanvas.getContext('2d');
+                  if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
+                  mpBitmap.close();
+                  return resCanvas;
+                }
+                const snap = await captureSnapshotBlob(sourceElement, width, height, 512);
+                if (!snap) return null;
+                return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+              })
+          : captureSnapshotBlob(sourceElement, width, height, 640).then(async (snap) => {
+              if (!snap) return null;
+              return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+            });
+
+        segmentPromise
           .then((result) => {
             if (result) {
               maskCacheMap.set(clipId, {
@@ -699,8 +712,6 @@ export async function applyAiBackgroundMask(
           });
       }
       // Fall through — composite whatever cached mask we have.
-      // If no mask yet (first frame), maskCanvas is null and we skip compositing
-      // (the video shows unmasked until the first mask arrives — typically 1-3s).
 
     } else {
       // ── EXPORT / PAUSED: await for frame-accurate mask ──
@@ -708,18 +719,36 @@ export async function applyAiBackgroundMask(
         Math.abs(currentVideoTime - (cached?.lastVideoTime ?? -1)) > 0.04;
 
       if (!maskCanvas || timeMoved) {
-        const model = modelSelection === 0 ? 'isnet' : 'isnet_fp16';
-        const snap = await captureSnapshotBlob(sourceElement, width, height);
-        if (snap) {
-          const result = await segmentBlob(snap.blob, snap.w, snap.h, model);
-          if (result) {
-            maskCanvas = result;
-            maskCacheMap.set(clipId, {
-              maskCanvas: result,
-              lastUpdateTimestamp: performance.now(),
-              lastVideoTime: currentVideoTime,
-            });
+        if (modelSelection === 0 || modelSelection === 1) {
+          const mpType = modelSelection === 0 ? 'general' : 'landscape';
+          const mpBitmap = await segmentSourceWithMediaPipe(sourceElement as any, mpType);
+          if (mpBitmap) {
+            const resCanvas = document.createElement('canvas');
+            resCanvas.width = width;
+            resCanvas.height = height;
+            const rCtx = resCanvas.getContext('2d');
+            if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
+            mpBitmap.close();
+            maskCanvas = resCanvas;
           }
+        }
+        if (!maskCanvas) {
+          const model = 'isnet_fp16';
+          const maxDim = modelSelection === 2 ? 1024 : 512;
+          const snap = await captureSnapshotBlob(sourceElement, width, height, maxDim);
+          if (snap) {
+            const result = await segmentBlob(snap.blob, snap.w, snap.h, model);
+            if (result) {
+              maskCanvas = result;
+            }
+          }
+        }
+        if (maskCanvas) {
+          maskCacheMap.set(clipId, {
+            maskCanvas: maskCanvas,
+            lastUpdateTimestamp: performance.now(),
+            lastVideoTime: currentVideoTime,
+          });
         }
       }
     }

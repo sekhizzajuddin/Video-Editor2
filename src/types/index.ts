@@ -337,7 +337,7 @@ export interface ClipAnimations {
 export interface ClipAiBackgroundSettings {
   enabled: boolean;
   edgeBlur: number;
-  modelSelection?: 0 | 1; // 0 for general (high quality), 1 for landscape (fast)
+  modelSelection?: 0 | 1 | 2; // 0 for fast GPU, 1 for High Accuracy HD, 2 for Ultra Studio (IS-Net)
   playbackQuality?: 'full' | 'balanced' | 'performance'; // Controls inference strategy during playback
 }
 
