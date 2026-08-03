@@ -26,14 +26,14 @@ import * as ortModule from 'onnxruntime-web';
 import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
 
 // ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
-let mediaPipeSegmenter: ImageSegmenter | null = null;
-let mediaPipeInitPromise: Promise<ImageSegmenter | null> | null = null;
+let mediaPipeSegmenter: any = null;
+let mediaPipeInitPromise: Promise<any> | null = null;
 
 /**
  * Preload the MediaPipe GPU Selfie Segmenter model (~250KB - 2MB).
  * Runs inference on WebGL GPU in 3-8ms per frame.
  */
-export async function loadMediaPipeSegmenter(): Promise<ImageSegmenter | null> {
+export async function loadMediaPipeSegmenter(): Promise<any> {
   if (mediaPipeSegmenter) return mediaPipeSegmenter;
   if (mediaPipeInitPromise) return mediaPipeInitPromise;
 
