@@ -19,7 +19,7 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatTime } from '@/utils/time';
 import { applyLutToCanvas } from '@/utils/lutParser';
-import { applyAiBackgroundMask, applySubjectNeonOutlineFlash } from '@/utils/aiBackground';
+import { applyAiBackgroundSmart, applySubjectNeonOutlineFlash } from '@/utils/aiBackgroundIntegrated';
 import { applyObjectRemoval } from '@/utils/objectRemoval';
 import { drawSubscribeAnimation } from '@/utils/socialAnimations';
 import {
@@ -829,36 +829,24 @@ export async function renderCanvasEngine({
           // Only awaits during export to guarantee frame-accurate masks.
           if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
             const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
+            const smartOpts = {
+              playbackQuality: clip.aiBackground.playbackQuality ?? 'balanced',
+              isPlaying: !isExporting,
+              edgeBlur: animEdgeBlur,
+              modelSelection: (clip.aiBackground.modelSelection ?? 1) as 0 | 1 | 2 | 3,
+              useROI: true,        // Enable smart ROI cropping for high effective resolution
+              skinThreshold: 0.008, // 0.8% skin pixels triggers human detection early-exit
+              choke: clip.aiBackground.choke ?? 0,
+              feather: clip.aiBackground.feather ?? 0,
+              spillSuppression: clip.aiBackground.spillSuppression ?? 0,
+              spillColor: clip.aiBackground.spillColor,
+            };
             if (isExporting) {
-              // Export: block until we have an exact mask for this frame
-              await applyAiBackgroundMask(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                sourceElement,
-                animEdgeBlur,
-                clip.aiBackground.modelSelection ?? 1,
-                clip.aiBackground.playbackQuality ?? 'balanced',
-                false,
-                clip.id,
-                clip.aiBackground
-              );
+              // Export: block until we have an exact synchronous mask for this frame
+              await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
             } else {
-              // Interactive (playing, scrubbing, OR paused): fire-and-forget.
-              // The mask arrives asynchronously; cached masks draw instantly.
-              // This prevents the render loop from hanging for 2-10s on model load/inference.
-              void applyAiBackgroundMask(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                sourceElement,
-                animEdgeBlur,
-                clip.aiBackground.modelSelection ?? 1,
-                clip.aiBackground.playbackQuality ?? 'balanced',
-                true,
-                clip.id,
-                clip.aiBackground
-              );
+              // Interactive: fire-and-forget with early exit & scene-change gating
+              void applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
             }
           }
 

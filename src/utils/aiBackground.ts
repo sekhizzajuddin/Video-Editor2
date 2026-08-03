@@ -24,6 +24,7 @@
 
 import * as ortModule from 'onnxruntime-web';
 import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
+import { detectHumanPresence, computeROICrop } from './humanDetection';
 
 // ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
 let mediaPipeGeneralSegmenter: any = null;
@@ -178,7 +179,7 @@ export function setOnMaskReadyCallback(cb: (() => void) | null): void {
 }
 
 let maskRafPending = false;
-function notifyMaskReady(): void {
+export function notifyMaskReady(): void {
   if (maskRafPending) return;
   maskRafPending = true;
   requestAnimationFrame(() => {
@@ -193,7 +194,7 @@ function notifyMaskReady(): void {
 const canvasPool = new Map<string, HTMLCanvasElement>();
 const MAX_POOL_SIZE = 50;
 
-function getPooledCanvas(key: string, w: number, h: number): HTMLCanvasElement {
+export function getPooledCanvas(key: string, w: number, h: number): HTMLCanvasElement {
   let c = canvasPool.get(key);
   if (c) {
     // Re-insert to mark as most recently used in Map iteration order
@@ -260,7 +261,7 @@ export const loadBackgroundRemover = (): Promise<void> => {
  * With the forced ONNX proxy, the heavy WASM inference runs in ONNX Runtime's
  * internal Web Worker. Main-thread cost: ~5-10ms (image resize + pixel loop).
  */
-async function segmentBlob(
+export async function segmentBlob(
   inputBlob: Blob,
   inferW: number,
   inferH: number,
@@ -307,7 +308,7 @@ async function segmentBlob(
  * Returns ImageBitmap directly — skips the redundant Blob→Canvas→ImageBitmap
  * round-trip that segmentBlob does. Saves ~10-20ms per frame.
  */
-async function segmentBlobToImageBitmap(
+export async function segmentBlobToImageBitmap(
   inputBlob: Blob,
   model: 'isnet' | 'isnet_fp16' = 'isnet_fp16'
 ): Promise<ImageBitmap | null> {
@@ -341,7 +342,7 @@ async function segmentBlobToImageBitmap(
  * @param maxDimOverride  Override the max dimension for inference. Default 384.
  *                        Use 256 for pre-analysis (faster, mask-only — no detail needed).
  */
-function captureSnapshotBlob(
+export function captureSnapshotBlob(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   targetWidth: number,
   targetHeight: number,
@@ -541,6 +542,20 @@ export async function startClipBackgroundAnalysis(
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 360;
 
+      // ── Early-Exit: skip AI entirely if no human present in frame ──
+      const human = detectHumanPresence(video, clipId, 0.008);
+      if (!human.hasHuman) {
+        processed++;
+        const pct = Math.min(99, Math.round((processed / totalKeyframes) * 100));
+        updateClipAnalysisStatus(clipId, {
+          status: 'analyzing',
+          progress: pct,
+          processedFrames: processed,
+          totalFrames: totalKeyframes,
+        });
+        continue;
+      }
+
       // ── Step 1: High Accuracy MediaPipe GPU Segmenter (modelSelection 0: General, 1: HD Landscape 16:9) ──
       let bitmap: ImageBitmap | null = null;
       if (modelSelection === 0 || modelSelection === 1) {
@@ -548,14 +563,41 @@ export async function startClipBackgroundAnalysis(
         bitmap = await segmentSourceWithMediaPipe(video, mpType);
       }
 
-      // ── Step 2: Fallback or Ultra Studio ONNX IS-Net model (modelSelection === 2) ──
+      // ── Step 2: Fallback or Ultra Studio ONNX IS-Net model (modelSelection === 2) with Smart ROI ──
       if (!bitmap) {
         // For Ultra Studio mode (modelSelection === 2), use high resolution (768px) to preserve fine hair,
         // glasses, and contour precision. For fallback from MediaPipe, use 512px.
         const maxDim = modelSelection === 2 ? 768 : 512;
-        const snap = await captureSnapshotBlob(video, w, h, maxDim);
-        if (snap) {
-          bitmap = await segmentBlobToImageBitmap(snap.blob, model);
+
+        if (human.bbox) {
+          const crop = computeROICrop(w, h, human.bbox, 0.25, null);
+          const roiCanvas = getPooledCanvas('_analysis_roi', crop.sw, crop.sh);
+          const roiCtx = roiCanvas.getContext('2d');
+          if (roiCtx) {
+            roiCtx.clearRect(0, 0, crop.sw, crop.sh);
+            roiCtx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
+          }
+          const snap = await captureSnapshotBlob(roiCanvas, crop.sw, crop.sh, maxDim);
+          if (snap) {
+            const roiMaskBitmap = await segmentBlobToImageBitmap(snap.blob, model);
+            if (roiMaskBitmap) {
+              const fullCanvas = getPooledCanvas('_analysis_full', w, h);
+              const fCtx = fullCanvas.getContext('2d');
+              if (fCtx) {
+                fCtx.clearRect(0, 0, w, h);
+                fCtx.drawImage(roiMaskBitmap, crop.sx, crop.sy, crop.sw, crop.sh);
+              }
+              roiMaskBitmap.close();
+              bitmap = await createImageBitmap(fullCanvas);
+            }
+          }
+        }
+
+        if (!bitmap) {
+          const snap = await captureSnapshotBlob(video, w, h, maxDim);
+          if (snap) {
+            bitmap = await segmentBlobToImageBitmap(snap.blob, model);
+          }
         }
       }
 
@@ -623,7 +665,7 @@ function getVideoCurrentTime(sourceElement: any): number {
  * Suppress background color spill (e.g. green or blue fringe on hair/shoulders).
  * Operates directly on semi-transparent edge pixels of the composited canvas.
  */
-function applySpillSuppression(
+export function applySpillSuppression(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
@@ -671,7 +713,7 @@ function applySpillSuppression(
 /**
  * Refine mask alpha boundaries with Choke (shrink/expand) and Feather (Gaussian blur).
  */
-function refineMaskEdges(
+export function refineMaskEdges(
   maskCanvas: HTMLCanvasElement | ImageBitmap | HTMLCanvasElement,
   width: number,
   height: number,
@@ -725,6 +767,75 @@ function refineMaskEdges(
  *
  * Export (isPlaying=false): Awaits segmentation for frame-accurate masks.
  */
+export function applyPreRenderedMaskIfAvailable(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,
+  clipId: string,
+  isPlaying: boolean,
+  modelSelection: number = 1,
+  choke: number = 0,
+  feather: number = 0,
+  spillSuppression: number = 0,
+  spillColor?: string
+): boolean {
+  const currentVideoTime = getVideoCurrentTime(sourceElement);
+  const clipPreRendered = preRenderedMaskCache.get(clipId);
+  if (!clipPreRendered || clipPreRendered.size === 0 || currentVideoTime < 0) {
+    return false;
+  }
+
+  const targetKey = timeToKey(currentVideoTime);
+  let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
+
+  // If exact frame isn't ready yet, look for closest analyzed frame within +-3 frames (~150ms)
+  if (!preMask) {
+    for (let offset = 1; offset <= 3; offset++) {
+      preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
+      if (preMask) break;
+    }
+  }
+  if (!preMask) return false;
+
+  // Temporal Alpha Blending: smoothly interpolate between adjacent keyframe masks to eliminate popping/flicker
+  const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
+  const interval = 1 / inferenceFps;
+  const prevKey = timeToKey(currentVideoTime - (interval * 0.5));
+  const nextKey = timeToKey(currentVideoTime + (interval * 0.5));
+  const prevMask = clipPreRendered.get(prevKey);
+  const nextMask = clipPreRendered.get(nextKey);
+
+  if (prevMask && nextMask && prevMask !== nextMask && isPlaying) {
+    const localT = Math.max(0, Math.min(1, (currentVideoTime % interval) / interval));
+    const blendCanvas = getPooledCanvas(`${clipId}_temporal_blend`, width, height);
+    const bCtx = blendCanvas.getContext('2d');
+    if (bCtx) {
+      bCtx.clearRect(0, 0, width, height);
+      bCtx.globalAlpha = 1 - localT;
+      bCtx.drawImage(prevMask as any, 0, 0, width, height);
+      bCtx.globalAlpha = localT;
+      bCtx.drawImage(nextMask as any, 0, 0, width, height);
+      bCtx.globalAlpha = 1.0;
+      preMask = blendCanvas;
+    }
+  }
+
+  // Instant GPU texture composite with Choke and Feather
+  const refinedMask = (choke !== 0 || feather > 0)
+    ? refineMaskEdges(preMask, width, height, choke, feather, `${clipId}_pre`)
+    : preMask;
+
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(refinedMask as any, 0, 0, width, height);
+  ctx.globalCompositeOperation = 'source-over';
+
+  if (spillSuppression > 0) {
+    applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
+  }
+  return true;
+}
+
 export async function applyAiBackgroundMask(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -739,62 +850,14 @@ export async function applyAiBackgroundMask(
 ): Promise<void> {
   try {
     const currentVideoTime = getVideoCurrentTime(sourceElement);
-    const clipPreRendered = preRenderedMaskCache.get(clipId);
     const choke = options.choke ?? 0;
     const feather = (options.feather ?? 0) > 0 ? options.feather! : edgeBlur;
     const spillSuppression = options.spillSuppression ?? 0;
     const spillColor = options.spillColor;
 
     // ── STEP 1: FAST O(1) PRE-RENDERED MASK LOOKUP WITH TEMPORAL ALPHA BLENDING ──
-    if (clipPreRendered && clipPreRendered.size > 0 && currentVideoTime >= 0) {
-      const targetKey = timeToKey(currentVideoTime);
-      let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
-
-      // If exact frame isn't ready yet, look for closest analyzed frame within +-3 frames (~150ms)
-      if (!preMask) {
-        for (let offset = 1; offset <= 3; offset++) {
-          preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
-          if (preMask) break;
-        }
-      }
-      if (preMask) {
-        // Temporal Alpha Blending: smoothly interpolate between adjacent keyframe masks to eliminate popping/flicker
-        const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
-        const interval = 1 / inferenceFps;
-        const prevKey = timeToKey(currentVideoTime - (interval * 0.5));
-        const nextKey = timeToKey(currentVideoTime + (interval * 0.5));
-        const prevMask = clipPreRendered.get(prevKey);
-        const nextMask = clipPreRendered.get(nextKey);
-
-        if (prevMask && nextMask && prevMask !== nextMask && isPlaying) {
-          const localT = Math.max(0, Math.min(1, (currentVideoTime % interval) / interval));
-          const blendCanvas = getPooledCanvas(`${clipId}_temporal_blend`, width, height);
-          const bCtx = blendCanvas.getContext('2d');
-          if (bCtx) {
-            bCtx.clearRect(0, 0, width, height);
-            bCtx.globalAlpha = 1 - localT;
-            bCtx.drawImage(prevMask, 0, 0, width, height);
-            bCtx.globalAlpha = localT;
-            bCtx.drawImage(nextMask, 0, 0, width, height);
-            bCtx.globalAlpha = 1.0;
-            preMask = blendCanvas;
-          }
-        }
-
-        // Instant GPU texture composite with Choke and Feather
-        const refinedMask = (choke !== 0 || feather > 0)
-          ? refineMaskEdges(preMask, width, height, choke, feather, `${clipId}_pre`)
-          : preMask;
-
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(refinedMask as any, 0, 0, width, height);
-        ctx.globalCompositeOperation = 'source-over';
-
-        if (spillSuppression > 0) {
-          applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
-        }
-        return; // Complete! Zero AI inference required!
-      }
+    if (applyPreRenderedMaskIfAvailable(ctx, width, height, sourceElement, clipId, isPlaying, modelSelection, choke, feather, spillSuppression, spillColor)) {
+      return;
     }
 
     const cached = maskCacheMap.get(clipId);

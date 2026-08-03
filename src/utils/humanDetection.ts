@@ -4,38 +4,27 @@
  * Lightweight human-presence heuristics + temporal mask caching for the AI
  * background-removal pipeline.
  *
- * Provides:
- *   1. Skin-tone detection in YCbCr space — fast pre-check to skip ML
- *      inference when no human is in frame.
- *   2. Scene-change detection via luminance histogram chi-squared distance —
- *      avoids redundant inference on stable frames.
- *   3. Temporal mask caching — re-uses the alpha mask across frames. Masks
- *      are cached at SOURCE resolution (full canvas) so re-compositing gives
- *      crisp edges without up-scaling artifacts.
- *   4. Downscaled inference support — inference runs on a small canvas for
- *      speed, but the cached mask is re-drawn at full resolution before
- *      compositing.
- *
- * All state is isolated per-clip via clipId to prevent mask bleed across
- * multiple clips/tracks.
+ * Improvements:
+ *   - Thread-safe per-call sampling (no global canvas)
+ *   - Temporal bbox smoothing (EMA) to prevent jitter
+ *   - Dual skin-tone check (YCbCr + HSV) for better accuracy under colored lighting
+ *   - ROI crop helper with aspect-ratio preservation
  */
 
 interface ClipDetectionState {
-  // Temporal mask cache — kept at the LAST USED resolution, not downscaled.
   cachedMask: HTMLCanvasElement | null;
-  rescaledMask?: HTMLCanvasElement | null;
+  rescaledMask: HTMLCanvasElement | null;
   cachedMaskTimestamp: number;
   cachedMaskFrameCount: number;
-
-  // Monotonic counter — forces re-segmentation after N frames even if
-  // scene-change detection says "stable".
   monotoneFramesSinceInference: number;
-
-  // Scene change detection
   previousHistogram: Uint32Array | null;
-
-  // Throttle counter for expensive scene-change histogram readback.
   sceneCheckCounter: number;
+
+  // Temporal smoothing for human bbox
+  smoothedBbox: { x: number; y: number; w: number; h: number } | null;
+  bboxAlpha: number; // EMA factor
+  lastDetectedFrame: number;
+  consecutiveEmptyFrames: number;
 }
 
 const clipStates = new Map<string, ClipDetectionState>();
@@ -51,20 +40,18 @@ function getClipState(clipId: string): ClipDetectionState {
       monotoneFramesSinceInference: 0,
       previousHistogram: null,
       sceneCheckCounter: 0,
+      smoothedBbox: null,
+      bboxAlpha: 0.3,
+      lastDetectedFrame: 0,
+      consecutiveEmptyFrames: 0,
     };
     clipStates.set(clipId, state);
   }
   return state;
 }
 
-// Re-segment every Nth frame in playback for performance.
-// Reduced from 12/24 to 3/5 — moving subjects drift out of a stale mask within
-// ~3 frames, so longer reuse produces visibly wrong background removal.
 const BALANCED_CACHE_FRAMES = 3;
 const PERFORMANCE_CACHE_FRAMES = 5;
-
-// Hard ceiling: force re-segmentation regardless of scene stability.
-// Reduced so masks stay in sync with fast-moving subjects.
 const BALANCED_MAX_STALE_FRAMES = 8;
 const PERFORMANCE_MAX_STALE_FRAMES = 15;
 
@@ -77,9 +64,6 @@ export function getCachedMaskCanvas(
 ): HTMLCanvasElement | null {
   const state = getClipState(clipId);
   if (!state.cachedMask) return null;
-  // If the cached mask resolution differs from the requested one, rescale it
-  // onto a new canvas at the requested resolution so the caller gets exactly
-  // what it needs. This prevents halo artifacts when re-compositing.
   if (state.cachedMask.width !== width || state.cachedMask.height !== height) {
     if (!state.rescaledMask) {
       state.rescaledMask = document.createElement('canvas');
@@ -106,9 +90,6 @@ export function cacheMaskCanvas(clipId: string, mask: HTMLCanvasElement | null):
   state.rescaledMask = null;
   state.cachedMaskTimestamp = performance.now();
   state.cachedMaskFrameCount = 0;
-  // NOTE: monotoneFramesSinceInference is reset only by markInferencePerformed()
-  // — setCachedMask may be called from non-inference paths (cache reuse) and
-  // must not reset the ceiling counter.
 }
 
 export function markInferencePerformed(clipId: string): void {
@@ -133,8 +114,6 @@ export function shouldUseCachedMask(
   return state.cachedMaskFrameCount < maxFrames;
 }
 
-// Pure read-only variant — does NOT mutate state. Use when you only want to
-// check the cache validity without consuming a "frame slot".
 export function peekCachedMaskValid(
   clipId: string,
   playbackQuality: 'full' | 'balanced' | 'performance'
@@ -142,7 +121,6 @@ export function peekCachedMaskValid(
   const state = getClipState(clipId);
   if (!state.cachedMask) return false;
   if (playbackQuality === 'full') return false;
-
   const maxFrames = playbackQuality === 'performance'
     ? PERFORMANCE_CACHE_FRAMES
     : BALANCED_CACHE_FRAMES;
@@ -170,6 +148,7 @@ export function invalidateMaskCache(clipId?: string): void {
       state.cachedMaskTimestamp = 0;
       state.cachedMaskFrameCount = 0;
       state.monotoneFramesSinceInference = 0;
+      state.smoothedBbox = null;
     }
   } else {
     for (const state of clipStates.values()) {
@@ -178,45 +157,36 @@ export function invalidateMaskCache(clipId?: string): void {
       state.cachedMaskTimestamp = 0;
       state.cachedMaskFrameCount = 0;
       state.monotoneFramesSinceInference = 0;
+      state.smoothedBbox = null;
     }
   }
 }
 
-// Backward-compatible ImageBitmap cache aliases (legacy callers may still use these)
 export function getCachedMask(clipId: string): HTMLCanvasElement | null {
   return getClipState(clipId).cachedMask;
 }
-export function setCachedMask(
-  clipId: string,
-  mask: HTMLCanvasElement | null
-): void {
+export function setCachedMask(clipId: string, mask: HTMLCanvasElement | null): void {
   cacheMaskCanvas(clipId, mask);
 }
 
 // ─── Scene Change Detection ─────────────────────────────────────────────────
 
-let sampleCanvas: HTMLCanvasElement | null = null;
-let sampleCtx: CanvasRenderingContext2D | null = null;
-const SAMPLE_WIDTH = 64;
-const SAMPLE_HEIGHT = 36;
-
-function ensureSampleCanvas(): CanvasRenderingContext2D | null {
-  if (!sampleCanvas) {
-    sampleCanvas = document.createElement('canvas');
-    sampleCanvas.width = SAMPLE_WIDTH;
-    sampleCanvas.height = SAMPLE_HEIGHT;
-    sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
-  }
-  return sampleCtx;
+function createSampleCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  return { canvas, ctx };
 }
 
 function computeLuminanceHistogram(
-  source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap
+  source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+  sampleW: number = 64,
+  sampleH: number = 36
 ): Uint32Array {
-  const ctx = ensureSampleCanvas();
-  if (!ctx) return new Uint32Array(16);
-  ctx.drawImage(source, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-  const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+  const { ctx } = createSampleCanvas(sampleW, sampleH);
+  ctx.drawImage(source as CanvasImageSource, 0, 0, sampleW, sampleH);
+  const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
   const data = imageData.data;
   const histogram = new Uint32Array(16);
   for (let i = 0; i < data.length; i += 4) {
@@ -239,7 +209,7 @@ export function detectSceneChange(
     return true;
   }
   let chiSq = 0;
-  const totalPixels = SAMPLE_WIDTH * SAMPLE_HEIGHT;
+  const totalPixels = 64 * 36;
   for (let i = 0; i < 16; i++) {
     const expected = state.previousHistogram[i];
     const observed = currentHistogram[i];
@@ -252,9 +222,6 @@ export function detectSceneChange(
   return normalizedDist > threshold;
 }
 
-// Throttled wrapper that limits histogram-based scene-change checks to at most
-// once every N frames per clip. Without this the 64x36 readback runs on every
-// render tick, which causes severe playback hangs on long timelines.
 export function shouldDetectSceneChange(clipId: string, everyNFrames: number = 12): boolean {
   const state = getClipState(clipId);
   state.sceneCheckCounter = (state.sceneCheckCounter || 0) + 1;
@@ -267,47 +234,31 @@ export function shouldDetectSceneChange(clipId: string, everyNFrames: number = 1
 
 // ─── Skin-Tone Detection (Human Presence Heuristic) ─────────────────────────
 
-interface DetectionResult {
+export interface DetectionResult {
   hasHuman: boolean;
-  /** Bounding box of the most skin-dense region (0..1 normalized). */
   bbox?: { x: number; y: number; w: number; h: number };
-  /** Total skin pixel ratio (0..1) — useful for debugging. */
   skinRatio: number;
 }
 
 /**
- * Fast heuristic to detect whether a human is likely present in the frame
- * by analyzing skin-tone pixel density in YCbCr color space, with a grid-based
- * bounding-box estimate to localize the human region.
- *
- * This runs in < 1ms on a 64x36 downscaled sample. The result is used to:
- *   1. Skip expensive ML inference when no human is visible
- *   2. Constrain ML inference to a small region around the human (faster + more
- *      accurate than running on the whole frame).
- *
- * YCbCr skin-tone ranges covering Fitzpatrick types I–VI:
- *   - Cb: 70–135  (widened from 77–127 for dark skin)
- *   - Cr: 125–180 (widened from 133–173 for dark skin)
- *
- * @returns DetectionResult — hasHuman, optional bbox, skinRatio.
+ * Detect human presence using dual skin-tone detection.
+ * Thread-safe: creates its own canvas internally.
  */
 export function detectHumanPresence(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
-  minSkinRatio: number = 0.012
+  clipId: string,
+  minSkinRatio: number = 0.008
 ): DetectionResult {
-  const ctx = ensureSampleCanvas();
-  if (!ctx) return { hasHuman: true, skinRatio: 0 }; // Fail open
+  const SAMPLE_WIDTH = 64;
+  const SAMPLE_HEIGHT = 36;
+  const { ctx } = createSampleCanvas(SAMPLE_WIDTH, SAMPLE_HEIGHT);
 
-  ctx.drawImage(source, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+  ctx.drawImage(source as CanvasImageSource, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
   const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
   const data = imageData.data;
 
   let skinPixels = 0;
   const totalPixels = SAMPLE_WIDTH * SAMPLE_HEIGHT;
-
-  // Grid-based bbox: divide the sample into a 4×4 grid, find the densest cell
-  // with skin, then expand to neighboring cells with skin pixels. This gives
-  // a rough but useful bbox that constrains ML inference to the human region.
   const GRID = 4;
   const cellW = SAMPLE_WIDTH / GRID;
   const cellH = SAMPLE_HEIGHT / GRID;
@@ -319,11 +270,29 @@ export function detectHumanPresence(
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
+
+      // YCbCr skin tone (Fitzpatrick I–VI, wider range for dark skin)
       const cb = -0.169 * r - 0.331 * g + 0.500 * b + 128;
       const cr = 0.500 * r - 0.419 * g - 0.081 * b + 128;
+      const ycbcrSkin = cb >= 65 && cb <= 140 && cr >= 120 && cr <= 185;
 
-      // Skin tone: Cb in [70, 135], Cr in [125, 180]
-      if (cb >= 70 && cb <= 135 && cr >= 125 && cr <= 180) {
+      // HSV fallback for colored lighting (blue/green stage lights)
+      const maxC = Math.max(r, g, b);
+      const minC = Math.min(r, g, b);
+      const delta = maxC - minC;
+      let h = 0;
+      if (delta !== 0) {
+        if (maxC === r) h = ((g - b) / delta) % 6;
+        else if (maxC === g) h = (b - r) / delta + 2;
+        else h = (r - g) / delta + 4;
+        h *= 60;
+        if (h < 0) h += 360;
+      }
+      const s = maxC === 0 ? 0 : (delta / maxC) * 100;
+      const v = (maxC / 255) * 100;
+      const hsvSkin = ((h >= 0 && h <= 50) || h >= 340) && s >= 15 && s <= 80 && v >= 25 && v <= 95;
+
+      if (ycbcrSkin || hsvSkin) {
         skinPixels++;
         const gx = Math.min(GRID - 1, Math.floor(x / cellW));
         const gy = Math.min(GRID - 1, Math.floor(y / cellH));
@@ -333,20 +302,27 @@ export function detectHumanPresence(
   }
 
   const skinRatio = skinPixels / totalPixels;
+  const state = getClipState(clipId);
+
   if (skinRatio < minSkinRatio) {
-    return { hasHuman: false, skinRatio };
+    state.consecutiveEmptyFrames++;
+    // Only declare "no human" after 2 consecutive empty frames (prevents flicker)
+    if (state.consecutiveEmptyFrames >= 2) {
+      state.smoothedBbox = null;
+      return { hasHuman: false, skinRatio };
+    }
+    // Return last known bbox briefly to prevent pop-in/pop-out
+    return { hasHuman: true, skinRatio, bbox: state.smoothedBbox || undefined };
   }
 
-  // Find the densest grid cell, expand bbox to all cells with >5% skin density.
-  let maxCell = 0;
-  let maxCellIdx = 0;
+  state.consecutiveEmptyFrames = 0;
+
+  // Compute raw bbox from grid
+  let maxCell = 0, maxCellIdx = 0;
   for (let i = 0; i < cellSkin.length; i++) {
-    if (cellSkin[i] > maxCell) {
-      maxCell = cellSkin[i];
-      maxCellIdx = i;
-    }
+    if (cellSkin[i] > maxCell) { maxCell = cellSkin[i]; maxCellIdx = i; }
   }
-  const threshold = Math.max(2, maxCell * 0.2);
+  const threshold = Math.max(2, maxCell * 0.15);
   let minX = GRID, minY = GRID, maxX = -1, maxY = -1;
   for (let gy = 0; gy < GRID; gy++) {
     for (let gx = 0; gx < GRID; gx++) {
@@ -358,43 +334,112 @@ export function detectHumanPresence(
       }
     }
   }
-  if (maxX < 0) maxX = maxCellIdx % GRID;
-  if (minX > maxX) minX = maxX;
+  if (maxX < 0) { maxX = maxCellIdx % GRID; minX = maxX; }
+  if (minY > maxY) { maxY = minY; }
+
+  const rawBbox = {
+    x: minX / GRID,
+    y: minY / GRID,
+    w: (maxX - minX + 1) / GRID,
+    h: (maxY - minY + 1) / GRID,
+  };
+
+  // Temporal smoothing: EMA on bbox coordinates
+  if (state.smoothedBbox) {
+    const a = state.bboxAlpha;
+    state.smoothedBbox = {
+      x: state.smoothedBbox.x * (1 - a) + rawBbox.x * a,
+      y: state.smoothedBbox.y * (1 - a) + rawBbox.y * a,
+      w: state.smoothedBbox.w * (1 - a) + rawBbox.w * a,
+      h: state.smoothedBbox.h * (1 - a) + rawBbox.h * a,
+    };
+  } else {
+    state.smoothedBbox = rawBbox;
+  }
+
+  return { hasHuman: true, skinRatio, bbox: state.smoothedBbox };
+}
+
+// ─── ROI Crop Helper ────────────────────────────────────────────────────────
+
+/**
+ * Compute a padded, aspect-ratio-preserving crop region from a human bbox.
+ * This is used to send only the human region to the segmentation model,
+ * dramatically improving effective resolution and accuracy.
+ *
+ * @param sourceW - Full frame width
+ * @param sourceH - Full frame height
+ * @param bbox - Normalized bbox from detectHumanPresence
+ * @param padding - Extra context around the human (0.15 = 15% of bbox size)
+ * @param targetAspect - Force aspect ratio (e.g., 16/9 for landscape model). Null = freeform.
+ */
+export function computeROICrop(
+  sourceW: number,
+  sourceH: number,
+  bbox: { x: number; y: number; w: number; h: number },
+  padding: number = 0.2,
+  targetAspect: number | null = null
+): { sx: number; sy: number; sw: number; sh: number } {
+  // Add padding
+  let cx = bbox.x - padding * bbox.w;
+  let cy = bbox.y - padding * bbox.h;
+  let cw = bbox.w * (1 + 2 * padding);
+  let ch = bbox.h * (1 + 2 * padding);
+
+  // Clamp to frame
+  cx = Math.max(0, cx);
+  cy = Math.max(0, cy);
+  cw = Math.min(1 - cx, cw);
+  ch = Math.min(1 - cy, ch);
+
+  // Preserve target aspect ratio (e.g., 16:9 for MediaPipe landscape)
+  if (targetAspect !== null) {
+    const currentAspect = (cw * sourceW) / (ch * sourceH);
+    if (currentAspect > targetAspect) {
+      // Too wide: increase height
+      const newH = (cw * sourceW) / (targetAspect * sourceH);
+      cy = Math.max(0, cy - (newH - ch) / 2);
+      ch = Math.min(1 - cy, newH);
+    } else if (currentAspect < targetAspect) {
+      // Too tall: increase width
+      const newW = (ch * sourceH * targetAspect) / sourceW;
+      cx = Math.max(0, cx - (newW - cw) / 2);
+      cw = Math.min(1 - cx, newW);
+    }
+  }
 
   return {
-    hasHuman: true,
-    skinRatio,
-    bbox: {
-      x: minX / GRID,
-      y: minY / GRID,
-      w: (maxX - minX + 1) / GRID,
-      h: (maxY - minY + 1) / GRID,
-    },
+    sx: Math.round(cx * sourceW),
+    sy: Math.round(cy * sourceH),
+    sw: Math.round(cw * sourceW),
+    sh: Math.round(ch * sourceH),
   };
 }
 
 // ─── Downscaled Inference Support ───────────────────────────────────────────
 
-let downscaleCanvas: HTMLCanvasElement | null = null;
-
 export function downscaleForInference(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   scale: number = 0.5
 ): HTMLCanvasElement {
-  const sourceWidth = 'videoWidth' in source
-    ? (source as HTMLVideoElement).videoWidth
-    : 'naturalWidth' in source
-      ? (source as HTMLImageElement).naturalWidth
-      : source.width;
-  const sourceHeight = 'videoHeight' in source
-    ? (source as HTMLVideoElement).videoHeight
-    : 'naturalHeight' in source
-      ? (source as HTMLImageElement).naturalHeight
-      : source.height;
+  let sourceWidth: number, sourceHeight: number;
+
+  if ('videoWidth' in source && (source as HTMLVideoElement).videoWidth) {
+    sourceWidth = (source as HTMLVideoElement).videoWidth;
+    sourceHeight = (source as HTMLVideoElement).videoHeight;
+  } else if ('naturalWidth' in source && (source as HTMLImageElement).naturalWidth) {
+    sourceWidth = (source as HTMLImageElement).naturalWidth;
+    sourceHeight = (source as HTMLImageElement).naturalHeight;
+  } else if ('width' in source && typeof (source as any).width === 'number') {
+    sourceWidth = (source as any).width;
+    sourceHeight = (source as any).height;
+  } else {
+    sourceWidth = 640;
+    sourceHeight = 360;
+  }
 
   let targetW = Math.round(sourceWidth * scale);
   let targetH = Math.round(sourceHeight * scale);
-
   const minPixels = 14400;
   const currentPixels = targetW * targetH;
   if (currentPixels < minPixels && currentPixels > 0) {
@@ -405,16 +450,12 @@ export function downscaleForInference(
   targetW = Math.max(16, targetW);
   targetH = Math.max(16, targetH);
 
-  if (!downscaleCanvas) {
-    downscaleCanvas = document.createElement('canvas');
-  }
-  if (downscaleCanvas.width !== targetW || downscaleCanvas.height !== targetH) {
-    downscaleCanvas.width = targetW;
-    downscaleCanvas.height = targetH;
-  }
-  const ctx = downscaleCanvas.getContext('2d');
-  if (ctx) ctx.drawImage(source, 0, 0, targetW, targetH);
-  return downscaleCanvas;
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+  if (ctx) ctx.drawImage(source as CanvasImageSource, 0, 0, targetW, targetH);
+  return canvas;
 }
 
 // ─── Reset ──────────────────────────────────────────────────────────────────
@@ -427,7 +468,6 @@ export function resetAllDetectionState(): void {
   clipStates.clear();
 }
 
-// Legacy alias
 export function resetHumanDetectionState(): void {
   resetAllDetectionState();
 }
