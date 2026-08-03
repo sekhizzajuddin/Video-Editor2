@@ -67,7 +67,7 @@ export function ExportModal() {
 
   const [fps, setFps] = useState('30');
   const [quality, setQuality] = useState('high');
-  const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('webm'); // Default to webm — most reliable
+  const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('mp4'); // Default to MP4 — frame-by-frame WebCodecs, always smooth
   const [useHardwareEncoder, setUseHardwareEncoder] = useState<boolean>(true);
   const [resolution, setResolution] = useState('720p');
   const [batchTargets, setBatchTargets] = useState<('16:9' | '9:16' | '1:1' | '4:3')[]>(['16:9']);
@@ -94,6 +94,7 @@ export function ExportModal() {
   const streamRef = useRef<MediaStream | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pipelineCancelRef = useRef<(() => void) | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const batchTimeoutsRef = useRef<any[]>([]);
 
@@ -155,6 +156,8 @@ export function ExportModal() {
 
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    pipelineCancelRef.current?.();
+    pipelineCancelRef.current = null;
     chunksRef.current = [];
     playbackStartedRef.current = false;
     // FIX M12: restore canvas BEFORE calling setIsExporting(false) to avoid flicker
@@ -378,19 +381,22 @@ export function ExportModal() {
     setErrorMsg(null);
     setStatusMsg('Preparing...');
 
-    // Check if WebCodecs hardware GPU encoding can process this MP4 export instantaneously
-    if (exportFormat === 'mp4' && useHardwareEncoder) {
+    // Route through unified ExportPipeline — selects best backend automatically
+    // MP4 → WebCodecsBackend (H.264 frame-by-frame)
+    // WebM → WebMWebCodecsBackend (VP9 frame-by-frame) if WebCodecs available
+    // Fallback → MediaRecorderBackend (legacy real-time capture)
+    {
       const bitsPerSecond = quality === 'max' ? 12_000_000 : quality === 'high' ? 6_000_000 : 3_000_000;
       const pipelineOpts = {
         width,
         height,
         fps: parseInt(fps),
-        format: 'mp4' as const,
+        format: exportFormat,
         quality: quality as any,
         bitrate: bitsPerSecond,
         startAt,
         endAt,
-        useHardwareEncoder: true,
+        useHardwareEncoder,
         canvas: previewCanvas,
         audioStream: masterAudioStream,
         onProgress: (prog: any) => {
@@ -401,13 +407,16 @@ export function ExportModal() {
       };
 
       const selectedBackend = await defaultExportPipeline.selectBestBackend(pipelineOpts);
-      if (selectedBackend.type === 'webcodecs') {
+      // Use pipeline for any WebCodecs-capable backend (MP4 or WebM frame-by-frame)
+      if (selectedBackend.type === 'webcodecs' || selectedBackend.type === 'webm-webcodecs') {
         try {
-          const { promise } = defaultExportPipeline.start(pipelineOpts);
+          const { promise, cancel } = defaultExportPipeline.start(pipelineOpts);
+          pipelineCancelRef.current = cancel;
           const result = await promise;
-          triggerDownload(result.blob, 'mp4');
+          pipelineCancelRef.current = null;
+          triggerDownload(result.blob, exportFormat);
           updateStatus('done');
-          setStatusMsg('MP4 export complete (WebCodecs GPU)!');
+          setStatusMsg(`${exportFormat.toUpperCase()} export complete!`);
           isExportingRef.current = false;
           setIsExporting(false);
 
@@ -432,7 +441,7 @@ export function ExportModal() {
           batchTimeoutsRef.current.push(tId);
           return;
         } catch (err: any) {
-          console.warn('[Export] WebCodecs GPU encoding exception, failing over to standard stream recorder...', err);
+          console.warn('[Export] WebCodecs encoding exception, failing over to MediaRecorder...', err);
         }
       }
     }
@@ -762,8 +771,8 @@ export function ExportModal() {
             <label className="text-xs text-[#a0a0a0] block mb-2">Export Format</label>
             <div className="flex gap-2">
               {[
-                { id: 'webm', label: 'WebM (VP8 + Opus)', desc: 'Recommended — Fast & Reliable' },
-                { id: 'mp4', label: 'MP4 (H.264 + AAC)', desc: 'Slower — Needs FFmpeg WASM' },
+                { id: 'mp4', label: 'MP4 (H.264 + AAC)', desc: 'Recommended — Frame-perfect quality' },
+                { id: 'webm', label: 'WebM (VP8 + Opus)', desc: 'Legacy — May desync on complex projects' },
               ].map((fmt) => (
                 <button
                   key={fmt.id}
@@ -781,6 +790,24 @@ export function ExportModal() {
                 </button>
               ))}
             </div>
+            {/* WebM desync warning */}
+            {exportFormat === 'webm' && (
+              <div className="mt-2 flex items-start gap-2 px-3 py-2 bg-yellow-900/30 border border-yellow-700/50 rounded-md">
+                <AlertCircle className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />
+                <p className="text-[10px] text-yellow-300/90 leading-relaxed">
+                  WebM uses real-time canvas capture. Multi-track projects with effects may produce <strong>slow-motion video</strong> and <strong>audio desync</strong>. Use MP4 for reliable, frame-perfect export.
+                </p>
+              </div>
+            )}
+            {/* WebCodecs not available warning */}
+            {exportFormat === 'mp4' && typeof window.VideoEncoder === 'undefined' && (
+              <div className="mt-2 flex items-start gap-2 px-3 py-2 bg-orange-900/30 border border-orange-700/50 rounded-md">
+                <AlertCircle className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
+                <p className="text-[10px] text-orange-300/90 leading-relaxed">
+                  Your browser does not support WebCodecs (GPU encoding). MP4 export will use FFmpeg WASM as fallback, which may be slower. For best performance, use Chrome 94+ or Edge 94+.
+                </p>
+              </div>
+            )}
             {/* Hardware GPU Acceleration Option */}
             {exportFormat === 'mp4' && typeof window.VideoEncoder !== 'undefined' && (
               <div className="mt-2.5 flex items-center gap-2 px-3 py-2 bg-zinc-900/70 border border-zinc-800/80 rounded-md">

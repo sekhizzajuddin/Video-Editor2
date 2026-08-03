@@ -1,11 +1,13 @@
 import { EncoderBackend, EncoderBackendType, ExportOptions } from './types';
 import { WebCodecsBackend } from './backends/WebCodecsBackend';
+import { WebMWebCodecsBackend } from './backends/WebMWebCodecsBackend';
 import { MediaRecorderBackend } from './backends/MediaRecorderBackend';
 
 export class ExportPipeline {
   private backends: EncoderBackend[] = [
-    new WebCodecsBackend(),
-    new MediaRecorderBackend(),
+    new WebCodecsBackend(),         // MP4 frame-by-frame (best for MP4)
+    new WebMWebCodecsBackend(),     // WebM frame-by-frame (best for WebM)
+    new MediaRecorderBackend(),     // Legacy real-time fallback
   ];
   private activeBackend: EncoderBackend | null = null;
 
@@ -43,10 +45,10 @@ export class ExportPipeline {
         }
 
         // Automatic High-Reliability Failover:
-        // If GPU WebCodecs fails due to unhandled OS driver issues or GPU reset, fall back seamlessly to software MediaRecorder
-        if (selectedBackend.type === 'webcodecs') {
-          console.warn('[ExportPipeline] WebCodecs GPU encoding encountered an exception, attempting fallback to software stream recording...', err);
-          opts.setStatusMsg?.('GPU encoder failed, falling back to software recording...');
+        // If any WebCodecs backend fails, fall back to MediaRecorder
+        if (selectedBackend.type === 'webcodecs' || selectedBackend.type === 'webm-webcodecs') {
+          console.warn(`[ExportPipeline] ${selectedBackend.name} failed, falling back to MediaRecorder...`, err);
+          opts.setStatusMsg?.('Hardware encoder failed, falling back to software recording...');
           
           const fallbackBackend = new MediaRecorderBackend();
           this.activeBackend = fallbackBackend;

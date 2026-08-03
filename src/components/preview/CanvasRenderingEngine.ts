@@ -17,7 +17,7 @@ import { TimelineTrack, MediaItem } from '@/types';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
-import { formatTime } from '@/utils/time';
+
 import { applyLutToCanvas } from '@/utils/lutParser';
 import { applyAiBackgroundSmart, applySubjectNeonOutlineFlash } from '@/utils/aiBackgroundIntegrated';
 import { applyObjectRemoval } from '@/utils/objectRemoval';
@@ -1381,35 +1381,7 @@ export async function renderCanvasEngine({
     ctx.restore();
   }
 
-  if (!isExporting) {
-    ctx.globalAlpha = 1;
-    const tcText = formatTime(currentTime);
-    ctx.font = 'bold 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-    const tcMetrics = ctx.measureText(tcText);
-    const tcPadX = 8;
-    const tcPadY = 4;
-    const tcW = tcMetrics.width + tcPadX * 2;
-    const tcH = 20;
-    const tcX = offsetX + W - tcW - 8;
-    const tcY = offsetY + 8;
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.beginPath();
-    if (typeof (ctx as any).roundRect === 'function') {
-      (ctx as any).roundRect(tcX, tcY, tcW, tcH, 4);
-    } else {
-      const r = 4;
-      ctx.moveTo(tcX + r, tcY);
-      ctx.arcTo(tcX + tcW, tcY, tcX + tcW, tcY + tcH, r);
-      ctx.arcTo(tcX + tcW, tcY + tcH, tcX, tcY + tcH, r);
-      ctx.arcTo(tcX, tcY + tcH, tcX, tcY, r);
-      ctx.arcTo(tcX, tcY, tcX + tcW, tcY, r);
-    }
-    ctx.fill();
-    ctx.fillStyle = '#fbbf24';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(tcText, offsetX + W - 8 - tcPadX, tcY + tcH / 2);
-  }
+  // Timecode overlay removed — timestamp is displayed in the timeline toolbar instead
 
   ctx.restore();
 

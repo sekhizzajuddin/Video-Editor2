@@ -2,7 +2,7 @@
  * Core type definitions for modular export pipelines and encoder backends.
  */
 
-export type EncoderBackendType = 'webcodecs' | 'ffmpeg' | 'mediarecorder';
+export type EncoderBackendType = 'webcodecs' | 'webm-webcodecs' | 'ffmpeg' | 'mediarecorder';
 
 export interface ExportOptions {
   width: number;

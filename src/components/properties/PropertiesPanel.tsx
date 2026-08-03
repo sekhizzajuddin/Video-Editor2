@@ -5207,14 +5207,7 @@ export function PropertiesPanel() {
                             const tempEngine = new SpeedRampEngine(ramp);
                             const sourceEnd = maxDuration - selectedClip.trimEnd;
                             const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-                            console.log('[PRESET CLICK]', preset.id);
-                            console.log('[PRESET CLICK] selectedClip.id:', selectedClip.id);
-                            console.log('[PRESET CLICK] selectedClip.duration (old):', selectedClip.duration);
-                            console.log('[PRESET CLICK] mediaItem found?:', !!mediaItem, 'maxDuration:', maxDuration);
-                            console.log('[PRESET CLICK] trimStart:', selectedClip.trimStart, 'trimEnd:', selectedClip.trimEnd);
-                            console.log('[PRESET CLICK] sourceEnd:', sourceEnd);
-                            console.log('[PRESET CLICK] newDuration (calculated):', newDuration);
-                            console.log('[PRESET CLICK] ramp:', JSON.stringify(ramp));
+
                             updateClip(selectedClip.id, { 
                               speedRamp: ramp,
                               duration: Math.max(0.1, newDuration)
