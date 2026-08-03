@@ -337,8 +337,12 @@ export interface ClipAnimations {
 export interface ClipAiBackgroundSettings {
   enabled: boolean;
   edgeBlur: number;
-  modelSelection?: 0 | 1 | 2; // 0 for fast GPU, 1 for High Accuracy HD, 2 for Ultra Studio (IS-Net)
+  modelSelection?: 0 | 1 | 2; // 0: Fast GPU, 1: High Accuracy HD, 2: Ultra Studio / RVM
   playbackQuality?: 'full' | 'balanced' | 'performance'; // Controls inference strategy during playback
+  choke?: number;          // -10 to 10 px (shrink/expand mask edge)
+  feather?: number;        // 0 to 20 px (Gaussian blur on alpha edge)
+  spillSuppression?: number; // 0 to 100 (desaturate edge fringe)
+  spillColor?: string;     // Hex color for spill suppression target, e.g. '#00ff00'
 }
 
 export interface ClipChromaKeySettings {

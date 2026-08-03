@@ -44,14 +44,15 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
   if (modelType === 'general' && mediaPipeGeneralSegmenter) return mediaPipeGeneralSegmenter;
 
   try {
+    // Pinned to exact installed version (1.0.1) to avoid breaking on CDN upstream updates
     const vision = await FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
     );
     const modelAssetPath = modelType === 'landscape'
       ? 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite'
       : 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
 
-    const segmenter = await ImageSegmenter.createFromOptions(vision, {
+    const createOpts: any = {
       baseOptions: {
         modelAssetPath,
         delegate: 'GPU',
@@ -59,6 +60,13 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
       runningMode: 'IMAGE',
       outputCategoryMask: false,
       outputConfidenceMasks: true,
+    };
+
+    // Automatic GPU -> CPU fallback if WebGL context or shader delegate fails
+    const segmenter = await ImageSegmenter.createFromOptions(vision, createOpts).catch(async (gpuErr: any) => {
+      console.warn('[aiBackground] MediaPipe GPU delegate failed, falling back to CPU delegate:', gpuErr);
+      createOpts.baseOptions.delegate = 'CPU';
+      return ImageSegmenter.createFromOptions(vision, createOpts);
     });
 
     if (modelType === 'landscape') mediaPipeLandscapeSegmenter = segmenter;
@@ -66,7 +74,7 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
 
     return segmenter;
   } catch (err) {
-    console.warn('[aiBackground] MediaPipe GPU Segmenter load failed, falling back to @imgly:', err);
+    console.warn('[aiBackground] MediaPipe Segmenter load failed, falling back to @imgly:', err);
     return null;
   }
 }
@@ -136,7 +144,8 @@ if (typeof window !== 'undefined') {
   // Force ort.env.wasm.proxy = true — make it read-only so the library can't
   // override it to false when WebGPU is unavailable.
   try {
-    if (ortObj?.env?.wasm) {
+    const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+    if (!hasWebGPU && ortObj?.env?.wasm) {
       Object.defineProperty(ortObj.env.wasm, 'proxy', {
         get: () => true,
         set: () => {}, // Silently ignore @imgly's `ort.env.wasm.proxy = false`
@@ -162,23 +171,39 @@ interface SimpleMaskCache {
 const maskCacheMap = new Map<string, SimpleMaskCache>();
 const segmentingInFlight = new Set<string>();
 
-// Redraw callback: when an async mask arrives, signal the RAF loop to repaint.
+// Redraw callback: debounced with requestAnimationFrame to prevent RAF storms
 let _onMaskReadyCallback: (() => void) | null = null;
 export function setOnMaskReadyCallback(cb: (() => void) | null): void {
   _onMaskReadyCallback = cb;
 }
+
+let maskRafPending = false;
 function notifyMaskReady(): void {
-  if (_onMaskReadyCallback) _onMaskReadyCallback();
+  if (maskRafPending) return;
+  maskRafPending = true;
+  requestAnimationFrame(() => {
+    maskRafPending = false;
+    if (_onMaskReadyCallback) _onMaskReadyCallback();
+  });
 }
 
-// ── Canvas Pool ──────────────────────────────────────────────────────────────
-// Pre-allocated canvases to avoid GC pressure from repeated createElement calls.
+// ── Canvas Pool with LRU Eviction ─────────────────────────────────────────────
+// Pre-allocated canvases with LRU eviction to prevent unbounded memory growth.
 
 const canvasPool = new Map<string, HTMLCanvasElement>();
+const MAX_POOL_SIZE = 50;
 
 function getPooledCanvas(key: string, w: number, h: number): HTMLCanvasElement {
   let c = canvasPool.get(key);
-  if (!c) {
+  if (c) {
+    // Re-insert to mark as most recently used in Map iteration order
+    canvasPool.delete(key);
+    canvasPool.set(key, c);
+  } else {
+    if (canvasPool.size >= MAX_POOL_SIZE) {
+      const firstKey = canvasPool.keys().next().value;
+      if (firstKey) canvasPool.delete(firstKey);
+    }
     c = document.createElement('canvas');
     canvasPool.set(key, c);
   }
@@ -592,6 +617,101 @@ function getVideoCurrentTime(sourceElement: any): number {
   return -1;
 }
 
+// ── Professional Matting & Edge Post-Processing ──────────────────────────────
+
+/**
+ * Suppress background color spill (e.g. green or blue fringe on hair/shoulders).
+ * Operates directly on semi-transparent edge pixels of the composited canvas.
+ */
+function applySpillSuppression(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  spillStrength: number = 0,
+  targetHexColor?: string
+): void {
+  if (!spillStrength || spillStrength <= 0 || width <= 0 || height <= 0) return;
+  try {
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const data = imgData.data;
+    const factor = Math.min(1, spillStrength / 100);
+
+    let targetR = 0, targetG = 255, targetB = 0;
+    if (targetHexColor && targetHexColor.startsWith('#') && targetHexColor.length === 7) {
+      targetR = parseInt(targetHexColor.slice(1, 3), 16);
+      targetG = parseInt(targetHexColor.slice(3, 5), 16);
+      targetB = parseInt(targetHexColor.slice(5, 7), 16);
+    }
+
+    const isGreen = targetG > targetR + 30 && targetG > targetB + 30;
+    const isBlue = targetB > targetR + 30 && targetB > targetG + 30;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a < 250 && a > 10) { // Target alpha fringe boundary pixels
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        if (isGreen && g > r && g > b) {
+          const avg = (r + b) / 2;
+          data[i + 1] = Math.round(g * (1 - factor) + avg * factor);
+        } else if (isBlue && b > r && b > g) {
+          const avg = (r + g) / 2;
+          data[i + 2] = Math.round(b * (1 - factor) + avg * factor);
+        } else if (!isGreen && !isBlue && g > 140 && g > r + 15 && g > b + 15) {
+          const avg = (r + b) / 2;
+          data[i + 1] = Math.round(g * (1 - factor) + avg * factor);
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } catch (e) {
+    // Ignore CORS canvas contamination
+  }
+}
+
+/**
+ * Refine mask alpha boundaries with Choke (shrink/expand) and Feather (Gaussian blur).
+ */
+function refineMaskEdges(
+  maskCanvas: HTMLCanvasElement | ImageBitmap | HTMLCanvasElement,
+  width: number,
+  height: number,
+  choke: number = 0,
+  feather: number = 0,
+  poolKey: string = 'mask_refine'
+): HTMLCanvasElement {
+  const temp = getPooledCanvas(`${poolKey}_edge`, width, height);
+  const tCtx = temp.getContext('2d');
+  if (!tCtx) return temp;
+
+  tCtx.clearRect(0, 0, width, height);
+  const blurVal = Math.max(0, feather + Math.abs(choke * 0.4));
+  if (blurVal > 0) {
+    tCtx.filter = `blur(${blurVal}px)`;
+    tCtx.drawImage(maskCanvas as any, 0, 0, width, height);
+    tCtx.filter = 'none';
+  } else {
+    tCtx.drawImage(maskCanvas as any, 0, 0, width, height);
+  }
+
+  if (choke !== 0) {
+    try {
+      const imgData = tCtx.getImageData(0, 0, width, height);
+      const data = imgData.data;
+      const shift = Math.round(choke * 15); // Map -10..10 to alpha threshold shift
+      for (let i = 3; i < data.length; i += 4) {
+        let a = data[i];
+        if (a > 0 && a < 255) {
+          data[i] = Math.max(0, Math.min(255, a + shift));
+        }
+      }
+      tCtx.putImageData(imgData, 0, 0);
+    } catch (e) {
+      // Ignore if canvas is tainted
+    }
+  }
+  return temp;
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -614,16 +734,21 @@ export async function applyAiBackgroundMask(
   modelSelection: 0 | 1 | 2 = 1,
   playbackQuality: 'full' | 'balanced' | 'performance' = 'balanced',
   isPlaying: boolean = false,
-  clipId: string = '_default'
+  clipId: string = '_default',
+  options: { choke?: number; feather?: number; spillSuppression?: number; spillColor?: string } = {}
 ): Promise<void> {
   try {
     const currentVideoTime = getVideoCurrentTime(sourceElement);
     const clipPreRendered = preRenderedMaskCache.get(clipId);
+    const choke = options.choke ?? 0;
+    const feather = (options.feather ?? 0) > 0 ? options.feather! : edgeBlur;
+    const spillSuppression = options.spillSuppression ?? 0;
+    const spillColor = options.spillColor;
 
-    // ── STEP 1: FAST O(1) PRE-RENDERED MASK LOOKUP (Zero AI CPU load during playback!) ──
+    // ── STEP 1: FAST O(1) PRE-RENDERED MASK LOOKUP WITH TEMPORAL ALPHA BLENDING ──
     if (clipPreRendered && clipPreRendered.size > 0 && currentVideoTime >= 0) {
       const targetKey = timeToKey(currentVideoTime);
-      let preMask = clipPreRendered.get(targetKey);
+      let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
 
       // If exact frame isn't ready yet, look for closest analyzed frame within +-3 frames (~150ms)
       if (!preMask) {
@@ -633,23 +758,40 @@ export async function applyAiBackgroundMask(
         }
       }
       if (preMask) {
-        // Instant GPU texture composite (< 0.05ms render cost)
-        if (edgeBlur > 0) {
-          const blurredCanvas = getPooledCanvas(`${clipId}_blur`, width, height);
-          const bCtx = blurredCanvas.getContext('2d');
+        // Temporal Alpha Blending: smoothly interpolate between adjacent keyframe masks to eliminate popping/flicker
+        const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
+        const interval = 1 / inferenceFps;
+        const prevKey = timeToKey(currentVideoTime - (interval * 0.5));
+        const nextKey = timeToKey(currentVideoTime + (interval * 0.5));
+        const prevMask = clipPreRendered.get(prevKey);
+        const nextMask = clipPreRendered.get(nextKey);
+
+        if (prevMask && nextMask && prevMask !== nextMask && isPlaying) {
+          const localT = Math.max(0, Math.min(1, (currentVideoTime % interval) / interval));
+          const blendCanvas = getPooledCanvas(`${clipId}_temporal_blend`, width, height);
+          const bCtx = blendCanvas.getContext('2d');
           if (bCtx) {
             bCtx.clearRect(0, 0, width, height);
-            bCtx.filter = `blur(${edgeBlur}px)`;
-            bCtx.drawImage(preMask, 0, 0, width, height);
-            bCtx.filter = 'none';
+            bCtx.globalAlpha = 1 - localT;
+            bCtx.drawImage(prevMask, 0, 0, width, height);
+            bCtx.globalAlpha = localT;
+            bCtx.drawImage(nextMask, 0, 0, width, height);
+            bCtx.globalAlpha = 1.0;
+            preMask = blendCanvas;
           }
-          ctx.globalCompositeOperation = 'destination-in';
-          ctx.drawImage(blurredCanvas, 0, 0, width, height);
-          ctx.globalCompositeOperation = 'source-over';
-        } else {
-          ctx.globalCompositeOperation = 'destination-in';
-          ctx.drawImage(preMask, 0, 0, width, height);
-          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        // Instant GPU texture composite with Choke and Feather
+        const refinedMask = (choke !== 0 || feather > 0)
+          ? refineMaskEdges(preMask, width, height, choke, feather, `${clipId}_pre`)
+          : preMask;
+
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(refinedMask as any, 0, 0, width, height);
+        ctx.globalCompositeOperation = 'source-over';
+
+        if (spillSuppression > 0) {
+          applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
         }
         return; // Complete! Zero AI inference required!
       }
@@ -756,22 +898,16 @@ export async function applyAiBackgroundMask(
     // ── Composite mask (GPU-accelerated drawImage, < 0.1ms) ──
     if (!maskCanvas) return;
 
-    if (edgeBlur > 0) {
-      const blurredCanvas = getPooledCanvas(`${clipId}_blur`, width, height);
-      const bCtx = blurredCanvas.getContext('2d');
-      if (bCtx) {
-        bCtx.clearRect(0, 0, width, height);
-        bCtx.filter = `blur(${edgeBlur}px)`;
-        bCtx.drawImage(maskCanvas, 0, 0, width, height);
-        bCtx.filter = 'none';
-      }
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.drawImage(blurredCanvas, 0, 0, width, height);
-      ctx.globalCompositeOperation = 'source-over';
-    } else {
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.drawImage(maskCanvas, 0, 0, width, height);
-      ctx.globalCompositeOperation = 'source-over';
+    const refinedMask = (choke !== 0 || feather > 0)
+      ? refineMaskEdges(maskCanvas, width, height, choke, feather, `${clipId}_live`)
+      : (edgeBlur > 0 ? refineMaskEdges(maskCanvas, width, height, 0, edgeBlur, `${clipId}_blur`) : maskCanvas);
+
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(refinedMask as any, 0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+
+    if (spillSuppression > 0) {
+      applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
     }
   } catch (err) {
     console.error('[aiBackground] applyAiBackgroundMask error:', err);

@@ -837,10 +837,11 @@ export async function renderCanvasEngine({
                 offCanvas.height,
                 sourceElement,
                 animEdgeBlur,
-                clip.aiBackground.modelSelection ?? 0,
+                clip.aiBackground.modelSelection ?? 1,
                 clip.aiBackground.playbackQuality ?? 'balanced',
                 false,
-                clip.id
+                clip.id,
+                clip.aiBackground
               );
             } else {
               // Interactive (playing, scrubbing, OR paused): fire-and-forget.
@@ -852,10 +853,11 @@ export async function renderCanvasEngine({
                 offCanvas.height,
                 sourceElement,
                 animEdgeBlur,
-                clip.aiBackground.modelSelection ?? 0,
+                clip.aiBackground.modelSelection ?? 1,
                 clip.aiBackground.playbackQuality ?? 'balanced',
                 true,
-                clip.id
+                clip.id,
+                clip.aiBackground
               );
             }
           }
