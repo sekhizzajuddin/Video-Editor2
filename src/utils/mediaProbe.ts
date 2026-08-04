@@ -68,6 +68,7 @@ export async function probeVideo(
   objectUrl: string
 ): Promise<Partial<MediaItem>> {
   const video = document.createElement('video');
+  video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
 
@@ -199,6 +200,7 @@ export async function probeImage(
   objectUrl: string
 ): Promise<Partial<MediaItem>> {
   const img = document.createElement('img');
+  img.crossOrigin = 'anonymous';
 
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve();
@@ -248,6 +250,7 @@ export async function generateFrameStripOnDemand(
   maxWidth = 120
 ): Promise<string[]> {
   const video = document.createElement('video');
+  video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
   video.crossOrigin = 'anonymous';

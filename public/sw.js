@@ -39,6 +39,12 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
+  // Bypass Service Worker for all cross-origin requests to prevent COEP credentialless blocking
+  const url = new URL(e.request.url);
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   // Use Network First, falling back to cache for HTML navigation requests
   if (e.request.mode === 'navigate' || (e.request.headers.get('accept') && e.request.headers.get('accept').includes('text/html'))) {
     e.respondWith(

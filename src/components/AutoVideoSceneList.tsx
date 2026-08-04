@@ -153,7 +153,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
                         : 'border-transparent opacity-50 hover:opacity-100'
                     }`}
                   >
-                    <img src={opt.thumbnail || opt.url} alt="thumbnail" className="w-full h-full object-cover bg-black" />
+                    <img src={opt.thumbnail || opt.url} crossOrigin="anonymous" alt="thumbnail" className="w-full h-full object-cover bg-black" />
                   </div>
                 ))}
               </div>

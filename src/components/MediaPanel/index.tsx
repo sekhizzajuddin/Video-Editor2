@@ -1026,6 +1026,7 @@ export function MediaPanel() {
       return (
         <img
           src={media.thumbnail}
+          crossOrigin="anonymous"
           alt={media.name}
           className="w-full h-full object-cover rounded-sm"
           draggable={false}
@@ -1360,6 +1361,7 @@ export function MediaPanel() {
                       <video
                         key={previewItem.id}
                         src={previewItem.url}
+                        crossOrigin="anonymous"
                         controls
                         className="w-full h-full object-contain"
                         autoPlay={false}
@@ -1372,7 +1374,7 @@ export function MediaPanel() {
                       </div>
                     )}
                     {previewItem.type === 'image' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
-                      <img src={previewItem.url} className="w-full h-full object-contain" alt="" />
+                      <img src={previewItem.url} crossOrigin="anonymous" className="w-full h-full object-contain" alt="" />
                     )}
                     <button
                       onClick={() => setPreviewItem(null)}
@@ -1492,7 +1494,7 @@ export function MediaPanel() {
                       {/* Thumbnail in list view */}
                       <div className="w-10 h-7 rounded overflow-hidden bg-black/30 shrink-0 flex items-center justify-center">
                         {media.thumbnail ? (
-                          <img src={media.thumbnail} alt="" className="w-full h-full object-cover" draggable={false} />
+                          <img src={media.thumbnail} crossOrigin="anonymous" alt="" className="w-full h-full object-cover" draggable={false} />
                         ) : (
                           getMediaIcon(media.type)
                         )}

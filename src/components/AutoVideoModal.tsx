@@ -114,7 +114,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           duration: finalDuration,
           url: audioObjectUrl,
           createdAt: Date.now()
-        });
+        }, new File([audioBlob], `${finalAudioId}.mp3`, { type: audioBlob.type || 'audio/mp3' }));
 
         // Mock timestamps for TTS (since our API doesn't return them currently)
         const words = script.split(' ');
@@ -224,6 +224,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         }
 
         let localObjectUrl = null;
+        let localFile: File | undefined = undefined;
         if (videoUrl) {
           try {
             const res = await fetch(videoUrl);
@@ -234,8 +235,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             const writable = await fileHandle.createWritable();
             await writable.write(blob);
             await writable.close();
-            const localFile = await fileHandle.getFile();
-            localObjectUrl = URL.createObjectURL(localFile);
+            localFile = await fileHandle.getFile();
+            localObjectUrl = URL.createObjectURL(localFile!);
           } catch (e) {
             console.error('Download to SSD failed:', e);
             localObjectUrl = videoUrl; // fallback
@@ -252,7 +253,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
              duration: scene.duration,
               url: localObjectUrl,
              createdAt: Date.now()
-          });
+          }, localFile);
 
           generatedClips.push({
             id: `clip_${uuidv4()}`,
@@ -486,7 +487,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                     className={`w-full h-24 bg-[#1e1e1e] border border-dashed rounded flex flex-col items-center justify-center overflow-hidden transition-colors ${characterRef ? 'border-[#3e3e3e]' : 'border-[#3e3e3e] hover:border-indigo-500 cursor-pointer'}`}
                   >
                     {characterRef ? (
-                      <img src={characterRef} alt="Char Ref" className="w-full h-full object-cover" />
+                      <img src={characterRef} crossOrigin="anonymous" alt="Char Ref" className="w-full h-full object-cover" />
                     ) : (
                       <>
                         <ImageIcon className="w-5 h-5 text-[#6a6a6a] mb-1" />

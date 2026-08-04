@@ -462,6 +462,7 @@ export async function startClipBackgroundAnalysis(
   updateClipAnalysisStatus(clipId, { status: 'analyzing', progress: 0, processedFrames: 0, totalFrames: 1 });
 
   const video = document.createElement('video');
+  video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
   video.crossOrigin = 'anonymous';

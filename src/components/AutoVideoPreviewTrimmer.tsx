@@ -42,7 +42,7 @@ export const AutoVideoPreviewTrimmer: React.FC<AutoVideoPreviewTrimmerProps> = (
     return (
       <div className="flex flex-col gap-2">
         <div className="w-full aspect-video bg-black rounded overflow-hidden flex items-center justify-center">
-          <img src={url} alt="preview" className="max-w-full max-h-full object-contain" />
+          <img src={url} alt="preview" crossOrigin="anonymous" className="max-w-full max-h-full object-contain" />
         </div>
       </div>
     );
@@ -55,6 +55,7 @@ export const AutoVideoPreviewTrimmer: React.FC<AutoVideoPreviewTrimmerProps> = (
           <video 
             ref={mediaRef as React.RefObject<HTMLVideoElement>} 
             src={url} 
+            crossOrigin="anonymous"
             className="w-full h-full object-contain"
             onTimeUpdate={handleTimeUpdate}
             onEnded={() => setIsPlaying(false)}
@@ -63,6 +64,7 @@ export const AutoVideoPreviewTrimmer: React.FC<AutoVideoPreviewTrimmerProps> = (
           <audio 
             ref={mediaRef as React.RefObject<HTMLAudioElement>} 
             src={url}
+            crossOrigin="anonymous"
             onTimeUpdate={handleTimeUpdate}
             onEnded={() => setIsPlaying(false)}
           />

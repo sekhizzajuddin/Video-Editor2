@@ -31,6 +31,7 @@ export async function extractFrames(
   if (cached && cached.length >= count) return cached;
 
   const video = document.createElement('video');
+  video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
   video.crossOrigin = 'anonymous';
@@ -125,6 +126,7 @@ export async function extractFramesFromVideo(
   height = 48
 ): Promise<string[]> {
   const video = document.createElement('video');
+  video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
   video.crossOrigin = 'anonymous';
