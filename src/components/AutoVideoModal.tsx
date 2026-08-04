@@ -4,7 +4,7 @@ import { useEditorStore } from '../store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { generateAutoVideoBlueprint, alignScriptToAudio, AutoVideoBlueprint } from '../utils/aiClient';
-import { fetchStockVisualForScene } from '../utils/pexelsClient';
+import { fetchStockVisualOptionsForScene, generatePollinationsImageWithReference } from '../utils/pexelsClient';
 import { AutoVideoSceneList } from './AutoVideoSceneList';
 import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
 
@@ -145,6 +145,25 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       );
 
       setBlueprint(generatedBlueprint);
+      
+      setStatus('Fetching alternative video clips...');
+      const scenesWithOptions = await Promise.all(
+        generatedBlueprint.scenes.map(async (scene) => {
+          if (scene.visualSource === 'pexels' && scene.pexelsQuery) {
+            const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery, 'landscape', pexelsApiKey, 4);
+            return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
+          } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
+            const options = [];
+            for (let i = 0; i < 4; i++) {
+              options.push(generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080));
+            }
+            return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
+          }
+          return scene;
+        })
+      );
+      setBlueprint({ ...generatedBlueprint, scenes: scenesWithOptions });
+
       setStatus('Blueprint ready!');
       setProgress(100);
       toast.success('Scene blueprint generated! Please review it.');
@@ -165,9 +184,17 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       return;
     }
 
+    let dirHandle: any = null;
+    try {
+      dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+    } catch (e) {
+      toast.error('Local folder access denied. Assembly cancelled.');
+      return;
+    }
+
     setIsGenerating(true);
     setProgress(10);
-    setStatus('Assembling scenes...');
+    setStatus('Assembling scenes to local SSD...');
 
     try {
       const generatedClips: any[] = [];
@@ -176,33 +203,46 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       let currentStartTime = 0;
 
       for (const scene of blueprint.scenes) {
-        setStatus(`Sourcing media ${sceneIndex + 1}/${totalScenes}...`);
+        setStatus(`Downloading media ${sceneIndex + 1}/${totalScenes} to local disk...`);
         
-        let videoUrl = null;
+        let videoUrl = scene.selectedVisualUrl;
         let isImage = false;
         
-        try {
-          if (scene.visualSource === 'pexels') {
-            const visual = await fetchStockVisualForScene(scene.pexelsQuery || '', 'landscape', pexelsApiKey);
-            if (visual) {
-               videoUrl = visual.url;
-               isImage = visual.type === 'image';
+        if (!videoUrl) {
+          try {
+            if (scene.visualSource === 'pexels') {
+              const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery || '', 'landscape', pexelsApiKey, 1);
+              if (options.length > 0) { videoUrl = options[0].url; isImage = options[0].type === 'image'; }
+            } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
+              const res = generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080);
+              videoUrl = res.url;
+              isImage = true;
             }
-          } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
-            // Pollinations
-            let url = `https://image.pollinations.ai/prompt/${encodeURIComponent(scene.pollinationsPrompt)}?width=1920&height=1080&nologo=true`;
-            if (characterRef) url += `&image=${encodeURIComponent(characterRef)}`;
-            videoUrl = url;
-            isImage = true;
-          } else if (scene.visualSource === 'map') {
-             // We'd render map here, for now use a placeholder
-             videoUrl = null; // Map logic should ideally run offline and save blob
-          }
-        } catch (e) {
-          console.error('Visual search failed:', e);
+          } catch (e) { console.error(e); }
+        } else {
+           isImage = videoUrl.includes('pollinations') || videoUrl.endsWith('.jpg') || videoUrl.endsWith('.png');
         }
 
+        let localObjectUrl = null;
         if (videoUrl) {
+          try {
+            const res = await fetch(videoUrl);
+            const blob = await res.blob();
+            const ext = isImage ? 'jpg' : 'mp4';
+            const filename = `scene_${Date.now()}_${sceneIndex}.${ext}`;
+            const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            const localFile = await fileHandle.getFile();
+            localObjectUrl = URL.createObjectURL(localFile);
+          } catch (e) {
+            console.error('Download to SSD failed:', e);
+            localObjectUrl = videoUrl; // fallback
+          }
+        }
+
+        if (localObjectUrl) {
           const mediaId = `auto_${Date.now()}_${sceneIndex}`;
           
           addMedia({
@@ -210,7 +250,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
              name: `Scene ${sceneIndex + 1}`,
              type: isImage ? 'image' : 'video',
              duration: scene.duration,
-             url: videoUrl,
+              url: localObjectUrl,
              createdAt: Date.now()
           });
 
@@ -220,7 +260,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             startTime: currentStartTime,
             duration: scene.duration,
             track: 0,
-            mediaStartTime: 0,
+            mediaStartTime: scene.mediaStartTime || 0,
             fx: visualStyle !== 'realistic' ? [visualStyle] : []
           });
           

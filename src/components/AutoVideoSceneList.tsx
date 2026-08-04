@@ -1,6 +1,7 @@
 import React from 'react';
 import { AutoVideoScene } from '../utils/aiClient';
-import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown } from 'lucide-react';
+import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown, Scissors } from 'lucide-react';
+import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
 
 interface AutoVideoSceneListProps {
   scenes: AutoVideoScene[];
@@ -137,6 +138,42 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
               )}
             </div>
           </div>
+
+          {scene.visualOptions && scene.visualOptions.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">Alternative Clips</label>
+              <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
+                {scene.visualOptions.map((opt, oIdx) => (
+                  <div 
+                    key={oIdx} 
+                    onClick={() => updateScene(idx, { selectedVisualUrl: opt.url })}
+                    className={`w-24 h-16 shrink-0 rounded overflow-hidden cursor-pointer border-2 transition-all ${
+                      (scene.selectedVisualUrl === opt.url || (!scene.selectedVisualUrl && oIdx === 0)) 
+                        ? 'border-indigo-500 opacity-100' 
+                        : 'border-transparent opacity-50 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={opt.thumbnail || opt.url} alt="thumbnail" className="w-full h-full object-cover bg-black" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {scene.selectedVisualUrl && scene.visualOptions?.find(o => o.url === scene.selectedVisualUrl)?.type === 'video' && (
+             <div className="mt-2 bg-[#141414] border border-[#2a2a2a] p-2 rounded">
+               <AutoVideoPreviewTrimmer 
+                 url={scene.selectedVisualUrl} 
+                 type="video" 
+                 duration={scene.visualOptions?.find(o => o.url === scene.selectedVisualUrl)?.duration || 15}
+                 onTrimChange={(start, end) => updateScene(idx, { mediaStartTime: start, mediaEndTime: end })}
+               />
+               <div className="text-[10px] text-[#8a8a8a] mt-2 flex justify-between items-center">
+                 <span>Previewing: <span className="text-white">{scene.mediaStartTime?.toFixed(1) || 0}s</span> to <span className="text-white">{scene.mediaEndTime?.toFixed(1) || (scene.mediaStartTime || 0) + scene.duration}s</span></span>
+                 <span className="text-indigo-400">Fixed Dialogue Target: {scene.duration.toFixed(1)}s</span>
+               </div>
+             </div>
+          )}
         </div>
       ))}
     </div>

@@ -9,6 +9,7 @@ export interface StockVisualResult {
   url: string;
   source: 'pexels' | 'pollinations';
   duration?: number; // In seconds
+  thumbnail?: string;
 }
 
 /**
@@ -75,6 +76,7 @@ export async function searchPexelsVideos(
           url: bestFile.link,
           source: 'pexels',
           duration: video.duration,
+          thumbnail: video.image,
         });
       }
       
@@ -111,7 +113,8 @@ export function generatePollinationsImageWithReference(
     type: 'image',
     url,
     source: 'pollinations',
-    duration: 5, // Default 5 seconds
+    duration: 5,
+    thumbnail: url,
   };
 }
 
@@ -123,20 +126,31 @@ export async function fetchStockVisualForScene(
   orientation: 'landscape' | 'portrait' = 'landscape',
   apiKey?: string
 ): Promise<StockVisualResult> {
-  // 1. Try Pexels Video
-  const pexelsResults = await searchPexelsVideos(query, orientation, apiKey, 1);
+  const options = await fetchStockVisualOptionsForScene(query, orientation, apiKey, 1);
+  return options[0];
+}
+
+export async function fetchStockVisualOptionsForScene(
+  query: string,
+  orientation: 'landscape' | 'portrait' = 'landscape',
+  apiKey?: string,
+  count: number = 3
+): Promise<StockVisualResult[]> {
+  const pexelsResults = await searchPexelsVideos(query, orientation, apiKey, count);
   if (pexelsResults.length > 0) {
-    return pexelsResults[0];
+    return pexelsResults;
   }
 
-  // 2. Fallback to Pollinations AI Image
-  console.log(`No video found for "${query}", falling back to Pollinations.AI image.`);
-  
-  // Format the prompt a bit better for image generation
+  console.log(`No video found for "${query}", falling back to Pollinations.AI images.`);
   const enhancedPrompt = `High quality cinematic photo of ${query}, highly detailed, 8k resolution, photorealistic`;
   const width = orientation === 'landscape' ? 1920 : 1080;
   const height = orientation === 'landscape' ? 1080 : 1920;
   
-  return generatePollinationsImageWithReference(enhancedPrompt, null, undefined, width, height);
+  const options: StockVisualResult[] = [];
+  for (let i = 0; i < count; i++) {
+    // vary the seed to get different images
+    options.push(generatePollinationsImageWithReference(enhancedPrompt, null, undefined, width, height));
+  }
+  return options;
 }
 

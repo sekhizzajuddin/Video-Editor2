@@ -9,7 +9,7 @@ export function getGroqKey(): string {
 }
 
 // ─── Model constants ─────────────────────────────────────────────────────────
-const GEMINI_VISION_MODEL = 'gemini-3.1-flash-lite';          // current stable GA model, good free tier
+const GEMINI_VISION_MODEL = 'gemini-3.5-flash-lite';          // current stable GA model, good free tier
 const GROQ_VISION_MODEL   = 'meta-llama/llama-4-scout-17b-16e-instruct'; // Valid Groq vision model
 const GROQ_TEXT_MODEL     = 'llama3-8b-8192';        // Best Groq reasoning / text model
 
@@ -873,6 +873,10 @@ export interface AutoVideoScene {
     zoom: number;
     style: 'standard' | 'satellite' | 'dark' | 'vintage';
   } | null;
+  visualOptions?: { url: string; thumbnail?: string; type: 'video' | 'image'; source: string; duration?: number }[];
+  selectedVisualUrl?: string;
+  mediaStartTime?: number;
+  mediaEndTime?: number;
 }
 
 export interface AutoVideoBlueprint {
@@ -889,8 +893,8 @@ export async function generateAutoVideoBlueprint(
   customInstructions?: string,
   characterDescription?: string
 ): Promise<AutoVideoBlueprint> {
-  // We use gemini-2.5-flash as the actual endpoint, mapped to user's intent
-  const model = "gemini-2.5-flash"; 
+  // We use gemini-3.5-flash-lite as the actual endpoint, mapped to user's intent
+  const model = "gemini-3.5-flash-lite"; 
   const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 100)); // Sample if too long, though we should pass all
   const systemPrompt = `You are an expert video director, stock footage researcher, and AI image prompt engineer.
 I am providing you with a script that has a total audio voiceover duration of ${totalDuration.toFixed(1)} seconds, along with word-level timestamps.
