@@ -240,7 +240,7 @@ export interface ClipTextSettings {
 }
 
 export interface ClipFxSettings {
-  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'rhythmic_mirror' | 'action_zoom_pulse' | 'action_strobe' | 'action_shake' | 'quadrant_kaleidoscope' | 'subject_outline_flash' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | string;
+  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'rhythmic_mirror' | 'action_zoom_pulse' | 'action_strobe' | 'action_shake' | 'quadrant_kaleidoscope' | 'subject_outline_flash' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | 'style_anime' | 'style_watercolor' | 'style_papercut' | string;
   intensity: number;    // 0 to 100
   wipeAngle?: number;   // 0 to 360 (for wipes)
   // ── Action FX parameters ──
@@ -266,7 +266,8 @@ export type ParticleEffectType =
   | 'bubbles'
   | 'leaves'
   | 'hearts'
-  | 'matrix';
+  | 'matrix'
+  | 'paper_pieces';
 
 export interface ClipParticleSettings {
   type: ParticleEffectType;
@@ -408,6 +409,21 @@ export interface ClipMaskSettings {
   rotation?: number; // 0-360 degrees
   roundness?: number; // 0-100% (for rectangle)
   matteSourceClipId?: string; // For track matte
+}
+
+// Map Waypoint
+export interface MapWaypoint {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
+// Map Animation Settings
+export interface MapAnimationSettings {
+  type: 'route' | 'flyTo' | 'highlight';
+  waypoints: MapWaypoint[];
+  zoom: number;
+  style: 'standard' | 'satellite' | 'dark' | 'vintage';
 }
 
 // Timeline Clip

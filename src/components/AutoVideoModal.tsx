@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Loader2, Sparkles, Wand2, Mic, Settings, Play, Type } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Loader2, Wand2, Mic, Settings, Play, Type, Image as ImageIcon, Map, Video, Upload, Music } from 'lucide-react';
 import { useEditorStore } from '../store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
-import { generateVideoScenesFromScript } from '../utils/aiClient';
+import { generateAutoVideoBlueprint, alignScriptToAudio, AutoVideoBlueprint } from '../utils/aiClient';
 import { fetchStockVisualForScene } from '../utils/pexelsClient';
+import { AutoVideoSceneList } from './AutoVideoSceneList';
+import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
 
 const uuidv4 = () => crypto.randomUUID();
 
@@ -23,122 +25,206 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
   const geminiApiKey = (settings as any)?.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY;
   const pexelsApiKey = (settings as any)?.pexelsApiKey || import.meta.env.VITE_PEXELS_API_KEY;
 
+  const [activeTab, setActiveTab] = useState<'script' | 'audio' | 'both'>('script');
+  
+  // Inputs
   const [script, setScript] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('');
-
-  // TTS Settings
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  
+  // Generation Options
   const [ttsVoice, setTtsVoice] = useState('en-US-AriaNeural');
-  const [ttsRate, setTtsRate] = useState(1);
-  const [ttsPitch, setTtsPitch] = useState(1);
+  const [visualStyle, setVisualStyle] = useState('realistic');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [characterRef, setCharacterRef] = useState<string | null>(null);
 
-  const handleGenerate = async () => {
-    if (!script.trim()) {
-      toast.error('Please enter a script to generate video.');
-      return;
+  // State
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [status, setStatus] = useState('');
+  const [progress, setProgress] = useState(0);
+
+  // Output
+  const [blueprint, setBlueprint] = useState<AutoVideoBlueprint | null>(null);
+  const [audioMediaId, setAudioMediaId] = useState<string | null>(null);
+  const [audioDuration, setAudioDuration] = useState<number>(0);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const charInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setAudioFile(e.target.files[0]);
     }
+  };
+
+  const handleCharRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setCharacterRef(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // STEP 1: Generate Blueprint (Audio + Script -> Scenes)
+  const handleGenerateBlueprint = async () => {
     if (!geminiApiKey) {
-      toast.error('Gemini API key is missing.');
-      return;
-    }
-    if (!pexelsApiKey) {
-      toast.error('Pexels API key is missing.');
+      toast.error('Gemini API key is required.');
       return;
     }
 
     setIsGenerating(true);
-    setProgress(5);
-    setStatus('Generating voiceover...');
+    setProgress(10);
+    setStatus('Processing audio & script...');
 
     try {
-      // 1. Generate Voiceover via Edge TTS
-      const ttsUrl = `/api/tts?text=${encodeURIComponent(script)}&voice=${ttsVoice}&rate=${ttsRate}&pitch=${ttsPitch}`;
-      const audioResponse = await fetch(ttsUrl);
-      if (!audioResponse.ok) throw new Error('Failed to generate voiceover audio.');
-      
-      const audioBlob = await audioResponse.blob();
-      const audioObjectUrl = URL.createObjectURL(audioBlob);
-      
-      const audioMediaId = `tts_${Date.now()}`;
-      
-      setStatus('Analyzing audio duration...');
-      setProgress(15);
-      
-      // Determine audio duration
-      const audioEl = new Audio(audioObjectUrl);
-      await new Promise((resolve) => {
-        audioEl.onloadedmetadata = resolve;
-        audioEl.onerror = resolve; // fallback if meta fails
-        setTimeout(resolve, 3000); // safety timeout
-      });
-      const audioDuration = (audioEl.duration && isFinite(audioEl.duration)) ? audioEl.duration : 10;
-      
-      addMedia({
-        id: audioMediaId,
-        name: `Voiceover: ${script.slice(0, 20)}...`,
-        type: 'audio',
-        duration: audioDuration,
-        url: audioObjectUrl,
-        createdAt: Date.now()
-      });
+      let finalScript = script;
+      let finalAudioId = '';
+      let finalDuration = 0;
+      let wordTimestamps: { word: string; start: number; end: number }[] = [];
 
-      setStatus('Planning scenes with AI...');
-      setProgress(25);
+      if (activeTab === 'script') {
+        if (!script.trim()) throw new Error('Please enter a script.');
+        
+        setStatus('Generating voiceover (TTS)...');
+        // TTS
+        const ttsUrl = `/api/tts?text=${encodeURIComponent(script)}&voice=${ttsVoice}&rate=1&pitch=1`;
+        const audioResponse = await fetch(ttsUrl);
+        if (!audioResponse.ok) throw new Error('Failed to generate voiceover.');
+        
+        const audioBlob = await audioResponse.blob();
+        const audioObjectUrl = URL.createObjectURL(audioBlob);
+        finalAudioId = `tts_${Date.now()}`;
+        
+        const audioEl = new Audio(audioObjectUrl);
+        await new Promise((resolve) => {
+          audioEl.onloadedmetadata = resolve;
+          audioEl.onerror = resolve;
+          setTimeout(resolve, 3000);
+        });
+        finalDuration = (audioEl.duration && isFinite(audioEl.duration)) ? audioEl.duration : 10;
+        
+        addMedia({
+          id: finalAudioId,
+          name: `Voiceover (AI)`,
+          type: 'audio',
+          duration: finalDuration,
+          url: audioObjectUrl,
+          createdAt: Date.now()
+        });
 
-      // 2. Scene Planning via Gemini
-      const scenePlan = await generateVideoScenesFromScript(script, audioDuration, geminiApiKey);
-      const totalScenes = scenePlan.length;
-      
-      if (totalScenes === 0) throw new Error('No scenes generated by AI.');
+        // Mock timestamps for TTS (since our API doesn't return them currently)
+        const words = script.split(' ');
+        const timePerWord = finalDuration / words.length;
+        wordTimestamps = words.map((w, i) => ({
+          word: w,
+          start: i * timePerWord,
+          end: (i + 1) * timePerWord
+        }));
 
-      setStatus('Sourcing stock media...');
-      setProgress(40);
+      } else {
+        throw new Error('Audio import flow requires backend transcription which is mocked out for now. Please use Script tab.');
+      }
 
-      // 3. Source Stock Media for each scene
+      setAudioMediaId(finalAudioId);
+      setAudioDuration(finalDuration);
+
+      setStatus('AI is planning scenes...');
+      setProgress(50);
+
+      const generatedBlueprint = await generateAutoVideoBlueprint(
+        finalScript,
+        wordTimestamps,
+        finalDuration,
+        geminiApiKey,
+        customInstructions,
+        characterRef ? "Use provided character reference." : undefined
+      );
+
+      setBlueprint(generatedBlueprint);
+      setStatus('Blueprint ready!');
+      setProgress(100);
+      toast.success('Scene blueprint generated! Please review it.');
+
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message);
+    } finally {
+      setIsGenerating(false);
+      setTimeout(() => { setProgress(0); setStatus(''); }, 2000);
+    }
+  };
+
+  // STEP 2: Assemble Video (Fetch media + add to timeline)
+  const handleAssemble = async () => {
+    if (!blueprint || !audioMediaId || !pexelsApiKey) {
+      toast.error('Missing blueprint or API keys.');
+      return;
+    }
+
+    setIsGenerating(true);
+    setProgress(10);
+    setStatus('Assembling scenes...');
+
+    try {
       const generatedClips: any[] = [];
-      let currentStartTime = 0;
+      const totalScenes = blueprint.scenes.length;
       let sceneIndex = 0;
+      let currentStartTime = 0;
 
-      for (const scene of scenePlan) {
-        setStatus(`Sourcing scene ${sceneIndex + 1} of ${totalScenes}...`);
+      for (const scene of blueprint.scenes) {
+        setStatus(`Sourcing media ${sceneIndex + 1}/${totalScenes}...`);
         
         let videoUrl = null;
         let isImage = false;
         
         try {
-          const visual = await fetchStockVisualForScene(scene.searchQuery, 'landscape', pexelsApiKey);
-          if (visual) {
-             videoUrl = visual.url;
-             isImage = visual.type === 'image';
+          if (scene.visualSource === 'pexels') {
+            const visual = await fetchStockVisualForScene(scene.pexelsQuery || '', 'landscape', pexelsApiKey);
+            if (visual) {
+               videoUrl = visual.url;
+               isImage = visual.type === 'image';
+            }
+          } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
+            // Pollinations
+            let url = `https://image.pollinations.ai/prompt/${encodeURIComponent(scene.pollinationsPrompt)}?width=1920&height=1080&nologo=true`;
+            if (characterRef) url += `&image=${encodeURIComponent(characterRef)}`;
+            videoUrl = url;
+            isImage = true;
+          } else if (scene.visualSource === 'map') {
+             // We'd render map here, for now use a placeholder
+             videoUrl = null; // Map logic should ideally run offline and save blob
           }
         } catch (e) {
           console.error('Visual search failed:', e);
         }
 
         if (videoUrl) {
-          const mediaId = `stock_${Date.now()}_${sceneIndex}`;
+          const mediaId = `auto_${Date.now()}_${sceneIndex}`;
           
           addMedia({
              id: mediaId,
-             name: `Scene ${sceneIndex + 1}: ${scene.searchQuery}`,
+             name: `Scene ${sceneIndex + 1}`,
              type: isImage ? 'image' : 'video',
              duration: scene.duration,
              url: videoUrl,
              createdAt: Date.now()
           });
 
-          // Create Video Clip
           generatedClips.push({
             id: `clip_${uuidv4()}`,
             mediaId,
             startTime: currentStartTime,
             duration: scene.duration,
             track: 0,
-            mediaStartTime: 0
+            mediaStartTime: 0,
+            fx: visualStyle !== 'realistic' ? [visualStyle] : []
           });
           
-          // Create Text Clip (Subtitles)
+          // Subtitles
           const textMediaId = `text_media_${uuidv4()}`;
           addMedia({
             id: textMediaId,
@@ -155,15 +241,13 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             mediaId: textMediaId,
             startTime: currentStartTime,
             duration: scene.duration,
-            track: 1, // Will map to a video/text track
+            track: 1,
             textSettings: {
                text: scene.narration,
                fontFamily: 'Inter',
                fontSize: 32,
                color: '#ffffff',
                bold: true,
-               italic: false,
-               underline: false,
                align: 'center',
                verticalAlign: 'bottom',
                shadowColor: '#000000',
@@ -177,18 +261,15 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         
         currentStartTime += scene.duration;
         sceneIndex++;
-        setProgress(40 + Math.floor((sceneIndex / totalScenes) * 50));
+        setProgress(10 + Math.floor((sceneIndex / totalScenes) * 80));
       }
 
-      setStatus('Assembling timeline...');
-      setProgress(95);
-
-      // 4. Inject into Timeline
+      setStatus('Adding to timeline...');
+      
       const v1Track = tracks.find(t => t.id === 'v1');
       const v2Track = tracks.find(t => t.id === 'v2');
       const a1Track = tracks.find(t => t.id === 'a1');
       
-      // Inject audio
       addClip({
         id: `audio_${uuidv4()}`,
         mediaId: audioMediaId,
@@ -203,9 +284,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         effects: []
       });
 
-      // Inject scenes (V1) and text (V2)
       for (const gc of generatedClips) {
-        if (gc.textSettings) { // It's a text clip
+        if (gc.textSettings) {
            addClip({
               id: gc.id,
               mediaId: gc.mediaId,
@@ -232,33 +312,29 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               opacity: 1,
               speed: 1,
               transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-              effects: []
+              effects: (gc.fx || []).map((fx: string) => ({ id: uuidv4(), type: fx, intensity: 100 }))
            });
         }
       }
 
       setProgress(100);
-      setStatus('Complete!');
-      toast.success('Auto-video generated and added to timeline!');
-      
-      setTimeout(() => {
-        onClose();
-      }, 1500);
+      toast.success('Video successfully assembled!');
+      setTimeout(() => { onClose(); }, 1000);
 
     } catch (e: any) {
       console.error(e);
-      toast.error(`Generation failed: ${e.message}`);
+      toast.error(`Assembly failed: ${e.message}`);
+    } finally {
       setIsGenerating(false);
-      setProgress(0);
-      setStatus('');
     }
   };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl w-full max-w-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl w-full max-w-6xl h-[80vh] shadow-2xl flex flex-col overflow-hidden">
+        
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[#2a2a2a] bg-[#1a1a1a]">
+        <div className="flex items-center justify-between p-4 border-b border-[#2a2a2a] bg-[#1a1a1a] shrink-0">
           <div className="flex items-center gap-2">
             <Wand2 className="w-5 h-5 text-indigo-400" />
             <h2 className="text-sm font-semibold text-white">Auto-Faceless Video Generator</h2>
@@ -268,83 +344,197 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           </button>
         </div>
 
-        <div className="p-4 flex flex-col gap-4">
-          <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded p-3 text-xs text-[#a0a0a0]">
-            Enter a complete script below. The system will automatically generate a human-like voiceover using Edge TTS, plan visual scenes using Gemini AI, source matching stock videos from Pexels (or generate images with Pollinations), and assemble the final project in your timeline.
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-[#a0a0a0] flex items-center gap-2">
-              <Type className="w-3.5 h-3.5" />
-              Video Script
-            </label>
-            <textarea
-              value={script}
-              onChange={(e) => setScript(e.target.value)}
-              placeholder="E.g., Did you know that space is completely silent? Because there is no atmosphere in space, sound has no medium or way to travel..."
-              className="w-full h-40 bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none resize-none"
-              disabled={isGenerating}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-[#a0a0a0] flex items-center gap-2">
-                <Mic className="w-3.5 h-3.5" />
-                Voice Actor
-              </label>
-              <select
-                value={ttsVoice}
-                onChange={(e) => setTtsVoice(e.target.value)}
-                disabled={isGenerating}
-                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none"
-              >
-                <option value="en-US-AriaNeural">Aria (Female)</option>
-                <option value="en-US-GuyNeural">Guy (Male)</option>
-                <option value="en-US-JennyNeural">Jenny (Female)</option>
-                <option value="en-US-ChristopherNeural">Christopher (Male)</option>
-                <option value="en-GB-SoniaNeural">Sonia (UK Female)</option>
-                <option value="en-GB-RyanNeural">Ryan (UK Male)</option>
-                <option value="en-AU-NatashaNeural">Natasha (AU Female)</option>
-                <option value="en-AU-WilliamNeural">William (AU Male)</option>
-              </select>
-            </div>
+        {/* Content Body */}
+        <div className="flex flex-1 overflow-hidden">
+          
+          {/* Left Panel: Studio & Inputs */}
+          <div className="w-1/3 min-w-[320px] border-r border-[#2a2a2a] bg-[#171717] flex flex-col p-4 gap-4 overflow-y-auto custom-scrollbar">
             
-            <div className="flex flex-col gap-1.5 justify-end">
+            {/* Tabs */}
+            <div className="flex bg-[#1a1a1a] rounded p-1 border border-[#2a2a2a]">
+              {(['script', 'audio', 'both'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors capitalize ${activeTab === tab ? 'bg-[#2a2a2a] text-white shadow-sm' : 'text-[#8a8a8a] hover:text-white'}`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Inputs based on tab */}
+            {(activeTab === 'script' || activeTab === 'both') && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#a0a0a0] flex items-center gap-2">
+                  <Type className="w-3.5 h-3.5" /> Script
+                </label>
+                <textarea
+                  value={script}
+                  onChange={(e) => setScript(e.target.value)}
+                  placeholder="Enter your script here..."
+                  className="w-full h-32 bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none resize-none"
+                />
+              </div>
+            )}
+
+            {(activeTab === 'audio' || activeTab === 'both') && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#a0a0a0] flex items-center gap-2">
+                  <Music className="w-3.5 h-3.5" /> Audio Voiceover
+                </label>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  ref={fileInputRef}
+                  onChange={handleAudioUpload}
+                  className="hidden"
+                />
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full bg-[#1e1e1e] border border-dashed border-[#3e3e3e] hover:border-indigo-500 rounded p-4 flex flex-col items-center justify-center gap-2 transition-colors"
+                >
+                  <Upload className="w-5 h-5 text-[#6a6a6a]" />
+                  <span className="text-xs text-[#8a8a8a]">
+                    {audioFile ? audioFile.name : 'Upload Audio File'}
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* Settings */}
+            <div className="flex flex-col gap-4 mt-2">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#a0a0a0]">Voice Actor (for Script)</label>
+                <select
+                  value={ttsVoice}
+                  onChange={(e) => setTtsVoice(e.target.value)}
+                  className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
+                >
+                  <option value="en-US-AriaNeural">Aria (Female)</option>
+                  <option value="en-US-GuyNeural">Guy (Male)</option>
+                  <option value="hi-IN-SwaraNeural">Swara (Hindi Female)</option>
+                  <option value="hi-IN-MadhurNeural">Madhur (Hindi Male)</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#a0a0a0]">Visual Style</label>
+                <select
+                  value={visualStyle}
+                  onChange={(e) => setVisualStyle(e.target.value)}
+                  className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
+                >
+                  <option value="realistic">Realistic (Stock / Pexels)</option>
+                  <option value="style_anime">Anime (AI Gen)</option>
+                  <option value="style_watercolor">Watercolor (AI Gen)</option>
+                  <option value="style_papercut">Papercut (AI Gen)</option>
+                </select>
+              </div>
+
+              {visualStyle !== 'realistic' && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-[#a0a0a0] flex items-center justify-between">
+                    <span>Character Reference (Optional)</span>
+                    {characterRef && (
+                      <button onClick={() => setCharacterRef(null)} className="text-red-400 hover:text-red-300 text-[10px]">Remove</button>
+                    )}
+                  </label>
+                  <input type="file" accept="image/*" ref={charInputRef} onChange={handleCharRefUpload} className="hidden" />
+                  <div 
+                    onClick={() => !characterRef && charInputRef.current?.click()}
+                    className={`w-full h-24 bg-[#1e1e1e] border border-dashed rounded flex flex-col items-center justify-center overflow-hidden transition-colors ${characterRef ? 'border-[#3e3e3e]' : 'border-[#3e3e3e] hover:border-indigo-500 cursor-pointer'}`}
+                  >
+                    {characterRef ? (
+                      <img src={characterRef} alt="Char Ref" className="w-full h-full object-cover" />
+                    ) : (
+                      <>
+                        <ImageIcon className="w-5 h-5 text-[#6a6a6a] mb-1" />
+                        <span className="text-[10px] text-[#8a8a8a]">Upload image for style consistency</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#a0a0a0]">Custom AI Instructions (Optional)</label>
+                <textarea
+                  value={customInstructions}
+                  onChange={(e) => setCustomInstructions(e.target.value)}
+                  placeholder="E.g. Make it a dark, moody thriller..."
+                  className="w-full h-16 bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-auto pt-4 flex flex-col gap-2">
               <button
-                onClick={handleGenerate}
-                disabled={isGenerating || !script.trim()}
-                className="w-full h-[38px] bg-indigo-600 hover:bg-indigo-700 disabled:bg-[#2a2a2a] disabled:text-[#6a6a6a] text-white text-sm font-medium rounded flex items-center justify-center gap-2 transition-colors"
+                onClick={handleGenerateBlueprint}
+                disabled={isGenerating || (activeTab === 'script' && !script.trim()) || (activeTab === 'audio' && !audioFile)}
+                className="w-full py-2.5 bg-[#2a2a2a] hover:bg-[#333] border border-[#3e3e3e] disabled:opacity-50 text-white text-sm font-medium rounded flex items-center justify-center gap-2 transition-colors"
               >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4" />
-                    Generate Video
-                  </>
-                )}
+                {isGenerating && !blueprint ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings className="w-4 h-4" />}
+                1. Generate Blueprint
               </button>
             </div>
           </div>
 
-          {isGenerating && (
-            <div className="flex flex-col gap-2 mt-2">
-              <div className="flex items-center justify-between text-xs text-[#a0a0a0]">
-                <span>{status}</span>
-                <span>{progress}%</span>
-              </div>
-              <div className="w-full h-1.5 bg-[#1e1e1e] rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+          {/* Right Panel: Scene Editor & Assemble */}
+          <div className="flex-1 bg-[#141414] flex flex-col relative overflow-hidden">
+            <div className="p-4 border-b border-[#2a2a2a] flex items-center justify-between bg-[#1a1a1a]">
+              <h3 className="text-sm font-semibold text-white">Preview & Scene Blueprint</h3>
+              {blueprint && (
+                <button
+                  onClick={handleAssemble}
+                  disabled={isGenerating}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded flex items-center justify-center gap-2 transition-colors shadow-lg"
+                >
+                  {isGenerating && blueprint ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  2. Assemble Video
+                </button>
+              )}
             </div>
-          )}
+            
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scrollbar">
+              {audioFile && activeTab === 'audio' && (
+                <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded p-3">
+                  <h4 className="text-xs font-medium text-[#8a8a8a] mb-2 uppercase tracking-wider">Audio Source Preview</h4>
+                  <AutoVideoPreviewTrimmer 
+                    url={URL.createObjectURL(audioFile)} 
+                    type="audio" 
+                    duration={audioDuration || 60} 
+                    onTrimChange={() => {}} 
+                  />
+                </div>
+              )}
+
+              <AutoVideoSceneList 
+                scenes={blueprint?.scenes || []}
+                onChange={(newScenes) => {
+                  if (blueprint) setBlueprint({ ...blueprint, scenes: newScenes });
+                }}
+                disabled={isGenerating}
+              />
+            </div>
+
+            {/* Status Bar Overlay */}
+            {isGenerating && (
+              <div className="absolute bottom-4 left-4 right-4 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg p-3 shadow-xl">
+                <div className="flex items-center justify-between text-xs text-[#a0a0a0] mb-2">
+                  <span className="font-medium text-white">{status}</span>
+                  <span>{progress}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-[#141414] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          
         </div>
       </div>
     </div>

@@ -246,7 +246,7 @@ export function drawPerspectiveTexture(
 
 export type ParticleEffectType =
   | 'snow' | 'rain' | 'fire' | 'sparkles' | 'confetti'
-  | 'smoke' | 'bubbles' | 'leaves' | 'hearts' | 'matrix';
+  | 'smoke' | 'bubbles' | 'leaves' | 'hearts' | 'matrix' | 'paper_pieces';
 
 export interface Particle {
   x: number; y: number;
@@ -327,6 +327,11 @@ export function spawnParticle(
   if (ps.type === 'matrix') {
     const chars = '0123456789ABCDEF日月火水木金土';
     return { x: ex, y: 0, vx: 0, vy: baseSpeed, life: 1, maxLife: baseLife, size: 10 * (ps.size / 100), color, rotation: 0, rotSpeed: 0, char: chars[Math.floor(Math.random()*chars.length)], type: ps.type };
+  }
+  if (ps.type === 'paper_pieces') {
+    vx = (Math.random() - 0.5) * turbulence * 2 + (ps.wind / 100);
+    vy = baseSpeed * (0.2 + Math.random() * 0.5);
+    return { x: px, y: -20, vx, vy, life: 1, maxLife: baseLife, size: baseSize * 2, color, rotation: Math.random() * Math.PI, rotSpeed: (Math.random() - 0.5) * 0.3, type: ps.type };
   }
 
   vx += (Math.random() - 0.5) * turbulence;
@@ -460,6 +465,23 @@ export function drawParticleShape(ctx: CanvasRenderingContext2D, p: Particle, al
       ctx.globalAlpha = alpha * 0.4;
       ctx.fillStyle = '#ffffff';
       ctx.fillText(p.char ?? '0', 0, -p.size);
+      break;
+    }
+    case 'paper_pieces': {
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      const s = p.size;
+      ctx.moveTo(-s, -s*0.8);
+      ctx.lineTo(s*0.8, -s);
+      ctx.lineTo(s, s*0.9);
+      ctx.lineTo(-s*0.9, s);
+      ctx.closePath();
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetY = 2;
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
       break;
     }
   }
@@ -880,6 +902,53 @@ export function applyFxEffect(
             data[i] = tmp[si];
             data[i + 2] = tmp[i + 2];
           }
+        }
+        break;
+      }
+      case 'style_anime': {
+        for (let i = 0; i < data.length; i += 4) {
+          let r = data[i], g = data[i + 1], b = data[i + 2];
+          // Boost contrast slightly
+          r = ((r / 255 - 0.5) * 1.3 + 0.5) * 255;
+          g = ((g / 255 - 0.5) * 1.3 + 0.5) * 255;
+          b = ((b / 255 - 0.5) * 1.3 + 0.5) * 255;
+          // Quantize (cel shading)
+          r = Math.floor(r / 32) * 32;
+          g = Math.floor(g / 32) * 32;
+          b = Math.floor(b / 32) * 32;
+          data[i] = Math.min(255, Math.max(0, r));
+          data[i + 1] = Math.min(255, Math.max(0, g));
+          data[i + 2] = Math.min(255, Math.max(0, b));
+        }
+        break;
+      }
+      case 'style_watercolor': {
+        const tmp = new Uint8ClampedArray(data);
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            const i = (y * w + x) * 4;
+            // Smear randomly
+            const nx = x + (Math.random() < 0.5 ? -1 : 1);
+            const ny = y + (Math.random() < 0.5 ? -1 : 1);
+            const ni = (ny * w + nx) * 4;
+            // Pastel tint + blend
+            data[i] = Math.min(255, (tmp[i] * 0.7 + tmp[ni] * 0.3) + 15);
+            data[i+1] = Math.min(255, (tmp[i+1] * 0.7 + tmp[ni+1] * 0.3) + 15);
+            data[i+2] = Math.min(255, (tmp[i+2] * 0.7 + tmp[ni+2] * 0.3) + 15);
+          }
+        }
+        break;
+      }
+      case 'style_papercut': {
+        for (let i = 0; i < data.length; i += 4) {
+          let r = data[i], g = data[i + 1], b = data[i + 2];
+          // Heavy quantization
+          r = Math.round(r / 64) * 64;
+          g = Math.round(g / 64) * 64;
+          b = Math.round(b / 64) * 64;
+          data[i] = Math.min(255, r);
+          data[i + 1] = Math.min(255, g);
+          data[i + 2] = Math.min(255, b);
         }
         break;
       }

@@ -856,52 +856,155 @@ export async function enhancePromptWithGemini(prompt: string, apiKey: string): P
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
-export interface VideoScenePlan {
-  duration: number; // in seconds
+export interface AutoVideoScene {
+  dialogueIndex: number;
   narration: string;
-  searchQuery: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  pexelsQuery: string | null;
+  pexelsAlternates: string[] | null;
+  pollinationsPrompt: string | null;
+  pollinationsVariants: string[] | null;
+  visualSource: 'pexels' | 'pollinations' | 'map';
+  mapAnimation: {
+    type: 'route' | 'flyTo' | 'highlight';
+    waypoints: { lat: number; lng: number; label?: string }[];
+    zoom: number;
+    style: 'standard' | 'satellite' | 'dark' | 'vintage';
+  } | null;
 }
 
-export async function generateVideoScenesFromScript(script: string, totalDuration: number, apiKey: string): Promise<VideoScenePlan[]> {
-  const systemPrompt = `You are an expert video director and stock footage researcher.
-I am providing you with a script that has a total audio voiceover duration of ${totalDuration.toFixed(1)} seconds.
+export interface AutoVideoBlueprint {
+  scenes: AutoVideoScene[];
+  globalSeed: number;
+  characterDescription: string;
+}
+
+export async function generateAutoVideoBlueprint(
+  script: string, 
+  wordTimestamps: { word: string; start: number; end: number }[], 
+  totalDuration: number, 
+  apiKey: string,
+  customInstructions?: string,
+  characterDescription?: string
+): Promise<AutoVideoBlueprint> {
+  // We use gemini-2.5-flash as the actual endpoint, mapped to user's intent
+  const model = "gemini-2.5-flash"; 
+  const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 100)); // Sample if too long, though we should pass all
+  const systemPrompt = `You are an expert video director, stock footage researcher, and AI image prompt engineer.
+I am providing you with a script that has a total audio voiceover duration of ${totalDuration.toFixed(1)} seconds, along with word-level timestamps.
 Your job is to break this script down into a sequence of consecutive video scenes to perfectly cover this duration.
 
 RULES:
-1. Divide the script into logical scenes. Each scene should ideally be between 3 to 6 seconds long.
+1. Divide the script into logical scenes (ideally 3 to 6 seconds each).
 2. The sum of the "duration" for all scenes MUST equal exactly ${totalDuration.toFixed(1)} seconds.
-3. For each scene, provide a "searchQuery" which is a 1-3 word search term to find relevant free stock video on Pexels (e.g., "business meeting", "nature forest", "coding computer", "happy family"). Keep queries simple and generic for better search results.
-4. Provide the exact "narration" chunk spoken during that scene for subtitles.
+3. For each scene, determine the best visualSource:
+   - "map": if the narration explicitly mentions geographic travel, locations, or routes (e.g. traveling from A to B, focusing on a country/city map).
+   - "pollinations": if Custom Instructions ask for a style that stock video won't have (like anime, comic book, line art, watercolor, specific character illustrations) OR if it requires a very specific imaginary scene.
+   - "pexels": for general live-action stock footage (people, nature, cities, technology).
 
-Return ONLY a JSON array, nothing else. Format:
-[
-  { "duration": 4.5, "narration": "Welcome to the future of video editing.", "searchQuery": "futuristic technology" },
-  { "duration": 3.2, "narration": "Where everything is automated.", "searchQuery": "robot manufacturing" }
-]`;
+4. For "pexels" scenes: Provide a primary 1-3 word search query and 2 alternatives.
+5. For "pollinations" scenes: Provide a highly detailed image prompt and 2 variants.
+6. For "map" scenes: Provide the mapAnimation object with lat/lng waypoints.
+7. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
+8. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your pollinations prompts.` : 'No character reference.'}
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+Return ONLY this exact JSON format, nothing else (no markdown):
+{
+  "scenes": [
+    {
+      "dialogueIndex": 1,
+      "narration": "Exact text spoken",
+      "startTime": 0.0,
+      "endTime": 4.5,
+      "duration": 4.5,
+      "pexelsQuery": "generic search term",
+      "pexelsAlternates": ["alt1", "alt2"],
+      "pollinationsPrompt": "highly detailed image prompt",
+      "pollinationsVariants": ["variant 1", "variant 2"],
+      "visualSource": "pexels" | "pollinations" | "map",
+      "mapAnimation": {
+        "type": "route" | "flyTo" | "highlight",
+        "waypoints": [{ "lat": 12.3, "lng": 45.6, "label": "City" }],
+        "zoom": 4,
+        "style": "standard" | "satellite" | "dark" | "vintage"
+      }
+    }
+  ],
+  "globalSeed": 42,
+  "characterDescription": "Generated character description if any"
+}`;
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nScript: ${script}` }] }],
+      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nScript: ${script}\n\nWord Timestamps (Sample): ${wordTimestampsStr}` }] }],
       generationConfig: {
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        temperature: 0.4
       }
     })
   });
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Failed to generate scenes: ${err}`);
+    throw new Error(`Failed to generate video blueprint: ${err}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+  try {
+    return JSON.parse(text) as AutoVideoBlueprint;
+  } catch (e) {
+    console.error("Error parsing blueprint JSON:", text);
+    throw new Error("Invalid response from Gemini AI.");
+  }
+}
+
+export async function alignScriptToAudio(
+  script: string, 
+  wordTimestamps: { word: string; start: number; end: number }[], 
+  apiKey: string
+): Promise<{ text: string, words: { word: string; start: number; end: number }[] }> {
+  // For now, if the user provides a script, we assume the Whisper transcription just needs punctuation from the script.
+  // We can ask Gemini to apply punctuation to the transcript using the script as a reference.
+  const systemPrompt = `You are a transcript editor.
+I have a raw transcript with word-level timestamps (but no punctuation), and a reference script (which has correct punctuation).
+Return the word timestamps array, but update the "word" field to include the correct punctuation from the reference script.
+
+Return ONLY a JSON array, no markdown. Format:
+[
+  { "word": "Hello,", "start": 0.0, "end": 0.5 },
+  { "word": "world.", "start": 0.6, "end": 1.0 }
+]`;
+
+  const wordTimestampsStr = JSON.stringify(wordTimestamps);
+  
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nReference Script: ${script}\n\nRaw Timestamps: ${wordTimestampsStr}` }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.1
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to align script`);
   }
 
   const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
   try {
-    const scenes: VideoScenePlan[] = JSON.parse(text);
-    return scenes;
+    const words = JSON.parse(text);
+    const combinedText = words.map((w: any) => w.word).join(' ');
+    return { text: combinedText, words };
   } catch (e) {
-    console.error("Error parsing scene plan JSON:", text);
-    throw new Error("Invalid response from Gemini AI.");
+    return { text: script, words: wordTimestamps };
   }
 }
