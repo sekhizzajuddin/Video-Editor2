@@ -319,10 +319,17 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex}/${downloadedUrls.length}${attemptLabel} — Downloading...`);
             
             try {
-              // On retry for pollinations, bust the cache with a new seed
+              // On retry for pollinations, bust the cache with a new seed and rotate model (flux -> turbo -> unity)
               let fetchUrl = dl.url;
               if (isPollinations && attempts > 1) {
+                const models = ['flux', 'turbo', 'unity'];
+                const nextModel = models[(attempts - 1) % models.length];
                 fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
+                if (fetchUrl.includes('model=')) {
+                  fetchUrl = fetchUrl.replace(/model=[a-z0-9_-]+/i, `model=${nextModel}`);
+                } else {
+                  fetchUrl += `&model=${nextModel}`;
+                }
               }
               
               const res = await fetch(fetchUrl);

@@ -54,10 +54,17 @@ const SequentialImage: React.FC<{ src: string; alt: string; className: string }>
             setProgress(20);
             setStatusLog(attempt > 1 ? `Attempt ${attempt}: Sending to AI...` : 'Sending prompt to AI...');
 
-            // Cache-bust on retries
+            // Cache-bust and model-failover on retries (flux -> turbo -> unity)
             let fetchUrl = src;
             if (attempt > 1) {
+              const models = ['flux', 'turbo', 'unity'];
+              const nextModel = models[(attempt - 1) % models.length];
               fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
+              if (fetchUrl.includes('model=')) {
+                fetchUrl = fetchUrl.replace(/model=[a-z0-9_-]+/i, `model=${nextModel}`);
+              } else {
+                fetchUrl += `&model=${nextModel}`;
+              }
             }
 
             const res = await fetch(fetchUrl);

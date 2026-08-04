@@ -92,20 +92,35 @@ export async function searchPexelsVideos(
 
 /**
  * Generate a free image using Pollinations.AI (No API Key required)
- * Optionally uses image-to-image character reference.
+ * Uses ContentGenerator architecture: cleans special characters, adds &model=flux,
+ * and caps prompt length to prevent Pollinations 500 errors.
  */
 export function generatePollinationsImageWithReference(
   prompt: string,
   referenceImageUrl?: string | null,
   seed?: number,
   width: number = 1920,
-  height: number = 1080
+  height: number = 1080,
+  model: string = 'flux'
 ): StockVisualResult {
   const actualSeed = seed ?? Math.floor(Math.random() * 1000000);
-  const safePrompt = typeof prompt === 'string' && prompt.trim() ? prompt : 'vintage documentary background';
-  const cleanPrompt = encodeURIComponent(safePrompt.substring(0, 1000));
+  const rawPrompt = typeof prompt === 'string' && prompt.trim() ? prompt : 'vintage documentary background';
   
-  let url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=${width}&height=${height}&nologo=true&seed=${actualSeed}`;
+  // Clean prompt for Pollinations (matching ContentGenerator architecture):
+  // 1. Replace #00FF00 hex specs with clean text "solid green background"
+  // 2. Strip special characters [^a-zA-Z0-9\s] to prevent URL path encoding 500 errors on Pollinations server
+  // 3. Cap at 180 characters max
+  const cleanKeywordPrompt = rawPrompt
+    .replace(/solid\s*#?[0-9a-fA-F]{6}\s*green\s*screen/gi, 'solid green background')
+    .replace(/#00FF00/gi, 'green')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+
+  const cleanPrompt = encodeURIComponent(cleanKeywordPrompt || 'vintage documentary background');
+  
+  let url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=${width}&height=${height}&nologo=true&seed=${actualSeed}&model=${model}`;
   if (referenceImageUrl) {
     url += `&image=${encodeURIComponent(referenceImageUrl)}`;
   }
