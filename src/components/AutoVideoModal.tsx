@@ -3,7 +3,7 @@ import { X, Loader2, Wand2, Mic, Settings, Play, Type, Image as ImageIcon, Map, 
 import { useEditorStore } from '../store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
-import { generateAutoVideoBlueprint, alignScriptToAudio, AutoVideoBlueprint } from '../utils/aiClient';
+import { generateAutoVideoBlueprint, alignScriptToAudio, AutoVideoBlueprint, generateSourceAdaptivePrompt } from '../utils/aiClient';
 import { fetchStockVisualOptionsForScene, generatePollinationsImageWithReference } from '../utils/pexelsClient';
 import { AutoVideoSceneList } from './AutoVideoSceneList';
 import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
@@ -24,6 +24,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
   const geminiApiKey = (settings as any)?.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY;
   const pexelsApiKey = (settings as any)?.pexelsApiKey || import.meta.env.VITE_PEXELS_API_KEY;
+  const groqApiKey = (settings as any)?.groqApiKey || import.meta.env.VITE_GROQ_API_KEY;
 
   const [activeTab, setActiveTab] = useState<'script' | 'audio' | 'both'>('script');
   
@@ -152,12 +153,20 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           if (scene.visualSource === 'pexels' && scene.pexelsQuery) {
             const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery, 'landscape', pexelsApiKey, 4);
             return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
-          } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
-            const options = [];
-            for (let i = 0; i < 4; i++) {
-              options.push(generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080));
+          } else if (scene.visualSource === 'pollinations') {
+            if (scene.layeredPrompts && scene.layeredPrompts.length > 0) {
+              const layeredVisuals = scene.layeredPrompts.map((lp, idx) => {
+                const res = generatePollinationsImageWithReference(lp.prompt, characterRef, undefined, 1920, 1080);
+                return { url: res.url, isGreenScreen: lp.isGreenScreen, trackOffset: idx };
+              });
+              return { ...scene, layeredVisuals };
+            } else if (scene.pollinationsPrompt) {
+              const options = [];
+              for (let i = 0; i < 4; i++) {
+                options.push(generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080));
+              }
+              return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
             }
-            return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
           }
           return scene;
         })
@@ -174,6 +183,52 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
     } finally {
       setIsGenerating(false);
       setTimeout(() => { setProgress(0); setStatus(''); }, 2000);
+    }
+  };
+
+  const handleRegenerateVisuals = async (index: number) => {
+    if (!blueprint) return;
+    const newBlueprint = { ...blueprint };
+    const scene = newBlueprint.scenes[index];
+    
+    if (scene.visualSource === 'pexels' && scene.pexelsQuery) {
+      const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery, 'landscape', pexelsApiKey, 4);
+      scene.visualOptions = options;
+      scene.selectedVisualUrl = options[0]?.url;
+    } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
+      const res = generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080);
+      scene.visualOptions = [{ url: res.url, type: 'image', source: 'pollinations' }];
+      scene.selectedVisualUrl = res.url;
+      scene.layeredVisuals = undefined;
+    }
+    setBlueprint(newBlueprint);
+  };
+
+  const handleSourceChange = async (index: number, newSource: 'pexels' | 'pollinations' | 'map') => {
+    if (!blueprint) return;
+    const newBlueprint = { ...blueprint };
+    const scene = newBlueprint.scenes[index];
+    scene.visualSource = newSource;
+    setBlueprint({ ...newBlueprint });
+
+    if (groqApiKey) {
+      try {
+        const adaptive = await generateSourceAdaptivePrompt(scene.narration, newSource, groqApiKey);
+        if (newSource === 'pexels' && adaptive.query) {
+          scene.pexelsQuery = adaptive.query;
+          scene.pexelsAlternates = adaptive.alternatives;
+        } else if (newSource === 'pollinations' && adaptive.prompt) {
+          scene.pollinationsPrompt = adaptive.prompt;
+          scene.pollinationsVariants = adaptive.variants;
+          scene.layeredPrompts = adaptive.layeredPrompts;
+        } else if (newSource === 'map' && adaptive.mapAnimation) {
+          scene.mapAnimation = adaptive.mapAnimation;
+        }
+        setBlueprint({ ...newBlueprint });
+        handleRegenerateVisuals(index);
+      } catch (err) {
+        console.error(err);
+      }
     }
   };
 
@@ -207,30 +262,41 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         
         let videoUrl = scene.selectedVisualUrl;
         let isImage = false;
+        let downloadedUrls: { url: string, isImage: boolean, isGreenScreen: boolean, trackOffset: number }[] = [];
         
-        if (!videoUrl) {
-          try {
-            if (scene.visualSource === 'pexels') {
-              const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery || '', 'landscape', pexelsApiKey, 1);
-              if (options.length > 0) { videoUrl = options[0].url; isImage = options[0].type === 'image'; }
-            } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
-              const res = generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080);
-              videoUrl = res.url;
-              isImage = true;
-            }
-          } catch (e) { console.error(e); }
+        if (scene.layeredVisuals && scene.layeredVisuals.length > 0) {
+           for (const lv of scene.layeredVisuals) {
+             downloadedUrls.push({ url: lv.url, isImage: true, isGreenScreen: lv.isGreenScreen, trackOffset: lv.trackOffset });
+           }
         } else {
-           isImage = videoUrl.includes('pollinations') || videoUrl.endsWith('.jpg') || videoUrl.endsWith('.png');
+           if (!videoUrl) {
+             try {
+               if (scene.visualSource === 'pexels') {
+                 const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery || '', 'landscape', pexelsApiKey, 1);
+                 if (options.length > 0) { videoUrl = options[0].url; isImage = options[0].type === 'image'; }
+               } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
+                 const res = generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080);
+                 videoUrl = res.url;
+                 isImage = true;
+               }
+             } catch (e) { console.error(e); }
+           } else {
+              isImage = videoUrl.includes('pollinations') || videoUrl.endsWith('.jpg') || videoUrl.endsWith('.png');
+           }
+           if (videoUrl) {
+             downloadedUrls.push({ url: videoUrl, isImage, isGreenScreen: false, trackOffset: 0 });
+           }
         }
 
-        let localObjectUrl = null;
-        let localFile: File | undefined = undefined;
-        if (videoUrl) {
+        const localObjects = [];
+        for (const dl of downloadedUrls) {
+          let localObjectUrl = null;
+          let localFile: File | undefined = undefined;
           try {
-            const res = await fetch(videoUrl);
+            const res = await fetch(dl.url);
             const blob = await res.blob();
-            const ext = isImage ? 'jpg' : 'mp4';
-            const filename = `scene_${Date.now()}_${sceneIndex}.${ext}`;
+            const ext = dl.isImage ? 'jpg' : 'mp4';
+            const filename = `scene_${Date.now()}_${sceneIndex}_t${dl.trackOffset}.${ext}`;
             const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
             const writable = await fileHandle.createWritable();
             await writable.write(blob);
@@ -239,33 +305,42 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             localObjectUrl = URL.createObjectURL(localFile!);
           } catch (e) {
             console.error('Download to SSD failed:', e);
-            localObjectUrl = videoUrl; // fallback
+            localObjectUrl = dl.url; // fallback
+          }
+          if (localObjectUrl) {
+             localObjects.push({ ...dl, localObjectUrl, localFile });
           }
         }
 
-        if (localObjectUrl) {
-          const mediaId = `auto_${Date.now()}_${sceneIndex}`;
+        for (const locObj of localObjects) {
+          const mediaId = `auto_${Date.now()}_${sceneIndex}_t${locObj.trackOffset}`;
           
           addMedia({
              id: mediaId,
-             name: `Scene ${sceneIndex + 1}`,
-             type: isImage ? 'image' : 'video',
+             name: `Scene ${sceneIndex + 1} ${locObj.isGreenScreen ? '(Layer)' : ''}`,
+             type: locObj.isImage ? 'image' : 'video',
              duration: scene.duration,
-              url: localObjectUrl,
+             url: locObj.localObjectUrl,
              createdAt: Date.now()
-          }, localFile);
+          }, locObj.localFile);
 
           generatedClips.push({
             id: `clip_${uuidv4()}`,
             mediaId,
             startTime: currentStartTime,
             duration: scene.duration,
-            track: 0,
+            track: locObj.trackOffset,
             mediaStartTime: scene.mediaStartTime || 0,
-            fx: visualStyle !== 'realistic' ? [visualStyle] : []
+            fx: visualStyle !== 'realistic' && !locObj.isGreenScreen ? [visualStyle] : [],
+            chromaKey: locObj.isGreenScreen ? { enabled: true, color: '#00ff00', threshold: 40, softness: 20 } : undefined,
+            transform: locObj.isGreenScreen ? { x: 0, y: 10, scale: 90, rotation: 0 } : undefined,
+            animations: locObj.isGreenScreen ? [
+              { type: 'position', startTime: 0, duration: scene.duration, startValue: {x: 0, y: 10}, endValue: {x: 0, y: 15} }
+            ] : undefined
           });
-          
-          // Subtitles
+        }
+        
+        // Subtitles
           const textMediaId = `text_media_${uuidv4()}`;
           addMedia({
             id: textMediaId,
@@ -298,7 +373,6 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                backgroundOpacity: 0
             }
           });
-        }
         
         currentStartTime += scene.duration;
         sceneIndex++;
@@ -330,7 +404,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
            addClip({
               id: gc.id,
               mediaId: gc.mediaId,
-              trackId: v2Track?.id || 'v2',
+              trackId: 'v4', // Text track on top
               startTime: gc.startTime,
               duration: gc.duration,
               trimStart: 0,
@@ -342,17 +416,22 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               effects: []
            });
         } else {
+           const trackNum = (gc.track || 0) + 1;
+           const targetTrackId = tracks.find(t => t.id === `v${trackNum}`)?.id || `v${trackNum}`;
+           
            addClip({
               id: gc.id,
               mediaId: gc.mediaId,
-              trackId: v1Track?.id || 'v1',
+              trackId: targetTrackId,
               startTime: gc.startTime,
               duration: gc.duration,
               trimStart: 0,
               trimEnd: 0,
               opacity: 1,
               speed: 1,
-              transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+              transform: gc.transform || { x: 0, y: 0, scale: 100, rotation: 0 },
+              chromaKey: gc.chromaKey,
+              animations: gc.animations,
               effects: (gc.fx || []).map((fx: string) => ({ id: uuidv4(), type: fx, intensity: 100 }))
            });
         }
@@ -556,6 +635,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                   if (blueprint) setBlueprint({ ...blueprint, scenes: newScenes });
                 }}
                 disabled={isGenerating}
+                onRegenerateVisuals={handleRegenerateVisuals}
+                onSourceChange={handleSourceChange}
               />
             </div>
 

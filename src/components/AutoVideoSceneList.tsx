@@ -1,15 +1,17 @@
 import React from 'react';
 import { AutoVideoScene } from '../utils/aiClient';
-import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown, Scissors } from 'lucide-react';
+import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown, Scissors, RefreshCw } from 'lucide-react';
 import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
 
 interface AutoVideoSceneListProps {
   scenes: AutoVideoScene[];
   onChange: (scenes: AutoVideoScene[]) => void;
   disabled?: boolean;
+  onRegenerateVisuals?: (index: number) => void;
+  onSourceChange?: (index: number, newSource: 'pexels' | 'pollinations' | 'map') => void;
 }
 
-export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, onChange, disabled }) => {
+export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, onChange, disabled, onRegenerateVisuals, onSourceChange }) => {
   const updateScene = (index: number, updates: Partial<AutoVideoScene>) => {
     const newScenes = [...scenes];
     newScenes[index] = { ...newScenes[index], ...updates };
@@ -91,7 +93,13 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
                   <button
                     key={src}
                     disabled={disabled}
-                    onClick={() => updateScene(idx, { visualSource: src })}
+                    onClick={() => {
+                      if (onSourceChange) {
+                        onSourceChange(idx, src);
+                      } else {
+                        updateScene(idx, { visualSource: src });
+                      }
+                    }}
                     className={`flex-1 py-1.5 text-xs rounded border flex items-center justify-center gap-1.5 transition-colors
                       ${scene.visualSource === src 
                         ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' 
@@ -108,10 +116,21 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">
-                {scene.visualSource === 'pexels' ? 'Search Query' : 
-                 scene.visualSource === 'pollinations' ? 'Image Prompt' : 'Map Waypoints'}
-              </label>
+              <div className="flex justify-between items-center">
+                <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">
+                  {scene.visualSource === 'pexels' ? 'Search Query' : 
+                   scene.visualSource === 'pollinations' ? 'Image Prompt' : 'Map Waypoints'}
+                </label>
+                {scene.visualSource !== 'map' && onRegenerateVisuals && (
+                  <button 
+                    onClick={() => onRegenerateVisuals(idx)} 
+                    disabled={disabled}
+                    className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-[10px] font-medium"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Fetch / Generate
+                  </button>
+                )}
+              </div>
               {scene.visualSource === 'pexels' && (
                 <input 
                   type="text" 
@@ -139,7 +158,35 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
             </div>
           </div>
 
-          {scene.visualOptions && scene.visualOptions.length > 0 && (
+          {scene.visualSource === 'map' && scene.mapAnimation && (
+            <div className="mt-2 w-full h-32 bg-[#1a1a1a] rounded border border-[#2a2a2a] flex items-center justify-center relative overflow-hidden">
+               <div className="absolute inset-0 bg-[url('https://upload.wikimedia.org/wikipedia/commons/e/ec/World_map_blank_without_borders.svg')] bg-cover opacity-20" />
+               <div className="flex flex-col items-center z-10 text-[#a0a0a0]">
+                 <Map className="w-8 h-8 mb-2 opacity-50 text-indigo-400" />
+                 <span className="text-xs font-medium text-white">{scene.mapAnimation.type.toUpperCase()} ANIMATION</span>
+                 <span className="text-[10px] mt-1">{scene.mapAnimation.waypoints.length} waypoints plotted</span>
+               </div>
+            </div>
+          )}
+
+          {scene.layeredVisuals && scene.layeredVisuals.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">Multi-Layer Elements (BG + PIP)</label>
+              <div className="grid grid-cols-2 gap-2">
+                {scene.layeredVisuals.map((lv, lIdx) => (
+                  <div key={lIdx} className="w-full h-20 bg-black rounded overflow-hidden relative border border-[#2a2a2a]">
+                    <img src={lv.url} crossOrigin="anonymous" alt={`Layer ${lIdx}`} className="w-full h-full object-cover" />
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1 text-[8px] text-white flex justify-between">
+                      <span>{lv.isGreenScreen ? 'PIP (Green Screen)' : 'Background'}</span>
+                      <span>Track {lv.trackOffset}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!scene.layeredVisuals && scene.visualOptions && scene.visualOptions.length > 0 && (
             <div className="mt-2 flex flex-col gap-1">
               <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">Alternative Clips</label>
               <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">

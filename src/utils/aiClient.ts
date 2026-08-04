@@ -866,6 +866,8 @@ export interface AutoVideoScene {
   pexelsAlternates: string[] | null;
   pollinationsPrompt: string | null;
   pollinationsVariants: string[] | null;
+  layeredPrompts?: { prompt: string; isGreenScreen: boolean }[];
+  layeredVisuals?: { url: string; isGreenScreen: boolean; trackOffset: number }[];
   visualSource: 'pexels' | 'pollinations' | 'map';
   mapAnimation: {
     type: 'route' | 'flyTo' | 'highlight';
@@ -904,12 +906,12 @@ RULES:
 1. Divide the script into logical scenes (ideally 3 to 6 seconds each).
 2. The sum of the "duration" for all scenes MUST equal exactly ${totalDuration.toFixed(1)} seconds.
 3. For each scene, determine the best visualSource:
-   - "map": if the narration explicitly mentions geographic travel, locations, or routes (e.g. traveling from A to B, focusing on a country/city map).
-   - "pollinations": if Custom Instructions ask for a style that stock video won't have (like anime, comic book, line art, watercolor, specific character illustrations) OR if it requires a very specific imaginary scene.
+   - "map": ALWAYS use "map" if the narration explicitly mentions geographic travel, trade routes, locations, journeys, expeditions, or paths (e.g. traveling from A to B, focusing on a country/city map). NEVER use "pexels" or "pollinations" for trade routes or map-like journeys.
+   - "pollinations": if Custom Instructions ask for a style that stock video won't have OR if it requires a very specific imaginary scene OR if it involves specific character dialogues requiring animation.
    - "pexels": for general live-action stock footage (people, nature, cities, technology).
 
 4. For "pexels" scenes: Provide a primary 1-3 word search query and 2 alternatives.
-5. For "pollinations" scenes: Provide a highly detailed image prompt and 2 variants.
+5. For "pollinations" scenes: Provide a highly detailed image prompt and 2 variants. If the scene involves characters or elements that require animation (e.g. dialogue, character moving), ALSO provide "layeredPrompts": an array of 3-4 prompts where the first is the background (e.g., "Empty ancient battlefield background") and the rest are the characters/elements with a green screen (e.g., "A Roman soldier, full body, solid #00FF00 green screen background", "A horse, full body, solid #00FF00 green screen background").
 6. For "map" scenes: Provide the mapAnimation object with lat/lng waypoints.
 7. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
 8. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your pollinations prompts.` : 'No character reference.'}
@@ -927,6 +929,10 @@ Return ONLY this exact JSON format, nothing else (no markdown):
       "pexelsAlternates": ["alt1", "alt2"],
       "pollinationsPrompt": "highly detailed image prompt",
       "pollinationsVariants": ["variant 1", "variant 2"],
+      "layeredPrompts": [
+        { "prompt": "Empty ancient battlefield background", "isGreenScreen": false },
+        { "prompt": "A Roman soldier, full body, solid #00FF00 green screen background", "isGreenScreen": true }
+      ],
       "visualSource": "pexels" | "pollinations" | "map",
       "mapAnimation": {
         "type": "route" | "flyTo" | "highlight",
@@ -1011,5 +1017,54 @@ Return ONLY a JSON array, no markdown. Format:
     return { text: combinedText, words };
   } catch (e) {
     return { text: script, words: wordTimestamps };
+  }
+}
+
+export async function generateSourceAdaptivePrompt(
+  narration: string,
+  targetSource: 'pexels' | 'pollinations' | 'map',
+  apiKey: string
+): Promise<any> {
+  const systemPrompt = `You are an expert AI content generator for video scenes.
+Based on the narration, generate the required fields for the selected visual source: ${targetSource}.
+
+RULES for ${targetSource}:
+${targetSource === 'pexels' ? '- Return "query" (1-3 words) and "alternatives" (array of strings).' : ''}
+${targetSource === 'pollinations' ? '- Return "prompt" (highly detailed image prompt) and "variants" (array of strings).\n- If character animation is needed, also return "layeredPrompts" (array of objects with "prompt" and "isGreenScreen" boolean, first item being background).' : ''}
+${targetSource === 'map' ? '- Return "mapAnimation" object with "type" (route/flyTo), "waypoints" (array of {lat, lng, label}), "zoom" (number), and "style" (standard/satellite/dark/vintage).' : ''}
+
+Return ONLY a valid JSON object matching the requested schema, nothing else.`;
+
+  const payload = {
+    model: GROQ_TEXT_MODEL,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Narration: "${narration}"` }
+    ],
+    temperature: 0.3,
+    max_tokens: 1024
+  };
+
+  const response = await fetchWithKeyFailover(
+    (key) => 'https://api.groq.com/openai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    },
+    'groq'
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to generate adaptive prompt');
+  }
+
+  const resultData = await response.json();
+  const text = resultData?.choices?.[0]?.message?.content?.trim() || '{}';
+  try {
+    const clean = text.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
+    return JSON.parse(clean);
+  } catch (e) {
+    return {};
   }
 }
