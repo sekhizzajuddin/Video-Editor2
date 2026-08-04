@@ -994,17 +994,17 @@ RULES:
 1. Divide the script into logical scenes (ideally 3 to 6 seconds each).
 2. The sum of the "duration" for all scenes MUST equal exactly ${totalDuration.toFixed(1)} seconds.
 3. For each scene, determine the best visualSource:
-   - "map": ALWAYS use "map" if the narration explicitly mentions geographic travel, trade routes, locations, journeys, expeditions, or paths (e.g. traveling from A to B, focusing on a country/city map). NEVER use "pexels" or "pollinations" for trade routes or map-like journeys.
-   - "pollinations": if Custom Instructions ask for a style that stock video won't have OR if it requires a very specific imaginary scene OR if it involves specific character dialogues requiring animation.
+   - "map": ALWAYS use "map" if the narration explicitly mentions geographic travel, trade routes, locations, journeys, expeditions, or paths (e.g. traveling from A to B, focusing on a country/city map). NEVER use "pexels" or "cloudflare" for trade routes or map-like journeys.
+   - "cloudflare": if Custom Instructions ask for a style that stock video won't have OR if it requires a very specific imaginary scene OR if it involves specific character dialogues requiring animation.
    - "pexels": for general live-action stock footage (people, nature, cities, technology).
 
 4. For "pexels" scenes: Provide a primary 1-3 word search query and 2 alternatives.
-5. For "pollinations" scenes: Provide a highly detailed image prompt and 2 variants. If the scene involves characters or elements that require animation (e.g. dialogue, character moving), ALSO provide "layeredPrompts": an array of 3-4 prompts where the first is the background (e.g., "Empty ancient battlefield background") and the rest are the characters/elements with a green screen (e.g., "A Roman soldier, full body, solid #00FF00 green screen background", "A horse, full body, solid #00FF00 green screen background").
-${visualStyle === 'vox_vintage' ? '6. CRITICAL FOR VOX VINTAGE STYLE: ALWAYS use "pollinations" and "layeredPrompts" for documentary scenes. The background MUST be "vintage paper texture, old newspaper collage, halftone grid background". The foreground characters/objects MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background".' : ''}
-${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE: ALWAYS use "pollinations" and "layeredPrompts" for documentary scenes. The background MUST be a realistic documentary scene. The foreground characters MUST be realistic, highly detailed photography, solid #00FF00 green screen background.' : ''}
+5. For "cloudflare" scenes: Provide a highly detailed image prompt and 2 variants. (NOTE: Put these in the "pollinationsPrompt" and "pollinationsVariants" JSON fields). If the scene involves characters or elements that require animation (e.g. dialogue, character moving), ALSO provide "layeredPrompts": an array of 3-4 prompts where the first is the background (e.g., "Empty ancient battlefield background") and the rest are the characters/elements with a green screen (e.g., "A Roman soldier, full body, solid #00FF00 green screen background", "A horse, full body, solid #00FF00 green screen background").
+${visualStyle === 'vox_vintage' ? '6. CRITICAL FOR VOX VINTAGE STYLE: ALWAYS use "cloudflare" and "layeredPrompts" for documentary scenes. The background MUST be "vintage paper texture, old newspaper collage, halftone grid background". The foreground characters/objects MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background".' : ''}
+${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE: ALWAYS use "cloudflare" and "layeredPrompts" for documentary scenes. The background MUST be a realistic documentary scene. The foreground characters MUST be realistic, highly detailed photography, solid #00FF00 green screen background.' : ''}
 7. For "map" scenes: Provide the mapAnimation object with lat/lng waypoints.
 8. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
-9. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your pollinations prompts.` : 'No character reference.'}
+9. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your image prompts.` : 'No character reference.'}
 
 Return ONLY a valid JSON object.`;
 
