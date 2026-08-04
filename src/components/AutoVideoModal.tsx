@@ -142,7 +142,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         finalDuration,
         geminiApiKey,
         customInstructions,
-        characterRef ? "Use provided character reference." : undefined
+        characterRef ? "Use provided character reference." : undefined,
+        visualStyle
       );
 
       setBlueprint(generatedBlueprint);
@@ -289,7 +290,9 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         }
 
         const localObjects = [];
+        let layerIndex = 1;
         for (const dl of downloadedUrls) {
+          setStatus(`Generating Clip ${sceneIndex + 1}/${totalScenes} - Layer ${layerIndex}/${downloadedUrls.length}...`);
           let localObjectUrl = null;
           let localFile: File | undefined = undefined;
           try {
@@ -310,6 +313,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           if (localObjectUrl) {
              localObjects.push({ ...dl, localObjectUrl, localFile });
           }
+          layerIndex++;
         }
 
         for (const locObj of localObjects) {
@@ -324,6 +328,46 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
              createdAt: Date.now()
           }, locObj.localFile);
 
+          let animations: any = undefined;
+          if (visualStyle.startsWith('vox_')) {
+             if (locObj.trackOffset === 0) {
+               // Background: Slow scale up
+               animations = {
+                 'transform.scale': [
+                    { time: 0, value: 100, easing: 'linear' },
+                    { time: scene.duration, value: 110 }
+                 ]
+               };
+             } else {
+               // Foreground (Parallax): Slide up and scale slightly
+               animations = {
+                 'transform.y': [
+                    { time: 0, value: 30, easing: 'easeOut' },
+                    { time: Math.min(1, scene.duration), value: 0, easing: 'linear' },
+                    { time: scene.duration, value: -10 }
+                 ],
+                 'transform.scale': [
+                    { time: 0, value: 85, easing: 'easeOut' },
+                    { time: Math.min(1, scene.duration), value: 90, easing: 'linear' },
+                    { time: scene.duration, value: 95 }
+                 ]
+               };
+             }
+          } else if (locObj.isGreenScreen) {
+             animations = {
+               'transform.y': [
+                 { time: 0, value: 10, easing: 'easeInOut' },
+                 { time: scene.duration / 2, value: 15, easing: 'easeInOut' },
+                 { time: scene.duration, value: 10 }
+               ]
+             };
+          }
+          
+          let fx = visualStyle !== 'realistic' && !locObj.isGreenScreen ? [visualStyle] : [];
+          if (visualStyle === 'vox_vintage' && locObj.trackOffset === 0) {
+             fx = ['old_film']; // Override background FX for vintage vox
+          }
+
           generatedClips.push({
             id: `clip_${uuidv4()}`,
             mediaId,
@@ -331,12 +375,10 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             duration: scene.duration,
             track: locObj.trackOffset,
             mediaStartTime: scene.mediaStartTime || 0,
-            fx: visualStyle !== 'realistic' && !locObj.isGreenScreen ? [visualStyle] : [],
+            fx,
             chromaKey: locObj.isGreenScreen ? { enabled: true, color: '#00ff00', threshold: 40, softness: 20 } : undefined,
             transform: locObj.isGreenScreen ? { x: 0, y: 10, scale: 90, rotation: 0 } : undefined,
-            animations: locObj.isGreenScreen ? [
-              { type: 'position', startTime: 0, duration: scene.duration, startValue: {x: 0, y: 10}, endValue: {x: 0, y: 15} }
-            ] : undefined
+            animations
           });
         }
         
@@ -549,6 +591,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                   <option value="style_anime">Anime (AI Gen)</option>
                   <option value="style_watercolor">Watercolor (AI Gen)</option>
                   <option value="style_papercut">Papercut (AI Gen)</option>
+                  <option value="vox_vintage">Vox Documentary (Vintage Collage)</option>
+                  <option value="vox_realistic">Vox Documentary (Realistic)</option>
                 </select>
               </div>
 

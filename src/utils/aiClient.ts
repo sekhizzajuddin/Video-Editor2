@@ -893,7 +893,8 @@ export async function generateAutoVideoBlueprint(
   totalDuration: number, 
   apiKey: string,
   customInstructions?: string,
-  characterDescription?: string
+  characterDescription?: string,
+  visualStyle?: string
 ): Promise<AutoVideoBlueprint> {
   // We use gemini-3.5-flash-lite as the actual endpoint, mapped to user's intent
   const model = "gemini-3.5-flash-lite"; 
@@ -912,9 +913,11 @@ RULES:
 
 4. For "pexels" scenes: Provide a primary 1-3 word search query and 2 alternatives.
 5. For "pollinations" scenes: Provide a highly detailed image prompt and 2 variants. If the scene involves characters or elements that require animation (e.g. dialogue, character moving), ALSO provide "layeredPrompts": an array of 3-4 prompts where the first is the background (e.g., "Empty ancient battlefield background") and the rest are the characters/elements with a green screen (e.g., "A Roman soldier, full body, solid #00FF00 green screen background", "A horse, full body, solid #00FF00 green screen background").
-6. For "map" scenes: Provide the mapAnimation object with lat/lng waypoints.
-7. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
-8. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your pollinations prompts.` : 'No character reference.'}
+${visualStyle === 'vox_vintage' ? '6. CRITICAL FOR VOX VINTAGE STYLE: ALWAYS use "pollinations" and "layeredPrompts" for documentary scenes. The background MUST be "vintage paper texture, old newspaper collage, halftone grid background". The foreground characters/objects MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background".' : ''}
+${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE: ALWAYS use "pollinations" and "layeredPrompts" for documentary scenes. The background MUST be a realistic documentary scene. The foreground characters MUST be realistic, highly detailed photography, solid #00FF00 green screen background.' : ''}
+7. For "map" scenes: Provide the mapAnimation object with lat/lng waypoints.
+8. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
+9. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your pollinations prompts.` : 'No character reference.'}
 
 Return ONLY this exact JSON format, nothing else (no markdown):
 {
