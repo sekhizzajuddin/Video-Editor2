@@ -45,6 +45,7 @@ import {
   Globe,
   Scissors,
   FileText,
+  Wand2,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
@@ -65,6 +66,7 @@ import { analyzeCanvasChunkWithGemini } from '@/utils/aiClient';
 import { generateCombinedSfx } from '@/utils/elevenLabsClient';
 const AiSoundDesigner = React.lazy(() => import('../AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AIGeneratorModal = React.lazy(() => import('../AIGeneratorModal').then(m => ({ default: m.AIGeneratorModal })));
+const AutoVideoModal = React.lazy(() => import('../AutoVideoModal').then(m => ({ default: m.AutoVideoModal })));
 // Timeline FX — dragged to FX tracks. type field maps to PreviewCanvas fxType.
 // Color Correction — dragged to a video/image clip to apply that preset
 // Particle Effects — dragged to a video/image/FX clip
@@ -624,6 +626,7 @@ export function MediaPanel() {
   }, []);
   const [showAiSfxModal, setShowAiSfxModal] = useState(false);
   const [showAIGeneratorModal, setShowAIGeneratorModal] = useState(false);
+  const [showAutoVideoModal, setShowAutoVideoModal] = useState(false);
   const lutInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
 
@@ -1305,6 +1308,17 @@ export function MediaPanel() {
                     {aiVideoIsGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                     {aiVideoIsGenerating ? `${Math.round(aiVideoProgress)}%` : 'AI Gen'}
                   </span>
+                </button>
+              </div>
+              <div className="flex px-2 mt-2 gap-2">
+                <button
+                  onClick={() => setShowAutoVideoModal(true)}
+                  disabled={importing}
+                  className="flex-1 py-2 bg-gradient-to-r from-indigo-600/20 to-indigo-500/20 hover:from-indigo-600/40 hover:to-indigo-500/40 border-2 border-dashed border-indigo-500/50 hover:border-indigo-500 text-indigo-500 hover:text-indigo-400 rounded text-xs flex items-center justify-center gap-1 transition-all disabled:opacity-50 overflow-hidden"
+                  title="Auto-Faceless Video Generator"
+                >
+                  <Wand2 className="w-3 h-3" />
+                  Auto Video Gen
                 </button>
               </div>
 
@@ -3063,6 +3077,13 @@ export function MediaPanel() {
       {showAIGeneratorModal && (
         <React.Suspense fallback={null}>
           <AIGeneratorModal onClose={() => setShowAIGeneratorModal(false)} />
+        </React.Suspense>
+      )}
+
+      {/* Auto Video Generator Modal */}
+      {showAutoVideoModal && (
+        <React.Suspense fallback={null}>
+          <AutoVideoModal onClose={() => setShowAutoVideoModal(false)} />
         </React.Suspense>
       )}
 
