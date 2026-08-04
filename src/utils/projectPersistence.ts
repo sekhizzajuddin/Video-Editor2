@@ -105,11 +105,27 @@ export async function deleteProjectMeta(id: string): Promise<void> {
 
 
 function getDB(): Promise<IDBDatabase> {
-  if (dbInstance && openingProjectId === activeProjectId) return Promise.resolve(dbInstance);
+  // Validate cached instance is still usable (not closing/closed)
+  if (dbInstance && openingProjectId === activeProjectId) {
+    try {
+      // Quick check: if the db's objectStoreNames is accessible, the connection is live
+      void dbInstance.objectStoreNames;
+      return Promise.resolve(dbInstance);
+    } catch {
+      // Connection is dead/closing — discard and re-open
+      dbInstance = null;
+    }
+  }
   if (dbOpeningPromise && openingProjectId === activeProjectId) return dbOpeningPromise;
 
   openingProjectId = activeProjectId;
   
+  // Close any stale instance before opening a new one
+  if (dbInstance) {
+    try { dbInstance.close(); } catch { /* ignore */ }
+    dbInstance = null;
+  }
+
   dbOpeningPromise = new Promise((resolve, reject) => {
     const dbName = activeProjectId === 'default' ? DB_NAME : `${DB_NAME}_${activeProjectId}`;
     const request = indexedDB.open(dbName, DB_VERSION);
@@ -123,9 +139,9 @@ function getDB(): Promise<IDBDatabase> {
       dbInstance = db;
       dbOpeningPromise = null;
       
-      db.onclose = () => { dbInstance = null; };
-      db.onversionchange = () => { db.close(); dbInstance = null; };
-      db.onerror = () => { dbInstance = null; };
+      db.onclose = () => { dbInstance = null; dbOpeningPromise = null; };
+      db.onversionchange = () => { db.close(); dbInstance = null; dbOpeningPromise = null; };
+      db.onerror = () => { dbInstance = null; dbOpeningPromise = null; };
 
       resolve(db);
     };
@@ -152,16 +168,39 @@ function getDB(): Promise<IDBDatabase> {
 
 /**
  * Saves a local media File to IndexedDB.
+ * Retries once with a fresh connection if the DB is closing.
  */
 export async function saveFileToDB(mediaId: string, file: File): Promise<void> {
-  const db = await getDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction('files', 'readwrite');
-    const store = transaction.objectStore('files');
-    const request = store.put(file, mediaId);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+  const attemptSave = async (isRetry: boolean): Promise<void> => {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      let transaction: IDBTransaction;
+      try {
+        transaction = db.transaction('files', 'readwrite');
+      } catch (err: any) {
+        if (err.name === 'InvalidStateError' && !isRetry) {
+          dbInstance = null;
+          dbOpeningPromise = null;
+          return attemptSave(true).then(resolve, reject);
+        }
+        return reject(err);
+      }
+      const store = transaction.objectStore('files');
+      const request = store.put(file, mediaId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  };
+
+  try {
+    await attemptSave(false);
+  } catch (err: any) {
+    if (err.name === 'InvalidStateError') {
+      console.warn('[projectPersistence] DB closing during file save, skipping:', mediaId);
+      return;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -262,7 +301,8 @@ export async function saveProjectToDB(data: {
     return;
   }
 
-  try {
+  // Inner save logic — extracted so we can retry once on stale connection
+  const attemptSave = async (isRetry: boolean): Promise<void> => {
     const db = await getDB();
     
     return new Promise((resolve, reject) => {
@@ -271,7 +311,13 @@ export async function saveProjectToDB(data: {
         transaction = db.transaction('project', 'readwrite');
       } catch (err: any) {
         if (err.name === 'InvalidStateError') {
+          // DB connection is closing/closed — invalidate the cached instance
           dbInstance = null;
+          dbOpeningPromise = null;
+          if (!isRetry) {
+            // Retry once with a fresh connection
+            return attemptSave(true).then(resolve, reject);
+          }
         }
         return reject(err);
       }
@@ -320,6 +366,10 @@ export async function saveProjectToDB(data: {
         reject(new Error(`Project save failed: ${reason}`));
       };
     });
+  };
+
+  try {
+    await attemptSave(false);
   } catch (error: any) {
     // InvalidStateError happens during app shutdown (DB connection closing) — treat as no-op
     if (error.name === 'InvalidStateError') {
