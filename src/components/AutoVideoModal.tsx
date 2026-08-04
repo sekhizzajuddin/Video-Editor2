@@ -150,15 +150,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         throw new Error('AI returned an empty scene blueprint. Please try again.');
       }
 
-      // Pre-process layeredPrompts to inject global background
-      if (generatedBlueprint.globalBackgroundPrompt) {
-        generatedBlueprint.scenes.forEach(scene => {
-          if (scene.visualSource === 'cloudflare' || scene.visualSource === 'pollinations') {
-            if (!scene.layeredPrompts) scene.layeredPrompts = [];
-            scene.layeredPrompts.unshift({ prompt: generatedBlueprint.globalBackgroundPrompt as string, isGreenScreen: false });
-          }
-        });
-      }
+
 
       setBlueprint(generatedBlueprint);
       
@@ -176,12 +168,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               try {
                 const adaptive = await generateSourceAdaptivePrompt(scene.pollinationsPrompt || scene.narration, scene.visualSource, geminiApiKey, visualStyle);
                 if (adaptive.layeredPrompts && adaptive.layeredPrompts.length > 0) {
-                  // Keep the background at index 0, append the new layers
-                  const bg = currentLayeredPrompts[0];
                   currentLayeredPrompts = adaptive.layeredPrompts;
-                  if (bg && currentLayeredPrompts[0].prompt !== bg.prompt) {
-                     currentLayeredPrompts.unshift(bg);
-                  }
                 }
               } catch (e) {
                 console.error("Failed to fallback generate layers", e);
@@ -195,7 +182,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                 const url = scene.visualSource === 'cloudflare' 
                   ? `cloudflare://${encodeURIComponent(promptText)}` 
                   : generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576).url;
-                return { url, isGreenScreen: isGS, trackOffset: idx };
+                const trackOffset = generatedBlueprint.globalBackgroundPrompt ? idx + 1 : idx;
+                return { url, isGreenScreen: isGS, trackOffset };
               });
               return { ...scene, layeredPrompts: currentLayeredPrompts, layeredVisuals };
             } else if (scene.pollinationsPrompt) {
@@ -252,17 +240,15 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       }
 
       if (Array.isArray(currentLayeredPrompts) && currentLayeredPrompts.length > 0) {
-        // Ensure global background is preserved if it exists
-        if (blueprint.globalBackgroundPrompt && currentLayeredPrompts[0].prompt !== blueprint.globalBackgroundPrompt) {
-          currentLayeredPrompts.unshift({ prompt: blueprint.globalBackgroundPrompt, isGreenScreen: false });
-        }
+
         const layeredVisuals = currentLayeredPrompts.map((lp: any, idx: number) => {
           const promptText = typeof lp === 'string' ? lp : (lp?.prompt || scene.pollinationsPrompt || scene.narration || '');
           const isGS = typeof lp === 'object' && lp !== null ? Boolean(lp.isGreenScreen) : idx > 0;
           const url = scene.visualSource === 'cloudflare' 
             ? `cloudflare://${encodeURIComponent(promptText)}` 
             : generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576).url;
-          return { url, isGreenScreen: isGS, trackOffset: idx };
+          const trackOffset = blueprint.globalBackgroundPrompt ? idx + 1 : idx;
+          return { url, isGreenScreen: isGS, trackOffset };
         });
         scene.layeredPrompts = currentLayeredPrompts;
         scene.layeredVisuals = layeredVisuals;
@@ -337,6 +323,67 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       let currentStartTime = 0;
       
       const generationCache = new globalThis.Map<string, Blob>();
+
+      if (blueprint.globalBackgroundPrompt) {
+        setStatus('Downloading global background...');
+        const prompt = blueprint.globalBackgroundPrompt;
+        
+        try {
+          const accountId = settings?.cloudflareAccountId || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID;
+          const apiToken = settings?.cloudflareApiToken || import.meta.env.VITE_CLOUDFLARE_API_TOKEN;
+          
+          if (!accountId || !apiToken) throw new Error('Cloudflare API credentials are not set.');
+          
+          const cfUrl = `/cf-api/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
+          const res = await fetch(cfUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+          });
+          
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          
+          const filename = `global_bg_${Date.now()}.jpg`;
+          const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          const localFile = await fileHandle.getFile();
+          const localObjectUrl = URL.createObjectURL(localFile);
+          
+          const bgMediaId = `auto_bg_${Date.now()}`;
+          const totalVideoDuration = blueprint.scenes.reduce((acc, s) => acc + s.duration, 0);
+          
+          addMedia({
+             id: bgMediaId,
+             name: `Global Background`,
+             type: 'image',
+             duration: totalVideoDuration,
+             url: localObjectUrl,
+             createdAt: Date.now()
+          }, localFile);
+
+          generatedClips.push({
+            id: `clip_${uuidv4()}`,
+            mediaId: bgMediaId,
+            startTime: 0,
+            duration: totalVideoDuration,
+            track: 0,
+            mediaStartTime: 0,
+            fx: visualStyle === 'vox_vintage' ? ['old_film'] : (visualStyle !== 'realistic' ? [visualStyle] : []),
+            animations: {
+              'transform.scale': [
+                 { time: 0, value: 100, easing: 'linear' },
+                 { time: totalVideoDuration, value: 110 }
+              ]
+            }
+          });
+        } catch (e: any) {
+           console.error("Failed to download global background", e);
+           toast.error("Failed to download global background");
+        }
+      }
 
       for (const scene of blueprint.scenes) {
         setStatus(`Downloading media ${sceneIndex + 1}/${totalScenes} to local disk...`);
@@ -513,6 +560,19 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           }, locObj.localFile);
 
           let animations: any = undefined;
+          let initialTransform: any = undefined;
+
+          // Define stagger offsets based on track index to prevent overlapping PIPs
+          const offsets = [
+            { x: 0, y: 0, scale: 100 }, // Track 0 (Background)
+            { x: -25, y: 15, scale: 75 }, // Track 1
+            { x: 25, y: -5, scale: 75 },  // Track 2
+            { x: 0, y: -25, scale: 75 },  // Track 3
+            { x: -35, y: -20, scale: 65 }, // Track 4
+            { x: 35, y: 25, scale: 65 }   // Track 5
+          ];
+          const tOffset = offsets[locObj.trackOffset] || offsets[1];
+
           if (visualStyle.startsWith('vox_')) {
              if (locObj.trackOffset === 0) {
                // Background: Slow scale up
@@ -523,26 +583,28 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                  ]
                };
              } else {
-               // Foreground (Parallax): Slide up and scale slightly
+               // Foreground (Parallax): Slide up and scale slightly based on stagger offset
+               initialTransform = { x: tOffset.x, y: tOffset.y + 20, scale: tOffset.scale - 5, rotation: 0 };
                animations = {
                  'transform.y': [
-                    { time: 0, value: 30, easing: 'easeOut' },
-                    { time: Math.min(1, scene.duration), value: 0, easing: 'linear' },
-                    { time: scene.duration, value: -10 }
+                    { time: 0, value: tOffset.y + 20, easing: 'easeOut' },
+                    { time: Math.min(1, scene.duration), value: tOffset.y, easing: 'linear' },
+                    { time: scene.duration, value: tOffset.y - 10 }
                  ],
                  'transform.scale': [
-                    { time: 0, value: 85, easing: 'easeOut' },
-                    { time: Math.min(1, scene.duration), value: 90, easing: 'linear' },
-                    { time: scene.duration, value: 95 }
+                    { time: 0, value: tOffset.scale - 5, easing: 'easeOut' },
+                    { time: Math.min(1, scene.duration), value: tOffset.scale, easing: 'linear' },
+                    { time: scene.duration, value: tOffset.scale + 5 }
                  ]
                };
              }
           } else if (locObj.isGreenScreen) {
+             initialTransform = { x: tOffset.x, y: tOffset.y, scale: tOffset.scale, rotation: 0 };
              animations = {
                'transform.y': [
-                 { time: 0, value: 10, easing: 'easeInOut' },
-                 { time: scene.duration / 2, value: 15, easing: 'easeInOut' },
-                 { time: scene.duration, value: 10 }
+                 { time: 0, value: tOffset.y, easing: 'easeInOut' },
+                 { time: scene.duration / 2, value: tOffset.y + 5, easing: 'easeInOut' },
+                 { time: scene.duration, value: tOffset.y }
                ]
              };
           }
@@ -561,7 +623,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             mediaStartTime: scene.mediaStartTime || 0,
             fx,
             chromaKey: locObj.isGreenScreen ? { enabled: true, color: '#00ff00', threshold: 40, softness: 20 } : undefined,
-            transform: locObj.isGreenScreen ? { x: 0, y: 10, scale: 90, rotation: 0 } : undefined,
+            transform: locObj.isGreenScreen ? initialTransform : undefined,
             animations
           });
         }
