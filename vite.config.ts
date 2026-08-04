@@ -295,6 +295,13 @@ export default defineConfig({
   plugins: [react(), audioSeparatorPlugin()],
   server: {
     port: 3000,
+    proxy: {
+      '/cf-api': {
+        target: 'https://api.cloudflare.com/client/v4',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/cf-api/, '')
+      }
+    },
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "credentialless",

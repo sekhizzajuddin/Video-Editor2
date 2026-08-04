@@ -373,7 +373,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                   throw new Error('Cloudflare API credentials are not set.');
                 }
                 
-                const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
+                const cfUrl = `/cf-api/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
                 res = await fetch(cfUrl, {
                   method: 'POST',
                   headers: {

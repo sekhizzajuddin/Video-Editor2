@@ -7,7 +7,7 @@ export async function generateImageFromCloudflare(
     throw new Error('Cloudflare API credentials are not set in settings.');
   }
 
-  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
+  const url = `/cf-api/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
 
   const response = await fetch(url, {
     method: 'POST',
