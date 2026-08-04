@@ -169,8 +169,27 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery, 'landscape', pexelsApiKey, 4);
             return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
           } else if (scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') {
-            if (Array.isArray(scene.layeredPrompts) && scene.layeredPrompts.length > 0) {
-              const layeredVisuals = scene.layeredPrompts.map((lp: any, idx: number) => {
+            let currentLayeredPrompts = scene.layeredPrompts || [];
+            
+            // If we only have the background, try to generate foreground layers via Groq
+            if (currentLayeredPrompts.length <= 1 && groqApiKey && (visualStyle === 'vox_vintage' || visualStyle === 'vox_realistic')) {
+              try {
+                const adaptive = await generateSourceAdaptivePrompt(scene.pollinationsPrompt || scene.narration, scene.visualSource, groqApiKey, visualStyle);
+                if (adaptive.layeredPrompts && adaptive.layeredPrompts.length > 0) {
+                  // Keep the background at index 0, append the new layers
+                  const bg = currentLayeredPrompts[0];
+                  currentLayeredPrompts = adaptive.layeredPrompts;
+                  if (bg && currentLayeredPrompts[0].prompt !== bg.prompt) {
+                     currentLayeredPrompts.unshift(bg);
+                  }
+                }
+              } catch (e) {
+                console.error("Failed to fallback generate layers", e);
+              }
+            }
+
+            if (Array.isArray(currentLayeredPrompts) && currentLayeredPrompts.length > 0) {
+              const layeredVisuals = currentLayeredPrompts.map((lp: any, idx: number) => {
                 const promptText = typeof lp === 'string' ? lp : (lp?.prompt || scene.pollinationsPrompt || scene.narration || '');
                 const isGS = typeof lp === 'object' && lp !== null ? Boolean(lp.isGreenScreen) : idx > 0;
                 const url = scene.visualSource === 'cloudflare' 
@@ -178,7 +197,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                   : generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576).url;
                 return { url, isGreenScreen: isGS, trackOffset: idx };
               });
-              return { ...scene, layeredVisuals };
+              return { ...scene, layeredPrompts: currentLayeredPrompts, layeredVisuals };
             } else if (scene.pollinationsPrompt) {
               const options = [];
               for (let i = 0; i < 1; i++) {
@@ -218,12 +237,26 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       scene.visualOptions = options;
       scene.selectedVisualUrl = options[0]?.url;
     } else if ((scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') && scene.pollinationsPrompt) {
-      if (Array.isArray(scene.layeredPrompts) && scene.layeredPrompts.length > 0) {
+      let currentLayeredPrompts = scene.layeredPrompts || [];
+
+      // If user clicks regenerate and we don't have foreground objects, generate them from the prompt!
+      if (currentLayeredPrompts.length <= 1 && groqApiKey && (visualStyle === 'vox_vintage' || visualStyle === 'vox_realistic')) {
+         try {
+           const adaptive = await generateSourceAdaptivePrompt(scene.pollinationsPrompt, scene.visualSource, groqApiKey, visualStyle);
+           if (adaptive.layeredPrompts && adaptive.layeredPrompts.length > 0) {
+             currentLayeredPrompts = adaptive.layeredPrompts;
+           }
+         } catch (e) {
+           console.error("Failed to generate layered prompts on regenerate", e);
+         }
+      }
+
+      if (Array.isArray(currentLayeredPrompts) && currentLayeredPrompts.length > 0) {
         // Ensure global background is preserved if it exists
-        if (blueprint.globalBackgroundPrompt && scene.layeredPrompts[0].prompt !== blueprint.globalBackgroundPrompt) {
-          scene.layeredPrompts.unshift({ prompt: blueprint.globalBackgroundPrompt, isGreenScreen: false });
+        if (blueprint.globalBackgroundPrompt && currentLayeredPrompts[0].prompt !== blueprint.globalBackgroundPrompt) {
+          currentLayeredPrompts.unshift({ prompt: blueprint.globalBackgroundPrompt, isGreenScreen: false });
         }
-        const layeredVisuals = scene.layeredPrompts.map((lp: any, idx: number) => {
+        const layeredVisuals = currentLayeredPrompts.map((lp: any, idx: number) => {
           const promptText = typeof lp === 'string' ? lp : (lp?.prompt || scene.pollinationsPrompt || scene.narration || '');
           const isGS = typeof lp === 'object' && lp !== null ? Boolean(lp.isGreenScreen) : idx > 0;
           const url = scene.visualSource === 'cloudflare' 
@@ -231,6 +264,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             : generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576).url;
           return { url, isGreenScreen: isGS, trackOffset: idx };
         });
+        scene.layeredPrompts = currentLayeredPrompts;
         scene.layeredVisuals = layeredVisuals;
         scene.visualOptions = undefined;
         scene.selectedVisualUrl = undefined;
