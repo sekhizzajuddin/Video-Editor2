@@ -1,7 +1,50 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AutoVideoScene } from '../utils/aiClient';
 import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown, Scissors, RefreshCw } from 'lucide-react';
 import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
+
+// Global queue to prevent Pollinations 429 errors by loading previews sequentially with a delay
+const imageQueue: (() => void)[] = [];
+let isProcessingQueue = false;
+
+const processQueue = async () => {
+  if (isProcessingQueue || imageQueue.length === 0) return;
+  isProcessingQueue = true;
+  while (imageQueue.length > 0) {
+    const task = imageQueue.shift();
+    if (task) {
+      task();
+      await new Promise(r => setTimeout(r, 1000)); // 1 second delay between preview fetches
+    }
+  }
+  isProcessingQueue = false;
+};
+
+const SequentialImage: React.FC<{ src: string; alt: string; className: string }> = ({ src, alt, className }) => {
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!src) return;
+    if (!src.includes('pollinations.ai')) {
+      setLoadedSrc(src);
+      return;
+    }
+    
+    let isMounted = true;
+    imageQueue.push(() => {
+      if (isMounted) setLoadedSrc(src);
+    });
+    processQueue();
+    
+    return () => { isMounted = false; };
+  }, [src]);
+
+  if (!loadedSrc) {
+    return <div className={`bg-[#141414] flex items-center justify-center animate-pulse ${className}`}><span className="text-[8px] text-[#8a8a8a]">Waiting...</span></div>;
+  }
+  
+  return <img src={loadedSrc} alt={alt} crossOrigin="anonymous" className={className} />;
+};
 
 interface AutoVideoSceneListProps {
   scenes: AutoVideoScene[];
@@ -175,7 +218,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
               <div className="grid grid-cols-2 gap-2">
                 {scene.layeredVisuals.map((lv, lIdx) => (
                   <div key={lIdx} className="w-full h-20 bg-black rounded overflow-hidden relative border border-[#2a2a2a]">
-                    <img src={lv.url} loading="lazy" crossOrigin="anonymous" alt={`Layer ${lIdx}`} className="w-full h-full object-cover" />
+                    <SequentialImage src={lv.url} alt={`Layer ${lIdx}`} className="w-full h-full object-cover" />
                     <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1 text-[8px] text-white flex justify-between">
                       <span>{lv.isGreenScreen ? 'PIP (Green Screen)' : 'Background'}</span>
                       <span>Track {lv.trackOffset}</span>
@@ -200,7 +243,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
                         : 'border-transparent opacity-50 hover:opacity-100'
                     }`}
                   >
-                    <img src={opt.thumbnail || opt.url} loading="lazy" crossOrigin="anonymous" alt="thumbnail" className="w-full h-full object-cover bg-black" />
+                    <SequentialImage src={opt.thumbnail || opt.url} alt="thumbnail" className="w-full h-full object-cover bg-black" />
                   </div>
                 ))}
               </div>
