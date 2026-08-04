@@ -102,7 +102,8 @@ export function generatePollinationsImageWithReference(
   height: number = 1080
 ): StockVisualResult {
   const actualSeed = seed ?? Math.floor(Math.random() * 1000000);
-  const cleanPrompt = encodeURIComponent(prompt.substring(0, 1000));
+  const safePrompt = typeof prompt === 'string' && prompt.trim() ? prompt : 'vintage documentary background';
+  const cleanPrompt = encodeURIComponent(safePrompt.substring(0, 1000));
   
   let url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=${width}&height=${height}&nologo=true&seed=${actualSeed}`;
   if (referenceImageUrl) {

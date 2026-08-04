@@ -146,6 +146,10 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         visualStyle
       );
 
+      if (!generatedBlueprint || !Array.isArray(generatedBlueprint.scenes) || generatedBlueprint.scenes.length === 0) {
+        throw new Error('AI returned an empty scene blueprint. Please try again.');
+      }
+
       setBlueprint(generatedBlueprint);
       
       setStatus('Fetching alternative video clips...');
@@ -155,10 +159,12 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery, 'landscape', pexelsApiKey, 4);
             return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
           } else if (scene.visualSource === 'pollinations') {
-            if (scene.layeredPrompts && scene.layeredPrompts.length > 0) {
-              const layeredVisuals = scene.layeredPrompts.map((lp, idx) => {
-                const res = generatePollinationsImageWithReference(lp.prompt, characterRef, undefined, 1920, 1080);
-                return { url: res.url, isGreenScreen: lp.isGreenScreen, trackOffset: idx };
+            if (Array.isArray(scene.layeredPrompts) && scene.layeredPrompts.length > 0) {
+              const layeredVisuals = scene.layeredPrompts.map((lp: any, idx: number) => {
+                const promptText = typeof lp === 'string' ? lp : (lp?.prompt || scene.pollinationsPrompt || scene.narration || '');
+                const isGS = typeof lp === 'object' && lp !== null ? Boolean(lp.isGreenScreen) : idx > 0;
+                const res = generatePollinationsImageWithReference(promptText, characterRef, undefined, 1920, 1080);
+                return { url: res.url, isGreenScreen: isGS, trackOffset: idx };
               });
               return { ...scene, layeredVisuals };
             } else if (scene.pollinationsPrompt) {

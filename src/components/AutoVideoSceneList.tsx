@@ -338,8 +338,8 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
                <div className="absolute inset-0 bg-[url('https://upload.wikimedia.org/wikipedia/commons/e/ec/World_map_blank_without_borders.svg')] bg-cover opacity-20" />
                <div className="flex flex-col items-center z-10 text-[#a0a0a0]">
                  <Map className="w-8 h-8 mb-2 opacity-50 text-indigo-400" />
-                 <span className="text-xs font-medium text-white">{scene.mapAnimation.type.toUpperCase()} ANIMATION</span>
-                 <span className="text-[10px] mt-1">{scene.mapAnimation.waypoints.length} waypoints plotted</span>
+                 <span className="text-xs font-medium text-white">{(scene.mapAnimation?.type || 'route').toUpperCase()} ANIMATION</span>
+                 <span className="text-[10px] mt-1">{scene.mapAnimation?.waypoints?.length || 0} waypoints plotted</span>
                </div>
             </div>
           )}
