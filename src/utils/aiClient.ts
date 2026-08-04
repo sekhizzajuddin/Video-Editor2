@@ -984,7 +984,7 @@ export async function generateAutoVideoBlueprint(
   characterDescription?: string,
   visualStyle?: string
 ): Promise<AutoVideoBlueprint> {
-  const model = "gemini-1.5-flash"; 
+  const model = "gemini-3.5-flash-lite"; 
   const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 100)); // Sample if too long
   const systemPrompt = `You are an expert video director, stock footage researcher, and AI image prompt engineer.
 I am providing you with a script that has a total audio voiceover duration of ${totalDuration.toFixed(1)} seconds, along with word-level timestamps.
