@@ -158,21 +158,26 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           if (scene.visualSource === 'pexels' && scene.pexelsQuery) {
             const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery, 'landscape', pexelsApiKey, 4);
             return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
-          } else if (scene.visualSource === 'pollinations') {
+          } else if (scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') {
             if (Array.isArray(scene.layeredPrompts) && scene.layeredPrompts.length > 0) {
               const layeredVisuals = scene.layeredPrompts.map((lp: any, idx: number) => {
                 const promptText = typeof lp === 'string' ? lp : (lp?.prompt || scene.pollinationsPrompt || scene.narration || '');
                 const isGS = typeof lp === 'object' && lp !== null ? Boolean(lp.isGreenScreen) : idx > 0;
-                const res = generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576);
-                return { url: res.url, isGreenScreen: isGS, trackOffset: idx };
+                const url = scene.visualSource === 'cloudflare' 
+                  ? `cloudflare://${encodeURIComponent(promptText)}` 
+                  : generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576).url;
+                return { url, isGreenScreen: isGS, trackOffset: idx };
               });
               return { ...scene, layeredVisuals };
             } else if (scene.pollinationsPrompt) {
               const options = [];
               for (let i = 0; i < 1; i++) {
-                options.push(generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1024, 576));
+                const url = scene.visualSource === 'cloudflare' 
+                  ? `cloudflare://${encodeURIComponent(scene.pollinationsPrompt)}` 
+                  : generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1024, 576).url;
+                options.push({ type: 'image', source: scene.visualSource, url });
               }
-              return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
+              return { ...scene, visualOptions: options as any, selectedVisualUrl: options[0]?.url };
             }
           }
           return scene;
@@ -202,16 +207,18 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery, 'landscape', pexelsApiKey, 4);
       scene.visualOptions = options;
       scene.selectedVisualUrl = options[0]?.url;
-    } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
-      const res = generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080);
-      scene.visualOptions = [{ url: res.url, type: 'image', source: 'pollinations' }];
-      scene.selectedVisualUrl = res.url;
+    } else if ((scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') && scene.pollinationsPrompt) {
+      const url = scene.visualSource === 'cloudflare' 
+        ? `cloudflare://${encodeURIComponent(scene.pollinationsPrompt)}` 
+        : generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1024, 576).url;
+      scene.visualOptions = [{ url, type: 'image', source: scene.visualSource }];
+      scene.selectedVisualUrl = url;
       scene.layeredVisuals = undefined;
     }
     setBlueprint(newBlueprint);
   };
 
-  const handleSourceChange = async (index: number, newSource: 'pexels' | 'pollinations' | 'map') => {
+  const handleSourceChange = async (index: number, newSource: 'pexels' | 'pollinations' | 'cloudflare' | 'map') => {
     if (!blueprint) return;
     const newBlueprint = { ...blueprint };
     const scene = newBlueprint.scenes[index];
@@ -224,7 +231,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         if (newSource === 'pexels' && adaptive.query) {
           scene.pexelsQuery = adaptive.query;
           scene.pexelsAlternates = adaptive.alternatives;
-        } else if (newSource === 'pollinations' && adaptive.prompt) {
+        } else if ((newSource === 'pollinations' || newSource === 'cloudflare') && adaptive.prompt) {
           scene.pollinationsPrompt = adaptive.prompt;
           scene.pollinationsVariants = adaptive.variants;
           scene.layeredPrompts = adaptive.layeredPrompts;
@@ -281,14 +288,16 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                if (scene.visualSource === 'pexels') {
                  const options = await fetchStockVisualOptionsForScene(scene.pexelsQuery || '', 'landscape', pexelsApiKey, 1);
                  if (options.length > 0) { videoUrl = options[0].url; isImage = options[0].type === 'image'; }
-               } else if (scene.visualSource === 'pollinations' && scene.pollinationsPrompt) {
-                 const res = generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080);
-                 videoUrl = res.url;
+               } else if ((scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') && scene.pollinationsPrompt) {
+                 const url = scene.visualSource === 'cloudflare' 
+                   ? `cloudflare://${encodeURIComponent(scene.pollinationsPrompt)}` 
+                   : generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1024, 576).url;
+                 videoUrl = url;
                  isImage = true;
                }
              } catch (e) { console.error(e); }
            } else {
-              isImage = videoUrl.includes('pollinations') || videoUrl.endsWith('.jpg') || videoUrl.endsWith('.png');
+              isImage = videoUrl.includes('pollinations') || videoUrl.startsWith('cloudflare://') || videoUrl.endsWith('.jpg') || videoUrl.endsWith('.png');
            }
            if (videoUrl) {
              downloadedUrls.push({ url: videoUrl, isImage, isGreenScreen: false, trackOffset: 0 });
@@ -299,6 +308,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         let layerIndex = 1;
         for (const dl of downloadedUrls) {
           const isPollinations = dl.url.includes('pollinations.ai');
+          const isCloudflare = dl.url.startsWith('cloudflare://');
           let localObjectUrl = null;
           let localFile: File | undefined = undefined;
           
@@ -321,18 +331,39 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             try {
               // On retry for pollinations, bust the cache with a new seed and rotate model (flux -> turbo -> unity)
               let fetchUrl = dl.url;
-              if (isPollinations && attempts > 1) {
-                const models = ['flux', 'turbo', 'unity'];
-                const nextModel = models[(attempts - 1) % models.length];
-                fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
-                if (fetchUrl.includes('model=')) {
-                  fetchUrl = fetchUrl.replace(/model=[a-z0-9_-]+/i, `model=${nextModel}`);
-                } else {
-                  fetchUrl += `&model=${nextModel}`;
-                }
-              }
+              let res: Response;
               
-              const res = await fetch(fetchUrl);
+              if (isCloudflare) {
+                const prompt = decodeURIComponent(dl.url.replace('cloudflare://', ''));
+                const accountId = settings?.cloudflareAccountId || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID;
+                const apiToken = settings?.cloudflareApiToken || import.meta.env.VITE_CLOUDFLARE_API_TOKEN;
+                
+                if (!accountId || !apiToken) {
+                  throw new Error('Cloudflare API credentials are not set.');
+                }
+                
+                const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
+                res = await fetch(cfUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${apiToken}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ prompt }),
+                });
+              } else {
+                if (isPollinations && attempts > 1) {
+                  const models = ['flux', 'turbo', 'unity'];
+                  const nextModel = models[(attempts - 1) % models.length];
+                  fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
+                  if (fetchUrl.includes('model=')) {
+                    fetchUrl = fetchUrl.replace(/model=[a-z0-9_-]+/i, `model=${nextModel}`);
+                  } else {
+                    fetchUrl += `&model=${nextModel}`;
+                  }
+                }
+                res = await fetch(fetchUrl);
+              }
               
               // Handle 429 rate limit with aggressive backoff
               if (res.status === 429) {
@@ -374,8 +405,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             } catch (e: any) {
               console.error(`Download failed (Attempt ${attempts}/${maxAttempts}):`, e);
               if (attempts >= maxAttempts) {
-                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — All retries exhausted, using direct URL`);
-                localObjectUrl = dl.url; // fallback to raw URL
+                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — All retries exhausted${isCloudflare ? '' : ', using direct URL'}`);
+                if (!isCloudflare) localObjectUrl = dl.url; // fallback to raw URL
               } else {
                 // Exponential backoff: ~3s, ~5.4s, ~9.7s, ~17.5s
                 const backoffMs = Math.min(25000, 3000 * Math.pow(1.8, attempts - 1));

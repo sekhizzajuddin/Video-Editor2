@@ -723,6 +723,8 @@ export interface EditorState {
     freesoundApiKey?: string;
     elevenLabsApiKey?: string;
     openRouterApiKey?: string;
+    cloudflareAccountId?: string;
+    cloudflareApiToken?: string;
   };
   beatMarkers: { time: number; clipId: string }[];
   projectTemplates: ProjectTemplate[];

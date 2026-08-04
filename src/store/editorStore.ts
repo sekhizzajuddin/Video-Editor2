@@ -414,6 +414,8 @@ const initialState: EditorState = {
     groqApiKey: '',
     freesoundApiKey: '',
     elevenLabsApiKey: '',
+    cloudflareAccountId: '',
+    cloudflareApiToken: '',
   },
   hasUnsavedChanges: false,
   currentTime: 0,

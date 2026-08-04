@@ -868,7 +868,7 @@ export interface AutoVideoScene {
   pollinationsVariants: string[] | null;
   layeredPrompts?: { prompt: string; isGreenScreen: boolean }[];
   layeredVisuals?: { url: string; isGreenScreen: boolean; trackOffset: number }[];
-  visualSource: 'pexels' | 'pollinations' | 'map';
+  visualSource: 'pexels' | 'pollinations' | 'cloudflare' | 'map';
   mapAnimation: {
     type: 'route' | 'flyTo' | 'highlight';
     waypoints: { lat: number; lng: number; label?: string }[];
@@ -1148,7 +1148,7 @@ Return ONLY a JSON array, no markdown. Format:
 
 export async function generateSourceAdaptivePrompt(
   narration: string,
-  targetSource: 'pexels' | 'pollinations' | 'map',
+  targetSource: 'pexels' | 'pollinations' | 'cloudflare' | 'map',
   apiKey: string
 ): Promise<any> {
   const systemPrompt = `You are an expert AI content generator for video scenes.
@@ -1156,7 +1156,7 @@ Based on the narration, generate the required fields for the selected visual sou
 
 RULES for ${targetSource}:
 ${targetSource === 'pexels' ? '- Return "query" (1-3 words) and "alternatives" (array of strings).' : ''}
-${targetSource === 'pollinations' ? '- Return "prompt" (highly detailed image prompt) and "variants" (array of strings).\n- If character animation is needed, also return "layeredPrompts" (array of objects with "prompt" and "isGreenScreen" boolean, first item being background).' : ''}
+${targetSource === 'pollinations' || targetSource === 'cloudflare' ? '- Return "prompt" (highly detailed image prompt) and "variants" (array of strings).\n- If character animation is needed, also return "layeredPrompts" (array of objects with "prompt" and "isGreenScreen" boolean, first item being background).' : ''}
 ${targetSource === 'map' ? '- Return "mapAnimation" object with "type" (route/flyTo), "waypoints" (array of {lat, lng, label}), "zoom" (number), and "style" (standard/satellite/dark/vintage).' : ''}
 
 Return ONLY a valid JSON object matching the requested schema, nothing else.`;

@@ -3,6 +3,9 @@ import { AutoVideoScene } from '../utils/aiClient';
 import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown, Scissors, RefreshCw } from 'lucide-react';
 import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
 
+import { generateImageFromCloudflare } from '../utils/cloudflareClient';
+import { useEditorStore } from '../store/editorStore';
+
 // Global queue to serialize Pollinations image generation (avoid 429 burst rate limits)
 let pollinationsQueue: Promise<void> = Promise.resolve();
 
@@ -12,10 +15,13 @@ const SequentialImage: React.FC<{ src: string; alt: string; className: string }>
   const [progress, setProgress] = useState(0);
   const [statusLog, setStatusLog] = useState('');
   const [retryCount, setRetryCount] = useState(0);
+  const settings = useEditorStore(s => s.settings) as any;
   const isPollinations = src && src.includes('pollinations.ai');
+  const isCloudflare = src && src.startsWith('cloudflare://');
 
   useEffect(() => {
-    if (!isPollinations || !src) return;
+    if (!isPollinations && !isCloudflare) return;
+    if (!src) return;
     
     let cancelled = false;
 
@@ -54,9 +60,31 @@ const SequentialImage: React.FC<{ src: string; alt: string; className: string }>
             setProgress(20);
             setStatusLog(attempt > 1 ? `Attempt ${attempt}: Sending to AI...` : 'Sending prompt to AI...');
 
-            // Cache-bust and model-failover on retries (flux -> turbo -> unity)
+            if (cancelled) return;
+            setStatus('downloading');
+            setProgress(60);
+            setStatusLog(attempt > 1 ? `Attempt ${attempt}: Loading image...` : 'Generating & loading...');
+
+            if (isCloudflare) {
+              const prompt = decodeURIComponent(src.replace('cloudflare://', ''));
+              const accountId = settings?.cloudflareAccountId || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID;
+              const apiToken = settings?.cloudflareApiToken || import.meta.env.VITE_CLOUDFLARE_API_TOKEN;
+              
+              if (!accountId || !apiToken) {
+                throw new Error('Cloudflare API credentials are not set.');
+              }
+              
+              const localUrl = await generateImageFromCloudflare(prompt, accountId, apiToken);
+              if (cancelled) return;
+              setImageUrl(localUrl);
+              setStatus('done');
+              setProgress(100);
+              setStatusLog('✓ Complete');
+              return;
+            }
+
             let fetchUrl = src;
-            if (attempt > 1) {
+            if (attempt > 1 && isPollinations) {
               const models = ['flux', 'turbo', 'unity'];
               const nextModel = models[(attempt - 1) % models.length];
               fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
@@ -67,49 +95,27 @@ const SequentialImage: React.FC<{ src: string; alt: string; className: string }>
               }
             }
 
-            const res = await fetch(fetchUrl);
-
-            if (res.status === 429) {
-              const wait = Math.min(25000, 5000 * Math.pow(2, attempt - 1));
-              setStatusLog(`Rate limited (429). Backing off ${Math.round(wait / 1000)}s...`);
-              setProgress(15);
-              await new Promise(r => setTimeout(r, wait));
-              continue;
-            }
-
-            if (res.status >= 500) {
-              setStatusLog(`Server error (${res.status}). Retrying...`);
-              setProgress(15);
-              await new Promise(r => setTimeout(r, 3000 * attempt));
-              continue;
-            }
-
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-            if (cancelled) return;
-            setStatus('downloading');
-            setProgress(60);
-            setStatusLog('Downloading image...');
-
-            const blob = await res.blob();
-
-            if (blob.size < 2000) {
-              throw new Error('Response too small');
-            }
-
-            if (cancelled) return;
-            setProgress(90);
-            setStatusLog('Rendering...');
-
-            const objectUrl = URL.createObjectURL(blob);
-            setImageUrl(objectUrl);
-            setStatus('done');
-            setProgress(100);
-            setStatusLog('✓ Complete');
+            await new Promise<void>((resolve, reject) => {
+              const img = new Image();
+              img.crossOrigin = 'anonymous'; // Important for canvas
+              img.onload = () => {
+                if (cancelled) return resolve();
+                setImageUrl(fetchUrl);
+                setStatus('done');
+                setProgress(100);
+                setStatusLog('✓ Complete');
+                resolve();
+              };
+              img.onerror = () => {
+                reject(new Error('Image failed to load'));
+              };
+              img.src = fetchUrl;
+            });
+            
             return; // Success — exit retry loop
           } catch (err: any) {
             if (cancelled) return;
-            if (attempt >= maxAttempts) {
+            if (attempt >= maxAttempts || isCloudflare) {
               // Fallback to high-reliability placeholder so preview doesn't break
               const fallbackUrl = src.includes('green%20screen') || src.includes('PIP') 
                 ? 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="576"><rect width="1024" height="576" fill="%2300FF00"/><text x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="black" font-size="24">PIP Layer</text></svg>'
@@ -136,7 +142,7 @@ const SequentialImage: React.FC<{ src: string; alt: string; className: string }>
     };
   }, [src]);
 
-  if (isPollinations) {
+  if (isPollinations || isCloudflare) {
     // Show generated image once ready
     if (status === 'done' && imageUrl) {
       return <img src={imageUrl} alt={alt} crossOrigin="anonymous" className={className} />;
@@ -195,7 +201,7 @@ interface AutoVideoSceneListProps {
   onChange: (scenes: AutoVideoScene[]) => void;
   disabled?: boolean;
   onRegenerateVisuals?: (index: number) => void;
-  onSourceChange?: (index: number, newSource: 'pexels' | 'pollinations' | 'map') => void;
+  onSourceChange?: (index: number, newSource: 'pexels' | 'pollinations' | 'cloudflare' | 'map') => void;
 }
 
 export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, onChange, disabled, onRegenerateVisuals, onSourceChange }) => {
@@ -276,7 +282,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
             <div className="flex flex-col gap-1">
               <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">Visual Source</label>
               <div className="flex gap-2">
-                {(['pexels', 'pollinations', 'map'] as const).map(src => (
+                {(['pexels', 'pollinations', 'cloudflare', 'map'] as const).map(src => (
                   <button
                     key={src}
                     disabled={disabled}
@@ -294,7 +300,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
                       }`}
                   >
                     {src === 'pexels' && <Video className="w-3.5 h-3.5" />}
-                    {src === 'pollinations' && <ImageIcon className="w-3.5 h-3.5" />}
+                    {(src === 'pollinations' || src === 'cloudflare') && <ImageIcon className="w-3.5 h-3.5" />}
                     {src === 'map' && <Map className="w-3.5 h-3.5" />}
                     <span className="capitalize">{src}</span>
                   </button>
@@ -306,7 +312,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
               <div className="flex justify-between items-center">
                 <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">
                   {scene.visualSource === 'pexels' ? 'Search Query' : 
-                   scene.visualSource === 'pollinations' ? 'Image Prompt' : 'Map Waypoints'}
+                   (scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') ? 'Image Prompt' : 'Map Waypoints'}
                 </label>
                 {scene.visualSource !== 'map' && onRegenerateVisuals && (
                   <button 
@@ -327,7 +333,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
                   className="w-full bg-[#141414] border border-[#3e3e3e] rounded px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
                 />
               )}
-              {scene.visualSource === 'pollinations' && (
+              {(scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') && (
                 <textarea 
                   value={scene.pollinationsPrompt || ''}
                   onChange={e => updateScene(idx, { pollinationsPrompt: e.target.value })}

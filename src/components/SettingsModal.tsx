@@ -376,6 +376,26 @@ export function SettingsModal() {
                         className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
+                    <div>
+                      <label className="text-[10px] text-white block mb-1">Cloudflare Account ID (For AI Images)</label>
+                      <input
+                        type="password"
+                        placeholder="4cd6b614..."
+                        value={settings.cloudflareAccountId || ''}
+                        onChange={(e) => updateSettings({ cloudflareAccountId: e.target.value })}
+                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-white block mb-1">Cloudflare API Token</label>
+                      <input
+                        type="password"
+                        placeholder="cfat_..."
+                        value={settings.cloudflareApiToken || ''}
+                        onChange={(e) => updateSettings({ cloudflareApiToken: e.target.value })}
+                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
                   </div>
                 </div>
 

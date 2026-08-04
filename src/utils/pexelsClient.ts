@@ -120,7 +120,7 @@ export function generatePollinationsImageWithReference(
     .replace(/[^a-zA-Z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 150);
+    .slice(0, 100);
 
   const cleanPrompt = encodeURIComponent(cleanKeywordPrompt || 'vintage documentary background');
   
@@ -163,8 +163,8 @@ export async function fetchStockVisualOptionsForScene(
 
   console.log(`No video found for "${query}", falling back to Pollinations.AI images.`);
   const enhancedPrompt = `High quality cinematic photo of ${query}, highly detailed, 8k resolution, photorealistic`;
-  const width = orientation === 'landscape' ? 1920 : 1080;
-  const height = orientation === 'landscape' ? 1080 : 1920;
+  const width = orientation === 'landscape' ? 1024 : 576;
+  const height = orientation === 'landscape' ? 576 : 1024;
   
   const options: StockVisualResult[] = [];
   for (let i = 0; i < count; i++) {
