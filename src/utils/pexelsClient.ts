@@ -99,28 +99,32 @@ export function generatePollinationsImageWithReference(
   prompt: string,
   referenceImageUrl?: string | null,
   seed?: number,
-  width: number = 1920,
-  height: number = 1080,
+  width: number = 1024,
+  height: number = 576,
   model: string = 'flux'
 ): StockVisualResult {
   const actualSeed = seed ?? Math.floor(Math.random() * 1000000);
   const rawPrompt = typeof prompt === 'string' && prompt.trim() ? prompt : 'vintage documentary background';
   
+  // Cap max dimensions to 1024x576 to prevent GPU OOM 500 errors on Pollinations
+  const safeWidth = Math.min(width || 1024, 1024);
+  const safeHeight = Math.min(height || 576, 1024);
+
   // Clean prompt for Pollinations (matching ContentGenerator architecture):
   // 1. Replace #00FF00 hex specs with clean text "solid green background"
   // 2. Strip special characters [^a-zA-Z0-9\s] to prevent URL path encoding 500 errors on Pollinations server
-  // 3. Cap at 180 characters max
+  // 3. Cap at 150 characters max
   const cleanKeywordPrompt = rawPrompt
     .replace(/solid\s*#?[0-9a-fA-F]{6}\s*green\s*screen/gi, 'solid green background')
     .replace(/#00FF00/gi, 'green')
     .replace(/[^a-zA-Z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 180);
+    .slice(0, 150);
 
   const cleanPrompt = encodeURIComponent(cleanKeywordPrompt || 'vintage documentary background');
   
-  let url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=${width}&height=${height}&nologo=true&seed=${actualSeed}&model=${model}`;
+  let url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=${safeWidth}&height=${safeHeight}&nologo=true&seed=${actualSeed}&model=${model}`;
   if (referenceImageUrl) {
     url += `&image=${encodeURIComponent(referenceImageUrl)}`;
   }

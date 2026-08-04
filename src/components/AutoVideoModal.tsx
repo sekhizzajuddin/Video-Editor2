@@ -163,14 +163,14 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               const layeredVisuals = scene.layeredPrompts.map((lp: any, idx: number) => {
                 const promptText = typeof lp === 'string' ? lp : (lp?.prompt || scene.pollinationsPrompt || scene.narration || '');
                 const isGS = typeof lp === 'object' && lp !== null ? Boolean(lp.isGreenScreen) : idx > 0;
-                const res = generatePollinationsImageWithReference(promptText, characterRef, undefined, 1920, 1080);
+                const res = generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576);
                 return { url: res.url, isGreenScreen: isGS, trackOffset: idx };
               });
               return { ...scene, layeredVisuals };
             } else if (scene.pollinationsPrompt) {
               const options = [];
               for (let i = 0; i < 1; i++) {
-                options.push(generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080));
+                options.push(generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1024, 576));
               }
               return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };
             }
