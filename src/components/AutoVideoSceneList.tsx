@@ -3,20 +3,180 @@ import { AutoVideoScene } from '../utils/aiClient';
 import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown, Scissors, RefreshCw } from 'lucide-react';
 import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
 
+// Global queue to serialize Pollinations image generation (avoid 429 burst rate limits)
+let pollinationsQueue: Promise<void> = Promise.resolve();
+
 const SequentialImage: React.FC<{ src: string; alt: string; className: string }> = ({ src, alt, className }) => {
-  if (src && src.includes('pollinations.ai')) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'queued' | 'connecting' | 'generating' | 'downloading' | 'done' | 'error'>('idle');
+  const [progress, setProgress] = useState(0);
+  const [statusLog, setStatusLog] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
+  const isPollinations = src && src.includes('pollinations.ai');
+
+  useEffect(() => {
+    if (!isPollinations || !src) return;
+    
+    let cancelled = false;
+
+    const fetchImage = async () => {
+      if (cancelled) return;
+      setStatus('queued');
+      setProgress(5);
+      setStatusLog('Queued for generation...');
+
+      // Wait for previous queue item to finish (sequential generation)
+      const myTurn = pollinationsQueue.then(async () => {
+        if (cancelled) return;
+        
+        const maxAttempts = 4;
+        let attempt = 0;
+
+        while (attempt < maxAttempts && !cancelled) {
+          attempt++;
+          setRetryCount(attempt > 1 ? attempt - 1 : 0);
+
+          try {
+            // Pre-fetch delay to avoid bursting
+            if (attempt > 1) {
+              const backoff = Math.min(20000, 4000 * Math.pow(1.5, attempt - 1));
+              setStatus('connecting');
+              setProgress(10);
+              setStatusLog(`Retry ${attempt - 1}/${maxAttempts - 1} — waiting ${Math.round(backoff / 1000)}s...`);
+              await new Promise(r => setTimeout(r, backoff));
+            } else {
+              // Small delay even on first attempt
+              await new Promise(r => setTimeout(r, 800));
+            }
+
+            if (cancelled) return;
+            setStatus('generating');
+            setProgress(20);
+            setStatusLog(attempt > 1 ? `Attempt ${attempt}: Sending to AI...` : 'Sending prompt to AI...');
+
+            // Cache-bust on retries
+            let fetchUrl = src;
+            if (attempt > 1) {
+              fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
+            }
+
+            const res = await fetch(fetchUrl);
+
+            if (res.status === 429) {
+              const wait = Math.min(25000, 5000 * Math.pow(2, attempt - 1));
+              setStatusLog(`Rate limited (429). Backing off ${Math.round(wait / 1000)}s...`);
+              setProgress(15);
+              await new Promise(r => setTimeout(r, wait));
+              continue;
+            }
+
+            if (res.status >= 500) {
+              setStatusLog(`Server error (${res.status}). Retrying...`);
+              setProgress(15);
+              await new Promise(r => setTimeout(r, 3000 * attempt));
+              continue;
+            }
+
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+            if (cancelled) return;
+            setStatus('downloading');
+            setProgress(60);
+            setStatusLog('Downloading image...');
+
+            const blob = await res.blob();
+
+            if (blob.size < 2000) {
+              throw new Error('Response too small');
+            }
+
+            if (cancelled) return;
+            setProgress(90);
+            setStatusLog('Rendering...');
+
+            const objectUrl = URL.createObjectURL(blob);
+            setImageUrl(objectUrl);
+            setStatus('done');
+            setProgress(100);
+            setStatusLog('✓ Complete');
+            return; // Success — exit retry loop
+          } catch (err: any) {
+            if (cancelled) return;
+            if (attempt >= maxAttempts) {
+              setStatus('error');
+              setProgress(0);
+              setStatusLog(`Failed: ${err.message}`);
+            }
+          }
+        }
+      });
+
+      // Chain onto the global queue so next image waits for this one
+      pollinationsQueue = myTurn.catch(() => {});
+      await myTurn;
+    };
+
+    fetchImage();
+
+    return () => {
+      cancelled = true;
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [src]);
+
+  if (isPollinations) {
+    // Show generated image once ready
+    if (status === 'done' && imageUrl) {
+      return <img src={imageUrl} alt={alt} crossOrigin="anonymous" className={className} />;
+    }
+
+    // Show progress UI while generating
+    const progressColor = status === 'error' ? 'bg-red-500' : status === 'done' ? 'bg-green-500' : 'bg-indigo-500';
+    const pulseClass = status === 'generating' || status === 'connecting' ? 'animate-pulse' : '';
+
     return (
-      <div className={`bg-[#141414] border-2 border-dashed border-[#2a2a2a] flex flex-col items-center justify-center ${className} p-2 text-center relative overflow-hidden`}>
-         <div className="absolute inset-0 bg-indigo-500/10 animate-pulse" />
-         <ImageIcon className="w-5 h-5 text-indigo-500 mb-1 z-10" />
-         <span className="text-[10px] text-white font-medium z-10">AI Image Ready</span>
-         <span className="text-[8px] text-[#8a8a8a] z-10 mt-0.5 leading-tight">Will generate during assembly<br/>to prevent errors</span>
+      <div className={`bg-[#0a0a0a] flex flex-col items-center justify-center ${className} relative overflow-hidden`}>
+        {/* Background shimmer */}
+        <div className={`absolute inset-0 bg-gradient-to-r from-indigo-500/5 via-indigo-500/10 to-indigo-500/5 ${pulseClass}`} />
+        
+        {/* Content */}
+        <div className="z-10 flex flex-col items-center w-full px-3">
+          {status === 'error' ? (
+            <div className="w-4 h-4 rounded-full border-2 border-red-500 flex items-center justify-center mb-1">
+              <X className="w-2.5 h-2.5 text-red-500" />
+            </div>
+          ) : (
+            <div className="relative mb-1">
+              <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" className="text-[#2a2a2a]" />
+                <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-indigo-500" />
+              </svg>
+            </div>
+          )}
+          
+          <span className="text-[9px] text-white font-medium mb-0.5 text-center leading-tight">{statusLog}</span>
+          
+          {retryCount > 0 && (
+            <span className="text-[8px] text-amber-400/80 mb-1">Retry #{retryCount}</span>
+          )}
+          
+          {/* Progress bar */}
+          <div className="w-full h-1 bg-[#1a1a1a] rounded-full overflow-hidden mt-1">
+            <div 
+              className={`h-full ${progressColor} rounded-full transition-all duration-500 ease-out`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          
+          <span className="text-[8px] text-[#6a6a6a] mt-0.5">{progress}%</span>
+        </div>
       </div>
     );
   }
   
   return <img src={src} alt={alt} crossOrigin="anonymous" className={className} loading="lazy" />;
 };
+
 
 interface AutoVideoSceneListProps {
   scenes: AutoVideoScene[];
