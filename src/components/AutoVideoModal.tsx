@@ -150,6 +150,16 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         throw new Error('AI returned an empty scene blueprint. Please try again.');
       }
 
+      // Pre-process layeredPrompts to inject global background
+      if (generatedBlueprint.globalBackgroundPrompt) {
+        generatedBlueprint.scenes.forEach(scene => {
+          if (scene.visualSource === 'cloudflare' || scene.visualSource === 'pollinations') {
+            if (!scene.layeredPrompts) scene.layeredPrompts = [];
+            scene.layeredPrompts.unshift({ prompt: generatedBlueprint.globalBackgroundPrompt as string, isGreenScreen: false });
+          }
+        });
+      }
+
       setBlueprint(generatedBlueprint);
       
       setStatus('Fetching alternative video clips...');
@@ -208,12 +218,30 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       scene.visualOptions = options;
       scene.selectedVisualUrl = options[0]?.url;
     } else if ((scene.visualSource === 'pollinations' || scene.visualSource === 'cloudflare') && scene.pollinationsPrompt) {
-      const url = scene.visualSource === 'cloudflare' 
-        ? `cloudflare://${encodeURIComponent(scene.pollinationsPrompt)}` 
-        : generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1024, 576).url;
-      scene.visualOptions = [{ url, type: 'image', source: scene.visualSource }];
-      scene.selectedVisualUrl = url;
-      scene.layeredVisuals = undefined;
+      if (Array.isArray(scene.layeredPrompts) && scene.layeredPrompts.length > 0) {
+        // Ensure global background is preserved if it exists
+        if (blueprint.globalBackgroundPrompt && scene.layeredPrompts[0].prompt !== blueprint.globalBackgroundPrompt) {
+          scene.layeredPrompts.unshift({ prompt: blueprint.globalBackgroundPrompt, isGreenScreen: false });
+        }
+        const layeredVisuals = scene.layeredPrompts.map((lp: any, idx: number) => {
+          const promptText = typeof lp === 'string' ? lp : (lp?.prompt || scene.pollinationsPrompt || scene.narration || '');
+          const isGS = typeof lp === 'object' && lp !== null ? Boolean(lp.isGreenScreen) : idx > 0;
+          const url = scene.visualSource === 'cloudflare' 
+            ? `cloudflare://${encodeURIComponent(promptText)}` 
+            : generatePollinationsImageWithReference(promptText, characterRef, undefined, 1024, 576).url;
+          return { url, isGreenScreen: isGS, trackOffset: idx };
+        });
+        scene.layeredVisuals = layeredVisuals;
+        scene.visualOptions = undefined;
+        scene.selectedVisualUrl = undefined;
+      } else {
+        const url = scene.visualSource === 'cloudflare' 
+          ? `cloudflare://${encodeURIComponent(scene.pollinationsPrompt)}` 
+          : generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1024, 576).url;
+        scene.visualOptions = [{ url, type: 'image', source: scene.visualSource }];
+        scene.selectedVisualUrl = url;
+        scene.layeredVisuals = undefined;
+      }
     }
     setBlueprint(newBlueprint);
   };
@@ -227,14 +255,17 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
     if (groqApiKey) {
       try {
-        const adaptive = await generateSourceAdaptivePrompt(scene.narration, newSource, groqApiKey);
+        const adaptive = await generateSourceAdaptivePrompt(scene.narration, newSource, groqApiKey, visualStyle);
         if (newSource === 'pexels' && adaptive.query) {
           scene.pexelsQuery = adaptive.query;
           scene.pexelsAlternates = adaptive.alternatives;
         } else if ((newSource === 'pollinations' || newSource === 'cloudflare') && adaptive.prompt) {
           scene.pollinationsPrompt = adaptive.prompt;
           scene.pollinationsVariants = adaptive.variants;
-          scene.layeredPrompts = adaptive.layeredPrompts;
+          scene.layeredPrompts = adaptive.layeredPrompts || [];
+          if (blueprint.globalBackgroundPrompt) {
+            scene.layeredPrompts!.unshift({ prompt: blueprint.globalBackgroundPrompt, isGreenScreen: false });
+          }
         } else if (newSource === 'map' && adaptive.mapAnimation) {
           scene.mapAnimation = adaptive.mapAnimation;
         }

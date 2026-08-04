@@ -882,6 +882,7 @@ export interface AutoVideoScene {
 }
 
 export interface AutoVideoBlueprint {
+  globalBackgroundPrompt?: string;
   scenes: AutoVideoScene[];
   globalSeed: number;
   characterDescription: string;
@@ -999,9 +1000,9 @@ RULES:
    - "pexels": for general live-action stock footage (people, nature, cities, technology).
 
 4. For "pexels" scenes: Provide a primary 1-3 word search query and 2 alternatives.
-5. For "cloudflare" scenes: Provide a highly detailed image prompt and 2 variants. (NOTE: Put these in the "pollinationsPrompt" and "pollinationsVariants" JSON fields). If the scene involves characters or elements that require animation (e.g. dialogue, character moving), ALSO provide "layeredPrompts": an array of 3-4 prompts where the first is the background (e.g., "Empty ancient battlefield background") and the rest are the characters/elements with a green screen (e.g., "A Roman soldier, full body, solid #00FF00 green screen background", "A horse, full body, solid #00FF00 green screen background").
-${visualStyle === 'vox_vintage' ? '6. CRITICAL FOR VOX VINTAGE STYLE: ALWAYS use "cloudflare" and "layeredPrompts" for documentary scenes. The background MUST be "vintage paper texture, old newspaper collage, halftone grid background". The foreground characters/objects MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background".' : ''}
-${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE: ALWAYS use "cloudflare" and "layeredPrompts" for documentary scenes. The background MUST be a realistic documentary scene. The foreground characters MUST be realistic, highly detailed photography, solid #00FF00 green screen background.' : ''}
+5. For "cloudflare" scenes: Provide a highly detailed image prompt and 2 variants. (NOTE: Put these in the "pollinationsPrompt" and "pollinationsVariants" JSON fields). If the scene involves characters or elements that require animation (e.g. dialogue, character moving), ALSO provide "layeredPrompts" (up to 5 objects, all with isGreenScreen: true).
+${visualStyle === 'vox_vintage' ? '6. CRITICAL FOR VOX VINTAGE STYLE: ALWAYS generate a SINGLE "globalBackgroundPrompt" (e.g. "vintage paper texture, old newspaper collage, halftone grid background") representing the overall theme. Then, for EVERY scene, use "cloudflare" and provide up to 5 "layeredPrompts" for foreground characters/objects. These MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background" and have isGreenScreen set to true.' : ''}
+${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE: ALWAYS generate a SINGLE "globalBackgroundPrompt" representing the overall realistic theme. Then, for EVERY scene, use "cloudflare" and provide up to 5 "layeredPrompts" for foreground characters. These MUST be realistic, highly detailed photography on a solid #00FF00 green screen background, and have isGreenScreen set to true.' : ''}
 7. For "map" scenes: Provide the mapAnimation object with lat/lng waypoints.
 8. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
 9. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your image prompts.` : 'No character reference.'}
@@ -1015,6 +1016,7 @@ Return ONLY a valid JSON object.`;
       responseSchema: {
         type: "OBJECT",
         properties: {
+          globalBackgroundPrompt: { type: "STRING" },
           scenes: {
             type: "ARRAY",
             items: {
@@ -1149,14 +1151,15 @@ Return ONLY a JSON array, no markdown. Format:
 export async function generateSourceAdaptivePrompt(
   narration: string,
   targetSource: 'pexels' | 'pollinations' | 'cloudflare' | 'map',
-  apiKey: string
+  apiKey: string,
+  visualStyle?: string
 ): Promise<any> {
   const systemPrompt = `You are an expert AI content generator for video scenes.
 Based on the narration, generate the required fields for the selected visual source: ${targetSource}.
 
 RULES for ${targetSource}:
 ${targetSource === 'pexels' ? '- Return "query" (1-3 words) and "alternatives" (array of strings).' : ''}
-${targetSource === 'pollinations' || targetSource === 'cloudflare' ? '- Return "prompt" (highly detailed image prompt) and "variants" (array of strings).\n- If character animation is needed, also return "layeredPrompts" (array of objects with "prompt" and "isGreenScreen" boolean, first item being background).' : ''}
+${targetSource === 'pollinations' || targetSource === 'cloudflare' ? `- Return "prompt" (highly detailed image prompt) and "variants" (array of strings).\n${visualStyle === 'vox_vintage' ? 'CRITICAL FOR VOX VINTAGE STYLE: ALWAYS return "layeredPrompts" for documentary scenes. The background MUST be "vintage paper texture, old newspaper collage, halftone grid background". The foreground characters/objects MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background".\n' : ''}${visualStyle === 'vox_realistic' ? 'CRITICAL FOR VOX REALISTIC STYLE: ALWAYS return "layeredPrompts" for documentary scenes. The background MUST be a realistic documentary scene. The foreground characters MUST be realistic, highly detailed photography, solid #00FF00 green screen background".\n' : ''}- If character animation is needed or style is vox_vintage/vox_realistic, also return "layeredPrompts" (array of objects with "prompt" and "isGreenScreen" boolean, first item being background).` : ''}
 ${targetSource === 'map' ? '- Return "mapAnimation" object with "type" (route/flyTo), "waypoints" (array of {lat, lng, label}), "zoom" (number), and "style" (standard/satellite/dark/vintage).' : ''}
 
 Return ONLY a valid JSON object matching the requested schema, nothing else.`;
