@@ -162,7 +162,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               return { ...scene, layeredVisuals };
             } else if (scene.pollinationsPrompt) {
               const options = [];
-              for (let i = 0; i < 4; i++) {
+              for (let i = 0; i < 1; i++) {
                 options.push(generatePollinationsImageWithReference(scene.pollinationsPrompt, characterRef, undefined, 1920, 1080));
               }
               return { ...scene, visualOptions: options, selectedVisualUrl: options[0]?.url };

@@ -1045,15 +1045,14 @@ Return ONLY a valid JSON object matching the requested schema, nothing else.`;
     max_tokens: 1024
   };
 
-  const response = await fetchWithKeyFailover(
-    (key) => 'https://api.groq.com/openai/v1/chat/completions',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
     },
-    'groq'
-  );
+    body: JSON.stringify(payload)
+  });
 
   if (!response.ok) {
     throw new Error('Failed to generate adaptive prompt');
