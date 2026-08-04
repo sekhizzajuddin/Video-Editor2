@@ -295,21 +295,39 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           setStatus(`Generating Clip ${sceneIndex + 1}/${totalScenes} - Layer ${layerIndex}/${downloadedUrls.length}...`);
           let localObjectUrl = null;
           let localFile: File | undefined = undefined;
-          try {
-            const res = await fetch(dl.url);
-            const blob = await res.blob();
-            const ext = dl.isImage ? 'jpg' : 'mp4';
-            const filename = `scene_${Date.now()}_${sceneIndex}_t${dl.trackOffset}.${ext}`;
-            const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
-            const writable = await fileHandle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-            localFile = await fileHandle.getFile();
-            localObjectUrl = URL.createObjectURL(localFile!);
-          } catch (e) {
-            console.error('Download to SSD failed:', e);
-            localObjectUrl = dl.url; // fallback
+          
+          let success = false;
+          let attempts = 0;
+          const maxAttempts = dl.url.includes('pollinations.ai') ? 3 : 1;
+          
+          while (!success && attempts < maxAttempts) {
+            attempts++;
+            try {
+              if (dl.url.includes('pollinations.ai') && layerIndex > 1) {
+                 await new Promise(r => setTimeout(r, 1500)); // Delay between API calls
+              }
+              const res = await fetch(dl.url);
+              if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+              const blob = await res.blob();
+              const ext = dl.isImage ? 'jpg' : 'mp4';
+              const filename = `scene_${Date.now()}_${sceneIndex}_t${dl.trackOffset}.${ext}`;
+              const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+              const writable = await fileHandle.createWritable();
+              await writable.write(blob);
+              await writable.close();
+              localFile = await fileHandle.getFile();
+              localObjectUrl = URL.createObjectURL(localFile!);
+              success = true;
+            } catch (e) {
+              console.error(`Download failed (Attempt ${attempts}/${maxAttempts}):`, e);
+              if (attempts === maxAttempts) {
+                 localObjectUrl = dl.url; // fallback to raw URL if all attempts fail
+              } else {
+                 await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+              }
+            }
           }
+          
           if (localObjectUrl) {
              localObjects.push({ ...dl, localObjectUrl, localFile });
           }

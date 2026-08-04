@@ -3,47 +3,19 @@ import { AutoVideoScene } from '../utils/aiClient';
 import { Settings, Image as ImageIcon, Map, Video, X, ChevronUp, ChevronDown, Scissors, RefreshCw } from 'lucide-react';
 import { AutoVideoPreviewTrimmer } from './AutoVideoPreviewTrimmer';
 
-// Global queue to prevent Pollinations 429 errors by loading previews sequentially with a delay
-const imageQueue: (() => void)[] = [];
-let isProcessingQueue = false;
-
-const processQueue = async () => {
-  if (isProcessingQueue || imageQueue.length === 0) return;
-  isProcessingQueue = true;
-  while (imageQueue.length > 0) {
-    const task = imageQueue.shift();
-    if (task) {
-      task();
-      await new Promise(r => setTimeout(r, 1000)); // 1 second delay between preview fetches
-    }
-  }
-  isProcessingQueue = false;
-};
-
 const SequentialImage: React.FC<{ src: string; alt: string; className: string }> = ({ src, alt, className }) => {
-  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!src) return;
-    if (!src.includes('pollinations.ai')) {
-      setLoadedSrc(src);
-      return;
-    }
-    
-    let isMounted = true;
-    imageQueue.push(() => {
-      if (isMounted) setLoadedSrc(src);
-    });
-    processQueue();
-    
-    return () => { isMounted = false; };
-  }, [src]);
-
-  if (!loadedSrc) {
-    return <div className={`bg-[#141414] flex items-center justify-center animate-pulse ${className}`}><span className="text-[8px] text-[#8a8a8a]">Waiting...</span></div>;
+  if (src && src.includes('pollinations.ai')) {
+    return (
+      <div className={`bg-[#141414] border-2 border-dashed border-[#2a2a2a] flex flex-col items-center justify-center ${className} p-2 text-center relative overflow-hidden`}>
+         <div className="absolute inset-0 bg-indigo-500/10 animate-pulse" />
+         <ImageIcon className="w-5 h-5 text-indigo-500 mb-1 z-10" />
+         <span className="text-[10px] text-white font-medium z-10">AI Image Ready</span>
+         <span className="text-[8px] text-[#8a8a8a] z-10 mt-0.5 leading-tight">Will generate during assembly<br/>to prevent errors</span>
+      </div>
+    );
   }
   
-  return <img src={loadedSrc} alt={alt} crossOrigin="anonymous" className={className} />;
+  return <img src={src} alt={alt} crossOrigin="anonymous" className={className} loading="lazy" />;
 };
 
 interface AutoVideoSceneListProps {
