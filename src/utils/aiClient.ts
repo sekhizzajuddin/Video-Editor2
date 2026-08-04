@@ -887,6 +887,94 @@ export interface AutoVideoBlueprint {
   characterDescription: string;
 }
 
+/**
+ * Robust JSON repair & parser helper.
+ * Handles markdown fences, unquoted object keys, single quotes, trailing commas,
+ * and automatically repairs truncated JSON (unclosed strings, arrays, objects).
+ */
+export function parseAndRepairJson<T = any>(jsonString: string): T {
+  if (!jsonString || typeof jsonString !== 'string') {
+    throw new Error('Empty JSON string provided');
+  }
+
+  let cleaned = jsonString.trim();
+
+  // Strip Markdown Code Fences (```json ... ``` or ``` ... ```)
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // Try direct parse first
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    // Proceed to repair
+  }
+
+  // 1. Fix unquoted keys, e.g. layeredPrompts: or dialogueIndex: -> "layeredPrompts":
+  cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
+
+  // 2. Fix trailing commas before } or ]
+  cleaned = cleaned.replace(/,\s*([\]}])/g, '$1');
+
+  // 3. Fix single-quoted strings: 'foo' -> "foo"
+  cleaned = cleaned.replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, '"$1"');
+
+  // Try parse after string fixes
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    // Proceed to truncation repair
+  }
+
+  // 4. Handle truncated JSON (unclosed strings, arrays, objects)
+  let inString = false;
+  let quoteChar = '';
+  const stack: string[] = [];
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const char = cleaned[i];
+    const prevChar = i > 0 ? cleaned[i - 1] : '';
+
+    if ((char === '"' || char === "'") && prevChar !== '\\') {
+      if (!inString) {
+        inString = true;
+        quoteChar = char;
+      } else if (char === quoteChar) {
+        inString = false;
+      }
+    } else if (!inString) {
+      if (char === '{' || char === '[') {
+        stack.push(char === '{' ? '}' : ']');
+      } else if (char === '}' || char === ']') {
+        if (stack.length > 0 && stack[stack.length - 1] === char) {
+          stack.pop();
+        }
+      }
+    }
+  }
+
+  if (inString) {
+    cleaned += '"';
+  }
+
+  // Strip any dangling commas or incomplete key/value at the end
+  cleaned = cleaned.replace(/,\s*("[^"]*"?\s*:?\s*)?$/, '');
+
+  // Close remaining unclosed brackets/braces in reverse order
+  while (stack.length > 0) {
+    cleaned += stack.pop();
+  }
+
+  // Final cleanup of trailing commas created by closing brackets
+  cleaned = cleaned.replace(/,\s*([\]}])/g, '$1');
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (e: any) {
+    console.error('[aiClient] JSON repair failed. Snippet:', jsonString.substring(0, 300));
+    throw new Error(`Invalid response format from AI: ${e.message}`);
+  }
+}
+
 export async function generateAutoVideoBlueprint(
   script: string, 
   wordTimestamps: { word: string; start: number; end: number }[], 
@@ -896,9 +984,8 @@ export async function generateAutoVideoBlueprint(
   characterDescription?: string,
   visualStyle?: string
 ): Promise<AutoVideoBlueprint> {
-  // We use gemini-3.5-flash-lite as the actual endpoint, mapped to user's intent
-  const model = "gemini-3.5-flash-lite"; 
-  const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 100)); // Sample if too long, though we should pass all
+  const model = "gemini-1.5-flash"; 
+  const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 100)); // Sample if too long
   const systemPrompt = `You are an expert video director, stock footage researcher, and AI image prompt engineer.
 I am providing you with a script that has a total audio voiceover duration of ${totalDuration.toFixed(1)} seconds, along with word-level timestamps.
 Your job is to break this script down into a sequence of consecutive video scenes to perfectly cover this duration.
@@ -919,48 +1006,83 @@ ${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE: ALWAYS
 8. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
 9. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your pollinations prompts.` : 'No character reference.'}
 
-Return ONLY this exact JSON format, nothing else (no markdown):
-{
-  "scenes": [
-    {
-      "dialogueIndex": 1,
-      "narration": "Exact text spoken",
-      "startTime": 0.0,
-      "endTime": 4.5,
-      "duration": 4.5,
-      "pexelsQuery": "generic search term",
-      "pexelsAlternates": ["alt1", "alt2"],
-      "pollinationsPrompt": "highly detailed image prompt",
-      "pollinationsVariants": ["variant 1", "variant 2"],
-      "layeredPrompts": [
-        { "prompt": "Empty ancient battlefield background", "isGreenScreen": false },
-        { "prompt": "A Roman soldier, full body, solid #00FF00 green screen background", "isGreenScreen": true }
-      ],
-      "visualSource": "pexels" | "pollinations" | "map",
-      "mapAnimation": {
-        "type": "route" | "flyTo" | "highlight",
-        "waypoints": [{ "lat": 12.3, "lng": 45.6, "label": "City" }],
-        "zoom": 4,
-        "style": "standard" | "satellite" | "dark" | "vintage"
-      }
-    }
-  ],
-  "globalSeed": 42,
-  "characterDescription": "Generated character description if any"
-}`;
+Return ONLY a valid JSON object.`;
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nScript: ${script}\n\nWord Timestamps (Sample): ${wordTimestampsStr}` }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.4,
-        maxOutputTokens: 8192
-      }
-    })
-  });
+  const payload = {
+    contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nScript: ${script}\n\nWord Timestamps (Sample): ${wordTimestampsStr}` }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          scenes: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                dialogueIndex: { type: "INTEGER" },
+                narration: { type: "STRING" },
+                startTime: { type: "NUMBER" },
+                endTime: { type: "NUMBER" },
+                duration: { type: "NUMBER" },
+                pexelsQuery: { type: "STRING" },
+                pexelsAlternates: { type: "ARRAY", items: { type: "STRING" } },
+                pollinationsPrompt: { type: "STRING" },
+                pollinationsVariants: { type: "ARRAY", items: { type: "STRING" } },
+                layeredPrompts: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      prompt: { type: "STRING" },
+                      isGreenScreen: { type: "BOOLEAN" }
+                    },
+                    required: ["prompt", "isGreenScreen"]
+                  }
+                },
+                visualSource: { type: "STRING" },
+                mapAnimation: {
+                  type: "OBJECT",
+                  properties: {
+                    type: { type: "STRING" },
+                    waypoints: {
+                      type: "ARRAY",
+                      items: {
+                        type: "OBJECT",
+                        properties: {
+                          lat: { type: "NUMBER" },
+                          lng: { type: "NUMBER" },
+                          label: { type: "STRING" }
+                        }
+                      }
+                    },
+                    zoom: { type: "NUMBER" },
+                    style: { type: "STRING" }
+                  }
+                }
+              },
+              required: ["dialogueIndex", "narration", "startTime", "endTime", "duration", "visualSource"]
+            }
+          },
+          globalSeed: { type: "INTEGER" },
+          characterDescription: { type: "STRING" }
+        },
+        required: ["scenes"]
+      },
+      temperature: 0.3,
+      maxOutputTokens: 8192
+    }
+  };
+
+  const response = await fetchWithKeyFailover(
+    (key) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    'gemini'
+  );
 
   if (!response.ok) {
     const err = await response.text();
@@ -969,11 +1091,12 @@ Return ONLY this exact JSON format, nothing else (no markdown):
 
   const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+
   try {
-    return JSON.parse(text) as AutoVideoBlueprint;
-  } catch (e) {
+    return parseAndRepairJson<AutoVideoBlueprint>(text);
+  } catch (e: any) {
     console.error("Error parsing blueprint JSON:", text);
-    throw new Error("Invalid response from Gemini AI.");
+    throw new Error(`Invalid response from Gemini AI: ${e.message}`);
   }
 }
 
