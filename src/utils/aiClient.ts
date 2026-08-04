@@ -844,7 +844,7 @@ Output format MUST exactly match this JSON schema:
 
 export async function enhancePromptWithGemini(prompt: string, apiKey: string): Promise<string> {
   const systemPrompt = "You are an expert AI Video and Image prompt engineer. Enhance the following basic prompt into a highly detailed, cinematic, and professional prompt suitable for advanced AI video generators like Sora, Kling, or Midjourney. Focus on lighting, camera angles, atmosphere, and visual fidelity. Return ONLY the enhanced prompt string without any conversational filler or quotes.";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1000,9 +1000,9 @@ RULES:
    - "pexels": for general live-action stock footage (people, nature, cities, technology).
 
 4. For "pexels" scenes: Provide a primary 1-3 word search query and 2 alternatives.
-5. For "cloudflare" scenes: Provide a highly detailed image prompt and 2 variants. (NOTE: Put these in the "pollinationsPrompt" and "pollinationsVariants" JSON fields). If the scene involves characters or elements requiring animation (e.g. dialogue, character moving, objects), ALSO provide "layeredPrompts" (array of 1 to 5 foreground objects with isGreenScreen: true).
-${visualStyle === 'vox_vintage' ? '6. CRITICAL FOR VOX VINTAGE STYLE (VOX DOCUMENTARY): ALWAYS generate a SINGLE "globalBackgroundPrompt" (e.g. "vintage paper texture with subtle newspaper collage and halftone grid, full composition background, no characters") representing the script\'s overall theme. This exact background will be reused across all scenes. Then, for EVERY scene, set visualSource to "cloudflare" and YOU MUST output "layeredPrompts" containing 1 to 5 DISTINCT foreground subject/object prompts specific to that scene\'s narration (e.g., historical figures, vintage instruments, archive documents, cutouts). Every object prompt MUST end with ", vintage cutout illustration, halftone print style, solid #00FF00 green screen background" and have "isGreenScreen": true.' : ''}
-${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE (VOX DOCUMENTARY): ALWAYS generate a SINGLE "globalBackgroundPrompt" (e.g. "cinematic atmospheric studio wallpaper texture, subtle grid, documentary background") representing the script\'s overall theme. This exact background will be reused across all scenes. Then, for EVERY scene, set visualSource to "cloudflare" and YOU MUST output "layeredPrompts" containing 1 to 5 DISTINCT foreground subject/character prompts specific to that scene\'s narration. Every object prompt MUST end with ", realistic studio portrait cutout photography, solid #00FF00 green screen background" and have "isGreenScreen": true.' : ''}
+5. For "cloudflare" scenes: Provide a highly detailed image prompt and 2 variants. (NOTE: Put these in the "pollinationsPrompt" and "pollinationsVariants" JSON fields). If the scene involves characters or elements that require animation (e.g. dialogue, character moving), ALSO provide "layeredPrompts" (up to 5 objects, all with isGreenScreen: true).
+${visualStyle === 'vox_vintage' ? '6. CRITICAL FOR VOX VINTAGE STYLE: ALWAYS generate a SINGLE "globalBackgroundPrompt" (e.g. "vintage paper texture, old newspaper collage, halftone grid background") representing the overall theme. Then, for EVERY scene, use "cloudflare" and YOU MUST output the "layeredPrompts" JSON field containing an array of 1 to 5 foreground objects. These MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background" and have isGreenScreen set to true.' : ''}
+${visualStyle === 'vox_realistic' ? '6. CRITICAL FOR VOX REALISTIC STYLE: ALWAYS generate a SINGLE "globalBackgroundPrompt" representing the overall realistic theme. Then, for EVERY scene, use "cloudflare" and YOU MUST output the "layeredPrompts" JSON field containing an array of 1 to 5 foreground characters. These MUST be realistic, highly detailed photography on a solid #00FF00 green screen background, and have isGreenScreen set to true.' : ''}
 7. For "map" scenes: Provide the mapAnimation object with lat/lng waypoints.
 8. ${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}. You MUST strictly adhere to these instructions. Adjust visualSource and prompts accordingly.` : 'No custom instructions.'}
 9. ${characterDescription ? `CHARACTER REFERENCE: The main character is described as "${characterDescription}". Use this in your image prompts.` : 'No character reference.'}
@@ -1121,7 +1121,7 @@ Return ONLY a JSON array, no markdown. Format:
 
   const wordTimestampsStr = JSON.stringify(wordTimestamps);
   
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1159,27 +1159,62 @@ Based on the narration, generate the required fields for the selected visual sou
 
 RULES for ${targetSource}:
 ${targetSource === 'pexels' ? '- Return "query" (1-3 words) and "alternatives" (array of strings).' : ''}
-${targetSource === 'pollinations' || targetSource === 'cloudflare' ? `- Return "prompt" (highly detailed image prompt) and "variants" (array of strings).\n${visualStyle === 'vox_vintage' ? 'CRITICAL FOR VOX VINTAGE STYLE: YOU MUST return "layeredPrompts" containing an array of 1 to 5 foreground objects/characters based on the narration (e.g. historical cutouts, vintage artifacts, documents). Each prompt MUST end with ", vintage cutout illustration, halftone print style, solid #00FF00 green screen background" and have isGreenScreen: true. DO NOT return an empty array!\n' : ''}${visualStyle === 'vox_realistic' ? 'CRITICAL FOR VOX REALISTIC STYLE: YOU MUST return "layeredPrompts" containing an array of 1 to 5 foreground characters/objects based on the narration. Each prompt MUST end with ", realistic studio portrait cutout photography, solid #00FF00 green screen background" and have isGreenScreen: true. DO NOT return an empty array!\n' : ''}- If character animation is needed or style is vox_vintage/vox_realistic, also return "layeredPrompts" (array of objects with "prompt" and "isGreenScreen" boolean).` : ''}
+${targetSource === 'pollinations' || targetSource === 'cloudflare' ? `- Return "prompt" (highly detailed image prompt) and "variants" (array of strings).\n${visualStyle === 'vox_vintage' ? 'CRITICAL FOR VOX VINTAGE STYLE: YOU MUST return "layeredPrompts" containing an array of 1 to 5 foreground objects based on the narration (e.g., people, items). DO NOT leave it empty! These MUST be "vintage cutout illustration, halftone print style, solid #00FF00 green screen background" and have isGreenScreen set to true.\n' : ''}${visualStyle === 'vox_realistic' ? 'CRITICAL FOR VOX REALISTIC STYLE: YOU MUST return "layeredPrompts" containing an array of 1 to 5 foreground characters based on the narration. DO NOT leave it empty! These MUST be realistic, highly detailed photography, solid #00FF00 green screen background" and have isGreenScreen set to true.\n' : ''}- If character animation is needed or style is vox_vintage/vox_realistic, also return "layeredPrompts" (array of objects with "prompt" and "isGreenScreen" boolean).` : ''}
 ${targetSource === 'map' ? '- Return "mapAnimation" object with "type" (route/flyTo), "waypoints" (array of {lat, lng, label}), "zoom" (number), and "style" (standard/satellite/dark/vintage).' : ''}
 
 Return ONLY a valid JSON object matching the requested schema, nothing else.`;
 
+  const model = "gemini-3.5-flash-lite";
+
   const payload = {
-    model: GROQ_TEXT_MODEL,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Narration: "${narration}"` }
-    ],
-    temperature: 0.3,
-    max_tokens: 1024
+    contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nNarration: "${narration}"` }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      temperature: 0.3,
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING" },
+          alternatives: { type: "ARRAY", items: { type: "STRING" } },
+          prompt: { type: "STRING" },
+          variants: { type: "ARRAY", items: { type: "STRING" } },
+          layeredPrompts: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                prompt: { type: "STRING" },
+                isGreenScreen: { type: "BOOLEAN" }
+              }
+            }
+          },
+          mapAnimation: {
+            type: "OBJECT",
+            properties: {
+              type: { type: "STRING" },
+              zoom: { type: "NUMBER" },
+              style: { type: "STRING" },
+              waypoints: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    lat: { type: "NUMBER" },
+                    lng: { type: "NUMBER" },
+                    label: { type: "STRING" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   };
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
 
@@ -1188,7 +1223,7 @@ Return ONLY a valid JSON object matching the requested schema, nothing else.`;
   }
 
   const resultData = await response.json();
-  const text = resultData?.choices?.[0]?.message?.content?.trim() || '{}';
+  const text = resultData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
   try {
     const clean = text.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
     return JSON.parse(clean);
@@ -1196,3 +1231,4 @@ Return ONLY a valid JSON object matching the requested schema, nothing else.`;
     return {};
   }
 }
+

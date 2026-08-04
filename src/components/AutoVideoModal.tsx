@@ -150,13 +150,11 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         throw new Error('AI returned an empty scene blueprint. Please try again.');
       }
 
-      // Pre-process layeredPrompts to inject global background at index 0
+      // Pre-process layeredPrompts to inject global background
       if (generatedBlueprint.globalBackgroundPrompt) {
         generatedBlueprint.scenes.forEach(scene => {
           if (scene.visualSource === 'cloudflare' || scene.visualSource === 'pollinations') {
             if (!scene.layeredPrompts) scene.layeredPrompts = [];
-            // Remove any existing bg if present, then unshift single global bg
-            scene.layeredPrompts = scene.layeredPrompts.filter(p => p.prompt !== generatedBlueprint.globalBackgroundPrompt);
             scene.layeredPrompts.unshift({ prompt: generatedBlueprint.globalBackgroundPrompt as string, isGreenScreen: false });
           }
         });
@@ -174,9 +172,9 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             let currentLayeredPrompts = scene.layeredPrompts || [];
             
             // If we only have the background, try to generate foreground layers via Groq
-            if (currentLayeredPrompts.length <= 1 && groqApiKey && (visualStyle === 'vox_vintage' || visualStyle === 'vox_realistic')) {
+            if (currentLayeredPrompts.length <= 1 && geminiApiKey && (visualStyle === 'vox_vintage' || visualStyle === 'vox_realistic')) {
               try {
-                const adaptive = await generateSourceAdaptivePrompt(scene.pollinationsPrompt || scene.narration, scene.visualSource, groqApiKey, visualStyle);
+                const adaptive = await generateSourceAdaptivePrompt(scene.pollinationsPrompt || scene.narration, scene.visualSource, geminiApiKey, visualStyle);
                 if (adaptive.layeredPrompts && adaptive.layeredPrompts.length > 0) {
                   // Keep the background at index 0, append the new layers
                   const bg = currentLayeredPrompts[0];
@@ -242,9 +240,9 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       let currentLayeredPrompts = scene.layeredPrompts || [];
 
       // If user clicks regenerate and we don't have foreground objects, generate them from the prompt!
-      if (currentLayeredPrompts.length <= 1 && groqApiKey && (visualStyle === 'vox_vintage' || visualStyle === 'vox_realistic')) {
+      if (currentLayeredPrompts.length <= 1 && geminiApiKey && (visualStyle === 'vox_vintage' || visualStyle === 'vox_realistic')) {
          try {
-           const adaptive = await generateSourceAdaptivePrompt(scene.pollinationsPrompt, scene.visualSource, groqApiKey, visualStyle);
+           const adaptive = await generateSourceAdaptivePrompt(scene.pollinationsPrompt, scene.visualSource, geminiApiKey, visualStyle);
            if (adaptive.layeredPrompts && adaptive.layeredPrompts.length > 0) {
              currentLayeredPrompts = adaptive.layeredPrompts;
            }
@@ -289,9 +287,9 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
     scene.visualSource = newSource;
     setBlueprint({ ...newBlueprint });
 
-    if (groqApiKey) {
+    if (geminiApiKey) {
       try {
-        const adaptive = await generateSourceAdaptivePrompt(scene.narration, newSource, groqApiKey, visualStyle);
+        const adaptive = await generateSourceAdaptivePrompt(scene.narration, newSource, geminiApiKey, visualStyle);
         if (newSource === 'pexels' && adaptive.query) {
           scene.pexelsQuery = adaptive.query;
           scene.pexelsAlternates = adaptive.alternatives;
@@ -337,6 +335,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       const totalScenes = blueprint.scenes.length;
       let sceneIndex = 0;
       let currentStartTime = 0;
+      
+      const generationCache = new globalThis.Map<string, Blob>();
 
       for (const scene of blueprint.scenes) {
         setStatus(`Downloading media ${sceneIndex + 1}/${totalScenes} to local disk...`);
@@ -400,64 +400,75 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               let fetchUrl = dl.url;
               let res: Response;
               
-              if (isCloudflare) {
-                const prompt = decodeURIComponent(dl.url.replace('cloudflare://', ''));
-                const accountId = settings?.cloudflareAccountId || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID;
-                const apiToken = settings?.cloudflareApiToken || import.meta.env.VITE_CLOUDFLARE_API_TOKEN;
-                
-                if (!accountId || !apiToken) {
-                  throw new Error('Cloudflare API credentials are not set.');
-                }
-                
-                const cfUrl = `/cf-api/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
-                res = await fetch(cfUrl, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${apiToken}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({ prompt }),
-                });
+              
+              let blob: Blob;
+              
+              if (generationCache.has(dl.url)) {
+                blob = generationCache.get(dl.url)!;
               } else {
-                if (isPollinations && attempts > 1) {
-                  const models = ['flux', 'turbo', 'unity'];
-                  const nextModel = models[(attempts - 1) % models.length];
-                  fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
-                  if (fetchUrl.includes('model=')) {
-                    fetchUrl = fetchUrl.replace(/model=[a-z0-9_-]+/i, `model=${nextModel}`);
-                  } else {
-                    fetchUrl += `&model=${nextModel}`;
+                if (isCloudflare) {
+                  const prompt = decodeURIComponent(dl.url.replace('cloudflare://', ''));
+                  const accountId = settings?.cloudflareAccountId || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID;
+                  const apiToken = settings?.cloudflareApiToken || import.meta.env.VITE_CLOUDFLARE_API_TOKEN;
+                  
+                  if (!accountId || !apiToken) {
+                    throw new Error('Cloudflare API credentials are not set.');
                   }
+                  
+                  const cfUrl = `/cf-api/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
+                  res = await fetch(cfUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${apiToken}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ prompt }),
+                  });
+                } else {
+                  if (isPollinations && attempts > 1) {
+                    const models = ['flux', 'turbo', 'unity'];
+                    const nextModel = models[(attempts - 1) % models.length];
+                    fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
+                    if (fetchUrl.includes('model=')) {
+                      fetchUrl = fetchUrl.replace(/model=[a-z0-9_-]+/i, `model=${nextModel}`);
+                    } else {
+                      fetchUrl += `&model=${nextModel}`;
+                    }
+                  }
+                  res = await fetch(fetchUrl);
                 }
-                res = await fetch(fetchUrl);
+                
+                // Handle 429 rate limit with aggressive backoff
+                if (res.status === 429) {
+                  const backoff429 = Math.min(30000, 5000 * Math.pow(2, attempts - 1)); // 5s, 10s, 20s, 30s, 30s
+                  setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — Rate limited (429). Backing off ${Math.round(backoff429 / 1000)}s...`);
+                  console.warn(`Pollinations 429 — backing off ${backoff429}ms (attempt ${attempts})`);
+                  await new Promise(r => setTimeout(r, backoff429));
+                  continue;
+                }
+                
+                // Handle 500 server errors with moderate backoff
+                if (res.status >= 500) {
+                  const backoff500 = Math.min(15000, 3000 * attempts); // 3s, 6s, 9s, 12s, 15s
+                  setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — Server error (${res.status}). Retrying in ${Math.round(backoff500 / 1000)}s...`);
+                  console.warn(`Pollinations ${res.status} — retrying in ${backoff500}ms`);
+                  await new Promise(r => setTimeout(r, backoff500));
+                  continue;
+                }
+                
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                
+                blob = await res.blob();
+                
+                // Validate blob — pollinations sometimes returns tiny error pages
+                if (isPollinations && blob.size < 2000) {
+                  throw new Error(`Response too small (${blob.size} bytes) — likely an error placeholder`);
+                }
+                
+                generationCache.set(dl.url, blob);
               }
               
-              // Handle 429 rate limit with aggressive backoff
-              if (res.status === 429) {
-                const backoff429 = Math.min(30000, 5000 * Math.pow(2, attempts - 1)); // 5s, 10s, 20s, 30s, 30s
-                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — Rate limited (429). Backing off ${Math.round(backoff429 / 1000)}s...`);
-                console.warn(`Pollinations 429 — backing off ${backoff429}ms (attempt ${attempts})`);
-                await new Promise(r => setTimeout(r, backoff429));
-                continue;
-              }
-              
-              // Handle 500 server errors with moderate backoff
-              if (res.status >= 500) {
-                const backoff500 = Math.min(15000, 3000 * attempts); // 3s, 6s, 9s, 12s, 15s
-                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — Server error (${res.status}). Retrying in ${Math.round(backoff500 / 1000)}s...`);
-                console.warn(`Pollinations ${res.status} — retrying in ${backoff500}ms`);
-                await new Promise(r => setTimeout(r, backoff500));
-                continue;
-              }
-              
-              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-              
-              const blob = await res.blob();
-              
-              // Validate blob — pollinations sometimes returns tiny error pages
-              if (isPollinations && blob.size < 2000) {
-                throw new Error(`Response too small (${blob.size} bytes) — likely an error placeholder`);
-              }
+
               
               const ext = dl.isImage ? 'jpg' : 'mp4';
               const filename = `scene_${Date.now()}_${sceneIndex}_t${dl.trackOffset}.${ext}`;
