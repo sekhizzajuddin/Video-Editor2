@@ -292,23 +292,62 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         const localObjects = [];
         let layerIndex = 1;
         for (const dl of downloadedUrls) {
-          setStatus(`Generating Clip ${sceneIndex + 1}/${totalScenes} - Layer ${layerIndex}/${downloadedUrls.length}...`);
+          const isPollinations = dl.url.includes('pollinations.ai');
           let localObjectUrl = null;
           let localFile: File | undefined = undefined;
           
           let success = false;
           let attempts = 0;
-          const maxAttempts = dl.url.includes('pollinations.ai') ? 3 : 1;
+          const maxAttempts = isPollinations ? 5 : 2;
+          
+          // Pre-fetch cooldown for pollinations to space out API calls
+          if (isPollinations) {
+            const preDelay = (layerIndex === 1 && sceneIndex === 0) ? 500 : 3000;
+            setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex}/${downloadedUrls.length} — Waiting ${Math.round(preDelay / 1000)}s before request...`);
+            await new Promise(r => setTimeout(r, preDelay));
+          }
           
           while (!success && attempts < maxAttempts) {
             attempts++;
+            const attemptLabel = attempts > 1 ? ` (Retry ${attempts - 1}/${maxAttempts - 1})` : '';
+            setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex}/${downloadedUrls.length}${attemptLabel} — Downloading...`);
+            
             try {
-              if (dl.url.includes('pollinations.ai') && layerIndex > 1) {
-                 await new Promise(r => setTimeout(r, 1500)); // Delay between API calls
+              // On retry for pollinations, bust the cache with a new seed
+              let fetchUrl = dl.url;
+              if (isPollinations && attempts > 1) {
+                fetchUrl = fetchUrl.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 1000000)}`);
               }
-              const res = await fetch(dl.url);
-              if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+              
+              const res = await fetch(fetchUrl);
+              
+              // Handle 429 rate limit with aggressive backoff
+              if (res.status === 429) {
+                const backoff429 = Math.min(30000, 5000 * Math.pow(2, attempts - 1)); // 5s, 10s, 20s, 30s, 30s
+                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — Rate limited (429). Backing off ${Math.round(backoff429 / 1000)}s...`);
+                console.warn(`Pollinations 429 — backing off ${backoff429}ms (attempt ${attempts})`);
+                await new Promise(r => setTimeout(r, backoff429));
+                continue;
+              }
+              
+              // Handle 500 server errors with moderate backoff
+              if (res.status >= 500) {
+                const backoff500 = Math.min(15000, 3000 * attempts); // 3s, 6s, 9s, 12s, 15s
+                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — Server error (${res.status}). Retrying in ${Math.round(backoff500 / 1000)}s...`);
+                console.warn(`Pollinations ${res.status} — retrying in ${backoff500}ms`);
+                await new Promise(r => setTimeout(r, backoff500));
+                continue;
+              }
+              
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              
               const blob = await res.blob();
+              
+              // Validate blob — pollinations sometimes returns tiny error pages
+              if (isPollinations && blob.size < 2000) {
+                throw new Error(`Response too small (${blob.size} bytes) — likely an error placeholder`);
+              }
+              
               const ext = dl.isImage ? 'jpg' : 'mp4';
               const filename = `scene_${Date.now()}_${sceneIndex}_t${dl.trackOffset}.${ext}`;
               const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
@@ -318,12 +357,17 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               localFile = await fileHandle.getFile();
               localObjectUrl = URL.createObjectURL(localFile!);
               success = true;
-            } catch (e) {
+              setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex}/${downloadedUrls.length} — ✓ Downloaded`);
+            } catch (e: any) {
               console.error(`Download failed (Attempt ${attempts}/${maxAttempts}):`, e);
-              if (attempts === maxAttempts) {
-                 localObjectUrl = dl.url; // fallback to raw URL if all attempts fail
+              if (attempts >= maxAttempts) {
+                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — All retries exhausted, using direct URL`);
+                localObjectUrl = dl.url; // fallback to raw URL
               } else {
-                 await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+                // Exponential backoff: ~3s, ~5.4s, ~9.7s, ~17.5s
+                const backoffMs = Math.min(25000, 3000 * Math.pow(1.8, attempts - 1));
+                setStatus(`Clip ${sceneIndex + 1}/${totalScenes} · Layer ${layerIndex} — Error: ${e.message}. Retrying in ${Math.round(backoffMs / 1000)}s...`);
+                await new Promise(r => setTimeout(r, backoffMs));
               }
             }
           }
@@ -434,9 +478,18 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             }
           });
         
+        // Track whether this scene hit pollinations
+        const usedPollinations = downloadedUrls.some(dl => dl.url.includes('pollinations.ai'));
+        
         currentStartTime += scene.duration;
         sceneIndex++;
         setProgress(10 + Math.floor((sceneIndex / totalScenes) * 80));
+        
+        // Inter-scene cooldown to prevent burst rate limits on pollinations
+        if (usedPollinations && sceneIndex < totalScenes) {
+          setStatus(`Scene ${sceneIndex}/${totalScenes} done ✓ — Cooling down 4s before next scene...`);
+          await new Promise(r => setTimeout(r, 4000));
+        }
       }
 
       setStatus('Adding to timeline...');
