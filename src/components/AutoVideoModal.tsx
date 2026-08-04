@@ -150,11 +150,13 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         throw new Error('AI returned an empty scene blueprint. Please try again.');
       }
 
-      // Pre-process layeredPrompts to inject global background
+      // Pre-process layeredPrompts to inject global background at index 0
       if (generatedBlueprint.globalBackgroundPrompt) {
         generatedBlueprint.scenes.forEach(scene => {
           if (scene.visualSource === 'cloudflare' || scene.visualSource === 'pollinations') {
             if (!scene.layeredPrompts) scene.layeredPrompts = [];
+            // Remove any existing bg if present, then unshift single global bg
+            scene.layeredPrompts = scene.layeredPrompts.filter(p => p.prompt !== generatedBlueprint.globalBackgroundPrompt);
             scene.layeredPrompts.unshift({ prompt: generatedBlueprint.globalBackgroundPrompt as string, isGreenScreen: false });
           }
         });
