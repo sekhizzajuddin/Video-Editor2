@@ -947,7 +947,8 @@ Return ONLY this exact JSON format, nothing else (no markdown):
       contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nScript: ${script}\n\nWord Timestamps (Sample): ${wordTimestampsStr}` }] }],
       generationConfig: {
         responseMimeType: "application/json",
-        temperature: 0.4
+        temperature: 0.4,
+        maxOutputTokens: 8192
       }
     })
   });
