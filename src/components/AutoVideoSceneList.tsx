@@ -175,7 +175,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
               <div className="grid grid-cols-2 gap-2">
                 {scene.layeredVisuals.map((lv, lIdx) => (
                   <div key={lIdx} className="w-full h-20 bg-black rounded overflow-hidden relative border border-[#2a2a2a]">
-                    <img src={lv.url} crossOrigin="anonymous" alt={`Layer ${lIdx}`} className="w-full h-full object-cover" />
+                    <img src={lv.url} loading="lazy" crossOrigin="anonymous" alt={`Layer ${lIdx}`} className="w-full h-full object-cover" />
                     <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1 text-[8px] text-white flex justify-between">
                       <span>{lv.isGreenScreen ? 'PIP (Green Screen)' : 'Background'}</span>
                       <span>Track {lv.trackOffset}</span>
@@ -200,7 +200,7 @@ export const AutoVideoSceneList: React.FC<AutoVideoSceneListProps> = ({ scenes, 
                         : 'border-transparent opacity-50 hover:opacity-100'
                     }`}
                   >
-                    <img src={opt.thumbnail || opt.url} crossOrigin="anonymous" alt="thumbnail" className="w-full h-full object-cover bg-black" />
+                    <img src={opt.thumbnail || opt.url} loading="lazy" crossOrigin="anonymous" alt="thumbnail" className="w-full h-full object-cover bg-black" />
                   </div>
                 ))}
               </div>
