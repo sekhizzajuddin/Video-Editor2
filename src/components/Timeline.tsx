@@ -435,9 +435,8 @@ export function Timeline() {
                         top: `${getTrackTop(tracks, activeTrackIdx) + 4}px`,
                         left: `${dropPreview.time * zoomLevel}px`,
                         width: `${Math.max(16, dropPreview.duration * zoomLevel)}px`,
-                        height: `${(activeTrackIdx < tracks.length ? getTrackHeight(tracks[activeTrackIdx]) : DEFAULT_TRACK_HEIGHT) - 8}px`,
-                      }}
-                    >
+                        height: `${(activeTrackIdx >= 0 && activeTrackIdx < tracks.length ? getTrackHeight(tracks[activeTrackIdx]) : DEFAULT_TRACK_HEIGHT) - 8}px`,
+                      }}>
                       <div className="absolute inset-0 flex items-center px-2 overflow-hidden pointer-events-none">
                         <span className={`text-[10px] font-medium truncate ${colors.text} drop-shadow-md`}>
                           {dropPreview.mediaName || 'Drop here'}

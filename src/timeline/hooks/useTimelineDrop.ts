@@ -23,6 +23,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
   const handleDrop = useCallback(
     (e: React.DragEvent, trackId: string) => {
       e.preventDefault();
+      e.stopPropagation();
       // Clear the dragging media tracker set in MediaPanel's onDragStart
       (window as any).__procutDraggingMediaId = undefined;
       const state = useEditorStore.getState();
@@ -435,6 +436,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
   const handleDragOver = useCallback(
     (e: React.DragEvent, trackId: string) => {
       e.preventDefault();
+      e.stopPropagation();
       e.dataTransfer.dropEffect = 'copy';
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
