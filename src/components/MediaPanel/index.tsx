@@ -2665,7 +2665,7 @@ export function MediaPanel() {
                                   {dateStr}
                                 </span>
                                 <span className="text-[9px] text-[#a0a0a0] font-medium">
-                                  {tmpl.tracks.length} track(s) · {tmpl.totalDuration.toFixed(1)}s
+                                  {tmpl.tracks.length} track(s) · {(tmpl.totalDuration || 0).toFixed(1)}s
                                 </span>
                               </div>
 

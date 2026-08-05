@@ -347,12 +347,12 @@ export class WorkflowExecutor {
 
     return {
       planId: plan.id,
-      totalSteps: plan.totalSteps,
+      totalSteps: plan.totalSteps ?? plan.steps.length,
       successCount,
       failedCount,
       skippedCount,
       totalDurationMs: Date.now() - this.startedAt,
-      summary: this.buildSummary(phase, successCount, failedCount, plan.totalSteps, error),
+      summary: this.buildSummary(phase, successCount, failedCount, plan.totalSteps ?? plan.steps.length, error),
       steps,
     };
   }

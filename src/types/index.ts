@@ -482,8 +482,10 @@ export interface TimelineClip {
   pipWindowIds?: string[]; // Array of PIP window IDs attached to this clip
   // Sequencer / Interpolation (Gap #2 + #3)
   interpolation?: ClipInterpolationSettings;
-  sequenceId?: string; // Image sequence membership
+  sequenceId?: string; // position in sequence membership
   sequenceIndex?: number; // position in sequence (0, 1, 2...)
+  // Map Animation (Auto Video feature)
+  mapAnimation?: MapAnimationSettings;
 }
 
 // ─── Sequencer / Interpolation ───────────────────────────────────────────
@@ -503,139 +505,234 @@ export type SequenceTransitionType =
   | 'cut'
   | 'fade'
   | 'crossfade'
+  | 'wipeLeft'
+  | 'wipeRight'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'panLeft'
+  | 'panRight'
   | 'kenburnsFade'
-  | 'kenburnsAuto';
+  | 'kenburnsAuto';   // auto Ken-Burns (random pan/zoom per clip)
 
-export type SequenceEasing =
-  | 'linear'
-  | 'easeIn'
-  | 'easeOut'
-  | 'easeInOut';
-
-export type OpticalFlowModel = 'rife40' | 'rife49' | 'dain';
+export type SequenceEasing = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut';
 
 export interface ClipInterpolationSettings {
   mode: InterpolationMode;
-  autoKenBurns?: boolean;
   preset?: InterpolationPreset;
-  panAmplitude?: number;   // 0–100 (% of frame)
-  zoomAmount?: number;     // 0–100 (% scale)
-  blendDuration?: number;  // seconds, overlap with next image
-  intensity?: number;      // 0–100 (effect strength)
   easing?: SequenceEasing;
-  // optical-flow specific
-  flowModel?: OpticalFlowModel;
-  flowCount?: number;      // intermediate frames per pair (default 1)
-  flowFramerate?: number;  // target fps for synthesized segment
+  transitionType?: SequenceTransitionType;
+  transitionDuration?: number; // seconds
+  kenBurnsIntensity?: number;  // 0-100
+  morphStrength?: number;      // 0-100
+  blendDuration?: number;      // seconds for blend overlap between adjacent clips
+  autoKenBurns?: boolean;      // auto Ken-Burns mode enabled
 }
 
 export interface ImageSequence {
   id: string;
-  name?: string;
+  name?: string;               // optional — some code constructs without it
   trackId: string;
   startTime: number;
-  totalDuration: number;
-  memberClipIds: string[];
-  defaultClipDuration: number;
-  overlap: number;
+  clipIds?: string[];          // legacy field
+  memberClipIds: string[];     // current: array of clip IDs belonging to this sequence
+  totalDuration?: number;      // computed total duration in seconds
   transitionType: SequenceTransitionType;
-  kenBurnsAuto?: boolean;
-  interpolation?: ClipInterpolationSettings;
+  transitionDuration?: number; // optional — not always set on construction
+  overlap: number;
+  defaultClipDuration: number;
+  interpolation?: ClipInterpolationSettings; // optional — not always set
+  kenBurnsAuto?: boolean;      // auto Ken-Burns on every clip
   createdAt: number;
 }
 
-export interface InterpolationRenderFrame {
-  // light cache pointer so re-renders are cheap
-  cacheKey: string;
-}
-
-// NEW: PIP Window - A nested mini-timeline attached to a specific clip
-export interface PipWindow {
-  id: string;
-  parentClipId: string;
-  relativeStartTime: number; // Offset from parent clip start (in seconds)
-  tracks: TimelineTrack[];   // Mini-timeline tracks
-  duration: number;          // Minimum visual duration is 5s
-  zIndex: number;            // Overall PIP z-index relative to other PIPs
-  manualDuration?: boolean;  // User manually resized duration
-}
-
-// Timeline Track
+// ─── Timeline Track ───────────────────────────────────────────────────────
 export interface TimelineTrack {
   id: string;
   name: string;
   type: 'video' | 'audio' | 'text' | 'fx';
-  linkedTrackId?: string; // used by FX tracks to link to a host track
   clips: TimelineClip[];
   locked: boolean;
   muted: boolean;
   hidden: boolean;
-  isDynamic?: boolean;
-  volume?: number; // 0.0 to 1.0
-  pan?: number;    // -1.0 to 1.0 (left to right)
+  volume?: number;
+  pan?: number;
   solo?: boolean;
-  // Subtitle Language support
-  selectedSubtitleLanguage?: string; // current active language code (e.g., 'EN', 'HI')
-  subtitleVariants?: Record<string, TimelineClip[]>; // maps language code to array of clips
+  isDynamic?: boolean;         // track is dynamically generated (e.g. AI-driven)
+  // FX track linkage
+  linkedTrackId?: string;
+  // Subtitle multi-language support
+  subtitleVariants?: Record<string, TimelineClip[]>;
+  selectedSubtitleLanguage?: string;
 }
 
-export interface TimelineMarker {
+// ─── PIP Window ───────────────────────────────────────────────────────────
+export interface PipWindow {
   id: string;
-  time: number;
-  name: string;
-  color: string; // Hex color code
-  type?: 'standard' | 'sponsor' | 'chapter' | 'beat' | 'ad' | string;
+  clipId?: string;           // parent clip (modern field)
+  parentClipId?: string;     // alias — used by store's clip removal logic
+  relativeStartTime: number;
+  duration: number;
+  tracks: TimelineTrack[];
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  zIndex?: number;
+  manualDuration?: number;   // user-overridden duration in seconds
 }
 
+// ─── Subtitle ─────────────────────────────────────────────────────────────
 export interface SubtitleItem {
   id: string;
   startTime: number;
   endTime: number;
   text: string;
-  translations?: Record<string, string>;
+  speaker?: string;
+  confidence?: number;
+  translations?: Record<string, string>; // language code -> translated text
 }
 
-// Editor State
+// ─── Timeline Marker ──────────────────────────────────────────────────────
+export interface TimelineMarker {
+  id: string;
+  time: number;
+  name: string;
+  color: string;
+  type?: 'standard' | 'chapter' | 'sponsor'; // marker category
+}
+
+// ─── Beat Marker ────────────────────────────────────────────────────────
+export interface BeatMarker {
+  id?: string;   // optional — store constructs beat markers without id
+  clipId: string;
+  time: number;
+}
+
+// ─── Project Template ─────────────────────────────────────────────────────
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  thumbnail?: string;
+  tracks: TimelineTrack[];
+  aspectRatio?: string;
+  createdAt: number;
+  mediaLibrary?: any[];       // serialized media items
+  totalDuration?: number;    // pre-computed total duration
+}
+
+// ─── Virtual Camera ───────────────────────────────────────────────────────
 export interface VirtualCameraKeyframe {
   time: number;
   x: number;
   y: number;
-  scale?: number;
+  scale: number;
 }
 
-export interface VirtualCamera {
+export interface VirtualCameraState {
   enabled: boolean;
   aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
-  keyframes: Record<'16:9' | '9:16' | '1:1' | '4:3', VirtualCameraKeyframe[]>;
+  // Keyframes stored per aspect-ratio key for easy per-ratio switching
+  keyframes: Record<string, VirtualCameraKeyframe[]>;
 }
 
+// ─── Editor History Snapshot ──────────────────────────────────────────────
+export interface EditorSnapshot {
+  tracks: TimelineTrack[];
+  currentTime: number;
+  label?: string;
+  // Extended state captured by saveSnapshot
+  pipWindows?: Record<string, PipWindow>;
+  subtitles?: SubtitleItem[];
+  markers?: TimelineMarker[];
+  beatMarkers?: BeatMarker[];
+}
+
+// ─── Editor Tool / Tab ────────────────────────────────────────────────────
+export type EditorTool =
+  | 'select'
+  | 'cut'
+  | 'slip'
+  | 'zoom'
+  | 'hand'
+  | 'multiSelect'
+  | 'ripple'            // ripple trim
+  | 'rateStretch'       // rate stretch trim
+  | 'trackSelect'       // select all clips on track to the right
+  | 'trackSelectBackward' // select all clips on track to the left
+  | 'split'             // razor / split at playhead
+  | 'slide';            // slide clip within gap
+export type MediaTab = 'project' | 'stock' | 'ai' | 'audio' | 'text' | 'fx' | 'templates' | 'lut' | 'transitions' | 'effects';
+export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'thumbnail' | 'history';
+
+// ─── Editor Settings ──────────────────────────────────────────────────────
+export interface EditorSettings {
+  scrollSpeed: number;
+  gestureSensitivity: number;
+  autosave: boolean;
+  showWaveform: boolean;
+  snapEnabled: boolean;
+  defaultDuration: number;
+  previewQuality: 'full' | 'half' | 'quarter' | 'balanced' | 'performance';
+  previewMode: 'auto' | 'webgl' | 'canvas2d';
+  showThumbnails: boolean;
+  hardwareAcceleration: boolean;
+  keyboardShortcuts: Record<string, string>;
+  showSafeZones?: boolean;     // overlay action-safe / title-safe guides
+  geminiApiKey?: string;
+  groqApiKey?: string;
+  freesoundApiKey?: string;
+  elevenLabsApiKey?: string;
+  cloudflareAccountId?: string;
+  cloudflareApiToken?: string;
+  huggingFaceApiKey?: string;
+  openRouterApiKey?: string;
+}
+
+// ─── Per-Ratio Framing ────────────────────────────────────────────────────
+export interface PerRatioFramingEntry {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+// ─── AI Video Generation State ────────────────────────────────────────────
+export interface AIVideoGenerationState {
+  isGenerating: boolean;
+  progress: number;
+  jobId: string | null;
+  resultUrl: string | null;
+}
+
+// ─── Editor State ─────────────────────────────────────────────────────────
 export interface EditorState {
+  // Project
   projectId: string;
   projectName: string;
-  projectFileHandle: any | null; // FileSystemFileHandle reference for auto-saving
-  showTeleprompter: boolean;
-  showHelpMenu: boolean;
-  activeHelpSection: string | null;
-  useProxies: boolean;
-  // Media Library
+  projectFileHandle: any | null;
+
+  // Media
   mediaLibrary: MediaItem[];
   folders: MediaFolder[];
 
   // Timeline
   tracks: TimelineTrack[];
-  timelineStack: { tracks: TimelineTrack[]; compoundMediaId: string; activePipWindowId?: string | null }[]; // for compound clip nesting
+  timelineStack: { tracks: TimelineTrack[]; label?: string; compoundMediaId?: string; activePipWindowId?: string | null }[];
   selectedClipId: string | null;
   selectedClipIds: string[];
-  
-  // PIP Nested Timelines
-  pipWindows: Record<string, PipWindow>;
-  activePipWindowId: string | null;
-
-  // Image Sequencer (Gap #2 + #3)
-  sequences: ImageSequence[];
-
   selectedTrackId: string | null;
-  markers: TimelineMarker[];
+  pipWindows: Record<string, PipWindow>;
+  sequences: ImageSequence[];
+  activePipWindowId: string | null;
+  colorClipboard: any | null;
+  selectedTransitionClipId: string | null;
+  selectedKeyframeLines: { clipId: string; time: number }[];
+
+  // Settings
+  settings: EditorSettings;
+
+  // Status
+  hasUnsavedChanges: boolean;
 
   // Playback
   currentTime: number;
@@ -644,296 +741,213 @@ export interface EditorState {
   perfDowngraded: boolean;
   totalDuration: number;
   playbackSpeed: number;
-  playbackDirection?: number; // -1, 0, +1
+  playbackDirection: 1 | -1 | 0;
   isMuted: boolean;
-  muteTimelineAudio?: boolean;
+  muteTimelineAudio: boolean;
   volume: number;
   inPoint: number | null;
   outPoint: number | null;
-  aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
-  perRatioFramingEnabled: boolean;
-  perRatioFraming: Record<string, Record<string, { x: number; y: number; scale?: number }>>;
-  virtualCamera: VirtualCamera;
 
-  // Timeline Zoom & Scroll
-  zoomLevel: number;     // pixels per second
+  // Markers
+  markers: TimelineMarker[];
+  beatMarkers: BeatMarker[];
+
+  // Templates
+  projectTemplates: ProjectTemplate[];
+
+  // Aspect Ratio
+  aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
+
+  // Timeline View
+  zoomLevel: number;
   scrollLeft: number;
 
   // Tools
   activeTool: EditorTool;
-  colorClipboard: { colorFilters?: ClipColorFilters; lutFilter?: ClipLutSettings } | null;
 
-  // UI State
+  // Export
+  isExporting: boolean;
+  exportFps: number;
+  exportWidth: number;
+  exportHeight: number;
+  showExportModal: boolean;
+  showScopes: boolean;
+  scopeSettings: ScopeSettings;
+
+  // UI
+  showSettingsModal: boolean;
+  showTeleprompter: boolean;
+  showHelpMenu: boolean;
+  activeHelpSection: string | null;
+  useProxies: boolean;
   showProgressBar: boolean;
   progressBarColor: string;
   progressBarHeight: number;
-  showExportModal: boolean;
-  showScopes: boolean;
-  isExporting: boolean;
-  exportFps?: number;
-  exportWidth?: number;
-  exportHeight?: number;
-  showSettingsModal: boolean;
-  isRecordingVoiceover: boolean;
-  recordingTrackId: string | null;
-  activeMediaTab: 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates' | 'transcript';
-  activePropertiesTab: PropertiesTab;
+  canvasTransformMode: 'resize' | 'crop';
   workspaceLayout: {
-    preset: 'Editing' | 'Color' | 'Audio' | 'Custom';
+    preset: string;
     leftWidth: number;
     rightWidth: number;
     timelineHeight: number;
   };
 
-  // Canvas Mode
-  canvasTransformMode: 'resize' | 'crop';
+  // Recording
+  isRecordingVoiceover: boolean;
+  recordingTrackId: string | null;
+
+  // Tabs
+  activeMediaTab: MediaTab;
+  activePropertiesTab: PropertiesTab;
+
+  // Canvas / Stream
   previewCanvas: HTMLCanvasElement | null;
   masterAudioStream: MediaStream | null;
 
   // Clipboard
-  clipboardData: { type: 'clip' | 'style' | 'whole'; clips: TimelineClip[] } | null;
+  clipboardData: any | null;
   clipboardClip: TimelineClip | null;
 
-  // History for undo/redo
+  // History
   history: EditorSnapshot[];
   historyIndex: number;
 
-  // Drag/Drop state
+  // Drag/Drop
   draggingClipId: string | null;
   dragPreviewTime: number;
   dragPreviewTrackId: string | null;
 
-  // Transitions UI State
+  // Transitions
   showTransitionLayer: boolean;
-  selectedTransitionClipId: string | null;
 
-  // New features
-  hasUnsavedChanges: boolean;
-  selectedKeyframeLines: {clipId: string, time: number}[];
-  settings: {
-    scrollSpeed: number;
-    gestureSensitivity: number;
-    autosave: boolean;
-    showWaveform: boolean;
-    snapEnabled: boolean;
-    defaultDuration: number;
-    previewQuality: 'full' | 'half' | 'quarter';
-    previewMode?: 'auto' | 'fast' | 'high';
-    showThumbnails: boolean;
-    hardwareAcceleration: boolean;
-    showSafeZones?: boolean;
-    keyboardShortcuts?: Record<string, string>;
-    geminiApiKey?: string;
-    huggingFaceApiKey?: string;
-    groqApiKey?: string;
-    freesoundApiKey?: string;
-    elevenLabsApiKey?: string;
-    openRouterApiKey?: string;
-    cloudflareAccountId?: string;
-    cloudflareApiToken?: string;
-  };
-  beatMarkers: { time: number; clipId: string }[];
-  projectTemplates: ProjectTemplate[];
+  // Subtitles
   subtitles: SubtitleItem[];
   selectedSubtitleId: string | null;
   subtitleLanguage: string;
-  scopeSettings: ScopeSettings;
 
-  // AI Video Generation State
+  // AI Video
   aiVideoIsGenerating: boolean;
   aiVideoProgress: number;
   aiVideoJobId: string | null;
   aiVideoResultUrl: string | null;
+
+  // Per-ratio framing
+  perRatioFramingEnabled: boolean;
+  perRatioFraming: Record<string, Record<string, PerRatioFramingEntry>>;
+
+  // Virtual Camera
+  virtualCamera: VirtualCameraState;
 }
 
-export interface EditorActions {
-  setAIVideoGenerationState: (state: Partial<Pick<EditorState, 'aiVideoIsGenerating' | 'aiVideoProgress' | 'aiVideoJobId' | 'aiVideoResultUrl'>>) => void;
-  setScopeSettings: (settings: ScopeSettings) => void;
-  setPerRatioFramingEnabled: (enabled: boolean) => void;
-  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => void;
-  setVirtualCameraEnabled: (enabled: boolean) => void;
-  setVirtualCameraAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
-  addOrUpdateVirtualCameraKeyframe: (time: number, x: number, y: number, scale?: number) => void;
-  setShowHelpMenu: (show: boolean, section?: string | null) => void;
-  setProjectInfo: (id: string, name: string) => void;
-  setProjectFileHandle: (handle: any) => void;
-  resetProject: () => void;
-  setTracks: (tracks: TimelineTrack[]) => void;
-  setSubtitles: (subtitles: SubtitleItem[]) => void;
-  updateSubtitle: (id: string, updates: Partial<SubtitleItem>) => void;
-  deleteSubtitle: (id: string) => void;
-  addSubtitle: (sub: SubtitleItem) => void;
-  selectSubtitle: (id: string | null) => void;
-  addTextMedia: (text: string) => void;
-  rippleDeleteClip: (clipId: string) => void;
-  createPipWindow: (clipId: string, relativeStartTime: number) => void;
-  deletePipWindow: (pipId: string) => void;
-  updatePipWindowStartTime: (pipId: string, relativeStartTime: number) => void;
-  updatePipWindowDuration: (pipId: string, duration: number) => void;
-  setActivePipWindow: (pipId: string | null) => void;
-  addTrackToPip: (pipId: string, type: 'video' | 'audio' | 'text' | 'fx', mediaId: string, startTime: number, duration: number) => void;
-  removeTrackFromPip: (pipId: string, trackId: string) => void;
-  reorderPipTrack: (pipId: string, trackIndex: number, direction: 'up' | 'down') => void;
-  
-  copyColorGrade: (clipId: string) => void;
-  pasteColorGrade: (clipId: string) => void;
-  applyColorGradeToAll: (sourceClipId: string) => void;
-}
-
-export interface EditorSnapshot {
-  tracks: TimelineTrack[];
-  currentTime: number;
-  pipWindows?: Record<string, PipWindow>;
-  subtitles?: SubtitleItem[];
-  markers?: TimelineMarker[];
-  beatMarkers?: { time: number; clipId: string }[];
-  label?: string;
-}
-
-// Tool Types
-export type EditorTool = 'select' | 'split' | 'hand' | 'zoom' | 'ripple' | 'trackSelect' | 'trackSelectBackward' | 'rateStretch' | 'slip' | 'slide';
-
-// Media Tab Types
-export type MediaTab = 'project' | 'transitions' | 'audio' | 'effects' | 'text' | 'templates';
-
-// Properties Tab Types
-export type PropertiesTab = 'transform' | 'color' | 'mask' | 'speed' | 'audio' | 'text' | 'effects' | 'history' | 'thumbnail';
-
-// Time formatting utility type
-export type TimeFormat = 'HH:MM:SS' | 'MM:SS' | 'frames';
-
-// Transition definitions
+// ─── Transition ───────────────────────────────────────────────────────────
 export interface Transition {
-  id: string;
-  name: string;
-  type: 'dissolve' | 'wipe' | 'zoom' | 'slide' | 'shake' | 'flash' | 'zoomRush' | 'glitch' | 'lightLeak' | 'whipPan' | 'pixelate' | 'mirror' | 'custom';
+  id?: string;
+  name?: string;
+  type: string;
   duration: number;
-  params: Record<string, unknown>;
+  easing?: string;
+  params?: Record<string, any>;
 }
 
-// Effect definitions
-export interface Effect {
-  id: string;
-  name: string;
-  type: 'color' | 'filter' | 'transform' | 'audio';
-  params: Record<string, unknown>;
-}
-
-export interface ProjectTemplate {
-  id: string;
-  name: string;
-  description: string;
-  tracks: TimelineTrack[];
-  mediaLibrary: MediaItem[];
-  totalDuration: number;
-  createdAt: number;
-}
-
+// ─── OpenRouter ───────────────────────────────────────────────────────────
 export interface OpenRouterModel {
   id: string;
   name: string;
   description?: string;
-  pricing: {
+  context_length?: number;
+  pricing?: {
     prompt: string;
     completion: string;
-    image?: string;
-    request?: string;
   };
 }
 
-// ============================================
-// AI Copilot Workflow Types (Phase 1)
-// ============================================
-
-export type AIToolStatus = 'pending' | 'running' | 'success' | 'failed' | 'awaiting_confirmation';
+// ─── AI Copilot / Workflow Engine ─────────────────────────────────────────
+export type AIToolStepStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'awaiting_confirmation'
+  | 'skipped';
 
 export interface AIToolStep {
-  id: string;
+  // Core identity
+  id?: string;
+  // toolName is the primary key used throughout the copilot system
   toolName: string;
-  args: Record<string, any>;
-  expectation?: string;
-  status: AIToolStatus;
-  error?: string;
-  result?: any;
-  rollbackable: boolean;
-  requiresConfirmation: boolean;
-  userFriendlyLabel?: string;
+  // tool is an alias / normalized copy (optional, falls back to toolName)
+  tool?: string;
+  // Arguments
+  args: Record<string, any>;    // always present (default {})
+  params?: Record<string, any>; // alias for args (legacy)
+  // Execution state (mutated in-place by WorkflowExecutor)
+  status?: AIToolStepStatus;
   startedAt?: number;
   completedAt?: number;
+  result?: any;
+  error?: string;
+  // Metadata
+  description?: string;
+  userFriendlyLabel?: string;
+  expectation?: string;          // human-readable expected outcome
+  rollbackable?: boolean;        // whether this step can be undone
+  dependsOn?: string[];
+  requiresConfirmation?: boolean;
 }
 
 export interface AIWorkflowPlan {
-  id: string;
-  prompt: string;
-  totalSteps: number;
+  id?: string;
   steps: AIToolStep[];
-  estimatedDuration: number;
-  needsConfirmation: boolean;
-  destructiveOpsCount: number;
-  createdAt: number;
+  description?: string;
+  userIntent?: string;
+  estimatedDuration?: number;
+  totalSteps?: number;          // convenience count, mirrors steps.length
+  prompt?: string;              // original user prompt stored for re-plan
+  needsConfirmation?: boolean;  // true if any step requires user confirmation
+  destructiveOpsCount?: number; // count of destructive steps
+  createdAt?: number;           // plan creation timestamp
 }
 
 export interface AIWorkflowReport {
-  planId: string;
+  planId?: string;
+  steps: AIToolStep[];          // completed steps with status/result populated
+  // These are required by ExecutionStreamer.formatFinalReport
   totalSteps: number;
   successCount: number;
-  failedCount: number;
-  skippedCount: number;
+  failedCount?: number;
+  skippedCount?: number;
   totalDurationMs: number;
-  summary: string;
-  steps: AIToolStep[];
-  finalState?: Record<string, any>;
-}
-
-export interface AIConfirmationRequest {
-  stepId: string;
-  toolName: string;
-  args: Record<string, any>;
-  description: string;
-  reason: string;
-  risk: 'low' | 'medium' | 'high';
-}
-
-export interface AIRateLimitStatusFE {
-  canMakeCall: boolean;
-  remainingCalls: number;
-  resetInMs: number;
-  isInCooldown: boolean;
-  cooldownRemainingMs: number;
+  summary: string;              // human-readable one-liner
+  success?: boolean;
+  errorMessage?: string;
 }
 
 export interface AISelfTestResult {
   testId: string;
-  testName: string;
-  category: 'import' | 'edit' | 'audio' | 'color' | 'effects' | 'text' | 'export' | 'meta';
-  status: 'pass' | 'fail' | 'skip';
+  testName: string;            // human-readable name
+  name?: string;               // internal alias
+  category: string;
+  status: 'pass' | 'fail' | 'skip' | 'error';
   durationMs: number;
-  message: string;
-  details?: string;
   error?: string;
+  details?: string;
+  message?: string;            // short human message from the test runner
 }
 
 export interface AISelfTestReport {
+  runId?: string;
+  timestamp?: number;
+  results: AISelfTestResult[];
   totalTests: number;
   passed: number;
   failed: number;
   skipped: number;
-  passRate: number;
+  totalDurationMs?: number;
+  // Fields always set by AutoTester.run() — required for TestReportGenerator
   durationMs: number;
+  passRate: number;            // 0-100 percentage
+  summary: string;             // one-line human summary
   byCategory: Record<string, { passed: number; failed: number; total: number }>;
-  results: AISelfTestResult[];
-  workingFeatures: string[];
-  notWorkingFeatures: string[];
-  summary: string;
-}
-
-export interface AIGenerationJob {
-  id: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  progress?: number;
-  resultUrl?: string;
-  error?: string;
-  prompt: string;
-  createdAt: number;
+  workingFeatures: string[];   // names of passing features
+  notWorkingFeatures: string[];// names of failing features
 }
 

@@ -54,7 +54,7 @@ export function SequenceProperties() {
         <ImageIcon className="w-3 h-3" />
         <span>{sequence.memberClipIds.length} Images</span>
         <span className="mx-1">•</span>
-        <span>{sequence.totalDuration.toFixed(1)}s Total</span>
+        <span>{(sequence.totalDuration || 0).toFixed(1)}s Total</span>
       </div>
 
       <div className="space-y-2">

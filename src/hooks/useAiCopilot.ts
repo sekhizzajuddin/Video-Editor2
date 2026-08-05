@@ -214,7 +214,7 @@ export const useAiCopilot = () => {
             return;
           }
           setPendingConfirmation({
-            stepId: step.id,
+            stepId: step.id!,
             toolName: step.toolName,
             args: step.args,
             description: step.userFriendlyLabel || step.toolName,
@@ -351,7 +351,7 @@ export const useAiCopilot = () => {
         new Promise<boolean>((resolve) => {
           if (!isMountedRef.current) return resolve(false);
           setPendingConfirmation({
-            stepId: step.id,
+            stepId: step.id!,
             toolName: step.toolName,
             args: step.args,
             description: step.userFriendlyLabel || step.toolName,

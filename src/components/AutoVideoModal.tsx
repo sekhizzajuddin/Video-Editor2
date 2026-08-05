@@ -1,15 +1,31 @@
 import React, { useState, useRef } from 'react';
 import {
   X, Loader2, Wand2, Mic, Settings, Play, Type,
-  Upload, Music, Volume2
+  Upload, Music, Volume2, Map
 } from 'lucide-react';
 import { useEditorStore } from '../store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
-import { generateAutoVideoBlueprintV2, AutoVideoBlueprintV2 } from '../utils/aiClient';
+import { generateAutoVideoBlueprintV2, AutoVideoBlueprintV2, AutoVideoPipItemV2 } from '../utils/aiClient';
 import { AutoVoxBlueprintView } from './AutoVoxBlueprintView';
 
 const newId = () => crypto.randomUUID();
+
+// Build a Geoapify static map URL for a map pip item (free tier, no key registration needed)
+function buildMapPreviewUrl(pip: AutoVideoPipItemV2, width = 640, height = 360): string {
+  const waypoint = pip.mapWaypoints?.[0];
+  const lat = waypoint?.lat ?? 0;
+  const lng = waypoint?.lng ?? 0;
+  const zoom = pip.mapZoom ?? 8;
+  const style = pip.mapStyle ?? 'standard';
+  const styleParam =
+    style === 'dark'      ? 'dark-matter' :
+    style === 'satellite' ? 'imagery' :
+    style === 'vintage'   ? 'toner' :
+    'osm-bright';
+  // Geoapify free tier static map — no account needed for low-res
+  return `https://maps.geoapify.com/v1/staticmap?style=${styleParam}&width=${width}&height=${height}&center=lonlat:${lng},${lat}&zoom=${zoom}&marker=lonlat:${lng},${lat};color:%23ef4444;size:large&apiKey=4a77f7f3f3ee434183de843e5d94e0b4`;
+}
 
 interface AutoVideoModalProps {
   onClose: () => void;
@@ -347,17 +363,44 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           const pipTrackId = videoTrackIds[pIdx + 1];
           if (!pipTrackId) continue;
 
-          setStatus(`Scene ${sIdx + 1}/${totalScenes}: PIP ${pIdx + 1}/${scene.pipItems.length}…`);
+          setStatus(`Scene ${sIdx + 1}/${totalScenes}: PIP ${pIdx + 1}/${scene.pipItems.length}${pip.source === 'map' ? ' (Map)' : ''}…`);
 
           try {
             let blob: Blob;
-            if (pip.resolvedUrl?.startsWith('blob:')) {
-              blob = await getBlobFromUrl(pip.resolvedUrl);
+            const isMapPip = pip.source === 'map';
+
+            if (isMapPip) {
+              // ── Map pip: fetch static map image ──────────────────────────
+              const mapUrl = pip.resolvedUrl?.startsWith('blob:')
+                ? pip.resolvedUrl
+                : buildMapPreviewUrl(pip, 640, 360);
+              if (pip.resolvedUrl?.startsWith('blob:')) {
+                blob = await getBlobFromUrl(pip.resolvedUrl);
+              } else {
+                const mapResp = await fetch(mapUrl);
+                if (!mapResp.ok) throw new Error(`Map fetch failed: ${mapResp.status}`);
+                blob = await mapResp.blob();
+              }
             } else {
-              blob = await fetchCfImage(pip.prompt);
+              // ── AI image pip: use Cloudflare ─────────────────────────────
+              if (pip.resolvedUrl?.startsWith('blob:')) {
+                blob = await getBlobFromUrl(pip.resolvedUrl);
+              } else {
+                blob = await fetchCfImage(pip.prompt);
+              }
             }
 
             const pipMid = await saveImage(blob, `pip_s${sIdx}_p${pIdx}`, scene.duration);
+
+            // Build map animation settings if this is a map pip
+            const mapAnimationSettings = isMapPip && pip.mapWaypoints && pip.mapWaypoints.length > 0
+              ? {
+                  type: (pip.mapAnimType ?? 'flyTo') as 'route' | 'flyTo' | 'highlight',
+                  waypoints: pip.mapWaypoints.map(wp => ({ lat: wp.lat, lng: wp.lng, label: wp.label })),
+                  zoom: pip.mapZoom ?? 8,
+                  style: (pip.mapStyle ?? 'standard') as 'standard' | 'satellite' | 'dark' | 'vintage',
+                }
+              : undefined;
 
             addClip({
               id:           `clip_pip_${newId()}`,
@@ -376,27 +419,42 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                 scale:    tOff.scale - 5,
                 rotation: 0,
               },
-              chromaKey: {
-                enabled:   true,
-                color:     '#00ff00',
-                threshold: 40,
-                softness:  20,
-              },
-              animations: {
-                'transform.y': [
-                  { time: 0,                                value: tOff.y + 18, easing: 'easeOut' },
-                  { time: Math.min(0.6, scene.duration),   value: tOff.y,      easing: 'linear'  },
-                  { time: scene.duration,                  value: tOff.y - 8              },
-                ],
-                'transform.scale': [
-                  { time: 0,                                value: tOff.scale - 5, easing: 'easeOut' },
-                  { time: Math.min(0.6, scene.duration),   value: tOff.scale,     easing: 'linear'  },
-                  { time: scene.duration,                  value: tOff.scale + 4              },
-                ],
-              },
+              // Map pips: no chroma key, but full-frame map display
+              // AI pips: chroma key green screen removal
+              ...(!isMapPip ? {
+                chromaKey: {
+                  enabled:   true,
+                  color:     '#00ff00',
+                  threshold: 40,
+                  softness:  20,
+                },
+              } : {}),
+              // Attach map animation settings for the rendering engine
+              ...(mapAnimationSettings ? { mapAnimation: mapAnimationSettings } : {}),
+              animations: isMapPip
+                ? {
+                    // Map pips get a smooth Ken-Burns zoom-in for visual interest
+                    'transform.scale': [
+                      { time: 0,              value: tOff.scale - 5 },
+                      { time: scene.duration, value: tOff.scale + 3 },
+                    ],
+                  }
+                : {
+                    'transform.y': [
+                      { time: 0,                                value: tOff.y + 18, easing: 'easeOut' },
+                      { time: Math.min(0.6, scene.duration),   value: tOff.y,      easing: 'linear'  },
+                      { time: scene.duration,                  value: tOff.y - 8              },
+                    ],
+                    'transform.scale': [
+                      { time: 0,                                value: tOff.scale - 5, easing: 'easeOut' },
+                      { time: Math.min(0.6, scene.duration),   value: tOff.scale,     easing: 'linear'  },
+                      { time: scene.duration,                  value: tOff.scale + 4              },
+                    ],
+                  },
             });
           } catch (e: any) {
             console.warn(`PIP scene ${sIdx} / pip ${pIdx} failed:`, e);
+            toast(`PIP ${pIdx + 1} in scene ${sIdx + 1} failed — continuing.`, { icon: '⚠️' });
           }
         }
 

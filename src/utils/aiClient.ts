@@ -1236,9 +1236,23 @@ Return ONLY a valid JSON object matching the requested schema, nothing else.`;
 // V2 Types — Smart Vox-Style Blueprint (one continuous BG + PIP rows)
 // ===================================================================
 
+export interface AutoVideoPipWaypoint {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
+export type AutoVideoPipSource = 'ai_image' | 'map';
+
 export interface AutoVideoPipItemV2 {
-  prompt: string;
-  resolvedUrl?: string;
+  source: AutoVideoPipSource;  // 'ai_image' = CF SDXL image, 'map' = map animation
+  prompt: string;              // For ai_image: image prompt. For map: location description.
+  resolvedUrl?: string;        // Cached blob URL after generation
+  // Map-specific (only when source === 'map')
+  mapWaypoints?: AutoVideoPipWaypoint[];
+  mapZoom?: number;            // 1-18
+  mapStyle?: 'standard' | 'satellite' | 'dark' | 'vintage';
+  mapAnimType?: 'route' | 'flyTo' | 'highlight';
 }
 
 export interface AutoVideoSceneV2 {
@@ -1258,7 +1272,8 @@ export interface AutoVideoBlueprintV2 {
 }
 
 /**
- * V2 Blueprint generator — one continuous background + per-dialogue PIP items (green screen).
+ * V2 Blueprint generator — one continuous background + per-dialogue PIP items.
+ * Supports map animations and multiple visual styles.
  */
 export async function generateAutoVideoBlueprintV2(
   script: string,
@@ -1269,16 +1284,37 @@ export async function generateAutoVideoBlueprintV2(
   characterDescription?: string,
   visualStyle?: string
 ): Promise<AutoVideoBlueprintV2> {
-  const model = 'gemini-3.5-flash-lite';
+  const model = 'gemini-2.5-flash-lite';
   const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 200));
   const isVoxVintage = visualStyle === 'vox_vintage';
+  const isRealistic  = visualStyle === 'vox_realistic';
+  const isAnime      = visualStyle === 'style_anime';
+  const isWatercolor = visualStyle === 'style_watercolor';
+  const isPapercut   = visualStyle === 'style_papercut';
 
   const bgStyleHint = isVoxVintage
     ? 'vintage newspaper collage, halftone texture, aged paper, old magazine — NO people, pure background texture'
-    : 'cinematic documentary background, moody lighting, high detail, no foreground subjects, pure environment/setting';
+    : isRealistic
+    ? 'cinematic photograph, realistic background, moody lighting, no foreground subjects, photorealistic environment'
+    : isAnime
+    ? 'anime background art, detailed painterly environment, no characters, atmospheric'
+    : isWatercolor
+    ? 'watercolor painting background, loose brushstrokes, artistic texture, no subjects'
+    : isPapercut
+    ? 'paper art installation background, layered paper textures, no subjects'
+    : 'cinematic documentary background, moody lighting, high detail, no foreground subjects';
+
   const pipStyleHint = isVoxVintage
-    ? 'vintage cutout illustration, halftone print style, isolated object on solid pure #00FF00 green screen background, no text'
-    : 'realistic photo, high quality, isolated subject on solid pure #00FF00 green screen background, clean edges';
+    ? 'vintage cutout illustration, halftone print style, isolated object on solid pure #00FF00 green screen, no text'
+    : isRealistic
+    ? 'photorealistic image, high quality photograph, isolated subject on solid pure #00FF00 green screen, clean edges'
+    : isAnime
+    ? 'anime illustration, vibrant colors, isolated character or object on solid pure #00FF00 green screen'
+    : isWatercolor
+    ? 'watercolor illustration, artistic style, isolated subject on solid pure #00FF00 green screen'
+    : isPapercut
+    ? 'paper cut art style, layered paper look, isolated subject on solid pure #00FF00 green screen'
+    : 'realistic photo, isolated subject on solid pure #00FF00 green screen';
 
   const systemPrompt = `You are an expert Vox-style documentary video director and AI image prompt engineer.
 
@@ -1288,12 +1324,25 @@ RETURN JSON with:
 1. "storyTheme": One sentence — the overarching theme of the entire script.
 2. "globalBackgrounds": Array of EXACTLY 2 objects {prompt}. Full-screen BACKDROP images only (no subjects). Style: ${bgStyleHint}
 3. "scenes": One per 3–7 second segment summing to ${totalDuration.toFixed(1)}s total.
-   Each scene: narration (exact words in that range), startTime, endTime, duration (3-7s), selectedBackgroundIndex (0 or 1), pipItems (2-4 objects {prompt}).
-   pipItems = FOREGROUND content representing what the narration is about. Style: ${pipStyleHint}. NEVER backgrounds.
+   Each scene: narration, startTime, endTime, duration (3-7s), selectedBackgroundIndex (0 or 1), pipItems (2-4 items).
 
-RULES:
+PIP ITEM RULES — each pipItem must have:
+- "source": either "ai_image" or "map"
+- "prompt": For ai_image: AI generation prompt (${pipStyleHint}). For map: plain text location description (e.g. "Cairo, Egypt").
+- For map items ONLY, also include:
+  - "mapWaypoints": Array of {lat, lng, label?} objects (1-3 waypoints)
+  - "mapZoom": integer zoom level (4=continent, 8=country, 12=city, 15=street)
+  - "mapStyle": one of "standard", "satellite", "dark", "vintage"
+  - "mapAnimType": one of "route", "flyTo", "highlight"
+
+WHEN TO USE MAP SOURCE:
+- Use source="map" when the narration mentions a specific country, city, region, route, territory, border, or geographic location.
+- Use source="ai_image" for concepts, people, objects, ideas, and abstract topics.
+- You may mix map and ai_image pipItems in the same scene.
+- Every scene must have at least one ai_image pipItem.
+
+GLOBAL RULES:
 - globalBackgrounds = backdrops only. No subjects.
-- pipItems = foreground subjects only. No backgrounds.
 - Every scene needs 2-4 pipItems.
 - Vary selectedBackgroundIndex based on emotional tone.
 - Durations must sum to exactly ${totalDuration.toFixed(1)}s.
@@ -1326,7 +1375,29 @@ Return ONLY valid JSON.`;
                 selectedBackgroundIndex: { type: 'INTEGER' },
                 pipItems: {
                   type: 'ARRAY',
-                  items: { type: 'OBJECT', properties: { prompt: { type: 'STRING' } }, required: ['prompt'] }
+                  items: {
+                    type: 'OBJECT',
+                    properties: {
+                      source: { type: 'STRING', enum: ['ai_image', 'map'] },
+                      prompt: { type: 'STRING' },
+                      mapZoom: { type: 'INTEGER' },
+                      mapStyle: { type: 'STRING' },
+                      mapAnimType: { type: 'STRING' },
+                      mapWaypoints: {
+                        type: 'ARRAY',
+                        items: {
+                          type: 'OBJECT',
+                          properties: {
+                            lat: { type: 'NUMBER' },
+                            lng: { type: 'NUMBER' },
+                            label: { type: 'STRING' }
+                          },
+                          required: ['lat', 'lng']
+                        }
+                      }
+                    },
+                    required: ['source', 'prompt']
+                  }
                 }
               },
               required: ['narration', 'startTime', 'endTime', 'duration', 'selectedBackgroundIndex', 'pipItems']
@@ -1377,7 +1448,16 @@ Return ONLY valid JSON.`;
         duration: parseFloat(dur.toFixed(2)),
         endTime: parseFloat((elapsed + dur).toFixed(2)),
         selectedBackgroundIndex: Math.max(0, Math.min(parsed.globalBackgrounds.length - 1, s.selectedBackgroundIndex ?? 0)),
-        pipItems: (s.pipItems || []).slice(0, 4)
+        // Normalise pip items — ensure source field is always set
+        pipItems: (s.pipItems || []).slice(0, 4).map((pip) => ({
+          ...pip,
+          source: (pip.source === 'map' ? 'map' : 'ai_image') as AutoVideoPipSource,
+          // Map pips get sensible defaults if AI forgot fields
+          mapZoom: pip.source === 'map' ? (pip.mapZoom ?? 8) : undefined,
+          mapStyle: pip.source === 'map' ? (pip.mapStyle ?? 'standard') : undefined,
+          mapAnimType: pip.source === 'map' ? (pip.mapAnimType ?? 'flyTo') : undefined,
+          mapWaypoints: pip.source === 'map' ? (pip.mapWaypoints ?? [{ lat: 0, lng: 0, label: pip.prompt }]) : undefined,
+        }))
       };
       elapsed += dur;
       return scene;

@@ -94,11 +94,13 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
     }
   };
 
-  const isKeyframed = (property: keyof NonNullable<TimelineClip['chromaKey']>['keyframes']) => {
+  type ChromaKeyframeProperty = 'threshold' | 'softness' | 'spillSuppression' | 'edgeFeather';
+
+  const isKeyframed = (property: ChromaKeyframeProperty) => {
     return !!chromaKey.keyframes?.[property];
   };
 
-  const toggleKeyframe = (property: keyof NonNullable<TimelineClip['chromaKey']>['keyframes']) => {
+  const toggleKeyframe = (property: ChromaKeyframeProperty) => {
     const currentKeyframes = chromaKey.keyframes || {};
     if (currentKeyframes[property]) {
       const newKeyframes = { ...currentKeyframes };
@@ -178,13 +180,10 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
               <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
                 <div className="flex items-center space-x-2">
                   <span>Threshold</span>
-                  <button
-                    aria-label={`Toggle keyframes for threshold`}
+                  <KeyframeIcon
+                    active={isKeyframed('threshold')}
                     onClick={() => toggleKeyframe('threshold')}
-                    className={`hover:text-white transition-colors ${isKeyframed('threshold') ? 'text-green-400' : 'text-[#666]'}`}
-                  >
-                    <KeyframeIcon />
-                  </button>
+                  />
                 </div>
                 <span>{chromaKey.threshold || 40}%</span>
               </div>
@@ -202,13 +201,10 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
               <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
                 <div className="flex items-center space-x-2">
                   <span>Edge Softness</span>
-                  <button
-                    aria-label={`Toggle keyframes for softness`}
+                  <KeyframeIcon
+                    active={isKeyframed('softness')}
                     onClick={() => toggleKeyframe('softness')}
-                    className={`hover:text-white transition-colors ${isKeyframed('softness') ? 'text-green-400' : 'text-[#666]'}`}
-                  >
-                    <KeyframeIcon />
-                  </button>
+                  />
                 </div>
                 <span>{chromaKey.softness || 20}%</span>
               </div>
@@ -226,13 +222,10 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
               <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
                 <div className="flex items-center space-x-2">
                   <span>Spill Suppression</span>
-                  <button
-                    aria-label={`Toggle keyframes for spillSuppression`}
+                  <KeyframeIcon
+                    active={isKeyframed('spillSuppression')}
                     onClick={() => toggleKeyframe('spillSuppression')}
-                    className={`hover:text-white transition-colors ${isKeyframed('spillSuppression') ? 'text-green-400' : 'text-[#666]'}`}
-                  >
-                    <KeyframeIcon />
-                  </button>
+                  />
                 </div>
                 <span>{chromaKey.spillSuppression ?? 50}%</span>
               </div>
@@ -250,13 +243,10 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
               <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
                 <div className="flex items-center space-x-2">
                   <span title="0 px = sharp edges, 20 px = heavy feather">Edge Feather</span>
-                  <button
-                    aria-label={`Toggle keyframes for edgeFeather`}
+                  <KeyframeIcon
+                    active={isKeyframed('edgeFeather')}
                     onClick={() => toggleKeyframe('edgeFeather')}
-                    className={`hover:text-white transition-colors ${isKeyframed('edgeFeather') ? 'text-green-400' : 'text-[#666]'}`}
-                  >
-                    <KeyframeIcon />
-                  </button>
+                  />
                 </div>
                 <span>{chromaKey.edgeFeather ?? 0}px</span>
               </div>

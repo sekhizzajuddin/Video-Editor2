@@ -245,7 +245,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
               >
                 {models.length === 0 && <option disabled>No models found (Check API Key)</option>}
                 {models.map(m => {
-                  const isFree = m.pricing.prompt === "0" && m.pricing.completion === "0";
+                  const isFree = m.pricing?.prompt === "0" && m.pricing?.completion === "0";
                   return (
                     <option key={m.id} value={m.id}>
                       {m.id.toLowerCase().includes('nvidia') ? '🟢 NVIDIA ' : '🌐 '}{m.name} {isFree ? '(FREE)' : '(PAID)'}

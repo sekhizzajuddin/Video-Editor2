@@ -499,9 +499,9 @@ const initialState: EditorState = {
   perRatioFraming: {},
   virtualCamera: {
     enabled: false,
-    aspectRatio: '9:16',
-    keyframes: { '16:9': [], '9:16': [], '1:1': [], '4:3': [] },
-  },
+    aspectRatio: '9:16' as '9:16',
+    keyframes: { '16:9': [], '9:16': [], '1:1': [], '4:3': [] } as Record<string, any>,
+  } as any,
 };
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
@@ -571,7 +571,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       newKeyframes[idx] = { ...existing, x, y };
       if (scale !== undefined) newKeyframes[idx].scale = scale;
     } else {
-      newKeyframes.push({ time, x, y, scale });
+      newKeyframes.push({ time, x, y, scale: scale ?? 1 });
       newKeyframes.sort((a, b) => a.time - b.time);
     }
     return { virtualCamera: { ...state.virtualCamera, keyframes: { ...state.virtualCamera.keyframes, [ratio]: newKeyframes } } };
@@ -1437,7 +1437,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
       for (const [pipId, pip] of Object.entries(state.pipWindows || {})) {
-        if (idsToRemove.includes(pip.parentClipId)) {
+        if (idsToRemove.includes(pip.parentClipId ?? pip.clipId ?? '')) {
           orphanPipIds.add(pipId);
         }
       }
@@ -3112,7 +3112,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     let localCurrentTime = currentTime;
     if (activePipWindowId && pipWindows[activePipWindowId]) {
       const activePip = pipWindows[activePipWindowId];
-      const foundParent = findClipDeep(get(), activePip.parentClipId);
+      const foundParent = findClipDeep(get(), activePip.parentClipId ?? activePip.clipId ?? '');
       if (foundParent) {
         const pipAbsStart = foundParent.clip.startTime + (activePip.relativeStartTime || 0);
         localCurrentTime = Math.max(0, currentTime - pipAbsStart);
@@ -3459,7 +3459,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     // Resolve template's PENDING_RESTORE media items using resolveMediaItemFromDB
     const resolvedMediaLibrary: MediaItem[] = [];
     
-    for (const item of template.mediaLibrary) {
+    for (const item of template.mediaLibrary ?? []) {
       const existing = mediaLibrary.find((m) => m.id === item.id);
       if (existing && existing.url !== 'PENDING_RESTORE') {
         resolvedMediaLibrary.push(existing);
@@ -3707,7 +3707,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return {
         pipWindows: {
           ...state.pipWindows,
-          [pipId]: { ...pip, duration: Math.max(0.5, duration), manualDuration: true }
+          [pipId]: { ...pip, duration: Math.max(0.5, duration), manualDuration: Math.max(0.5, duration) }
         }
       };
     });
@@ -4042,7 +4042,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (!media || media.type !== 'compound') return;
 
     set({
-      timelineStack: [...timelineStack, { tracks: JSON.parse(JSON.stringify(tracks)), compoundMediaId: media.id, activePipWindowId: get().activePipWindowId }],
+      timelineStack: [...timelineStack, { tracks: JSON.parse(JSON.stringify(tracks)), label: `Compound: ${media.name ?? clipId}`, compoundMediaId: media.id, activePipWindowId: get().activePipWindowId }],
       tracks: media.nestedTimeline ? JSON.parse(JSON.stringify(media.nestedTimeline)) : [],
       currentTime: 0,
       activePipWindowId: null,
@@ -4059,7 +4059,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const currentStackItem = timelineStack[timelineStack.length - 1];
     
     // Save current tracks to the compound media item
-    updateMediaMetadata(currentStackItem.compoundMediaId, {
+    updateMediaMetadata(currentStackItem.compoundMediaId!, {
       nestedTimeline: JSON.parse(JSON.stringify(tracks))
     });
 
