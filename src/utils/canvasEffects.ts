@@ -6,6 +6,19 @@ const MAX_CACHE_SIZE = 50;
 export const imageCache = new Map<string, HTMLImageElement>();
 export const imageLoading = new Set<string>();
 
+let _blurBufA: Float32Array | null = null;
+let _blurBufB: Float32Array | null = null;
+let _blurCapacity = 0;
+
+function ensureBlurBuffers(width: number, height: number): void {
+  const needed = width * height;
+  if (_blurCapacity < needed) {
+    _blurBufA = new Float32Array(needed);
+    _blurBufB = new Float32Array(needed);
+    _blurCapacity = needed;
+  }
+}
+
 export function clearPreviewCaches() {
   imageCache.clear();
   imageLoading.clear();
@@ -688,36 +701,40 @@ export function applyChromaKeyOnData(
     const isBlueScreen = kb >= kr && kb >= kg;
 
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
+      let r = data[i];
+      let g = data[i + 1];
+      let b = data[i + 2];
 
       const u = -0.1687 * r - 0.3313 * g + 0.5 * b + 128;
       const v = 0.5 * r - 0.4187 * g - 0.0813 * b + 128;
 
       const dist = Math.sqrt((u - ku) ** 2 + (v - kv) ** 2);
 
+      // ─── Spill Suppression ─────────────────────────────
+      if (spillSuppression > 0) {
+        if (isGreenScreen) {
+          const gSpill = Math.max(0, g - Math.max(r, b)) * (spillSuppression / 100);
+          g = Math.max(0, g - gSpill);
+          r = Math.min(255, r + gSpill * 0.25);
+          b = Math.min(255, b + gSpill * 0.25);
+        } else if (isBlueScreen) {
+          const bSpill = Math.max(0, b - Math.max(r, g)) * (spillSuppression / 100);
+          b = Math.max(0, b - bSpill);
+          r = Math.min(255, r + bSpill * 0.25);
+          g = Math.min(255, g + bSpill * 0.25);
+        }
+        
+        data[i] = r;
+        data[i + 1] = g;
+        data[i + 2] = b;
+      }
+
+      // ─── Alpha Matte ───────────────────────────────────
       let alpha = 1.0;
       if (dist < th) {
         alpha = 0;
       } else if (dist < th + soft && soft > 0) {
         alpha = (dist - th) / soft;
-      }
-
-      // ─── Spill Suppression ─────────────────────────────
-      if (spillSuppression > 0 && alpha < 1.0) {
-        const spillFactor = (1 - alpha) * (spillSuppression / 100);
-        if (isGreenScreen) {
-          // Reduce green, boost red/blue slightly
-          data[i] = Math.min(255, r + (r * spillFactor * 0.3));
-          data[i + 1] = Math.max(0, g - (g * spillFactor * 0.5));
-          data[i + 2] = Math.min(255, b + (b * spillFactor * 0.3));
-        } else if (isBlueScreen) {
-          // Reduce blue
-          data[i] = Math.min(255, r + (r * spillFactor * 0.3));
-          data[i + 1] = Math.min(255, g + (g * spillFactor * 0.3));
-          data[i + 2] = Math.max(0, b - (b * spillFactor * 0.5));
-        }
       }
 
       data[i + 3] = Math.round(alpha * data[i + 3]);
@@ -735,31 +752,67 @@ export function applyChromaKeyOnData(
   }
 }
 
-/** Simple box blur on alpha channel only */
+/** Separable sliding-window box blur on alpha channel only */
 function blurAlphaChannel(imageData: ImageData, radius: number): void {
-  const { width, height, data } = imageData;
-  const alpha = new Float32Array(width * height);
-  for (let i = 0; i < width * height; i++) alpha[i] = data[i * 4 + 3];
+  const { width: w, height: h, data } = imageData;
+  if (w * h === 0) return;
+  radius = Math.round(radius);
+  if (radius <= 0) return;
+  
+  const maxRadius = Math.floor(Math.min(w, h) / 2);
+  radius = Math.min(radius, maxRadius);
+  
+  ensureBlurBuffers(w, h);
+  const alpha = _blurBufA!;
+  const temp = _blurBufB!;
 
-  const output = new Float32Array(width * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let sum = 0, count = 0;
-      for (let dy = -radius; dy <= radius; dy++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          const ny = y + dy, nx = x + dx;
-          if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-            sum += alpha[ny * width + nx];
-            count++;
-          }
-        }
+  for (let i = 0; i < w * h; i++) {
+    alpha[i] = data[i * 4 + 3];
+  }
+
+  // Horizontal pass
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    for (let x = 0; x <= radius; x++) {
+      sum += alpha[y * w + x];
+    }
+    
+    for (let x = 0; x < w; x++) {
+      const left = Math.max(0, x - radius - 1);
+      const right = Math.min(w - 1, x + radius);
+      const count = right - left + 1;
+      
+      if (x > 0) {
+        sum -= alpha[y * w + left];
+        sum += alpha[y * w + right];
       }
-      output[y * width + x] = sum / count;
+      temp[y * w + x] = sum / count;
     }
   }
 
-  for (let i = 0; i < width * height; i++) {
-    data[i * 4 + 3] = Math.floor(output[i]);
+  // Vertical pass
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = 0; y <= radius; y++) {
+      sum += temp[y * w + x];
+    }
+    
+    for (let y = 0; y < h; y++) {
+      const top = Math.max(0, y - radius - 1);
+      const bottom = Math.min(h - 1, y + radius);
+      const count = bottom - top + 1;
+      
+      if (y > 0) {
+        sum -= temp[top * w + x];
+        sum += temp[bottom * w + x];
+      }
+      alpha[y * w + x] = sum / count;
+    }
+  }
+
+  // Write back to image data
+  for (let i = 0; i < w * h; i++) {
+    data[i * 4 + 3] = Math.floor(alpha[i]);
   }
 }
 

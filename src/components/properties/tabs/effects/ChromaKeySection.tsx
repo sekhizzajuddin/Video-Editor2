@@ -1,14 +1,30 @@
 import type { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { KeyframeIcon } from '../../KeyframeIcon';
 
 interface ChromaKeySectionProps {
   selectedClip: TimelineClip;
 }
 
+const PRESETS = [
+  { label: 'Green', hex: '#00ff00' },
+  { label: 'Blue', hex: '#0000ff' },
+  { label: 'Red', hex: '#ff0000' },
+];
+
+const EyedropperIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m2 22 1-1h3l9-9"/>
+    <path d="M3 21v-3l9-9"/>
+    <path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/>
+  </svg>
+);
+
 export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
   const updateClip = useEditorStore((state) => state.updateClip);
   const saveSnapshot = useEditorStore((state) => state.saveSnapshot);
+  const currentTime = useEditorStore((state) => state.currentTime);
 
   const chromaKey = selectedClip.chromaKey || {
     enabled: false,
@@ -16,6 +32,7 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
     threshold: 40,
     softness: 20,
     spillSuppression: 50,
+    edgeFeather: 0,
   };
 
   const update = (patch: Partial<NonNullable<TimelineClip['chromaKey']>>) => {
@@ -28,10 +45,79 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
     saveSnapshot();
   };
 
+  const [isSampling, setIsSampling] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  const activateEyedropper = async () => {
+    if ('EyeDropper' in window) {
+      const dropper = new (window as any).EyeDropper();
+      abortControllerRef.current = new AbortController();
+      setIsSampling(true);
+      try {
+        const result = await dropper.open({ signal: abortControllerRef.current.signal });
+        handleColorChange(result.sRGBHex);
+      } catch (e) {
+        // user cancelled
+      } finally {
+        setIsSampling(false);
+      }
+    }
+  };
+
+  const [customSwatches, setCustomSwatches] = useState<string[]>([]);
+  
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('procut.chromaKey.swatches');
+      if (stored) {
+        setCustomSwatches(JSON.parse(stored));
+      }
+    } catch (e) {}
+  }, []);
+
+  const handleColorChange = (hex: string) => {
+    update({ color: hex });
+    if (!PRESETS.find(p => p.hex.toLowerCase() === hex.toLowerCase())) {
+      setCustomSwatches(prev => {
+        const next = [hex, ...prev.filter(c => c !== hex)].slice(0, 3);
+        localStorage.setItem('procut.chromaKey.swatches', JSON.stringify(next));
+        return next;
+      });
+    }
+  };
+
+  const isKeyframed = (property: keyof NonNullable<TimelineClip['chromaKey']>['keyframes']) => {
+    return !!chromaKey.keyframes?.[property];
+  };
+
+  const toggleKeyframe = (property: keyof NonNullable<TimelineClip['chromaKey']>['keyframes']) => {
+    const currentKeyframes = chromaKey.keyframes || {};
+    if (currentKeyframes[property]) {
+      const newKeyframes = { ...currentKeyframes };
+      delete newKeyframes[property];
+      update({ keyframes: newKeyframes });
+    } else {
+      update({
+        keyframes: {
+          ...currentKeyframes,
+          [property]: [{ time: currentTime, value: chromaKey[property as keyof typeof chromaKey] as number }]
+        }
+      });
+    }
+  };
+
   return (
     <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
       <h4 className="text-[11px] font-semibold text-white mb-3">Chroma Key (Green Screen)</h4>
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-[#a0a0a0]">Enabled</span>
           <button
@@ -44,19 +130,62 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
         
         {chromaKey.enabled && (
           <>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-[#a0a0a0]">Key Color:</span>
-              <input
-                type="color"
-                value={chromaKey.color || '#00ff00'}
-                onChange={(e) => update({ color: e.target.value })}
-                className="w-10 h-6 rounded cursor-pointer bg-transparent border border-[#444]"
-              />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#a0a0a0]">Key Color:</span>
+                <div className="flex items-center space-x-2">
+                  {typeof window !== 'undefined' && 'EyeDropper' in window && (
+                    <button
+                      onClick={activateEyedropper}
+                      className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${isSampling ? 'bg-green-500/20 text-green-500' : 'bg-[#1a1a1a] text-[#888] hover:text-white hover:bg-[#333]'}`}
+                      title="Pick color from screen"
+                    >
+                      <EyedropperIcon />
+                    </button>
+                  )}
+                  <input
+                    type="color"
+                    value={chromaKey.color || '#00ff00'}
+                    onChange={(e) => handleColorChange(e.target.value)}
+                    className="w-8 h-6 rounded cursor-pointer bg-transparent border border-[#444]"
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-1">
+                {PRESETS.map(p => (
+                  <button
+                    key={p.label}
+                    onClick={() => handleColorChange(p.hex)}
+                    className="w-6 h-4 rounded border border-[#444] hover:border-white transition-colors"
+                    style={{ backgroundColor: p.hex }}
+                    title={p.label}
+                  />
+                ))}
+                {customSwatches.length > 0 && <div className="w-[1px] h-4 bg-[#444] mx-1" />}
+                {customSwatches.map((hex, i) => (
+                  <button
+                    key={`custom-${i}`}
+                    onClick={() => handleColorChange(hex)}
+                    className="w-6 h-4 rounded border border-[#444] hover:border-white transition-colors"
+                    style={{ backgroundColor: hex }}
+                    title="Custom color"
+                  />
+                ))}
+              </div>
             </div>
 
-            <div>
-              <div className="flex justify-between text-[10px] text-[#a0a0a0] mb-1">
-                <span>Threshold</span>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+                <div className="flex items-center space-x-2">
+                  <span>Threshold</span>
+                  <button
+                    aria-label={`Toggle keyframes for threshold`}
+                    onClick={() => toggleKeyframe('threshold')}
+                    className={`hover:text-white transition-colors ${isKeyframed('threshold') ? 'text-green-400' : 'text-[#666]'}`}
+                  >
+                    <KeyframeIcon />
+                  </button>
+                </div>
                 <span>{chromaKey.threshold || 40}%</span>
               </div>
               <input
@@ -69,9 +198,18 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
               />
             </div>
 
-            <div>
-              <div className="flex justify-between text-[10px] text-[#a0a0a0] mb-1">
-                <span>Edge Softness</span>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+                <div className="flex items-center space-x-2">
+                  <span>Edge Softness</span>
+                  <button
+                    aria-label={`Toggle keyframes for softness`}
+                    onClick={() => toggleKeyframe('softness')}
+                    className={`hover:text-white transition-colors ${isKeyframed('softness') ? 'text-green-400' : 'text-[#666]'}`}
+                  >
+                    <KeyframeIcon />
+                  </button>
+                </div>
                 <span>{chromaKey.softness || 20}%</span>
               </div>
               <input
@@ -84,9 +222,18 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
               />
             </div>
 
-            <div>
-              <div className="flex justify-between text-[10px] text-[#a0a0a0] mb-1">
-                <span>Spill Suppression</span>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+                <div className="flex items-center space-x-2">
+                  <span>Spill Suppression</span>
+                  <button
+                    aria-label={`Toggle keyframes for spillSuppression`}
+                    onClick={() => toggleKeyframe('spillSuppression')}
+                    className={`hover:text-white transition-colors ${isKeyframed('spillSuppression') ? 'text-green-400' : 'text-[#666]'}`}
+                  >
+                    <KeyframeIcon />
+                  </button>
+                </div>
                 <span>{chromaKey.spillSuppression ?? 50}%</span>
               </div>
               <input
@@ -96,6 +243,32 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
                 value={chromaKey.spillSuppression ?? 50}
                 onChange={(e) => update({ spillSuppression: Number(e.target.value) })}
                 className="w-full accent-green-500 bg-[#1a1a1a] h-1 rounded cursor-pointer"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+                <div className="flex items-center space-x-2">
+                  <span title="0 px = sharp edges, 20 px = heavy feather">Edge Feather</span>
+                  <button
+                    aria-label={`Toggle keyframes for edgeFeather`}
+                    onClick={() => toggleKeyframe('edgeFeather')}
+                    className={`hover:text-white transition-colors ${isKeyframed('edgeFeather') ? 'text-green-400' : 'text-[#666]'}`}
+                  >
+                    <KeyframeIcon />
+                  </button>
+                </div>
+                <span>{chromaKey.edgeFeather ?? 0}px</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                step="1"
+                value={chromaKey.edgeFeather ?? 0}
+                onChange={(e) => update({ edgeFeather: Number(e.target.value) })}
+                className="w-full accent-green-500 bg-[#1a1a1a] h-1 rounded cursor-pointer"
+                title="0 px = sharp edges, 20 px = heavy feather"
               />
             </div>
           </>

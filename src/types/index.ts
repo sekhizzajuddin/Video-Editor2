@@ -353,6 +353,12 @@ export interface ClipChromaKeySettings {
   softness: number;   // 0 to 100
   spillSuppression?: number; // 0 to 100
   edgeFeather?: number;      // 0 to 20
+  keyframes?: {
+    threshold?: PropertyKeyframe[];
+    softness?: PropertyKeyframe[];
+    spillSuppression?: PropertyKeyframe[];
+    edgeFeather?: PropertyKeyframe[];
+  };
 }
 
 export interface ClipLumaKeySettings {
