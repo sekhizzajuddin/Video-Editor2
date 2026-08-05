@@ -73,56 +73,7 @@ const generateId = () =>
 let _inTransaction = false;
 
 // Create empty tracks
-const createEmptyTracks = (): TimelineTrack[] => [
-  {
-    id: 'v1',
-    name: 'V1',
-    type: 'video',
-    clips: [],
-    locked: false,
-    muted: false,
-    hidden: false,
-    volume: 1,
-    pan: 0,
-    solo: false,
-  },
-  {
-    id: 'v2',
-    name: 'V2',
-    type: 'video',
-    clips: [],
-    locked: false,
-    muted: false,
-    hidden: false,
-    volume: 1,
-    pan: 0,
-    solo: false,
-  },
-  {
-    id: 'a1',
-    name: 'A1',
-    type: 'audio',
-    clips: [],
-    locked: false,
-    muted: false,
-    hidden: false,
-    volume: 1,
-    pan: 0,
-    solo: false,
-  },
-  {
-    id: 'a2',
-    name: 'A2',
-    type: 'audio',
-    clips: [],
-    locked: false,
-    muted: false,
-    hidden: false,
-    volume: 1,
-    pan: 0,
-    solo: false,
-  },
-];
+const createEmptyTracks = (): TimelineTrack[] => [];
 
 // Check if a clip overlaps with existing clips on a track
 function checkOverlap(
@@ -1134,6 +1085,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // Timeline Operations
   addClip: (clip) => {
     set((state) => {
+      // 1. Determine expected track type based on media
+      let expectedTrackType: 'video' | 'audio' | 'text' | 'fx' = 'video';
+      const media = state.mediaLibrary.find(m => m.id === clip.mediaId);
+      if (media) {
+        if (media.type === 'audio') expectedTrackType = 'audio';
+        else if (media.type === 'text') expectedTrackType = 'text';
+        else if (media.type === 'fx' || media.type === 'lut') expectedTrackType = 'fx';
+      } else if ((clip as any).textSettings) {
+        expectedTrackType = 'text';
+      }
+
       // Find the target track (search in both state.tracks and state.pipWindows)
       let targetTrack = state.tracks.find((t) => t.id === clip.trackId);
       let isPip = false;
@@ -1149,6 +1111,69 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             break;
           }
         }
+      }
+
+      // 2. Validate track type, and auto-route if invalid/missing (not for PIP)
+      if (!isPip && (!targetTrack || targetTrack.type !== expectedTrackType)) {
+        // Find existing track of expected type
+        let validTrack = state.tracks.find(t => t.type === expectedTrackType);
+        
+        let newTracks = [...state.tracks];
+        if (!validTrack) {
+          // Auto-create track
+          const newTrackId = generateId();
+          const trackCount = state.tracks.filter(t => t.type === expectedTrackType).length;
+          const newName = `${expectedTrackType === 'video' ? 'V' : expectedTrackType === 'audio' ? 'A' : expectedTrackType === 'text' ? 'T' : 'F'}${trackCount + 1}`;
+          
+          validTrack = {
+            id: newTrackId,
+            name: newName,
+            type: expectedTrackType,
+            clips: [],
+            locked: false,
+            muted: false,
+            hidden: false,
+            volume: 1,
+            pan: 0,
+            solo: false,
+          };
+          
+          if (expectedTrackType === 'video') {
+            newTracks.unshift(validTrack);
+          } else {
+            newTracks.push(validTrack);
+          }
+        }
+        
+        // Append to the end of the chosen track if they didn't explicitly drop on it
+        // OR if this was the very first drop (empty timeline) they just get startTime=0
+        const trackClips = validTrack.clips;
+        let newStartTime = clip.startTime;
+        
+        if (!targetTrack) {
+           if (trackClips.length > 0) {
+             const lastClip = trackClips.reduce((prev, current) => (prev.startTime + prev.duration > current.startTime + current.duration) ? prev : current);
+             newStartTime = lastClip.startTime + lastClip.duration;
+           } else {
+             newStartTime = 0; // Explicitly start at 0 if no clips
+           }
+        } else {
+           // Target track exists but is invalid type! Fall back to current dropTime but on the valid track.
+           newStartTime = clip.startTime; 
+        }
+
+        targetTrack = validTrack;
+        clip.trackId = targetTrack.id;
+        clip.startTime = newStartTime;
+        
+        newTracks = newTracks.map(t => {
+          if (t.id === targetTrack!.id) {
+            return { ...t, clips: [...t.clips, { ...clip, isPreview: false }] };
+          }
+          return t;
+        });
+        
+        return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
       }
 
       if (isPip) {

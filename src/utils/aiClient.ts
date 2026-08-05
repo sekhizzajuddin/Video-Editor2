@@ -1288,6 +1288,7 @@ export async function generateAutoVideoBlueprintV2(
   const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 200));
   const isVoxVintage = visualStyle === 'vox_vintage';
   const isRealistic  = visualStyle === 'vox_realistic';
+  const isUltraRealistic = visualStyle === 'ultra_realistic';
   const isAnime      = visualStyle === 'style_anime';
   const isWatercolor = visualStyle === 'style_watercolor';
   const isPapercut   = visualStyle === 'style_papercut';
@@ -1296,6 +1297,8 @@ export async function generateAutoVideoBlueprintV2(
     ? 'vintage newspaper collage, halftone texture, aged paper, old magazine — NO people, pure background texture'
     : isRealistic
     ? 'cinematic photograph, realistic background, moody lighting, no foreground subjects, photorealistic environment'
+    : isUltraRealistic
+    ? 'ultra realistic 4k cinematic stock footage description of a background setting or environment, no specific subjects, just scenery'
     : isAnime
     ? 'anime background art, detailed painterly environment, no characters, atmospheric'
     : isWatercolor
@@ -1308,6 +1311,8 @@ export async function generateAutoVideoBlueprintV2(
     ? 'vintage cutout illustration, halftone print style, isolated object on solid pure #00FF00 green screen, no text'
     : isRealistic
     ? 'photorealistic image, high quality photograph, isolated subject on solid pure #00FF00 green screen, clean edges'
+    : isUltraRealistic
+    ? 'short cinematic stock footage description of an object or subject, real life 4k video concept'
     : isAnime
     ? 'anime illustration, vibrant colors, isolated character or object on solid pure #00FF00 green screen'
     : isWatercolor

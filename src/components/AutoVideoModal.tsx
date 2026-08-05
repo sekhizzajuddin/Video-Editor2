@@ -8,6 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { generateAutoVideoBlueprintV2, AutoVideoBlueprintV2, AutoVideoPipItemV2 } from '../utils/aiClient';
 import { AutoVoxBlueprintView } from './AutoVoxBlueprintView';
+import { searchPexelsVideos } from '../utils/pexelsClient';
 
 const newId = () => crypto.randomUUID();
 
@@ -241,8 +242,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       };
 
       // Helper: save blob to local folder + register media, return mediaId
-      const saveImage = async (blob: Blob, name: string, duration: number): Promise<string> => {
-        const filename = `${name}_${Date.now()}.jpg`;
+      const saveMediaFile = async (blob: Blob, name: string, duration: number, ext: string = 'jpg', type: 'image' | 'video' = 'image'): Promise<string> => {
+        const filename = `${name}_${Date.now()}.${ext}`;
         const fh = await dirHandle!.getFileHandle(filename, { create: true });
         const wr = await fh.createWritable();
         await wr.write(blob);
@@ -250,7 +251,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         const localFile = await fh.getFile();
         const url = URL.createObjectURL(localFile);
         const mid = `auto_${newId()}`;
-        addMedia({ id: mid, name, type: 'image', duration, url, createdAt: Date.now() }, localFile);
+        addMedia({ id: mid, name, type, duration, url, createdAt: Date.now() }, localFile);
         return mid;
       };
 
@@ -303,6 +304,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       setStatus('Generating global backgrounds…');
       const bgMediaIds: Record<number, string> = {};
       const usedBgIndices = [...new Set(blueprint.scenes.map(s => s.selectedBackgroundIndex))];
+      const isUltraRealistic = visualStyle === 'ultra_realistic';
 
       for (let i = 0; i < usedBgIndices.length; i++) {
         const bgIdx = usedBgIndices[i];
@@ -313,12 +315,26 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
         try {
           let blob: Blob;
+          let ext = 'jpg';
+          let mediaType: 'image' | 'video' = 'image';
+
           if (bg.resolvedUrl?.startsWith('blob:')) {
             blob = await getBlobFromUrl(bg.resolvedUrl);
+          } else if (isUltraRealistic) {
+            const pexelsRes = await searchPexelsVideos(bg.prompt, 'landscape', settings?.pexelsApiKey, 1, 'realistic');
+            if (pexelsRes && pexelsRes.length > 0) {
+              const vidResp = await fetch(pexelsRes[0].url);
+              if (!vidResp.ok) throw new Error(`Pexels fetch failed: ${vidResp.status}`);
+              blob = await vidResp.blob();
+              ext = 'mp4';
+              mediaType = 'video';
+            } else {
+              blob = await fetchCfImage(bg.prompt);
+            }
           } else {
             blob = await fetchCfImage(bg.prompt);
           }
-          bgMediaIds[bgIdx] = await saveImage(blob, `bg_${bgIdx}`, audioDuration);
+          bgMediaIds[bgIdx] = await saveMediaFile(blob, `bg_${bgIdx}`, audioDuration, ext, mediaType);
         } catch (e: any) {
           console.warn(`Background ${bgIdx} failed:`, e);
           toast(`Background ${bgIdx + 1} failed to generate — scene will use no background.`, { icon: '⚠️' });
@@ -367,6 +383,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
           try {
             let blob: Blob;
+            let ext = 'jpg';
+            let mediaType: 'image' | 'video' = 'image';
             const isMapPip = pip.source === 'map';
 
             if (isMapPip) {
@@ -381,6 +399,22 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                 if (!mapResp.ok) throw new Error(`Map fetch failed: ${mapResp.status}`);
                 blob = await mapResp.blob();
               }
+            } else if (isUltraRealistic) {
+              // ── Pexels video pip ─────────────────────────────
+              if (pip.resolvedUrl?.startsWith('blob:')) {
+                blob = await getBlobFromUrl(pip.resolvedUrl);
+              } else {
+                const pexelsRes = await searchPexelsVideos(pip.prompt, 'landscape', settings?.pexelsApiKey, 1, 'realistic');
+                if (pexelsRes && pexelsRes.length > 0) {
+                  const vidResp = await fetch(pexelsRes[0].url);
+                  if (!vidResp.ok) throw new Error(`Pexels fetch failed: ${vidResp.status}`);
+                  blob = await vidResp.blob();
+                  ext = 'mp4';
+                  mediaType = 'video';
+                } else {
+                  blob = await fetchCfImage(pip.prompt);
+                }
+              }
             } else {
               // ── AI image pip: use Cloudflare ─────────────────────────────
               if (pip.resolvedUrl?.startsWith('blob:')) {
@@ -390,7 +424,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               }
             }
 
-            const pipMid = await saveImage(blob, `pip_s${sIdx}_p${pIdx}`, scene.duration);
+            const pipMid = await saveMediaFile(blob, `pip_s${sIdx}_p${pIdx}`, scene.duration, ext, mediaType);
 
             // Build map animation settings if this is a map pip
             const mapAnimationSettings = isMapPip && pip.mapWaypoints && pip.mapWaypoints.length > 0
@@ -631,6 +665,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               >
                 <option value="vox_vintage">Vox Documentary (Vintage Collage)</option>
                 <option value="vox_realistic">Vox Documentary (Realistic)</option>
+                <option value="ultra_realistic">Ultra Realistic (Pexels Stock)</option>
                 <option value="style_anime">Anime (AI Gen)</option>
                 <option value="style_watercolor">Watercolor (AI Gen)</option>
                 <option value="style_papercut">Papercut (AI Gen)</option>

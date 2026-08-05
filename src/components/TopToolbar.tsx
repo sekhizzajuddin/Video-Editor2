@@ -210,16 +210,24 @@ export function TopToolbar() {
   };
 
   // FIX C8: Confirm before destructively resetting the project
-  const handleNewProject = async () => {
-    const hasContent = useEditorStore.getState().tracks.some(t => t.clips.length > 0);
-    if (hasContent) {
+  const handleCloseProject = async () => {
+    const state = useEditorStore.getState();
+    const hasContent = state.tracks.some(t => t.clips.length > 0);
+    
+    if (hasContent && state.hasUnsavedChanges) {
       const confirmed = window.confirm(
-        'Start a new project?\n\nAll unsaved changes will be lost. Make sure to save your project file first.'
+        'You have unsaved changes. Do you want to close this project without saving?'
       );
-      if (!confirmed) return;
+      if (!confirmed) {
+        // Option to save could be triggered here
+        await handleSaveProjectFile();
+        return;
+      }
     }
+    
     await resetProject();
     useEditorStore.getState().setProjectInfo('default', '');
+    useEditorStore.setState({ projectFileHandle: null, hasUnsavedChanges: false });
     setActiveProject('default');
     setShowFileMenu(false);
   };
@@ -314,7 +322,7 @@ export function TopToolbar() {
                 onClick={() => { setShowRecentModal(true); setShowFileMenu(false); }}
                 className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
-                <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recent Projects
+                <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recovered Projects
               </button>
               <button
                 onClick={() => { setShowExportModal(true); setShowFileMenu(false); }}
@@ -324,10 +332,10 @@ export function TopToolbar() {
               </button>
               <div className="border-t border-[#3e3e3e] my-1" />
               <button
-                onClick={handleNewProject}
+                onClick={handleCloseProject}
                 className="w-full px-3 py-2 text-xs text-left text-red-400 hover:text-red-300 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
               >
-                <RotateCcw className="w-3.5 h-3.5" /> New Project
+                <RotateCcw className="w-3.5 h-3.5" /> Close Project (Home)
               </button>
             </div>
           )}

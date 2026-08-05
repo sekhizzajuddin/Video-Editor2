@@ -61,9 +61,45 @@ export function loadProjectData(data: any) {
       }
     ],
     historyIndex: 0,
+    projectFileHandle: data._handle || null,
+    projectName: data.projectName || 'Untitled Project',
+    projectId: data.projectId || 'default',
   });
 
   useEditorStore.getState().recalcTotalDuration();
+}
+
+/**
+ * Scan a directory for .procut files.
+ */
+export async function getProcutFilesInDirectory(): Promise<any[]> {
+  if (!('showDirectoryPicker' in window)) {
+    throw new Error('Directory picker not supported in this browser.');
+  }
+  
+  const dirHandle = await (window as any).showDirectoryPicker();
+  const projects = [];
+  
+  for await (const entry of dirHandle.values()) {
+    if (entry.kind === 'file' && entry.name.endsWith('.procut')) {
+      try {
+        const file = await entry.getFile();
+        const text = await file.text();
+        const data = JSON.parse(text);
+        projects.push({
+          id: data.projectId || entry.name,
+          name: data.projectName || entry.name.replace('.procut', ''),
+          lastModified: file.lastModified,
+          handle: entry,
+          data: data
+        });
+      } catch (err) {
+        console.warn(`Failed to parse ${entry.name}:`, err);
+      }
+    }
+  }
+  
+  return projects.sort((a, b) => b.lastModified - a.lastModified);
 }
 
 /**

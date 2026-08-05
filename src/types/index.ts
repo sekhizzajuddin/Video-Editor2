@@ -687,6 +687,7 @@ export interface EditorSettings {
   cloudflareApiToken?: string;
   huggingFaceApiKey?: string;
   openRouterApiKey?: string;
+  pexelsApiKey?: string;
 }
 
 // ─── Per-Ratio Framing ────────────────────────────────────────────────────

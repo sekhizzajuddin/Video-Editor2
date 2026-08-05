@@ -313,6 +313,8 @@ export function Timeline() {
               className="procut-timeline-tracks flex-1 overflow-auto relative timeline-track-workspace"
               onClick={dragHandlers.handleTimelineClick}
               onScroll={scrollHandlers.handleScroll}
+              onDragOver={(e) => dropHandlers.handleDragOver(e, '')}
+              onDrop={(e) => dropHandlers.handleDrop(e, '')}
             >
               <div className="relative" style={{ width: `${timelineWidth}px`, minHeight: '100%' }}>
                 {/* Grid lines aligned with ruler markers */}

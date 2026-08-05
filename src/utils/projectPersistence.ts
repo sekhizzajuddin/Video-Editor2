@@ -11,6 +11,23 @@ import { MediaItem, TimelineTrack } from '@/types';
 const DB_NAME = 'procut_editor_db';
 const DB_VERSION = 3; // Bumped to handle new autosaves object store
 
+export interface ProcutFileFormat {
+  version: string;
+  projectId: string;
+  projectName: string;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
+  currentTime: number;
+  totalDuration?: number;
+  tracks: TimelineTrack[];
+  folders?: any[];
+  subtitles?: any[];
+  markers?: any[];
+  beatMarkers?: any[];
+  pipWindows?: Record<string, any>;
+  sequences?: any[];
+  mediaLibrary: any[];
+}
+
 let activeProjectId: string = 'default';
 let dbInstance: IDBDatabase | null = null;
 let dbOpeningPromise: Promise<IDBDatabase> | null = null;
@@ -280,7 +297,64 @@ function sanitizeTracksForStorage(tracks: TimelineTrack[]): TimelineTrack[] {
 }
 
 /**
- * Persists the entire project config (tracks metadata, media list, timeline) to IndexedDB.
+ * Persists the entire project config (tracks metadata, media list, timeline) to a .procut FileSystemFileHandle.
+ */
+export async function saveProcutFile(fileHandle: FileSystemFileHandle, data: {
+  targetProjectId?: string;
+  projectName: string;
+  tracks: TimelineTrack[];
+  mediaLibrary: MediaItem[];
+  folders?: any[];
+  subtitles?: any[];
+  markers?: any[];
+  beatMarkers?: any[];
+  currentTime: number;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
+  pipWindows?: Record<string, any>;
+  sequences?: any[];
+}): Promise<void> {
+  const cleanMediaLibrary = data.mediaLibrary.map(item => ({
+    ...item,
+    url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
+    thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
+    frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+  }));
+
+  const cleanTracks = sanitizeTracksForStorage(data.tracks);
+
+  const fileData: ProcutFileFormat = {
+    version: '1.0',
+    projectId: data.targetProjectId || 'default',
+    projectName: data.projectName,
+    currentTime: data.currentTime,
+    aspectRatio: data.aspectRatio,
+    tracks: cleanTracks,
+    folders: data.folders,
+    subtitles: data.subtitles,
+    markers: data.markers,
+    beatMarkers: data.beatMarkers,
+    pipWindows: data.pipWindows,
+    sequences: data.sequences,
+    mediaLibrary: cleanMediaLibrary,
+  };
+
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(fileData, null, 2));
+  await writable.close();
+}
+
+/**
+ * Loads project metadata from a .procut FileSystemFileHandle.
+ */
+export async function loadProcutFile(fileHandle: FileSystemFileHandle): Promise<ProcutFileFormat> {
+  const file = await fileHandle.getFile();
+  const text = await file.text();
+  const data = JSON.parse(text) as ProcutFileFormat;
+  return data;
+}
+
+/**
+ * Persists the entire project config to IndexedDB (now primarily for autosaves).
  */
 export async function saveProjectToDB(data: {
   targetProjectId?: string;

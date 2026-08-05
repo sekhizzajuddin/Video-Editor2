@@ -37,7 +37,12 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
         }
       }
-      if (!track) return;
+      if (!track && !e.dataTransfer.types.includes('application/procut-media') && !e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/procut-media-sequence')) {
+        // Only return early if track is missing AND we are dropping something that strictly requires a track (like transitions, FX, etc.)
+        // Media items, files, and templates can be dropped on empty space to auto-create tracks.
+        const hasTemplate = e.dataTransfer.getData('application/procut-template');
+        if (!hasTemplate) return;
+      }
 
       // ── Transition drop → apply to closest clip boundary ──
       const transitionName = e.dataTransfer.getData('application/procut-transition');
@@ -456,7 +461,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
       const hasFiles = e.dataTransfer.types.includes('Files');
 
-      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && trackIdx >= 0) {
+      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && (trackIdx >= 0 || hasMedia || hasFiles || hasTemplate)) {
         const dropTime = Math.max(0, x / zoomLevel);
 
         let approxDuration = 5;
