@@ -1232,3 +1232,160 @@ Return ONLY a valid JSON object matching the requested schema, nothing else.`;
   }
 }
 
+// ===================================================================
+// V2 Types — Smart Vox-Style Blueprint (one continuous BG + PIP rows)
+// ===================================================================
+
+export interface AutoVideoPipItemV2 {
+  prompt: string;
+  resolvedUrl?: string;
+}
+
+export interface AutoVideoSceneV2 {
+  narration: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  selectedBackgroundIndex: number;
+  pipItems: AutoVideoPipItemV2[];
+}
+
+export interface AutoVideoBlueprintV2 {
+  storyTheme: string;
+  globalBackgrounds: { prompt: string; resolvedUrl?: string }[];
+  scenes: AutoVideoSceneV2[];
+  characterDescription?: string;
+}
+
+/**
+ * V2 Blueprint generator — one continuous background + per-dialogue PIP items (green screen).
+ */
+export async function generateAutoVideoBlueprintV2(
+  script: string,
+  wordTimestamps: { word: string; start: number; end: number }[],
+  totalDuration: number,
+  apiKey: string,
+  customInstructions?: string,
+  characterDescription?: string,
+  visualStyle?: string
+): Promise<AutoVideoBlueprintV2> {
+  const model = 'gemini-3.5-flash-lite';
+  const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 200));
+  const isVoxVintage = visualStyle === 'vox_vintage';
+
+  const bgStyleHint = isVoxVintage
+    ? 'vintage newspaper collage, halftone texture, aged paper, old magazine — NO people, pure background texture'
+    : 'cinematic documentary background, moody lighting, high detail, no foreground subjects, pure environment/setting';
+  const pipStyleHint = isVoxVintage
+    ? 'vintage cutout illustration, halftone print style, isolated object on solid pure #00FF00 green screen background, no text'
+    : 'realistic photo, high quality, isolated subject on solid pure #00FF00 green screen background, clean edges';
+
+  const systemPrompt = `You are an expert Vox-style documentary video director and AI image prompt engineer.
+
+Script total audio duration: ${totalDuration.toFixed(1)} seconds. Word timestamps provided.
+
+RETURN JSON with:
+1. "storyTheme": One sentence — the overarching theme of the entire script.
+2. "globalBackgrounds": Array of EXACTLY 2 objects {prompt}. Full-screen BACKDROP images only (no subjects). Style: ${bgStyleHint}
+3. "scenes": One per 3–7 second segment summing to ${totalDuration.toFixed(1)}s total.
+   Each scene: narration (exact words in that range), startTime, endTime, duration (3-7s), selectedBackgroundIndex (0 or 1), pipItems (2-4 objects {prompt}).
+   pipItems = FOREGROUND content representing what the narration is about. Style: ${pipStyleHint}. NEVER backgrounds.
+
+RULES:
+- globalBackgrounds = backdrops only. No subjects.
+- pipItems = foreground subjects only. No backgrounds.
+- Every scene needs 2-4 pipItems.
+- Vary selectedBackgroundIndex based on emotional tone.
+- Durations must sum to exactly ${totalDuration.toFixed(1)}s.
+${customInstructions ? `CUSTOM: ${customInstructions}` : ''}
+${characterDescription ? `CHARACTER: ${characterDescription}` : ''}
+Return ONLY valid JSON.`;
+
+  const payload = {
+    contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\nScript:\n${script}\n\nWord Timestamps:\n${wordTimestampsStr}` }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          storyTheme: { type: 'STRING' },
+          characterDescription: { type: 'STRING' },
+          globalBackgrounds: {
+            type: 'ARRAY',
+            items: { type: 'OBJECT', properties: { prompt: { type: 'STRING' } }, required: ['prompt'] }
+          },
+          scenes: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                narration: { type: 'STRING' },
+                startTime: { type: 'NUMBER' },
+                endTime: { type: 'NUMBER' },
+                duration: { type: 'NUMBER' },
+                selectedBackgroundIndex: { type: 'INTEGER' },
+                pipItems: {
+                  type: 'ARRAY',
+                  items: { type: 'OBJECT', properties: { prompt: { type: 'STRING' } }, required: ['prompt'] }
+                }
+              },
+              required: ['narration', 'startTime', 'endTime', 'duration', 'selectedBackgroundIndex', 'pipItems']
+            }
+          }
+        },
+        required: ['storyTheme', 'globalBackgrounds', 'scenes']
+      },
+      temperature: 0.3,
+      maxOutputTokens: 8192
+    }
+  };
+
+  const response = await fetchWithKeyFailover(
+    (key) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
+    'gemini'
+  );
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to generate V2 blueprint: ${err}`);
+  }
+
+  const data = await response.json();
+  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+
+  try {
+    const parsed = parseAndRepairJson<AutoVideoBlueprintV2>(rawText);
+
+    // Ensure 2 backgrounds
+    if (!parsed.globalBackgrounds || parsed.globalBackgrounds.length < 2) {
+      parsed.globalBackgrounds = [
+        { prompt: parsed.globalBackgrounds?.[0]?.prompt || 'cinematic documentary background, high detail, moody lighting' },
+        { prompt: isVoxVintage ? 'vintage newspaper collage, halftone dots, aged paper texture' : 'modern documentary set, soft bokeh, studio lighting' }
+      ];
+    }
+
+    // Normalize scene durations so they sum to totalDuration
+    const rawTotal = (parsed.scenes || []).reduce((a, s) => a + (s.duration || 5), 0);
+    const scale = rawTotal > 0 ? totalDuration / rawTotal : 1;
+    let elapsed = 0;
+    parsed.scenes = (parsed.scenes || []).map((s) => {
+      const dur = Math.min(7, Math.max(3, (s.duration || 5) * scale));
+      const scene: AutoVideoSceneV2 = {
+        ...s,
+        startTime: elapsed,
+        duration: parseFloat(dur.toFixed(2)),
+        endTime: parseFloat((elapsed + dur).toFixed(2)),
+        selectedBackgroundIndex: Math.max(0, Math.min(parsed.globalBackgrounds.length - 1, s.selectedBackgroundIndex ?? 0)),
+        pipItems: (s.pipItems || []).slice(0, 4)
+      };
+      elapsed += dur;
+      return scene;
+    });
+
+    return parsed;
+  } catch (e: any) {
+    console.error('V2 blueprint parse error:', rawText.substring(0, 500));
+    throw new Error(`AI returned invalid V2 blueprint: ${e.message}`);
+  }
+}
