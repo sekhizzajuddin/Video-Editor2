@@ -109,13 +109,6 @@ export function getLocalElevenLabsKey(): string {
 }
 
 /**
- * Gets the primary Groq key, falling back to the local settings key if the env key is missing.
- */
-export function getGroqKey(): string {
-  return getEnvGroqKey() || getLocalGroqKey();
-}
-
-/**
  * A robust fetch wrapper that automatically fails over to the local API key
  * if the environment API key returns a 429 Rate Limit or network error.
  */

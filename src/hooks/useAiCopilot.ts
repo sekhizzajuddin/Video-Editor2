@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { getGroqKey, hydrateKeysFromServer } from '../utils/apiKeyManager';
+import { getGroqKey } from '../utils/apiKeyManager';
 
 import { useEditorStore } from '../store/editorStore';
 import { aiToolRegistry, executeAITool, requiresConfirmation } from '../utils/aiToolRegistry';
@@ -747,10 +747,6 @@ export const useAiCopilot = () => {
   }, [pendingConfirmation]);
 
   const sendMessage = async (text: string) => {
-    // FIX: Await key hydration before doing anything to prevent race conditions
-    // on fast page loads (e.g. user opening chatbot immediately on load)
-    await hydrateKeysFromServer();
-
     // Guard BUG #2: refuse re-entry while processing to avoid double-set
     if (isProcessing) {
       return;
