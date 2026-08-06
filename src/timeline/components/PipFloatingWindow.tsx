@@ -178,7 +178,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           const dt = dx / zoomLevel;
           const initialAbsoluteStart = parentClip.startTime + startRelTimeRef.current;
           let newAbsoluteStart = initialAbsoluteStart + dt;
-          newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd, newAbsoluteStart));
+          newAbsoluteStart = Math.max(parentClip.startTime, newAbsoluteStart); // Can't go before parent start, but can go beyond end
           const newRelativeStart = newAbsoluteStart - parentClip.startTime;
 
           if (pipContainerRef.current) {
@@ -234,9 +234,9 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           const dt = dx / zoomLevel;
           
           const absoluteStartTime = parentClip.startTime + relativeStartRef.current;
-          const maxDuration = parentEnd - absoluteStartTime;
+          // Remove maxDuration constraint based on parent clip length
           let newDuration = Math.max(0.5, startDurationRef.current + dt);
-          newDuration = Math.min(maxDuration, Math.min(600, newDuration));
+          newDuration = Math.min(600, newDuration); // Arbitrary max length for sanity
           
           if (pipContainerRef.current) {
             pipContainerRef.current.style.width = `${Math.max(200, newDuration * zoomLevel) + 2}px`;
