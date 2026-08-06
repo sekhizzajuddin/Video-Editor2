@@ -785,6 +785,11 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const lastScrubTimeRef = useRef<number>(0);
   const lastScrubStateUpdateRef = useRef<number>(0);
   const latestClientXRef = useRef<number>(0);
+  
+  // Track velocity for dynamic frame speed updates
+  const lastScrubClientXRef = useRef<number>(0);
+  const lastScrubTimestampRef = useRef<number>(0);
+  const lastScrubSeekTimestampRef = useRef<number>(0);
 
   const handleMouseMove = (e: MouseEvent) => {
     if (isScrubbing) {
@@ -793,6 +798,25 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         scrubRafIdRef.current = requestAnimationFrame(() => {
           scrubRafIdRef.current = null;
           const clientX = latestClientXRef.current;
+          const scrubNow = performance.now();
+          
+          // Calculate scrub velocity (px/sec)
+          const dt = scrubNow - lastScrubTimestampRef.current;
+          const dx = Math.abs(clientX - lastScrubClientXRef.current);
+          
+          let dynamicInterval = 16; // default 60fps for slow, fine scrubbing
+          if (dt > 0 && dt < 200) { // Ignore huge jumps if tab was inactive
+             const velocity = (dx / dt) * 1000; // pixels per second
+             // Dynamic frame speed updater:
+             // If scrubbing very fast (> 1000px/s), drop frame update interval to 50ms (20fps)
+             // If scrubbing medium (> 400px/s), drop to 33ms (~30fps)
+             if (velocity > 1000) dynamicInterval = 50;
+             else if (velocity > 400) dynamicInterval = 33;
+          }
+          
+          lastScrubTimestampRef.current = scrubNow;
+          lastScrubClientXRef.current = clientX;
+
           // CRITICAL FIX: use the RULER container's bounding rect, not the
           // trackContainerRef. The ruler lives above the clip tracks; using
           // trackContainerRef gave us a rect whose top was below the ruler,
@@ -813,12 +837,16 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const x = clientX - rect.left + currentScrollLeft;
             const time = Math.max(0, x / zoomLevel);
 
-            seek(time);
-            // Immediately notify the canvas render engine — avoids waiting for
-            // React's async render cycle to propagate the Zustand state change.
-            window.dispatchEvent(new Event('procut-frame-updated'));
+            // Dynamically throttle the heavy media-seeking and canvas rendering
+            if (scrubNow - lastScrubSeekTimestampRef.current >= dynamicInterval) {
+              seek(time);
+              // Immediately notify the canvas render engine — avoids waiting for
+              // React's async render cycle to propagate the Zustand state change.
+              window.dispatchEvent(new Event('procut-frame-updated'));
+              lastScrubSeekTimestampRef.current = scrubNow;
+            }
 
-            const scrubNow = performance.now();
+            // Always update the UI state (playhead overlay, tooltip) at 60fps for responsiveness
             if (scrubNow - lastScrubStateUpdateRef.current > 16) {
               setScrubTime(time);
               setScrubMouseX(clientX);
