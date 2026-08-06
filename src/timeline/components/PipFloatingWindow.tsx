@@ -255,6 +255,8 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
 
   return (
     <div
+      data-pip-window="true"
+      data-pip-id={pipWindow.id}
       className={`absolute z-50 rounded-lg shadow-2xl bg-[#2a2a2a]/95 backdrop-blur-md border border-[#4a4a4a] flex flex-col pointer-events-auto ${isCollapsed ? 'rounded-lg' : ''}`}
       style={{
         left: `${windowLeft}px`,

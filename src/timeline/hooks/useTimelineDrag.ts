@@ -15,7 +15,7 @@ const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime:
   if (draggedClips.length <= 1) return true;
   
   const clipsWithTime = draggedClips.map(dc => {
-     const c = findClipInTracks(tracks, dc.id);
+     const c = findClipInTracks(tracks, dc.id, useEditorStore.getState().pipWindows || {});
      return { start: dc.originalStartTime, end: dc.originalStartTime + (c?.duration || 0) };
   });
   
@@ -147,6 +147,28 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   }, []);
 
   const getTrackFromMouseY = useCallback((clientY: number, clipId: string | null = null): TimelineTrack | null => {
+    // Check if mouse is over any PIP window first
+    const pipWindows = Array.from(document.querySelectorAll('[data-pip-window="true"]'));
+    for (const pipEl of pipWindows) {
+      const rect = pipEl.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        const pipId = pipEl.getAttribute('data-pip-id');
+        if (pipId) {
+          const pip = useEditorStore.getState().pipWindows[pipId];
+          if (pip) {
+            // Found a PIP window. Calculate track index within it.
+            // Adjust relY to be relative to the PIP tracks container (roughly after the title bar).
+            // The title bar is 24px tall, plus some padding, so let's say 30px offset.
+            const pipRelY = clientY - rect.top - 30; 
+            const idx = getTrackAtY(pip.tracks, pipRelY);
+            if (idx >= 0 && idx < pip.tracks.length) {
+              return pip.tracks[idx];
+            }
+          }
+        }
+      }
+    }
+
     const container = trackContainerRef.current;
     if (!container) return null;
     const rect = container.getBoundingClientRect();
@@ -155,6 +177,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     const idx = getTrackAtY(latestTracks, relY);
     return idx >= 0 && idx < latestTracks.length ? latestTracks[idx] : null;
   }, [trackContainerRef]);
+
 
   const computeSnap = useCallback((rawTime: number, movingClipId: string, movingDuration: number) => {
     if (!settings.snapEnabled) {
@@ -165,13 +188,23 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
     // Collect snap targets: all other clip edges + the playhead
     const targets: number[] = [useEditorStore.getState().currentTime]; // snap to playhead
+    const state = useEditorStore.getState();
+    const pipAnchor = (() => {
+      const f = findClipDeep(state, movingClipId);
+      if (f && f.isPip) {
+        const pip = state.pipWindows[f.pipId!];
+        const parent = findClipInTracks(state.tracks, pip?.parentClipId, state.pipWindows || {});
+        return (parent?.startTime ?? 0) + (pip?.relativeStartTime ?? 0);
+      }
+      return 0;
+    })();
+
     for (const track of latestTracks) {
       for (const clip of track.clips) {
         if (clip.id === movingClipId) continue;
-        targets.push(clip.startTime);
-        targets.push(clip.startTime + clip.duration);
+        targets.push(clip.startTime + pipAnchor);
+        targets.push(clip.startTime + clip.duration + pipAnchor);
       }
-
     }
 
     const edges = [rawTime, rawTime + movingDuration];
@@ -202,30 +235,46 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
     const dx = (clientX - dragState.startX) + (currScrollLeft - dragState.originalScrollLeft);
     const dt = dx / zoomLevel;
-    let newTime = Math.max(0, dragState.originalStartTime + dt);
-
+    
     const actualHoverTrack = getTrackFromMouseY(clientY, dragState.clipId);
     const state = useEditorStore.getState();
     const found = findClipDeep(state, dragState.clipId);
     const isPip = !!(found && found.isPip);
+
+    let absoluteAnchor = dragState.originalStartTime;
+    let absoluteParentStart = 0;
+    let absoluteParentEnd = Infinity;
+    if (isPip) {
+      const pip = (state.pipWindows || {})[found.pipId!];
+      const parentClip = findClipInTracks(state.tracks, pip?.parentClipId, state.pipWindows || {});
+      absoluteParentStart = (parentClip?.startTime ?? 0) + (pip?.relativeStartTime ?? 0);
+      absoluteParentEnd = parentClip ? (parentClip.startTime + parentClip.duration) : Infinity;
+      absoluteAnchor = absoluteParentStart + dragState.originalStartTime;
+    }
+
+    let newAbsoluteTime = Math.max(absoluteParentStart, absoluteAnchor + dt);
+    
+    const movingClip = findClipDeep(state, dragState.clipId)?.clip;
+    const movingDuration = movingClip?.duration ?? 0;
+
+    if (isPip) {
+      newAbsoluteTime = Math.min(absoluteParentEnd - movingDuration, newAbsoluteTime);
+    }
 
     const targetTrackId = isPip
       ? dragState.trackId
       : (actualHoverTrack && actualHoverTrack.type === dragState.trackType ? actualHoverTrack.id : dragState.trackId);
 
     const latestTracks = getLatestTracks(dragState.clipId);
-    const movingClip = findClipDeep(state, dragState.clipId)?.clip;
-    const movingDuration = movingClip?.duration ?? 0;
 
-    const { snappedTime, snapPos } = computeSnap(newTime, dragState.clipId, movingDuration);
-    newTime = snappedTime;
+    const { snappedTime, snapPos } = computeSnap(newAbsoluteTime, dragState.clipId, movingDuration);
+    let newTime = snappedTime - absoluteParentStart;
     setSnapLine(snapPos);
 
     const minOriginalStart = Math.min(...dragState.draggedClips.map(c => c.originalStartTime));
     const clampedFinalDt = Math.max(-minOriginalStart, newTime - dragState.originalStartTime);
 
     if (dragState.draggedClips.length >= 1) {
-      setDragPreview(0, null);
 
       const sourceTrackIdx = latestTracks.findIndex((t) => t.id === dragState.trackId);
       const targetTrackIdx = latestTracks.findIndex((t) => t.id === targetTrackId);
@@ -698,7 +747,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       // wrong rect caused the playhead to jump to a random time when the
       // ruler's left edge differed from the clips area's left edge.
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const currentScrollLeft = useEditorStore.getState().scrollLeft;
+      const container = trackContainerRef.current;
+      const currentScrollLeft = container ? container.scrollLeft : useEditorStore.getState().scrollLeft;
       const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
 
@@ -740,7 +790,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           const rulerEl = rulerContainerRef.current;
           if (rulerEl) {
             const rect = rulerEl.getBoundingClientRect();
-            const currentScrollLeft = useEditorStore.getState().scrollLeft;
+            const container = trackContainerRef.current;
+            const currentScrollLeft = container ? container.scrollLeft : useEditorStore.getState().scrollLeft;
             const x = clientX - rect.left + currentScrollLeft;
             const time = Math.max(0, x / zoomLevel);
 

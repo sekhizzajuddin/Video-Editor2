@@ -490,13 +490,27 @@ export const findClipDeep = (state: EditorState, clipId: string) => {
   return null;
 };
 
-export const findClipInTracks = (tracks: TimelineTrack[], clipId: string | null | undefined): TimelineClip | undefined => {
-  if (!tracks || !clipId) return undefined;
-  for (let i = 0; i < tracks.length; i++) {
-    const clips = tracks[i].clips;
-    if (clips) {
-      for (let j = 0; j < clips.length; j++) {
-        if (clips[j] && clips[j].id === clipId) return clips[j];
+export const findClipInTracks = (
+  tracks: TimelineTrack[],
+  clipId: string | null | undefined,
+  pipWindows?: Record<string, PipWindow>
+): TimelineClip | undefined => {
+  if (!clipId) return undefined;
+  if (tracks) {
+    for (let i = 0; i < tracks.length; i++) {
+      const clips = tracks[i].clips;
+      if (clips) {
+        for (let j = 0; j < clips.length; j++) {
+          if (clips[j] && clips[j].id === clipId) return clips[j];
+        }
+      }
+    }
+  }
+  if (pipWindows) {
+    for (const pip of Object.values(pipWindows)) {
+      for (const t of pip.tracks || []) {
+        const c = t.clips?.find((x) => x.id === clipId);
+        if (c) return c;
       }
     }
   }
@@ -2412,7 +2426,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // audio clip on the first available (or new) audio track, at the same position.
   unlinkAudio: (clipId) => {
     const { tracks, mediaLibrary } = get();
-    const videoClip = findClipInTracks(tracks, clipId);
+    const videoClip = findClipInTracks(tracks, clipId, get().pipWindows || {});
     if (!videoClip) return;
 
     const media = mediaLibrary.find((m) => m.id === videoClip.mediaId);
@@ -2519,7 +2533,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   breakLinkConnection: (clipId) => {
     set((state) => {
-      const clip = findClipInTracks(state.tracks, clipId);
+      const clip = findClipInTracks(state.tracks, clipId, state.pipWindows || {});
       if (!clip) return {};
       const linkedClipId = clip.linkedClipId;
 
@@ -3651,7 +3665,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     };
     
     set((state) => {
-      const clip = findClipInTracks(state.tracks, clipId);
+      const clip = findClipInTracks(state.tracks, clipId, state.pipWindows || {});
       if (!clip) return {};
       
       const newTracks = state.tracks.map(t => {
