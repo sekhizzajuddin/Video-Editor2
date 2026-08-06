@@ -363,7 +363,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
                 mediaId: mediaItem.id,
                 trackId,
                 startTime,
-                duration: isText ? 3 : (mediaItem.type === 'image' ? 5 : Math.min(10, mediaItem.duration)),
+                duration: isText ? 3 : (mediaItem.type === 'image' ? 5 : mediaItem.duration),
                 trimStart: 0,
                 trimEnd: 0,
                 transform: { x: 0, y: 0, scale: 100, rotation: 0 },
@@ -402,7 +402,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         mediaId,
         trackId,
         startTime,
-        duration: isText ? 3 : (media.type === 'image' ? 5 : Math.min(10, media.duration)),
+        duration: isText ? 3 : (media.type === 'image' ? 5 : media.duration),
         trimStart: 0,
         trimEnd: 0,
         transform: { x: 0, y: isText ? 140 : 0, scale: 100, rotation: 0 },
@@ -481,7 +481,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
               mediaId = m.id;
               mediaType = m.type;
               mediaName = m.name;
-              approxDuration = m.type === 'image' ? 5 : Math.min(10, m.duration);
+              approxDuration = m.type === 'image' ? 5 : m.duration;
             }
           }
         } else if (hasFiles) {

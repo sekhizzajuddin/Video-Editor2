@@ -81,6 +81,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     addEmptyTrackToPip,
     mediaLibrary,
     selectedClipId,
+    selectedTrackId,
   } = useEditorStore(useShallow(s => ({
     updatePipWindowStartTime: s.updatePipWindowStartTime,
     updatePipWindowDuration: s.updatePipWindowDuration,
@@ -91,6 +92,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     addEmptyTrackToPip: s.addEmptyTrackToPip,
     mediaLibrary: s.mediaLibrary,
     selectedClipId: s.selectedClipId,
+    selectedTrackId: s.selectedTrackId,
   })));
 
   const [isDragging, setIsDragging] = useState(false);
@@ -273,7 +275,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
         </div>
         <div className="flex items-center gap-1">
           {(() => {
-            const selectedTrackIdx = pipWindow.tracks.findIndex(t => t.clips.some(c => c.id === selectedClipId));
+            let selectedTrackIdx = pipWindow.tracks.findIndex(t => t.clips.some(c => c.id === selectedClipId));
+            if (selectedTrackIdx === -1) {
+              selectedTrackIdx = pipWindow.tracks.findIndex(t => t.id === selectedTrackId);
+            }
             if (selectedTrackIdx !== -1) {
               return (
                 <>
@@ -294,6 +299,64 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                     <ChevronDown className="w-3.5 h-3.5" />
                   </button>
                   <div className="w-px h-4 bg-gray-600 mx-1"></div>
+                  
+                  {/* Selected Track Actions */}
+                  {(() => {
+                    const selTrack = pipWindow.tracks[selectedTrackIdx];
+                    const isMutedOrHidden = selTrack.type === 'audio' ? selTrack.muted : selTrack.hidden;
+                    return (
+                      <>
+                        <div className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded mr-1">
+                          {selTrack.type === 'video' && <Film className="w-3 h-3 text-blue-400" />}
+                          {selTrack.type === 'audio' && <Music className="w-3 h-3 text-green-400" />}
+                          {selTrack.type === 'text' && <Type className="w-3 h-3 text-yellow-400" />}
+                          {selTrack.type === 'fx' && <Sparkles className="w-3 h-3 text-rose-400" />}
+                          <span className="text-[10px] font-semibold text-gray-300 uppercase">
+                            {selTrack.name || selTrack.type.slice(0, 3)}
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selTrack.type === 'audio') {
+                              updatePipTrack(pipWindow.id, selTrack.id, { muted: !selTrack.muted });
+                            } else {
+                              updatePipTrack(pipWindow.id, selTrack.id, { hidden: !selTrack.hidden });
+                            }
+                          }}
+                          className={`p-1 rounded hover:bg-white/10 transition-colors ${isMutedOrHidden ? 'text-red-400' : 'text-gray-400 hover:text-white'}`}
+                          title={selTrack.type === 'audio' ? (selTrack.muted ? 'Unmute' : 'Mute') : (selTrack.hidden ? 'Show' : 'Hide')}
+                        >
+                          {selTrack.type === 'audio' ? (
+                            selTrack.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />
+                          ) : (
+                            selTrack.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updatePipTrack(pipWindow.id, selTrack.id, { locked: !selTrack.locked });
+                          }}
+                          className={`p-1 rounded hover:bg-white/10 transition-colors ${selTrack.locked ? 'text-yellow-400' : 'text-gray-400 hover:text-white'}`}
+                          title={selTrack.locked ? 'Unlock' : 'Lock'}
+                        >
+                          {selTrack.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeTrackFromPip(pipWindow.id, selTrack.id);
+                          }}
+                          className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+                          title="Delete Track"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <div className="w-px h-4 bg-gray-600 mx-1"></div>
+                      </>
+                    );
+                  })()}
                 </>
               );
             }
@@ -403,81 +466,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
 
                return (
                  <div key={track.id} className="flex items-stretch bg-gray-900/60 border border-white/5 rounded-md min-h-[44px] relative overflow-hidden group">
-                   {/* Compact Sidebar / Track Header */}
-                   <div 
-                     className="w-20 shrink-0 bg-gray-950/80 border-r border-white/5 flex flex-col justify-between p-1.5 z-10"
-                     onContextMenu={(e) => {
-                       e.preventDefault();
-                       e.stopPropagation();
-                       setContextMenu({
-                         x: e.clientX,
-                         y: e.clientY,
-                         items: [
-                           { label: 'Delete Track', action: () => removeTrackFromPip(pipWindow.id, track.id) },
-                           { label: track.muted ? 'Unmute' : 'Mute', action: () => updatePipTrack(pipWindow.id, track.id, { muted: !track.muted }) },
-                           { label: track.hidden ? 'Show' : 'Hide', action: () => updatePipTrack(pipWindow.id, track.id, { hidden: !track.hidden }) },
-                           { label: track.locked ? 'Unlock' : 'Lock', action: () => updatePipTrack(pipWindow.id, track.id, { locked: !track.locked }) },
-                           { label: 'Move Up', action: () => reorderPipTrack(pipWindow.id, idx, 'up') },
-                           { label: 'Move Down', action: () => reorderPipTrack(pipWindow.id, idx, 'down') },
-                         ]
-                       });
-                     }}
-                   >
-                     {/* Track Label and Icon */}
-                     <div className="flex items-center gap-1">
-                       <TrackIcon />
-                       <span className="text-[10px] font-semibold text-gray-300 uppercase truncate">
-                         {track.name || `${track.type.slice(0, 3)}${idx + 1}`}
-                       </span>
-                     </div>
 
-                     {/* Quick Actions */}
-                     <div className="flex items-center gap-1.5 mt-1">
-                       {/* Mute/Hide */}
-                       <button
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           if (track.type === 'audio') {
-                             updatePipTrack(pipWindow.id, track.id, { muted: !track.muted });
-                           } else {
-                             updatePipTrack(pipWindow.id, track.id, { hidden: !track.hidden });
-                           }
-                         }}
-                         className={`p-0.5 rounded hover:bg-white/10 transition-colors ${isMutedOrHidden ? 'text-red-400' : 'text-gray-400 hover:text-white'}`}
-                         title={track.type === 'audio' ? (track.muted ? 'Unmute' : 'Mute') : (track.hidden ? 'Show' : 'Hide')}
-                       >
-                         {track.type === 'audio' ? (
-                           track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />
-                         ) : (
-                           track.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />
-                         )}
-                       </button>
-
-                       {/* Lock */}
-                       <button
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           updatePipTrack(pipWindow.id, track.id, { locked: !track.locked });
-                         }}
-                         className={`p-0.5 rounded hover:bg-white/10 transition-colors ${track.locked ? 'text-yellow-400' : 'text-gray-400 hover:text-white'}`}
-                         title={track.locked ? 'Unlock' : 'Lock'}
-                       >
-                         {track.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-                       </button>
-
-                       {/* Delete */}
-                       <button
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           removeTrackFromPip(pipWindow.id, track.id);
-                         }}
-                         className="p-0.5 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                         title="Delete Track"
-                       >
-                         <Trash2 className="w-3 h-3" />
-                       </button>
-                     </div>
-                   </div>
 
                    {/* Clip Area */}
                    <div className="flex-1 min-w-0 relative">
