@@ -120,26 +120,9 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     };
   }, []);
 
-  const [localRelTime, setLocalRelTime] = useState<number | null>(null);
-  const localRelTimeRef = useRef<number | null>(null);
-  const setLocalRelTimeSafe = (val: number | null) => {
-    localRelTimeRef.current = val;
-    setLocalRelTime(val);
-  };
-
-  const [localDuration, setLocalDuration] = useState<number | null>(null);
-  const localDurationRef = useRef<number | null>(null);
-  const setLocalDurationSafe = (val: number | null) => {
-    localDurationRef.current = val;
-    setLocalDuration(val);
-  };
-
-  const displayRelTime = localRelTime !== null ? localRelTime : (pipWindow.relativeStartTime || 0);
-  const displayDuration = localDuration !== null ? localDuration : pipWindow.duration;
-
   const pipAbsoluteStart = useMemo(() => {
-    return displayRelTime + parentClip.startTime;
-  }, [displayRelTime, parentClip.startTime]);
+    return (pipWindow.relativeStartTime || 0) + parentClip.startTime;
+  }, [pipWindow.relativeStartTime, parentClip.startTime]);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -156,9 +139,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
   const startXRef = useRef(0);
   const startDurationRef = useRef(0);
   const startRelTimeRef = useRef(0);
+  const pipContainerRef = useRef<HTMLDivElement>(null);
   
-  const windowLeft = (parentClip.startTime + displayRelTime) * zoomLevel - 1;
-  const windowWidth = Math.max(200, displayDuration * zoomLevel) + 2;
+  const windowLeft = (parentClip.startTime + (pipWindow.relativeStartTime || 0)) * zoomLevel - 1;
+  const windowWidth = Math.max(200, pipWindow.duration * zoomLevel) + 2;
   const parentEnd = parentClip.startTime + parentClip.duration;
 
   const trackIdx = tracks.findIndex(t => t.id === parentClip.trackId);
@@ -197,7 +181,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd, newAbsoluteStart));
           const newRelativeStart = newAbsoluteStart - parentClip.startTime;
 
-          setLocalRelTimeSafe(newRelativeStart);
+          if (pipContainerRef.current) {
+            pipContainerRef.current.style.left = `${(parentClip.startTime + newRelativeStart) * zoomLevel - 1}px`;
+            pipContainerRef.current.dataset.dragRelTime = newRelativeStart.toString();
+          }
         });
       };
       const handleMouseUp = () => {
@@ -206,9 +193,9 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           dragRafRef.current = null;
         }
         setIsDragging(false);
-        if (localRelTimeRef.current !== null) {
-          updatePipWindowStartTime(pipWindow.id, localRelTimeRef.current);
-          setLocalRelTimeSafe(null);
+        if (pipContainerRef.current && pipContainerRef.current.dataset.dragRelTime) {
+          updatePipWindowStartTime(pipWindow.id, parseFloat(pipContainerRef.current.dataset.dragRelTime));
+          delete pipContainerRef.current.dataset.dragRelTime;
         }
         useEditorStore.getState().saveSnapshot('Move PIP Window');
         useEditorStore.getState().endTransaction();
@@ -251,7 +238,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           let newDuration = Math.max(0.5, startDurationRef.current + dt);
           newDuration = Math.min(maxDuration, Math.min(600, newDuration));
           
-          setLocalDurationSafe(newDuration);
+          if (pipContainerRef.current) {
+            pipContainerRef.current.style.width = `${Math.max(200, newDuration * zoomLevel) + 2}px`;
+            pipContainerRef.current.dataset.dragDuration = newDuration.toString();
+          }
         });
       };
       const handleMouseUp = () => {
@@ -260,9 +250,9 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           resizeRafRef.current = null;
         }
         setIsResizing(false);
-        if (localDurationRef.current !== null) {
-          updatePipWindowDuration(pipWindow.id, localDurationRef.current);
-          setLocalDurationSafe(null);
+        if (pipContainerRef.current && pipContainerRef.current.dataset.dragDuration) {
+          updatePipWindowDuration(pipWindow.id, parseFloat(pipContainerRef.current.dataset.dragDuration));
+          delete pipContainerRef.current.dataset.dragDuration;
         }
         useEditorStore.getState().saveSnapshot('Resize PIP Window');
         useEditorStore.getState().endTransaction();
@@ -312,6 +302,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
 
   return (
     <div
+      ref={pipContainerRef}
       data-pip-window="true"
       data-pip-id={pipWindow.id}
       className={`absolute z-50 rounded-lg shadow-2xl bg-[#2a2a2a]/95 backdrop-blur-md border border-[#4a4a4a] flex flex-col pointer-events-auto ${isCollapsed ? 'rounded-lg' : ''}`}
@@ -533,7 +524,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
               <div className="relative w-full h-full flex flex-col gap-1">
                 <PipPlayhead
                   absoluteStart={pipAbsoluteStart}
-                  duration={displayDuration}
+                  duration={pipWindow.duration}
                   zoomLevel={zoomLevel}
                 />
                 {(pipWindow.tracks || []).map((track, idx) => {
