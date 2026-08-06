@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { Film, Music, Image, Sparkles, Type, Plus } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem, EditorState, PipWindow } from '@/types';
@@ -296,12 +296,17 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                 key={t}
                 onMouseDown={(e) => {
                   e.stopPropagation();
+                  useEditorStore.getState().startTransaction();
                   const startX = e.clientX;
                   let currentTimeMark = t;
+                  
+                  const minTime = i > 0 ? keyframeTimes[i - 1] + 0.05 : 0;
+                  const maxTime = i < keyframeTimes.length - 1 ? keyframeTimes[i + 1] - 0.05 : clip.duration;
+
                   const onMouseMove = (moveEvent: MouseEvent) => {
                     const deltaX = moveEvent.clientX - startX;
                     let newTime = t + deltaX / zoomLevel;
-                    newTime = Math.max(0, Math.min(newTime, clip.duration));
+                    newTime = Math.max(minTime, Math.min(newTime, maxTime));
                     if (Math.abs(newTime - currentTimeMark) > 0.01) {
                       useEditorStore.getState().moveMasterKeyframe(clip.id, currentTimeMark, newTime);
                       currentTimeMark = newTime;
@@ -310,7 +315,8 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   const onMouseUp = () => {
                     window.removeEventListener('mousemove', onMouseMove);
                     window.removeEventListener('mouseup', onMouseUp);
-                    useEditorStore.getState().saveSnapshot();
+                    useEditorStore.getState().saveSnapshot('Move Keyframe');
+                    useEditorStore.getState().endTransaction();
                   };
                   window.addEventListener('mousemove', onMouseMove);
                   window.addEventListener('mouseup', onMouseUp);
@@ -467,7 +473,8 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 }: TimelineClipRowProps) {
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
   const allPipWindows = useEditorStore((s) => s.pipWindows);
-  
+  const dragCounter = useRef(0);
+
   // ── P0 FIX: Build O(1) lookup maps instead of O(N) .find() per clip ──────
   const mediaMap = useMemo(
     () => new Map(mediaLibrary.map((m) => [m.id, m])),
@@ -512,16 +519,29 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
       }`}
       style={{ height: getTrackHeight(track) }}
       onDragOver={(e) => handleDragOver(e, track.id)}
-      onDrop={(e) => handleDrop(e, track.id)}
-      onDragEnter={() => setHoveredTrackId(track.id)}
-      onDragLeave={() => {
-        setHoveredTrackId(null);
-        setDropPreview(null);
+      onDragEnter={(e) => {
+        e.preventDefault();
+        dragCounter.current += 1;
+        setHoveredTrackId(track.id);
       }}
-
+      onDragLeave={(e) => {
+        dragCounter.current -= 1;
+        if (dragCounter.current <= 0) {
+          dragCounter.current = 0;
+          setHoveredTrackId(null);
+          setDropPreview(null);
+        }
+      }}
+      onDrop={(e) => {
+        dragCounter.current = 0;
+        handleDrop(e, track.id);
+      }}
       onMouseLeave={() => {
-        setHoveredTrackId(null);
-        setDropPreview(null);
+        // Don't clear on mouse leave unless we are not dragging
+        if (!draggingClipId) {
+          setHoveredTrackId(null);
+          setDropPreview(null);
+        }
       }}
       onClick={(e) => {
         e.stopPropagation();

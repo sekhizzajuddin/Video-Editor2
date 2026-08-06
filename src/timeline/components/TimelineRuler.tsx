@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineMarker } from '@/types';
 import { RULER_HEIGHT } from '../timelineConstants';
@@ -38,6 +38,48 @@ interface TimelineRulerProps {
   handleRulerMouseDown: (e: React.MouseEvent) => void;
 }
 
+export const TimelineGridLines = React.memo(function TimelineGridLines({
+  rulerData,
+  zoomLevel,
+}: {
+  rulerData: RulerMarker[];
+  zoomLevel: number;
+}) {
+  const [scrollLeft, setScrollLeft] = useState(() => useEditorStore.getState().scrollLeft);
+  const [viewportWidth, setViewportWidth] = useState(1000);
+
+  useEffect(() => {
+    return useEditorStore.subscribe((state) => {
+      setScrollLeft(state.scrollLeft);
+    });
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const visibleMarkers = useMemo(() => {
+    const left = scrollLeft / zoomLevel;
+    const right = (scrollLeft + viewportWidth) / zoomLevel;
+    return rulerData.filter((m) => m.type === 'major' && m.time >= left - 1 && m.time <= right + 1);
+  }, [rulerData, scrollLeft, zoomLevel, viewportWidth]);
+
+  return (
+    <>
+      {visibleMarkers.map((m, i) => (
+        <div
+          key={`g-${i}-${m.time}`}
+          className="absolute top-0 bottom-0 w-px bg-[#3e3e3e]/30 pointer-events-none"
+          style={{ left: `${m.time * zoomLevel}px` }}
+        />
+      ))}
+    </>
+  );
+});
+
 export const TimelineRuler = React.memo(function TimelineRuler({
   rulerContainerRef,
   timelineWidth,
@@ -74,6 +116,28 @@ export const TimelineRuler = React.memo(function TimelineRuler({
     }
   };
 
+  const [scrollLeft, setScrollLeft] = useState(() => useEditorStore.getState().scrollLeft);
+  const [viewportWidth, setViewportWidth] = useState(1000);
+
+  useEffect(() => {
+    return useEditorStore.subscribe((state) => {
+      setScrollLeft(state.scrollLeft);
+    });
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const visibleRulerData = useMemo(() => {
+    const left = scrollLeft / zoomLevel;
+    const right = (scrollLeft + viewportWidth) / zoomLevel;
+    return rulerData.filter((m) => m.time >= left - 1 && m.time <= right + 1);
+  }, [rulerData, scrollLeft, zoomLevel, viewportWidth]);
+
   return (
     <div
       ref={rulerContainerRef}
@@ -87,7 +151,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
         style={{ width: `${timelineWidth}px` }}
       >
         {/* Ruler ticks & labels */}
-        {rulerData.map((tick, i) => {
+        {visibleRulerData.map((tick, i) => {
           let height = '20%';
           let color = '#3e3e3e';
           if (tick.type === 'major') {

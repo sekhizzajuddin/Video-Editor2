@@ -17,6 +17,7 @@ import {
   TimelineToolbar,
   TimelineTrackHeader,
   TimelineRuler,
+  TimelineGridLines,
   TimelineClipRow,
   TimelineModals,
   FloatingScrubTooltip,
@@ -318,15 +319,7 @@ export function Timeline() {
             >
               <div className="relative" style={{ width: `${timelineWidth}px`, minHeight: '100%' }}>
                 {/* Grid lines aligned with ruler markers */}
-                {rulerData
-                  .filter((m) => m.type === 'major')
-                  .map((m, i) => (
-                    <div
-                      key={`g-${i}`}
-                      className="absolute top-0 bottom-0 w-px bg-[#3e3e3e]/30 pointer-events-none"
-                      style={{ left: `${m.time * zoomLevel}px` }}
-                    />
-                  ))}
+                <TimelineGridLines rulerData={rulerData} zoomLevel={zoomLevel} />
 
                 {/* In-point vertical dashed line */}
                 {inPoint !== null && (

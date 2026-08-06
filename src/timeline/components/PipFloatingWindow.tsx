@@ -136,6 +136,13 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
   };
 
   const dragRafRef = useRef<number | null>(null);
+  
+  // T-22: Keep relativeStartTime in a ref so resize effect doesn't tear down on every frame
+  const relativeStartRef = useRef(pipWindow.relativeStartTime || 0);
+  useEffect(() => {
+    relativeStartRef.current = pipWindow.relativeStartTime || 0;
+  }, [pipWindow.relativeStartTime]);
+
   useEffect(() => {
     if (isDragging) {
       const handleMouseMove = (e: MouseEvent) => {
@@ -159,6 +166,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           dragRafRef.current = null;
         }
         setIsDragging(false);
+        useEditorStore.getState().saveSnapshot('Move PIP Window');
         useEditorStore.getState().endTransaction();
       };
       window.addEventListener('mousemove', handleMouseMove);
@@ -194,7 +202,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           const dx = clientX - startXRef.current;
           const dt = dx / zoomLevel;
           
-          const absoluteStartTime = parentClip.startTime + (pipWindow.relativeStartTime || 0);
+          const absoluteStartTime = parentClip.startTime + relativeStartRef.current;
           const maxDuration = parentEnd - absoluteStartTime;
           let newDuration = Math.max(0.5, startDurationRef.current + dt);
           newDuration = Math.min(maxDuration, Math.min(600, newDuration));
@@ -208,6 +216,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           resizeRafRef.current = null;
         }
         setIsResizing(false);
+        useEditorStore.getState().saveSnapshot('Resize PIP Window');
         useEditorStore.getState().endTransaction();
       };
       window.addEventListener('mousemove', handleMouseMove);
@@ -221,7 +230,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isResizing, pipWindow.id, pipWindow.relativeStartTime, zoomLevel, parentClip.startTime, parentEnd, updatePipWindowDuration]);
+  }, [isResizing, pipWindow.id, zoomLevel, parentClip.startTime, parentEnd, updatePipWindowDuration]);
 
   // Handle drop media inside PIP
   const handlePipContainerDrop = (e: React.DragEvent) => {

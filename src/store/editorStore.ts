@@ -3736,7 +3736,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       };
     });
-    get().saveSnapshot('Move PIP Window');
   },
 
   updatePipWindowDuration: (pipId: string, duration: number) => {
@@ -3750,7 +3749,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       };
     });
-    get().saveSnapshot('Resize PIP Window');
   },
 
   setActivePipWindow: (pipId) => {
