@@ -461,6 +461,12 @@ function App() {
         if (data.groqApiKey) {
           sessionStorage.setItem('procut_groq_key', data.groqApiKey);
         }
+        if (data.huggingFaceApiKey) {
+          sessionStorage.setItem('procut_huggingface_key', data.huggingFaceApiKey);
+        }
+        if (data.elevenLabsApiKey) {
+          sessionStorage.setItem('procut_elevenlabs_key', data.elevenLabsApiKey);
+        }
       })
       .catch((err) => {
         console.warn('API keys fetch not available or failed:', err);

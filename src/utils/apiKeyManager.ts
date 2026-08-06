@@ -21,7 +21,7 @@ export function getEnvGroqKey(): string {
  */
 export function getEnvHuggingFaceKey(): string {
   // @ts-ignore
-  return import.meta.env.VITE_HUGGINGFACE_API_KEY || import.meta.env.HUGGINGFACE_API_KEY || '';
+  return import.meta.env.VITE_HUGGINGFACE_API_KEY || import.meta.env.HUGGINGFACE_API_KEY || sessionStorage.getItem('procut_huggingface_key') || '';
 }
 
 /**
@@ -29,7 +29,7 @@ export function getEnvHuggingFaceKey(): string {
  */
 export function getEnvElevenLabsKey(): string {
   // @ts-ignore
-  return import.meta.env.VITE_ELEVENLABS_API_KEY || import.meta.env.ELEVENLABS_API_KEY || '';
+  return import.meta.env.VITE_ELEVENLABS_API_KEY || import.meta.env.ELEVENLABS_API_KEY || sessionStorage.getItem('procut_elevenlabs_key') || '';
 }
 
 /**

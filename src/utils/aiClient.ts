@@ -1,11 +1,11 @@
-import { fetchWithKeyFailover, getLocalGeminiKey, getEnvGeminiKey } from './apiKeyManager';
+import { fetchWithKeyFailover, getLocalGeminiKey, getEnvGeminiKey, getLocalGroqKey, getEnvGroqKey } from './apiKeyManager';
 
 export function getGeminiKey(): string {
   return getEnvGeminiKey() || getLocalGeminiKey();
 }
 
 export function getGroqKey(): string {
-  return '';
+  return getEnvGroqKey() || getLocalGroqKey();
 }
 
 // ─── Model constants ─────────────────────────────────────────────────────────
