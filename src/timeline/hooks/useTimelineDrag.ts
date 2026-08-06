@@ -513,7 +513,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const target = e.currentTarget as HTMLElement;
       const rect = target.getBoundingClientRect();
       const relX = e.clientX - rect.left;
-      const currentScrollLeft = useEditorStore.getState().scrollLeft;
+      // FIX: Read scrollLeft from the DOM element directly — the Zustand store
+      // value can lag the DOM by up to 100ms (throttled store sync) causing
+      // the originalScrollLeft to be stale and drag deltas to be wrong.
+      const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
       
       const state = useEditorStore.getState();
       const found = findClipDeep(state, clip.id);
@@ -748,26 +751,28 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (e.button !== 0) return;
       setIsScrubbing(true);
 
-      // CRITICAL FIX: use rulerContainerRef (the actual ruler DOM), not the
-      // trackContainerRef (the clips area below the ruler). The ruler has
-      // its own scrollLeft-independent position because it spans the full
-      // timelineWidth inside a horizontally-scrolling parent. Using the
-      // wrong rect caused the playhead to jump to a random time when the
-      // ruler's left edge differed from the clips area's left edge.
+      // FIX: Use rulerContainerRef's OWN scrollLeft, not trackContainerRef.
+      // Both are kept in sync by useTimelineScroll, but there is a RAF-throttled
+      // race window between a scroll event and the sync. Reading the ruler's own
+      // scrollLeft ensures the coordinate math is internally consistent:
+      //   x = clientX - rulerRect.left + ruler.scrollLeft
+      // Previously used trackContainer.scrollLeft which lagged by up to 16ms,
+      // causing the playhead to jump to a random time on click.
+      const rulerEl = rulerContainerRef.current;
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const container = trackContainerRef.current;
-      const currentScrollLeft = container ? container.scrollLeft : useEditorStore.getState().scrollLeft;
+      const currentScrollLeft = rulerEl ? rulerEl.scrollLeft : useEditorStore.getState().scrollLeft;
       const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
 
       setScrubTime(time);
       setScrubMouseX(e.clientX);
       seek(time);
+      window.dispatchEvent(new Event('procut-frame-updated'));
 
       e.preventDefault();
       e.stopPropagation();
     },
-    [zoomLevel, seek, setIsScrubbing, setScrubTime, setScrubMouseX],
+    [zoomLevel, seek, setIsScrubbing, setScrubTime, setScrubMouseX, rulerContainerRef],
   );
 
   const handleSplit = useCallback(
@@ -798,12 +803,20 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           const rulerEl = rulerContainerRef.current;
           if (rulerEl) {
             const rect = rulerEl.getBoundingClientRect();
-            const container = trackContainerRef.current;
-            const currentScrollLeft = container ? container.scrollLeft : useEditorStore.getState().scrollLeft;
+            // FIX: Always read the ruler element's OWN scrollLeft — not the
+            // trackContainer's, not the Zustand store. This is the only value
+            // that is guaranteed to be pixel-accurate at the moment the RAF
+            // callback fires, because useTimelineScroll writes to rulerContainerRef
+            // directly via DOM (not via RAF). Reading from trackContainerRef
+            // introduced a ~16ms race that made the time calculation wrong.
+            const currentScrollLeft = rulerEl.scrollLeft;
             const x = clientX - rect.left + currentScrollLeft;
             const time = Math.max(0, x / zoomLevel);
 
             seek(time);
+            // Immediately notify the canvas render engine — avoids waiting for
+            // React's async render cycle to propagate the Zustand state change.
+            window.dispatchEvent(new Event('procut-frame-updated'));
 
             const scrubNow = performance.now();
             if (scrubNow - lastScrubStateUpdateRef.current > 16) {

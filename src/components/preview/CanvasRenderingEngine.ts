@@ -157,6 +157,14 @@ export async function renderCanvasEngine({
   }
   if (!compositeCtxRef.current) return;
   const ctx = compositeCtxRef.current;
+  // PERF: During scrub disable bilinear filter on composite ctx for max GPU throughput.
+  // On scrub-end, the 'procut-scrub-finalize' path triggers a full-quality redraw.
+  if (isScrubbing) {
+    ctx.imageSmoothingEnabled = false;
+  } else {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+  }
   const previewQuality = settings?.previewQuality ?? useEditorStore.getState().settings?.previewQuality ?? 'full';
   const previewMode = settings?.previewMode ?? useEditorStore.getState().settings?.previewMode ?? 'auto';
   // Phase 3 Theme A2: Quality-2/3 Short-Circuit Integration for granular preview-mode gating.
@@ -214,11 +222,9 @@ export async function renderCanvasEngine({
   const W_target = 854;
   const H_target = 480;
   const canvas_scale = canvas.width / W_target;
-  // DOWNSCALE was previously 0.5 during playback for performance, but this caused
-  // mask rendering bugs (destination-in compositing at half-resolution coordinates
-  // produced smaller-than-expected clipped output). With GPU acceleration restored
-  // (no willReadFrequently on composite canvas), full-res rendering is fast enough.
-  const DOWNSCALE = 1.0;
+  // During scrubbing use half-resolution offscreen canvases for faster drawImage ops.
+  // On scrub end, 'procut-scrub-finalize' triggers a full-res repaint automatically.
+  const DOWNSCALE = isScrubbing ? 0.5 : 1.0;
 
   // NOTE: The old needsWait early-return was removed because it blocked the entire
   // rendering pipeline when a video element was mid-seek (readyState < 1). The

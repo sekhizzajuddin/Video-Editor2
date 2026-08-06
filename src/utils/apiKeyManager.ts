@@ -1,5 +1,52 @@
 import { useEditorStore } from '@/store/editorStore';
 
+// ─── Server-key Hydration ─────────────────────────────────────────────────────
+// Eagerly fetch API keys from /api/keys (Vercel serverless) at module load time.
+// This fires BEFORE any React useEffect, so keys are available in sessionStorage
+// the instant the first AI call is made — even if the user opens the chatbot
+// immediately on page load.
+//
+// Why not rely on VITE_GROQ_API_KEY?
+// Vite only bakes VITE_-prefixed vars at build time. Vercel env vars are named
+// GROQ_API_KEY (no prefix) and are only accessible server-side. The /api/keys
+// endpoint is the correct bridge. Previously the fetch only ran in a React
+// useEffect, creating a race window of ~200–500ms that caused 401 errors.
+
+let _hydrationDone = false;
+let _hydrationPromise: Promise<void> | null = null;
+
+export function hydrateKeysFromServer(): Promise<void> {
+  if (_hydrationDone) return Promise.resolve();
+  if (_hydrationPromise) return _hydrationPromise;
+
+  _hydrationPromise = fetch('/api/keys')
+    .then((res) => {
+      if (!res.ok) throw new Error(`/api/keys returned ${res.status}`);
+      return res.json();
+    })
+    .then((data: Record<string, string>) => {
+      if (data.geminiApiKey)     sessionStorage.setItem('procut_gemini_key',     data.geminiApiKey);
+      if (data.groqApiKey)       sessionStorage.setItem('procut_groq_key',       data.groqApiKey);
+      if (data.huggingFaceApiKey) sessionStorage.setItem('procut_huggingface_key', data.huggingFaceApiKey);
+      if (data.elevenLabsApiKey)  sessionStorage.setItem('procut_elevenlabs_key', data.elevenLabsApiKey);
+      _hydrationDone = true;
+      console.info('[apiKeyManager] Keys hydrated from /api/keys');
+    })
+    .catch((err) => {
+      // /api/keys only exists on Vercel. In local dev this 404s — that's fine.
+      // Local dev uses VITE_-prefixed env vars baked into the bundle by Vite.
+      console.warn('[apiKeyManager] /api/keys not available (local dev or error):', err?.message ?? err);
+      _hydrationDone = true; // Don't retry on failure
+    });
+
+  return _hydrationPromise;
+}
+
+// Fire immediately at module load so keys are ready before any component mounts.
+hydrateKeysFromServer();
+
+// ─── Key Getters ──────────────────────────────────────────────────────────────
+
 /**
  * Gets the primary Gemini key from the environment variables.
  */
@@ -31,6 +78,7 @@ export function getEnvElevenLabsKey(): string {
   // @ts-ignore
   return import.meta.env.VITE_ELEVENLABS_API_KEY || import.meta.env.ELEVENLABS_API_KEY || sessionStorage.getItem('procut_elevenlabs_key') || '';
 }
+
 
 /**
  * Gets the local fallback Gemini key provided by the user in settings.

@@ -1155,7 +1155,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const newTime = state.currentTime;
       const now = performance.now();
       // Throttle video element seeking to ~20fps to avoid overloading the hardware decoder during scrubs
-      if (now - lastScrubSeekTime < 50) return;
+      if (now - lastScrubSeekTime < 16) return;
       lastScrubSeekTime = now;
 
       const pool = poolRef.current;
@@ -1213,10 +1213,19 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           pendingSeeksRef.current.set(clip.clipId, mediaTime);
         } else {
           const drift = Math.abs(el.currentTime - mediaTime);
-          if (drift > 0.03) {
-            // Always use exact currentTime for scrub seeking (not fastSeek).
-            // fastSeek jumps to nearest keyframe causing choppy scrubbing.
+          if (drift > 0.016) {
+            // Use exact currentTime for scrub seeking for frame-accuracy.
             el.currentTime = mediaTime;
+            // Add a one-shot seeked listener to drain the pending seek queue immediately
+            const onSeeked = () => {
+              const pending = pendingSeeksRef.current.get(clip.clipId);
+              if (pending !== undefined) {
+                pendingSeeksRef.current.delete(clip.clipId);
+                const d2 = Math.abs(el.currentTime - pending);
+                if (d2 > 0.016) el.currentTime = pending;
+              }
+            };
+            el.addEventListener('seeked', onSeeked, { once: true });
           }
         }
       }

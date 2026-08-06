@@ -6,6 +6,8 @@ import { PreviewCanvas } from '@/components/PreviewCanvas';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { HelpTooltipManager } from '@/components/HelpTooltipManager';
 import { FileHandlerInitializer } from '@/components/FileHandlerInitializer';
+import { hydrateKeysFromServer } from '@/utils/apiKeyManager';
+
 
 const MediaPanel = React.lazy(() => import('@/components/MediaPanel').then(m => ({ default: m.MediaPanel })));
 const ScopesPanel = React.lazy(() => import('@/components/ScopesPanel').then(m => ({ default: m.ScopesPanel })));
@@ -447,30 +449,11 @@ function App() {
     });
   }, []);
 
-  // Fetch API keys from Vercel environment at runtime if available
+  // Ensure API keys are fetched from /api/keys (Vercel) and stored in sessionStorage.
+  // apiKeyManager already fires this eagerly at module load — this useEffect is a
+  // safety net in case the module was imported before the DOM was ready.
   useEffect(() => {
-    fetch('/api/keys')
-      .then((res) => {
-        if (res.ok) return res.json();
-        throw new Error('Failed to fetch keys');
-      })
-      .then((data) => {
-        if (data.geminiApiKey) {
-          sessionStorage.setItem('procut_gemini_key', data.geminiApiKey);
-        }
-        if (data.groqApiKey) {
-          sessionStorage.setItem('procut_groq_key', data.groqApiKey);
-        }
-        if (data.huggingFaceApiKey) {
-          sessionStorage.setItem('procut_huggingface_key', data.huggingFaceApiKey);
-        }
-        if (data.elevenLabsApiKey) {
-          sessionStorage.setItem('procut_elevenlabs_key', data.elevenLabsApiKey);
-        }
-      })
-      .catch((err) => {
-        console.warn('API keys fetch not available or failed:', err);
-      });
+    hydrateKeysFromServer().catch(() => {/* handled internally */});
   }, []);
 
   // Periodic Autosave Versioning (every 2 minutes)

@@ -1,4 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { getGroqKey } from '../utils/apiKeyManager';
+
 import { useEditorStore } from '../store/editorStore';
 import { aiToolRegistry, executeAITool, requiresConfirmation } from '../utils/aiToolRegistry';
 import { AiTrainingOrchestrator } from '../utils/ai-training/AiTrainingOrchestrator';
@@ -193,9 +195,11 @@ export const useAiCopilot = () => {
 
   // Phase 2: Workflow executor helper (creates an executor bound to current state)
   const buildExecutor = useCallback((): WorkflowExecutor | null => {
-    const groqKey = (import.meta as any).env?.VITE_GROQ_API_KEY
-      || sessionStorage.getItem('procut_groq_key')
-      || (editorStore as any).settings?.groqApiKey;
+    // FIX: Always use getGroqKey() which reads from env → sessionStorage → user settings.
+    // Previously used import.meta.env.VITE_GROQ_API_KEY which is ALWAYS undefined on
+    // Vercel because the env var is GROQ_API_KEY (no VITE_ prefix) and Vite only bakes
+    // VITE_-prefixed vars at build time.
+    const groqKey = getGroqKey();
     if (!groqKey) return null;
 
     const conversation = snapshotContext(editorStore);
@@ -849,9 +853,12 @@ export const useAiCopilot = () => {
       return;
     }
 
-    // Use Vercel env/session key first, then fallback to user settings
+    // FIX: Use getGroqKey() — the canonical fallback chain (env → sessionStorage → settings).
+    // Vercel env vars are NOT prefixed with VITE_, so import.meta.env.VITE_GROQ_API_KEY
+    // is always undefined in the deployed bundle. getGroqKey() reads sessionStorage which
+    // is hydrated by the /api/keys fetch in App.tsx.
     // @ts-ignore
-    const groqKey = import.meta.env.VITE_GROQ_API_KEY || sessionStorage.getItem('procut_groq_key') || editorStore.settings?.groqApiKey;
+    const groqKey = getGroqKey();
     if (!groqKey) {
       if (isMountedRef.current) {
         setMessages(prev => [...prev,
@@ -1233,12 +1240,7 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
     rateLimitStatus,
     workflowProgress,
     abortWorkflow,
-    runAgenticWorkflow: (prompt: string) => executeViaExecutor(prompt, (
-      (import.meta as any).env?.VITE_GROQ_API_KEY
-      || sessionStorage.getItem('procut_groq_key')
-      || (editorStore as any).settings?.groqApiKey
-      || ''
-    ), prompt),
+    runAgenticWorkflow: (prompt: string) => executeViaExecutor(prompt, getGroqKey() || '', prompt),
     selfTestState,
     abortSelfTest,
     runSelfTest,

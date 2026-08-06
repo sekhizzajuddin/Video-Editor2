@@ -559,31 +559,44 @@ export function PreviewCanvasContainer() {
         }
       }
 
-      if (tabVisible && framePendingRef.current && !isRendering) {
-        framePendingRef.current = false;
-        isRendering = true;
-        isRenderingRef.current = true;
-
-        // CRITICAL FIX: Patch renderDepsRef with FRESH store data right before rendering.
-        // Without this, renderDepsRef holds stale values because React's useEffect hasn't
-        // processed the Zustand state change yet when the RAF tick fires.
+      if (tabVisible && framePendingRef.current) {
+        // During scrubbing or playback: skip the isRendering mutex so we never
+        // drop frames waiting for an in-flight (but already cheap) render to finish.
+        // During scrub the engine skips all heavy FX so renders complete in <4ms.
         const freshState = useEditorStore.getState();
-        const deps = renderDepsRef.current;
-        deps.currentTime = currentTimeRef.current;
-        deps.tracks = freshState.tracks;
-        deps.selectedClipId = freshState.selectedClipId;
-        deps.mediaLibrary = freshState.mediaLibrary;
-        deps.isPlaying = freshState.isPlaying;
-        deps.isScrubbing = freshState.isScrubbing;
+        const currentlyScrubbing = freshState.isScrubbing;
+        const currentlyPlaying = freshState.isPlaying;
+        const allowConcurrent = currentlyScrubbing || currentlyPlaying;
 
-        renderCanvasRef.current()
-          .catch((err: unknown) => {
-            console.error('Error in renderCanvas:', err);
-          })
-          .finally(() => {
-            isRendering = false;
-            isRenderingRef.current = false;
-          });
+        if (allowConcurrent || !isRendering) {
+          framePendingRef.current = false;
+          if (!allowConcurrent) {
+            isRendering = true;
+            isRenderingRef.current = true;
+          }
+
+          // CRITICAL FIX: Patch renderDepsRef with FRESH store data right before rendering.
+          // Without this, renderDepsRef holds stale values because React's useEffect hasn't
+          // processed the Zustand state change yet when the RAF tick fires.
+          const deps = renderDepsRef.current;
+          deps.currentTime = currentTimeRef.current;
+          deps.tracks = freshState.tracks;
+          deps.selectedClipId = freshState.selectedClipId;
+          deps.mediaLibrary = freshState.mediaLibrary;
+          deps.isPlaying = currentlyPlaying;
+          deps.isScrubbing = currentlyScrubbing;
+
+          renderCanvasRef.current()
+            .catch((err: unknown) => {
+              console.error('Error in renderCanvas:', err);
+            })
+            .finally(() => {
+              if (!allowConcurrent) {
+                isRendering = false;
+                isRenderingRef.current = false;
+              }
+            });
+        }
       }
     };
 

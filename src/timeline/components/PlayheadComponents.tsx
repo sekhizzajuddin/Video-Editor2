@@ -73,7 +73,13 @@ export function FloatingScrubTooltip({
     
     const updateDOM = (state: any) => {
       if (containerRef.current && textRef.current) {
-        containerRef.current.style.left = `${state.currentTime * zoomLevel - state.scrollLeft}px`;
+        // FIX: Read scrollLeft directly from the ruler DOM element, not from the
+        // Zustand store. The store's scrollLeft is throttled to ~10Hz and can lag
+        // the DOM by up to 100ms, making the tooltip drift from the playhead
+        // during fast scrubs. The ruler element's scrollLeft is always current.
+        const rulerEl = document.querySelector<HTMLElement>('.procut-timeline-ruler');
+        const liveScrollLeft = rulerEl ? rulerEl.scrollLeft : state.scrollLeft;
+        containerRef.current.style.left = `${state.currentTime * zoomLevel - liveScrollLeft}px`;
         textRef.current.textContent = formatDetailedTooltipTime(state.currentTime);
       }
     };
@@ -98,6 +104,7 @@ export function FloatingScrubTooltip({
   );
 }
 
+
 export function PlaybackAutoScroller({
   zoomLevel,
   totalDuration,
@@ -108,15 +115,12 @@ export function PlaybackAutoScroller({
   trackContainerRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const lastScrollRef = useRef<number>(0);
-  const lastStoreSyncRef = useRef<number>(0);
+  const lastDomScrollRef = useRef<number>(0);  // throttle DOM scroll writes to ~30Hz
+  const lastStoreWriteRef = useRef<number>(0); // throttle Zustand store writes to ~10Hz
 
   useEffect(() => {
-    // We subscribe to the store manually rather than re-rendering this component
-    // on every currentTime update.
     return useEditorStore.subscribe((state) => {
-      // Auto-scroll during both playback AND scrubbing so the playhead stays
-      // in view. During scrub, scrolling is throttled to ~30 Hz via the
-      // lastStoreSyncRef gate below to avoid jank.
+      // Auto-scroll during both playback AND scrubbing so the playhead stays in view.
       if (!state.isPlaying && !state.isScrubbing) return;
       const container = trackContainerRef.current;
       if (!container) return;
@@ -138,23 +142,22 @@ export function PlaybackAutoScroller({
         targetScroll = Math.max(0, playheadX - visibleWidth * 0.1);
       }
 
-      if (targetScroll !== -1) {
-        // Only update if moved by >1px
-        if (Math.abs(targetScroll - lastScrollRef.current) < 1) return;
-        lastScrollRef.current = targetScroll;
+      if (targetScroll === -1) return;
+      // Skip tiny sub-pixel scrolls
+      if (Math.abs(targetScroll - lastScrollRef.current) < 1) return;
+      lastScrollRef.current = targetScroll;
 
-        // Throttle DOM scroll to 30 Hz to avoid jank during fast scrubs.
-        // The actual currentTime is unaffected — only the visual viewport moves.
-        const now = performance.now();
-        if (now - lastStoreSyncRef.current < 33) return;
-        lastStoreSyncRef.current = now;
+      const now = performance.now();
 
-        container.scrollLeft = targetScroll;
+      // Throttle DOM scroll updates to ~30 Hz (33ms) to avoid layout thrashing
+      if (now - lastDomScrollRef.current < 33) return;
+      lastDomScrollRef.current = now;
+      container.scrollLeft = targetScroll;
 
-        // Sync to store at 10Hz (100ms) for persistence to avoid broadcast storm
-        if (now - lastStoreSyncRef.current > 100) {
-          useEditorStore.getState().setScrollLeft(targetScroll);
-        }
+      // Throttle Zustand store writes to ~10 Hz (100ms) to avoid broadcast storms
+      if (now - lastStoreWriteRef.current > 100) {
+        lastStoreWriteRef.current = now;
+        useEditorStore.getState().setScrollLeft(targetScroll);
       }
     });
   }, [zoomLevel, totalDuration, trackContainerRef]);

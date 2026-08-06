@@ -19,24 +19,31 @@ export function useTimelineScroll({
 
   const handleScroll = useCallback(() => {
     if (!trackContainerRef.current) return;
-    if (scrollRafRef.current !== null) return; // already scheduled
 
+    // CRITICAL: Sync the ruler's scrollLeft IMMEDIATELY (synchronous, no RAF).
+    // The ruler is overflow-hidden so writing scrollLeft causes no browser layout.
+    // Any delay here means handleRulerMouseDown reads a stale scrollLeft value
+    // and calculates the wrong time — causing the "click at 5s → jumps to 3s" bug.
+    const target = trackContainerRef.current;
+    if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== target.scrollLeft) {
+      rulerContainerRef.current.scrollLeft = target.scrollLeft;
+    }
+    // Sync vertical scroll to headers immediately too
+    if (trackHeadersRef.current && trackHeadersRef.current.scrollTop !== target.scrollTop) {
+      trackHeadersRef.current.scrollTop = target.scrollTop;
+    }
+
+    // Zustand store write is RAF-throttled: it broadcasts to all subscribers,
+    // so writing on every scroll event would cause 60+ re-renders per second.
+    if (scrollRafRef.current !== null) return;
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null;
-      const target = trackContainerRef.current;
-      if (!target) return;
-      // Sync ruler immediately via DOM
-      if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== target.scrollLeft) {
-        rulerContainerRef.current.scrollLeft = target.scrollLeft;
-      }
-      // Update store — since timeline no longer selects scrollLeft this won't trigger re-renders
-      useEditorStore.getState().setScrollLeft(target.scrollLeft);
-      // Sync vertical scroll to headers
-      if (trackHeadersRef.current && trackHeadersRef.current.scrollTop !== target.scrollTop) {
-        trackHeadersRef.current.scrollTop = target.scrollTop;
-      }
+      const t = trackContainerRef.current;
+      if (!t) return;
+      useEditorStore.getState().setScrollLeft(t.scrollLeft);
     });
   }, [trackContainerRef, rulerContainerRef, trackHeadersRef]);
+
 
   const handleHeadersScroll = useCallback(() => {
     if (trackHeadersRef.current && trackContainerRef.current) {
