@@ -425,7 +425,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     (e: React.MouseEvent, clip: TimelineClip, edge: 'left' | 'right') => {
       e.stopPropagation();
       e.preventDefault();
-      const track = tracks.find((t) => t.id === clip.trackId);
+      let track = tracks.find((t) => t.id === clip.trackId);
+      if (!track) {
+        const pipWindows = useEditorStore.getState().pipWindows || {};
+        for (const pip of Object.values(pipWindows)) {
+          track = pip.tracks.find((t) => t.id === clip.trackId);
+          if (track) break;
+        }
+      }
       if (track?.locked) return;
       
       startTransactionSafe();
@@ -686,6 +693,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           selectClip(clip.id);
           currentSelectedIds = [clip.id];
         }
+        selectTrack(null);
       }
 
       let draggedClips: { id: string; originalStartTime: number; trackId: string }[] = [];

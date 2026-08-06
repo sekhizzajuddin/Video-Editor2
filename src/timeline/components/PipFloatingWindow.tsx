@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { PipWindow, TimelineClip } from '@/types';
@@ -33,14 +33,13 @@ interface PipFloatingWindowProps {
   selectTransition: (id: string | null) => void;
 }
 
-const PipPlayhead = React.memo(({ parentStartTime, pipRelativeStartTime, pipDuration, zoomLevel }: { parentStartTime: number, pipRelativeStartTime?: number, pipDuration: number, zoomLevel: number }) => {
+const PipPlayhead = React.memo(({ absoluteStart, duration, zoomLevel }: { absoluteStart: number, duration: number, zoomLevel: number }) => {
   const currentTime = useEditorStore(s => s.currentTime);
-  const pipAbsStart = parentStartTime + (pipRelativeStartTime || 0);
-  if (currentTime >= pipAbsStart && currentTime <= pipAbsStart + pipDuration) {
+  if (currentTime >= absoluteStart && currentTime <= absoluteStart + duration) {
     return (
       <div 
-        className="absolute top-0 bottom-0 w-px bg-red-500 z-50 pointer-events-none"
-        style={{ left: `${(currentTime - pipAbsStart) * zoomLevel}px` }}
+        className="absolute top-0 bottom-0 w-px bg-red-500 z-30 pointer-events-none"
+        style={{ left: `${(currentTime - absoluteStart) * zoomLevel}px` }}
       />
     );
   }
@@ -82,6 +81,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     mediaLibrary,
     selectedClipId,
     selectedTrackId,
+    enterCompoundClip,
+    toggleKeyframeLineSelection,
+    isScrubbing,
+    currentTime,
   } = useEditorStore(useShallow(s => ({
     updatePipWindowStartTime: s.updatePipWindowStartTime,
     updatePipWindowDuration: s.updatePipWindowDuration,
@@ -93,6 +96,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     mediaLibrary: s.mediaLibrary,
     selectedClipId: s.selectedClipId,
     selectedTrackId: s.selectedTrackId,
+    isScrubbing: s.isScrubbing,
+    currentTime: s.currentTime,
+    enterCompoundClip: s.enterCompoundClip,
+    toggleKeyframeLineSelection: s.toggleKeyframeLineSelection,
   })));
 
   const [isDragging, setIsDragging] = useState(false);
@@ -113,12 +120,45 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     };
   }, []);
 
+  const [localRelTime, setLocalRelTime] = useState<number | null>(null);
+  const localRelTimeRef = useRef<number | null>(null);
+  const setLocalRelTimeSafe = (val: number | null) => {
+    localRelTimeRef.current = val;
+    setLocalRelTime(val);
+  };
+
+  const [localDuration, setLocalDuration] = useState<number | null>(null);
+  const localDurationRef = useRef<number | null>(null);
+  const setLocalDurationSafe = (val: number | null) => {
+    localDurationRef.current = val;
+    setLocalDuration(val);
+  };
+
+  const displayRelTime = localRelTime !== null ? localRelTime : (pipWindow.relativeStartTime || 0);
+  const displayDuration = localDuration !== null ? localDuration : pipWindow.duration;
+
+  const pipAbsoluteStart = useMemo(() => {
+    return displayRelTime + parentClip.startTime;
+  }, [displayRelTime, parentClip.startTime]);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // T-14: Auto-scroll PIP container
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !isScrubbing) return;
+    const playheadX = (currentTime - pipAbsoluteStart) * zoomLevel;
+    if (playheadX < el.scrollLeft || playheadX > el.scrollLeft + el.clientWidth) {
+      el.scrollLeft = playheadX - el.clientWidth / 2;
+    }
+  }, [currentTime, pipAbsoluteStart, zoomLevel, isScrubbing]);
+
   const startXRef = useRef(0);
   const startDurationRef = useRef(0);
   const startRelTimeRef = useRef(0);
   
-  const windowLeft = (parentClip.startTime + (pipWindow.relativeStartTime || 0)) * zoomLevel - 1;
-  const windowWidth = Math.max(200, pipWindow.duration * zoomLevel) + 2;
+  const windowLeft = (parentClip.startTime + displayRelTime) * zoomLevel - 1;
+  const windowWidth = Math.max(200, displayDuration * zoomLevel) + 2;
   const parentEnd = parentClip.startTime + parentClip.duration;
 
   const trackIdx = tracks.findIndex(t => t.id === parentClip.trackId);
@@ -157,7 +197,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           newAbsoluteStart = Math.max(parentClip.startTime, Math.min(parentEnd, newAbsoluteStart));
           const newRelativeStart = newAbsoluteStart - parentClip.startTime;
 
-          updatePipWindowStartTime(pipWindow.id, newRelativeStart);
+          setLocalRelTimeSafe(newRelativeStart);
         });
       };
       const handleMouseUp = () => {
@@ -166,6 +206,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           dragRafRef.current = null;
         }
         setIsDragging(false);
+        if (localRelTimeRef.current !== null) {
+          updatePipWindowStartTime(pipWindow.id, localRelTimeRef.current);
+          setLocalRelTimeSafe(null);
+        }
         useEditorStore.getState().saveSnapshot('Move PIP Window');
         useEditorStore.getState().endTransaction();
       };
@@ -207,7 +251,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           let newDuration = Math.max(0.5, startDurationRef.current + dt);
           newDuration = Math.min(maxDuration, Math.min(600, newDuration));
           
-          updatePipWindowDuration(pipWindow.id, newDuration);
+          setLocalDurationSafe(newDuration);
         });
       };
       const handleMouseUp = () => {
@@ -216,6 +260,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           resizeRafRef.current = null;
         }
         setIsResizing(false);
+        if (localDurationRef.current !== null) {
+          updatePipWindowDuration(pipWindow.id, localDurationRef.current);
+          setLocalDurationSafe(null);
+        }
         useEditorStore.getState().saveSnapshot('Resize PIP Window');
         useEditorStore.getState().endTransaction();
       };
@@ -289,6 +337,12 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
             let selectedTrackIdx = pipWindow.tracks.findIndex(t => t.clips.some(c => c.id === selectedClipId));
             if (selectedTrackIdx === -1) {
               selectedTrackIdx = pipWindow.tracks.findIndex(t => t.id === selectedTrackId);
+            }
+            if (selectedTrackIdx >= 0) {
+              const t = pipWindow.tracks[selectedTrackIdx];
+              if (t.id !== selectedTrackId && !t.clips.some(c => c.id === selectedClipId)) {
+                selectedTrackIdx = -1;
+              }
             }
             if (selectedTrackIdx !== -1) {
               return (
@@ -376,16 +430,23 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
 
           {/* Add Track Button & Dropdown */}
           <div className="relative" ref={addTrackMenuRef}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowAddTrackMenu(!showAddTrackMenu);
-              }}
-              className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors flex items-center justify-center"
-              title="Add Track to PIP"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
+            {(() => {
+              const PIP_MAX_TRACKS = 6;
+              const canAddTrack = pipWindow.tracks.length < PIP_MAX_TRACKS;
+              return (
+                <button
+                  disabled={!canAddTrack}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowAddTrackMenu(!showAddTrackMenu);
+                  }}
+                  className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors flex items-center justify-center disabled:opacity-30"
+                  title={canAddTrack ? "Add Track to PIP" : "PIP track limit reached"}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              );
+            })()}
             {showAddTrackMenu && (
               <div className="absolute right-0 mt-1 w-24 bg-[#1e1e1e]/95 backdrop-blur-md border border-[#4a4a4a] rounded shadow-2xl z-[100] flex flex-col py-1 text-[10px]">
                 {(['video', 'audio', 'text', 'fx'] as const).map((type) => (
@@ -444,82 +505,81 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
       {!isCollapsed && (
         <div 
           className="flex-1 relative overflow-y-auto py-2 min-h-[60px] rounded-b-lg"
-        onDrop={handlePipContainerDrop}
-        onDragOver={handlePipContainerDragOver}
-      >
-        {pipWindow.tracks.length === 0 ? (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-xs font-medium text-gray-500/70 border border-dashed border-gray-600 px-4 py-2 rounded-md">
-              Drop Video/Image Here
-            </span>
-          </div>
-        ) : (
-          <div className="relative w-full h-full flex flex-col gap-1">
-            <PipPlayhead
-              parentStartTime={parentClip.startTime}
-              pipRelativeStartTime={pipWindow.relativeStartTime}
-              pipDuration={pipWindow.duration}
-              zoomLevel={zoomLevel}
-            />
-             {(pipWindow.tracks || []).map((track, idx) => {
-               // Render track type icon
-               const TrackIcon = () => {
-                 switch (track.type) {
-                   case 'video': return <Film className="w-3.5 h-3.5 text-blue-400" />;
-                   case 'audio': return <Music className="w-3.5 h-3.5 text-green-400" />;
-                   case 'text': return <Type className="w-3.5 h-3.5 text-yellow-400" />;
-                   case 'fx': return <Sparkles className="w-3.5 h-3.5 text-rose-400" />;
-                   default: return null;
-                 }
-               };
-
-               const isMutedOrHidden = track.type === 'audio' ? track.muted : track.hidden;
-
-               return (
-                 <div key={track.id} className="flex items-stretch bg-gray-900/60 border border-white/5 rounded-md min-h-[44px] relative overflow-hidden group">
-
-
-                   {/* Clip Area */}
-                   <div className="flex-1 min-w-0 relative">
-                     {track.hidden ? (
-                       <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px] text-[10px] text-gray-500 italic select-none">
-                         Track contents hidden
-                       </div>
-                     ) : (
-                       <TimelineClipRow
-                         track={track}
-                         tracks={pipWindow.tracks}
-                         zoomLevel={zoomLevel}
-                         selectedClipIds={selectedClipIds}
-                         draggingClipId={draggingClipId}
-                         activeTool={activeTool}
-                         hoverCutClipId={hoverCutClipId}
-                         hoverCutX={hoverCutX}
-                         handleDragOver={handleDragOver}
-                         handleDrop={handleDrop}
-                         setHoveredTrackId={setHoveredTrackId}
-                         setDropPreview={setDropPreview}
-                         setContextMenu={setContextMenu}
-                         handleClipMouseDown={handleClipMouseDown}
-                         setHoverCutX={setHoverCutX}
-                         setHoverCutClipId={setHoverCutClipId}
-                         enterCompoundClip={() => {}}
-                         toggleKeyframeLineSelection={() => {}}
-                         selectedKeyframeLines={[]}
-                         showTransitionLayer={false}
-                         selectedTransitionClipId={null}
-                         hoveredTrackId={null}
-                         selectTrack={selectTrack}
-                         selectClip={selectClip}
-                         selectTransition={selectTransition}
-                       />
-                     )}
-                   </div>
-                 </div>
-               );
-             })}
-          </div>
-        )}
+          ref={containerRef}
+          onDrop={handlePipContainerDrop}
+          onDragOver={handlePipContainerDragOver}
+        >
+          {(() => {
+            const parentTrack = tracks.find(t => t.id === parentClip.trackId);
+            const parentIsHidden = parentTrack ? (parentTrack.type === 'audio' ? parentTrack.muted : parentTrack.hidden) : false;
+            
+            if (parentIsHidden) {
+              return (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-50 text-gray-400 font-medium text-sm">
+                  Parent clip is hidden
+                </div>
+              );
+            }
+            if (pipWindow.tracks.length === 0) {
+              return (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="text-xs font-medium text-gray-500/70 border border-dashed border-gray-600 px-4 py-2 rounded-md">
+                    Drop Video/Image Here
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <div className="relative w-full h-full flex flex-col gap-1">
+                <PipPlayhead
+                  absoluteStart={pipAbsoluteStart}
+                  duration={displayDuration}
+                  zoomLevel={zoomLevel}
+                />
+                {(pipWindow.tracks || []).map((track, idx) => {
+                  return (
+                    <div key={track.id} className="flex items-stretch bg-gray-900/60 border border-white/5 rounded-md min-h-[44px] relative overflow-hidden group">
+                      <div className="flex-1 min-w-0 relative">
+                        {track.hidden ? (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px] text-[10px] text-gray-500 italic select-none">
+                            Track contents hidden
+                          </div>
+                        ) : (
+                          <TimelineClipRow
+                            track={track}
+                            tracks={pipWindow.tracks}
+                            zoomLevel={zoomLevel}
+                            selectedClipIds={selectedClipIds}
+                            draggingClipId={draggingClipId}
+                            activeTool={activeTool}
+                            hoverCutClipId={hoverCutClipId}
+                            hoverCutX={hoverCutX}
+                            handleDragOver={handleDragOver}
+                            handleDrop={handleDrop}
+                            setHoveredTrackId={setHoveredTrackId}
+                            setDropPreview={setDropPreview}
+                            setContextMenu={setContextMenu}
+                            handleClipMouseDown={handleClipMouseDown}
+                            setHoverCutX={setHoverCutX}
+                            setHoverCutClipId={setHoverCutClipId}
+                            enterCompoundClip={enterCompoundClip}
+                            toggleKeyframeLineSelection={toggleKeyframeLineSelection}
+                            selectedKeyframeLines={[]}
+                            showTransitionLayer={false}
+                            selectedTransitionClipId={null}
+                            hoveredTrackId={null}
+                            selectTrack={selectTrack}
+                            selectClip={selectClip}
+                            selectTransition={selectTransition}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import type { SpeedRampKeyframe } from '@/types';
 
@@ -113,6 +113,12 @@ export function useTimelineState() {
   // audio engine, and useMediaPlayback can react with quality-2 rendering
   // and silent audio (CapCut behavior).
   const setGlobalScrubbing = useEditorStore((s) => s.setIsScrubbing);
+  const globalIsScrubbing = useEditorStore((s) => s.isScrubbing);
+
+  useEffect(() => {
+    setIsScrubbingLocal(globalIsScrubbing);
+  }, [globalIsScrubbing]);
+
   const setIsScrubbing = useCallback(
     (v: boolean) => {
       setIsScrubbingLocal(v);

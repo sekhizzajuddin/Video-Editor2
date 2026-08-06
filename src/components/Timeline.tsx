@@ -352,8 +352,13 @@ export function Timeline() {
                 {sortedMarkers.map((marker, i) => {
                   let nextTime = totalDuration;
                   if (marker.type === 'sponsor' || marker.type === 'chapter') {
-                    const nextMarker = sortedMarkers.slice(i+1).find(m => m.time > marker.time);
-                    if (nextMarker) nextTime = nextMarker.time;
+                    for (let j = i + 1; j < sortedMarkers.length; j++) {
+                      const n = sortedMarkers[j];
+                      if (n.type === 'sponsor' || n.type === 'chapter') {
+                        nextTime = n.time;
+                        break;
+                      }
+                    }
                   }
                   const isSegment = marker.type === 'sponsor' || marker.type === 'chapter';
 
@@ -423,7 +428,7 @@ export function Timeline() {
                   const activeTrackIdx = hoveredTrackIdx >= 0 ? hoveredTrackIdx : dropPreview.trackIdx;
                   return (
                     <div
-                      className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border}`}
+                      className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border ?? 'border-white/30'}`}
                       style={{
                         top: `${getTrackTop(tracks, activeTrackIdx) + 4}px`,
                         left: `${dropPreview.time * zoomLevel}px`,

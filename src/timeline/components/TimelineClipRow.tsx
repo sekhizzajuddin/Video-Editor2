@@ -241,20 +241,24 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       </div>
 
       {/* ── Resize Handles (Visible on Hover) ──────────────── */}
-      <div 
-        className="absolute left-0 top-0 bottom-0 w-[8px] bg-white/0 hover:bg-white/50 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
-        data-edge="left"
-        onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
-      >
-        <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
-      </div>
-      <div 
-        className="absolute right-0 top-0 bottom-0 w-[8px] bg-white/0 hover:bg-white/50 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
-        data-edge="right"
-        onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
-      >
-        <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
-      </div>
+      {!trackLocked && (
+        <>
+          <div 
+            className="absolute left-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
+            data-edge="left"
+            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+          >
+            <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
+          </div>
+          <div 
+            className="absolute right-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
+            data-edge="right"
+            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+          >
+            <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
+          </div>
+        </>
+      )}
 
 
 
@@ -335,21 +339,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         </div>
       )}
 
-      {/* ── Resize handles ────────────────────────── */}
-      {!trackLocked && (
-        <>
-          <div
-            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
-            className={`absolute left-0 top-0 bottom-0 w-2.5 cursor-w-resize z-20 transition-colors hover:bg-amber-500/80`}
-            title="Drag to trim start"
-          />
-          <div
-            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
-            className={`absolute right-0 top-0 bottom-0 w-2.5 cursor-e-resize z-20 transition-colors hover:bg-amber-500/80`}
-            title="Drag to trim end"
-          />
-        </>
-      )}
+
 
       {/* ── Clip label overlay ────────────────────── */}
       <div className="absolute inset-0 flex flex-col px-1.5 py-0.5 overflow-hidden z-10 pointer-events-none">
@@ -629,7 +619,8 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
         const prevClip = sortedClips[idx - 1];
         const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
         
-        if (Math.abs(gap) < 0.034) {
+        const isEligibleForTransition = gap > -0.034 && gap < 0.034;
+        if (isEligibleForTransition) {
           const intersectionTime = clip.startTime;
           const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
           

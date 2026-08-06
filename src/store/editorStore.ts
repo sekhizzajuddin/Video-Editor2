@@ -292,6 +292,7 @@ interface EditorActions {
 
   // Computed: recalculate total duration from all clips
   recalcTotalDuration: () => void;
+  recalcPipDurations: (pipId: string) => void;
   setAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
   setPerRatioFramingEnabled: (enabled: boolean) => void;
   updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => void;
@@ -681,7 +682,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return {
         tracks: newTracks,
         selectedClipId: newSelectedClipId,
-        selectedClipIds: newSelectedClipIds
+        selectedClipIds: newSelectedClipIds,
+        selectedKeyframeLines: state.selectedKeyframeLines.filter(l => l.clipId !== clipId)
       };
     });
 
@@ -791,6 +793,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         pipWindows,
         selectedClipId: newSelectedClipId,
         selectedClipIds: newSelectedClipIds,
+        selectedKeyframeLines: state.selectedKeyframeLines.filter(l => l.clipId !== clipId)
       };
     });
 
@@ -1507,6 +1510,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks: newTracks,
         selectedClipId: newSelectedClipId,
         selectedClipIds: newSelectedClipIds,
+        selectedKeyframeLines: state.selectedKeyframeLines.filter(l => !idsToRemove.includes(l.clipId)),
         ...(pipUpdated || orphanPipIds.size > 0 ? { pipWindows: newPipWindows } : {})
       };
     });
@@ -1515,9 +1519,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   updateClip: (clipId, updates, options) => {
+    let pipsToRecalc: string[] = [];
     set((state) => {
       const found = findClipDeep(state, clipId);
       if (!found) return state; // Prevent null pointer exception if clip was deleted
+
       
       let durationOverride = updates.duration; // Use whatever the caller passed first
       let durationDelta = 0;
@@ -1549,6 +1555,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       if (found && options?.ripple && durationOverride !== undefined) {
         durationDelta = durationOverride - found.clip.duration;
+      }
+      
+      const newDuration = durationOverride !== undefined ? durationOverride : found.clip.duration;
+      const newStartTime = updates.startTime !== undefined ? updates.startTime : found.clip.startTime;
+      if ((newDuration !== found.clip.duration || newStartTime !== found.clip.startTime) && found.clip.pipWindowIds?.length) {
+        pipsToRecalc = [...found.clip.pipWindowIds];
       }
 
       const finalUpdates = {
@@ -1618,6 +1630,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().recalcTotalDuration();
+    if (pipsToRecalc.length > 0) {
+      pipsToRecalc.forEach(pid => get().recalcPipDurations(pid));
+    }
     // NOTE: saveSnapshot() is intentionally NOT called here - callers call it explicitly when needed
     // This prevents excessive snapshot creation during drag operations
   },
@@ -1632,18 +1647,28 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       get().updateClip(updates[0].clipId, updates[0].changes);
       return;
     }
+    const pipIdsToRecalc = new Set<string>();
+    
     set((state) => {
       const updateMap = new Map(updates.map(u => [u.clipId, u.changes]));
       const { tracks, pipWindows } = mapTracksDeep(state, (track) => ({
         ...track,
         clips: track.clips.map((clip) => {
           const changes = updateMap.get(clip.id);
-          return changes ? { ...clip, ...changes } : clip;
+          if (changes) {
+            if ((changes.duration !== undefined && changes.duration !== clip.duration) ||
+                (changes.startTime !== undefined && changes.startTime !== clip.startTime)) {
+              clip.pipWindowIds?.forEach(pid => pipIdsToRecalc.add(pid));
+            }
+            return { ...clip, ...changes };
+          }
+          return clip;
         }),
       }));
       return { tracks, pipWindows };
     });
     get().recalcTotalDuration();
+    pipIdsToRecalc.forEach(pid => get().recalcPipDurations(pid));
   },
 
   moveClip: (clipId, newStartTime, newTrackId, resolveOverlap = false) => {
@@ -2907,11 +2932,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         return { ...c, animations: anims };
       };
 
-      const newTracks = state.tracks.map((t) => ({
+      return mapTracksDeep(state, (t) => ({
         ...t,
         clips: t.clips.map(updateClipKeyframes),
       }));
-      return { tracks: newTracks };
     });
     get().saveSnapshot('Add Keyframe');
   },
@@ -2963,11 +2987,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         return updatedClip;
       };
 
-      const newTracks = state.tracks.map((t) => ({
+      return mapTracksDeep(state, (t) => ({
         ...t,
         clips: t.clips.map(deleteClipKeyframe),
       }));
-      return { tracks: newTracks };
     });
     get().saveSnapshot('Delete Keyframe');
   },
@@ -2991,11 +3014,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         return { ...c, animations: anims };
       };
 
-      const newTracks = state.tracks.map((t) => ({
+      return mapTracksDeep(state, (t) => ({
         ...t,
         clips: t.clips.map(moveClipKeyframe),
       }));
-      return { tracks: newTracks };
     });
     get().saveSnapshot('Move Keyframe');
   },
@@ -3018,13 +3040,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         return { ...c, animations: anims };
       };
 
-      const newTracks = state.tracks.map((t) => ({
+      return mapTracksDeep(state, (t) => ({
         ...t,
         clips: t.clips.map(breakClipKeyframe),
       }));
-      return { tracks: newTracks };
     });
-    get().saveSnapshot('Toggle Easing Hold');
+    get().saveSnapshot('Break Keyframe Link');
   },
 
   toggleKeyframeLineSelection: (clipId, time, multi = false) => set((state) => {
@@ -3043,7 +3064,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   removeSelectedKeyframeLines: () => {
     set((state) => {
       if (state.selectedKeyframeLines.length === 0) return {};
-      const newTracks = state.tracks.map((t) => ({
+      const mapped = mapTracksDeep(state, (t) => ({
         ...t,
         clips: t.clips.map((c) => {
           const linesForClip = state.selectedKeyframeLines.filter((l: any) => l.clipId === c.id);
@@ -3061,7 +3082,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           return { ...c, animations: anims };
         })
       }));
-      return { tracks: newTracks, selectedKeyframeLines: [] };
+      return { ...mapped, selectedKeyframeLines: [] };
     });
     get().saveSnapshot('Remove Keyframes');
   },
@@ -3630,7 +3651,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         // Duration is maxClipEnd + 3 seconds, capped at 10 minutes (600 seconds)
         // If manualDuration is set, respect it but ensure it is at least maxClipEnd
         const targetDuration = pip.manualDuration
-          ? Math.max(pip.duration, maxClipEnd)
+          ? Math.max(pip.manualDuration, maxClipEnd)
           : Math.min(600, Math.max(5, maxClipEnd + 3));
         if (pip.duration !== targetDuration) {
           updatedPipWindows[id] = { ...pip, duration: targetDuration };
@@ -3649,6 +3670,44 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       tracks: cleanedTracks,
       totalDuration: newTotalDuration,
       ...(pipChanged ? { pipWindows: updatedPipWindows } : {})
+    });
+  },
+
+  recalcPipDurations: (pipId: string) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return state;
+      
+      const parentClip = findClipInTracks(state.tracks, pip.parentClipId, state.pipWindows || {});
+      let targetDuration = pip.duration;
+      
+      if (parentClip) {
+        // Bound the PIP duration to the parent clip's duration if parent shrinks
+        const maxAllowed = parentClip.duration - (pip.relativeStartTime || 0);
+        
+        let maxClipEnd = 0;
+        for (const track of pip.tracks) {
+          for (const clip of track.clips) {
+            const end = clip.startTime + clip.duration;
+            if (end > maxClipEnd) maxClipEnd = end;
+          }
+        }
+        
+        targetDuration = pip.manualDuration 
+          ? Math.max(pip.manualDuration, maxClipEnd)
+          : Math.min(600, Math.max(5, maxClipEnd + 3));
+          
+        targetDuration = Math.min(targetDuration, Math.max(0.5, maxAllowed));
+      }
+      
+      if (pip.duration === targetDuration) return state;
+      
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: { ...pip, duration: targetDuration }
+        }
+      };
     });
   },
 
