@@ -1136,7 +1136,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         pendingSeeksRef.current.set(clip.clipId, mediaTime);
       } else {
         const drift = Math.abs(el.currentTime - mediaTime);
-        if (drift > 0.03) {
+        if (drift > 0.005) {
           el.currentTime = mediaTime;
         }
       }
@@ -1147,16 +1147,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // This ensures video elements start seeking IMMEDIATELY when store state changes, without waiting for React re-render
   useEffect(() => {
     if (!isPrimary) return;
-    let lastScrubSeekTime = 0;
-
+    // Removed artificial throttle – let the browser coalesce seeks naturally.
+    // This ensures we respond to every critical currentTime update during scrubbing.
     const unsub = useEditorStore.subscribe((state) => {
       if (state.isPlaying) return;
 
       const newTime = state.currentTime;
-      const now = performance.now();
-      // Throttle video element seeking to ~20fps to avoid overloading the hardware decoder during scrubs
-      if (now - lastScrubSeekTime < 16) return;
-      lastScrubSeekTime = now;
+      // No explicit time throttling – we rely on the browser's internal coalescing.
 
       const pool = poolRef.current;
       if (!pool || pool.size === 0) return;
@@ -1213,7 +1210,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           pendingSeeksRef.current.set(clip.clipId, mediaTime);
         } else {
           const drift = Math.abs(el.currentTime - mediaTime);
-          if (drift > 0.016) {
+          if (drift > 0.005) {
             // Use exact currentTime for scrub seeking for frame-accuracy.
             el.currentTime = mediaTime;
             // Add a one-shot seeked listener to drain the pending seek queue immediately
@@ -1222,7 +1219,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               if (pending !== undefined) {
                 pendingSeeksRef.current.delete(clip.clipId);
                 const d2 = Math.abs(el.currentTime - pending);
-                if (d2 > 0.016) el.currentTime = pending;
+                if (d2 > 0.005) el.currentTime = pending;
               }
             };
             el.addEventListener('seeked', onSeeked, { once: true });

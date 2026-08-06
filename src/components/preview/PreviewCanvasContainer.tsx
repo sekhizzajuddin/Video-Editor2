@@ -123,6 +123,7 @@ export function PreviewCanvasContainer() {
   const compositeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const lastFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const framePendingRef = useRef(true);
+  const lastRenderedTimeRef = useRef<number>(0);
   const isRenderingRef = useRef(false);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -559,7 +560,10 @@ export function PreviewCanvasContainer() {
         }
       }
 
-      if (tabVisible && framePendingRef.current) {
+      if (Math.abs(currentTimeRef.current - lastRenderedTimeRef.current) > 0.001) {
+      framePendingRef.current = true;
+    }
+    if (tabVisible && framePendingRef.current) {
         // During scrubbing or playback: skip the isRendering mutex so we never
         // drop frames waiting for an in-flight (but already cheap) render to finish.
         // During scrub the engine skips all heavy FX so renders complete in <4ms.
@@ -590,12 +594,13 @@ export function PreviewCanvasContainer() {
             .catch((err: unknown) => {
               console.error('Error in renderCanvas:', err);
             })
-            .finally(() => {
-              if (!allowConcurrent) {
-                isRendering = false;
-                isRenderingRef.current = false;
-              }
-            });
+.finally(() => {
+                if (!allowConcurrent) {
+                  isRendering = false;
+                  isRenderingRef.current = false;
+                }
+                lastRenderedTimeRef.current = currentTimeRef.current;
+              });
         }
       }
     };
