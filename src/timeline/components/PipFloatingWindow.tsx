@@ -282,8 +282,9 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
 
     if (media.type !== 'video' && media.type !== 'image') return; // PIP only supports video/image
 
-    // Media ALWAYS drops at the very beginning of the PIP workspace
-    const timeWithinPip = 0;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const timeWithinPip = Math.max(0, x / zoomLevel);
 
     const trackType = media.type === 'image' ? 'video' : media.type;
     if (trackType !== 'video' && trackType !== 'audio' && trackType !== 'text' && trackType !== 'fx') return;

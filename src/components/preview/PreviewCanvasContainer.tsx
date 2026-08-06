@@ -760,7 +760,7 @@ export function PreviewCanvasContainer() {
       : 480;
 
   const cursorStyle = useMemo(() => {
-    const sc = findClipInTracks(tracks, selectedClipId);
+    const sc = findClipInTracks(tracks, selectedClipId, pipWindows);
     return activeTool === 'hand'
       ? isPanning.current
         ? 'grabbing'
@@ -816,7 +816,7 @@ export function PreviewCanvasContainer() {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onClick={(e) => {
-          const selClip = findClipInTracks(tracks, selectedClipId);
+          const selClip = findClipInTracks(tracks, selectedClipId, pipWindows);
           if (selClip?.particleSettings && (e.ctrlKey || e.altKey)) {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100;

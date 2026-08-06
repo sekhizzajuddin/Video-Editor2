@@ -458,13 +458,13 @@ const initialState: EditorState = {
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
   return {
-    tracks: state.tracks.map(t => modifier(t, null)),
+    tracks: state.tracks.map(t => modifier({ ...t, clips: t.clips || [] }, null)),
     pipWindows: Object.fromEntries(
       Object.entries(state.pipWindows || {}).map(([pipId, pip]) => [
         pipId,
         {
           ...pip,
-          tracks: pip.tracks.map(t => modifier(t, pipId))
+          tracks: (pip.tracks || []).map(t => modifier({ ...t, clips: t.clips || [] }, pipId))
         }
       ])
     )
@@ -1226,12 +1226,53 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   insertClip: (clip, atTime, trackId) => {
     set((state) => {
-      const newTracks = state.tracks.map((track) => {
-        if (track.id !== trackId) {
-          // Ripple clips starting at or after atTime on other tracks too? No, usually insert edits only affect the target track or all linked tracks.
-          // The provided report suggested rippling all tracks if `track.id !== trackId`. Wait, standard NLE insert shifts ALL tracks if not locked.
-          // Let's shift clips on ALL unlocked tracks.
+      let isPipTrack = false;
+      let targetPipId: string | null = null;
+      for (const [pipId, pip] of Object.entries(state.pipWindows || {})) {
+        if (pip.tracks.some(t => t.id === trackId)) {
+          isPipTrack = true;
+          targetPipId = pipId;
+          break;
+        }
+      }
+
+      if (isPipTrack && targetPipId) {
+        const pip = state.pipWindows[targetPipId];
+        const newPipTracks = pip.tracks.map((track) => {
           if (track.locked) return track;
+          if (track.id !== trackId) {
+            return {
+              ...track,
+              clips: track.clips.map((c) => ({
+                ...c,
+                startTime: c.startTime >= atTime ? c.startTime + clip.duration : c.startTime,
+              })),
+            };
+          }
+          return {
+            ...track,
+            clips: [
+              ...track.clips.map((c) => ({
+                ...c,
+                startTime: c.startTime >= atTime ? c.startTime + clip.duration : c.startTime,
+              })),
+              { ...clip, startTime: atTime, trackId },
+            ].sort((a, b) => a.startTime - b.startTime),
+          };
+        });
+        return {
+          pipWindows: {
+            ...state.pipWindows,
+            [targetPipId]: { ...pip, tracks: newPipTracks }
+          },
+          selectedClipId: clip.id,
+          selectedClipIds: [clip.id]
+        };
+      }
+
+      const newTracks = state.tracks.map((track) => {
+        if (track.locked) return track;
+        if (track.id !== trackId) {
           return {
             ...track,
             clips: track.clips.map((c) => ({
@@ -1241,7 +1282,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           };
         }
         
-        // Insert the new clip on target track and ripple
         return {
           ...track,
           clips: [
@@ -1262,25 +1302,30 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   overwriteClip: (clip, atTime, trackId) => {
     set((state) => {
-      const newTracks = state.tracks.map((track) => {
+      let isPipTrack = false;
+      let targetPipId: string | null = null;
+      for (const [pipId, pip] of Object.entries(state.pipWindows || {})) {
+        if (pip.tracks.some(t => t.id === trackId)) {
+          isPipTrack = true;
+          targetPipId = pipId;
+          break;
+        }
+      }
+
+      const processTrack = (track: any) => {
         if (track.id !== trackId) return track; // Overwrite only affects target track
         if (track.locked) return track;
         
         const clipEnd = atTime + clip.duration;
         
         // Remove clips that overlap completely or partially with the insert region
-        let newClips = track.clips.filter((c) => {
+        let newClips = track.clips.filter((c: any) => {
           const cEnd = c.startTime + c.duration;
           // Keep clips that end before atTime or start after clipEnd
           return cEnd <= atTime || c.startTime >= clipEnd;
         });
         
-        // Trim clips that overlap (we need to split/trim them actually)
-        // Wait, standard Overwrite Edit DESTROYS the content underneath.
-        // It's easier to just push the new clip and let `resolveOverlaps` handle it?
-        // No, `resolveOverlaps` pushes clips to new tracks. Overwrite deletes what's underneath.
-        
-        track.clips.forEach((c) => {
+        track.clips.forEach((c: any) => {
           const cEnd = c.startTime + c.duration;
           // Clip starts before overwrite, ends during overwrite (Trim End)
           if (c.startTime < atTime && cEnd > atTime && cEnd <= clipEnd) {
@@ -1313,8 +1358,23 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         // Add the new clip
         newClips.push({ ...clip, startTime: atTime, trackId });
         
-        return { ...track, clips: newClips.sort((a, b) => a.startTime - b.startTime) };
-      });
+        return { ...track, clips: newClips.sort((a: any, b: any) => a.startTime - b.startTime) };
+      };
+
+      if (isPipTrack && targetPipId) {
+        const pip = state.pipWindows[targetPipId];
+        const newPipTracks = pip.tracks.map(processTrack);
+        return {
+          pipWindows: {
+            ...state.pipWindows,
+            [targetPipId]: { ...pip, tracks: newPipTracks }
+          },
+          selectedClipId: clip.id,
+          selectedClipIds: [clip.id]
+        };
+      }
+
+      const newTracks = state.tracks.map(processTrack);
       
       return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
     });
@@ -1469,15 +1529,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const newPipWindows = { ...state.pipWindows };
       let pipUpdated = false;
 
-      // Collect PIP window IDs associated with deleted clips
-      const allClipsDeep = getAllClipsDeep(state);
-      const deletedClipsDeep = allClipsDeep.filter(c => idsToRemove.includes(c.id));
+      // R-3: Only mark a PIP orphan when its parent clip is being removed.
+      // Simply being referenced by a deleted clip's `pipWindowIds` array is NOT enough —
+      // the parent itself must be in `idsToRemove`. Otherwise we nuke valid PIPs.
       const orphanPipIds = new Set<string>();
-      for (const clip of deletedClipsDeep) {
-        if (clip.pipWindowIds) {
-          clip.pipWindowIds.forEach(pid => orphanPipIds.add(pid));
-        }
-      }
       for (const [pipId, pip] of Object.entries(state.pipWindows || {})) {
         if (idsToRemove.includes(pip.parentClipId ?? pip.clipId ?? '')) {
           orphanPipIds.add(pipId);
@@ -1513,6 +1568,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         selectedKeyframeLines: state.selectedKeyframeLines.filter(l => !idsToRemove.includes(l.clipId)),
         ...(pipUpdated || orphanPipIds.size > 0 ? { pipWindows: newPipWindows } : {})
       };
+    });
+    // R-3 / R-12 follow-up: Recalc durations of any PIP that lost child clips
+    Object.keys(get().pipWindows || {}).forEach((pid) => {
+      get().recalcPipDurations(pid);
     });
     get().recalcTotalDuration();
     get().saveSnapshot('Delete Clip');
@@ -1573,11 +1632,30 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           (!found?.isPip && pipId === null && track.id === found?.track.id) ||
           (found?.isPip && pipId === found.pipId && track.id === found?.track.id);
 
+        // C-1: Identify the target PIP window (if any) for bounds clamping
+        const targetPip = pipId ? state.pipWindows?.[pipId] : null;
+
         return {
           ...track,
           clips: track.clips.map((clip) => {
             if (clip.id === clipId) {
-              return { ...clip, ...finalUpdates };
+              let merged = { ...clip, ...finalUpdates };
+              // C-1: Clamp PIP bounds if this clip lives in a PIP
+              if (targetPip) {
+                const pipMaxDur = targetPip.manualDuration ?? targetPip.duration;
+                if (merged.startTime < 0) {
+                  merged.startTime = 0;
+                }
+                if (merged.startTime + merged.duration > pipMaxDur) {
+                  if (merged.startTime >= pipMaxDur) {
+                    merged.startTime = Math.max(0, pipMaxDur - merged.duration);
+                  }
+                  if (merged.startTime + merged.duration > pipMaxDur) {
+                    merged.duration = Math.max(0.1, pipMaxDur - merged.startTime);
+                  }
+                }
+              }
+              return merged;
             }
             if (isTargetTrack && durationDelta !== 0 && found) {
               if (clip.startTime >= found.clip.startTime + found.clip.duration - 0.001) {
@@ -2175,6 +2253,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             trimStart: baseTrimStart + seg.start * clipSpeed,
             trimEnd: baseTrimEnd + (targetClip.duration - seg.end) * clipSpeed,
             duration: dur,
+            // R-12/R-13: Strip PIP/linked-clip references from cuts; reattach below.
+            pipWindowIds: undefined,
+            linkedClipId: undefined,
           });
           currentTimeOffset += dur;
         } else {
@@ -2199,8 +2280,42 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         return { ...track, clips: newClips };
       });
 
-      return { tracks, pipWindows };
+      // R-12/R-13: Re-attach any PIP whose parent was the original clip to the FIRST
+      // resulting cut so the PIP window keeps working. Update the new parent clip's
+      // pipWindowIds array to reflect this.
+      const firstCutId = resultingClips[0]?.id;
+      const orphanPipIds = targetClip.pipWindowIds || [];
+      let nextPipWindows = pipWindows;
+      if (firstCutId && orphanPipIds.length > 0) {
+        nextPipWindows = { ...pipWindows };
+        for (const pid of orphanPipIds) {
+          const pip = nextPipWindows[pid];
+          if (pip) {
+            nextPipWindows = {
+              ...nextPipWindows,
+              [pid]: { ...pip, parentClipId: firstCutId }
+            };
+          }
+        }
+      }
+
+      // Update the parent track clips so the first cut inherits pipWindowIds reference.
+      const finalTracks = firstCutId && orphanPipIds.length > 0
+        ? tracks.map((t) => {
+            if (t.id !== targetTrack.id) return t;
+            return {
+              ...t,
+              clips: t.clips.map((c) => {
+                if (c.id !== firstCutId) return c;
+                return { ...c, pipWindowIds: [...orphanPipIds] };
+              })
+            };
+          })
+        : tracks;
+
+      return { tracks: finalTracks, pipWindows: nextPipWindows };
     });
+    get().recalcTotalDuration();
     get().saveSnapshot('Auto Jump Cuts');
   },
 
@@ -2216,7 +2331,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         const clip = track.clips[clipIndex];
         const relativeSplitTime = splitTime - clip.startTime;
 
-        if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration) return track;
+        if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration - 0.05) return track;
 
         const groupId = clip.splitGroupId || generateId();
         leftClipId = generateId();
@@ -2344,16 +2459,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         return { ...track, clips: newClips };
       });
 
+      const newSelectedKeyframeLines = state.selectedKeyframeLines.filter(l => l.clipId !== clipId);
+
       if (isSelected && leftClipId) {
         return {
           tracks,
           pipWindows,
           selectedClipId: leftClipId,
           selectedClipIds: [leftClipId],
+          selectedKeyframeLines: newSelectedKeyframeLines,
         };
       }
 
-      return { tracks, pipWindows };
+      return { tracks, pipWindows, selectedKeyframeLines: newSelectedKeyframeLines };
     });
     get().recalcTotalDuration();
     get().saveSnapshot('Split Clip');
@@ -3693,11 +3811,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           }
         }
         
-        targetDuration = pip.manualDuration 
+        // C-3: Avoid magic "+3" padding. Use a tiny 0.1s breathing room when auto-deriving,
+        // and never auto-shrink below the previous duration when manualDuration is unset.
+        const computed = pip.manualDuration 
           ? Math.max(pip.manualDuration, maxClipEnd)
-          : Math.min(600, Math.max(5, maxClipEnd + 3));
+          : Math.min(600, Math.max(5, Math.max(maxClipEnd + 0.1, pip.duration)));
           
-        targetDuration = Math.min(targetDuration, Math.max(0.5, maxAllowed));
+        targetDuration = Math.min(computed, Math.max(0.5, maxAllowed));
       }
       
       if (pip.duration === targetDuration) return state;
@@ -3714,18 +3834,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // PIP Window Operations
   createPipWindow: (clipId, relativeStartTime) => {
     const id = generateId();
-    const newPip: PipWindow = {
-      id,
-      parentClipId: clipId,
-      relativeStartTime,
-      tracks: [],
-      duration: 5,
-      zIndex: Object.keys(get().pipWindows || {}).length + 1,
-    };
     
     set((state) => {
       const clip = findClipInTracks(state.tracks, clipId, state.pipWindows || {});
       if (!clip) return {};
+      
+      const newPip: PipWindow = {
+        id,
+        parentClipId: clipId,
+        relativeStartTime,
+        tracks: [],
+        duration: 5,
+        zIndex: Object.keys(state.pipWindows || {}).length + 1,
+      };
       
       const newTracks = state.tracks.map(t => {
         const hasClip = (t.clips || []).some(c => c.id === clipId);
@@ -3758,6 +3879,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const newPipWindows = { ...state.pipWindows };
       delete newPipWindows[pipId];
 
+      // C-4: Locate the parent clip in main tracks OR nested PIP tracks (deep search).
+      const parentFound = findClipDeep(state, pip.parentClipId || '');
+
       const newTracks = state.tracks.map(t => ({
         ...t,
         clips: t.clips.map(c => 
@@ -3767,6 +3891,32 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         )
       }));
 
+      // C-4: Also clean up pipWindowIds if the parent lives inside another PIP track.
+      let newPipWindowsAfter = newPipWindows;
+      if (parentFound && parentFound.isPip) {
+        const parentPipId = parentFound.pipId!;
+        const parentPip = newPipWindows[parentPipId];
+        if (parentPip) {
+          newPipWindowsAfter = {
+            ...newPipWindows,
+            [parentPipId]: {
+              ...parentPip,
+              tracks: parentPip.tracks.map(t => ({
+                ...t,
+                clips: t.clips.map(c => 
+                  c.id === pip.parentClipId 
+                    ? { ...c, pipWindowIds: (c.pipWindowIds || []).filter(id => id !== pipId) } 
+                    : c
+                )
+              }))
+            }
+          };
+        }
+      }
+      // Reference `parentFound` so the value is reachable; suppresses linter complaints
+      // and makes intent clear if a future change wants to use it.
+      void parentFound;
+
       const deletedClipIds = pip.tracks.flatMap(t => t.clips || []).map(c => c.id);
       const newSelectedClipIds = state.selectedClipIds.filter(id => !deletedClipIds.includes(id));
       const newSelectedClipId = newSelectedClipIds.includes(state.selectedClipId || '') 
@@ -3774,7 +3924,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         : (newSelectedClipIds[0] || null);
 
       return {
-        pipWindows: newPipWindows,
+        pipWindows: newPipWindowsAfter,
         tracks: newTracks,
         activePipWindowId: state.activePipWindowId === pipId ? null : state.activePipWindowId,
         selectedClipId: newSelectedClipId,
@@ -3834,6 +3984,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           if (end > lastEnd) lastEnd = end;
         }
 
+        // C-2: Clamp lastEnd into PIP bounds so append-after-existing never escapes
+        const pipMaxDur = pip.manualDuration ?? pip.duration;
+        lastEnd = Math.max(0, Math.min(lastEnd, pipMaxDur - 0.05));
+
         let targetDuration = duration;
         if (pip.manualDuration) {
           const maxDur = pip.duration - lastEnd;
@@ -3871,9 +4025,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       } else {
         const trackId = generateId();
         
+        // C-2: Clamp startTime into PIP bounds [0, pipMaxDur - duration]
+        const pipMaxDur = pip.manualDuration ?? pip.duration;
+        let clampedStartTime = Math.max(0, Math.min(startTime, pipMaxDur - 0.05));
+        
         let targetDuration = duration;
         if (pip.manualDuration) {
-          const maxDur = pip.duration - startTime;
+          const maxDur = pip.duration - clampedStartTime;
           if (maxDur <= 0.05) return {};
           targetDuration = Math.min(duration, maxDur);
         }
@@ -3882,7 +4040,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           id: generateId(),
           trackId,
           mediaId,
-          startTime,
+          startTime: clampedStartTime,
           duration: targetDuration,
           trimStart: 0,
           trimEnd: 0,
@@ -3964,6 +4122,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       };
     });
+    get().recalcPipDurations(pipId);
     get().saveSnapshot('Remove PIP Clip');
   },
 

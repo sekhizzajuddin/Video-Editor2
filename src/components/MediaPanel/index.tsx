@@ -382,7 +382,7 @@ export function MediaPanel() {
   const handleTemplateClick = (tmpl: any) => {
     if (tmpl.type === 'video') {
       const { selectedClipId, currentTime } = useEditorStore.getState();
-      let targetClip = findClipInTracks(tracks, selectedClipId);
+      let targetClip = findClipInTracks(tracks, selectedClipId, useEditorStore.getState().pipWindows);
       
       if (!targetClip) {
         const videoTrack = tracks.find(t => t.type === 'video');
@@ -657,7 +657,7 @@ export function MediaPanel() {
 
   const handleGenerateKineticTypography = async () => {
     const { selectedClipId, tracks } = useEditorStore.getState();
-    let targetClip = findClipInTracks(tracks, selectedClipId);
+    let targetClip = findClipInTracks(tracks, selectedClipId, useEditorStore.getState().pipWindows);
     
     if (!targetClip) {
       const { currentTime } = useEditorStore.getState();

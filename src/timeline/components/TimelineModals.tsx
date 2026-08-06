@@ -112,7 +112,7 @@ export function TimelineModals({
   };
 
   const handleZIndexChange = (clipId: string, action: 'front' | 'back' | 'forward' | 'backward') => {
-    const clip = findClipInTracks(tracks, clipId);
+    const clip = findClipInTracks(tracks, clipId, useEditorStore.getState().pipWindows);
     
     if (!clip) return;
     const currentZ = clip.zIndex || 0;
@@ -219,7 +219,7 @@ export function TimelineModals({
                   className="w-full text-left px-3 py-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-2 transition-colors border-b border-[#3e3e3e]"
                   onClick={() => {
                     const state = useEditorStore.getState();
-                    const clip = findClipInTracks(state.tracks, contextMenu.clipId);
+                    const clip = findClipInTracks(state.tracks, contextMenu.clipId, state.pipWindows);
                     if (clip) {
                       const relativeStart = Math.max(0, state.currentTime - clip.startTime);
                       state.createPipWindow(contextMenu.clipId, relativeStart);
@@ -444,7 +444,7 @@ export function TimelineModals({
                     Replace with Media...
                   </button>
                   {(() => {
-                    const clip = findClipInTracks(tracks, contextMenu.clipId);
+                    const clip = findClipInTracks(tracks, contextMenu.clipId, useEditorStore.getState().pipWindows);
                     return clip ? (
                       <button
                         className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"

@@ -17,7 +17,7 @@ interface ClipContextMenuProps {
 export function ClipContextMenu({ x, y, clipId, onClose }: ClipContextMenuProps) {
   const state = useEditorStore.getState();
 
-  const clip = findClipInTracks(state.tracks, clipId);
+  const clip = findClipInTracks(state.tracks, clipId, state.pipWindows);
   if (!clip) {
     return null;
   }

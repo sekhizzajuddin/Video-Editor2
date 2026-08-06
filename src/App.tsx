@@ -243,7 +243,7 @@ function App() {
           setActiveTool('slide');
           break;
         case 'select_all_clips_forward': {
-          const selectedClip = findClipInTracks(tracks, selectedClipId);
+          const selectedClip = findClipInTracks(tracks, selectedClipId, useEditorStore.getState().pipWindows);
           if (selectedClip) {
             const refTime = selectedClip.startTime;
             const matchingIds: string[] = [];
@@ -257,7 +257,7 @@ function App() {
           break;
         }
         case 'select_all_clips_backward': {
-          const selectedClip = findClipInTracks(tracks, selectedClipId);
+          const selectedClip = findClipInTracks(tracks, selectedClipId, useEditorStore.getState().pipWindows);
           if (selectedClip) {
             const refTime = selectedClip.startTime;
             const matchingIds: string[] = [];
@@ -325,7 +325,7 @@ function App() {
           if (state.selectedClipIds && state.selectedClipIds.length > 0) {
             let splitted = false;
             state.selectedClipIds.forEach(id => {
-              const c = findClipInTracks(tracks, id);
+              const c = findClipInTracks(tracks, id, state.pipWindows);
               if (c && t > c.startTime && t < c.startTime + c.duration) {
                 splitClip(id, t);
                 splitted = true;
@@ -620,7 +620,7 @@ function App() {
                             if (state.selectedClipIds && state.selectedClipIds.length > 0) {
                               let splitted = false;
                               state.selectedClipIds.forEach(id => {
-                                const c = findClipInTracks(tracks, id);
+                                const c = findClipInTracks(tracks, id, state.pipWindows);
                                 if (c && t > c.startTime && t < c.startTime + c.duration) {
                                   splitClip(id, t);
                                   splitted = true;
