@@ -1210,7 +1210,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           pendingSeeksRef.current.set(clip.clipId, mediaTime);
         } else {
           const drift = Math.abs(el.currentTime - mediaTime);
-          if (drift > 0.005) {
+if (true) {
             // Use exact currentTime for scrub seeking for frame-accuracy.
             el.currentTime = mediaTime;
             // Add a one-shot seeked listener to drain the pending seek queue immediately
@@ -1219,7 +1219,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               if (pending !== undefined) {
                 pendingSeeksRef.current.delete(clip.clipId);
                 const d2 = Math.abs(el.currentTime - pending);
-                if (d2 > 0.005) el.currentTime = pending;
+                el.currentTime = pending;
               }
             };
             el.addEventListener('seeked', onSeeked, { once: true });
