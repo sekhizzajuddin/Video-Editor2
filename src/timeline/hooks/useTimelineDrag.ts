@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { getRampedTrimEndForRightResize, getRampedTrimStartForLeftResize, getSpeedRampEngine } from '@/utils/speedRamp';
 import { getTrackHeight, getTrackTop, getTrackAtY } from '../trackGeometry';
-import { TRACK_HEADER_WIDTH } from '../timelineConstants';
+
 import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT, SNAP_THRESHOLD_PX } from '../timelineConstants';
 import type { TimelineState } from './useTimelineState';
 
@@ -762,7 +762,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const rulerEl = rulerContainerRef.current;
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const currentScrollLeft = rulerEl ? rulerEl.scrollLeft : useEditorStore.getState().scrollLeft;
-      const x = e.clientX - rect.left + currentScrollLeft - TRACK_HEADER_WIDTH;
+      const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
 
       setScrubTime(time);
@@ -811,7 +811,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             // directly via DOM (not via RAF). Reading from trackContainerRef
             // introduced a ~16ms race that made the time calculation wrong.
             const currentScrollLeft = rulerEl.scrollLeft;
-            const x = clientX - rect.left + currentScrollLeft - TRACK_HEADER_WIDTH;
+            const x = clientX - rect.left + currentScrollLeft;
             const time = Math.max(0, x / zoomLevel);
 
             seek(time);
