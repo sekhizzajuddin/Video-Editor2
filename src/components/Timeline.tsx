@@ -293,6 +293,7 @@ export function Timeline() {
             <FloatingScrubTooltip
               zoomLevel={zoomLevel}
               isScrubbing={isScrubbing}
+              trackContainerRef={trackContainerRef}
             />
 
             <TimelineRuler

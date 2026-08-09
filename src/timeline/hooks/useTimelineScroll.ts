@@ -75,6 +75,33 @@ export function useTimelineScroll({
     return unsubscribe;
   }, [rulerContainerRef, trackContainerRef]);
 
+  // CRITICAL FIX: Also attach a native 'scroll' listener to trackContainerRef.
+  // React's onScroll prop only fires for user-initiated scrolls that go through
+  // React's synthetic event system. However, PlaybackAutoScroller does:
+  //   container.scrollLeft = value   (direct DOM write)
+  // This triggers the native 'scroll' event but NOT React's onScroll, so the
+  // ruler was never synced after auto-scroll during playback. The result: ruler
+  // scrollLeft stays at its old value, making handleRulerMouseDown read a stale
+  // offset and produce a wrong playhead time on the next click.
+  useEffect(() => {
+    const el = trackContainerRef.current;
+    if (!el) return;
+
+    const nativeScrollHandler = () => {
+      const ruler = rulerContainerRef.current;
+      if (ruler && ruler.scrollLeft !== el.scrollLeft) {
+        ruler.scrollLeft = el.scrollLeft;
+      }
+      const headers = trackHeadersRef.current;
+      if (headers && headers.scrollTop !== el.scrollTop) {
+        headers.scrollTop = el.scrollTop;
+      }
+    };
+
+    el.addEventListener('scroll', nativeScrollHandler, { passive: true });
+    return () => el.removeEventListener('scroll', nativeScrollHandler);
+  }, [trackContainerRef, rulerContainerRef, trackHeadersRef]);
+
 
   // Native wheel pinch-to-zoom gesture listener
   useEffect(() => {

@@ -61,9 +61,11 @@ export function WorkspacePlayhead({ zoomLevel }: { zoomLevel: number }) {
 export function FloatingScrubTooltip({
   zoomLevel,
   isScrubbing,
+  trackContainerRef,
 }: {
   zoomLevel: number;
   isScrubbing: boolean;
+  trackContainerRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
@@ -73,12 +75,11 @@ export function FloatingScrubTooltip({
     
     const updateDOM = (state: any) => {
       if (containerRef.current && textRef.current) {
-        // FIX: Read scrollLeft directly from the ruler DOM element, not from the
-        // Zustand store. The store's scrollLeft is throttled to ~10Hz and can lag
-        // the DOM by up to 100ms, making the tooltip drift from the playhead
-        // during fast scrubs. The ruler element's scrollLeft is always current.
-        const rulerEl = document.querySelector<HTMLElement>('.procut-timeline-ruler');
-        const liveScrollLeft = rulerEl ? rulerEl.scrollLeft : state.scrollLeft;
+        // FIX: Read scrollLeft directly from trackContainerRef (the actual
+        // scrollable element). The ruler uses overflow-hidden so its
+        // scrollLeft is unreliable. trackContainerRef always holds the
+        // true live scroll position.
+        const liveScrollLeft = trackContainerRef.current?.scrollLeft ?? state.scrollLeft;
         containerRef.current.style.left = `${state.currentTime * zoomLevel - liveScrollLeft}px`;
         textRef.current.textContent = formatDetailedTooltipTime(state.currentTime);
       }
@@ -89,7 +90,7 @@ export function FloatingScrubTooltip({
     
     // Imperative subscription
     return useEditorStore.subscribe(updateDOM);
-  }, [zoomLevel, isScrubbing]);
+  }, [zoomLevel, isScrubbing, trackContainerRef]);
 
   if (!isScrubbing) return null;
   return (
