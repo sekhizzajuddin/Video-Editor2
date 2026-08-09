@@ -762,20 +762,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
 
-      console.log('[RULER CLICK DEBUG]', {
-        clientX: e.clientX,
-        rectLeft: rect.left,
-        rectRight: rect.right,
-        rectWidth: rect.width,
-        rulerScrollLeft,
-        trackScrollLeft,
-        storeScrollLeft,
-        usedScrollLeft: currentScrollLeft,
-        pixelInView: e.clientX - rect.left,
-        absoluteX: x,
-        zoomLevel,
-        computedTime: time,
-      });
+      console.log(`[RULER CLICK] clientX=${e.clientX} rectLeft=${rect.left.toFixed(1)} rulerSL=${rulerScrollLeft.toFixed(1)} trackSL=${trackScrollLeft.toFixed(1)} storeSL=${storeScrollLeft.toFixed(1)} usedSL=${currentScrollLeft.toFixed(1)} pixInView=${(e.clientX - rect.left).toFixed(1)} absX=${x.toFixed(1)} zoom=${zoomLevel} time=${time.toFixed(3)}`);
 
       setScrubTime(time);
       setScrubMouseX(e.clientX);
