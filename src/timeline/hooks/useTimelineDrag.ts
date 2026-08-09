@@ -750,8 +750,23 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const handleRulerMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
-      setIsScrubbing(true);
 
+      // ── CRITICAL: compute the click time BEFORE setIsScrubbing(true). ──
+      //
+      // setIsScrubbing(true) synchronously sets isScrubbing in the Zustand store.
+      // The PlaybackAutoScroller is a Zustand subscriber that fires immediately
+      // when isScrubbing changes. It sees currentTime at the OLD playhead position
+      // and scrolls the view to keep that old position in the viewport. This:
+      //   1. Changes trackContainer.scrollLeft
+      //   2. Writes the new scrollLeft to the Zustand store
+      //   3. The store subscriber in useTimelineScroll syncs rulerContainer.scrollLeft
+      //   4. The ruler's inner content div shifts position
+      //
+      // If we read getBoundingClientRect() AFTER this chain, the rect reflects
+      // the shifted scroll position — but e.clientX is still from the original
+      // click. The result: clientX - shiftedRect.left = wrong absolute position.
+      //
+      // By computing time FIRST, we use the original (correct) scroll position.
       const rulerEl = rulerContainerRef.current;
       const innerDiv = rulerEl?.firstElementChild as HTMLElement | null;
 
@@ -767,24 +782,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         time = Math.max(0, x / zoomLevel);
       }
 
+      // NOW it's safe to set scrubbing — the auto-scroller will fire, but we
+      // already have the correct time computed above.
+      setIsScrubbing(true);
+
       setScrubTime(time);
       setScrubMouseX(e.clientX);
       seek(time);
       window.dispatchEvent(new Event('procut-frame-updated'));
-
-      const soughtTime = time;
-      const afterSeek = useEditorStore.getState().currentTime;
-      console.log(`[RULER] sought=${soughtTime.toFixed(3)} storeAfterSeek=${afterSeek.toFixed(3)}`);
-      
-      // Check after 50ms and 200ms if something overrode it
-      setTimeout(() => {
-        const t = useEditorStore.getState().currentTime;
-        console.log(`[RULER +50ms] currentTime=${t.toFixed(3)} expected=${soughtTime.toFixed(3)} match=${Math.abs(t - soughtTime) < 0.01}`);
-      }, 50);
-      setTimeout(() => {
-        const t = useEditorStore.getState().currentTime;
-        console.log(`[RULER +200ms] currentTime=${t.toFixed(3)} expected=${soughtTime.toFixed(3)} match=${Math.abs(t - soughtTime) < 0.01}`);
-      }, 200);
 
       e.preventDefault();
       e.stopPropagation();
