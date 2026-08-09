@@ -193,6 +193,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             clipId={clip.id}
             width={width}
             height={clipHeight}
+            color="rgba(255,255,255,1)"
           />
         ) : (
           <>
@@ -233,6 +234,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   width={width}
                   height={12}
                   small
+                  color="rgba(255,255,255,0.5)"
                 />
               </div>
             )}
