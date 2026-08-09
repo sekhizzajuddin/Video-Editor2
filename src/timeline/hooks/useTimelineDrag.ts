@@ -537,7 +537,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       }
 
       const clickTime = absoluteStartTime + relX / zoomLevel;
-      seek(Math.max(0, clickTime));
 
       const clickedEdge = (e.target as HTMLElement).getAttribute('data-edge');
       if (clickedEdge === 'left' || clickedEdge === 'right') {
@@ -559,6 +558,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         }
         return;
       }
+
+      seek(Math.max(0, clickTime));
 
       const latestTracks = getLatestTracks(clip.id);
 
@@ -1083,6 +1084,18 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               }
             });
             batchUpdateClips(batchBufferRef.current);
+          } else {
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({
+              clipId: resizeState.clipId,
+              changes: {
+                duration: clamped,
+                trimEnd: Math.max(0, isRamped
+                  ? getRampedTrimEndForRightResize(clip, clamped, sourceDuration)
+                  : resizeState.originalTrimEnd + (resizeState.originalDuration - clamped) * clip.speed),
+              }
+            });
+            batchUpdateClips(batchBufferRef.current);
           }
         } else {
           const shrink = -dt;
@@ -1140,6 +1153,21 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                 trimEnd: Math.max(0, sibNewTrimEnd),
               }
             }, {
+              clipId: resizeState.clipId,
+              changes: {
+                startTime: resizeState.originalStartTime + shift,
+                duration: clamped,
+                trimStart: Math.max(0, newTrimStart),
+              }
+            });
+            batchUpdateClips(batchBufferRef.current);
+          } else {
+            const newTrimStart = isRamped
+              ? getRampedTrimStartForLeftResize(clip, shift)
+              : resizeState.originalTrimStart + shift * clip.speed;
+
+            batchBufferRef.current.length = 0;
+            batchBufferRef.current.push({
               clipId: resizeState.clipId,
               changes: {
                 startTime: resizeState.originalStartTime + shift,
