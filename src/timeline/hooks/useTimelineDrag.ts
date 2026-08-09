@@ -752,17 +752,33 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (e.button !== 0) return;
       setIsScrubbing(true);
 
+      // ROBUST FIX: Instead of computing `clientX - rulerRect.left + scrollLeft`,
+      // get the click position relative to the INNER content div. Its
+      // getBoundingClientRect() already accounts for all scrolling and CSS
+      // transforms applied by the browser — no manual scrollLeft needed.
       const rulerEl = rulerContainerRef.current;
-      const trackEl = trackContainerRef.current;
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const rulerScrollLeft = rulerEl ? rulerEl.scrollLeft : -1;
-      const trackScrollLeft = trackEl ? trackEl.scrollLeft : -1;
-      const storeScrollLeft = useEditorStore.getState().scrollLeft;
-      const currentScrollLeft = trackScrollLeft >= 0 ? trackScrollLeft : storeScrollLeft;
-      const x = e.clientX - rect.left + currentScrollLeft;
-      const time = Math.max(0, x / zoomLevel);
+      const innerDiv = rulerEl?.firstElementChild as HTMLElement | null;
 
-      console.log(`[RULER CLICK] clientX=${e.clientX} rectLeft=${rect.left.toFixed(1)} rulerSL=${rulerScrollLeft.toFixed(1)} trackSL=${trackScrollLeft.toFixed(1)} storeSL=${storeScrollLeft.toFixed(1)} usedSL=${currentScrollLeft.toFixed(1)} pixInView=${(e.clientX - rect.left).toFixed(1)} absX=${x.toFixed(1)} zoom=${zoomLevel} time=${time.toFixed(3)}`);
+      let time: number;
+      if (innerDiv) {
+        const innerRect = innerDiv.getBoundingClientRect();
+        const absX = e.clientX - innerRect.left;
+        time = Math.max(0, absX / zoomLevel);
+
+        // DEBUG: compare old vs new approach
+        const trackEl = trackContainerRef.current;
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const oldScrollLeft = trackEl ? trackEl.scrollLeft : 0;
+        const oldAbsX = e.clientX - rect.left + oldScrollLeft;
+        const oldTime = Math.max(0, oldAbsX / zoomLevel);
+        console.log(`[RULER CLICK] NEW absX=${absX.toFixed(1)} time=${time.toFixed(3)} | OLD absX=${oldAbsX.toFixed(1)} time=${oldTime.toFixed(3)} | innerRect.left=${innerRect.left.toFixed(1)} rectLeft=${rect.left.toFixed(1)} scrollLeft=${oldScrollLeft.toFixed(1)} zoom=${zoomLevel}`);
+      } else {
+        // Fallback: use old approach
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
+        const x = e.clientX - rect.left + currentScrollLeft;
+        time = Math.max(0, x / zoomLevel);
+      }
 
       setScrubTime(time);
       setScrubMouseX(e.clientX);
@@ -800,14 +816,23 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           // playhead snapped to an unrelated time whenever the user moved
           // the cursor. This is the "playhead jumps to a random position"
           // bug.
-          const rulerEl = rulerContainerRef.current;
+           const rulerEl = rulerContainerRef.current;
           if (rulerEl) {
-            const rect = rulerEl.getBoundingClientRect();
-            // FIX: The ruler uses overflow-hidden, so rulerEl.scrollLeft is always 0.
-            // Read the actual scroll position from trackContainerRef instead.
-            const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
-            const x = clientX - rect.left + currentScrollLeft;
-            const time = Math.max(0, x / zoomLevel);
+            // ROBUST FIX: Use the inner content div's bounding rect to compute
+            // the absolute pixel position. Its getBoundingClientRect() already
+            // accounts for any scrolling/transforms the browser applied.
+            const innerDiv = rulerEl.firstElementChild as HTMLElement | null;
+            let time: number;
+            if (innerDiv) {
+              const innerRect = innerDiv.getBoundingClientRect();
+              const absX = clientX - innerRect.left;
+              time = Math.max(0, absX / zoomLevel);
+            } else {
+              const rect = rulerEl.getBoundingClientRect();
+              const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
+              const x = clientX - rect.left + currentScrollLeft;
+              time = Math.max(0, x / zoomLevel);
+            }
 
             seek(time);
             // Immediately notify the canvas render engine — avoids waiting for
