@@ -752,10 +752,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (e.button !== 0) return;
       setIsScrubbing(true);
 
-      // ROBUST FIX: Instead of computing `clientX - rulerRect.left + scrollLeft`,
-      // get the click position relative to the INNER content div. Its
-      // getBoundingClientRect() already accounts for all scrolling and CSS
-      // transforms applied by the browser — no manual scrollLeft needed.
       const rulerEl = rulerContainerRef.current;
       const innerDiv = rulerEl?.firstElementChild as HTMLElement | null;
 
@@ -764,16 +760,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const innerRect = innerDiv.getBoundingClientRect();
         const absX = e.clientX - innerRect.left;
         time = Math.max(0, absX / zoomLevel);
-
-        // DEBUG: compare old vs new approach
-        const trackEl = trackContainerRef.current;
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const oldScrollLeft = trackEl ? trackEl.scrollLeft : 0;
-        const oldAbsX = e.clientX - rect.left + oldScrollLeft;
-        const oldTime = Math.max(0, oldAbsX / zoomLevel);
-        console.log(`[RULER CLICK] NEW absX=${absX.toFixed(1)} time=${time.toFixed(3)} | OLD absX=${oldAbsX.toFixed(1)} time=${oldTime.toFixed(3)} | innerRect.left=${innerRect.left.toFixed(1)} rectLeft=${rect.left.toFixed(1)} scrollLeft=${oldScrollLeft.toFixed(1)} zoom=${zoomLevel}`);
       } else {
-        // Fallback: use old approach
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
         const x = e.clientX - rect.left + currentScrollLeft;
@@ -784,6 +771,20 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       setScrubMouseX(e.clientX);
       seek(time);
       window.dispatchEvent(new Event('procut-frame-updated'));
+
+      const soughtTime = time;
+      const afterSeek = useEditorStore.getState().currentTime;
+      console.log(`[RULER] sought=${soughtTime.toFixed(3)} storeAfterSeek=${afterSeek.toFixed(3)}`);
+      
+      // Check after 50ms and 200ms if something overrode it
+      setTimeout(() => {
+        const t = useEditorStore.getState().currentTime;
+        console.log(`[RULER +50ms] currentTime=${t.toFixed(3)} expected=${soughtTime.toFixed(3)} match=${Math.abs(t - soughtTime) < 0.01}`);
+      }, 50);
+      setTimeout(() => {
+        const t = useEditorStore.getState().currentTime;
+        console.log(`[RULER +200ms] currentTime=${t.toFixed(3)} expected=${soughtTime.toFixed(3)} match=${Math.abs(t - soughtTime) < 0.01}`);
+      }, 200);
 
       e.preventDefault();
       e.stopPropagation();
