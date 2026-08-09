@@ -752,16 +752,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (e.button !== 0) return;
       setIsScrubbing(true);
 
-      // FIX: Use rulerContainerRef's OWN scrollLeft, not trackContainerRef.
-      // Both are kept in sync by useTimelineScroll, but there is a RAF-throttled
-      // race window between a scroll event and the sync. Reading the ruler's own
-      // scrollLeft ensures the coordinate math is internally consistent:
-      //   x = clientX - rulerRect.left + ruler.scrollLeft
-      // Previously used trackContainer.scrollLeft which lagged by up to 16ms,
-      // causing the playhead to jump to a random time on click.
-      const rulerEl = rulerContainerRef.current;
+      // FIX: The rulerContainerRef element uses `overflow-hidden` in CSS, so its
+      // scrollLeft is always 0 (the browser ignores scrollLeft writes on
+      // overflow-hidden elements). The ACTUAL scroll offset lives on the
+      // trackContainerRef, which is the true scrollable container synced by
+      // useTimelineScroll. Reading the ruler's own scrollLeft was the root cause
+      // of the "click jumps to wrong time when scrolled" bug.
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const currentScrollLeft = rulerEl ? rulerEl.scrollLeft : useEditorStore.getState().scrollLeft;
+      const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
       const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
 
@@ -773,7 +771,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       e.preventDefault();
       e.stopPropagation();
     },
-    [zoomLevel, seek, setIsScrubbing, setScrubTime, setScrubMouseX, rulerContainerRef],
+    [zoomLevel, seek, setIsScrubbing, setScrubTime, setScrubMouseX, rulerContainerRef, trackContainerRef],
   );
 
   const handleSplit = useCallback(
@@ -804,13 +802,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           const rulerEl = rulerContainerRef.current;
           if (rulerEl) {
             const rect = rulerEl.getBoundingClientRect();
-            // FIX: Always read the ruler element's OWN scrollLeft — not the
-            // trackContainer's, not the Zustand store. This is the only value
-            // that is guaranteed to be pixel-accurate at the moment the RAF
-            // callback fires, because useTimelineScroll writes to rulerContainerRef
-            // directly via DOM (not via RAF). Reading from trackContainerRef
-            // introduced a ~16ms race that made the time calculation wrong.
-            const currentScrollLeft = rulerEl.scrollLeft;
+            // FIX: The ruler uses overflow-hidden, so rulerEl.scrollLeft is always 0.
+            // Read the actual scroll position from trackContainerRef instead.
+            const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
             const x = clientX - rect.left + currentScrollLeft;
             const time = Math.max(0, x / zoomLevel);
 
