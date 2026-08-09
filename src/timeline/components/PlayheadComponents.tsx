@@ -121,8 +121,12 @@ export function PlaybackAutoScroller({
 
   useEffect(() => {
     return useEditorStore.subscribe((state) => {
-      // Auto-scroll during both playback AND scrubbing so the playhead stays in view.
-      if (!state.isPlaying && !state.isScrubbing) return;
+      // Auto-scroll ONLY during active playback. During scrubbing the user
+      // has explicitly scrolled the timeline to the position they want to seek
+      // to — firing here causes a scroll fight: the old currentTime triggers a
+      // scroll BACK to the previous playhead area before seek() runs with the
+      // new time, making the timeline jump to a completely wrong position.
+      if (!state.isPlaying) return;
       const container = trackContainerRef.current;
       if (!container) return;
 

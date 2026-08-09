@@ -812,16 +812,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     if (isScrubbing) {
       latestClientXRef.current = e.clientX;
       if (scrubRafIdRef.current === null) {
-        scrubRafIdRef.current = requestAnimationFrame(() => {
+          scrubRafIdRef.current = requestAnimationFrame(() => {
           scrubRafIdRef.current = null;
           const clientX = latestClientXRef.current;
-          // CRITICAL FIX: use the RULER container's bounding rect, not the
-          // trackContainerRef. The ruler lives above the clip tracks; using
-          // trackContainerRef gave us a rect whose top was below the ruler,
-          // so clientX - rect.left produced the wrong offset and the
-          // playhead snapped to an unrelated time whenever the user moved
-          // the cursor. This is the "playhead jumps to a random position"
-          // bug.
            const rulerEl = rulerContainerRef.current;
           if (rulerEl) {
             // ROBUST FIX: Use the inner content div's bounding rect to compute
@@ -844,6 +837,27 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             // Immediately notify the canvas render engine — avoids waiting for
             // React's async render cycle to propagate the Zustand state change.
             window.dispatchEvent(new Event('procut-frame-updated'));
+
+            // Edge-scroll: since PlaybackAutoScroller no longer fires during
+            // scrubbing, we do it here — driven by cursor position, NOT currentTime.
+            // Only scroll when the cursor is near the ruler's left/right edge.
+            const container = trackContainerRef.current;
+            if (container) {
+              const rulerRect = rulerEl.getBoundingClientRect();
+              const edgeZone = 80; // px from edge where scroll kicks in
+              const distFromLeft = clientX - rulerRect.left;
+              const distFromRight = rulerRect.right - clientX;
+              if (distFromLeft < edgeZone && distFromLeft >= 0) {
+                const speed = Math.round((edgeZone - distFromLeft) / edgeZone * 20);
+                container.scrollLeft = Math.max(0, container.scrollLeft - speed);
+              } else if (distFromRight < edgeZone && distFromRight >= 0) {
+                const speed = Math.round((edgeZone - distFromRight) / edgeZone * 20);
+                container.scrollLeft = Math.min(
+                  container.scrollWidth - container.clientWidth,
+                  container.scrollLeft + speed
+                );
+              }
+            }
 
             const scrubNow = performance.now();
             if (scrubNow - lastScrubStateUpdateRef.current > 16) {
