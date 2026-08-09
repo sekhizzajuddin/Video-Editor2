@@ -752,16 +752,30 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (e.button !== 0) return;
       setIsScrubbing(true);
 
-      // FIX: The rulerContainerRef element uses `overflow-hidden` in CSS, so its
-      // scrollLeft is always 0 (the browser ignores scrollLeft writes on
-      // overflow-hidden elements). The ACTUAL scroll offset lives on the
-      // trackContainerRef, which is the true scrollable container synced by
-      // useTimelineScroll. Reading the ruler's own scrollLeft was the root cause
-      // of the "click jumps to wrong time when scrolled" bug.
+      const rulerEl = rulerContainerRef.current;
+      const trackEl = trackContainerRef.current;
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
+      const rulerScrollLeft = rulerEl ? rulerEl.scrollLeft : -1;
+      const trackScrollLeft = trackEl ? trackEl.scrollLeft : -1;
+      const storeScrollLeft = useEditorStore.getState().scrollLeft;
+      const currentScrollLeft = trackScrollLeft >= 0 ? trackScrollLeft : storeScrollLeft;
       const x = e.clientX - rect.left + currentScrollLeft;
       const time = Math.max(0, x / zoomLevel);
+
+      console.log('[RULER CLICK DEBUG]', {
+        clientX: e.clientX,
+        rectLeft: rect.left,
+        rectRight: rect.right,
+        rectWidth: rect.width,
+        rulerScrollLeft,
+        trackScrollLeft,
+        storeScrollLeft,
+        usedScrollLeft: currentScrollLeft,
+        pixelInView: e.clientX - rect.left,
+        absoluteX: x,
+        zoomLevel,
+        computedTime: time,
+      });
 
       setScrubTime(time);
       setScrubMouseX(e.clientX);
