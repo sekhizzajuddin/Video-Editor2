@@ -908,9 +908,19 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           if (resizeState.edge === 'right') {
             const newDuration = Math.max(0.1, resizeState.originalDuration + dt);
             const newSpeed = sourceContentDuration / newDuration;
-            const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
-            const clampedDuration = sourceContentDuration / clampedSpeed;
-            const delta = clampedDuration - resizeState.originalDuration;
+            let clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
+            let clampedDuration = sourceContentDuration / clampedSpeed;
+            let delta = clampedDuration - resizeState.originalDuration;
+            
+            const rawEdgeTime = resizeState.originalStartTime + clampedDuration;
+            const { snappedTime: snappedEdge, snapPos } = computeSnap(rawEdgeTime, resizeState.clipId, 0);
+            const snappedDuration = snappedEdge - resizeState.originalStartTime;
+            
+            clampedDuration = Math.max(0.1, snappedDuration);
+            clampedSpeed = Math.min(20, Math.max(0.1, sourceContentDuration / clampedDuration));
+            clampedDuration = sourceContentDuration / clampedSpeed;
+            delta = clampedDuration - resizeState.originalDuration;
+            setSnapLine(snapPos);
 
             batchBufferRef.current.length = 0;
             batchBufferRef.current.push({ clipId: resizeState.clipId, changes: { duration: clampedDuration, speed: clampedSpeed } });
@@ -939,7 +949,19 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                   maxDuration = resizeState.originalDuration + Math.max(0, availableSpace);
                }
             }
-            const limitedDuration = Math.min(newDur, maxDuration);
+            let limitedDuration = Math.min(newDur, maxDuration);
+
+            let rawStartTime = resizeState.originalStartTime + (resizeState.originalDuration - limitedDuration);
+            const { snappedTime: snappedEdge, snapPos } = computeSnap(rawStartTime, resizeState.clipId, 0);
+            let snappedShift = snappedEdge - resizeState.originalStartTime;
+            limitedDuration = resizeState.originalDuration - snappedShift;
+            
+            if (limitedDuration > maxDuration) {
+                limitedDuration = maxDuration;
+                setSnapLine(null);
+            } else {
+                setSnapLine(snapPos);
+            }
             
             const newSpeed = sourceContentDuration / limitedDuration;
             const clampedSpeed = Math.min(20, Math.max(0.1, newSpeed));
@@ -975,7 +997,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             } else {
               maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
             }
-            const clamped = Math.min(newDuration, maxDuration);
+            let clamped = Math.min(newDuration, maxDuration);
+
+            const rawEdgeTime = resizeState.originalStartTime + clamped;
+            const { snappedTime: snappedEdge, snapPos } = computeSnap(rawEdgeTime, resizeState.clipId, 0);
+            clamped = Math.min(snappedEdge - resizeState.originalStartTime, maxDuration);
+            setSnapLine(snapPos);
+
             const delta = clamped - resizeState.originalDuration;
 
             const newTrimEnd = isRamped
@@ -1005,7 +1033,20 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             }
             
             let clampedDuration = Math.min(newDuration, maxDuration);
-            const deltaDuration = clampedDuration - resizeState.originalDuration; // positive if expand, negative if shrink
+            let deltaDuration = clampedDuration - resizeState.originalDuration; // positive if expand, negative if shrink
+
+            let rawStartTime = resizeState.originalStartTime + deltaDuration;
+            const { snappedTime: snappedEdge, snapPos } = computeSnap(rawStartTime, resizeState.clipId, 0);
+            deltaDuration = snappedEdge - resizeState.originalStartTime;
+            clampedDuration = resizeState.originalDuration - deltaDuration;
+            
+            if (clampedDuration > maxDuration) {
+                clampedDuration = maxDuration;
+                deltaDuration = resizeState.originalDuration - clampedDuration;
+                setSnapLine(null);
+            } else {
+                setSnapLine(snapPos);
+            }
 
             const newTrimStart = isRamped
               ? getRampedTrimStartForLeftResize(clip, -deltaDuration)
@@ -1085,6 +1126,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             });
             batchUpdateClips(batchBufferRef.current);
           } else {
+            const rawEdgeTime = resizeState.originalStartTime + clamped;
+            const { snappedTime: snappedEdge, snapPos } = computeSnap(rawEdgeTime, resizeState.clipId, 0);
+            
+            // Adjust clamped based on the snap, but do not exceed media bounds (maxDuration)
+            clamped = Math.min(snappedEdge - resizeState.originalStartTime, maxDuration);
+            setSnapLine(snapPos);
+
             batchBufferRef.current.length = 0;
             batchBufferRef.current.push({
               clipId: resizeState.clipId,
@@ -1162,6 +1210,22 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             });
             batchUpdateClips(batchBufferRef.current);
           } else {
+            let rawStartTime = resizeState.originalStartTime + shift;
+            const { snappedTime: snappedEdge, snapPos } = computeSnap(rawStartTime, resizeState.clipId, 0);
+            
+            // Re-calculate shift and clamped based on the snapped start time
+            shift = snappedEdge - resizeState.originalStartTime;
+            clamped = resizeState.originalDuration - shift;
+
+            // Ensure clamped doesn't exceed media limits
+            if (clamped > maxDuration) {
+                clamped = maxDuration;
+                shift = resizeState.originalDuration - clamped;
+                setSnapLine(null); // Snapping failed because it exceeded media bounds
+            } else {
+                setSnapLine(snapPos);
+            }
+
             const newTrimStart = isRamped
               ? getRampedTrimStartForLeftResize(clip, shift)
               : resizeState.originalTrimStart + shift * clip.speed;
@@ -1339,6 +1403,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       endTransactionSafe();
     }
     if (resizeState) {
+      useEditorStore.getState().resolveOverlaps([resizeState.clipId]);
+      setSnapLine(null);
       setResizeState(null);
       endTransactionSafe();
     }
