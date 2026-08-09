@@ -218,28 +218,56 @@ export function WaveformViewer({
     const actualBarWidth = barWidth - gap;
     const amp = cssHeight / 2;
 
-    // Gradient for waveform
+    // Gradient for professional waveform
     const gradient = ctx.createLinearGradient(0, 0, 0, cssHeight);
-    gradient.addColorStop(0, '#63B3ED');
-    gradient.addColorStop(0.5, '#4299E1');
-    gradient.addColorStop(1, '#63B3ED');
+    gradient.addColorStop(0, 'rgba(99, 179, 237, 0.4)');
+    gradient.addColorStop(0.3, 'rgba(66, 153, 225, 0.9)');
+    gradient.addColorStop(0.5, 'rgba(66, 153, 225, 1.0)');
+    gradient.addColorStop(0.7, 'rgba(66, 153, 225, 0.9)');
+    gradient.addColorStop(1, 'rgba(99, 179, 237, 0.4)');
 
     ctx.fillStyle = gradient;
+    ctx.beginPath();
 
+    let firstX = -1;
+
+    // Top half
     for (let i = 0; i < peaks.length; i++) {
+      const peakTime = (i / peaks.length) * peaks.duration;
+      if (peakTime < visibleStart || peakTime > visibleEnd) continue;
+
+      const x = ((peakTime - visibleStart) / visibleDuration) * cssWidth;
+      if (firstX === -1) {
+        firstX = x;
+        ctx.moveTo(firstX, amp);
+      }
+
+      const minVal = peaks.min[i];
+      const maxVal = peaks.max[i];
+      const barHeight = Math.max(1, (maxVal - minVal) * amp * 0.85);
+      ctx.lineTo(x, amp - (barHeight / 2));
+    }
+
+    // Bottom half (reverse order)
+    for (let i = peaks.length - 1; i >= 0; i--) {
       const peakTime = (i / peaks.length) * peaks.duration;
       if (peakTime < visibleStart || peakTime > visibleEnd) continue;
 
       const x = ((peakTime - visibleStart) / visibleDuration) * cssWidth;
       const minVal = peaks.min[i];
       const maxVal = peaks.max[i];
-
-      // Draw mirrored waveform (top and bottom)
       const barHeight = Math.max(1, (maxVal - minVal) * amp * 0.85);
-      const y = amp - (barHeight / 2);
-
-      ctx.fillRect(x, y, actualBarWidth, barHeight);
+      ctx.lineTo(x, amp + (barHeight / 2));
     }
+
+    if (firstX !== -1) {
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Draw prominent center line
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.fillRect(0, amp - 0.5, cssWidth, 1);
 
     // ============================================
     // 4. BEAT MARKERS

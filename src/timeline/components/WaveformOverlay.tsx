@@ -35,11 +35,8 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
 }: WaveformOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Bar spacing: tighter for small mode, normal for full
-  const BAR_W = small ? 1 : 2;
-  const GAP = small ? 1 : 1;
-  const STEP = BAR_W + GAP;
-
+  // Use a continuous path, so step is just 1 or 2 to make it dense and solid.
+  const STEP = small ? 1 : 2;
   const barCount = Math.max(Math.floor(width / STEP), 4);
 
   const peaks = useMemo(() => {
@@ -69,48 +66,60 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     ctx.clearRect(0, 0, W, H);
 
     if (small) {
-      // ── Thin bottom waveform for video clips ───────────────────────────
+      // ── Thin bottom waveform for video clips (continuous path) ─────────
       const waveColor = color ?? 'rgba(255,255,255,0.45)';
       ctx.fillStyle = waveColor;
+      
+      ctx.beginPath();
+      ctx.moveTo(0, H);
       for (let i = 0; i < peaks.length; i++) {
         const x = i * STEP;
         const barH = Math.max(1, peaks[i] * H);
-        ctx.fillRect(x, H - barH, BAR_W, barH);
+        ctx.lineTo(x, H - barH);
       }
+      ctx.lineTo((peaks.length - 1) * STEP, H);
+      ctx.closePath();
+      ctx.fill();
       return;
     }
 
     // ── Full centered / mirrored waveform (audio tracks) ─────────────────
-    // Parse the base color for gradient construction
-    const baseColor = color ?? 'rgba(255,255,255,1)';
+    const baseColor = color ?? '#1e293b'; // slightly darker fallback
     const cy = H / 2;
 
-    // Vertical gradient: brighter at center, fades toward top/bottom edges
+    // Professional waveform look: solid shape, sharper gradient
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    // Parse color into components for gradient — build rgba variants
-    // We'll use the baseColor for mid-point and a transparent version for edges
-    grad.addColorStop(0,   replaceAlpha(baseColor, 0.25));
-    grad.addColorStop(0.2, replaceAlpha(baseColor, 0.65));
-    grad.addColorStop(0.5, replaceAlpha(baseColor, 0.90));
-    grad.addColorStop(0.8, replaceAlpha(baseColor, 0.65));
-    grad.addColorStop(1,   replaceAlpha(baseColor, 0.25));
+    grad.addColorStop(0,   replaceAlpha(baseColor, 0.4));
+    grad.addColorStop(0.3, replaceAlpha(baseColor, 0.9));
+    grad.addColorStop(0.5, replaceAlpha(baseColor, 1.0));
+    grad.addColorStop(0.7, replaceAlpha(baseColor, 0.9));
+    grad.addColorStop(1,   replaceAlpha(baseColor, 0.4));
 
     ctx.fillStyle = grad;
 
+    ctx.beginPath();
+    // Top half
+    ctx.moveTo(0, cy);
     for (let i = 0; i < peaks.length; i++) {
       const x = i * STEP;
-      // Leave ~8% padding top and bottom so bars don't touch the clip edge
       const maxHalf = cy * 0.92;
       const halfH = Math.max(1.5, peaks[i] * maxHalf);
-
-      // Draw mirrored bar centered on cy
-      ctx.fillRect(x, cy - halfH, BAR_W, halfH * 2);
+      ctx.lineTo(x, cy - halfH);
     }
+    // Bottom half
+    for (let i = peaks.length - 1; i >= 0; i--) {
+      const x = i * STEP;
+      const maxHalf = cy * 0.92;
+      const halfH = Math.max(1.5, peaks[i] * maxHalf);
+      ctx.lineTo(x, cy + halfH);
+    }
+    ctx.closePath();
+    ctx.fill();
 
-    // Subtle center-line
-    ctx.fillStyle = replaceAlpha(baseColor, 0.15);
+    // Prominent center-line to help spot dialogue start/end
+    ctx.fillStyle = replaceAlpha(baseColor, 0.5);
     ctx.fillRect(0, cy - 0.5, W, 1);
-  }, [peaks, width, height, small, color, BAR_W, GAP, STEP]);
+  }, [peaks, width, height, small, color, STEP]);
 
   return (
     <canvas

@@ -43,33 +43,55 @@ export function renderWaveform(
 
   if (peaks.length === 0) return;
 
-  const barWidth = customBarWidth ?? Math.max(1, (width / peaks.length) - barGap);
-  const totalBarSpace = barWidth + barGap;
+  const step = customBarWidth ? customBarWidth + barGap : Math.max(1, (width / peaks.length));
 
   ctx.fillStyle = color;
 
-  for (let i = 0; i < peaks.length; i++) {
-    const x = i * totalBarSpace;
-    if (x > width) break;
-
-    const peak = Math.max(0.02, peaks[i]); // minimum visible height
-    const barHeight = peak * height * 0.9;
-
-    if (style === 'center') {
-      const y = (height - barHeight) / 2;
-      if (cornerRadius > 0) {
-        roundRect(ctx, x, y, barWidth, barHeight, cornerRadius);
-      } else {
-        ctx.fillRect(x, y, barWidth, barHeight);
-      }
-    } else {
-      const y = height - barHeight;
-      if (cornerRadius > 0) {
-        roundRect(ctx, x, y, barWidth, barHeight, cornerRadius);
-      } else {
-        ctx.fillRect(x, y, barWidth, barHeight);
-      }
+  if (style === 'center') {
+    const cy = height / 2;
+    ctx.beginPath();
+    
+    // Top half
+    ctx.moveTo(0, cy);
+    for (let i = 0; i < peaks.length; i++) {
+      const x = i * step;
+      if (x > width) break;
+      const peak = Math.max(0.02, peaks[i]);
+      const halfH = (peak * height * 0.9) / 2;
+      ctx.lineTo(x, cy - halfH);
     }
+    
+    // Bottom half
+    for (let i = peaks.length - 1; i >= 0; i--) {
+      const x = i * step;
+      if (x > width) continue;
+      const peak = Math.max(0.02, peaks[i]);
+      const halfH = (peak * height * 0.9) / 2;
+      ctx.lineTo(x, cy + halfH);
+    }
+    
+    ctx.closePath();
+    ctx.fill();
+
+    // Center line for distinct dialogue start/end
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.fillRect(0, cy - 0.5, width, 1);
+  } else {
+    // Bottom style
+    ctx.beginPath();
+    ctx.moveTo(0, height);
+    for (let i = 0; i < peaks.length; i++) {
+      const x = i * step;
+      if (x > width) break;
+      const peak = Math.max(0.02, peaks[i]);
+      const barHeight = peak * height * 0.9;
+      ctx.lineTo(x, height - barHeight);
+    }
+    // close path
+    const lastValidX = Math.min(width, (peaks.length - 1) * step);
+    ctx.lineTo(lastValidX, height);
+    ctx.closePath();
+    ctx.fill();
   }
 }
 
