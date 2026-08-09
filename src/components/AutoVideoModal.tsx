@@ -192,6 +192,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       return;
     }
 
+
     const accountId = settings?.cloudflareAccountId || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID;
     const apiToken  = settings?.cloudflareApiToken  || import.meta.env.VITE_CLOUDFLARE_API_TOKEN;
     if (!accountId || !apiToken) {
@@ -199,7 +200,6 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
       return;
     }
 
-    // Pick a local folder to store generated images
     let dirHandle: FileSystemDirectoryHandle | null = null;
     try {
       dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
@@ -210,12 +210,11 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
     setIsAssembling(true);
     setProgress(5);
-    setStatus('Starting assembly…');
+    setStatus('Starting smart assembly…');
 
     try {
       const cfUrl = `/cf-api/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`;
 
-      // Helper: generate image via Cloudflare SDXL (with 1 retry)
       const fetchCfImage = async (prompt: string): Promise<Blob> => {
         for (let attempt = 1; attempt <= 2; attempt++) {
           const res = await fetch(cfUrl, {
@@ -235,14 +234,15 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         throw new Error('Failed to generate image');
       };
 
-      // Helper: if resolvedUrl is a blob: URL already in memory, re-fetch its blob
       const getBlobFromUrl = async (blobUrl: string): Promise<Blob> => {
         const res = await fetch(blobUrl);
         return res.blob();
       };
 
-      // Helper: save blob to local folder + register media, return mediaId
-      const saveMediaFile = async (blob: Blob, name: string, duration: number, ext: string = 'jpg', type: 'image' | 'video' = 'image'): Promise<string> => {
+      const saveMediaFile = async (
+        blob: Blob, name: string, duration: number,
+        ext: string = 'jpg', type: 'image' | 'video' = 'image'
+      ): Promise<string> => {
         const filename = `${name}_${Date.now()}.${ext}`;
         const fh = await dirHandle!.getFileHandle(filename, { create: true });
         const wr = await fh.createWritable();
@@ -255,14 +255,174 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         return mid;
       };
 
-      // ── Ensure we have enough video tracks ───────────────────────────────
-      // We need: Track 0 (v1) = BG, Tracks 1..maxPips = PIPs, one text track, one audio track
-      const maxPips = blueprint.scenes.reduce((m, s) => Math.max(m, s.pipItems.length), 0);
+      const buildPipAnimations = (
+        pip: AutoVideoPipItemV2,
+        baseX: number,
+        baseY: number,
+        baseScale: number,
+        dur: number
+      ): { initial: { x: number; y: number; scale: number; rotation: number }; animations: Record<string, any[]> } => {
+        const dir  = pip.animDirection ?? 'floatUp';
+        const ease = 'easeOut' as const;
+        const snapT = Math.min(0.55, dur * 0.25);
 
-      // Get current state of tracks (fresh from store)
+        switch (dir) {
+          case 'slideInLeft':
+            return {
+              initial: { x: baseX - 45, y: baseY, scale: baseScale, rotation: 0 },
+              animations: {
+                'transform.x': [
+                  { time: 0,      value: baseX - 45, easing: ease },
+                  { time: snapT,  value: baseX,       easing: 'linear' as const },
+                  { time: dur,    value: baseX + 4 },
+                ],
+              },
+            };
+          case 'slideInRight':
+            return {
+              initial: { x: baseX + 45, y: baseY, scale: baseScale, rotation: 0 },
+              animations: {
+                'transform.x': [
+                  { time: 0,     value: baseX + 45, easing: ease },
+                  { time: snapT, value: baseX,       easing: 'linear' as const },
+                  { time: dur,   value: baseX - 4 },
+                ],
+              },
+            };
+          case 'zoomIn':
+            return {
+              initial: { x: baseX, y: baseY, scale: baseScale - 30, rotation: 0 },
+              animations: {
+                'transform.scale': [
+                  { time: 0,     value: baseScale - 30, easing: ease },
+                  { time: snapT, value: baseScale,       easing: 'linear' as const },
+                  { time: dur,   value: baseScale + 4 },
+                ],
+              },
+            };
+          case 'zoomOut':
+            return {
+              initial: { x: baseX, y: baseY, scale: baseScale + 30, rotation: 0 },
+              animations: {
+                'transform.scale': [
+                  { time: 0,     value: baseScale + 30, easing: ease },
+                  { time: snapT, value: baseScale,       easing: 'linear' as const },
+                  { time: dur,   value: baseScale - 3 },
+                ],
+              },
+            };
+          case 'floatDown':
+            return {
+              initial: { x: baseX, y: baseY - 22, scale: baseScale, rotation: 0 },
+              animations: {
+                'transform.y': [
+                  { time: 0,     value: baseY - 22, easing: ease },
+                  { time: snapT, value: baseY,       easing: 'linear' as const },
+                  { time: dur,   value: baseY + 6 },
+                ],
+              },
+            };
+          case 'kenBurns':
+            return {
+              initial: { x: baseX, y: baseY, scale: baseScale - 8, rotation: 0 },
+              animations: {
+                'transform.scale': [
+                  { time: 0,   value: baseScale - 8 },
+                  { time: dur, value: baseScale + 8 },
+                ],
+                'transform.x': [
+                  { time: 0,   value: baseX },
+                  { time: dur, value: baseX + 5 },
+                ],
+              },
+            };
+          case 'pop':
+            return {
+              initial: { x: baseX, y: baseY, scale: 0, rotation: 0 },
+              animations: {
+                'transform.scale': [
+                  { time: 0,           value: 0,              easing: ease },
+                  { time: snapT * 0.7, value: baseScale + 12, easing: 'linear' as const },
+                  { time: snapT,       value: baseScale,       easing: 'linear' as const },
+                  { time: dur,         value: baseScale + 3 },
+                ],
+              },
+            };
+          case 'drift':
+            return {
+              initial: { x: baseX - 12, y: baseY - 8, scale: baseScale, rotation: 0 },
+              animations: {
+                'transform.x': [
+                  { time: 0,   value: baseX - 12 },
+                  { time: dur, value: baseX + 4 },
+                ],
+                'transform.y': [
+                  { time: 0,   value: baseY - 8 },
+                  { time: dur, value: baseY + 4 },
+                ],
+              },
+            };
+          case 'rotate':
+            return {
+              initial: { x: baseX, y: baseY, scale: baseScale - 5, rotation: -6 },
+              animations: {
+                'transform.rotation': [
+                  { time: 0,     value: -6, easing: ease },
+                  { time: snapT, value: 0,  easing: 'linear' as const },
+                  { time: dur,   value: 1 },
+                ],
+                'transform.scale': [
+                  { time: 0,     value: baseScale - 5, easing: ease },
+                  { time: snapT, value: baseScale },
+                ],
+              },
+            };
+          case 'none':
+            return {
+              initial: { x: baseX, y: baseY, scale: baseScale, rotation: 0 },
+              animations: {},
+            };
+          default:
+            return {
+              initial: { x: baseX, y: baseY + 20, scale: baseScale - 5, rotation: 0 },
+              animations: {
+                'transform.y': [
+                  { time: 0,     value: baseY + 20, easing: ease },
+                  { time: snapT, value: baseY,       easing: 'linear' as const },
+                  { time: dur,   value: baseY - 6 },
+                ],
+                'transform.scale': [
+                  { time: 0,     value: baseScale - 5, easing: ease },
+                  { time: snapT, value: baseScale,      easing: 'linear' as const },
+                  { time: dur,   value: baseScale + 4 },
+                ],
+              },
+            };
+        }
+      };
+
+      const buildChromaKey = (pip: AutoVideoPipItemV2) => {
+        const hint = pip.chromaHint ?? 'green';
+        if (hint === 'none') return undefined;
+
+        const color = hint === 'blue' ? '#0000ff' : '#00ff00';
+        const isVintage   = visualStyle === 'vox_vintage';
+        const isAnime     = visualStyle === 'style_anime' || visualStyle === 'style_watercolor';
+        const isRealistic = visualStyle === 'vox_realistic' || visualStyle === 'ultra_realistic';
+
+        return {
+          enabled:          true,
+          color,
+          threshold:        isAnime ? 30 : isRealistic ? 45 : isVintage ? 35 : 40,
+          softness:         isAnime ? 30 : isRealistic ? 15 : isVintage ? 25 : 20,
+          spillSuppression: isVintage ? 30 : isRealistic ? 20 : 15,
+          edgeFeather:      isAnime ? 2 : 1,
+        };
+      };
+
+      const maxPips = blueprint.scenes.reduce((m, s) => Math.max(m, s.pipItems.length), 0);
       const getStoreTracks = () => useEditorStore.getState().tracks;
 
-      // Helper: ensure at least N video tracks exist, return their IDs (0-indexed)
       const ensureVideoTracks = (needed: number): string[] => {
         let vTracks = getStoreTracks().filter(t => t.type === 'video');
         while (vTracks.length < needed) {
@@ -272,17 +432,15 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         return vTracks.map(t => t.id);
       };
 
-      // Helper: ensure at least one text track exists, return its ID
-      const ensureTextTrack = (): string => {
+      const ensureTextTracks = (needed: number): string[] => {
         let tTracks = getStoreTracks().filter(t => t.type === 'text');
-        if (tTracks.length === 0) {
+        while (tTracks.length < needed) {
           addTrack('text');
           tTracks = getStoreTracks().filter(t => t.type === 'text');
         }
-        return tTracks[0].id;
+        return tTracks.map(t => t.id);
       };
 
-      // Helper: ensure at least one audio track exists, return its ID
       const ensureAudioTrack = (): string => {
         let aTracks = getStoreTracks().filter(t => t.type === 'audio');
         if (aTracks.length === 0) {
@@ -292,26 +450,29 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         return aTracks[0].id;
       };
 
-      // Need: 1 BG track + maxPips PIP tracks = maxPips + 1 video tracks total
-      const videoTrackIds = ensureVideoTracks(maxPips + 1);
-      const bgTrackId     = videoTrackIds[0];
-      const textTrackId   = ensureTextTrack();
-      const audioTrackId  = ensureAudioTrack();
+      const videoTrackIds    = ensureVideoTracks(maxPips + 1);
+      const bgTrackId        = videoTrackIds[0];
+      const pipTrackIds      = videoTrackIds.slice(1);
 
-      const totalScenes = blueprint.scenes.length;
+      const textTrackIds     = ensureTextTracks(2);
+      const subtitleTrackId  = textTrackIds[0];
+      const pipPointTrackId  = textTrackIds[1];
+      const audioTrackId     = ensureAudioTrack();
 
-      // ── STEP A: Download all required backgrounds ─────────────────────────
+      const totalScenes      = blueprint.scenes.length;
+      const isUltraRealistic = visualStyle === 'ultra_realistic';
+      const XFADE            = 0.35;
+
       setStatus('Generating global backgrounds…');
       const bgMediaIds: Record<number, string> = {};
       const usedBgIndices = [...new Set(blueprint.scenes.map(s => s.selectedBackgroundIndex))];
-      const isUltraRealistic = visualStyle === 'ultra_realistic';
 
       for (let i = 0; i < usedBgIndices.length; i++) {
         const bgIdx = usedBgIndices[i];
-        const bg = blueprint.globalBackgrounds[bgIdx];
+        const bg    = blueprint.globalBackgrounds[bgIdx];
         if (!bg) continue;
         setStatus(`Generating background ${bgIdx + 1}/${blueprint.globalBackgrounds.length}…`);
-        setProgress(5 + (i / usedBgIndices.length) * 10);
+        setProgress(5 + (i / usedBgIndices.length) * 12);
 
         try {
           let blob: Blob;
@@ -337,49 +498,102 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           bgMediaIds[bgIdx] = await saveMediaFile(blob, `bg_${bgIdx}`, audioDuration, ext, mediaType);
         } catch (e: any) {
           console.warn(`Background ${bgIdx} failed:`, e);
-          toast(`Background ${bgIdx + 1} failed to generate — scene will use no background.`, { icon: '⚠️' });
+          toast(`Background ${bgIdx + 1} failed to generate — scene will skip background.`, { icon: '⚠️' });
         }
       }
 
-      // ── STEP B: Process each dialogue scene ──────────────────────────────
       for (let sIdx = 0; sIdx < totalScenes; sIdx++) {
-        const scene = blueprint.scenes[sIdx];
-        const pctStart = 15 + (sIdx / totalScenes) * 75;
+        const scene    = blueprint.scenes[sIdx];
+        const pctStart = 17 + (sIdx / totalScenes) * 73;
         setProgress(Math.round(pctStart));
-        setStatus(`Scene ${sIdx + 1}/${totalScenes}: Adding background clip…`);
 
-        // B1: Background clip on videoTrackIds[0]
-        const bgMid = bgMediaIds[scene.selectedBackgroundIndex];
+        const bgMid      = bgMediaIds[scene.selectedBackgroundIndex];
+        const bgLabel    = blueprint.globalBackgrounds[scene.selectedBackgroundIndex]?.prompt?.slice(0, 28) ?? '';
+        setStatus(`Dialogue ${sIdx + 1}/${totalScenes}: BG "${bgLabel}…"`);
+
         if (bgMid) {
+          const clipStart = sIdx === 0 ? scene.startTime : Math.max(0, scene.startTime - XFADE);
+          const clipDur   = sIdx === 0 ? scene.duration  : scene.duration + XFADE;
+
           addClip({
-            id:           `clip_bg_${newId()}`,
-            mediaId:      bgMid,
-            trackId:      bgTrackId,
-            startTime:    scene.startTime,
-            duration:     scene.duration,
-            trimStart:    0,
-            trimEnd:      0,
-            opacity:      1,
-            speed:        1,
-            effects:      [],
-            transform:    { x: 0, y: 0, scale: 100, rotation: 0 },
-            animations:   {
+            id:        `clip_bg_${newId()}`,
+            mediaId:   bgMid,
+            trackId:   bgTrackId,
+            startTime: clipStart,
+            duration:  clipDur,
+            trimStart: 0,
+            trimEnd:   0,
+            opacity:   1,
+            speed:     1,
+            effects:   [],
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            animations: {
+              opacity: sIdx === 0
+                ? [
+                    { time: 0,    value: 0, easing: 'easeOut' as const },
+                    { time: 0.25, value: 1 },
+                    { time: clipDur, value: 1 },
+                  ]
+                : [
+                    { time: 0,     value: 0, easing: 'easeInOut' as const },
+                    { time: XFADE, value: 1, easing: 'linear' as const },
+                    { time: clipDur, value: 1 },
+                  ],
               'transform.scale': [
-                { time: 0,              value: 100 },
-                { time: scene.duration, value: 108 },
+                { time: 0,       value: 100 },
+                { time: clipDur, value: 108 },
               ],
             },
           });
         }
 
-        // B2: PIP clips on videoTrackIds[1], [2], [3], …
+        const markerMid = `pip_marker_${newId()}`;
+        addMedia({
+          id:          markerMid,
+          name:        `D${sIdx + 1} · ${scene.startTime.toFixed(1)}s`,
+          type:        'text',
+          duration:    0.2,
+          url:         '',
+          createdAt:   Date.now(),
+          textContent: `D${sIdx + 1}`,
+        });
+        addClip({
+          id:        `clip_pipmark_${newId()}`,
+          mediaId:   markerMid,
+          trackId:   pipPointTrackId,
+          startTime: scene.startTime,
+          duration:  0.2,
+          trimStart: 0,
+          trimEnd:   0,
+          opacity:   1,
+          speed:     1,
+          effects:   [],
+          transform: { x: 0, y: -48, scale: 70, rotation: 0 },
+          textSettings: {
+            text:            `D${sIdx + 1} · ${scene.startTime.toFixed(1)}s`,
+            fontFamily:      'Inter',
+            fontSize:        11,
+            color:           '#f0f0f0',
+            backgroundColor: 'rgba(99,102,241,0.80)',
+            bold:            true,
+            italic:          false,
+            underline:       false,
+            shadow:          false,
+            textAlign:       'center',
+          },
+          zIndex: 10000,
+        });
+
         for (let pIdx = 0; pIdx < scene.pipItems.length; pIdx++) {
-          const pip  = scene.pipItems[pIdx];
-          const tOff = PIP_OFFSETS[pIdx] ?? PIP_OFFSETS[0];
-          const pipTrackId = videoTrackIds[pIdx + 1];
+          const pip        = scene.pipItems[pIdx];
+          const tOff       = PIP_OFFSETS[pIdx] ?? PIP_OFFSETS[0];
+          const pipTrackId = pipTrackIds[pIdx];
           if (!pipTrackId) continue;
 
-          setStatus(`Scene ${sIdx + 1}/${totalScenes}: PIP ${pIdx + 1}/${scene.pipItems.length}${pip.source === 'map' ? ' (Map)' : ''}…`);
+          setStatus(
+            `Dialogue ${sIdx + 1}/${totalScenes}: PIP ${pIdx + 1}/${scene.pipItems.length}` +
+            ` [${pip.animDirection ?? 'floatUp'}]${pip.source === 'map' ? ' (Map)' : ''}…`
+          );
 
           try {
             let blob: Blob;
@@ -388,19 +602,17 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
             const isMapPip = pip.source === 'map';
 
             if (isMapPip) {
-              // ── Map pip: fetch static map image ──────────────────────────
               const mapUrl = pip.resolvedUrl?.startsWith('blob:')
                 ? pip.resolvedUrl
                 : buildMapPreviewUrl(pip, 640, 360);
-              if (pip.resolvedUrl?.startsWith('blob:')) {
-                blob = await getBlobFromUrl(pip.resolvedUrl);
-              } else {
-                const mapResp = await fetch(mapUrl);
-                if (!mapResp.ok) throw new Error(`Map fetch failed: ${mapResp.status}`);
-                blob = await mapResp.blob();
-              }
+              blob = pip.resolvedUrl?.startsWith('blob:')
+                ? await getBlobFromUrl(pip.resolvedUrl)
+                : await (async () => {
+                    const r = await fetch(mapUrl);
+                    if (!r.ok) throw new Error(`Map fetch failed: ${r.status}`);
+                    return r.blob();
+                  })();
             } else if (isUltraRealistic) {
-              // ── Pexels video pip ─────────────────────────────
               if (pip.resolvedUrl?.startsWith('blob:')) {
                 blob = await getBlobFromUrl(pip.resolvedUrl);
               } else {
@@ -416,83 +628,58 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                 }
               }
             } else {
-              // ── AI image pip: use Cloudflare ─────────────────────────────
-              if (pip.resolvedUrl?.startsWith('blob:')) {
-                blob = await getBlobFromUrl(pip.resolvedUrl);
-              } else {
-                blob = await fetchCfImage(pip.prompt);
-              }
+              blob = pip.resolvedUrl?.startsWith('blob:')
+                ? await getBlobFromUrl(pip.resolvedUrl)
+                : await fetchCfImage(pip.prompt);
             }
 
             const pipMid = await saveMediaFile(blob, `pip_s${sIdx}_p${pIdx}`, scene.duration, ext, mediaType);
 
-            // Build map animation settings if this is a map pip
             const mapAnimationSettings = isMapPip && pip.mapWaypoints && pip.mapWaypoints.length > 0
               ? {
-                  type: (pip.mapAnimType ?? 'flyTo') as 'route' | 'flyTo' | 'highlight',
+                  type:      (pip.mapAnimType ?? 'flyTo')  as 'route' | 'flyTo' | 'highlight',
                   waypoints: pip.mapWaypoints.map(wp => ({ lat: wp.lat, lng: wp.lng, label: wp.label })),
-                  zoom: pip.mapZoom ?? 8,
-                  style: (pip.mapStyle ?? 'standard') as 'standard' | 'satellite' | 'dark' | 'vintage',
+                  zoom:      pip.mapZoom ?? 8,
+                  style:     (pip.mapStyle ?? 'standard') as 'standard' | 'satellite' | 'dark' | 'vintage',
                 }
               : undefined;
 
-            addClip({
-              id:           `clip_pip_${newId()}`,
-              mediaId:      pipMid,
-              trackId:      pipTrackId,
-              startTime:    scene.startTime,
-              duration:     scene.duration,
-              trimStart:    0,
-              trimEnd:      0,
-              opacity:      1,
-              speed:        1,
-              effects:      [],
-              transform:    {
-                x:        tOff.x,
-                y:        tOff.y + 18,
-                scale:    tOff.scale - 5,
-                rotation: 0,
-              },
-              // Map pips: no chroma key, but full-frame map display
-              // AI pips: chroma key green screen removal
-              ...(!isMapPip ? {
-                chromaKey: {
-                  enabled:   true,
-                  color:     '#00ff00',
-                  threshold: 40,
-                  softness:  20,
-                },
-              } : {}),
-              // Attach map animation settings for the rendering engine
-              ...(mapAnimationSettings ? { mapAnimation: mapAnimationSettings } : {}),
-              animations: isMapPip
-                ? {
-                    // Map pips get a smooth Ken-Burns zoom-in for visual interest
+            const { initial: initTransform, animations: pipAnim } = isMapPip
+              ? {
+                  initial: { x: tOff.x, y: tOff.y, scale: tOff.scale - 5, rotation: 0 },
+                  animations: {
                     'transform.scale': [
                       { time: 0,              value: tOff.scale - 5 },
                       { time: scene.duration, value: tOff.scale + 3 },
                     ],
-                  }
-                : {
-                    'transform.y': [
-                      { time: 0,                                value: tOff.y + 18, easing: 'easeOut' },
-                      { time: Math.min(0.6, scene.duration),   value: tOff.y,      easing: 'linear'  },
-                      { time: scene.duration,                  value: tOff.y - 8              },
-                    ],
-                    'transform.scale': [
-                      { time: 0,                                value: tOff.scale - 5, easing: 'easeOut' },
-                      { time: Math.min(0.6, scene.duration),   value: tOff.scale,     easing: 'linear'  },
-                      { time: scene.duration,                  value: tOff.scale + 4              },
-                    ],
                   },
+                }
+              : buildPipAnimations(pip, tOff.x, tOff.y, tOff.scale, scene.duration);
+
+            const chromaKey = isMapPip ? undefined : buildChromaKey(pip);
+
+            addClip({
+              id:        `clip_pip_${newId()}`,
+              mediaId:   pipMid,
+              trackId:   pipTrackId,
+              startTime: scene.startTime,
+              duration:  scene.duration,
+              trimStart: 0,
+              trimEnd:   0,
+              opacity:   1,
+              speed:     1,
+              effects:   [],
+              transform: initTransform,
+              ...(chromaKey          ? { chromaKey }          : {}),
+              ...(mapAnimationSettings ? { mapAnimation: mapAnimationSettings } : {}),
+              animations: pipAnim,
             });
           } catch (e: any) {
             console.warn(`PIP scene ${sIdx} / pip ${pIdx} failed:`, e);
-            toast(`PIP ${pIdx + 1} in scene ${sIdx + 1} failed — continuing.`, { icon: '⚠️' });
+            toast(`PIP ${pIdx + 1} in dialogue ${sIdx + 1} failed — continuing.`, { icon: '⚠️' });
           }
         }
 
-        // B3: Subtitle / caption text clip
         const textMid = `text_${newId()}`;
         addMedia({
           id:          textMid,
@@ -503,11 +690,10 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           createdAt:   Date.now(),
           textContent: scene.narration,
         });
-
         addClip({
           id:          `clip_txt_${newId()}`,
           mediaId:     textMid,
-          trackId:     textTrackId,
+          trackId:     subtitleTrackId,
           startTime:   scene.startTime,
           duration:    scene.duration,
           trimStart:   0,
@@ -534,10 +720,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         });
       }
 
-      // ── STEP C: Audio clip ────────────────────────────────────────────────
       setStatus('Adding voiceover to timeline…');
       setProgress(92);
-
       addClip({
         id:        `clip_audio_${newId()}`,
         mediaId:   audioMediaId,
@@ -554,7 +738,9 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
       setProgress(100);
       setStatus('Done! ✓');
-      toast.success(`Video assembled! ${totalScenes} scenes, ${audioDuration.toFixed(1)}s timeline.`);
+      toast.success(
+        `Video assembled! ${totalScenes} dialogues · ${audioDuration.toFixed(1)}s · ${maxPips} PIP tracks · crossfade backgrounds ✓`
+      );
       setTimeout(onClose, 1200);
 
     } catch (e: any) {

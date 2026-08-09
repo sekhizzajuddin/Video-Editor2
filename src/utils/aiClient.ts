@@ -1244,10 +1244,27 @@ export interface AutoVideoPipWaypoint {
 
 export type AutoVideoPipSource = 'ai_image' | 'map';
 
+export type PipAnimDirection =
+  | 'slideInLeft'
+  | 'slideInRight'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'floatUp'
+  | 'floatDown'
+  | 'kenBurns'
+  | 'pop'
+  | 'drift'
+  | 'rotate'
+  | 'none';
+
 export interface AutoVideoPipItemV2 {
   source: AutoVideoPipSource;  // 'ai_image' = CF SDXL image, 'map' = map animation
   prompt: string;              // For ai_image: image prompt. For map: location description.
   resolvedUrl?: string;        // Cached blob URL after generation
+  // Animation direction chosen by AI — used locally to build keyframes, NO extra AI call
+  animDirection?: PipAnimDirection;
+  // Chroma key hint from AI — tells assembler what color background was generated
+  chromaHint?: 'green' | 'blue' | 'none';
   // Map-specific (only when source === 'map')
   mapWaypoints?: AutoVideoPipWaypoint[];
   mapZoom?: number;            // 1-18
@@ -1334,6 +1351,10 @@ RETURN JSON with:
 PIP ITEM RULES — each pipItem must have:
 - "source": either "ai_image" or "map"
 - "prompt": For ai_image: AI generation prompt (${pipStyleHint}). For map: plain text location description (e.g. "Cairo, Egypt").
+- "animDirection": ONE of: slideInLeft | slideInRight | zoomIn | zoomOut | floatUp | floatDown | kenBurns | pop | drift | rotate | none
+  Choose based on the emotional direction of the narration (e.g. entering → slideInLeft, revealing → zoomIn, calm → kenBurns, dramatic → pop).
+- "chromaHint": ONLY for ai_image sources — "green" if the image uses a #00FF00 green screen background (most cases), "blue" if blue screen, "none" if it is a realistic photo without a colour-key background.
+- For map items: omit chromaHint (maps never have chroma key).
 - For map items ONLY, also include:
   - "mapWaypoints": Array of {lat, lng, label?} objects (1-3 waypoints)
   - "mapZoom": integer zoom level (4=continent, 8=country, 12=city, 15=street)
@@ -1349,7 +1370,7 @@ WHEN TO USE MAP SOURCE:
 GLOBAL RULES:
 - globalBackgrounds = backdrops only. No subjects.
 - Every scene needs 2-4 pipItems.
-- Vary selectedBackgroundIndex based on emotional tone.
+- Vary selectedBackgroundIndex based on emotional tone — choose a DIFFERENT background index when the narration theme shifts.
 - Durations must sum to exactly ${totalDuration.toFixed(1)}s.
 ${customInstructions ? `CUSTOM: ${customInstructions}` : ''}
 ${characterDescription ? `CHARACTER: ${characterDescription}` : ''}
@@ -1385,6 +1406,11 @@ Return ONLY valid JSON.`;
                     properties: {
                       source: { type: 'STRING', enum: ['ai_image', 'map'] },
                       prompt: { type: 'STRING' },
+                      animDirection: {
+                        type: 'STRING',
+                        enum: ['slideInLeft', 'slideInRight', 'zoomIn', 'zoomOut', 'floatUp', 'floatDown', 'kenBurns', 'pop', 'drift', 'rotate', 'none']
+                      },
+                      chromaHint: { type: 'STRING', enum: ['green', 'blue', 'none'] },
                       mapZoom: { type: 'INTEGER' },
                       mapStyle: { type: 'STRING' },
                       mapAnimType: { type: 'STRING' },
@@ -1401,7 +1427,7 @@ Return ONLY valid JSON.`;
                         }
                       }
                     },
-                    required: ['source', 'prompt']
+                    required: ['source', 'prompt', 'animDirection', 'chromaHint']
                   }
                 }
               },
@@ -1457,6 +1483,10 @@ Return ONLY valid JSON.`;
         pipItems: (s.pipItems || []).slice(0, 4).map((pip) => ({
           ...pip,
           source: (pip.source === 'map' ? 'map' : 'ai_image') as AutoVideoPipSource,
+          // Animation direction — default to floatUp if AI didn't specify
+          animDirection: (pip.animDirection ?? 'floatUp') as any,
+          // Chroma hint — default to green for ai_image, none for map
+          chromaHint: pip.source === 'map' ? 'none' : (pip.chromaHint ?? 'green') as any,
           // Map pips get sensible defaults if AI forgot fields
           mapZoom: pip.source === 'map' ? (pip.mapZoom ?? 8) : undefined,
           mapStyle: pip.source === 'map' ? (pip.mapStyle ?? 'standard') : undefined,

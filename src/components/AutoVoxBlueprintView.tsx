@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Trash2, ZoomIn, RefreshCw, Loader2, X, ChevronDown, Sparkles, MapPin, Image, Map } from 'lucide-react';
-import { AutoVideoBlueprintV2, AutoVideoSceneV2, AutoVideoPipItemV2, AutoVideoPipSource } from '../utils/aiClient';
+import { Plus, Trash2, ZoomIn, RefreshCw, Loader2, X, ChevronDown, Sparkles, MapPin, Image, Map, Zap } from 'lucide-react';
+import { AutoVideoBlueprintV2, AutoVideoSceneV2, AutoVideoPipItemV2, AutoVideoPipSource, PipAnimDirection } from '../utils/aiClient';
 import { generateImageFromCloudflare } from '../utils/cloudflareClient';
 import { useEditorStore } from '../store/editorStore';
 
@@ -432,6 +432,21 @@ function MapEditModal({ pip, onClose, onSave }: MapEditModalProps) {
   );
 }
 
+// Animation direction options for the override dropdown
+const ANIM_DIRECTIONS: { value: PipAnimDirection; label: string }[] = [
+  { value: 'floatUp',      label: '↑ Float Up' },
+  { value: 'floatDown',    label: '↓ Float Down' },
+  { value: 'slideInLeft',  label: '← Slide Left' },
+  { value: 'slideInRight', label: '→ Slide Right' },
+  { value: 'zoomIn',       label: '⊕ Zoom In' },
+  { value: 'zoomOut',      label: '⊖ Zoom Out' },
+  { value: 'kenBurns',     label: '⟳ Ken Burns' },
+  { value: 'pop',          label: '✦ Pop' },
+  { value: 'drift',        label: '~ Drift' },
+  { value: 'rotate',       label: '↻ Rotate' },
+  { value: 'none',         label: '— None' },
+];
+
 // ---------------------------------------------------------------------------
 // PipTile — wraps ImageTile or MapTile based on pip.source + source toggle
 // ---------------------------------------------------------------------------
@@ -449,6 +464,7 @@ interface PipTileProps {
 
 function PipTile({ pip, settings, disabled, onDelete, onUpdatePip, onPreviewImage, onEditMap }: PipTileProps) {
   const isMap = pip.source === 'map';
+  const animDir = pip.animDirection ?? 'floatUp';
 
   const switchSource = (newSource: AutoVideoPipSource) => {
     if (newSource === pip.source) return;
@@ -473,6 +489,10 @@ function PipTile({ pip, settings, disabled, onDelete, onUpdatePip, onPreviewImag
         mapAnimType: undefined,
       });
     }
+  };
+
+  const setAnimDir = (dir: PipAnimDirection) => {
+    onUpdatePip({ ...pip, animDirection: dir });
   };
 
   return (
@@ -518,6 +538,24 @@ function PipTile({ pip, settings, disabled, onDelete, onUpdatePip, onPreviewImag
           onDelete={onDelete}
           onUrlResolved={(url) => onUpdatePip({ ...pip, resolvedUrl: url })}
         />
+      )}
+
+      {/* Animation direction badge + override (AI images only) */}
+      {!isMap && (
+        <div className="relative">
+          <select
+            value={animDir}
+            onChange={(e) => setAnimDir(e.target.value as PipAnimDirection)}
+            disabled={disabled}
+            title="Animation Direction"
+            className="w-full appearance-none bg-[#111] border border-[#2a2a2a] hover:border-indigo-600/60 rounded-md pl-4 pr-1 py-0.5 text-[8px] text-indigo-300 outline-none cursor-pointer disabled:opacity-50 transition-colors"
+          >
+            {ANIM_DIRECTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          <Zap className="absolute left-1 top-1/2 -translate-y-1/2 w-2 h-2 text-indigo-500 pointer-events-none" />
+        </div>
       )}
     </div>
   );
