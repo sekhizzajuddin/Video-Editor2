@@ -1,7 +1,10 @@
 /**
- * waveformRenderer.ts — Render waveform peaks onto a <canvas> element.
+ * waveformRenderer.ts — Audacity / DaVinci Resolve style waveform renderer.
  *
- * Used by both the MediaPanel (mini-preview) and the Timeline (in-clip waveform).
+ * Renders individual vertical bar columns, NOT a single filled polygon.
+ * Each bar = one audio chunk.  Silent chunks = very short bar.  Loud = tall.
+ *
+ * Used by MediaPanel (mini preview) and WaveformViewer (trim panel).
  */
 
 export interface WaveformRenderOptions {
@@ -10,15 +13,15 @@ export interface WaveformRenderOptions {
   height: number;
   color?: string;
   bgColor?: string;
-  /** 'center' = symmetric around middle, 'bottom' = bars from bottom */
+  /** 'center' = symmetric bars around vertical midpoint (default), 'bottom' = bars anchored to bottom */
   style?: 'center' | 'bottom';
   barWidth?: number;
   barGap?: number;
-  cornerRadius?: number;
 }
 
 /**
- * Render waveform peaks onto a canvas 2D context.
+ * Render a waveform onto an existing 2D canvas context.
+ * The context must already be scaled for DPR by the caller if needed.
  */
 export function renderWaveform(
   ctx: CanvasRenderingContext2D,
@@ -28,12 +31,11 @@ export function renderWaveform(
     peaks,
     width,
     height,
-    color = 'rgba(255, 255, 255, 0.5)',
+    color = 'rgba(255, 255, 255, 0.8)',
     bgColor,
     style = 'center',
     barWidth: customBarWidth,
     barGap = 1,
-    cornerRadius = 1,
   } = options;
 
   if (bgColor) {
@@ -43,84 +45,78 @@ export function renderWaveform(
 
   if (peaks.length === 0) return;
 
-  const step = customBarWidth ? customBarWidth + barGap : Math.max(1, (width / peaks.length));
+  // Auto-size bars to fill the canvas width if no custom size provided
+  const barW = customBarWidth ?? Math.max(1, Math.floor((width / peaks.length) * 0.8));
+  const step = Math.max(barW + barGap, Math.ceil(width / peaks.length));
 
-  ctx.fillStyle = color;
+  // Parse color into components for dynamic alpha
+  const rgb = parseRGB(color);
 
   if (style === 'center') {
     const cy = height / 2;
-    ctx.beginPath();
-    
-    // Top half
-    ctx.moveTo(0, cy);
-    for (let i = 0; i < peaks.length; i++) {
-      const x = i * step;
-      if (x > width) break;
-      const peak = Math.max(0.02, peaks[i]);
-      const halfH = (peak * height * 0.9) / 2;
-      ctx.lineTo(x, cy - halfH);
-    }
-    
-    // Bottom half
-    for (let i = peaks.length - 1; i >= 0; i--) {
-      const x = i * step;
-      if (x > width) continue;
-      const peak = Math.max(0.02, peaks[i]);
-      const halfH = (peak * height * 0.9) / 2;
-      ctx.lineTo(x, cy + halfH);
-    }
-    
-    ctx.closePath();
-    ctx.fill();
+    const maxHalf = cy * 0.92;
 
-    // Center line for distinct dialogue start/end
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.fillRect(0, cy - 0.5, width, 1);
-  } else {
-    // Bottom style
-    ctx.beginPath();
-    ctx.moveTo(0, height);
+    // Gradient spanning the full height
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0,    `rgba(${rgb},0.28)`);
+    grad.addColorStop(0.20, `rgba(${rgb},0.72)`);
+    grad.addColorStop(0.45, `rgba(${rgb},0.96)`);
+    grad.addColorStop(0.50, `rgba(${rgb},1.00)`);
+    grad.addColorStop(0.55, `rgba(${rgb},0.96)`);
+    grad.addColorStop(0.80, `rgba(${rgb},0.72)`);
+    grad.addColorStop(1,    `rgba(${rgb},0.28)`);
+
     for (let i = 0; i < peaks.length; i++) {
       const x = i * step;
-      if (x > width) break;
-      const peak = Math.max(0.02, peaks[i]);
-      const barHeight = peak * height * 0.9;
-      ctx.lineTo(x, height - barHeight);
+      if (x >= width) break;
+
+      const peak = Math.max(0, peaks[i]);
+      const halfH = Math.max(1, peak * maxHalf);
+
+      // Outer bar with gradient
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, cy - halfH, barW, halfH * 2);
+
+      // Bright core spine — the "lit centre" that DaVinci uses
+      const coreH = halfH * 0.35;
+      const coreAlpha = 0.30 + peak * 0.60;
+      ctx.fillStyle = `rgba(${rgb},${coreAlpha})`;
+      ctx.fillRect(x, cy - coreH, barW, coreH * 2);
     }
-    // close path
-    const lastValidX = Math.min(width, (peaks.length - 1) * step);
-    ctx.lineTo(lastValidX, height);
-    ctx.closePath();
-    ctx.fill();
+
+    // Subtle center line
+    ctx.fillStyle = `rgba(${rgb},0.20)`;
+    ctx.fillRect(0, cy - 0.5, width, 1);
+
+  } else {
+    // Bottom style — used for mini previews
+    for (let i = 0; i < peaks.length; i++) {
+      const x = i * step;
+      if (x >= width) break;
+
+      const peak = Math.max(0, peaks[i]);
+      const barH = Math.max(1, peak * height * 0.92);
+      const alpha = 0.35 + peak * 0.55;
+      ctx.fillStyle = `rgba(${rgb},${alpha})`;
+      ctx.fillRect(x, height - barH, barW, barH);
+    }
   }
 }
 
-/**
- * Helper: draw a rounded rectangle and fill it.
- */
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number
-): void {
-  if (w < 2 * r) r = w / 2;
-  if (h < 2 * r) r = h / 2;
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-  ctx.fill();
+/** Parse a CSS color string to an "r,g,b" string for rgba() template literals. */
+function parseRGB(color: string): string {
+  const m = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (m) return `${m[1]},${m[2]},${m[3]}`;
+  const h = color.match(/^#?([0-9a-fA-F]{6})$/);
+  if (h) {
+    const hex = h[1];
+    return `${parseInt(hex.slice(0,2),16)},${parseInt(hex.slice(2,4),16)},${parseInt(hex.slice(4,6),16)}`;
+  }
+  return '255,255,255';
 }
 
 /**
- * Render waveform onto a standalone canvas element (creates one if needed).
- * Returns the canvas for embedding.
+ * Create a standalone canvas element with a waveform rendered on it.
  */
 export function createWaveformCanvas(
   peaks: number[],
@@ -138,13 +134,13 @@ export function createWaveformCanvas(
 }
 
 /**
- * Generate a data URL of a waveform rendering for use in <img> tags.
+ * Generate a data URL of a waveform for use in <img> tags.
  */
 export function renderWaveformToDataUrl(
   peaks: number[],
   width: number,
   height: number,
-  color = 'rgba(52, 211, 153, 0.6)',
+  color = 'rgba(52, 211, 153, 0.8)',
   style: 'center' | 'bottom' = 'center'
 ): string {
   const canvas = createWaveformCanvas(peaks, width, height, color, style);

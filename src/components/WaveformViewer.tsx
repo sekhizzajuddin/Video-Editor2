@@ -197,14 +197,12 @@ export function WaveformViewer({
     if (!canvas || !ctx || !peaks) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const width = canvas.width;
-    const height = canvas.height;
-    const cssWidth = width / dpr;
-    const cssHeight = height / dpr;
+    const cssWidth = canvas.width / dpr;
+    const cssHeight = canvas.height / dpr;
 
-    ctx.clearRect(0, 0, width, height);
-    ctx.save();
-    ctx.scale(dpr, dpr);
+    // Reset transform cleanly — prevents DPR scale from accumulating each redraw
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
 
     // Calculate visible window based on zoom
     const zoomOffset = trimOffset * (1 - 1 / zoomLevel);
@@ -212,61 +210,55 @@ export function WaveformViewer({
     const visibleStart = Math.max(0, zoomOffset);
     const visibleEnd = Math.min(totalDuration, visibleStart + visibleDuration);
 
-    // Draw waveform bars
-    const barWidth = Math.max(1, cssWidth / peaks.length);
-    const gap = Math.max(0.5, barWidth * 0.2);
-    const actualBarWidth = barWidth - gap;
-    const amp = cssHeight / 2;
+    const amp = cssHeight / 2; // vertical center
+    const maxHalf = amp * 0.88; // 12% padding from top/bottom edges
 
-    // Gradient for professional waveform
+    // Bar geometry: auto-fit bars to fill visible area
+    const visiblePeakCount = peaks.length * (visibleDuration / peaks.duration);
+    const barW = Math.max(1, Math.floor(cssWidth / Math.max(1, visiblePeakCount) * 0.8));
+    const barStep = Math.max(barW + 1, cssWidth / Math.max(1, visiblePeakCount));
+
+    // Audacity/DaVinci gradient: bright at center, fades at top/bottom
     const gradient = ctx.createLinearGradient(0, 0, 0, cssHeight);
-    gradient.addColorStop(0, 'rgba(99, 179, 237, 0.4)');
-    gradient.addColorStop(0.3, 'rgba(66, 153, 225, 0.9)');
-    gradient.addColorStop(0.5, 'rgba(66, 153, 225, 1.0)');
-    gradient.addColorStop(0.7, 'rgba(66, 153, 225, 0.9)');
-    gradient.addColorStop(1, 'rgba(99, 179, 237, 0.4)');
+    gradient.addColorStop(0,    'rgba(99,179,237,0.28)');
+    gradient.addColorStop(0.20, 'rgba(66,153,225,0.72)');
+    gradient.addColorStop(0.45, 'rgba(66,153,225,0.96)');
+    gradient.addColorStop(0.50, 'rgba(99,210,255,1.00)');
+    gradient.addColorStop(0.55, 'rgba(66,153,225,0.96)');
+    gradient.addColorStop(0.80, 'rgba(66,153,225,0.72)');
+    gradient.addColorStop(1,    'rgba(99,179,237,0.28)');
 
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-
-    let firstX = -1;
-
-    // Top half
+    // Collect visible peaks and their screen x positions
+    const visibleBars: { x: number; halfH: number; minY: number; maxY: number }[] = [];
     for (let i = 0; i < peaks.length; i++) {
       const peakTime = (i / peaks.length) * peaks.duration;
       if (peakTime < visibleStart || peakTime > visibleEnd) continue;
-
       const x = ((peakTime - visibleStart) / visibleDuration) * cssWidth;
-      if (firstX === -1) {
-        firstX = x;
-        ctx.moveTo(firstX, amp);
-      }
-
-      const minVal = peaks.min[i];
-      const maxVal = peaks.max[i];
-      const barHeight = Math.max(1, (maxVal - minVal) * amp * 0.85);
-      ctx.lineTo(x, amp - (barHeight / 2));
+      // Use actual min/max for asymmetric waveform accuracy (like Audacity)
+      const minVal = peaks.min[i]; // negative
+      const maxVal = peaks.max[i]; // positive
+      const topY   = amp - Math.max(1, maxVal  *  maxHalf); // peaks upward
+      const botY   = amp - Math.min(-1, minVal * maxHalf); // peaks downward
+      const halfH  = Math.max(1, ((maxVal - minVal) / 2) * maxHalf);
+      visibleBars.push({ x, halfH, minY: topY, maxY: botY });
     }
 
-    // Bottom half (reverse order)
-    for (let i = peaks.length - 1; i >= 0; i--) {
-      const peakTime = (i / peaks.length) * peaks.duration;
-      if (peakTime < visibleStart || peakTime > visibleEnd) continue;
-
-      const x = ((peakTime - visibleStart) / visibleDuration) * cssWidth;
-      const minVal = peaks.min[i];
-      const maxVal = peaks.max[i];
-      const barHeight = Math.max(1, (maxVal - minVal) * amp * 0.85);
-      ctx.lineTo(x, amp + (barHeight / 2));
+    // ── Pass 1: outer body bars ──────────────────────────────────────────
+    ctx.fillStyle = gradient;
+    for (const bar of visibleBars) {
+      ctx.fillRect(bar.x, bar.minY, barW, bar.maxY - bar.minY);
     }
 
-    if (firstX !== -1) {
-      ctx.closePath();
-      ctx.fill();
+    // ── Pass 2: bright core spine (inner 35%) — the DaVinci "lit" look ──
+    for (const bar of visibleBars) {
+      const coreHalf = bar.halfH * 0.35;
+      const peakNorm = Math.min(1, bar.halfH / maxHalf);
+      ctx.fillStyle = `rgba(180,225,255,${0.25 + peakNorm * 0.65})`;
+      ctx.fillRect(bar.x, amp - coreHalf, barW, coreHalf * 2);
     }
 
-    // Draw prominent center line
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    // ── Center baseline ──────────────────────────────────────────────────
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fillRect(0, amp - 0.5, cssWidth, 1);
 
     // ============================================
@@ -355,7 +347,6 @@ export function WaveformViewer({
       ctx.fillText(text, hoverX, 14);
     }
 
-    ctx.restore();
   }, [peaks, trimOffset, trimDuration, totalDuration, currentTime, hoverTime, beatMarkers, zoomLevel]);
 
   // Redraw on changes
