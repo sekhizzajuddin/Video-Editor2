@@ -14,11 +14,11 @@ interface WaveformOverlayProps {
 }
 
 /**
- * Linearly interpolate a peaks array to a target bar count.
- * Also smooths via a 3-sample average for a cleaner look.
+ * Linearly interpolate a peaks array to exactly `targetCount` samples.
+ * One sample per CSS pixel → solid continuous fill with no gaps.
  */
 function resamplePeaks(src: number[], targetCount: number): number[] {
-  if (src.length === 0 || targetCount === 0) return [];
+  if (src.length === 0 || targetCount <= 0) return [];
   const result = new Array<number>(targetCount);
   for (let i = 0; i < targetCount; i++) {
     const srcIdx = (i / targetCount) * src.length;
@@ -30,14 +30,14 @@ function resamplePeaks(src: number[], targetCount: number): number[] {
   return result;
 }
 
-/** Parse any CSS color string to [r, g, b] components. */
+/** Parse any CSS color string to [r, g, b]. */
 function parseRGB(color: string): [number, number, number] {
   const m = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
   if (m) return [+m[1], +m[2], +m[3]];
   const h = color.match(/^#?([0-9a-fA-F]{6})$/);
   if (h) {
     const hex = h[1];
-    return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+    return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
   }
   return [255, 255, 255];
 }
@@ -52,16 +52,9 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
 }: WaveformOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // ── Bar geometry ───────────────────────────────────────────────────────────
-  // Audacity/DaVinci use narrow bars with tiny gaps.
-  // small = video audio strip (1 px bars), full = audio track (2 px bars, 1 px gap)
-  const BAR_W = small ? 1 : 2;
-  const BAR_GAP = small ? 0 : 1;
-  const STEP = BAR_W + BAR_GAP;
-
-  // Stable memo: only depends on waveformPeaks array reference + clipId + barCount
+  // ── One sample per CSS pixel — zero gap — solid DaVinci silhouette ─────
   const waveformPeaks = media?.waveformPeaks;
-  const barCount = useMemo(() => Math.max(Math.floor(width / STEP), 4), [width, STEP]);
+  const barCount = useMemo(() => Math.max(Math.round(width), 4), [width]);
 
   const peaks = useMemo(() => {
     const src =
@@ -85,7 +78,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     const physW = W * dpr;
     const physH = H * dpr;
 
-    // Resize canvas (this also resets the transform — so no accumulation)
+    // Resize canvas only when dimensions change
     if (canvas.width !== physW || canvas.height !== physH) {
       canvas.width = physW;
       canvas.height = physH;
@@ -93,7 +86,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       canvas.style.height = `${H}px`;
     }
 
-    // Reset transform cleanly — avoids DPR scale accumulation across re-renders
+    // Reset transform cleanly — prevents DPR scale accumulation
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
@@ -101,66 +94,49 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
 
     if (small) {
       // ──────────────────────────────────────────────────────────────────────
-      // SMALL: thin bottom waveform strip for video clips
-      // Audacity-style: individual bottom-anchored bars
+      // SMALL: thin bottom waveform strip inside video clips
+      // 1px columns, no gap, solid fill
       // ──────────────────────────────────────────────────────────────────────
+      ctx.fillStyle = `rgba(${r},${g},${b},0.55)`;
       for (let i = 0; i < peaks.length; i++) {
-        const x = i * STEP;
-        if (x >= W) break;
+        if (i >= W) break;
         const peak = peaks[i];
-        const barH = Math.max(1, peak * H);
-        const alpha = 0.35 + peak * 0.55; // dim at silence, bright at loud
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-        ctx.fillRect(x, H - barH, BAR_W, barH);
+        const barH = peak * H;
+        if (barH < 0.5) continue; // true silence = nothing
+        ctx.fillRect(i, H - barH, 1, barH);
       }
       return;
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // FULL: Audacity / DaVinci Resolve style centered waveform
+    // FULL: DaVinci Resolve style centered waveform
     //
-    // Each bar is an independent vertical column drawn from (cy - halfH) to
-    // (cy + halfH).  No continuous polygon — bars are independent so silence
-    // truly collapses to a thin line.
-    //
-    // Two-pass render for depth:
-    //   Pass 1 — dimmer shadow bar (full height) gives the "fill" body
-    //   Pass 2 — bright center core bar (inner 40%) gives the bright spine
+    // How DaVinci does it:
+    //   - 1px-wide columns, ZERO gap → solid continuous mountain silhouette
+    //   - Mirrored symmetrically around the vertical center
+    //   - Single solid color (slightly translucent white on colored track bg)
+    //   - Silence = waveform collapses to nothing (just center line visible)
+    //   - No gradient fade, no "core spine" — just a solid filled shape
     // ────────────────────────────────────────────────────────────────────────
     const cy = H / 2;
-    const maxHalf = cy * 0.92; // 8% padding from edge
+    const maxHalf = cy * 0.92; // 8% padding so peaks don't clip the edge
 
-    // Build a vertical gradient matching the clip height
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0,    `rgba(${r},${g},${b},0.30)`);
-    grad.addColorStop(0.20, `rgba(${r},${g},${b},0.70)`);
-    grad.addColorStop(0.45, `rgba(${r},${g},${b},0.95)`);
-    grad.addColorStop(0.50, `rgba(${r},${g},${b},1.00)`);
-    grad.addColorStop(0.55, `rgba(${r},${g},${b},0.95)`);
-    grad.addColorStop(0.80, `rgba(${r},${g},${b},0.70)`);
-    grad.addColorStop(1,    `rgba(${r},${g},${b},0.30)`);
+    // Single solid color — DaVinci uses uniform opacity, not a gradient
+    ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
 
     for (let i = 0; i < peaks.length; i++) {
-      const x = i * STEP;
-      if (x >= W) break;
-
+      if (i >= W) break;
       const peak = peaks[i];
-      const halfH = Math.max(1, peak * maxHalf);
-
-      // Outer body bar
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, cy - halfH, BAR_W, halfH * 2);
-
-      // Bright core spine (inner 35%) — gives the DaVinci "lit center" look
-      const coreH = halfH * 0.35;
-      ctx.fillStyle = `rgba(${r},${g},${b},${0.35 + peak * 0.55})`;
-      ctx.fillRect(x, cy - coreH, BAR_W, coreH * 2);
+      const halfH = peak * maxHalf;
+      if (halfH < 0.5) continue; // true silence = skip (center line shows through)
+      ctx.fillRect(i, cy - halfH, 1, halfH * 2);
     }
 
-    // Center line — helps identify exactly where dialogue starts/ends
-    ctx.fillStyle = `rgba(${r},${g},${b},0.20)`;
+    // Center line — thin baseline so you can spot exactly where dialogue
+    // starts/ends (the waveform opens up from this line)
+    ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
     ctx.fillRect(0, cy - 0.5, W, 1);
-  }, [peaks, width, height, small, r, g, b, BAR_W, STEP]);
+  }, [peaks, width, height, small, r, g, b]);
 
   return (
     <canvas

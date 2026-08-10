@@ -213,52 +213,26 @@ export function WaveformViewer({
     const amp = cssHeight / 2; // vertical center
     const maxHalf = amp * 0.88; // 12% padding from top/bottom edges
 
-    // Bar geometry: auto-fit bars to fill visible area
-    const visiblePeakCount = peaks.length * (visibleDuration / peaks.duration);
-    const barW = Math.max(1, Math.floor(cssWidth / Math.max(1, visiblePeakCount) * 0.8));
-    const barStep = Math.max(barW + 1, cssWidth / Math.max(1, visiblePeakCount));
+    // DaVinci style: solid fill, 1px columns, zero gap
+    ctx.fillStyle = 'rgba(66, 153, 225, 0.88)';
 
-    // Audacity/DaVinci gradient: bright at center, fades at top/bottom
-    const gradient = ctx.createLinearGradient(0, 0, 0, cssHeight);
-    gradient.addColorStop(0,    'rgba(99,179,237,0.28)');
-    gradient.addColorStop(0.20, 'rgba(66,153,225,0.72)');
-    gradient.addColorStop(0.45, 'rgba(66,153,225,0.96)');
-    gradient.addColorStop(0.50, 'rgba(99,210,255,1.00)');
-    gradient.addColorStop(0.55, 'rgba(66,153,225,0.96)');
-    gradient.addColorStop(0.80, 'rgba(66,153,225,0.72)');
-    gradient.addColorStop(1,    'rgba(99,179,237,0.28)');
-
-    // Collect visible peaks and their screen x positions
-    const visibleBars: { x: number; halfH: number; minY: number; maxY: number }[] = [];
     for (let i = 0; i < peaks.length; i++) {
       const peakTime = (i / peaks.length) * peaks.duration;
       if (peakTime < visibleStart || peakTime > visibleEnd) continue;
       const x = ((peakTime - visibleStart) / visibleDuration) * cssWidth;
-      // Use actual min/max for asymmetric waveform accuracy (like Audacity)
+
+      // Use real min/max for true asymmetric waveform (like DaVinci)
       const minVal = peaks.min[i]; // negative
       const maxVal = peaks.max[i]; // positive
-      const topY   = amp - Math.max(1, maxVal  *  maxHalf); // peaks upward
-      const botY   = amp - Math.min(-1, minVal * maxHalf); // peaks downward
-      const halfH  = Math.max(1, ((maxVal - minVal) / 2) * maxHalf);
-      visibleBars.push({ x, halfH, minY: topY, maxY: botY });
+      const topY = amp - maxVal * maxHalf;
+      const botY = amp - minVal * maxHalf; // minVal is negative → botY > amp
+      const barH = botY - topY;
+      if (barH < 0.5) continue; // true silence = nothing
+      ctx.fillRect(Math.round(x), topY, 1, barH);
     }
 
-    // ── Pass 1: outer body bars ──────────────────────────────────────────
-    ctx.fillStyle = gradient;
-    for (const bar of visibleBars) {
-      ctx.fillRect(bar.x, bar.minY, barW, bar.maxY - bar.minY);
-    }
-
-    // ── Pass 2: bright core spine (inner 35%) — the DaVinci "lit" look ──
-    for (const bar of visibleBars) {
-      const coreHalf = bar.halfH * 0.35;
-      const peakNorm = Math.min(1, bar.halfH / maxHalf);
-      ctx.fillStyle = `rgba(180,225,255,${0.25 + peakNorm * 0.65})`;
-      ctx.fillRect(bar.x, amp - coreHalf, barW, coreHalf * 2);
-    }
-
-    // ── Center baseline ──────────────────────────────────────────────────
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    // Center baseline — where silence collapses to
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
     ctx.fillRect(0, amp - 0.5, cssWidth, 1);
 
     // ============================================
