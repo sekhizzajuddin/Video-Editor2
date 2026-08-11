@@ -11,6 +11,9 @@ interface WaveformOverlayProps {
   small?: boolean;
   /** Override waveform color (CSS color string). Falls back to white. */
   color?: string;
+  trimStart?: number;
+  clipDuration?: number;
+  speed?: number;
 }
 
 /**
@@ -59,6 +62,9 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
   height,
   small = false,
   color,
+  trimStart,
+  clipDuration,
+  speed,
 }: WaveformOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -71,8 +77,25 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       waveformPeaks && waveformPeaks.length > 0
         ? waveformPeaks
         : generateFallbackWaveform(clipId, barCount);
-    return resamplePeaksWindowed(src, barCount);
-  }, [waveformPeaks, clipId, barCount]);
+        
+    let finalSrc = src;
+    if (trimStart !== undefined && clipDuration !== undefined) {
+      const mediaDuration = media?.duration || 1;
+      const effectiveSpeed = speed || 1;
+      
+      const startRatio = trimStart / mediaDuration;
+      const consumedMedia = clipDuration * effectiveSpeed;
+      const endRatio = Math.min(1, (trimStart + consumedMedia) / mediaDuration);
+      
+      const totalLen = src.length;
+      const startIdx = Math.max(0, Math.floor(startRatio * totalLen));
+      const endIdx = Math.max(startIdx + 1, Math.min(totalLen, Math.ceil(endRatio * totalLen)));
+      
+      finalSrc = src.slice(startIdx, endIdx);
+    }
+    
+    return resamplePeaksWindowed(finalSrc, barCount);
+  }, [waveformPeaks, clipId, barCount, trimStart, clipDuration, speed, media?.duration]);
 
   const [r, g, b] = useMemo(() => parseRGB(color ?? 'rgba(255,255,255,1)'), [color]);
 

@@ -194,6 +194,9 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             width={width}
             height={clipHeight}
             color="rgba(255,255,255,1)"
+            trimStart={clip.trimStart}
+            clipDuration={clip.duration}
+            speed={clip.speed}
           />
         ) : (
           <>
@@ -235,6 +238,9 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   height={12}
                   small
                   color="rgba(255,255,255,0.5)"
+                  trimStart={clip.trimStart}
+                  clipDuration={clip.duration}
+                  speed={clip.speed}
                 />
               </div>
             )}
