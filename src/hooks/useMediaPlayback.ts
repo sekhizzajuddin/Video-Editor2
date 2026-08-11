@@ -1123,9 +1123,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
     for (const clip of clips) {
       const entry = pool.get(clip.clipId);
-      if (!entry || entry.type !== 'video') continue;
+      if (!entry) continue;
 
-      const el = entry.el as HTMLVideoElement;
+      const el = entry.el;
       const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
       const maxDuration = mediaItem ? mediaItem.duration : 10000;
       const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
