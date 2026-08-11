@@ -2379,151 +2379,191 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   splitClip: (clipId, splitTime) => {
     set((state) => {
       const isSelected = state.selectedClipIds.includes(clipId);
-      let leftClipId = '';
+      let primaryLeftId = '';
+
+      // Find the primary clip to check for linked clip
+      const primaryFound = findClipDeep(state, clipId);
+      if (!primaryFound) return state;
+      const primaryClip = primaryFound.clip;
+
+      const idsToSplit = new Set([clipId]);
+      if (primaryClip.linkedClipId) {
+        idsToSplit.add(primaryClip.linkedClipId);
+      }
+
+      // Pre-generate left/right IDs for all clips being split so they can cross-link properly
+      const splitMap: Record<string, { left: string; right: string }> = {};
+      for (const id of idsToSplit) {
+        splitMap[id] = { left: generateId(), right: generateId() };
+      }
+      
+      if (isSelected) {
+        primaryLeftId = splitMap[clipId].left;
+      }
 
       const { tracks, pipWindows } = mapTracksDeep(state, (track) => {
-        const clipIndex = track.clips.findIndex((c) => c.id === clipId);
-        if (clipIndex === -1) return track;
+        const newClips = [];
+        let modified = false;
 
-        const clip = track.clips[clipIndex];
-        const relativeSplitTime = splitTime - clip.startTime;
-
-        if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration - 0.05) return track;
-
-        const groupId = clip.splitGroupId || generateId();
-        leftClipId = generateId();
-        const rightClipId = generateId();
-
-        // Remap speed ramp keyframes for each half when a ramp exists
-        let leftSpeedRamp = clip.speedRamp;
-        let rightSpeedRamp = clip.speedRamp;
-        const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
-
-        if (hasRamp) {
-          const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
-          const splitSourceTime = engine.timelineToSource(relativeSplitTime);
-          const splitSpeed = engine.getSpeedAtSourceTime(splitSourceTime);
-
-          const sorted = [...clip.speedRamp!].sort((a, b) => a.sourceTime - b.sourceTime);
-
-          // Left half: keyframes in [0, splitSourceTime]
-          const leftKeys = sorted.filter((kf) => kf.sourceTime < splitSourceTime);
-          leftKeys.push({
-            id: generateId(),
-            sourceTime: splitSourceTime,
-            speed: splitSpeed,
-            easing: 'linear',
-          });
-          leftSpeedRamp = leftKeys;
-
-          // Right half: keyframes in [splitSourceTime, end]
-          const rightKeys = sorted.filter((kf) => kf.sourceTime > splitSourceTime);
-          rightKeys.unshift({
-            id: generateId(),
-            sourceTime: splitSourceTime,
-            speed: splitSpeed,
-            easing: 'linear',
-          });
-          rightSpeedRamp = rightKeys;
-        }
-
-        const splitMediaTime = hasRamp
-          ? getMediaTimeForClip(clip, splitTime)
-          : clip.trimStart + relativeSplitTime * clip.speed;
-
-        const originalMediaDuration = hasRamp
-          ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
-          : clip.duration * clip.speed;
-
-        // Remap keyframe animations for split
-        let leftAnimations = clip.animations ? { ...clip.animations } : undefined;
-        let rightAnimations = clip.animations ? { ...clip.animations } : undefined;
-
-        if (clip.animations) {
-          leftAnimations = {};
-          rightAnimations = {};
-
-          for (const key of Object.keys(clip.animations)) {
-            const kfs = clip.animations[key];
-            if (!kfs || kfs.length === 0) continue;
-
-            let baseVal = 1;
-            if (key === 'opacity') baseVal = clip.opacity;
-            else if (key === 'transform.scale') baseVal = clip.transform.scale;
-            else if (key === 'transform.x') baseVal = clip.transform.x;
-            else if (key === 'transform.y') baseVal = clip.transform.y;
-            else if (key === 'transform.rotation') baseVal = clip.transform.rotation;
-            else if (key === 'transform.rotationX') baseVal = (clip.transform as any).rotationX ?? 0;
-            else if (key === 'transform.rotationY') baseVal = (clip.transform as any).rotationY ?? 0;
-            // Simple linear interpolation fallback
-            let splitVal = baseVal;
-            if (kfs.length > 0) {
-              const leftKf = [...kfs].reverse().find(k => k.time <= relativeSplitTime);
-              const rightKf = kfs.find(k => k.time >= relativeSplitTime);
-              if (leftKf && rightKf && leftKf.time !== rightKf.time) {
-                const ratio = (relativeSplitTime - leftKf.time) / (rightKf.time - leftKf.time);
-                splitVal = leftKf.value + (rightKf.value - leftKf.value) * ratio;
-              } else if (leftKf) {
-                splitVal = leftKf.value;
-              } else if (rightKf) {
-                splitVal = rightKf.value;
-              }
-            }
-
-            const leftKfs = kfs.filter((k) => k.time <= relativeSplitTime);
-            leftKfs.push({ time: relativeSplitTime, value: splitVal });
-            leftAnimations[key] = leftKfs;
-
-            const rightKfs = kfs
-              .filter((k) => k.time >= relativeSplitTime)
-              .map((k) => ({
-                value: k.value,
-                time: k.time - relativeSplitTime,
-              }));
-            rightKfs.unshift({ time: 0, value: splitVal });
-            rightAnimations[key] = rightKfs;
+        for (const clip of track.clips) {
+          if (!idsToSplit.has(clip.id)) {
+            newClips.push(clip);
+            continue;
           }
+
+          const relativeSplitTime = splitTime - clip.startTime;
+          if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration - 0.05) {
+             // Split time is out of bounds for this clip, keep it intact
+             newClips.push(clip);
+             continue;
+          }
+
+          modified = true;
+          const groupId = clip.splitGroupId || generateId();
+          const leftId = splitMap[clip.id].left;
+          const rightId = splitMap[clip.id].right;
+
+          // Remap speed ramp keyframes for each half when a ramp exists
+          let leftSpeedRamp = clip.speedRamp;
+          let rightSpeedRamp = clip.speedRamp;
+          const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
+
+          if (hasRamp) {
+            const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+            const splitSourceTime = engine.timelineToSource(relativeSplitTime);
+            const splitSpeed = engine.getSpeedAtSourceTime(splitSourceTime);
+
+            const sorted = [...clip.speedRamp!].sort((a, b) => a.sourceTime - b.sourceTime);
+
+            // Left half: keyframes in [0, splitSourceTime]
+            const leftKeys = sorted.filter((kf) => kf.sourceTime < splitSourceTime);
+            leftKeys.push({
+              id: generateId(),
+              sourceTime: splitSourceTime,
+              speed: splitSpeed,
+              easing: 'linear',
+            });
+            leftSpeedRamp = leftKeys;
+
+            // Right half: keyframes in [splitSourceTime, end]
+            const rightKeys = sorted.filter((kf) => kf.sourceTime > splitSourceTime);
+            rightKeys.unshift({
+              id: generateId(),
+              sourceTime: splitSourceTime,
+              speed: splitSpeed,
+              easing: 'linear',
+            });
+            rightSpeedRamp = rightKeys;
+          }
+
+          const splitMediaTime = hasRamp
+            ? getMediaTimeForClip(clip, splitTime)
+            : clip.trimStart + relativeSplitTime * clip.speed;
+
+          const originalMediaDuration = hasRamp
+            ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
+            : clip.duration * clip.speed;
+
+          // Remap keyframe animations for split
+          let leftAnimations = clip.animations ? { ...clip.animations } : undefined;
+          let rightAnimations = clip.animations ? { ...clip.animations } : undefined;
+
+          if (clip.animations) {
+            leftAnimations = {};
+            rightAnimations = {};
+
+            for (const key of Object.keys(clip.animations)) {
+              const kfs = clip.animations[key];
+              if (!kfs || kfs.length === 0) continue;
+
+              let baseVal = 1;
+              if (key === 'opacity') baseVal = clip.opacity;
+              else if (key === 'transform.scale') baseVal = clip.transform.scale;
+              else if (key === 'transform.x') baseVal = clip.transform.x;
+              else if (key === 'transform.y') baseVal = clip.transform.y;
+              else if (key === 'transform.rotation') baseVal = clip.transform.rotation;
+              else if (key === 'transform.rotationX') baseVal = (clip.transform as any).rotationX ?? 0;
+              else if (key === 'transform.rotationY') baseVal = (clip.transform as any).rotationY ?? 0;
+              
+              // Simple linear interpolation fallback
+              let splitVal = baseVal;
+              if (kfs.length > 0) {
+                const leftKf = [...kfs].reverse().find(k => k.time <= relativeSplitTime);
+                const rightKf = kfs.find(k => k.time >= relativeSplitTime);
+                if (leftKf && rightKf && leftKf.time !== rightKf.time) {
+                  const ratio = (relativeSplitTime - leftKf.time) / (rightKf.time - leftKf.time);
+                  splitVal = leftKf.value + (rightKf.value - leftKf.value) * ratio;
+                } else if (leftKf) {
+                  splitVal = leftKf.value;
+                } else if (rightKf) {
+                  splitVal = rightKf.value;
+                }
+              }
+
+              const leftKfs = kfs.filter((k) => k.time <= relativeSplitTime);
+              leftKfs.push({ time: relativeSplitTime, value: splitVal });
+              leftAnimations[key] = leftKfs;
+
+              const rightKfs = kfs
+                .filter((k) => k.time >= relativeSplitTime)
+                .map((k) => ({
+                  value: k.value,
+                  time: k.time - relativeSplitTime,
+                }));
+              rightKfs.unshift({ time: 0, value: splitVal });
+              rightAnimations[key] = rightKfs;
+            }
+          }
+
+          let newLinkedLeftId = clip.linkedClipId;
+          let newLinkedRightId = clip.linkedClipId;
+          if (clip.linkedClipId && splitMap[clip.linkedClipId]) {
+            newLinkedLeftId = splitMap[clip.linkedClipId].left;
+            newLinkedRightId = splitMap[clip.linkedClipId].right;
+          }
+
+          const leftClip: TimelineClip = {
+            ...structuredClone(clip),
+            id: leftId,
+            splitGroupId: groupId,
+            duration: relativeSplitTime,
+            trimEnd: hasRamp
+              ? originalMediaDuration - splitMediaTime
+              : clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
+            transitionOut: undefined, // Clear transition on the first half of the split
+            speedRamp: leftSpeedRamp,
+            animations: leftAnimations,
+            linkedClipId: newLinkedLeftId
+          };
+
+          const rightClip: TimelineClip = {
+            ...structuredClone(clip),
+            id: rightId,
+            splitGroupId: groupId,
+            startTime: splitTime,
+            duration: clip.duration - relativeSplitTime,
+            trimStart: splitMediaTime,
+            transitionIn: undefined, // Clear transition on the second half of the split
+            speedRamp: rightSpeedRamp,
+            animations: rightAnimations,
+            linkedClipId: newLinkedRightId
+          };
+
+          newClips.push(leftClip, rightClip);
         }
 
-        const leftClip: TimelineClip = {
-          ...structuredClone(clip),
-          id: leftClipId,
-          splitGroupId: groupId,
-          duration: relativeSplitTime,
-          trimEnd: hasRamp
-            ? originalMediaDuration - splitMediaTime
-            : clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
-          transitionOut: undefined, // Clear transition on the first half of the split
-          speedRamp: leftSpeedRamp,
-          animations: leftAnimations,
-        };
-
-        const rightClip: TimelineClip = {
-          ...structuredClone(clip),
-          id: rightClipId,
-          splitGroupId: groupId,
-          startTime: splitTime,
-          duration: clip.duration - relativeSplitTime,
-          trimStart: splitMediaTime,
-          transitionIn: undefined, // Clear transition on the second half of the split
-          speedRamp: rightSpeedRamp,
-          animations: rightAnimations,
-        };
-
-        const newClips = [...track.clips];
-        newClips.splice(clipIndex, 1, leftClip, rightClip);
-
+        if (!modified) return track;
         return { ...track, clips: newClips };
       });
 
-      const newSelectedKeyframeLines = state.selectedKeyframeLines.filter(l => l.clipId !== clipId);
+      const newSelectedKeyframeLines = state.selectedKeyframeLines.filter(l => !idsToSplit.has(l.clipId));
 
-      if (isSelected && leftClipId) {
+      if (isSelected && primaryLeftId) {
         return {
           tracks,
           pipWindows,
-          selectedClipId: leftClipId,
-          selectedClipIds: [leftClipId],
+          selectedClipId: primaryLeftId,
+          selectedClipIds: [primaryLeftId],
           selectedKeyframeLines: newSelectedKeyframeLines,
         };
       }
