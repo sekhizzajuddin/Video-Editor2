@@ -722,6 +722,23 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
     }
+    }
+
+    // Calculate buffering state
+    let anyBuffering = false;
+    for (const [clipId, entry] of pool) {
+      if (playingIds.has(clipId)) {
+        // readyState < 3 means HAVE_CURRENT_DATA or lower, implying not enough data to play ahead seamlessly
+        if (entry.el.seeking || entry.el.readyState < 3) {
+          anyBuffering = true;
+          break;
+        }
+      }
+    }
+    const currentIsBuffering = useEditorStore.getState().isBuffering;
+    if (currentIsBuffering !== anyBuffering) {
+      useEditorStore.getState().setIsBuffering(anyBuffering);
+    }
 
     // Update active clip IDs ref
     lastActiveClipIdsRef.current = playingIds;

@@ -738,6 +738,7 @@ export interface EditorState {
   // Playback
   currentTime: number;
   isPlaying: boolean;
+  isBuffering: boolean;
   isScrubbing: boolean;
   perfDowngraded: boolean;
   totalDuration: number;

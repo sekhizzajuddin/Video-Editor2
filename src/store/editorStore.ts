@@ -203,6 +203,7 @@ interface EditorActions {
   togglePlayback: () => void;
   seek: (time: number) => void;
   setPlaybackSpeed: (speed: number) => void;
+  setIsBuffering: (isBuffering: boolean) => void;
   setPlaybackDirection: (dir: -1 | 0 | 1, speed?: number) => void;
   setVolume: (volume: number) => void;
   toggleMute: () => void;
@@ -372,6 +373,7 @@ const initialState: EditorState = {
   hasUnsavedChanges: false,
   currentTime: 0,
   isPlaying: false,
+  isBuffering: false,
   isScrubbing: false,
   perfDowngraded: false,
   totalDuration: 0,
@@ -2887,6 +2889,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
   },
   setIsScrubbing: (scrubbing) => set({ isScrubbing: scrubbing }),
+  setIsBuffering: (isBuffering) => set({ isBuffering }),
   setPerfDowngraded: (downgraded) => set({ perfDowngraded: downgraded }),
   setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
   setPlaybackDirection: (dir, speed = 1) => {
