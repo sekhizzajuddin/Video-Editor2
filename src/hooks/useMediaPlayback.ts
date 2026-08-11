@@ -478,7 +478,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const el = document.createElement('audio');
         el.preload = 'auto';
         el.crossOrigin = 'anonymous';
-        el.src = media.url;
+        // Append unique hash to bypass Chromium's blob cache locking bug which causes
+        // adjacent split clips to stutter or fail to load.
+        const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
+        el.src = media.url + hash;
         el.style.display = 'none';
 
         // Drain pending seeks when a seek finishes. If we don't do this, rapid loop jumps
@@ -1252,9 +1255,11 @@ if (true) {
         const media = mediaLibrary.find((m) => m.id === entry.mediaId);
         if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
         const targetSrc = media.url;
+        const hash = targetSrc.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
+        const finalSrc = targetSrc + hash;
         
-        if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
-          el.src = targetSrc;
+        if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
+          el.src = finalSrc;
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
              el.currentTime = pendingTime;
@@ -1318,8 +1323,10 @@ if (true) {
             .then((file) => (file ? URL.createObjectURL(file) : null))
             .then((restoredUrl) => {
               if (!restoredUrl) return;
-              if (el.src !== restoredUrl && !el.src.endsWith(restoredUrl)) {
-                el.src = restoredUrl;
+              const hash = restoredUrl.includes('#') ? `&clip=${ve.clipId}` : `#clip=${ve.clipId}`;
+              const finalSrc = restoredUrl + hash;
+              if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
+                el.src = finalSrc;
                 el.load();
                 // Persist the restored URL so subsequent renders skip this path
                 useEditorStore.setState((state) => ({
@@ -1337,17 +1344,21 @@ if (true) {
             .catch(() => {
               // Could not resolve — leave element unloaded
             });
-        } else if (el.src !== targetSrc && !el.src.endsWith(targetSrc)) {
-          // Live blob URL — assign directly. The browser issues range
-          // requests internally and only fetches what the decoder needs,
-          // so RAM stays bounded without our manual slicing.
-          el.src = targetSrc;
-          const pendingTime = pendingSeeksRef.current.get(ve.clipId);
+        } else {
+          const hash = targetSrc.includes('#') ? `&clip=${ve.clipId}` : `#clip=${ve.clipId}`;
+          const finalSrc = targetSrc + hash;
+          if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
+            // Live blob URL — assign directly. The browser issues range
+            // requests internally and only fetches what the decoder needs,
+            // so RAM stays bounded without our manual slicing.
+            el.src = finalSrc;
+            const pendingTime = pendingSeeksRef.current.get(ve.clipId);
           if (pendingTime !== undefined) {
             el.currentTime = pendingTime;
             pendingSeeksRef.current.delete(ve.clipId);
           }
           el.load();
+        }
         }
         loadedCount.current++;
       } else {
