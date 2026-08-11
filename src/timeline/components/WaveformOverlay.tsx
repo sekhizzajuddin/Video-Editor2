@@ -14,20 +14,30 @@ interface WaveformOverlayProps {
 }
 
 /**
- * Linearly interpolate a peaks array to exactly `targetCount` samples.
- * One sample per CSS pixel → solid continuous fill with no gaps.
+ * Downsample a high-density peak array to screen pixels using windowed maximum peak sampling.
+ * Unlike linear interpolation (which blurs zero-silence gaps into neighboring peaks),
+ * windowed max sampling preserves exact sharp dialogue transients and clean zero-level silences.
  */
-function resamplePeaks(src: number[], targetCount: number): number[] {
+function resamplePeaksWindowed(src: number[], targetCount: number): number[] {
   if (src.length === 0 || targetCount <= 0) return [];
-  const result = new Array<number>(targetCount);
+  const result = new Float32Array(targetCount);
+  const srcLen = src.length;
+  const ratio = srcLen / targetCount;
+
   for (let i = 0; i < targetCount; i++) {
-    const srcIdx = (i / targetCount) * src.length;
-    const lo = Math.floor(srcIdx);
-    const hi = Math.min(lo + 1, src.length - 1);
-    const frac = srcIdx - lo;
-    result[i] = src[lo] * (1 - frac) + src[hi] * frac;
+    const startIdx = Math.floor(i * ratio);
+    const endIdx = Math.max(startIdx + 1, Math.ceil((i + 1) * ratio));
+    
+    let max = 0;
+    for (let k = startIdx; k < endIdx && k < srcLen; k++) {
+      const val = src[k];
+      if (val > max) max = val;
+    }
+    
+    // Silence thresholding: if peak is below 0.015, drop to clean 0 baseline
+    result[i] = max < 0.015 ? 0 : max;
   }
-  return result;
+  return Array.from(result);
 }
 
 /** Parse any CSS color string to [r, g, b]. */
@@ -61,7 +71,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       waveformPeaks && waveformPeaks.length > 0
         ? waveformPeaks
         : generateFallbackWaveform(clipId, barCount);
-    return resamplePeaks(src, barCount);
+    return resamplePeaksWindowed(src, barCount);
   }, [waveformPeaks, clipId, barCount]);
 
   const [r, g, b] = useMemo(() => parseRGB(color ?? 'rgba(255,255,255,1)'), [color]);

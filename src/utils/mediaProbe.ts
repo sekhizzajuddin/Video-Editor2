@@ -118,39 +118,52 @@ export async function probeVideo(
 // ── Audio probe ──────────────────────────────────────────────────────────────
 
 /**
- * Extract normalised waveform peaks from a URL using Web Audio API.
- * Returns an array of ~200 peaks normalised to [0..1].
+ * Extract high-density normalised waveform peaks from an audio URL using Web Audio API.
+ * Uses 100 samples per second of audio (10ms resolution) so dialogue pauses,
+ * speech start/end boundaries, and transients are precisely captured.
  */
 export async function extractWaveformFromUrl(
   url: string,
-  targetPeaks = 200
+  targetPeaks?: number
 ): Promise<number[]> {
-  const audioCtx = new AudioContext();
+  const tmpCtx = new AudioContext();
+  let audioBuffer: AudioBuffer;
   try {
     const arrayBuffer = await blobUrlToArrayBuffer(url);
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-
-    const rawData = audioBuffer.getChannelData(0); // mono or left channel
-    const samplesPerPeak = Math.floor(rawData.length / targetPeaks);
-    const peaks: number[] = [];
-
-    for (let i = 0; i < targetPeaks; i++) {
-      const start = i * samplesPerPeak;
-      const end = start + samplesPerPeak;
-      let max = 0;
-      for (let j = start; j < end && j < rawData.length; j++) {
-        const abs = Math.abs(rawData[j]);
-        if (abs > max) max = abs;
-      }
-      peaks.push(max);
-    }
-
-    // Normalise to [0..1]
-    const maxPeak = Math.max(...peaks, 0.001);
-    return peaks.map((p) => p / maxPeak);
+    audioBuffer = await tmpCtx.decodeAudioData(arrayBuffer);
   } finally {
-    await audioCtx.close();
+    await tmpCtx.close();
   }
+
+  const rawData = audioBuffer.getChannelData(0);
+  const duration = audioBuffer.duration || 1;
+
+  // 100 samples per second (10ms time slices) for ultra-accurate dialogue tracking
+  const actualTargetPeaks = targetPeaks ?? Math.min(12000, Math.max(2000, Math.floor(duration * 100)));
+  const samplesPerPeak = Math.max(1, Math.floor(rawData.length / actualTargetPeaks));
+  const rawPeaks: number[] = [];
+
+  for (let i = 0; i < actualTargetPeaks; i++) {
+    const start = i * samplesPerPeak;
+    const end = Math.min(start + samplesPerPeak, rawData.length);
+    let max = 0;
+    for (let j = start; j < end; j++) {
+      const abs = Math.abs(rawData[j]);
+      if (abs > max) max = abs;
+    }
+    rawPeaks.push(max);
+  }
+
+  const maxPeak = Math.max(...rawPeaks, 0.0001);
+
+  // Apply noise-floor thresholding (< 0.02 -> 0) so background room hiss or quiet gaps
+  // between spoken dialogue words collapse cleanly to 0, making word boundaries crisp.
+  return rawPeaks.map((p) => {
+    const norm = p / maxPeak;
+    if (norm < 0.025) return 0;
+    // Mild contrast curve to make speech bursts pop relative to ambient noise
+    return Math.min(1, Math.pow((norm - 0.02) / 0.98, 1.15));
+  });
 }
 
 /**

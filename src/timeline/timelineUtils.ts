@@ -48,13 +48,34 @@ export function seededRandom(seed: string): () => number {
   };
 }
 
-/** Fallback waveform when no real peaks are available. */
+/** Procedurally generate realistic speech dialogue cadence fallback when real audio decoding is pending. */
 export function generateFallbackWaveform(clipId: string, barCount: number): number[] {
   const peaks: number[] = [];
   const rng = seededRandom(clipId);
+  
+  let inSpeech = rng() > 0.3;
+  let remainingInState = Math.floor(3 + rng() * 8);
+
   for (let i = 0; i < barCount; i++) {
-    peaks.push(0.2 + rng() * 0.8);
+    if (remainingInState <= 0) {
+      inSpeech = !inSpeech;
+      remainingInState = inSpeech 
+        ? Math.floor(4 + rng() * 12)  // Speech burst: 4..15 bars
+        : Math.floor(2 + rng() * 6);   // Dialogue gap / silence: 2..7 bars
+    }
+
+    if (inSpeech) {
+      // Speech burst with dynamic syllable volume changes
+      const envelope = Math.sin((1 - remainingInState / 15) * Math.PI);
+      const amp = 0.25 + rng() * 0.70;
+      peaks.push(Math.min(1, Math.max(0.15, amp * (0.6 + 0.4 * envelope))));
+    } else {
+      // Zero silence gap between words
+      peaks.push(0);
+    }
+    remainingInState--;
   }
+
   return peaks;
 }
 

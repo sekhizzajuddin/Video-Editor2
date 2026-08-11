@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
+import { extractWaveformFromUrl } from '@/utils/mediaProbe';
 
 export function useVoiceoverRecording() {
   const {
@@ -93,9 +94,11 @@ export function useVoiceoverRecording() {
           const finalDuration = Math.max(0.5, Number(probedDuration.toFixed(2)));
           const mediaId = `recorded_voiceover_${Date.now()}`;
 
-          const peaks: number[] = [];
-          for (let i = 0; i < 100; i++) {
-            peaks.push(0.1 + Math.random() * 0.7);
+          let peaks: number[] = [];
+          try {
+            peaks = await extractWaveformFromUrl(audioUrl);
+          } catch {
+            peaks = Array.from({ length: 200 }, () => 0);
           }
 
           try {

@@ -6,6 +6,7 @@ import { synthesizeProceduralSFX } from '../sfxSynth';
 import { parseTransliteratedResponse } from '../timelineUtils';
 import type { TimelineState } from './useTimelineState';
 import { toast } from 'sonner';
+import { extractWaveformFromUrl } from '@/utils/mediaProbe';
 
 interface UseTimelineAIDeps {
   timelineState: TimelineState;
@@ -162,9 +163,11 @@ Return your response ONLY as a JSON object with these two fields:
         createdAt: Date.now()
       };
 
-      const peaks: number[] = [];
-      for (let i = 0; i < 100; i++) {
-        peaks.push(0.1 + Math.random() * 0.7);
+      let peaks: number[] = [];
+      try {
+        peaks = await extractWaveformFromUrl(audioUrl);
+      } catch {
+        peaks = Array.from({ length: 200 }, () => 0);
       }
 
       const finalMediaItem = {
@@ -387,9 +390,11 @@ Return your response ONLY as a JSON array of objects:
             createdAt: Date.now()
           };
 
-          const peaks: number[] = [];
-          for (let p = 0; p < 100; p++) {
-            peaks.push(0.1 + Math.random() * 0.7);
+          let peaks: number[] = [];
+          try {
+            peaks = await extractWaveformFromUrl(audioUrl);
+          } catch {
+            peaks = Array.from({ length: 200 }, () => 0);
           }
 
           const finalMediaItem = {

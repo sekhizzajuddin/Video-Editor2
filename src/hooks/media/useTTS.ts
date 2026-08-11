@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useEditorStore } from '@/store/editorStore';
 
 import { saveFileToDB } from '@/utils/projectPersistence';
-import { probeFile } from '@/utils/mediaProbe';
+import { probeFile, extractWaveformFromUrl } from '@/utils/mediaProbe';
 import { v4 as uuidv4 } from 'uuid';
 
 export function useTTS(setActiveMediaTab?: any) {
@@ -308,7 +308,12 @@ const generateTTS = async () => {
         clearTimeout(metaTimeout);
 
         const realDuration = (!isNaN(audioEl.duration) && audioEl.duration > 0) ? audioEl.duration : 5;
-        const peaks: number[] = Array.from({ length: 100 }, () => 0.1 + Math.random() * 0.7);
+        let peaks: number[] = [];
+        try {
+          peaks = await extractWaveformFromUrl(audioUrl);
+        } catch {
+          peaks = Array.from({ length: 200 }, () => 0);
+        }
 
         const finalMediaItem = {
           ...mediaItem,

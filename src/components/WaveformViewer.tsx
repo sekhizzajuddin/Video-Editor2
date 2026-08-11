@@ -222,8 +222,12 @@ export function WaveformViewer({
       const x = ((peakTime - visibleStart) / visibleDuration) * cssWidth;
 
       // Use real min/max for true asymmetric waveform (like DaVinci)
-      const minVal = peaks.min[i]; // negative
-      const maxVal = peaks.max[i]; // positive
+      // Apply noise thresholding so background hiss collapses to 0
+      let minVal = peaks.min[i];
+      let maxVal = peaks.max[i];
+      if (Math.abs(minVal) < 0.025) minVal = 0;
+      if (Math.abs(maxVal) < 0.025) maxVal = 0;
+
       const topY = amp - maxVal * maxHalf;
       const botY = amp - minVal * maxHalf; // minVal is negative → botY > amp
       const barH = botY - topY;
