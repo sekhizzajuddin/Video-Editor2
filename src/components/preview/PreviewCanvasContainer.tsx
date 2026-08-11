@@ -509,9 +509,7 @@ export function PreviewCanvasContainer() {
         } else {
           const dt = (now - lastTime) / 1000;
           lastTime = now;
-          if (!state.isBuffering) {
-            newTime = currentTimeRef.current + dt * speed * dir;
-          }
+          newTime = currentTimeRef.current + dt * speed * dir;
         }
 
         if (newTime !== currentTimeRef.current) {

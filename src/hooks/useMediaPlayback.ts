@@ -484,6 +484,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // Drain pending seeks when a seek finishes. If we don't do this, rapid loop jumps
         // (e.g. when a clip is selected and loops) will leave the audio element permanently out of sync.
         const handleSeeked = () => {
+          if (useEditorStore.getState().isPlaying) {
+            pendingSeeksRef.current.delete(clipId);
+            return;
+          }
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
             pendingSeeksRef.current.delete(clipId);
@@ -658,7 +662,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const threshold = clipForceSeek ? forceSeekThreshold : driftLimit;
           if (drift > threshold) {
             if (entry.el.seeking) {
-              pendingSeeksRef.current.set(clipId, mediaTime);
+              if (!isPlaying) {
+                pendingSeeksRef.current.set(clipId, mediaTime);
+              }
             } else {
               // Always use exact currentTime for scrub seeking (not fastSeek).
               // fastSeek jumps to nearest keyframe causing choppy scrubbing.
@@ -721,22 +727,6 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         }
       }
-    }
-
-    // Calculate buffering state
-    let anyBuffering = false;
-    for (const [clipId, entry] of pool) {
-      if (playingIds.has(clipId)) {
-        // readyState < 3 means HAVE_CURRENT_DATA or lower, implying not enough data to play ahead seamlessly
-        if (entry.el.seeking || entry.el.readyState < 3) {
-          anyBuffering = true;
-          break;
-        }
-      }
-    }
-    const currentIsBuffering = useEditorStore.getState().isBuffering;
-    if (currentIsBuffering !== anyBuffering) {
-      useEditorStore.getState().setIsBuffering(anyBuffering);
     }
 
     // Update active clip IDs ref
