@@ -661,14 +661,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const forceSeekThreshold = !isPlaying ? 0.005 : (isReversing ? 0.02 : 0.15); // 150ms during live play
           const threshold = clipForceSeek ? forceSeekThreshold : driftLimit;
           if (drift > threshold) {
-            if (entry.el.seeking) {
-              if (!isPlaying) {
-                pendingSeeksRef.current.set(clipId, mediaTime);
-              }
-            } else {
-              // Always use exact currentTime for scrub seeking (not fastSeek).
-              // fastSeek jumps to nearest keyframe causing choppy scrubbing.
+            // Strictly seek active clip to mediaTime. On forceSeek or activation, override seeking lock so video & audio start strictly synced at playhead
+            if (clipForceSeek || !entry.el.seeking) {
               entry.el.currentTime = mediaTime;
+              pendingSeeksRef.current.delete(clipId);
+            } else {
+              pendingSeeksRef.current.set(clipId, mediaTime);
             }
           }
         }
@@ -681,51 +679,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
 
-    // Pause and pre-seek inactive elements to their start position (trimStart or transition start) so they play instantly and seamlessly
+    // Strictly pause inactive elements. Do NOT perform background seeks on inactive clips to prevent decoder congestion & desync on active clip playback.
     for (const [clipId, entry] of pool) {
       const isActive = playingIds.has(clipId);
       if (!isActive) {
         if (!entry.el.paused) {
           entry.el.pause();
         }
-        
-        // Find the clip in tracks to get its trimStart or transition entry start time
-        const foundNode = findClipById(clipId);
-        const fullClip = foundNode ? foundNode.clip : null;
-        if (fullClip) {
-          let targetTime = fullClip.trimStart;
-          if ('transitionIn' in fullClip && (fullClip as any).transitionIn) {
-            const transDur = (fullClip as any).transitionIn.duration;
-            const alignment = (fullClip as any).transitionIn.params?.alignment || 'center';
-            let offset = 0;
-            if (alignment === 'center') {
-              offset = transDur / 2;
-            } else if (alignment === 'right') {
-              offset = transDur;
-            }
-            
-            const startTimelineTime = fullClip.startTime - offset;
-            const mediaItem = mediaLibrary.find((m) => m.id === fullClip.mediaId);
-            const maxDuration = mediaItem ? mediaItem.duration : 10000;
-            
-            targetTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
-              id: fullClip.id,
-              startTime: fullClip.startTime,
-              duration: fullClip.duration,
-              trimStart: fullClip.trimStart,
-              speed: fullClip.speed,
-              speedRamp: fullClip.speedRamp
-            }, startTimelineTime)));
-          }
-
-          if (Math.abs(entry.el.currentTime - targetTime) > 0.1) {
-            if (!entry.el.seeking) {
-              entry.el.currentTime = targetTime;
-            } else {
-              pendingSeeksRef.current.set(clipId, targetTime);
-            }
-          }
-        }
+        pendingSeeksRef.current.delete(clipId);
       }
     }
 
