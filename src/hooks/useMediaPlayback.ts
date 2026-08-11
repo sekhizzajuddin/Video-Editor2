@@ -633,9 +633,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const direction = useEditorStore.getState().playbackDirection ?? 1;
         const isReversing = direction < 0;
 
-        // Relaxed drift limit (450ms) during normal forward playback to avoid stuttering/seeking loops.
-        // During force-seeking (play start, user seek, first activation) or reverse playback, we use tighter limits.
-        const driftLimit = isReversing ? 0.02 : 0.45;
+        // Tighter drift limit (150ms) to ensure audio/video remain aligned.
+        // We rely on gentle playbackRate adjustments (PLL) to correct minor drifts,
+        // but if it exceeds 150ms (e.g. from buffering lag), we perform a hard seek.
+        const driftLimit = isReversing ? 0.02 : 0.15;
 
         if (clipForceSeek || drift > driftLimit) {
           const forceSeekThreshold = !isPlaying ? 0.005 : (isReversing ? 0.02 : 0.15); // 150ms during live play
@@ -1099,9 +1100,25 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const currentMediaTime = entry.el.currentTime;
       const rawDrift = currentMediaTime - mediaTime; // > 0 means video is ahead of timeline
       
-      // Gentle sync catchup (PLL) logic removed to prevent video playback stuttering 
-      // from constantly shifting HTML5 playbackRate.
-      const targetSpeed = Math.max(0.1, playbackSpeed * effectiveSpeed);
+      const isScrubbing = useEditorStore.getState().isScrubbing;
+      const direction = useEditorStore.getState().playbackDirection ?? 1;
+      const isReversing = direction < 0;
+
+      let targetSpeed = Math.max(0.1, playbackSpeed * effectiveSpeed);
+
+      // Gentle sync catchup (PLL) logic to keep native HTML5 media precisely aligned
+      // with the global RAF timeline clock without hard-seeking.
+      if (isPlaying && !isScrubbing && !isReversing) {
+        if (Math.abs(rawDrift) > 0.02 && Math.abs(rawDrift) < 0.15) {
+          const MAX_ADJUSTMENT = 0.03; // Limit adjustment to 3% to prevent audible pitch shifting
+          let adjustment = rawDrift * 0.3; // Proportional control
+          if (Math.abs(adjustment) > MAX_ADJUSTMENT) {
+            adjustment = Math.sign(adjustment) * MAX_ADJUSTMENT;
+          }
+          targetSpeed *= (1 - adjustment);
+        }
+      }
+
       if (Math.abs(entry.el.playbackRate - targetSpeed) > 0.005) {
         entry.el.playbackRate = targetSpeed;
       }
