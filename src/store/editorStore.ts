@@ -1627,6 +1627,31 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         ...(durationOverride !== undefined ? { duration: durationOverride } : {})
       };
 
+      // Build linked-clip timing propagation: when a clip's timing changes,
+      // its linked audio/video clip must receive the same timing updates
+      // to stay in sync. Without this, trimming or editing a clip leaves
+      // the linked partner at its old position → audio/video misalignment.
+      const linkedClipId = found.clip.linkedClipId;
+      const timingKeys = ['startTime', 'trimStart', 'trimEnd', 'duration', 'speed', 'speedRamp'] as const;
+      let linkedTimingUpdates: Record<string, any> | null = null;
+      if (linkedClipId) {
+        linkedTimingUpdates = {};
+        for (const key of timingKeys) {
+          if ((finalUpdates as any)[key] !== undefined) {
+            (linkedTimingUpdates as any)[key] = (finalUpdates as any)[key];
+          }
+        }
+        // If durationOverride was computed (from trimStart/trimEnd/speed change),
+        // ensure it propagates to the linked clip too
+        if (durationOverride !== undefined) {
+          linkedTimingUpdates.duration = durationOverride;
+        }
+        // If no timing keys changed, skip linked update
+        if (Object.keys(linkedTimingUpdates).length === 0) {
+          linkedTimingUpdates = null;
+        }
+      }
+
       const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
         const isTargetTrack = 
           (!found?.isPip && pipId === null && track.id === found?.track.id) ||
@@ -1656,6 +1681,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
                 }
               }
               return merged;
+            }
+            // Propagate timing changes to the linked clip
+            if (linkedTimingUpdates && clip.id === linkedClipId) {
+              return { ...clip, ...linkedTimingUpdates };
             }
             if (isTargetTrack && durationDelta !== 0 && found) {
               if (clip.startTime >= found.clip.startTime + found.clip.duration - 0.001) {
@@ -1729,6 +1758,29 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     
     set((state) => {
       const updateMap = new Map(updates.map(u => [u.clipId, u.changes]));
+
+      // Propagate timing changes to linked clips that aren't already in the batch
+      const timingKeys = ['startTime', 'trimStart', 'trimEnd', 'duration', 'speed', 'speedRamp'];
+      const linkedUpdates = new Map<string, Record<string, any>>();
+      for (const u of updates) {
+        // Find the clip to check for linkedClipId
+        for (const track of state.tracks) {
+          const clip = track.clips.find(c => c.id === u.clipId);
+          if (clip?.linkedClipId && !updateMap.has(clip.linkedClipId)) {
+            const timingChanges: Record<string, any> = {};
+            for (const key of timingKeys) {
+              if ((u.changes as any)[key] !== undefined) {
+                timingChanges[key] = (u.changes as any)[key];
+              }
+            }
+            if (Object.keys(timingChanges).length > 0) {
+              linkedUpdates.set(clip.linkedClipId, timingChanges);
+            }
+          }
+          if (clip) break;
+        }
+      }
+
       const { tracks, pipWindows } = mapTracksDeep(state, (track) => ({
         ...track,
         clips: track.clips.map((clip) => {
@@ -1739,6 +1791,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
               clip.pipWindowIds?.forEach(pid => pipIdsToRecalc.add(pid));
             }
             return { ...clip, ...changes };
+          }
+          // Apply linked timing propagation
+          const linkedChanges = linkedUpdates.get(clip.id);
+          if (linkedChanges) {
+            return { ...clip, ...linkedChanges };
           }
           return clip;
         }),
