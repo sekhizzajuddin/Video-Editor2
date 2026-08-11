@@ -480,6 +480,19 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         el.crossOrigin = 'anonymous';
         el.src = media.url;
         el.style.display = 'none';
+
+        // Drain pending seeks when a seek finishes. If we don't do this, rapid loop jumps
+        // (e.g. when a clip is selected and loops) will leave the audio element permanently out of sync.
+        const handleSeeked = () => {
+          const pendingTime = pendingSeeksRef.current.get(clipId);
+          if (pendingTime !== undefined) {
+            pendingSeeksRef.current.delete(clipId);
+            el.currentTime = pendingTime;
+          }
+        };
+        (el as any)._handleSeeked = handleSeeked;
+        el.addEventListener('seeked', handleSeeked);
+
         getMediaContainer().appendChild(el);
         el.load(); // Force the browser to start fetching the audio
         
@@ -493,11 +506,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     for (const [clipId, entry] of pool) {
       if (!neededClips.has(clipId)) {
         entry.el.pause();
+        const el = entry.el as any;
+        if (el._handleSeeked) {
+          el.removeEventListener('seeked', el._handleSeeked);
+        }
+        
         if (entry.type === 'video') {
-          const el = entry.el as any;
-          if (el._handleSeeked) {
-            el.removeEventListener('seeked', el._handleSeeked);
-          }
           el.removeEventListener('timeupdate', stableTriggerRedraw);
           el.removeEventListener('canplay', stableTriggerRedraw);
           // Cancel pending requestVideoFrameCallback to prevent leak
@@ -510,6 +524,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             el._onVisibilityChange = null;
           }
         }
+        
         if (entry.separationGraph) {
           try { entry.separationGraph.input.disconnect(); } catch (e) {}
         }
