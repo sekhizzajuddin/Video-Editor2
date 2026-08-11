@@ -722,7 +722,6 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
     }
-    }
 
     // Calculate buffering state
     let anyBuffering = false;
@@ -742,9 +741,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
     // Update active clip IDs ref
     lastActiveClipIdsRef.current = playingIds;
-    };
-    syncPlayback();
-  }, [isPlaying, currentTime, playbackSpeed, activeClips, mediaLibrary, tracks]);
+  };
+  syncPlayback();
+}, [isPlaying, currentTime, playbackSpeed, activeClips, mediaLibrary, tracks]);
 
   // Cleanup orphaned track analysers
   useEffect(() => {
