@@ -744,8 +744,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const existing = pool.get(clipId);
       if (existing) {
         if (existing.type === 'audio' && media.url !== 'PENDING_RESTORE') {
-          if (existing.el.src !== media.url && !existing.el.src.endsWith(media.url)) {
-            existing.el.src = media.url;
+          const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
+          const finalSrc = media.url + hash;
+          if (existing.el.src !== finalSrc && !existing.el.src.endsWith(finalSrc)) {
+            existing.el.src = finalSrc;
             existing.el.load();
           }
         }
