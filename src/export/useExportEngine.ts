@@ -32,7 +32,9 @@ export interface ExportState {
   filename: string | null;
 }
 
-export function useExportEngine(timeline: any) {
+import { useEditorStore } from '@/store/editorStore';
+
+export function useExportEngine() {
   const [exportState, setExportState] = useState<ExportState>({
     phase: 'idle',
     progress: 0,
@@ -60,6 +62,7 @@ export function useExportEngine(timeline: any) {
     try {
       setExportState(prev => ({ ...prev, phase: 'analyzing', progress: 0, warnings: [], filename: null }));
       
+      const timeline = useEditorStore.getState();
       const totalFrames = Math.ceil((timeline as any).duration * config.fps);
       
       setExportState(prev => ({ 
@@ -120,7 +123,7 @@ export function useExportEngine(timeline: any) {
         }));
       }
     }
-  }, [timeline]);
+  }, []);
 
   const cancelExport = useCallback(() => {
     abortControllerRef.current?.abort();

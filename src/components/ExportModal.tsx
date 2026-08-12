@@ -6,22 +6,19 @@ import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExp
 import { ExportPhase } from '@/export/types';
 
 export function ExportModal() {
-  const { showExportModal, setShowExportModal, getTimelineData } = useEditorStore(
+  const { showExportModal, setShowExportModal } = useEditorStore(
     useShallow(s => ({
       showExportModal: s.showExportModal,
       setShowExportModal: s.setShowExportModal,
-      // We will need a way to grab the full timeline, or we can just pass the store's state
-      getTimelineData: () => s
     }))
   );
 
-  const timelineData = getTimelineData();
   const [selectedResolution, setSelectedResolution] = useState<Resolution>(RESOLUTION_PRESETS['16:9_1080']);
   const [quality, setQuality] = useState<'low' | 'medium' | 'high' | 'ultra'>('high');
   const [format, setFormat] = useState<'mp4' | 'webm'>('mp4');
   const [fps, setFps] = useState<number>(30);
 
-  const { exportState, startExport, cancelExport, downloadFile } = useExportEngine(timelineData as any);
+  const { exportState, startExport, cancelExport, downloadFile } = useExportEngine();
 
   const handleExport = useCallback(async () => {
     await startExport({
