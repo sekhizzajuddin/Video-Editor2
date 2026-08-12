@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { X, Download, AlertCircle } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -6,14 +6,28 @@ import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExp
 import { ExportPhase } from '@/export/types';
 
 export function ExportModal() {
-  const { showExportModal, setShowExportModal } = useEditorStore(
+  const { showExportModal, setShowExportModal, aspectRatio } = useEditorStore(
     useShallow(s => ({
       showExportModal: s.showExportModal,
       setShowExportModal: s.setShowExportModal,
+      aspectRatio: s.aspectRatio,
     }))
   );
 
-  const [selectedResolution, setSelectedResolution] = useState<Resolution>(RESOLUTION_PRESETS['16:9_1080']);
+  const initialResolution = useMemo(() => {
+    if (aspectRatio === '9:16') return RESOLUTION_PRESETS['9:16_1080'];
+    if (aspectRatio === '1:1') return RESOLUTION_PRESETS['1:1_1080'];
+    return RESOLUTION_PRESETS['16:9_1080'];
+  }, [aspectRatio]);
+
+  const [selectedResolution, setSelectedResolution] = useState<Resolution>(initialResolution);
+
+  useEffect(() => {
+    if (showExportModal) {
+      setSelectedResolution(initialResolution);
+    }
+  }, [showExportModal, initialResolution]);
+
   const [quality, setQuality] = useState<'low' | 'medium' | 'high' | 'ultra'>('high');
   const [format, setFormat] = useState<'mp4' | 'webm'>('mp4');
   const [fps, setFps] = useState<number>(30);
@@ -28,6 +42,7 @@ export function ExportModal() {
       bitrate: selectedResolution.maxBitrate,
       format,
       filename: `export_${Date.now()}`,
+      aspectRatio,
     });
   }, [startExport, selectedResolution, format, fps]);
 

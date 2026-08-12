@@ -7,6 +7,7 @@ export interface ExportWorkerConfig {
   bitrate: number;
   format: 'mp4' | 'webm';
   filename: string;
+  aspectRatio: string;
 }
 
 export interface AudioExportPayload {
@@ -110,7 +111,7 @@ async function handleExport(
   config: ExportWorkerConfig,
   audioData?: AudioExportPayload | null
 ) {
-  console.log('[ExportWorker] STARTING v3 - On-Demand Streaming', { width: config.width, height: config.height, fps: config.fps });
+  console.log('[ExportWorker] STARTING v4 - Precise Coordinate Scaling', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
   isExporting = true;
   isCancelled = false;
 
@@ -137,7 +138,7 @@ async function handleExport(
 
     // Compositor Initialization
     const canvas = new OffscreenCanvas(outputWidth, outputHeight);
-    const compositor = new Compositor(canvas);
+    const compositor = new Compositor(canvas, config.aspectRatio);
 
     // Calculate duration reliably
     let duration = timeline.duration || timeline.totalDuration || 0;

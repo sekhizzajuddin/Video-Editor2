@@ -90,40 +90,47 @@ void main() {
 export class Compositor {
   private canvas: OffscreenCanvas;
   private ctx: OffscreenCanvasRenderingContext2D;
+  private aspectRatio: string;
 
-  constructor(canvas: OffscreenCanvas) {
+  constructor(canvas: OffscreenCanvas, aspectRatio: string = '16:9') {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d', {
-      willReadFrequently: true, // Optimizes for getImageData (used in Chroma Key)
-      alpha: false,
-    });
-    if (!ctx) throw new Error('2D context not supported');
-    this.ctx = ctx as OffscreenCanvasRenderingContext2D;
+    this.aspectRatio = aspectRatio;
+    this.ctx = canvas.getContext('2d', { alpha: false }) as OffscreenCanvasRenderingContext2D;
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = 'high';
   }
 
-  async render(layers: RenderLayer[]) {
-    const ctx = this.ctx;
-    
-    // Clear background
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+  public render(layers: RenderLayer[]) {
+    // Fill background
+    this.ctx.fillStyle = '#0a0a0a';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     for (const layer of layers) {
       if (layer.type === 'video' && layer.frame) {
-        ctx.save();
+        this.ctx.save();
         
         const vw = layer.frame.displayWidth;
         const vh = layer.frame.displayHeight;
         const W = this.canvas.width;
         const H = this.canvas.height;
         
-        // 1. Calculate base size to fit the export canvas (matching UI previewMath.ts)
+        // 1. Calculate active view dimensions based on PROJECT aspect ratio (matches UI preview)
+        let viewW = 854;
+        let viewH = 480;
+        if (this.aspectRatio === '9:16') {
+            viewW = Math.round(480 * (9 / 16));
+        } else if (this.aspectRatio === '1:1') {
+            viewW = 480;
+        } else if (this.aspectRatio === '4:3') {
+            viewW = Math.round(480 * (4 / 3));
+        }
+
+        // 2. Calculate base size to fit the export canvas (matching UI previewMath.ts)
         const scaleToFit = Math.min(W / vw, H / vh);
         const baseW = vw * scaleToFit;
         const baseH = vh * scaleToFit;
 
-        // 2. Extract and convert scale (UI uses 100 for 100%)
-        // Fallback to 1.0 if scale is somehow 1 (old FrameScheduler bug)
+        // 3. Extract and convert scale (UI uses 100 for 100%)
         let scale = layer.transform.scale;
         if (scale <= 10 && scale > 0) scale = scale * 100; // Auto-correct legacy '1' scale
         const finalScale = scale / 100;
@@ -131,24 +138,26 @@ export class Compositor {
         const finalW = baseW * finalScale;
         const finalH = baseH * finalScale;
 
-        // 3. Scale UI coordinates (854x480) to Export Resolution
-        const exportScaleX = W / 854;
-        const exportScaleY = H / 480;
+        // 4. Scale UI coordinates (relative to viewW x viewH) to Export Resolution
+        // UI coordinates (transform.x/y) represent 1 unit per pixel in the view area.
+        // We need to scale these units up to the export canvas size.
+        const exportScaleX = W / viewW;
+        const exportScaleY = H / viewH;
+        
         const tx = layer.transform.x * exportScaleX;
         const ty = layer.transform.y * exportScaleY;
 
-        // 4. Apply global translation + rotation
+        // 5. Apply global translation + rotation
         const cx = W / 2;
         const cy = H / 2;
-        ctx.translate(cx + tx, cy + ty);
-        ctx.rotate((layer.transform.rotation * Math.PI) / 180);
+        this.ctx.translate(cx + tx, cy + ty);
+        this.ctx.rotate((layer.transform.rotation * Math.PI) / 180);
         
-        ctx.globalAlpha = layer.opacity;
+        this.ctx.globalAlpha = layer.opacity;
 
         // 5. Draw the frame exactly as sized
-        ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
-        
-        ctx.restore();
+        this.ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
+        this.ctx.restore();
 
         // Apply Chroma Key (Green Screen) if enabled
         if (layer.chromaKey && layer.chromaKey.enabled) {
