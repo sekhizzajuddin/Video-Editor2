@@ -109,8 +109,15 @@ export class Compositor {
       if (layer.type === 'video' && layer.frame) {
         this.ctx.save();
         
-        const vw = layer.frame.displayWidth;
-        const vh = layer.frame.displayHeight;
+        let vw = layer.frame.displayWidth;
+        let vh = layer.frame.displayHeight;
+        const srcRot = layer.sourceRotation || 0;
+        const isRotated = srcRot === 90 || srcRot === 270 || srcRot === -90;
+        if (isRotated) {
+          vw = layer.frame.displayHeight;
+          vh = layer.frame.displayWidth;
+        }
+
         const W = this.canvas.width;
         const H = this.canvas.height;
         
@@ -155,8 +162,19 @@ export class Compositor {
         
         this.ctx.globalAlpha = layer.opacity;
 
-        // 5. Draw the frame exactly as sized
-        this.ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
+        // 6. Draw the frame, applying source metadata rotation
+        this.ctx.save();
+        if (srcRot !== 0) {
+          this.ctx.rotate((srcRot * Math.PI) / 180);
+        }
+        
+        if (isRotated) {
+          this.ctx.drawImage(layer.frame, -finalH / 2, -finalW / 2, finalH, finalW);
+        } else {
+          this.ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
+        }
+        this.ctx.restore();
+        
         this.ctx.restore();
 
         // Apply Chroma Key (Green Screen) if enabled

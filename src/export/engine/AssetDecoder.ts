@@ -19,6 +19,7 @@ export class AssetDecoder {
   private mp4boxfile: any;
   private trackId: number = 0;
   private trackInfo: any = null;
+  public rotation: number = 0;
 
   // Compressed MP4 samples stored in RAM (typically only a few MBs)
   private samples: StoredSample[] = [];
@@ -79,7 +80,8 @@ export class AssetDecoder {
 
     // Give MP4Box 150ms to finish sample parsing
     await new Promise<void>((r) => setTimeout(r, 150));
-    this.samples.sort((a, b) => a.timestamp - b.timestamp);
+    // DO NOT sort samples by timestamp (CTS)! VideoDecoder requires chunks in Decoding Order (DTS).
+    // Sorting by CTS breaks B-frame decoding, causing severe lag and stuttering.
 
     if (this.samples.length === 0 || !this.trackInfo) {
       console.warn('[AssetDecoder] Empty media or failed track parsing');
@@ -90,6 +92,22 @@ export class AssetDecoder {
     const codec  = this.trackInfo.codec ?? 'avc1.42E01E';
     const width  = this.trackInfo.video?.width  ?? 1920;
     const height = this.trackInfo.video?.height ?? 1080;
+
+    // Extract rotation from MP4 track matrix
+    let rotation = 0;
+    const matrix = this.trackInfo.matrix;
+    if (matrix && matrix.length === 9) {
+      // MP4 matrix: [a, b, u, c, d, v, x, y, w]
+      // Rotation is determined by a, b, c, d (indices 0, 1, 3, 4)
+      if (matrix[0] === 0 && matrix[1] === 65536 && matrix[3] === -65536 && matrix[4] === 0) {
+        rotation = 90;
+      } else if (matrix[0] === -65536 && matrix[1] === 0 && matrix[3] === 0 && matrix[4] === -65536) {
+        rotation = 180;
+      } else if (matrix[0] === 0 && matrix[1] === -65536 && matrix[3] === 65536 && matrix[4] === 0) {
+        rotation = 270; // or -90
+      }
+    }
+    this.rotation = rotation;
 
     this.decoderConfig = {
       codec,

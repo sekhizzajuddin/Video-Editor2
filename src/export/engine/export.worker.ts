@@ -111,7 +111,7 @@ async function handleExport(
   config: ExportWorkerConfig,
   audioData?: AudioExportPayload | null
 ) {
-  console.log('[ExportWorker] STARTING v4 - Precise Coordinate Scaling', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
+  console.log('[ExportWorker] STARTING v5 - Corrected Frame DTS & Rotation', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
   isExporting = true;
   isCancelled = false;
 

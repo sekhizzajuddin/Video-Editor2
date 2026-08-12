@@ -21,6 +21,7 @@ export interface RenderLayer {
     rotation: number;
   };
   zIndex: number;
+  sourceRotation?: number;
 }
 
 export class FrameScheduler {
@@ -94,6 +95,7 @@ export class FrameScheduler {
                 chromaKey: clip.chromaKey,
                 transform,
                 zIndex: clip.zIndex !== undefined ? clip.zIndex : trackIdx,
+                sourceRotation: decoder.rotation,
               });
             }
           } else if (track.type === 'text') {
