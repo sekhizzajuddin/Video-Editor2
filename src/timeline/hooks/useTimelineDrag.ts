@@ -1250,8 +1250,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const store = useEditorStore.getState();
         const updatedClip = findClipDeep(store, resizeState.clipId)?.clip;
         if (updatedClip) {
-            // Subtract 0.001 from the right edge to keep the playhead technically inside the clip's time bounds
-            const edgeTime = resizeState.edge === 'left' ? updatedClip.startTime : updatedClip.startTime + updatedClip.duration - 0.001;
+            // Subtract 0.04 (approx 1 frame at 25fps) from the right edge to ensure we preview the last visible frame of the clip
+            const edgeTime = resizeState.edge === 'left' ? updatedClip.startTime : updatedClip.startTime + updatedClip.duration - 0.04;
             store.seek(Math.max(0, edgeTime));
             window.dispatchEvent(new Event('procut-frame-updated'));
         }
