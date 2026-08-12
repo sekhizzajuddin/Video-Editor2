@@ -148,13 +148,31 @@ async function handleExport(
     duration = Math.max(0.1, duration);
     const totalFrames = Math.max(1, Math.ceil(duration * config.fps));
 
-    // Audio status
-    const hasAudio = !!(
-      audioData &&
-      audioData.channels &&
-      audioData.channels.length > 0 &&
-      audioData.length > 0
-    );
+    // Audio status & configuration check
+    let hasAudio = false;
+    let audioEncoder: AudioEncoder | null = null;
+
+    if (audioData && audioData.channels && audioData.channels.length > 0 && audioData.length > 0) {
+      const audioConfig: AudioEncoderConfig = {
+        codec: 'mp4a.40.2', // AAC LC
+        sampleRate: audioData.sampleRate || 48000,
+        numberOfChannels: 2,
+        bitrate: 128_000,
+      };
+
+      try {
+        if (typeof AudioEncoder.isConfigSupported === 'function') {
+          const support = await AudioEncoder.isConfigSupported(audioConfig);
+          if (support && support.supported) {
+            hasAudio = true;
+          }
+        } else {
+          hasAudio = true;
+        }
+      } catch {
+        hasAudio = false;
+      }
+    }
 
     // Muxer Initialization
     const muxerOptions: any = {
@@ -170,7 +188,7 @@ async function handleExport(
     if (hasAudio) {
       muxerOptions.audio = {
         codec: 'aac',
-        numberOfChannels: audioData!.numberOfChannels || 2,
+        numberOfChannels: 2,
         sampleRate: audioData!.sampleRate || 48000,
       };
     }
@@ -194,7 +212,6 @@ async function handleExport(
     );
 
     // AudioEncoder Initialization
-    let audioEncoder: AudioEncoder | null = null;
     if (hasAudio) {
       audioEncoder = new AudioEncoder({
         output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
@@ -204,7 +221,7 @@ async function handleExport(
       audioEncoder.configure({
         codec: 'mp4a.40.2', // AAC LC
         sampleRate: audioData!.sampleRate || 48000,
-        numberOfChannels: audioData!.numberOfChannels || 2,
+        numberOfChannels: 2,
         bitrate: 128_000,
       });
     }
@@ -254,25 +271,27 @@ async function handleExport(
     if (hasAudio && audioEncoder && audioData) {
       postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'encoding' } });
       
-      const numFrames = 1024; // AAC typical chunk size
+      const numFrames = 1024; // AAC strictly requires fixed 1024 frames per AudioData chunk
       const totalSamples = audioData.length;
       const ch0 = audioData.channels[0];
       const ch1 = audioData.channels[1] || ch0;
       const sampleRate = audioData.sampleRate || 48000;
       
       for (let offset = 0; offset < totalSamples; offset += numFrames) {
-        const frameCount = Math.min(numFrames, totalSamples - offset);
+        const remaining = totalSamples - offset;
+        const frameCount = Math.min(numFrames, remaining);
         
-        const planarData = new Float32Array(frameCount * 2);
+        // Zero-padded buffer to exactly 1024 samples per channel for AAC encoder compliance
+        const planarData = new Float32Array(numFrames * 2);
         planarData.set(ch0.subarray(offset, offset + frameCount), 0);
-        planarData.set(ch1.subarray(offset, offset + frameCount), frameCount);
+        planarData.set(ch1.subarray(offset, offset + frameCount), numFrames);
         
         const timestampUs = Math.round((offset / sampleRate) * 1_000_000);
         
         const audioChunk = new AudioData({
           format: 'f32-planar',
           sampleRate: sampleRate,
-          numberOfFrames: frameCount,
+          numberOfFrames: numFrames,
           numberOfChannels: 2,
           timestamp: timestampUs,
           data: planarData,
