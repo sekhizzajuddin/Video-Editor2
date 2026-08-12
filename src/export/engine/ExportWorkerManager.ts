@@ -63,7 +63,7 @@ export class ExportWorkerManager {
     };
   }
 
-  async export(signal: AbortSignal): Promise<string> {
+  async export(signal: AbortSignal): Promise<{filename: string, savedViaRuntime: boolean}> {
     this.startTime = Date.now();
     
     const serializedTimeline = this.serializeTimeline(this.options.timeline);
