@@ -813,7 +813,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const latestClientXRef = useRef<number>(0);
 
   const handleMouseMove = (e: MouseEvent) => {
-    if (isScrubbing) {
+    if (isScrubbing && !resizeState && !dragState && !slipState && !slideState) {
       latestClientXRef.current = e.clientX;
       if (scrubRafIdRef.current === null) {
           scrubRafIdRef.current = requestAnimationFrame(() => {
