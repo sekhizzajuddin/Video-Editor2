@@ -112,6 +112,7 @@ export class Compositor {
     const gl = canvas.getContext('webgl2', {
       premultipliedAlpha: false,
       alpha: false,
+      preserveDrawingBuffer: true,
       powerPreference: 'low-power', // Avoids competing with main thread for high-power GPU
       antialias: false,
       depth: false,

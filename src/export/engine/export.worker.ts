@@ -110,6 +110,7 @@ async function handleExport(
   config: ExportWorkerConfig,
   audioData?: AudioExportPayload | null
 ) {
+  console.log('[ExportWorker] STARTING v3 - On-Demand Streaming', { width: config.width, height: config.height, fps: config.fps });
   isExporting = true;
   isCancelled = false;
 

@@ -101,7 +101,7 @@ export class AssetDecoder {
     }
 
     this.initDecoder();
-    console.log(`[AssetDecoder] Loaded ${this.samples.length} compressed samples | ${codec} ${width}x${height}`);
+    console.log(`[AssetDecoder] v3 loaded ${this.samples.length} compressed samples | ${codec} ${width}x${height}`);
   }
 
   private initDecoder(): void {
