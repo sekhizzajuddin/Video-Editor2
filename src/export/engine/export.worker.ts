@@ -111,7 +111,7 @@ async function handleExport(
   config: ExportWorkerConfig,
   audioData?: AudioExportPayload | null
 ) {
-  console.log('[ExportWorker] STARTING v6 - Pre-Decoded Frames', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
+  console.log('[ExportWorker] STARTING v7 - Streaming Decode + Flush', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
   isExporting = true;
   isCancelled = false;
 

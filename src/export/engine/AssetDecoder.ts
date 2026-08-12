@@ -2,12 +2,12 @@ import * as MP4Box from 'mp4box';
 import { FramePool } from './memory/FramePool';
 
 export interface AssetFrame {
-  timestamp: number; // µs
+  timestamp: number; // µs (CTS - presentation time)
   frame: VideoFrame;
 }
 
 interface StoredSample {
-  timestamp: number;   // µs (CTS - presentation time)
+  timestamp: number;   // µs (CTS)
   duration: number;    // µs
   data: Uint8Array;
   isKeyframe: boolean;
@@ -21,12 +21,14 @@ export class AssetDecoder {
   private trackInfo: any = null;
   public rotation: number = 0;
 
-  // Compressed MP4 samples stored in RAM (in DTS/muxing order from MP4Box)
+  // Compressed MP4 samples in DTS (decoding) order from MP4Box
   private samples: StoredSample[] = [];
 
-  // All decoded frames sorted by presentation timestamp for O(1) lookup
-  private allFrames: AssetFrame[] = [];
-  private isFullyDecoded: boolean = false;
+  // Live decoding state
+  private decoder: VideoDecoder | null = null;
+  private decoderConfig: VideoDecoderConfig | null = null;
+  private decodedQueue: AssetFrame[] = [];
+  private nextSampleIdx: number = 0;
 
   private onReadyCallback: (() => void) | null = null;
 
@@ -78,7 +80,7 @@ export class AssetDecoder {
 
     // Give MP4Box 150ms to finish sample parsing
     await new Promise<void>((r) => setTimeout(r, 150));
-    // Samples arrive in DTS (decoding) order from MP4Box — do NOT re-sort them.
+    // Samples arrive in DTS (decoding) order from MP4Box — do NOT re-sort.
 
     if (this.samples.length === 0 || !this.trackInfo) {
       console.warn('[AssetDecoder] Empty media or failed track parsing');
@@ -104,81 +106,44 @@ export class AssetDecoder {
     }
     this.rotation = rotation;
 
-    const decoderConfig: VideoDecoderConfig = {
+    this.decoderConfig = {
       codec,
       codedWidth: width,
       codedHeight: height,
     };
     if (description) {
-      decoderConfig.description = description;
+      this.decoderConfig.description = description;
     }
 
-    // ── Pre-decode ALL frames upfront ──────────────────────────────────────
-    // This eliminates per-frame decode latency during the render loop.
-    // Frames are decoded in DTS order (as MP4Box provides them) and the
-    // output queue is sorted by CTS (presentation time) for correct lookup.
-    console.log(`[AssetDecoder] v6 pre-decoding ${this.samples.length} samples | ${codec} ${width}x${height}`);
+    this.initDecoder();
+    console.log(`[AssetDecoder] v7 streaming-decode ready | ${this.samples.length} samples | ${codec} ${width}x${height} | rotation=${rotation}`);
+  }
 
-    const collectedFrames: AssetFrame[] = [];
+  private initDecoder(): void {
+    if (this.decoder) {
+      try { this.decoder.close(); } catch {}
+      this.decoder = null;
+    }
 
-    const decoder = new VideoDecoder({
+    this.clearDecodedQueue();
+    this.nextSampleIdx = 0;
+
+    if (!this.decoderConfig) return;
+
+    this.decoder = new VideoDecoder({
       output: (frame) => {
-        collectedFrames.push({ timestamp: frame.timestamp, frame });
+        this.decodedQueue.push({ timestamp: frame.timestamp, frame });
       },
       error: (e) => {
-        console.warn('[AssetDecoder] VideoDecoder error during pre-decode:', e.message);
+        console.warn('[AssetDecoder] VideoDecoder error:', e.message);
       },
     });
 
     try {
-      decoder.configure(decoderConfig);
+      this.decoder.configure(this.decoderConfig);
     } catch (e: any) {
       console.error('[AssetDecoder] VideoDecoder configure failed:', e.message);
-      return;
     }
-
-    // Feed ALL samples to decoder in DTS order
-    for (let i = 0; i < this.samples.length; i++) {
-      const sample = this.samples[i];
-
-      // Backpressure: if decoder has too many queued, wait for it to catch up
-      while (decoder.decodeQueueSize > 20) {
-        await new Promise<void>((r) => setTimeout(r, 2));
-      }
-
-      try {
-        decoder.decode(new EncodedVideoChunk({
-          type:      sample.isKeyframe ? 'key' : 'delta',
-          timestamp: sample.timestamp,
-          duration:  sample.duration,
-          data:      sample.data,
-        }));
-      } catch (e: any) {
-        console.warn(`[AssetDecoder] Decode chunk error @${sample.timestamp}:`, e.message);
-      }
-    }
-
-    // Flush decoder to get any remaining frames
-    try {
-      await decoder.flush();
-    } catch (e: any) {
-      console.warn('[AssetDecoder] Flush error:', e.message);
-    }
-
-    // Allow any remaining output callbacks to fire
-    await new Promise<void>((r) => setTimeout(r, 50));
-
-    try { decoder.close(); } catch {}
-
-    // Sort decoded frames by presentation timestamp (CTS) for correct lookup
-    collectedFrames.sort((a, b) => a.timestamp - b.timestamp);
-    this.allFrames = collectedFrames;
-    this.isFullyDecoded = true;
-
-    // Free the compressed samples — no longer needed
-    this.samples = [];
-
-    console.log(`[AssetDecoder] v6 pre-decoded ${this.allFrames.length} frames successfully`);
   }
 
   /** Extract AVCDecoderConfigurationRecord (avcC) or HEVCDecoderConfigurationRecord (hvcC) bytes */
@@ -200,37 +165,113 @@ export class AssetDecoder {
   }
 
   /**
-   * Instant frame lookup — all frames are pre-decoded and sorted by CTS.
-   * Uses binary search for O(log n) performance.
+   * Streaming sequential decoder optimized for export.
+   * 
+   * Strategy for smooth export:
+   * 1. Feed all compressed samples up to (and 500ms past) the target timestamp to the decoder
+   * 2. Use decoder.flush() to guarantee all frames are decoded (no setTimeout polling)
+   * 3. Sort decoded queue by CTS (presentation time) for correct frame selection
+   * 4. Binary search for the closest frame
+   * 5. Purge frames more than 1 second behind to bound memory usage
    */
   async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
-    if (this.allFrames.length === 0) return null;
+    if (this.samples.length === 0 || !this.decoder) return null;
 
-    // Binary search for the closest frame
-    let lo = 0, hi = this.allFrames.length - 1;
+    // 1. Purge frames more than 1 second behind (keep generous buffer to avoid re-decoding)
+    const purgeThreshold = timestampMicroseconds - 1_000_000;
+    while (this.decodedQueue.length > 2 && this.decodedQueue[0].timestamp < purgeThreshold) {
+      const old = this.decodedQueue.shift();
+      try { old?.frame.close(); } catch {}
+    }
+
+    // 2. Feed compressed samples to decoder until we're past the target timestamp
+    //    Feed all samples whose CTS <= target + 500ms (look-ahead for B-frame reordering)
+    const lookAheadTarget = timestampMicroseconds + 500_000;
+    let fedNewSamples = false;
+
+    while (this.nextSampleIdx < this.samples.length) {
+      const sample = this.samples[this.nextSampleIdx];
+
+      // Stop feeding if we've gone well past the target AND we have frames past it
+      if (sample.timestamp > lookAheadTarget && this.nextSampleIdx > 0) {
+        // Check if the last frame we queued is past our target
+        const lastQueuedCTS = this.decodedQueue.length > 0
+          ? this.decodedQueue[this.decodedQueue.length - 1].timestamp
+          : -1;
+        if (lastQueuedCTS >= timestampMicroseconds) break;
+      }
+
+      if (this.decoder.state === 'closed') {
+        this.initDecoder();
+        if (!this.decoder) return null;
+      }
+
+      try {
+        this.decoder.decode(new EncodedVideoChunk({
+          type:      sample.isKeyframe ? 'key' : 'delta',
+          timestamp: sample.timestamp,
+          duration:  sample.duration,
+          data:      sample.data,
+        }));
+        fedNewSamples = true;
+      } catch (e: any) {
+        console.warn(`[AssetDecoder] Decode chunk error @${sample.timestamp}:`, e.message);
+      }
+
+      this.nextSampleIdx++;
+    }
+
+    // 3. Flush decoder to guarantee all fed samples produce output frames
+    if (fedNewSamples && this.decoder && this.decoder.state !== 'closed') {
+      try {
+        await this.decoder.flush();
+        // Re-configure after flush (flush resets decoder to unconfigured state)
+        if (this.decoderConfig && this.decoder.state === 'unconfigured') {
+          this.decoder.configure(this.decoderConfig);
+        }
+      } catch (e: any) {
+        console.warn('[AssetDecoder] Flush error:', e.message);
+      }
+    }
+
+    if (this.decodedQueue.length === 0) return null;
+
+    // 4. Sort decoded queue by CTS (presentation time) for correct frame selection
+    //    The decoder outputs frames in CTS order usually, but B-frames can cause reordering
+    this.decodedQueue.sort((a, b) => a.timestamp - b.timestamp);
+
+    // 5. Binary search for the frame closest to timestampMicroseconds
+    let lo = 0, hi = this.decodedQueue.length - 1;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (this.allFrames[mid].timestamp < timestampMicroseconds) lo = mid + 1;
+      if (this.decodedQueue[mid].timestamp < timestampMicroseconds) lo = mid + 1;
       else hi = mid;
     }
 
-    // Pick the closest between lo and lo-1
     let best = lo;
     if (lo > 0) {
-      const prevDist = Math.abs(this.allFrames[lo - 1].timestamp - timestampMicroseconds);
-      const currDist = Math.abs(this.allFrames[lo].timestamp - timestampMicroseconds);
+      const prevDist = Math.abs(this.decodedQueue[lo - 1].timestamp - timestampMicroseconds);
+      const currDist = Math.abs(this.decodedQueue[lo].timestamp - timestampMicroseconds);
       if (prevDist < currDist) best = lo - 1;
     }
 
     // Return a clone so caller can close() their copy independently
-    return this.allFrames[best].frame.clone();
+    return this.decodedQueue[best].frame.clone();
+  }
+
+  private clearDecodedQueue(): void {
+    for (const item of this.decodedQueue) {
+      try { item.frame.close(); } catch {}
+    }
+    this.decodedQueue = [];
   }
 
   dispose() {
-    for (const item of this.allFrames) {
-      try { item.frame.close(); } catch {}
+    this.clearDecodedQueue();
+    if (this.decoder) {
+      try { this.decoder.close(); } catch {}
+      this.decoder = null;
     }
-    this.allFrames = [];
     this.samples = [];
   }
 }
