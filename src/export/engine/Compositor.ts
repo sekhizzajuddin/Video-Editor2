@@ -89,196 +89,28 @@ void main() {
 
 export class Compositor {
   private canvas: OffscreenCanvas;
-  private gl: WebGL2RenderingContext;
-  private program: WebGLProgram;
-  
-  // Buffers and Uniforms
-  private positionBuffer: WebGLBuffer;
-  private texCoordBuffer: WebGLBuffer;
-  private vao: WebGLVertexArrayObject;
-  private texture: WebGLTexture;
-  
-  private matrixLocation: WebGLUniformLocation;
-  private opacityLocation: WebGLUniformLocation;
-  private ckEnabledLoc: WebGLUniformLocation;
-  private ckColorLoc: WebGLUniformLocation;
-  private ckThresholdLoc: WebGLUniformLocation;
-  private ckSoftnessLoc: WebGLUniformLocation;
-  private ckSpillLoc: WebGLUniformLocation;
-  private ckTypeLoc: WebGLUniformLocation;
-  
+  private ctx: OffscreenCanvasRenderingContext2D;
+
   constructor(canvas: OffscreenCanvas) {
     this.canvas = canvas;
-    const gl = canvas.getContext('webgl2', {
-      premultipliedAlpha: false,
+    const ctx = canvas.getContext('2d', {
+      willReadFrequently: true, // Optimizes for getImageData (used in Chroma Key)
       alpha: false,
-      preserveDrawingBuffer: true,
-      powerPreference: 'low-power', // Avoids competing with main thread for high-power GPU
-      antialias: false,
-      depth: false,
-      stencil: false,
     });
-    if (!gl) throw new Error('WebGL2 not supported');
-    this.gl = gl;
-
-    // Enable blending for transparency
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-
-    // Compile shaders
-    const vs = this.createShader(gl.VERTEX_SHADER, vertexShaderSource);
-    const fs = this.createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-    this.program = this.createProgram(vs, fs);
-
-    // Look up uniforms
-    this.matrixLocation = gl.getUniformLocation(this.program, 'u_matrix')!;
-    this.opacityLocation = gl.getUniformLocation(this.program, 'u_opacity')!;
-    
-    this.ckEnabledLoc = gl.getUniformLocation(this.program, 'u_chromaKeyEnabled')!;
-    this.ckColorLoc = gl.getUniformLocation(this.program, 'u_keyColor')!;
-    this.ckThresholdLoc = gl.getUniformLocation(this.program, 'u_threshold')!;
-    this.ckSoftnessLoc = gl.getUniformLocation(this.program, 'u_softness')!;
-    this.ckSpillLoc = gl.getUniformLocation(this.program, 'u_spillSuppression')!;
-    this.ckTypeLoc = gl.getUniformLocation(this.program, 'u_keyType')!;
-
-    // Create VAO
-    this.vao = gl.createVertexArray()!;
-    gl.bindVertexArray(this.vao);
-
-    // Set up positions
-    this.positionBuffer = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      0, 0,
-      1, 0,
-      0, 1,
-      0, 1,
-      1, 0,
-      1, 1,
-    ]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    // Set up texture coords (note: WebGL has Y up, VideoFrames are usually Y down. We flip here)
-    this.texCoordBuffer = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      0, 0,
-      1, 0,
-      0, 1,
-      0, 1,
-      1, 0,
-      1, 1,
-    ]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-
-    // Create texture
-    this.texture = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  }
-
-  private createShader(type: number, source: string): WebGLShader {
-    const gl = this.gl;
-    const shader = gl.createShader(type)!;
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      throw new Error(gl.getShaderInfoLog(shader)!);
-    }
-    return shader;
-  }
-
-  private createProgram(vs: WebGLShader, fs: WebGLShader): WebGLProgram {
-    const gl = this.gl;
-    const prog = gl.createProgram()!;
-    gl.attachShader(prog, vs);
-    gl.attachShader(prog, fs);
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      throw new Error(gl.getProgramInfoLog(prog)!);
-    }
-    return prog;
-  }
-
-  // Basic 3x3 matrix math for 2D transformations
-  private getProjectionMatrix(width: number, height: number): Float32Array {
-    return new Float32Array([
-      2 / width, 0, 0,
-      0, -2 / height, 0,
-      -1, 1, 1,
-    ]);
-  }
-
-  private m3Multiply(a: Float32Array, b: Float32Array): Float32Array {
-    const m = new Float32Array(9);
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
-        m[i * 3 + j] = a[i * 3 + 0] * b[0 * 3 + j] +
-                       a[i * 3 + 1] * b[1 * 3 + j] +
-                       a[i * 3 + 2] * b[2 * 3 + j];
-      }
-    }
-    return m;
-  }
-
-  private m3Translate(m: Float32Array, tx: number, ty: number): Float32Array {
-    return this.m3Multiply(m, new Float32Array([
-      1, 0, 0,
-      0, 1, 0,
-      tx, ty, 1,
-    ]));
-  }
-
-  private m3Rotate(m: Float32Array, angleInRadians: number): Float32Array {
-    const c = Math.cos(angleInRadians);
-    const s = Math.sin(angleInRadians);
-    return this.m3Multiply(m, new Float32Array([
-      c, -s, 0,
-      s, c, 0,
-      0, 0, 1,
-    ]));
-  }
-
-  private m3Scale(m: Float32Array, sx: number, sy: number): Float32Array {
-    return this.m3Multiply(m, new Float32Array([
-      sx, 0, 0,
-      0, sy, 0,
-      0, 0, 1,
-    ]));
+    if (!ctx) throw new Error('2D context not supported');
+    this.ctx = ctx as OffscreenCanvasRenderingContext2D;
   }
 
   async render(layers: RenderLayer[]) {
-    const gl = this.gl;
-    
-    // Check if the WebGL context has been lost (e.g. GPU pressure from main thread)
-    if (gl.isContextLost()) {
-      console.warn('[Compositor] WebGL context lost - using 2D canvas fallback for this frame');
-      await this.render2DFallback(layers);
-      return;
-    }
+    const ctx = this.ctx;
     
     // Clear background
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.0, 0.0, 0.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    gl.useProgram(this.program);
-    gl.bindVertexArray(this.vao);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     for (const layer of layers) {
       if (layer.type === 'video' && layer.frame) {
-        
-        // Upload VideoFrame to GPU
-        gl.bindTexture(gl.TEXTURE_2D, this.texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, layer.frame);
-
-        // Compute Transform Matrix
-        let matrix = this.getProjectionMatrix(this.canvas.width, this.canvas.height);
+        ctx.save();
         
         // Calculate center for transform origin
         const w = layer.frame.displayWidth;
@@ -286,69 +118,98 @@ export class Compositor {
         const cx = this.canvas.width / 2;
         const cy = this.canvas.height / 2;
 
-        // Apply global translation + rotation
-        matrix = this.m3Translate(matrix, cx + layer.transform.x, cy + layer.transform.y);
-        matrix = this.m3Rotate(matrix, (layer.transform.rotation * Math.PI) / 180);
-        matrix = this.m3Scale(matrix, layer.transform.scale, layer.transform.scale);
+        // Apply global translation + rotation + scale
+        ctx.translate(cx + layer.transform.x, cy + layer.transform.y);
+        ctx.rotate((layer.transform.rotation * Math.PI) / 180);
+        ctx.scale(layer.transform.scale, layer.transform.scale);
         
-        // Move back from center so draw goes from top-left of image
-        matrix = this.m3Translate(matrix, -w / 2, -h / 2);
+        ctx.globalAlpha = layer.opacity;
+
+        // Draw the frame
+        // ctx.drawImage automatically converts NV12/I420 VideoFrames to RGB!
+        ctx.drawImage(layer.frame, -w / 2, -h / 2, w, h);
         
-        // Scale to image dimensions
-        matrix = this.m3Scale(matrix, w, h);
+        ctx.restore();
 
-        gl.uniformMatrix3fv(this.matrixLocation, false, matrix);
-        gl.uniform1f(this.opacityLocation, layer.opacity);
-
+        // Apply Chroma Key (Green Screen) if enabled
         if (layer.chromaKey && layer.chromaKey.enabled) {
-          gl.uniform1i(this.ckEnabledLoc, 1);
-          
-          const hex = layer.chromaKey.color.replace('#', '');
-          const r = parseInt(hex.substring(0, 2), 16) / 255.0;
-          const g = parseInt(hex.substring(2, 4), 16) / 255.0;
-          const b = parseInt(hex.substring(4, 6), 16) / 255.0;
-          gl.uniform3f(this.ckColorLoc, r, g, b);
-          
-          gl.uniform1f(this.ckThresholdLoc, layer.chromaKey.threshold);
-          gl.uniform1f(this.ckSoftnessLoc, layer.chromaKey.softness);
-          gl.uniform1f(this.ckSpillLoc, layer.chromaKey.spillSuppression || 0);
-          
-          // Determine key type (1=green, 2=blue)
-          let keyType = 0;
-          if (g >= r && g >= b) keyType = 1;
-          else if (b >= r && b >= g) keyType = 2;
-          gl.uniform1i(this.ckTypeLoc, keyType);
-        } else {
-          gl.uniform1i(this.ckEnabledLoc, 0);
+          this.applyChromaKey(layer.chromaKey);
         }
-
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
-      
-      // TODO: Handle 'text' layers by rendering to 2D canvas, creating ImageBitmap, and passing to WebGL
     }
   }
 
-  private async render2DFallback(layers: RenderLayer[]) {
-    const ctx = this.canvas.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
-    if (!ctx) return;
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    for (const layer of layers) {
-      if (layer.type === 'video' && layer.frame) {
-        ctx.globalAlpha = layer.opacity;
-        ctx.drawImage(layer.frame, 0, 0, this.canvas.width, this.canvas.height);
-        ctx.globalAlpha = 1;
+  private applyChromaKey(settings: { color: string; threshold: number; softness: number; spillSuppression: number }) {
+    const ctx = this.ctx;
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+    
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    
+    // Parse hex color
+    const hex = settings.color.replace('#', '');
+    const kr = parseInt(hex.substring(0, 2), 16);
+    const kg = parseInt(hex.substring(2, 4), 16);
+    const kb = parseInt(hex.substring(4, 6), 16);
+    
+    const kyuv = this.rgb2yuv(kr, kg, kb);
+    const th = settings.threshold * 2.4;
+    const soft = settings.softness * 2.4;
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+      
+      if (a === 0) continue;
+
+      const yuv = this.rgb2yuv(r, g, b);
+      
+      // Distance in UV space
+      const dy = yuv.u - kyuv.u;
+      const dz = yuv.v - kyuv.v;
+      const dist = Math.sqrt(dy * dy + dz * dz) * 255.0;
+      
+      let alpha = 1.0;
+      if (dist < th) {
+        alpha = 0.0;
+      } else if (dist < th + soft && soft > 0) {
+        alpha = (dist - th) / soft;
+      }
+      
+      if (alpha < 1.0) {
+        data[i + 3] = a * alpha;
+        
+        // Spill suppression
+        if (settings.spillSuppression > 0 && alpha > 0.0) {
+           const spill = settings.spillSuppression / 100.0;
+           // If key color is mostly green
+           if (kg >= kr && kg >= kb) {
+             const gSpill = Math.max(0, g - Math.max(r, b)) * spill;
+             data[i + 1] = Math.max(0, g - gSpill);
+           } 
+           // If key color is mostly blue
+           else if (kb >= kr && kb >= kg) {
+             const bSpill = Math.max(0, b - Math.max(r, g)) * spill;
+             data[i + 2] = Math.max(0, b - bSpill);
+           }
+        }
       }
     }
+    
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  private rgb2yuv(r: number, g: number, b: number) {
+    const y = 0.299 * (r/255) + 0.587 * (g/255) + 0.114 * (b/255);
+    const u = -0.1687 * (r/255) - 0.3313 * (g/255) + 0.5 * (b/255) + 128.0/255.0;
+    const v = 0.5 * (r/255) - 0.4187 * (g/255) - 0.0813 * (b/255) + 128.0/255.0;
+    return { y, u, v };
   }
 
   dispose() {
-    this.gl.deleteProgram(this.program);
-    this.gl.deleteBuffer(this.positionBuffer);
-    this.gl.deleteBuffer(this.texCoordBuffer);
-    this.gl.deleteVertexArray(this.vao);
-    this.gl.deleteTexture(this.texture);
+    // 2D context doesn't require explicit GL resource disposal
   }
 }

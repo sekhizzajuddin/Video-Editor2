@@ -179,7 +179,7 @@ export class AssetDecoder {
 
     // 3. Decode forward until we reach timestampMicroseconds (or end of samples)
     let attempts = 0;
-    while (attempts < 100) {
+    while (attempts < 1000) {
       attempts++;
 
       // Check if we have a frame at or after target timestamp in queue
