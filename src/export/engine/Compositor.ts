@@ -109,7 +109,14 @@ export class Compositor {
   
   constructor(canvas: OffscreenCanvas) {
     this.canvas = canvas;
-    const gl = canvas.getContext('webgl2', { premultipliedAlpha: false, alpha: false });
+    const gl = canvas.getContext('webgl2', {
+      premultipliedAlpha: false,
+      alpha: false,
+      powerPreference: 'low-power', // Avoids competing with main thread for high-power GPU
+      antialias: false,
+      depth: false,
+      stencil: false,
+    });
     if (!gl) throw new Error('WebGL2 not supported');
     this.gl = gl;
 
@@ -247,6 +254,13 @@ export class Compositor {
   async render(layers: RenderLayer[]) {
     const gl = this.gl;
     
+    // Check if the WebGL context has been lost (e.g. GPU pressure from main thread)
+    if (gl.isContextLost()) {
+      console.warn('[Compositor] WebGL context lost - using 2D canvas fallback for this frame');
+      await this.render2DFallback(layers);
+      return;
+    }
+    
     // Clear background
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
@@ -311,6 +325,21 @@ export class Compositor {
       }
       
       // TODO: Handle 'text' layers by rendering to 2D canvas, creating ImageBitmap, and passing to WebGL
+    }
+  }
+
+  private async render2DFallback(layers: RenderLayer[]) {
+    const ctx = this.canvas.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
+    if (!ctx) return;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    for (const layer of layers) {
+      if (layer.type === 'video' && layer.frame) {
+        ctx.globalAlpha = layer.opacity;
+        ctx.drawImage(layer.frame, 0, 0, this.canvas.width, this.canvas.height);
+        ctx.globalAlpha = 1;
+      }
     }
   }
 

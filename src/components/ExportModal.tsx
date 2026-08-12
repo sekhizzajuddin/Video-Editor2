@@ -159,21 +159,38 @@ export function ExportModal() {
             </select>
           </div>
 
-          {/* Progress Display */}
+          {/* Progress Display - shown during all active phases */}
           {exportState.phase !== 'idle' && exportState.phase !== 'completed' && exportState.phase !== 'cancelled' && exportState.phase !== 'error' && (
             <div className="bg-[#252525] rounded p-4 border border-[#3e3e3e] space-y-3">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium text-amber-400">{getPhaseLabel(exportState.phase)}</span>
                 <span className="text-xs font-bold text-white">{exportState.progress.toFixed(1)}%</span>
               </div>
-              <div className="w-full bg-[#1a1a1a] rounded-full h-2.5 overflow-hidden">
+              <div className="w-full bg-[#1a1a1a] rounded-full h-2.5 overflow-hidden relative">
+                {/* Main progress fill */}
                 <div 
-                  className="bg-amber-500 h-2.5 rounded-full transition-all duration-300" 
-                  style={{ width: `${exportState.progress}%` }}
+                  className="bg-amber-500 h-2.5 rounded-full transition-all duration-500 ease-out" 
+                  style={{ width: `${Math.max(exportState.progress, exportState.phase === 'preparing' ? 5 : exportState.phase === 'analyzing' ? 2 : 0)}%` }}
                 />
+                {/* Shimmer overlay when actively working */}
+                {(exportState.phase === 'rendering' || exportState.phase === 'encoding' || exportState.phase === 'muxing') && (
+                  <div 
+                    className="absolute inset-0 rounded-full"
+                    style={{
+                      background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 1.5s infinite',
+                      clipPath: `inset(0 ${100 - exportState.progress}% 0 0 round 9999px)`
+                    }}
+                  />
+                )}
               </div>
               <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-                <span>Frame {exportState.currentFrame} / {exportState.totalFrames}</span>
+                {exportState.phase === 'rendering' ? (
+                  <span>Frame {exportState.currentFrame} / {exportState.totalFrames}</span>
+                ) : (
+                  <span className="capitalize">{exportState.phase}...</span>
+                )}
                 {exportState.estimatedTimeRemaining > 0 && (
                   <span>ETA: {formatTime(exportState.estimatedTimeRemaining)}</span>
                 )}
@@ -206,7 +223,7 @@ export function ExportModal() {
                 ⬇ Download ({formatFileSize(exportState.fileSize)})
               </button>
             </>
-          ) : exportState.phase === 'rendering' || exportState.phase === 'muxing' ? (
+          ) : exportState.phase !== 'idle' && exportState.phase !== 'error' && exportState.phase !== 'cancelled' ? (
             <>
               <button onClick={cancelExport} className="px-4 py-2 text-xs text-red-400 hover:text-red-300 transition-colors">
                 Cancel

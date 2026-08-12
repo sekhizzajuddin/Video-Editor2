@@ -87,3 +87,7 @@
   animation: rateStretchPulse 1.5s infinite ease-in-out;
 }
 
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

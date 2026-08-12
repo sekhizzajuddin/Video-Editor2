@@ -56,10 +56,13 @@ async function configureVideoEncoder(
     'avc1.64001f', // High Profile Level 3.1
   ];
 
-  const accelerationModes: ('prefer-hardware' | 'no-preference' | 'prefer-software')[] = [
-    'prefer-hardware',
-    'no-preference',
+  // prefer-software FIRST: hardware encoders have OS-level inactivity timeouts
+  // (QuotaExceededError: Codec reclaimed due to inactivity) when frames take too long.
+  // Software encoders have no such timeout. We try hardware last as a bonus.
+  const accelerationModes: ('prefer-software' | 'no-preference' | 'prefer-hardware')[] = [
     'prefer-software',
+    'no-preference',
+    'prefer-hardware',
   ];
 
   for (const accel of accelerationModes) {
@@ -237,7 +240,7 @@ async function handleExport(
       const timestampSeconds = i / config.fps;
       const layers = await scheduler.getLayersAtTime(timestampSeconds);
 
-      // Render frame with WebGL
+      // Render frame with WebGL (or 2D fallback if context lost)
       await compositor.render(layers);
       
       // Capture the canvas and encode it
@@ -255,6 +258,12 @@ async function handleExport(
         if (layer.frame) {
           layer.frame.close();
         }
+      }
+
+      // Periodically flush the encoder to prevent OS codec inactivity reclaim
+      // (QuotaExceededError). Every 30 frames keeps the codec warm.
+      if (i > 0 && i % 30 === 0) {
+        await videoEncoder.flush();
       }
 
       const progress = ((i + 1) / totalFrames) * (hasAudio ? 70 : 90);
