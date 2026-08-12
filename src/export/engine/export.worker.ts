@@ -254,7 +254,7 @@ async function handleExport(
     });
 
     videoEncoder.configure({
-      codec: 'avc1.42001f',
+      codec: 'avc1.4d0034', // Main Profile, Level 5.2 (Supports up to 4K 60fps)
       width: outputWidth,
       height: outputHeight,
       bitrate: config.bitrate || 12000000,
