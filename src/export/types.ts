@@ -20,8 +20,22 @@ export interface ExportOptions {
   setStatusMsg?: (msg: string) => void;
 }
 
+export type ExportPhase = 
+  | 'idle' 
+  | 'analyzing' 
+  | 'preparing' 
+  | 'capturing'
+  | 'rendering' 
+  | 'encoding'
+  | 'muxing' 
+  | 'finalizing' 
+  | 'completed' 
+  | 'complete'
+  | 'cancelled' 
+  | 'error';
+
 export interface ExportProgress {
-  stage: 'preparing' | 'capturing' | 'encoding' | 'muxing' | 'complete' | 'error';
+  stage: ExportPhase;
   percentage: number; // 0 to 100
   message?: string;
 }
