@@ -46,6 +46,7 @@ import {
   Scissors,
   FileText,
   Wand2,
+  Wrench,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
@@ -55,6 +56,7 @@ import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { storeMediaHandle } from '@/utils/mediaFileHandle';
 import { parseSRT } from '@/utils/srtParser';
+import { repairAudioFile } from '@/utils/audioRepair';
 import demoA from '../../assets/transition_demo_a.webp';
 import demoB from '../../assets/transition_demo_b.webp';
 import { toast } from 'sonner';
@@ -299,9 +301,67 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 export function MediaPanel() {
   const [isLocalImporting, setIsLocalImporting] = useState(false);
-    const { detectingBeatId, handleDetectBeats } = useAudioFeatures();
-    const { ttsText, setTtsText, ttsLanguage, setTtsLanguage, ttsRate, setTtsRate, ttsPitch, setTtsPitch, ttsEngine, setTtsEngine, ttsVoice, setTtsVoice, isGeneratingTTS, ttsAudioRef, previewTTS, generateTTS } = useTTS();
-    const { isDragging, isUploading: importing, progressText: hookProgressText, progressPercent: hookProgressPercent, currentFileName: hookCurrentFileName, fileInputRef, handleDragOver, handleDragLeave, handleDrop, handleFileSelect } = useMediaImport();
+  const { detectingBeatId, handleDetectBeats } = useAudioFeatures();
+  
+  const handleRepairAudio = async (media: MediaItem) => {
+    if (media.type !== 'audio') return;
+    toast.loading('Repairing audio...', { id: 'repair' });
+    try {
+      const { resolveMediaFile } = await import('@/utils/mediaFileHandle');
+      const file = await resolveMediaFile(media.id);
+      if (!file) throw new Error('Could not read file');
+      
+      const repairedBlob = await repairAudioFile(file);
+      
+      toast.dismiss('repair');
+      toast.success('Audio repaired! Please select a location to save it.');
+      
+      const suggestedName = media.name.replace(/\.[^/.]+$/, "") + "_repaired.wav";
+      
+      let handle;
+      try {
+        if ('showSaveFilePicker' in window) {
+          handle = await (window as any).showSaveFilePicker({
+            suggestedName,
+            types: [{
+              description: 'WAV Audio File',
+              accept: { 'audio/wav': ['.wav'] },
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(repairedBlob);
+          await writable.close();
+        }
+      } catch (e) {
+        const url = URL.createObjectURL(repairedBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = suggestedName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      
+      const repairedFile = new File([repairedBlob], suggestedName, { type: 'audio/wav' });
+      const newMediaItem = await probeFile(repairedFile);
+      
+      await saveFileToDB(newMediaItem.id, repairedFile);
+      if (handle) {
+         try { await storeMediaHandle(newMediaItem.id, repairedFile, handle); } catch (e) {}
+      }
+      
+      useEditorStore.getState().addMedia(newMediaItem);
+      toast.success('Repaired audio added to library!');
+      
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to repair audio.', { id: 'repair' });
+    }
+  };
+
+  const { ttsText, setTtsText, ttsLanguage, setTtsLanguage, ttsRate, setTtsRate, ttsPitch, setTtsPitch, ttsEngine, setTtsEngine, ttsVoice, setTtsVoice, isGeneratingTTS, ttsAudioRef, previewTTS, generateTTS } = useTTS();
+  const { isDragging, isUploading: importing, progressText: hookProgressText, progressPercent: hookProgressPercent, currentFileName: hookCurrentFileName, fileInputRef, handleDragOver, handleDragLeave, handleDrop, handleFileSelect } = useMediaImport();
   const {
     mediaLibrary,
     activeMediaTab,
@@ -1511,6 +1571,15 @@ export function MediaPanel() {
                       {/* Actions */}
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         {media.type === 'video' && <Play className="w-3 h-3 text-[#a0a0a0]" />}
+                        {media.type === 'audio' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRepairAudio(media); }}
+                            title="Repair / Normalize Audio"
+                            className="p-0.5 text-[#a0a0a0] hover:text-green-400 rounded transition-colors"
+                          >
+                            <Wrench className="w-3 h-3" />
+                          </button>
+                        )}
                         {(media.type === 'audio' || media.type === 'video') && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDetectBeats(media); }}
