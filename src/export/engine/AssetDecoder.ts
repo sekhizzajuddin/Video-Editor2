@@ -206,6 +206,13 @@ export class AssetDecoder {
         if (!this.decoder) return null;
       }
 
+      // Throttle decoder input queue to prevent hardware decoder crashes
+      let queueRetries = 20;
+      while (this.decoder.decodeQueueSize >= 15 && queueRetries > 0) {
+        await new Promise(r => setTimeout(r, 5));
+        queueRetries--;
+      }
+
       try {
         this.decoder.decode(new EncodedVideoChunk({
           type:      sample.isKeyframe ? 'key' : 'delta',

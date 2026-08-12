@@ -294,9 +294,22 @@ async function handleExport(
       const timestampMicroseconds = Math.round(i * (1_000_000 / config.fps));
       const vf = new VideoFrame(canvas, { timestamp: timestampMicroseconds });
       
+      // Wait if encoder queue is getting too large to prevent QuotaExceededError
+      let encodeRetries = 50;
+      while (videoEncoder.encodeQueueSize > 30 && encodeRetries > 0) {
+        await new Promise(r => setTimeout(r, 10));
+        encodeRetries--;
+      }
+
       // Force a keyframe on the first frame and every 2 seconds
       const keyFrame = i === 0 || i % (config.fps * 2) === 0;
-      videoEncoder.encode(vf, { keyFrame });
+      try {
+        if (videoEncoder.state !== 'closed') {
+          videoEncoder.encode(vf, { keyFrame });
+        }
+      } catch (e: any) {
+        console.warn('[ExportWorker] Frame encode skipped:', e.message);
+      }
       
       vf.close();
       
