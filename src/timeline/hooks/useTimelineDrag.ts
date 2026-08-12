@@ -491,6 +491,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         originalTrimEnd: clip.trimEnd,
         originalStartTime: clip.startTime,
         originalSpeed: clip.speed,
+        originalCurrentTime: useEditorStore.getState().currentTime,
         siblingClip: sibling,
         rippleClips,
       });
@@ -1242,6 +1243,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             batchUpdateClips(batchBufferRef.current);
           }
         }
+
+        // Live preview of trimmed edge
+        const store = useEditorStore.getState();
+        const updatedClip = findClipDeep(store, resizeState.clipId)?.clip;
+        if (updatedClip) {
+            const edgeTime = resizeState.edge === 'left' ? updatedClip.startTime : updatedClip.startTime + updatedClip.duration;
+            store.seek(edgeTime);
+            window.dispatchEvent(new Event('procut-frame-updated'));
+        }
       });
     }
 
@@ -1403,6 +1413,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       endTransactionSafe();
     }
     if (resizeState) {
+      if (resizeState.originalCurrentTime !== undefined) {
+        useEditorStore.getState().seek(resizeState.originalCurrentTime);
+      }
       useEditorStore.getState().resolveOverlaps([resizeState.clipId]);
       setSnapLine(null);
       setResizeState(null);

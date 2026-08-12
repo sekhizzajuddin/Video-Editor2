@@ -26,6 +26,7 @@ export interface ResizeState {
   originalTrimEnd: number;
   originalStartTime: number;
   originalSpeed: number;
+  originalCurrentTime?: number;
   siblingClip?: {
     id: string;
     originalTrimStart: number;
