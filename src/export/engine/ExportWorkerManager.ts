@@ -137,8 +137,17 @@ export class ExportWorkerManager {
   }
 
   private serializeTimeline(timeline: any): any {
-    // Strip functions and DOM references (like VideoElement cache)
-    // Deep clone to ensure it's transferable via structured clone algorithm
-    return JSON.parse(JSON.stringify(timeline));
+    // Strip functions and DOM references (like VideoElement/Canvas cache)
+    // We only extract exactly what we need to avoid JSON stringify circular errors
+    // caused by React Fiber nodes attached to DOM elements in the store.
+    const safeTimeline = {
+      tracks: timeline.tracks || [],
+      media: timeline.mediaLibrary || [], // Worker expects 'media'
+      duration: timeline.duration || 0,
+      aspectRatio: timeline.aspectRatio || 16/9,
+    };
+    
+    // Deep clone just in case there are nested non-serializable proxies
+    return JSON.parse(JSON.stringify(safeTimeline));
   }
 }
