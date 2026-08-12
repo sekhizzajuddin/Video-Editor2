@@ -224,13 +224,20 @@ export class AssetDecoder {
     // 3. Flush decoder to guarantee all fed samples produce output frames
     if (fedNewSamples && this.decoder && this.decoder.state !== 'closed') {
       try {
-        await this.decoder.flush();
+        await Promise.race([
+          this.decoder.flush(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Flush timeout')), 2000))
+        ]);
         // Re-configure after flush (flush resets decoder to unconfigured state)
         if (this.decoderConfig && this.decoder.state === 'unconfigured') {
           this.decoder.configure(this.decoderConfig);
         }
       } catch (e: any) {
-        console.warn('[AssetDecoder] Flush error:', e.message);
+        console.warn('[AssetDecoder] Flush error or timeout:', e.message);
+        // On HEVC flush hang, we may need to reset the decoder completely to recover
+        if (e.message === 'Flush timeout') {
+          this.initDecoder();
+        }
       }
     }
 

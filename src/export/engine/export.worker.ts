@@ -179,52 +179,97 @@ async function handleExport(
       }
     }
 
-    // Muxer Initialization
-    const muxerOptions: any = {
-      target: new Mp4Muxer.FileSystemWritableFileStreamTarget(writable!),
-      video: {
-        codec: 'avc',
-        width: outputWidth,
-        height: outputHeight,
-      },
-      fastStart: false,
-    };
+    let ws: WebSocket | null = null;
+    let useLocalRuntime = false;
 
-    if (hasAudio) {
-      muxerOptions.audio = {
-        codec: 'aac',
-        numberOfChannels: 2,
-        sampleRate: audioData!.sampleRate || 48000,
-      };
-    }
-
-    const muxer = new Mp4Muxer.Muxer(muxerOptions);
-
-    // VideoEncoder Initialization
-    const videoEncoder = new VideoEncoder({
-      output: (chunk, meta) => {
-        muxer.addVideoChunk(chunk, meta);
-      },
-      error: (e) => console.error('VideoEncoder error:', e),
-    });
-
-    await configureVideoEncoder(
-      videoEncoder,
-      outputWidth,
-      outputHeight,
-      config.fps,
-      config.bitrate || 8_000_000
-    );
-
-    // AudioEncoder Initialization
-    if (hasAudio) {
-      audioEncoder = new AudioEncoder({
-        output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
-        error: (e) => console.error('AudioEncoder error:', e),
+    // Try to connect to Hikmah Runtime
+    try {
+      const isAlive = await new Promise<boolean>((resolve) => {
+        const testWs = new WebSocket('ws://127.0.0.1:12589');
+        const timer = setTimeout(() => { testWs.close(); resolve(false); }, 600);
+        testWs.onopen = () => { clearTimeout(timer); resolve(true); };
+        testWs.onerror = () => { clearTimeout(timer); resolve(false); };
       });
 
+      if (isAlive) {
+        ws = new WebSocket('ws://127.0.0.1:12589');
+        await new Promise<void>((resolve) => { ws!.onopen = () => resolve(); });
+        ws.send(JSON.stringify({
+          action: 'START_FILE_EXPORT',
+          filename: config.filename || 'Export',
+          width: outputWidth,
+          height: outputHeight,
+          fps: config.fps,
+          bitrate: config.bitrate || 12000000,
+          format: config.format
+        }));
+        useLocalRuntime = true;
+        console.log('[ExportWorker] Connected to Hikmah Local Runtime');
+      }
+    } catch (e) {}
+
+    // OPFS Initialization (fallback if no local runtime)
+    let muxer: any = null;
+    if (!useLocalRuntime) {
+      const root = await navigator.storage.getDirectory();
+      const fileName = `${config.filename}.${config.format}`;
+      outputFileHandle = await root.getFileHandle(fileName, { create: true });
+      writable = await outputFileHandle.createWritable();
+
+      const muxerOptions: any = {
+        target: new Mp4Muxer.FileSystemWritableFileStreamTarget(writable!),
+        video: {
+          codec: 'avc',
+          width: outputWidth,
+          height: outputHeight,
+        },
+        fastStart: false,
+      };
+
+      if (hasAudio) {
+        muxerOptions.audio = {
+          codec: 'aac',
+          numberOfChannels: 2,
+          sampleRate: audioData!.sampleRate || 48000,
+        };
+      }
+      muxer = new Mp4Muxer.Muxer(muxerOptions);
+    }
+
+    // Video Encoder
+    const videoEncoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        if (useLocalRuntime && ws && ws.readyState === WebSocket.OPEN) {
+          const buffer = new ArrayBuffer(chunk.byteLength);
+          chunk.copyTo(buffer);
+          ws.send(buffer);
+        } else if (muxer) {
+          muxer.addVideoChunk(chunk, meta);
+        }
+      },
+      error: e => {
+        console.error('[ExportWorker] Video encoder error:', e);
+        postMessage({ type: 'ERROR', payload: { message: `Video encoder failed: ${e.message}` } });
+      }
+    });
+
+    videoEncoder.configure({
+      codec: 'avc1.42001f',
+      width: outputWidth,
+      height: outputHeight,
+      bitrate: config.bitrate || 12000000,
+      framerate: config.fps,
+      avc: { format: useLocalRuntime ? 'annexb' : 'avc' },
+    });
+
+    // Audio Encoder
+    if (hasAudio && !useLocalRuntime) {
+      audioEncoder = new AudioEncoder({
+        output: (chunk, meta) => muxer!.addAudioChunk(chunk, meta),
+        error: e => console.error('[ExportWorker] Audio encoder error:', e)
+      });
       audioEncoder.configure({
-        codec: 'mp4a.40.2', // AAC LC
+        codec: 'mp4a.40.2',
         sampleRate: audioData!.sampleRate || 48000,
         numberOfChannels: 2,
         bitrate: 128_000,
@@ -318,8 +363,23 @@ async function handleExport(
 
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'muxing' } });
     
+    if (useLocalRuntime && ws) {
+      ws.close();
+      compositor.dispose();
+      scheduler.dispose();
+      framePool.clear();
+      postMessage({ 
+        type: 'COMPLETE', 
+        payload: { fileSize: 0, filename: config.filename || 'Export' }, 
+      });
+      isExporting = false;
+      return;
+    }
+
     // Finalize MP4 Muxer
-    muxer.finalize();
+    if (muxer) {
+      muxer.finalize();
+    }
 
     // Finalize OPFS stream
     if (writable) {
@@ -331,7 +391,7 @@ async function handleExport(
     scheduler.dispose();
     framePool.clear();
 
-    const file = await outputFileHandle.getFile();
+    const file = await outputFileHandle!.getFile();
 
     postMessage({ 
       type: 'COMPLETE', 
