@@ -7,7 +7,7 @@ export interface AssetFrame {
 }
 
 interface StoredSample {
-  timestamp: number;   // µs
+  timestamp: number;   // µs (CTS - presentation time)
   duration: number;    // µs
   data: Uint8Array;
   isKeyframe: boolean;
@@ -21,14 +21,12 @@ export class AssetDecoder {
   private trackInfo: any = null;
   public rotation: number = 0;
 
-  // Compressed MP4 samples stored in RAM (typically only a few MBs)
+  // Compressed MP4 samples stored in RAM (in DTS/muxing order from MP4Box)
   private samples: StoredSample[] = [];
 
-  // Live decoding state
-  private decoder: VideoDecoder | null = null;
-  private decoderConfig: VideoDecoderConfig | null = null;
-  private decodedQueue: AssetFrame[] = [];
-  private nextSampleIdx: number = 0;
+  // All decoded frames sorted by presentation timestamp for O(1) lookup
+  private allFrames: AssetFrame[] = [];
+  private isFullyDecoded: boolean = false;
 
   private onReadyCallback: (() => void) | null = null;
 
@@ -80,8 +78,7 @@ export class AssetDecoder {
 
     // Give MP4Box 150ms to finish sample parsing
     await new Promise<void>((r) => setTimeout(r, 150));
-    // DO NOT sort samples by timestamp (CTS)! VideoDecoder requires chunks in Decoding Order (DTS).
-    // Sorting by CTS breaks B-frame decoding, causing severe lag and stuttering.
+    // Samples arrive in DTS (decoding) order from MP4Box — do NOT re-sort them.
 
     if (this.samples.length === 0 || !this.trackInfo) {
       console.warn('[AssetDecoder] Empty media or failed track parsing');
@@ -97,56 +94,91 @@ export class AssetDecoder {
     let rotation = 0;
     const matrix = this.trackInfo.matrix;
     if (matrix && matrix.length === 9) {
-      // MP4 matrix: [a, b, u, c, d, v, x, y, w]
-      // Rotation is determined by a, b, c, d (indices 0, 1, 3, 4)
       if (matrix[0] === 0 && matrix[1] === 65536 && matrix[3] === -65536 && matrix[4] === 0) {
         rotation = 90;
       } else if (matrix[0] === -65536 && matrix[1] === 0 && matrix[3] === 0 && matrix[4] === -65536) {
         rotation = 180;
       } else if (matrix[0] === 0 && matrix[1] === -65536 && matrix[3] === 65536 && matrix[4] === 0) {
-        rotation = 270; // or -90
+        rotation = 270;
       }
     }
     this.rotation = rotation;
 
-    this.decoderConfig = {
+    const decoderConfig: VideoDecoderConfig = {
       codec,
       codedWidth: width,
       codedHeight: height,
     };
     if (description) {
-      this.decoderConfig.description = description;
+      decoderConfig.description = description;
     }
 
-    this.initDecoder();
-    console.log(`[AssetDecoder] v3 loaded ${this.samples.length} compressed samples | ${codec} ${width}x${height}`);
-  }
+    // ── Pre-decode ALL frames upfront ──────────────────────────────────────
+    // This eliminates per-frame decode latency during the render loop.
+    // Frames are decoded in DTS order (as MP4Box provides them) and the
+    // output queue is sorted by CTS (presentation time) for correct lookup.
+    console.log(`[AssetDecoder] v6 pre-decoding ${this.samples.length} samples | ${codec} ${width}x${height}`);
 
-  private initDecoder(): void {
-    if (this.decoder) {
-      try { this.decoder.close(); } catch {}
-      this.decoder = null;
-    }
+    const collectedFrames: AssetFrame[] = [];
 
-    this.clearDecodedQueue();
-    this.nextSampleIdx = 0;
-
-    if (!this.decoderConfig) return;
-
-    this.decoder = new VideoDecoder({
+    const decoder = new VideoDecoder({
       output: (frame) => {
-        this.decodedQueue.push({ timestamp: frame.timestamp, frame });
+        collectedFrames.push({ timestamp: frame.timestamp, frame });
       },
       error: (e) => {
-        console.warn('[AssetDecoder] VideoDecoder error:', e.message);
+        console.warn('[AssetDecoder] VideoDecoder error during pre-decode:', e.message);
       },
     });
 
     try {
-      this.decoder.configure(this.decoderConfig);
+      decoder.configure(decoderConfig);
     } catch (e: any) {
       console.error('[AssetDecoder] VideoDecoder configure failed:', e.message);
+      return;
     }
+
+    // Feed ALL samples to decoder in DTS order
+    for (let i = 0; i < this.samples.length; i++) {
+      const sample = this.samples[i];
+
+      // Backpressure: if decoder has too many queued, wait for it to catch up
+      while (decoder.decodeQueueSize > 20) {
+        await new Promise<void>((r) => setTimeout(r, 2));
+      }
+
+      try {
+        decoder.decode(new EncodedVideoChunk({
+          type:      sample.isKeyframe ? 'key' : 'delta',
+          timestamp: sample.timestamp,
+          duration:  sample.duration,
+          data:      sample.data,
+        }));
+      } catch (e: any) {
+        console.warn(`[AssetDecoder] Decode chunk error @${sample.timestamp}:`, e.message);
+      }
+    }
+
+    // Flush decoder to get any remaining frames
+    try {
+      await decoder.flush();
+    } catch (e: any) {
+      console.warn('[AssetDecoder] Flush error:', e.message);
+    }
+
+    // Allow any remaining output callbacks to fire
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    try { decoder.close(); } catch {}
+
+    // Sort decoded frames by presentation timestamp (CTS) for correct lookup
+    collectedFrames.sort((a, b) => a.timestamp - b.timestamp);
+    this.allFrames = collectedFrames;
+    this.isFullyDecoded = true;
+
+    // Free the compressed samples — no longer needed
+    this.samples = [];
+
+    console.log(`[AssetDecoder] v6 pre-decoded ${this.allFrames.length} frames successfully`);
   }
 
   /** Extract AVCDecoderConfigurationRecord (avcC) or HEVCDecoderConfigurationRecord (hvcC) bytes */
@@ -168,138 +200,37 @@ export class AssetDecoder {
   }
 
   /**
-   * On-demand streaming decoder: decodes samples as needed for the requested timestamp.
-   * Keeps VRAM footprint minimal by discarding old VideoFrames.
+   * Instant frame lookup — all frames are pre-decoded and sorted by CTS.
+   * Uses binary search for O(log n) performance.
    */
   async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
-    if (this.samples.length === 0 || !this.decoder) return null;
+    if (this.allFrames.length === 0) return null;
 
-    // 1. Purge old frames from decoded queue (more than 100ms behind requested timestamp)
-    const purgeThreshold = timestampMicroseconds - 100_000;
-    while (this.decodedQueue.length > 1 && this.decodedQueue[0].timestamp < purgeThreshold) {
-      const old = this.decodedQueue.shift();
-      try { old?.frame.close(); } catch {}
-    }
-
-    // 2. Check if we need to seek backward
-    const lastDecodedTs = this.decodedQueue.length > 0
-      ? this.decodedQueue[this.decodedQueue.length - 1].timestamp
-      : -1;
-
-    // If requested timestamp is behind our last sample index or queue, seek
-    const nextSampleTs = this.nextSampleIdx < this.samples.length
-      ? this.samples[this.nextSampleIdx].timestamp
-      : Infinity;
-
-    if (timestampMicroseconds < lastDecodedTs - 500_000 || (this.decodedQueue.length === 0 && timestampMicroseconds < nextSampleTs - 100_000)) {
-      this.seekToTimestamp(timestampMicroseconds);
-    }
-
-    // 3. Decode forward until we reach timestampMicroseconds (or end of samples)
-    let attempts = 0;
-    while (attempts < 1000) {
-      attempts++;
-
-      // Check if we have a frame at or after target timestamp in queue
-      const latestInQueue = this.decodedQueue.length > 0
-        ? this.decodedQueue[this.decodedQueue.length - 1].timestamp
-        : -1;
-
-      if (latestInQueue >= timestampMicroseconds || this.nextSampleIdx >= this.samples.length) {
-        // We have enough frames, or reached end of file
-        break;
-      }
-
-      // Backpressure management: wait if decode queue is full
-      if (this.decoder.decodeQueueSize > 6) {
-        await new Promise((r) => setTimeout(r, 4));
-      }
-
-      // Feed next batch of samples (up to 5 samples at a time)
-      const batchEnd = Math.min(this.nextSampleIdx + 5, this.samples.length);
-      while (this.nextSampleIdx < batchEnd) {
-        const sample = this.samples[this.nextSampleIdx];
-        this.nextSampleIdx++;
-
-        if (this.decoder.state === 'closed') {
-          this.initDecoder();
-          break;
-        }
-
-        try {
-          this.decoder.decode(new EncodedVideoChunk({
-            type:      sample.isKeyframe ? 'key' : 'delta',
-            timestamp: sample.timestamp,
-            duration:  sample.duration,
-            data:      sample.data,
-          }));
-        } catch (e: any) {
-          console.warn(`[AssetDecoder] Decode chunk error @${sample.timestamp}:`, e.message);
-        }
-      }
-
-      // Allow microtask yield so VideoDecoder output callback fires
-      await new Promise((r) => setTimeout(r, 1));
-    }
-
-    if (this.decodedQueue.length === 0) return null;
-
-    // 4. Binary search for the frame closest to timestampMicroseconds
-    let lo = 0, hi = this.decodedQueue.length - 1;
+    // Binary search for the closest frame
+    let lo = 0, hi = this.allFrames.length - 1;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (this.decodedQueue[mid].timestamp < timestampMicroseconds) lo = mid + 1;
+      if (this.allFrames[mid].timestamp < timestampMicroseconds) lo = mid + 1;
       else hi = mid;
     }
 
+    // Pick the closest between lo and lo-1
     let best = lo;
     if (lo > 0) {
-      const prev = Math.abs(this.decodedQueue[lo - 1].timestamp - timestampMicroseconds);
-      const curr = Math.abs(this.decodedQueue[lo].timestamp - timestampMicroseconds);
-      if (prev < curr) best = lo - 1;
+      const prevDist = Math.abs(this.allFrames[lo - 1].timestamp - timestampMicroseconds);
+      const currDist = Math.abs(this.allFrames[lo].timestamp - timestampMicroseconds);
+      if (prevDist < currDist) best = lo - 1;
     }
 
-    // Return a clone so caller can close() their handle safely
-    return this.decodedQueue[best].frame.clone();
-  }
-
-  private seekToTimestamp(targetTs: number): void {
-    // Find the nearest keyframe at or before targetTs
-    let keyframeIdx = 0;
-    for (let i = 0; i < this.samples.length; i++) {
-      if (this.samples[i].isKeyframe && this.samples[i].timestamp <= targetTs) {
-        keyframeIdx = i;
-      } else if (this.samples[i].timestamp > targetTs) {
-        break;
-      }
-    }
-
-    this.clearDecodedQueue();
-    this.nextSampleIdx = keyframeIdx;
-
-    if (this.decoder && this.decoder.state !== 'closed') {
-      try { this.decoder.reset(); } catch {}
-      if (this.decoderConfig) {
-        try { this.decoder.configure(this.decoderConfig); } catch {}
-      }
-    } else {
-      this.initDecoder();
-    }
-  }
-
-  private clearDecodedQueue(): void {
-    for (const item of this.decodedQueue) {
-      try { item.frame.close(); } catch {}
-    }
-    this.decodedQueue = [];
+    // Return a clone so caller can close() their copy independently
+    return this.allFrames[best].frame.clone();
   }
 
   dispose() {
-    this.clearDecodedQueue();
-    if (this.decoder) {
-      try { this.decoder.close(); } catch {}
-      this.decoder = null;
+    for (const item of this.allFrames) {
+      try { item.frame.close(); } catch {}
     }
+    this.allFrames = [];
     this.samples = [];
   }
 }

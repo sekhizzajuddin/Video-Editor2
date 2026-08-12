@@ -111,7 +111,7 @@ async function handleExport(
   config: ExportWorkerConfig,
   audioData?: AudioExportPayload | null
 ) {
-  console.log('[ExportWorker] STARTING v5 - Corrected Frame DTS & Rotation', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
+  console.log('[ExportWorker] STARTING v6 - Pre-Decoded Frames', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
   isExporting = true;
   isCancelled = false;
 
@@ -262,15 +262,9 @@ async function handleExport(
         }
       }
 
-      // Periodically flush the encoder to prevent OS codec inactivity reclaim
-      // (QuotaExceededError). Every 30 frames keeps the codec warm.
-      if (i > 0 && i % 30 === 0) {
-        await videoEncoder.flush();
-      }
-
       const progress = ((i + 1) / totalFrames) * (hasAudio ? 70 : 90);
       
-      if (i % 10 === 0 || i === totalFrames - 1) {
+      if (i % 5 === 0 || i === totalFrames - 1) {
         postMessage({ 
           type: 'PROGRESS', 
           payload: { progress, currentFrame: i + 1, eta: 0 }, 
