@@ -2396,7 +2396,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       // Pre-generate left/right IDs for all clips being split so they can cross-link properly
       const splitMap: Record<string, { left: string; right: string }> = {};
       for (const id of idsToSplit) {
-        splitMap[id] = { left: generateId(), right: generateId() };
+        // We reuse the original ID for the RIGHT half. Since the playhead is typically moving
+        // forward into the right half during a split, this prevents useMediaPlayback from destroying
+        // and recreating the active <audio>/<video> elements, entirely avoiding decoder lag!
+        splitMap[id] = { left: generateId(), right: id };
       }
       
       if (isSelected) {
