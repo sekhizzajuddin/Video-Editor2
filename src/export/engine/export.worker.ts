@@ -79,12 +79,9 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
     const videoEncoder = new VideoEncoder({
       output: (chunk, meta) => {
         if (meta) {
-          // WebCodecs on some browsers outputs null for colorSpace or decoderConfig
-          // which crashes mp4-muxer's internal checks. We sanitize it here.
+          // If meta.decoderConfig is explicitly null (some browser quirks), make it undefined
           if (meta.decoderConfig === null) {
-            delete (meta as any).decoderConfig;
-          } else if (meta.decoderConfig && meta.decoderConfig.colorSpace === null) {
-            delete (meta.decoderConfig as any).colorSpace;
+            meta = { ...meta, decoderConfig: undefined } as any;
           }
         }
         muxer.addVideoChunk(chunk, meta);
@@ -102,8 +99,9 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
       width: config.width,
       height: config.height,
       hardwareAcceleration: 'prefer-hardware',
-      bitrate: 8_000_000, // 8 Mbps
+      bitrate: config.bitrate || 8_000_000,
       framerate: config.fps,
+      avc: { format: 'avc' } // REQUIRED for mp4-muxer!
     });
 
     audioEncoder.configure({
