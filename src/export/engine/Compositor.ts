@@ -112,22 +112,41 @@ export class Compositor {
       if (layer.type === 'video' && layer.frame) {
         ctx.save();
         
-        // Calculate center for transform origin
-        const w = layer.frame.displayWidth;
-        const h = layer.frame.displayHeight;
-        const cx = this.canvas.width / 2;
-        const cy = this.canvas.height / 2;
+        const vw = layer.frame.displayWidth;
+        const vh = layer.frame.displayHeight;
+        const W = this.canvas.width;
+        const H = this.canvas.height;
+        
+        // 1. Calculate base size to fit the export canvas (matching UI previewMath.ts)
+        const scaleToFit = Math.min(W / vw, H / vh);
+        const baseW = vw * scaleToFit;
+        const baseH = vh * scaleToFit;
 
-        // Apply global translation + rotation + scale
-        ctx.translate(cx + layer.transform.x, cy + layer.transform.y);
+        // 2. Extract and convert scale (UI uses 100 for 100%)
+        // Fallback to 1.0 if scale is somehow 1 (old FrameScheduler bug)
+        let scale = layer.transform.scale;
+        if (scale <= 10 && scale > 0) scale = scale * 100; // Auto-correct legacy '1' scale
+        const finalScale = scale / 100;
+        
+        const finalW = baseW * finalScale;
+        const finalH = baseH * finalScale;
+
+        // 3. Scale UI coordinates (854x480) to Export Resolution
+        const exportScaleX = W / 854;
+        const exportScaleY = H / 480;
+        const tx = layer.transform.x * exportScaleX;
+        const ty = layer.transform.y * exportScaleY;
+
+        // 4. Apply global translation + rotation
+        const cx = W / 2;
+        const cy = H / 2;
+        ctx.translate(cx + tx, cy + ty);
         ctx.rotate((layer.transform.rotation * Math.PI) / 180);
-        ctx.scale(layer.transform.scale, layer.transform.scale);
         
         ctx.globalAlpha = layer.opacity;
 
-        // Draw the frame
-        // ctx.drawImage automatically converts NV12/I420 VideoFrames to RGB!
-        ctx.drawImage(layer.frame, -w / 2, -h / 2, w, h);
+        // 5. Draw the frame exactly as sized
+        ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
         
         ctx.restore();
 

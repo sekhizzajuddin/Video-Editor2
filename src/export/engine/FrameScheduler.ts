@@ -74,10 +74,10 @@ export class FrameScheduler {
         // Is this clip visible at this timestamp?
         if (timestampSeconds >= clip.startTime && timestampSeconds < (clip.startTime + clip.duration)) {
           const transform = {
-            x: clip.transform?.x || clip.position?.x || 0,
-            y: clip.transform?.y || clip.position?.y || 0,
-            scale: clip.transform?.scale || clip.scale || 1,
-            rotation: clip.transform?.rotation || clip.rotation || 0,
+            x: clip.transform?.x ?? clip.position?.x ?? 0,
+            y: clip.transform?.y ?? clip.position?.y ?? 0,
+            scale: clip.transform?.scale ?? clip.scale ?? 100,
+            rotation: clip.transform?.rotation ?? clip.rotation ?? 0,
           };
           
           if (track.type === 'video' && this.decoders.has(clip.id)) {
