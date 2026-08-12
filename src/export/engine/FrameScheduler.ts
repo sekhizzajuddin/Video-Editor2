@@ -95,7 +95,7 @@ export class FrameScheduler {
                 chromaKey: clip.chromaKey,
                 transform,
                 zIndex: clip.zIndex !== undefined ? clip.zIndex : trackIdx,
-                sourceRotation: decoder.rotation,
+                sourceRotation: decoder?.rotation || 0,
               });
             }
           } else if (track.type === 'text') {
