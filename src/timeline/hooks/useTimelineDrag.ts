@@ -1250,8 +1250,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const store = useEditorStore.getState();
         const updatedClip = findClipDeep(store, resizeState.clipId)?.clip;
         if (updatedClip) {
-            const edgeTime = resizeState.edge === 'left' ? updatedClip.startTime : updatedClip.startTime + updatedClip.duration;
-            store.seek(edgeTime);
+            // Subtract 0.001 from the right edge to keep the playhead technically inside the clip's time bounds
+            const edgeTime = resizeState.edge === 'left' ? updatedClip.startTime : updatedClip.startTime + updatedClip.duration - 0.001;
+            store.seek(Math.max(0, edgeTime));
             window.dispatchEvent(new Event('procut-frame-updated'));
         }
       });
