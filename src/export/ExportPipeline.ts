@@ -1,13 +1,15 @@
 import { EncoderBackend, EncoderBackendType, ExportOptions } from './types';
+import { LocalRuntimeBackend } from './backends/LocalRuntimeBackend';
 import { WebCodecsBackend } from './backends/WebCodecsBackend';
 import { WebMWebCodecsBackend } from './backends/WebMWebCodecsBackend';
 import { MediaRecorderBackend } from './backends/MediaRecorderBackend';
 
 export class ExportPipeline {
   private backends: EncoderBackend[] = [
-    new WebCodecsBackend(),         // MP4 frame-by-frame (best for MP4)
-    new WebMWebCodecsBackend(),     // WebM frame-by-frame (best for WebM)
-    new MediaRecorderBackend(),     // Legacy real-time fallback
+    new LocalRuntimeBackend(),      // Local native FFmpeg runtime (10x-50x speed, no browser limits)
+    new WebCodecsBackend(),         // MP4 frame-by-frame (best for MP4 in-browser)
+    new WebMWebCodecsBackend(),     // WebM frame-by-frame
+    new MediaRecorderBackend(),     // Real-time software stream fallback
   ];
   private activeBackend: EncoderBackend | null = null;
 
