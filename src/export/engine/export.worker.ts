@@ -77,7 +77,18 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
     });
 
     const videoEncoder = new VideoEncoder({
-      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      output: (chunk, meta) => {
+        if (meta) {
+          // WebCodecs on some browsers outputs null for colorSpace or decoderConfig
+          // which crashes mp4-muxer's internal checks. We sanitize it here.
+          if (meta.decoderConfig === null) {
+            delete (meta as any).decoderConfig;
+          } else if (meta.decoderConfig && meta.decoderConfig.colorSpace === null) {
+            delete (meta.decoderConfig as any).colorSpace;
+          }
+        }
+        muxer.addVideoChunk(chunk, meta);
+      },
       error: (e) => console.error('VideoEncoder error:', e)
     });
 
