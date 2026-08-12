@@ -495,8 +495,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         siblingClip: sibling,
         rippleClips,
       });
+      setIsScrubbing(true);
+      window.dispatchEvent(new Event('procut-frame-updated'));
     },
-    [tracks, activeTool, startTransactionSafe, setResizeState],
+    [tracks, activeTool, startTransactionSafe, setResizeState, setIsScrubbing],
   );
 
   const handleClipMouseDown = useCallback(
