@@ -1,4 +1,5 @@
 import { useEditorStore } from '../store/editorStore';
+import { getMediaTimeForClip } from '../utils/speedRamp';
 
 export interface AudioExportOptions {
   startAt: number;
@@ -54,12 +55,30 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
         const gainNode = offlineCtx.createGain();
         const vol = (volume / 100) * ((store.volume ?? 100) / 100);
         gainNode.gain.value = vol;
+        
+        // Apply static speed (for speedRamps, this is just the base speed)
+        source.playbackRate.value = clip.speed || 1;
+        
         source.connect(gainNode);
         gainNode.connect(offlineCtx.destination);
 
         // Calculate precise trim and timeline placement
         const scheduleTime = Math.max(0, clip.startTime - opts.startAt);
-        const offset = Math.max(0, clip.trimStart + (opts.startAt > clip.startTime ? opts.startAt - clip.startTime : 0));
+        const timelinePlayStart = Math.max(opts.startAt, clip.startTime);
+        
+        // Use the exact media time math rather than a simple addition that breaks on speed/splits
+        const offset = getMediaTimeForClip(
+          {
+            id: clip.id,
+            startTime: clip.startTime,
+            duration: clip.duration,
+            trimStart: clip.trimStart,
+            speed: clip.speed || 1,
+            speedRamp: clip.speedRamp
+          },
+          timelinePlayStart
+        );
+        
         const playDuration = Math.min(clip.duration, duration - scheduleTime);
 
         if (playDuration > 0) {
