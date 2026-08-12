@@ -221,23 +221,17 @@ export class AssetDecoder {
       this.nextSampleIdx++;
     }
 
-    // 3. Flush decoder to guarantee all fed samples produce output frames
+    // 3. Wait briefly for the decoder to output the frames (hardware pipelining)
+    // We only wait if we just fed new samples and we don't already have the target frame.
     if (fedNewSamples && this.decoder && this.decoder.state !== 'closed') {
-      try {
-        await Promise.race([
-          this.decoder.flush(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Flush timeout')), 2000))
-        ]);
-        // Re-configure after flush (flush resets decoder to unconfigured state)
-        if (this.decoderConfig && this.decoder.state === 'unconfigured') {
-          this.decoder.configure(this.decoderConfig);
+      let retries = 15; // Max wait 150ms per frame
+      while (retries > 0) {
+        if (this.decodedQueue.length > 0) {
+          const lastQueuedCTS = this.decodedQueue[this.decodedQueue.length - 1].timestamp;
+          if (lastQueuedCTS >= timestampMicroseconds) break;
         }
-      } catch (e: any) {
-        console.warn('[AssetDecoder] Flush error or timeout:', e.message);
-        // On HEVC flush hang, we may need to reset the decoder completely to recover
-        if (e.message === 'Flush timeout') {
-          this.initDecoder();
-        }
+        await new Promise(r => setTimeout(r, 10));
+        retries--;
       }
     }
 
