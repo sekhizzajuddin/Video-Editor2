@@ -1,5 +1,6 @@
 import { ExportWorkerConfig } from './export.worker';
 import { ExportPhase } from '../types';
+import { AudioMixer } from './AudioMixer';
 
 export interface ExporterCallbacks {
   onProgress: (progress: number, currentFrame: number, eta: number) => void;
@@ -37,7 +38,7 @@ export class ExportWorkerManager {
         case 'PROGRESS':
           const elapsed = (Date.now() - this.startTime) / 1000;
           const progress = payload.progress;
-          const rate = progress / elapsed; // percent per second
+          const rate = progress / (elapsed || 0.001); // percent per second
           const remaining = rate > 0 ? (100 - progress) / rate : 0;
           
           this.options.callbacks.onProgress(
@@ -65,14 +66,45 @@ export class ExportWorkerManager {
   async export(signal: AbortSignal): Promise<string> {
     this.startTime = Date.now();
     
-    // Transfer timeline data to worker
+    const serializedTimeline = this.serializeTimeline(this.options.timeline);
+
+    // Mix audio on main thread where OfflineAudioContext is fully supported
+    this.options.callbacks.onPhaseChange('preparing');
+    let audioPayload: any = null;
+    const transferables: Transferable[] = [];
+
+    try {
+      const audioMixer = new AudioMixer();
+      const audioBuffer = await audioMixer.mix(serializedTimeline, serializedTimeline.duration);
+      if (audioBuffer && audioBuffer.length > 0) {
+        const ch0 = audioBuffer.getChannelData(0);
+        const ch1 = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : ch0;
+        
+        const ch0Copy = new Float32Array(ch0);
+        const ch1Copy = new Float32Array(ch1);
+
+        audioPayload = {
+          sampleRate: audioBuffer.sampleRate,
+          numberOfChannels: 2,
+          length: audioBuffer.length,
+          channels: [ch0Copy, ch1Copy]
+        };
+
+        transferables.push(ch0Copy.buffer, ch1Copy.buffer);
+      }
+    } catch (err) {
+      console.warn('Audio pre-mix failed on main thread:', err);
+    }
+
+    // Transfer timeline data and audio PCM to worker
     this.worker.postMessage({
       type: 'START_EXPORT',
       payload: {
-        timeline: this.serializeTimeline(this.options.timeline),
+        timeline: serializedTimeline,
         config: this.options.config,
+        audioData: audioPayload,
       }
-    });
+    }, transferables);
 
     // Handle cancellation
     signal.addEventListener('abort', () => {

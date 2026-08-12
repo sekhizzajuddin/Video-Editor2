@@ -9,14 +9,20 @@ export interface ExportWorkerConfig {
   filename: string;
 }
 
+export interface AudioExportPayload {
+  sampleRate: number;
+  numberOfChannels: number;
+  length: number;
+  channels: Float32Array[];
+}
+
 import { FramePool } from './memory/FramePool';
 import { FrameScheduler } from './FrameScheduler';
 import { Compositor } from './Compositor';
-import { AudioMixer } from './AudioMixer';
 import * as Mp4Muxer from 'mp4-muxer';
 
 export type WorkerMessageType = 
-  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig } }
+  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null } }
   | { type: 'CANCEL' };
 
 let isExporting = false;
@@ -27,7 +33,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
 
   switch (message.type) {
     case 'START_EXPORT':
-      await handleExport(message.payload.timeline, message.payload.config);
+      await handleExport(message.payload.timeline, message.payload.config, message.payload.audioData);
       break;
     case 'CANCEL':
       isCancelled = true;
@@ -35,7 +41,72 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
   }
 };
 
-async function handleExport(timeline: any, config: ExportWorkerConfig) {
+async function configureVideoEncoder(
+  encoder: VideoEncoder,
+  width: number,
+  height: number,
+  fps: number,
+  bitrate: number
+): Promise<void> {
+  const candidateCodecs = [
+    'avc1.4d002a', // Main Profile Level 4.2 (broadly supported)
+    'avc1.42001f', // Baseline Profile Level 3.1
+    'avc1.640028', // High Profile Level 4.0
+    'avc1.42E01E', // Baseline
+    'avc1.64001f', // High Profile Level 3.1
+  ];
+
+  const accelerationModes: ('prefer-hardware' | 'no-preference' | 'prefer-software')[] = [
+    'prefer-hardware',
+    'no-preference',
+    'prefer-software',
+  ];
+
+  for (const accel of accelerationModes) {
+    for (const codec of candidateCodecs) {
+      const testConfig: VideoEncoderConfig = {
+        codec,
+        width,
+        height,
+        bitrate,
+        framerate: fps,
+        hardwareAcceleration: accel,
+        avc: { format: 'avc' },
+      };
+
+      try {
+        if (typeof VideoEncoder.isConfigSupported === 'function') {
+          const support = await VideoEncoder.isConfigSupported(testConfig);
+          if (support && support.supported) {
+            encoder.configure(support.config || testConfig);
+            return;
+          }
+        } else {
+          encoder.configure(testConfig);
+          return;
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+  }
+
+  // Fallback direct configuration if testing loop didn't catch
+  encoder.configure({
+    codec: 'avc1.42001f',
+    width,
+    height,
+    bitrate,
+    framerate: fps,
+    avc: { format: 'avc' },
+  });
+}
+
+async function handleExport(
+  timeline: any,
+  config: ExportWorkerConfig,
+  audioData?: AudioExportPayload | null
+) {
   isExporting = true;
   isCancelled = false;
 
@@ -45,6 +116,10 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
   try {
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'preparing' } });
     
+    // Ensure dimensions are even numbers (multiples of 2) for H.264 video encoding
+    const outputWidth = Math.floor(config.width / 2) * 2;
+    const outputHeight = Math.floor(config.height / 2) * 2;
+
     // OPFS Initialization
     const root = await navigator.storage.getDirectory();
     const fileName = `${config.filename}.${config.format}`;
@@ -57,7 +132,7 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
     await scheduler.initializeDecoders();
 
     // Compositor Initialization
-    const canvas = new OffscreenCanvas(config.width, config.height);
+    const canvas = new OffscreenCanvas(outputWidth, outputHeight);
     const compositor = new Compositor(canvas);
 
     // Calculate duration reliably
@@ -73,66 +148,70 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
     duration = Math.max(0.1, duration);
     const totalFrames = Math.max(1, Math.ceil(duration * config.fps));
 
-    // Process Audio First to check if audio track is needed
-    const audioMixer = new AudioMixer();
-    const masterAudioBuffer = await audioMixer.mix(timeline, duration);
-    const hasAudio = !!(masterAudioBuffer && masterAudioBuffer.length > 0);
+    // Audio status
+    const hasAudio = !!(
+      audioData &&
+      audioData.channels &&
+      audioData.channels.length > 0 &&
+      audioData.length > 0
+    );
 
-    // Muxer and VideoEncoder Initialization
+    // Muxer Initialization
     const muxerOptions: any = {
       target: new Mp4Muxer.FileSystemWritableFileStreamTarget(writable!),
       video: {
         codec: 'avc',
-        width: config.width,
-        height: config.height
+        width: outputWidth,
+        height: outputHeight,
       },
-      fastStart: false
+      fastStart: false,
     };
 
     if (hasAudio) {
       muxerOptions.audio = {
         codec: 'aac',
-        numberOfChannels: 2,
-        sampleRate: 48000
+        numberOfChannels: audioData!.numberOfChannels || 2,
+        sampleRate: audioData!.sampleRate || 48000,
       };
     }
 
     const muxer = new Mp4Muxer.Muxer(muxerOptions);
 
+    // VideoEncoder Initialization
     const videoEncoder = new VideoEncoder({
       output: (chunk, meta) => {
         muxer.addVideoChunk(chunk, meta);
       },
-      error: (e) => console.error('VideoEncoder error:', e)
+      error: (e) => console.error('VideoEncoder error:', e),
     });
 
+    await configureVideoEncoder(
+      videoEncoder,
+      outputWidth,
+      outputHeight,
+      config.fps,
+      config.bitrate || 8_000_000
+    );
+
+    // AudioEncoder Initialization
     let audioEncoder: AudioEncoder | null = null;
     if (hasAudio) {
       audioEncoder = new AudioEncoder({
         output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
-        error: (e) => console.error('AudioEncoder error:', e)
+        error: (e) => console.error('AudioEncoder error:', e),
       });
 
       audioEncoder.configure({
         codec: 'mp4a.40.2', // AAC LC
-        sampleRate: 48000,
-        numberOfChannels: 2,
-        bitrate: 128_000
+        sampleRate: audioData!.sampleRate || 48000,
+        numberOfChannels: audioData!.numberOfChannels || 2,
+        bitrate: 128_000,
       });
     }
 
-    videoEncoder.configure({
-      codec: 'avc1.640028', // High Profile, Level 4.0
-      width: config.width,
-      height: config.height,
-      hardwareAcceleration: 'prefer-hardware',
-      bitrate: config.bitrate || 8_000_000,
-      framerate: config.fps,
-      avc: { format: 'avc' } // REQUIRED for mp4-muxer!
-    });
-
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'rendering' } });
     
+    // Render video frames
     for (let i = 0; i < totalFrames; i++) {
       if (isCancelled) {
         throw new Error('Export cancelled');
@@ -166,19 +245,20 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
       if (i % 10 === 0 || i === totalFrames - 1) {
         postMessage({ 
           type: 'PROGRESS', 
-          payload: { progress, currentFrame: i + 1, eta: 0 } 
+          payload: { progress, currentFrame: i + 1, eta: 0 }, 
         });
       }
     }
 
     // Process Audio Encoding if audio is present
-    if (hasAudio && masterAudioBuffer && audioEncoder) {
+    if (hasAudio && audioEncoder && audioData) {
       postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'encoding' } });
       
       const numFrames = 1024; // AAC typical chunk size
-      const totalSamples = masterAudioBuffer.length;
-      const ch0 = masterAudioBuffer.getChannelData(0);
-      const ch1 = masterAudioBuffer.numberOfChannels > 1 ? masterAudioBuffer.getChannelData(1) : ch0;
+      const totalSamples = audioData.length;
+      const ch0 = audioData.channels[0];
+      const ch1 = audioData.channels[1] || ch0;
+      const sampleRate = audioData.sampleRate || 48000;
       
       for (let offset = 0; offset < totalSamples; offset += numFrames) {
         const frameCount = Math.min(numFrames, totalSamples - offset);
@@ -187,26 +267,26 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
         planarData.set(ch0.subarray(offset, offset + frameCount), 0);
         planarData.set(ch1.subarray(offset, offset + frameCount), frameCount);
         
-        const timestampUs = Math.round((offset / 48000) * 1_000_000);
+        const timestampUs = Math.round((offset / sampleRate) * 1_000_000);
         
-        const audioData = new AudioData({
+        const audioChunk = new AudioData({
           format: 'f32-planar',
-          sampleRate: 48000,
+          sampleRate: sampleRate,
           numberOfFrames: frameCount,
           numberOfChannels: 2,
           timestamp: timestampUs,
-          data: planarData
+          data: planarData,
         });
         
-        audioEncoder.encode(audioData);
-        audioData.close();
+        audioEncoder.encode(audioChunk);
+        audioChunk.close();
       }
     }
     
     // Flush the encoders to finish writing all frames
     await Promise.all([
       videoEncoder.flush(),
-      audioEncoder ? audioEncoder.flush() : Promise.resolve()
+      audioEncoder ? audioEncoder.flush() : Promise.resolve(),
     ]);
     
     videoEncoder.close();
@@ -231,13 +311,13 @@ async function handleExport(timeline: any, config: ExportWorkerConfig) {
 
     postMessage({ 
       type: 'COMPLETE', 
-      payload: { fileSize: file.size, filename: fileName } 
+      payload: { fileSize: file.size, filename: fileName }, 
     });
 
   } catch (error: any) {
     postMessage({ 
       type: 'ERROR', 
-      payload: { message: error.message } 
+      payload: { message: error.message }, 
     });
   } finally {
     isExporting = false;
