@@ -112,11 +112,12 @@ export class ExportWorkerManager {
     });
 
     // We rely on the callbacks passed via options, but we can also return a promise
-    return new Promise((resolve, reject) => {
+    return new Promise<{filename: string, savedViaRuntime: boolean}>((resolve, reject) => {
       const cleanup = () => {
         signal.removeEventListener('abort', abortHandler);
+        this.worker.onmessage = originalOnMessage;
       };
-
+      
       const abortHandler = () => {
         reject(new Error('AbortError'));
         cleanup();
@@ -131,7 +132,7 @@ export class ExportWorkerManager {
         
         const { type, payload } = event.data;
         if (type === 'COMPLETE') {
-          resolve(payload.filename);
+          resolve({ filename: payload.filename, savedViaRuntime: !!payload.savedViaRuntime });
           cleanup();
         } else if (type === 'ERROR') {
           reject(new Error(payload.message));

@@ -383,7 +383,7 @@ async function handleExport(
       framePool.clear();
       postMessage({ 
         type: 'COMPLETE', 
-        payload: { fileSize: 0, filename: config.filename || 'Export' }, 
+        payload: { fileSize: 0, filename: config.filename || 'Export', savedViaRuntime: true }, 
       });
       isExporting = false;
       return;

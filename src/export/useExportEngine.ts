@@ -30,6 +30,7 @@ export interface ExportState {
   fileSize: number;
   warnings: string[];
   filename: string | null;
+  savedViaRuntime?: boolean;
 }
 
 import { useEditorStore } from '@/store/editorStore';
@@ -119,9 +120,13 @@ export function useExportEngine() {
 
       exporterRef.current = exporter;
       
-      const filename = await exporter.export(abortController.signal);
+      const result = await exporter.export(abortController.signal);
       
-      setExportState(prev => ({ ...prev, filename }));
+      setExportState(prev => ({ 
+        ...prev, 
+        filename: result.filename,
+        savedViaRuntime: result.savedViaRuntime
+      }));
     } catch (error) {
       if ((error as Error).message === 'AbortError') {
         setExportState(prev => ({ ...prev, phase: 'cancelled' }));

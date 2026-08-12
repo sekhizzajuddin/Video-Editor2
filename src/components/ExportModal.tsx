@@ -231,12 +231,20 @@ export function ExportModal() {
         <div className="flex items-center justify-end gap-2 p-4 border-t border-[#3e3e3e] bg-[#252525]/50">
           {exportState.phase === 'completed' ? (
             <>
+              {exportState.savedViaRuntime && (
+                <span className="text-xs text-green-400 mr-auto flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                  Saved to Desktop by Hikmah Runtime!
+                </span>
+              )}
               <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors">
                 Close
               </button>
-              <button onClick={downloadFile} className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs rounded font-medium transition-colors">
-                ⬇ Download ({formatFileSize(exportState.fileSize)})
-              </button>
+              {!exportState.savedViaRuntime && (
+                <button onClick={downloadFile} className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs rounded font-medium transition-colors">
+                  ⬇ Download ({formatFileSize(exportState.fileSize)})
+                </button>
+              )}
             </>
           ) : exportState.phase !== 'idle' && exportState.phase !== 'error' && exportState.phase !== 'cancelled' ? (
             <>
