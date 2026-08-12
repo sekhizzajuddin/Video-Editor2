@@ -177,7 +177,7 @@ export async function renderCanvasEngine({
     .filter((t) => t.type === 'video' && !t.hidden)
     .reduce((count, track) => {
       const hasActive = track.clips.some(
-        (c) => !c.disabled && currentTime >= c.startTime && currentTime < c.startTime + c.duration
+        (c) => !c.disabled && currentTime >= c.startTime && currentTime < c.startTime + c.duration + 0.001
       );
       return count + (hasActive ? 1 : 0);
     }, 0);
@@ -1196,7 +1196,7 @@ export async function renderCanvasEngine({
   const drawQueue: { clip: any; layer: number }[] = [];
   for (const track of visualTracks) {
     for (const clip of track.clips) {
-      if (!clip.disabled && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+      if (!clip.disabled && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration + 0.001) {
         drawQueue.push({ clip, layer: track.id.startsWith('text') ? 100 : 0 });
       }
     }
@@ -1216,12 +1216,12 @@ export async function renderCanvasEngine({
       if (!parentClip || parentClip.disabled) continue;
 
       const pipAbsStart = parentClip.startTime + (pip.relativeStartTime || 0);
-      if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+      if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration + 0.001) {
         for (const pTrack of pip.tracks) {
           if (pTrack.hidden) continue;
           for (const pClip of pTrack.clips) {
             const pAbsStart = pipAbsStart + pClip.startTime;
-            if (!pClip.disabled && currentTime >= pAbsStart && currentTime < pAbsStart + pClip.duration) {
+            if (!pClip.disabled && currentTime >= pAbsStart && currentTime < pAbsStart + pClip.duration + 0.001) {
               const syntheticClip = {
                 ...pClip,
                 startTime: pAbsStart,
@@ -1274,7 +1274,7 @@ export async function renderCanvasEngine({
   if (!skipExpensiveFX) {
     for (const track of visualTracks) {
       for (const clip of track.clips) {
-        if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+        if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration + 0.001) {
           renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
         }
       }

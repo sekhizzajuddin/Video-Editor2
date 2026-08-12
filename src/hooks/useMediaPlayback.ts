@@ -1095,7 +1095,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // ---- VIDEO SYNC STRATEGY (Aggressive) ----
         else if (entry.type === 'video') {
           const VIDEO_HARD_SEEK_THRESHOLD = 0.10;  // 100ms
-          const VIDEO_PLL_THRESHOLD = 0.02;        // 20ms
+          const VIDEO_PLL_THRESHOLD = 0.05;        // 20ms
           const VIDEO_MAX_PLL_ADJUST = 0.03;       // 3%
 
           if (playing && !isReversing) {
