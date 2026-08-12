@@ -23,6 +23,7 @@ export function AIMotionGraphicsSection({
 }: AIMotionGraphicsSectionProps) {
   const [showKineticConfig, setShowKineticConfig] = useState(false);
   const [typoMode, setTypoMode] = useState<'word' | 'sentence' | 'hybrid'>('hybrid');
+  const [typoLayout, setTypoLayout] = useState<'row' | 'column'>('row');
   const [script, setScript] = useState('english');
   const [casing, setCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
   const [stylePreset, setStylePreset] = useState<string>('random');
@@ -50,6 +51,7 @@ export function AIMotionGraphicsSection({
           animationSelection: animationPreset,
           provider: aiProvider,
           typoType: typoMode,
+          typoLayout: typoLayout,
         },
         (p) => setKineticProgress(Math.round(p))
       );
@@ -155,6 +157,28 @@ export function AIMotionGraphicsSection({
               {typoMode === 'sentence' && 'Clean captions: Groups words naturally into full sentences placed neatly as lower-third subtitle clips.'}
             </p>
           </div>
+
+          {/* Typography Layout Selector (Row vs Column) */}
+          {(typoMode === 'hybrid' || typoMode === 'sentence') && (
+            <div className="space-y-1 animate-in fade-in pt-1 border-t border-teal-500/20 mt-2">
+              <label className="block text-[10px] font-semibold text-white uppercase tracking-wider">
+                Typography Layout <span className="text-indigo-400 lowercase font-normal">(16:9 vs 9:16)</span>
+              </label>
+              <select
+                value={typoLayout}
+                onChange={(e) => setTypoLayout(e.target.value as 'row' | 'column')}
+                disabled={isGeneratingKinetic}
+                className="bg-[#152020] hover:bg-[#1a2626] text-white text-[11px] font-medium border border-teal-500/40 rounded px-2.5 py-1.5 focus:outline-none focus:border-amber-400 w-full transition-colors"
+              >
+                <option value="row">Row Wise (16:9 Landscape Video)</option>
+                <option value="column">Column Wise (9:16 Short Video / Reel)</option>
+              </select>
+              <p className="text-[10px] text-[#8aa8a8] italic leading-tight pt-0.5">
+                {typoLayout === 'row' && "Line breaks are added intelligently so text does not exceed 16:9 width."}
+                {typoLayout === 'column' && "AI adds excellent, punchy line breaks specifically optimized for vertical short videos."}
+              </p>
+            </div>
+          )}
 
           {/* Language & Casing Settings */}
           <div className="grid grid-cols-2 gap-2 pt-1">

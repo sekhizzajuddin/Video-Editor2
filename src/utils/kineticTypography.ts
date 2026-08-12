@@ -15,6 +15,7 @@ export interface KineticTypographyOptions {
   animationSelection?: string;
   provider?: 'gemini' | 'groq';
   typoType?: 'word' | 'sentence' | 'hybrid';
+  typoLayout?: 'row' | 'column';
   referenceScript?: string;
 }
 
@@ -87,9 +88,14 @@ PRIMARY TASK: Generate a JSON array of text animation clips, STRICTLY WORD-BY-WO
 - Do NOT skip any words. Do NOT group multiple words into one object. Missing words will break the video sync.
 - Every word must have a precise, short duration matching the real audio timing.
 
-SCRIPT & LANGUAGE:
+SPOKEN SCRIPT & LANGUAGE:
 - ${scriptInstruction}
 ${casingInstruction ? `- ${casingInstruction}` : ''}${refScriptInstruction}
+
+LAYOUT REQUIREMENTS:
+${options.typoLayout === 'column' 
+  ? "- COLUMN WISE (9:16 Short Video): Keep lines extremely short (1-3 words max). It is CRITICAL to set \"breakAfter\": true on words where a line break should naturally occur for dramatic pacing."
+  : "- ROW WISE (16:9 Landscape): Keep text flowing in wide lines. Set \"breakAfter\": true on words only when grammatically or visually necessary to prevent lines from exceeding 6-8 words."}
 
 DESIGNING AN EMOTIONALLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL RULES):
 1. SEMANTIC WEIGHT: Identify KEY emotional/emphatic words (nouns, verbs like 'NEVER', 'EXPLODE', 'LOVE', 'ROKNA').
@@ -121,6 +127,7 @@ For each word, define:
 - "color": A vibrant hex color string.
 - "x": X position (30–70, as percentage of screen width).
 - "y": Y position (35–65, as percentage of screen height).
+- "breakAfter": true or false (AI intelligently decides line breaks based on layout requirements).
 - "animationIn": Choose from:
   Basic: 'fadeIn', 'zoom', 'bounce', 'typewriter', 'slideUp', 'slideDown', 'slideLeft', 'slideRight'
   Cinematic (prefer these for KEY words): 'elastic' (spring pop - best for hype/energy words), 'splitReveal' (cinematic title reveal - best for dramatic statements), 'revealWipe' (curtain wipe - best for reveals/announcements), 'rollUp' (film credit roll - best for lists/credits), 'scaleFlip' (dramatic snap - best for shocking words), 'zoomBlur' (blockbuster zoom - best for openers/big moments), 'glitch' (cyber jitter - best for tech/error/intensity words), 'letterSpacing' (expand in - best for brand names/titles)
@@ -130,7 +137,7 @@ For each word, define:
 - "stylePreset": Choose from: 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
 
 Output ONLY a valid JSON array, no markdown, no explanation:
-[{"text":"Wow","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":52,"y":48,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
+[{"text":"Wow","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":52,"y":48,"breakAfter":false,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
   let resultJsonStr = '';
 
@@ -154,7 +161,7 @@ Rules:
 - Use the Whisper timestamps as the SOURCE OF TRUTH for word timing.
 - CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE WORD present in the Whisper transcription. Do NOT skip any words. Do NOT group words. Missing words will break the video sync.
 - Return ONLY a valid JSON array of word typography objects.
-- Each object MUST have all required fields: text, start, end, fontSize, fontFamily, color, x, y, animationIn, animationOut, stylePreset.
+- Each object MUST have all required fields: text, start, end, fontSize, fontFamily, color, x, y, breakAfter, animationIn, animationOut, stylePreset.
 - Do NOT include any text, explanation, or markdown outside the JSON array.
 
 ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
@@ -452,19 +459,31 @@ processedClips.push({
       };
 
       // Smart Non-Overlapping Layout Calculation for Sentence Words
+      const isColumn = options.typoLayout === 'column';
+      const maxLineWidth = isColumn ? 420 : 860; // constrain width based on layout
+      
       const totalChars = fullSentenceText.length;
-      const fontSize = Math.min(54, Math.max(36, Math.floor(680 / Math.max(1, totalChars * 0.52))));
+      let fontSize = 54;
+      if (isColumn) {
+        fontSize = Math.min(68, Math.max(42, Math.floor(500 / Math.max(1, totalChars * 0.4))));
+      } else {
+        fontSize = Math.min(54, Math.max(36, Math.floor(760 / Math.max(1, totalChars * 0.52))));
+      }
+      
       const charWidth = fontSize * 0.52;
       const spaceWidth = fontSize * 0.35;
       const lineHeight = fontSize * 1.35;
-      const maxLineWidth = 720; // max line width inside canvas
 
       const lines: { word: any; width: number }[][] = [[]];
       let currentLineWidth = 0;
 
       grp.forEach((w) => {
+        const prevWordInLine = lines[lines.length - 1].length > 0 ? lines[lines.length - 1][lines[lines.length - 1].length - 1].word : null;
         const wWidth = Math.round(w.text.length * charWidth);
-        if (lines[lines.length - 1].length > 0 && currentLineWidth + spaceWidth + wWidth > maxLineWidth) {
+        const aiBreak = prevWordInLine && prevWordInLine.breakAfter === true;
+        const widthExceeded = currentLineWidth + spaceWidth + wWidth > maxLineWidth;
+        
+        if (lines[lines.length - 1].length > 0 && (widthExceeded || aiBreak)) {
           lines.push([]);
           currentLineWidth = 0;
         }

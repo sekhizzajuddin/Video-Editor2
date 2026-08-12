@@ -665,6 +665,7 @@ export function MediaPanel() {
   const [kineticTypoAnimation, setKineticTypoAnimation] = useState<string>('random');
   const [kineticTypoProvider, setKineticTypoProvider] = useState<'gemini' | 'groq'>('groq');
   const [kineticTypoType, setKineticTypoType] = useState<'word' | 'sentence' | 'hybrid'>('hybrid');
+  const [kineticTypoLayout, setKineticTypoLayout] = useState<'row' | 'column'>('row');
   const [referenceScript, setReferenceScript] = useState('');
   const [showReferenceInput, setShowReferenceInput] = useState(false);
 
@@ -749,6 +750,7 @@ export function MediaPanel() {
           animationSelection: kineticTypoAnimation,
           provider: kineticTypoProvider,
           typoType: kineticTypoType,
+          typoLayout: kineticTypoLayout,
           referenceScript: referenceScript.trim()
         },
         (p) => setKineticTypoProgress(p)
@@ -2460,6 +2462,29 @@ export function MediaPanel() {
                         {kineticTypoType === 'sentence' && "Complete sentence text clips added to timeline for each spoken sentence."}
                       </p>
                     </div>
+
+                    {(kineticTypoType === 'hybrid' || kineticTypoType === 'sentence') && (
+                      <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3 animate-fadeIn">
+                        <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center">
+                          Typography Layout
+                          <span className="px-1.5 py-0.5 rounded text-[8px] bg-indigo-500/20 text-indigo-400 font-bold border border-indigo-500/30 uppercase">
+                            {kineticTypoLayout}
+                          </span>
+                        </label>
+                        <select
+                          value={kineticTypoLayout}
+                          onChange={(e) => setKineticTypoLayout(e.target.value as 'row' | 'column')}
+                          className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                        >
+                          <option value="row">Row Wise (16:9 Landscape Video)</option>
+                          <option value="column">Column Wise (9:16 Short Video / Reel)</option>
+                        </select>
+                        <p className="text-[10px] text-[#888] leading-tight mt-0.5">
+                          {kineticTypoLayout === 'row' && "Line breaks are added intelligently so text does not exceed 16:9 width."}
+                          {kineticTypoLayout === 'column' && "AI adds excellent, punchy line breaks specifically optimized for vertical short videos."}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Reference Script Input (Optional Ground-Truth Text) */}
                     <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
