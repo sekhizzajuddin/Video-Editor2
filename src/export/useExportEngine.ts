@@ -63,7 +63,17 @@ export function useExportEngine() {
       setExportState(prev => ({ ...prev, phase: 'analyzing', progress: 0, warnings: [], filename: null }));
       
       const timeline = useEditorStore.getState();
-      const totalFrames = Math.ceil((timeline as any).duration * config.fps);
+      let duration = (timeline as any).totalDuration || (timeline as any).duration || 0;
+      if (!duration && timeline.tracks) {
+        for (const track of timeline.tracks) {
+          for (const clip of track.clips || []) {
+            const end = (clip.startTime || 0) + (clip.duration || 0);
+            if (end > duration) duration = end;
+          }
+        }
+      }
+      duration = Math.max(0.1, duration);
+      const totalFrames = Math.ceil(duration * config.fps);
       
       setExportState(prev => ({ 
         ...prev, 

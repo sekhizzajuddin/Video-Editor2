@@ -34,17 +34,20 @@ export class FrameScheduler {
   }
 
   async initializeDecoders() {
-    // 1. Find all video clips in the timeline
-    // 2. Instantiate AssetDecoder for each unique source URL
-    // 3. Load them
     const promises: Promise<void>[] = [];
+    const mediaMap = new Map<string, any>();
+    if (this.timeline.media) {
+      for (const m of this.timeline.media) {
+        mediaMap.set(m.id, m);
+      }
+    }
     
-    for (const track of this.timeline.tracks) {
+    for (const track of this.timeline.tracks || []) {
       if (track.type === 'video') {
-        for (const clip of track.clips) {
+        for (const clip of track.clips || []) {
           if (!this.decoders.has(clip.id)) {
-            // Using a blob URL or direct URL from the clip
-            const url = clip.file?.blob ? URL.createObjectURL(clip.file.blob) : (clip.file?.url || clip.url);
+            const media = mediaMap.get(clip.mediaId);
+            const url = media?.url || clip.url;
             if (url) {
               const decoder = new AssetDecoder(url, this.framePool);
               this.decoders.set(clip.id, decoder);
@@ -61,50 +64,45 @@ export class FrameScheduler {
   async getLayersAtTime(timestampSeconds: number): Promise<RenderLayer[]> {
     const layers: RenderLayer[] = [];
     
-    // Convert to microseconds
-    const timeMicro = timestampSeconds * 1_000_000;
-    
-    // Sort tracks by zIndex (or just their array order)
-    for (let trackIdx = 0; trackIdx < this.timeline.tracks.length; trackIdx++) {
-      const track = this.timeline.tracks[trackIdx];
+    // Sort tracks by zIndex (or their array order)
+    const tracks = this.timeline.tracks || [];
+    for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
+      const track = tracks[trackIdx];
+      if (track.muted || track.isMuted) continue;
       
-      for (const clip of track.clips) {
+      for (const clip of track.clips || []) {
         // Is this clip visible at this timestamp?
         if (timestampSeconds >= clip.startTime && timestampSeconds < (clip.startTime + clip.duration)) {
+          const transform = {
+            x: clip.transform?.x || clip.position?.x || 0,
+            y: clip.transform?.y || clip.position?.y || 0,
+            scale: clip.transform?.scale || clip.scale || 1,
+            rotation: clip.transform?.rotation || clip.rotation || 0,
+          };
           
           if (track.type === 'video' && this.decoders.has(clip.id)) {
             const decoder = this.decoders.get(clip.id);
             // Calculate local clip time (accounting for trimming and speed)
-            const localTimeSeconds = ((timestampSeconds - clip.startTime) * (clip.speed || 1)) + (clip.startOffset || 0);
+            const localTimeSeconds = ((timestampSeconds - clip.startTime) * (clip.speed || 1)) + (clip.trimStart || clip.startOffset || 0);
             
             const frame = await decoder?.getFrameAt(localTimeSeconds * 1_000_000);
             if (frame) {
               layers.push({
                 type: 'video',
                 frame,
-                opacity: 1, // To be extracted from clip.properties or keyframes
+                opacity: clip.opacity !== undefined ? clip.opacity : 1,
                 chromaKey: clip.chromaKey,
-                transform: {
-                  x: clip.position?.x || 0,
-                  y: clip.position?.y || 0,
-                  scale: clip.scale || 1,
-                  rotation: clip.rotation || 0,
-                },
-                zIndex: trackIdx,
+                transform,
+                zIndex: clip.zIndex !== undefined ? clip.zIndex : trackIdx,
               });
             }
           } else if (track.type === 'text') {
             layers.push({
               type: 'text',
-              textData: clip, // Handled by WebGL text renderer later
-              opacity: 1,
-              transform: {
-                x: clip.position?.x || 0,
-                y: clip.position?.y || 0,
-                scale: clip.scale || 1,
-                rotation: clip.rotation || 0,
-              },
-              zIndex: trackIdx,
+              textData: clip,
+              opacity: clip.opacity !== undefined ? clip.opacity : 1,
+              transform,
+              zIndex: clip.zIndex !== undefined ? clip.zIndex : trackIdx,
             });
           }
         }
