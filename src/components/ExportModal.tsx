@@ -1,16 +1,27 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { X, Download, AlertCircle } from 'lucide-react';
+import { X, Download, AlertCircle, FolderOpen, Film } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
 import { ExportPhase } from '@/export/types';
 
+const RUNTIME_URL = 'http://127.0.0.1:12589';
+
+function generateFilename(projectName: string): string {
+  const safeName = (projectName || 'Untitled_Project').replace(/[<>:"/\\|?*]+/g, '_').trim();
+  const now = new Date();
+  const date = now.toISOString().slice(0, 10); // YYYY-MM-DD
+  const time = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+  return `${safeName}_${date}_${time}`;
+}
+
 export function ExportModal() {
-  const { showExportModal, setShowExportModal, aspectRatio } = useEditorStore(
+  const { showExportModal, setShowExportModal, aspectRatio, projectName } = useEditorStore(
     useShallow(s => ({
       showExportModal: s.showExportModal,
       setShowExportModal: s.setShowExportModal,
       aspectRatio: s.aspectRatio,
+      projectName: s.projectName,
     }))
   );
 
@@ -21,32 +32,60 @@ export function ExportModal() {
   }, [aspectRatio]);
 
   const [selectedResolution, setSelectedResolution] = useState<Resolution>(initialResolution);
-
-  useEffect(() => {
-    if (showExportModal) {
-      setSelectedResolution(initialResolution);
-    }
-  }, [showExportModal, initialResolution]);
-
   const [quality, setQuality] = useState<'low' | 'medium' | 'high' | 'ultra'>('high');
   const [format, setFormat] = useState<'mp4' | 'webm'>('mp4');
   const [fps, setFps] = useState<number>(30);
+  const [filename, setFilename] = useState('');
+  const [outputFolder, setOutputFolder] = useState(() => localStorage.getItem('exportOutputFolder') || '');
+  const [isBrowsing, setIsBrowsing] = useState(false);
+
+  // Auto-generate filename when modal opens
+  useEffect(() => {
+    if (showExportModal) {
+      setSelectedResolution(initialResolution);
+      setFilename(generateFilename(projectName));
+      // Refresh saved folder
+      const savedFolder = localStorage.getItem('exportOutputFolder');
+      if (savedFolder) setOutputFolder(savedFolder);
+    }
+  }, [showExportModal, initialResolution, projectName]);
 
   const { exportState, startExport, cancelExport, downloadFile } = useExportEngine();
 
+  const handleBrowseFolder = useCallback(async () => {
+    setIsBrowsing(true);
+    try {
+      const resp = await fetch(`${RUNTIME_URL}/pick-folder`, { signal: AbortSignal.timeout(60000) });
+      const data = await resp.json();
+      if (data.path) {
+        setOutputFolder(data.path);
+        localStorage.setItem('exportOutputFolder', data.path);
+      }
+    } catch (e) {
+      console.warn('Folder picker unavailable (runtime not running?):', e);
+    } finally {
+      setIsBrowsing(false);
+    }
+  }, []);
+
   const handleExport = useCallback(async () => {
+    const exportFilename = filename.trim() || generateFilename(projectName);
     await startExport({
       fps,
       width: selectedResolution.width,
       height: selectedResolution.height,
       bitrate: selectedResolution.maxBitrate,
       format,
-      filename: `export_${Date.now()}`,
+      filename: exportFilename,
+      outputFolder: outputFolder || '',
       aspectRatio,
     });
-  }, [startExport, selectedResolution, format, fps]);
+  }, [startExport, selectedResolution, format, fps, filename, outputFolder, projectName, aspectRatio]);
 
   if (!showExportModal) return null;
+
+  const isWorking = exportState.phase !== 'idle' && exportState.phase !== 'completed' && exportState.phase !== 'cancelled' && exportState.phase !== 'error';
+  const canEdit = exportState.phase === 'idle' || exportState.phase === 'completed';
 
   const getPhaseLabel = (phase: ExportPhase): string => {
     const labels: Record<ExportPhase, string> = {
@@ -80,6 +119,11 @@ export function ExportModal() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // Truncate long folder paths for display
+  const displayFolder = outputFolder
+    ? (outputFolder.length > 40 ? '...' + outputFolder.slice(-37) : outputFolder)
+    : 'Desktop (default)';
+
   return (
     <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
       <div className="bg-[#2d2d2d] rounded-lg shadow-2xl w-full max-w-lg overflow-hidden border border-[#3e3e3e]">
@@ -87,7 +131,7 @@ export function ExportModal() {
         <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
           <div className="flex items-center gap-2">
             <Download className="w-5 h-5 text-amber-400" />
-            <h2 className="text-sm font-semibold text-white">Export Video (v2.0 Beta)</h2>
+            <h2 className="text-sm font-semibold text-white">Export Video</h2>
           </div>
           <button
             onClick={() => exportState.phase === 'rendering' ? cancelExport() : setShowExportModal(false)}
@@ -97,12 +141,50 @@ export function ExportModal() {
           </button>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="p-4 space-y-3">
+          {/* Filename Input */}
+          <div>
+            <label className="text-xs text-[#a0a0a0] block mb-1.5">Filename</label>
+            <div className="flex gap-2 items-center">
+              <Film className="w-4 h-4 text-[#606060] shrink-0" />
+              <input
+                type="text"
+                disabled={!canEdit}
+                value={filename}
+                onChange={e => setFilename(e.target.value)}
+                placeholder="Enter filename..."
+                className="flex-1 bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 disabled:opacity-40 placeholder-[#606060]"
+              />
+              <span className="text-xs text-[#606060] shrink-0">.{format}</span>
+            </div>
+          </div>
+
+          {/* Output Folder */}
+          <div>
+            <label className="text-xs text-[#a0a0a0] block mb-1.5">Save to</label>
+            <div className="flex gap-2 items-center">
+              <div 
+                className="flex-1 bg-[#252525] text-xs border border-[#3e3e3e] rounded px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap"
+                title={outputFolder || 'Desktop (default)'}
+              >
+                <span className={outputFolder ? 'text-white' : 'text-[#606060]'}>{displayFolder}</span>
+              </div>
+              <button
+                disabled={!canEdit || isBrowsing}
+                onClick={handleBrowseFolder}
+                className="shrink-0 px-3 py-2 bg-[#353535] hover:bg-[#404040] text-[#a0a0a0] hover:text-white text-xs border border-[#3e3e3e] rounded transition-colors disabled:opacity-40 flex items-center gap-1.5"
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                {isBrowsing ? 'Picking...' : 'Browse'}
+              </button>
+            </div>
+          </div>
+
           {/* Resolution Selector */}
           <div>
-            <label className="text-xs text-[#a0a0a0] block mb-2">Resolution</label>
+            <label className="text-xs text-[#a0a0a0] block mb-1.5">Resolution</label>
             <select
-              disabled={exportState.phase !== 'idle' && exportState.phase !== 'completed'}
+              disabled={!canEdit}
               value={selectedResolution.name}
               onChange={(e) => {
                 const preset = Object.values(RESOLUTION_PRESETS).find(r => r.name === e.target.value);
@@ -118,76 +200,53 @@ export function ExportModal() {
             </select>
           </div>
 
-          {/* FPS Selector */}
-          <div>
-            <label className="text-xs text-[#a0a0a0] block mb-2">Frame Rate</label>
-            <div className="flex gap-2">
-              {[24, 30, 60].map((f) => (
-                <button
-                  key={f}
-                  disabled={exportState.phase !== 'idle' && exportState.phase !== 'completed'}
-                  onClick={() => setFps(f)}
-                  className={`flex-1 px-4 py-2 rounded text-xs border transition-colors ${
-                    fps === f
-                      ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0] disabled:opacity-40'
-                  }`}
-                >
-                  {f} fps
-                </button>
-              ))}
+          {/* FPS & Format Row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[#a0a0a0] block mb-1.5">Frame Rate</label>
+              <div className="flex gap-1.5">
+                {[24, 30, 60].map((f) => (
+                  <button
+                    key={f}
+                    disabled={!canEdit}
+                    onClick={() => setFps(f)}
+                    className={`flex-1 px-2 py-1.5 rounded text-xs border transition-colors ${
+                      fps === f
+                        ? 'bg-amber-600/20 border-amber-500 text-amber-400'
+                        : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0] disabled:opacity-40'
+                    }`}
+                  >
+                    {f}fps
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-[#a0a0a0] block mb-1.5">Format</label>
+              <select 
+                disabled={!canEdit}
+                value={format} 
+                onChange={(e) => setFormat(e.target.value as any)}
+                className="w-full bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-[7px] focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
+              >
+                <option value="mp4">MP4 (H.264)</option>
+                <option value="webm">WebM (VP9)</option>
+              </select>
             </div>
           </div>
 
-          {/* Quality Selector */}
-          <div>
-            <label className="text-xs text-[#a0a0a0] block mb-2">Quality</label>
-            <div className="flex gap-2">
-              {(['low', 'medium', 'high', 'ultra'] as const).map(q => (
-                <button
-                  key={q}
-                  disabled={exportState.phase !== 'idle' && exportState.phase !== 'completed'}
-                  onClick={() => setQuality(q)}
-                  className={`flex-1 px-3 py-2 rounded text-xs border transition-colors capitalize ${
-                    quality === q
-                      ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0] disabled:opacity-40'
-                  }`}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Format Selector */}
-          <div>
-            <label className="text-xs text-[#a0a0a0] block mb-2">Format</label>
-            <select 
-              disabled={exportState.phase !== 'idle' && exportState.phase !== 'completed'}
-              value={format} 
-              onChange={(e) => setFormat(e.target.value as any)}
-              className="w-full bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
-            >
-              <option value="mp4">MP4 (H.264)</option>
-              <option value="webm">WebM (VP9)</option>
-            </select>
-          </div>
-
-          {/* Progress Display - shown during all active phases */}
-          {exportState.phase !== 'idle' && exportState.phase !== 'completed' && exportState.phase !== 'cancelled' && exportState.phase !== 'error' && (
+          {/* Progress Display */}
+          {isWorking && (
             <div className="bg-[#252525] rounded p-4 border border-[#3e3e3e] space-y-3">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium text-amber-400">{getPhaseLabel(exportState.phase)}</span>
                 <span className="text-xs font-bold text-white">{exportState.progress.toFixed(1)}%</span>
               </div>
               <div className="w-full bg-[#1a1a1a] rounded-full h-2.5 overflow-hidden relative">
-                {/* Main progress fill */}
                 <div 
                   className="bg-amber-500 h-2.5 rounded-full transition-all duration-500 ease-out" 
                   style={{ width: `${Math.max(exportState.progress, exportState.phase === 'preparing' ? 5 : exportState.phase === 'analyzing' ? 2 : 0)}%` }}
                 />
-                {/* Shimmer overlay when actively working */}
                 {(exportState.phase === 'rendering' || exportState.phase === 'encoding' || exportState.phase === 'muxing') && (
                   <div 
                     className="absolute inset-0 rounded-full"
@@ -233,8 +292,8 @@ export function ExportModal() {
             <>
               {exportState.savedViaRuntime && (
                 <span className="text-xs text-green-400 mr-auto flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-green-400"></div>
-                  Saved to Desktop by Hikmah Runtime!
+                  <span className="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+                  Saved to {outputFolder ? outputFolder.split(/[/\\]/).pop() : 'Desktop'}!
                 </span>
               )}
               <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors">
@@ -246,7 +305,7 @@ export function ExportModal() {
                 </button>
               )}
             </>
-          ) : exportState.phase !== 'idle' && exportState.phase !== 'error' && exportState.phase !== 'cancelled' ? (
+          ) : isWorking ? (
             <>
               <button onClick={cancelExport} className="px-4 py-2 text-xs text-red-400 hover:text-red-300 transition-colors">
                 Cancel

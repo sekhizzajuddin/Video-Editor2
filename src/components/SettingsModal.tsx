@@ -436,6 +436,59 @@ export function SettingsModal() {
                       Reset Project
                     </button>
                   </div>
+
+                  {/* Export Settings */}
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider pt-2">Export Settings</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <div>
+                          <span className="text-xs text-white">Default Output Folder</span>
+                          <p className="text-[10px] text-[#a0a0a0]">Where exported videos are saved</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1 bg-[#1a1a1a] text-xs border border-[#3e3e3e] rounded px-3 py-2 text-[#a0a0a0] overflow-hidden text-ellipsis whitespace-nowrap" title={localStorage.getItem('exportOutputFolder') || 'Desktop (default)'}>
+                          {localStorage.getItem('exportOutputFolder') || 'Desktop (default)'}
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const resp = await fetch('http://127.0.0.1:12589/pick-folder', { signal: AbortSignal.timeout(60000) });
+                              const data = await resp.json();
+                              if (data.path) {
+                                localStorage.setItem('exportOutputFolder', data.path);
+                                toast.success(`Export folder set to: ${data.path}`);
+                                // Force re-render
+                                setShowSettingsModal(false);
+                                setTimeout(() => setShowSettingsModal(true), 50);
+                              }
+                            } catch {
+                              toast.error('Could not open folder picker. Make sure Hikmah Runtime is running.');
+                            }
+                          }}
+                          className="shrink-0 px-3 py-2 bg-[#353535] hover:bg-[#404040] text-[#a0a0a0] hover:text-white text-xs border border-[#3e3e3e] rounded transition-colors flex items-center gap-1.5"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                          Browse
+                        </button>
+                        {localStorage.getItem('exportOutputFolder') && (
+                          <button
+                            onClick={() => {
+                              localStorage.removeItem('exportOutputFolder');
+                              toast.success('Reset to Desktop');
+                              setShowSettingsModal(false);
+                              setTimeout(() => setShowSettingsModal(true), 50);
+                            }}
+                            className="shrink-0 px-2 py-2 text-[#a0a0a0] hover:text-white text-xs transition-colors"
+                            title="Reset to Desktop"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

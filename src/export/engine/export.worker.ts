@@ -8,6 +8,7 @@ export interface ExportWorkerConfig {
   format: 'mp4' | 'webm';
   filename: string;
   aspectRatio: string;
+  outputFolder?: string;
 }
 
 export interface AudioExportPayload {
@@ -197,6 +198,7 @@ async function handleExport(
         ws.send(JSON.stringify({
           action: 'START_FILE_EXPORT',
           filename: config.filename || 'Export',
+          outputFolder: config.outputFolder || '',
           width: outputWidth,
           height: outputHeight,
           fps: config.fps,
