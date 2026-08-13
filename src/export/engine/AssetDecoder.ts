@@ -245,26 +245,26 @@ export class AssetDecoder {
     if (this.decodedQueue.length === 0) return null;
 
     // 4. Sort decoded queue by CTS (presentation time) for correct frame selection
-    //    The decoder outputs frames in CTS order usually, but B-frames can cause reordering
     this.decodedQueue.sort((a, b) => a.timestamp - b.timestamp);
 
-    // 5. Binary search for the frame closest to timestampMicroseconds
-    let lo = 0, hi = this.decodedQueue.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (this.decodedQueue[mid].timestamp < timestampMicroseconds) lo = mid + 1;
-      else hi = mid;
+    // 5. Select the last decoded frame whose presentation timestamp is <= requested timestamp
+    // Never select future frames (which causes frame jumping / stuttering)
+    const epsilonUs = 1000; // 1ms rounding tolerance
+    let bestIdx = -1;
+    for (let i = 0; i < this.decodedQueue.length; i++) {
+      if (this.decodedQueue[i].timestamp <= timestampMicroseconds + epsilonUs) {
+        bestIdx = i;
+      } else {
+        break; // Queue is sorted ascending
+      }
     }
 
-    let best = lo;
-    if (lo > 0) {
-      const prevDist = Math.abs(this.decodedQueue[lo - 1].timestamp - timestampMicroseconds);
-      const currDist = Math.abs(this.decodedQueue[lo].timestamp - timestampMicroseconds);
-      if (prevDist < currDist) best = lo - 1;
+    if (bestIdx === -1) {
+      bestIdx = 0; // Fallback to first frame if before start
     }
 
     // Return a clone so caller can close() their copy independently
-    return this.decodedQueue[best].frame.clone();
+    return this.decodedQueue[bestIdx].frame.clone();
   }
 
   private clearDecodedQueue(): void {

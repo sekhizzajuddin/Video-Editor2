@@ -308,7 +308,11 @@ async function handleExport(
       
       // Capture the canvas and encode it
       const timestampMicroseconds = Math.round(i * (1_000_000 / config.fps));
-      const vf = new VideoFrame(canvas, { timestamp: timestampMicroseconds });
+      const durationMicroseconds = Math.round(1_000_000 / config.fps);
+      const vf = new VideoFrame(canvas, { 
+        timestamp: timestampMicroseconds,
+        duration: durationMicroseconds,
+      });
       
       // Wait if encoder queue is getting too large to prevent QuotaExceededError
       while (videoEncoder.encodeQueueSize > 12 && !isCancelled) {
