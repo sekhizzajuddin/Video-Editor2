@@ -4,9 +4,14 @@ import { WebCodecsBackend } from './backends/WebCodecsBackend';
 import { WebMWebCodecsBackend } from './backends/WebMWebCodecsBackend';
 import { MediaRecorderBackend } from './backends/MediaRecorderBackend';
 
+import { GifEncoderBackend } from './backends/GifEncoderBackend';
+import { ProResBackend } from './backends/ProResBackend';
+
 export class ExportPipeline {
   private backends: EncoderBackend[] = [
     new LocalRuntimeBackend(),      // Local native FFmpeg runtime (10x-50x speed, no browser limits)
+    new ProResBackend(),            // ProRes native/webcodecs backend
+    new GifEncoderBackend(),        // Animated GIF encoder
     new WebCodecsBackend(),         // MP4 frame-by-frame (best for MP4 in-browser)
     new WebMWebCodecsBackend(),     // WebM frame-by-frame
     new MediaRecorderBackend(),     // Real-time software stream fallback

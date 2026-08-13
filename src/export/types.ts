@@ -2,13 +2,14 @@
  * Core type definitions for modular export pipelines and encoder backends.
  */
 
-export type EncoderBackendType = 'webcodecs' | 'webm-webcodecs' | 'ffmpeg' | 'mediarecorder';
+export type EncoderBackendType = 'webcodecs' | 'webm-webcodecs' | 'ffmpeg' | 'mediarecorder' | 'gif' | 'prores';
 
 export interface ExportOptions {
   width: number;
   height: number;
   fps: number;
-  format: 'mp4' | 'webm';
+  format: 'mp4' | 'webm' | 'gif' | 'prores' | 'wav';
+  proresProfile?: 'proxy' | 'lt' | 'standard' | 'hq' | '4444';
   quality: 'ultra' | 'high' | 'medium' | 'low';
   bitrate?: number;
   startAt: number;

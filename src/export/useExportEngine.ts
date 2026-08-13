@@ -12,12 +12,20 @@ export interface Resolution {
 }
 
 export const RESOLUTION_PRESETS: Record<string, Resolution> = {
+  // 16:9 Widescreen
   '16:9_4K':   { width: 3840, height: 2160, aspectRatio: 16/9, name: '4K UHD', maxBitrate: 50_000_000 },
-  '16:9_1080': { width: 1920, height: 1080, aspectRatio: 16/9, name: 'Full HD', maxBitrate: 12_000_000 },
-  '16:9_720':  { width: 1280, height: 720,  aspectRatio: 16/9, name: 'HD', maxBitrate: 5_000_000 },
-  '9:16_1080': { width: 1080, height: 1920, aspectRatio: 9/16, name: 'Instagram Reels', maxBitrate: 8_000_000 },
-  '9:16_720':  { width: 720,  height: 1280, aspectRatio: 9/16, name: 'TikTok', maxBitrate: 4_000_000 },
-  '1:1_1080':  { width: 1080, height: 1080, aspectRatio: 1,    name: 'Instagram Post', maxBitrate: 6_000_000 },
+  '16:9_1080': { width: 1920, height: 1080, aspectRatio: 16/9, name: 'Full HD', maxBitrate: 15_000_000 },
+  '16:9_720':  { width: 1280, height: 720,  aspectRatio: 16/9, name: 'HD', maxBitrate: 8_000_000 },
+  // 9:16 Vertical
+  '9:16_4K':   { width: 2160, height: 3840, aspectRatio: 9/16, name: '4K Vertical', maxBitrate: 50_000_000 },
+  '9:16_1080': { width: 1080, height: 1920, aspectRatio: 9/16, name: 'Instagram Reels', maxBitrate: 15_000_000 },
+  '9:16_720':  { width: 720,  height: 1280, aspectRatio: 9/16, name: 'TikTok', maxBitrate: 8_000_000 },
+  // 1:1 Square
+  '1:1_4K':    { width: 2160, height: 2160, aspectRatio: 1,    name: '4K Square', maxBitrate: 40_000_000 },
+  '1:1_1080':  { width: 1080, height: 1080, aspectRatio: 1,    name: 'Instagram Post', maxBitrate: 10_000_000 },
+  // 4:3 Standard
+  '4:3_4K':    { width: 2880, height: 2160, aspectRatio: 4/3, name: '4K Standard', maxBitrate: 40_000_000 },
+  '4:3_1080':  { width: 1440, height: 1080, aspectRatio: 4/3, name: 'Standard HD', maxBitrate: 12_000_000 },
 };
 
 export interface ExportState {

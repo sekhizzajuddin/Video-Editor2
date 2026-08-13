@@ -37,6 +37,9 @@ import {
   LocalCornerPoints
 } from '@/utils/canvasEffects';
 import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCurveActive as isCurveOn } from '@/utils/curvesEngine';
+import { applyVectorMaskToContext } from '@/utils/vectorMaskEngine';
+import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
+import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
 
@@ -515,13 +518,48 @@ export async function renderCanvasEngine({
     }
     if (!mediaItem) return;
 
+    if (clip.isAdjustmentLayer || clip.mediaId?.startsWith('adj_') || mediaItem.type === 'adjustment') {
+      applyAdjustmentLayerPass(ctx, clip, W, H);
+      anyClipDrawn = true;
+      return true;
+    }
+
     let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity']);
     const localTime = currentTime - clip.startTime;
 
     let aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
     let aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
     let aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
-    const aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+    let aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+
+    // ── Motion Tracking Trajectory Offset ──────────────────────────────────
+    if (clip.motionAttachment?.trackId) {
+      for (const tTrack of tracks) {
+        for (const parentClip of tTrack.clips || []) {
+          const motionTrack = parentClip.motionTracks?.find((mt) => mt.id === clip.motionAttachment!.trackId);
+          if (motionTrack) {
+            const localMediaTime = currentTime - parentClip.startTime;
+            const pos = getInterpolatedMotionPosition(motionTrack.keyframes, localMediaTime);
+            if (pos) {
+              if (clip.motionAttachment.applyPosition) {
+                // Convert percentage position (0-100%) to canvas pixel offset relative to center
+                const targetPixelX = (pos.position.x / 100) * W - W / 2;
+                const targetPixelY = (pos.position.y / 100) * H - H / 2;
+                aX += targetPixelX;
+                aY += targetPixelY;
+              }
+              if (clip.motionAttachment.applyScale && pos.scale !== undefined) {
+                aScale *= (pos.scale / 100);
+              }
+              if (clip.motionAttachment.applyRotation && pos.rotation !== undefined) {
+                aRot += pos.rotation;
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
 
     // ── Per-Aspect-Ratio Custom Framing Overrides ────────────────────────
     // PERF: read from the snapshot captured at frame start (was 3 store
@@ -535,6 +573,23 @@ export async function renderCanvasEngine({
       if (customFraming.x !== undefined) aX += customFraming.x;
       if (customFraming.y !== undefined) aY += customFraming.y;
       if (customFraming.scale !== undefined) aScale *= (customFraming.scale / 100);
+
+      // Auto-Reframe Integration
+      if ((customFraming as any).autoReframeTrackId) {
+        const arTrackId = (customFraming as any).autoReframeTrackId;
+        const mt = clip.motionTracks?.find(t => t.id === arTrackId);
+        if (mt) {
+          const localMediaTime = currentTime - clip.startTime;
+          const pos = getInterpolatedMotionPosition(mt.keyframes, localMediaTime);
+          if (pos) {
+            // Invert the tracking position to KEEP the subject centered
+            const targetPixelX = (pos.position.x / 100) * W - W / 2;
+            const targetPixelY = (pos.position.y / 100) * H - H / 2;
+            aX -= targetPixelX; // INVERTED for pan compensation
+            aY -= targetPixelY; 
+          }
+        }
+      }
     }
 
     const aCropTop = getAnimatedValue(clip.crop?.top || 0, currentTime, clip.startTime, clip.animations?.['crop.top']);
@@ -554,6 +609,10 @@ export async function renderCanvasEngine({
     ctx.save();
     ctx.globalAlpha = totalAlpha * (aBlendIntensity / 100);
     ctx.globalCompositeOperation = blendMode;
+
+    if (clip.vectorMask?.enabled) {
+      applyVectorMaskToContext(ctx, clip.vectorMask, W, H);
+    }
 
     const cx = W / 2;
     const cy = H / 2;

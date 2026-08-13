@@ -15,8 +15,11 @@ export class MediaRecorderBackend implements EncoderBackend {
     }
   }
 
-  async isSupported(): Promise<boolean> {
-    // MediaRecorder is universally supported as our dependable software/stream fallback
+  async isSupported(opts: ExportOptions): Promise<boolean> {
+    // MediaRecorder is our dependable software fallback only for mp4 and webm
+    if (opts.format !== 'mp4' && opts.format !== 'webm') {
+      return false;
+    }
     return typeof window.MediaRecorder !== 'undefined';
   }
 
@@ -38,18 +41,19 @@ export class MediaRecorderBackend implements EncoderBackend {
 
     const tracks: MediaStreamTrack[] = [
       ...canvasStream.getVideoTracks(),
-      ...(liveAudio ? liveAudio.getAudioTracks() : []),
+      ...(liveAudio ? liveAudio.getAudioTracks() : [])
     ];
     const combinedStream = new MediaStream(tracks);
 
-    // Prefer VP8/VP9 or standard webm codecs
-    const candidates = [
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-      'video/mp4'
-    ];
-    const mimeType = candidates.find((c) => MediaRecorder.isTypeSupported(c)) || 'video/webm';
+    // Respect requested format
+    const candidates = opts.format === 'mp4' 
+      ? ['video/mp4'] 
+      : [
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm'
+        ];
+    const mimeType = candidates.find((c) => MediaRecorder.isTypeSupported(c)) || (opts.format === 'mp4' ? 'video/mp4' : 'video/webm');
 
     const chunks: Blob[] = [];
     return new Promise<Blob>((resolve, reject) => {

@@ -255,7 +255,8 @@ async function runSegmentationAsync(
 
     // Try 1: MediaPipe on full frame (fastest)
     if (tryMediaPipe) {
-      const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType);
+      const videoTime = source && 'currentTime' in source ? (source as HTMLVideoElement).currentTime : 0;
+      const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
       if (mpBitmap) {
         maskCanvas = getPooledCanvas(`${clipId}_async_mp`, targetW, targetH);
         const mCtx = maskCanvas.getContext('2d');
@@ -335,7 +336,8 @@ async function runSegmentationSync(
   let maskCanvas: HTMLCanvasElement | null = null;
 
   if (tryMediaPipe) {
-    const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType);
+    const videoTime = (source as HTMLVideoElement).currentTime || 0;
+    const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
     if (mpBitmap) {
       maskCanvas = document.createElement('canvas');
       maskCanvas.width = targetW;

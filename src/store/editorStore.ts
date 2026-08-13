@@ -20,6 +20,8 @@ import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, cle
 import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
 import { cleanupClipBackgroundState } from '@/utils/aiBackground';
+import { detectAspectRatio } from '@/utils/aspectRatioHelper';
+import type { AspectRatioConflictData } from '@/types';
 
 let saveTimeoutId: any = null;
 const debouncedSaveProject = (state: any) => {
@@ -229,7 +231,8 @@ interface EditorActions {
   setTrackVolume: (trackId: string, volume: number) => void;
   setTrackPan: (trackId: string, pan: number) => void;
   toggleTrackSolo: (trackId: string) => void;
-  addTrack: (type: 'video' | 'audio' | 'text' | 'fx') => void;
+  addTrack: (type: 'video' | 'audio' | 'text' | 'fx' | 'adjustment') => void;
+  addAdjustmentLayer: (duration?: number) => void;
   removeTrack: (trackId: string) => void;
   reorderTrack: (trackId: string, newIndex: number) => void;
 
@@ -298,6 +301,8 @@ interface EditorActions {
   setPerRatioFramingEnabled: (enabled: boolean) => void;
   updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => void;
   reframeProject: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
+  setAspectRatioConflictData: (data: AspectRatioConflictData | null) => void;
+  resolveAspectRatioConflict: (applyNewRatio: boolean, dontAskAgain?: boolean) => void;
 
   // Transitions
   setShowTransitionLayer: (show: boolean) => void;
@@ -456,6 +461,7 @@ const initialState: EditorState = {
     aspectRatio: '9:16' as '9:16',
     keyframes: { '16:9': [], '9:16': [], '1:1': [], '4:3': [] } as Record<string, any>,
   } as any,
+  aspectRatioConflictData: null,
 };
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
@@ -544,7 +550,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
     return { virtualCamera: { ...state.virtualCamera, keyframes: { ...state.virtualCamera.keyframes, [ratio]: newKeyframes } } };
   }),
-  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => {
+  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number; autoReframeTrackId?: string }) => {
     set((state) => {
       const ratioFraming = state.perRatioFraming[ratio] || {};
       const currentClipFraming = ratioFraming[clipId] || { x: 0, y: 0 };
@@ -1115,6 +1121,26 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         expectedTrackType = 'text';
       }
 
+      // Check for first video clip aspect ratio conflict
+      let pendingConflictData: AspectRatioConflictData | null = null;
+      if (media && media.type === 'video' && media.width && media.height && state.settings.autoPromptAspectRatio !== false) {
+        const existingVideoClips = state.tracks
+          .filter(t => t.type === 'video')
+          .flatMap(t => t.clips || []);
+        if (existingVideoClips.length === 0) {
+          const detected = detectAspectRatio(media.width, media.height);
+          if (detected !== state.aspectRatio) {
+            pendingConflictData = {
+              mediaName: media.name || 'Video Clip',
+              videoWidth: media.width,
+              videoHeight: media.height,
+              detectedRatio: detected,
+              currentRatio: state.aspectRatio,
+            };
+          }
+        }
+      }
+
       // Find the target track (search in both state.tracks and state.pipWindows)
       let targetTrack = state.tracks.find((t) => t.id === clip.trackId);
       let isPip = false;
@@ -1192,7 +1218,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           return t;
         });
         
-        return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
+        return {
+          tracks: newTracks,
+          selectedClipId: clip.id,
+          selectedClipIds: [clip.id],
+          ...(pendingConflictData ? { aspectRatioConflictData: pendingConflictData } : {}),
+        };
       }
 
       if (isPip) {
@@ -1205,7 +1236,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           return track;
         });
         newPipWindows[parentPipId] = { ...pip, tracks: newTracks };
-        return { pipWindows: newPipWindows, selectedClipId: clip.id, selectedClipIds: [clip.id] };
+        return {
+          pipWindows: newPipWindows,
+          selectedClipId: clip.id,
+          selectedClipIds: [clip.id],
+          ...(pendingConflictData ? { aspectRatioConflictData: pendingConflictData } : {}),
+        };
       } else {
         const newTracks = state.tracks.map((track) => {
           if (track.id === clip.trackId) {
@@ -1213,7 +1249,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           }
           return track;
         });
-        return { tracks: newTracks, selectedClipId: clip.id, selectedClipIds: [clip.id] };
+        return {
+          tracks: newTracks,
+          selectedClipId: clip.id,
+          selectedClipIds: [clip.id],
+          ...(pendingConflictData ? { aspectRatioConflictData: pendingConflictData } : {}),
+        };
       }
     });
     get().recalcTotalDuration();
@@ -3849,6 +3890,23 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Reframe Project');
   },
 
+  setAspectRatioConflictData: (data) => set({ aspectRatioConflictData: data }),
+
+  resolveAspectRatioConflict: (applyNewRatio, dontAskAgain = false) => {
+    const data = get().aspectRatioConflictData;
+    if (applyNewRatio && data) {
+      get().reframeProject(data.detectedRatio);
+    }
+    if (dontAskAgain) {
+      set((state) => ({
+        settings: { ...state.settings, autoPromptAspectRatio: false },
+        aspectRatioConflictData: null,
+      }));
+    } else {
+      set({ aspectRatioConflictData: null });
+    }
+  },
+
 
   // Recalculate total duration from all clips and clean up empty custom tracks
   recalcTotalDuration: () => {
@@ -4543,6 +4601,46 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       pipWindows: mapTracksDeep(s, (track, pipId) => track).pipWindows
     }));
     get().saveSnapshot('Apply Color Grade to All');
+  },
+
+  addAdjustmentLayer: (duration = 5) => {
+    const { tracks, currentTime } = get();
+    let targetTrack = tracks.find((t) => t.type === 'adjustment' || t.type === 'video');
+    if (!targetTrack) {
+      get().addTrack('adjustment');
+      targetTrack = get().tracks.find((t) => t.type === 'adjustment');
+    }
+    if (!targetTrack) return;
+
+    const mediaId = `adj_${generateId()}`;
+    const clipId = generateId();
+
+    get().addMedia({
+      id: mediaId,
+      name: 'Adjustment Layer',
+      type: 'adjustment',
+      duration,
+      url: '',
+      createdAt: Date.now(),
+    });
+
+    const newClip: TimelineClip = {
+      id: clipId,
+      mediaId,
+      trackId: targetTrack.id,
+      startTime: currentTime,
+      duration,
+      trimStart: 0,
+      trimEnd: 0,
+      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+      opacity: 1,
+      speed: 1,
+      effects: [],
+      isAdjustmentLayer: true,
+    };
+
+    get().addClip(newClip);
+    get().saveSnapshot('Add Adjustment Layer');
   }
 }));
 

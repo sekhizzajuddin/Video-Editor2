@@ -19,6 +19,7 @@ const SettingsModal = React.lazy(() => import('@/components/SettingsModal').then
 const TeleprompterModal = React.lazy(() => import('@/components/TeleprompterModal').then(m => ({ default: m.TeleprompterModal })));
 const WelcomeScreen = React.lazy(() => import('@/components/WelcomeScreen').then(m => ({ default: m.WelcomeScreen })));
 const AiCopilot = React.lazy(() => import('@/components/AiCopilot').then(m => ({ default: m.AiCopilot })));
+const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRatioConflictModal').then(m => ({ default: m.AspectRatioConflictModal })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -708,6 +709,9 @@ function App() {
 
       {/* Modals & Global Handlers */}
       <FileHandlerInitializer />
+      <Suspense fallback={null}>
+        <AspectRatioConflictModal />
+      </Suspense>
       {showExportModal && (
         <Suspense fallback={null}>
           <ExportModal />

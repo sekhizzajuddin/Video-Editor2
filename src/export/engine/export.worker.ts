@@ -5,7 +5,7 @@ export interface ExportWorkerConfig {
   width: number;
   height: number;
   bitrate: number;
-  format: 'mp4' | 'webm';
+  format: 'mp4' | 'webm' | 'gif' | 'prores' | 'wav';
   filename: string;
   aspectRatio: string;
   outputFolder?: string;

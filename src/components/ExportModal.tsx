@@ -33,7 +33,7 @@ export function ExportModal() {
 
   const [selectedResolution, setSelectedResolution] = useState<Resolution>(initialResolution);
   const [quality, setQuality] = useState<'low' | 'medium' | 'high' | 'ultra'>('high');
-  const [format, setFormat] = useState<'mp4' | 'webm'>('mp4');
+  const [format, setFormat] = useState<'mp4' | 'webm' | 'gif' | 'prores' | 'wav'>('mp4');
   const [fps, setFps] = useState<number>(30);
   const [filename, setFilename] = useState('');
   const [outputFolder, setOutputFolder] = useState(() => localStorage.getItem('exportOutputFolder') || '');
@@ -248,6 +248,9 @@ export function ExportModal() {
               >
                 <option value="mp4">MP4 (H.264)</option>
                 <option value="webm">WebM (VP9)</option>
+                <option value="prores">Apple ProRes (MOV)</option>
+                <option value="gif">Animated GIF</option>
+                <option value="wav">WAV Audio</option>
               </select>
             </div>
           </div>

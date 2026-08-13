@@ -24,7 +24,8 @@ import {
   RotateCcw,
   Grid,
   ExternalLink,
-  X
+  X,
+  Zap
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 
@@ -88,6 +89,17 @@ export function PreviewCanvasHeaderToolbar({
           <option value="1:1">1:1 Square</option>
           <option value="4:3">4:3 Standard</option>
         </select>
+
+        {typeof navigator !== 'undefined' && 'gpu' in navigator && !!navigator.gpu ? (
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full" title="WebGPU Hardware Acceleration Engine Active">
+            <Zap className="w-3 h-3 text-emerald-400 fill-emerald-400" />
+            WebGPU
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 bg-zinc-800/80 border border-zinc-700 px-2 py-0.5 rounded-full" title="Canvas 2D fallback renderer active">
+            Canvas 2D
+          </span>
+        )}
 
         <label
           className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-[#3e3e3e] bg-[#252525] hover:bg-[#2e2e2e] cursor-pointer text-[11px] select-none transition-colors"

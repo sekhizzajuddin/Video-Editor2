@@ -25,6 +25,7 @@
 import * as ortModule from 'onnxruntime-web';
 import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
 import { detectHumanPresence, computeROICrop } from './humanDetection';
+import { stabilizeTemporalAlpha } from './temporalMaskEngine';
 
 // ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
 let mediaPipeGeneralSegmenter: any = null;
@@ -86,7 +87,9 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
  */
 export async function segmentSourceWithMediaPipe(
   source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
-  modelType: 'general' | 'landscape' = 'landscape'
+  modelType: 'general' | 'landscape' = 'landscape',
+  clipId?: string,
+  videoTime = 0
 ): Promise<ImageBitmap | null> {
   const segmenter = await loadMediaPipeSegmenter(modelType);
   if (!segmenter) return null;
@@ -99,9 +102,13 @@ export async function segmentSourceWithMediaPipe(
     }
 
     const confidenceMask = result.confidenceMasks[0];
-    const floatArray = confidenceMask.getAsFloat32Array();
+    let floatArray = confidenceMask.getAsFloat32Array();
     const w = confidenceMask.width;
     const h = confidenceMask.height;
+
+    if (clipId) {
+      floatArray = stabilizeTemporalAlpha(clipId, floatArray, w, h, videoTime);
+    }
 
     const imgData = new ImageData(w, h);
     const data32 = new Uint32Array(imgData.data.buffer);

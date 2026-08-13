@@ -1,5 +1,5 @@
 // Media Types
-export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx' | 'lut' | 'compound';
+export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx' | 'lut' | 'compound' | 'adjustment';
 
 // LUT (Color Look-Up Table) data parsed from .cube files
 export interface LutData {
@@ -417,6 +417,74 @@ export interface ClipMaskSettings {
   matteSourceClipId?: string; // For track matte
 }
 
+// ─── Vector Bezier Masking Engine ──────────────────────────────────────────
+export interface MaskPoint {
+  x: number; // 0 to 100% or absolute canvas coords
+  y: number; // 0 to 100% or absolute canvas coords
+}
+
+export interface BezierPoint extends MaskPoint {
+  handleIn?: MaskPoint;
+  handleOut?: MaskPoint;
+}
+
+export interface BezierPath {
+  points: BezierPoint[];
+  closed: boolean;
+}
+
+export interface ClipVectorMaskSettings {
+  enabled: boolean;
+  shapeType: 'rectangle' | 'ellipse' | 'polygon' | 'bezier';
+  points: BezierPoint[];
+  closed: boolean;
+  feather: number;    // 0 to 50 px soft blur
+  inverted: boolean;   // invert clipping mask
+  expansion: number;  // -50 to +50 px expansion/choke
+  opacity: number;    // 0 to 100%
+}
+
+// ─── Motion Tracking Engine ────────────────────────────────────────────────
+export interface TrackingPoint {
+  x: number;
+  y: number;
+}
+
+export interface TrackingRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface TrackingKeyframe {
+  frame: number;
+  time: number;
+  position: TrackingPoint;
+  scale?: number;
+  rotation?: number;
+  confidence: number;
+}
+
+export interface MotionTrackingData {
+  id: string;
+  name: string;
+  clipId: string;
+  region: TrackingRegion;
+  keyframes: TrackingKeyframe[];
+  frameRate: number;
+  createdAt: number;
+}
+
+export interface MotionTrackAttachment {
+  trackId: string;
+  applyPosition: boolean;
+  applyScale: boolean;
+  applyRotation: boolean;
+  offsetX: number;
+  offsetY: number;
+}
+
 // Map Waypoint
 export interface MapWaypoint {
   lat: number;
@@ -479,6 +547,10 @@ export interface TimelineClip {
   lut?: ClipLutSettings;
   lutFilter?: ClipLutSettings;
   mask?: ClipMaskSettings;
+  vectorMask?: ClipVectorMaskSettings;
+  isAdjustmentLayer?: boolean;
+  motionTracks?: MotionTrackingData[];
+  motionAttachment?: MotionTrackAttachment;
   pipWindowIds?: string[]; // Array of PIP window IDs attached to this clip
   // Sequencer / Interpolation (Gap #2 + #3)
   interpolation?: ClipInterpolationSettings;
@@ -549,7 +621,7 @@ export interface ImageSequence {
 export interface TimelineTrack {
   id: string;
   name: string;
-  type: 'video' | 'audio' | 'text' | 'fx';
+  type: 'video' | 'audio' | 'text' | 'fx' | 'adjustment';
   clips: TimelineClip[];
   locked: boolean;
   muted: boolean;
@@ -679,6 +751,7 @@ export interface EditorSettings {
   hardwareAcceleration: boolean;
   keyboardShortcuts: Record<string, string>;
   showSafeZones?: boolean;     // overlay action-safe / title-safe guides
+  autoPromptAspectRatio?: boolean; // automatically prompt on first video clip aspect ratio mismatch
   geminiApiKey?: string;
   groqApiKey?: string;
   freesoundApiKey?: string;
@@ -695,6 +768,7 @@ export interface PerRatioFramingEntry {
   x: number;
   y: number;
   scale: number;
+  autoReframeTrackId?: string;
 }
 
 // ─── AI Video Generation State ────────────────────────────────────────────
@@ -838,6 +912,17 @@ export interface EditorState {
 
   // Virtual Camera
   virtualCamera: VirtualCameraState;
+
+  // Aspect Ratio Conflict Smart Handler
+  aspectRatioConflictData?: AspectRatioConflictData | null;
+}
+
+export interface AspectRatioConflictData {
+  mediaName: string;
+  videoWidth: number;
+  videoHeight: number;
+  detectedRatio: '16:9' | '9:16' | '1:1' | '4:3';
+  currentRatio: '16:9' | '9:16' | '1:1' | '4:3';
 }
 
 // ─── Transition ───────────────────────────────────────────────────────────
