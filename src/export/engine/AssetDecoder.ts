@@ -233,12 +233,18 @@ export class AssetDecoder {
     }
 
     // 3. Wait for the decoder to output the frames (hardware pipelining)
-    // Use WebCodecs flush() to guarantee all fed chunks are fully decoded and output
+    // DO NOT use decoder.flush() mid-stream! On many hardware decoders (especially Chrome/Edge),
+    // calling flush() before the end of the stream resets the reference frame buffer (GOP),
+    // causing subsequent P-frames to fail decoding, crashing the decoder, and triggering an infinite re-init loop!
     if (fedNewSamples && this.decoder && this.decoder.state === 'configured') {
-      try {
-        await this.decoder.flush();
-      } catch (e: any) {
-        console.warn('[AssetDecoder] Decoder flush error:', e.message);
+      let retries = 100; // Max wait 1000ms
+      while (retries > 0) {
+        if (this.decodedQueue.length > 0) {
+          const lastQueuedCTS = this.decodedQueue[this.decodedQueue.length - 1].timestamp;
+          if (lastQueuedCTS >= timestampMicroseconds) break;
+        }
+        await new Promise(r => setTimeout(r, 10));
+        retries--;
       }
     }
 
