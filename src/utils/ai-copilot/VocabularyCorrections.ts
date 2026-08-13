@@ -144,6 +144,10 @@ const PHRASE_FIXES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\b(turn (?:it |the volume )?up|raise (?:the )?volume|increase volume|louder)\b/gi, 'set volume to 80'],
   [/\b(turn (?:it |the volume )?down|lower (?:the )?volume|quieter)\b/gi, 'set volume to 20'],
   [/\bmute (?:the audio|the clip|the sound)\b/gi, 'mute the audio track'],
+
+  // Expressions
+  [/\b(make it shake|add a shake|shake effect|jiggle|wiggle)\b/gi, 'apply a wiggle expression'],
+  [/\b(add a wave|make it wave|sine wave)\b/gi, 'apply a Math.sin expression'],
 ];
 
 // -----------------------------------------------------------------------------

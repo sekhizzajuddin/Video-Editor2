@@ -391,17 +391,18 @@ export async function renderCanvasEngine({
     oh: number,
     clipId: string,
     clipStartTime: number,
-    animations: any
+    animations: any,
+    expressions?: any
   ) => {
     if (!mask || !mask.enabled) return;
     
-    const mX = getAnimatedValue(mask.x ?? 50, currentTime, clipStartTime, animations?.['mask.x']);
-    const mY = getAnimatedValue(mask.y ?? 50, currentTime, clipStartTime, animations?.['mask.y']);
-    const mW = getAnimatedValue(mask.width ?? 50, currentTime, clipStartTime, animations?.['mask.width']);
-    const mH = getAnimatedValue(mask.height ?? 50, currentTime, clipStartTime, animations?.['mask.height']);
-    const mRot = getAnimatedValue(mask.rotation ?? 0, currentTime, clipStartTime, animations?.['mask.rotation']);
-    const mFeather = getAnimatedValue(mask.feather ?? 0, currentTime, clipStartTime, animations?.['mask.feather']);
-    const mRoundness = getAnimatedValue(mask.roundness ?? 0, currentTime, clipStartTime, animations?.['mask.roundness']);
+    const mX = getAnimatedValue(mask.x ?? 50, currentTime, clipStartTime, animations?.['mask.x'], expressions?.['mask.x']);
+    const mY = getAnimatedValue(mask.y ?? 50, currentTime, clipStartTime, animations?.['mask.y'], expressions?.['mask.y']);
+    const mW = getAnimatedValue(mask.width ?? 50, currentTime, clipStartTime, animations?.['mask.width'], expressions?.['mask.width']);
+    const mH = getAnimatedValue(mask.height ?? 50, currentTime, clipStartTime, animations?.['mask.height'], expressions?.['mask.height']);
+    const mRot = getAnimatedValue(mask.rotation ?? 0, currentTime, clipStartTime, animations?.['mask.rotation'], expressions?.['mask.rotation']);
+    const mFeather = getAnimatedValue(mask.feather ?? 0, currentTime, clipStartTime, animations?.['mask.feather'], expressions?.['mask.feather']);
+    const mRoundness = getAnimatedValue(mask.roundness ?? 0, currentTime, clipStartTime, animations?.['mask.roundness'], expressions?.['mask.roundness']);
     
     const mx = (mX / 100) * ow;
     const my = (mY / 100) * oh;
@@ -524,13 +525,13 @@ export async function renderCanvasEngine({
       return true;
     }
 
-    let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity']);
+    let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity'], clip.expressions?.['opacity']);
     const localTime = currentTime - clip.startTime;
 
-    let aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale']);
-    let aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x']);
-    let aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y']);
-    let aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation']);
+    let aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale'], clip.expressions?.['transform.scale']);
+    let aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x'], clip.expressions?.['transform.x']);
+    let aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y'], clip.expressions?.['transform.y']);
+    let aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation'], clip.expressions?.['transform.rotation']);
 
     // ── Motion Tracking Trajectory Offset ──────────────────────────────────
     if (clip.motionAttachment?.trackId) {
@@ -592,16 +593,16 @@ export async function renderCanvasEngine({
       }
     }
 
-    const aCropTop = getAnimatedValue(clip.crop?.top || 0, currentTime, clip.startTime, clip.animations?.['crop.top']);
-    const aCropBot = getAnimatedValue(clip.crop?.bottom || 0, currentTime, clip.startTime, clip.animations?.['crop.bottom']);
-    const aCropLeft = getAnimatedValue(clip.crop?.left || 0, currentTime, clip.startTime, clip.animations?.['crop.left']);
-    const aCropRight = getAnimatedValue(clip.crop?.right || 0, currentTime, clip.startTime, clip.animations?.['crop.right']);
+    const aCropTop = getAnimatedValue(clip.crop?.top || 0, currentTime, clip.startTime, clip.animations?.['crop.top'], clip.expressions?.['crop.top']);
+    const aCropBot = getAnimatedValue(clip.crop?.bottom || 0, currentTime, clip.startTime, clip.animations?.['crop.bottom'], clip.expressions?.['crop.bottom']);
+    const aCropLeft = getAnimatedValue(clip.crop?.left || 0, currentTime, clip.startTime, clip.animations?.['crop.left'], clip.expressions?.['crop.left']);
+    const aCropRight = getAnimatedValue(clip.crop?.right || 0, currentTime, clip.startTime, clip.animations?.['crop.right'], clip.expressions?.['crop.right']);
 
-    const aRotX = getAnimatedValue(clip.transform.rotationX ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationX']);
-    const aRotY = getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY']);
+    const aRotX = getAnimatedValue(clip.transform.rotationX ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationX'], clip.expressions?.['transform.rotationX']);
+    const aRotY = getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY'], clip.expressions?.['transform.rotationY']);
 
     const hasPerspectiveWarp = !!(clip.transform.perspectivePin || Math.abs(aRotX) > 0.01 || Math.abs(aRotY) > 0.01);
-    const aBlendIntensity = Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'])));
+    const aBlendIntensity = Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity'])));
     const blendMode = clip.transform.blendMode || 'source-over';
     const totalAlpha = aOpacity * opacityMultiplier;
     const needsDualBlend = blendMode !== 'source-over' && aBlendIntensity < 100;
@@ -640,14 +641,14 @@ export async function renderCanvasEngine({
           corners = { ...trackedCorners };
         } else {
           corners = {
-            x0: getAnimatedValue(pc.x0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x0']),
-            y0: getAnimatedValue(pc.y0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y0']),
-            x1: getAnimatedValue(pc.x1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x1']),
-            y1: getAnimatedValue(pc.y1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y1']),
-            x2: getAnimatedValue(pc.x2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x2']),
-            y2: getAnimatedValue(pc.y2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y2']),
-            x3: getAnimatedValue(pc.x3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x3']),
-            y3: getAnimatedValue(pc.y3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y3']),
+            x0: getAnimatedValue(pc.x0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x0'], clip.expressions?.['transform.perspectiveCorners.x0']),
+            y0: getAnimatedValue(pc.y0, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y0'], clip.expressions?.['transform.perspectiveCorners.y0']),
+            x1: getAnimatedValue(pc.x1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x1'], clip.expressions?.['transform.perspectiveCorners.x1']),
+            y1: getAnimatedValue(pc.y1, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y1'], clip.expressions?.['transform.perspectiveCorners.y1']),
+            x2: getAnimatedValue(pc.x2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x2'], clip.expressions?.['transform.perspectiveCorners.x2']),
+            y2: getAnimatedValue(pc.y2, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y2'], clip.expressions?.['transform.perspectiveCorners.y2']),
+            x3: getAnimatedValue(pc.x3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.x3'], clip.expressions?.['transform.perspectiveCorners.x3']),
+            y3: getAnimatedValue(pc.y3, currentTime, clip.startTime, clip.animations?.['transform.perspectiveCorners.y3'], clip.expressions?.['transform.perspectiveCorners.y3']),
           };
         }
 
@@ -764,14 +765,14 @@ export async function renderCanvasEngine({
     }
 
     const filters = {
-      temperature: getAnimatedValue(clip.colorFilters?.temperature ?? 0, currentTime, clip.startTime, clip.animations?.['color.temperature']),
-      tint: getAnimatedValue(clip.colorFilters?.tint ?? 0, currentTime, clip.startTime, clip.animations?.['color.tint']),
-      exposure: getAnimatedValue(clip.colorFilters?.exposure ?? 0, currentTime, clip.startTime, clip.animations?.['color.exposure']) + fxFlashBrightness,
-      contrast: getAnimatedValue(clip.colorFilters?.contrast ?? 100, currentTime, clip.startTime, clip.animations?.['color.contrast']),
-      saturation: getAnimatedValue(clip.colorFilters?.saturation ?? 100, currentTime, clip.startTime, clip.animations?.['color.saturation']),
-      blur: getAnimatedValue(clip.colorFilters?.blur ?? 0, currentTime, clip.startTime, clip.animations?.['color.blur']),
-      fadedFilm: getAnimatedValue(clip.colorFilters?.fadedFilm ?? 0, currentTime, clip.startTime, clip.animations?.['color.fadedFilm']),
-      vignette: getAnimatedValue(clip.colorFilters?.vignette ?? 0, currentTime, clip.startTime, clip.animations?.['color.vignette']),
+      temperature: getAnimatedValue(clip.colorFilters?.temperature ?? 0, currentTime, clip.startTime, clip.animations?.['color.temperature'], clip.expressions?.['color.temperature']),
+      tint: getAnimatedValue(clip.colorFilters?.tint ?? 0, currentTime, clip.startTime, clip.animations?.['color.tint'], clip.expressions?.['color.tint']),
+      exposure: getAnimatedValue(clip.colorFilters?.exposure ?? 0, currentTime, clip.startTime, clip.animations?.['color.exposure'], clip.expressions?.['color.exposure']) + fxFlashBrightness,
+      contrast: getAnimatedValue(clip.colorFilters?.contrast ?? 100, currentTime, clip.startTime, clip.animations?.['color.contrast'], clip.expressions?.['color.contrast']),
+      saturation: getAnimatedValue(clip.colorFilters?.saturation ?? 100, currentTime, clip.startTime, clip.animations?.['color.saturation'], clip.expressions?.['color.saturation']),
+      blur: getAnimatedValue(clip.colorFilters?.blur ?? 0, currentTime, clip.startTime, clip.animations?.['color.blur'], clip.expressions?.['color.blur']),
+      fadedFilm: getAnimatedValue(clip.colorFilters?.fadedFilm ?? 0, currentTime, clip.startTime, clip.animations?.['color.fadedFilm'], clip.expressions?.['color.fadedFilm']),
+      vignette: getAnimatedValue(clip.colorFilters?.vignette ?? 0, currentTime, clip.startTime, clip.animations?.['color.vignette'], clip.expressions?.['color.vignette']),
       shadows: clip.colorFilters?.shadows,
       midtones: clip.colorFilters?.midtones,
       highlights: clip.colorFilters?.highlights,
@@ -893,7 +894,7 @@ export async function renderCanvasEngine({
           // AI Background Removal — always non-blocking during interactive preview.
           // Only awaits during export to guarantee frame-accurate masks.
           if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
-            const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur']);
+            const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur'], clip.expressions?.['aiBackground.edgeBlur']);
             const smartOpts = {
               playbackQuality: clip.aiBackground.playbackQuality ?? 'balanced',
               isPlaying: !isExporting,
@@ -917,10 +918,10 @@ export async function renderCanvasEngine({
 
           if (!skipExpensiveFX) {
             if (clip.chromaKey?.enabled) {
-              const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold']);
-              const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness']);
-              const animSpill = getAnimatedValue(clip.chromaKey.spillSuppression ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.spillSuppression']);
-              const animFeather = getAnimatedValue(clip.chromaKey.edgeFeather ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.edgeFeather']);
+              const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold'], clip.expressions?.['chromaKey.threshold']);
+              const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness'], clip.expressions?.['chromaKey.softness']);
+              const animSpill = getAnimatedValue(clip.chromaKey.spillSuppression ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.spillSuppression'], clip.expressions?.['chromaKey.spillSuppression']);
+              const animFeather = getAnimatedValue(clip.chromaKey.edgeFeather ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.edgeFeather'], clip.expressions?.['chromaKey.edgeFeather']);
               applyChromaKeyOnData(
                 oCtx,
                 offCanvas.width,
@@ -933,8 +934,8 @@ export async function renderCanvasEngine({
               );
             }
             if (clip.lumaKey?.enabled) {
-              const animThresh = getAnimatedValue(clip.lumaKey.threshold, currentTime, clip.startTime, clip.animations?.['lumaKey.threshold']);
-              const animSoft = getAnimatedValue(clip.lumaKey.softness, currentTime, clip.startTime, clip.animations?.['lumaKey.softness']);
+              const animThresh = getAnimatedValue(clip.lumaKey.threshold, currentTime, clip.startTime, clip.animations?.['lumaKey.threshold'], clip.expressions?.['lumaKey.threshold']);
+              const animSoft = getAnimatedValue(clip.lumaKey.softness, currentTime, clip.startTime, clip.animations?.['lumaKey.softness'], clip.expressions?.['lumaKey.softness']);
               applyLumaKeyOnData(
                 oCtx,
                 offCanvas.width,
@@ -1020,7 +1021,7 @@ export async function renderCanvasEngine({
           if (clip.mask?.enabled) {
             // With DOWNSCALE=1.0, offCanvas dimensions match logical dimensions,
             // so the mask can be applied directly without transform manipulation.
-            await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations);
+            await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations, clip.expressions);
           } else {
             offscreenCanvasPool.current.delete('clip_mask_temp_' + clip.id);
           }

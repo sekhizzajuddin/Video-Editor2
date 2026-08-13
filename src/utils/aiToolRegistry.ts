@@ -143,6 +143,19 @@ export const aiToolRegistry = [
       required: ["clipId", "time", "values"]
     }
   },
+  {
+    name: "applyAnimationExpression",
+    description: "Applies a code-driven animation expression (like After Effects expressions) to a clip property.",
+    parameters: {
+      type: "object",
+      properties: {
+        clipId: { type: "string", description: "The ID of the clip to animate." },
+        property: { type: "string", description: "The property to animate (e.g., 'transform.x', 'transform.scale', 'opacity', 'mask.x')." },
+        expression: { type: "string", description: "The expression code. Available variables: time, value, fps, width, height. Math functions available. E.g. 'wiggle(2, 50)' or 'Math.sin(time * 5) * 100 + value'." }
+      },
+      required: ["clipId", "property", "expression"]
+    }
+  },
   // ============================================
   // Phase 1: New Critical Tools
   // ============================================
@@ -423,6 +436,20 @@ export const executeAITool = (name: string, args: any, context?: { currentTime?:
         message: `Transition "${args.type}" added between clips`,
         result: { transitionType: args.type, duration: args.duration },
       };
+    }
+    case 'applyAnimationExpression': {
+      const { clipId, property, expression } = args;
+      const clip = store.tracks.flatMap((t: any) => t.clips || []).find((c: any) => c.id === clipId);
+      if (!clip) return { success: false, error: 'Clip not found' };
+      
+      const expressions = { ...(clip.expressions || {}) };
+      if (expression && expression.trim()) {
+        expressions[property] = expression;
+      } else {
+        delete expressions[property];
+      }
+      store.updateClip(clipId, { expressions });
+      return { success: true, message: `Expression applied to ${property} on clip ${clipId}` };
     }
     default:
       return { success: false, error: `Tool ${name} not implemented` };

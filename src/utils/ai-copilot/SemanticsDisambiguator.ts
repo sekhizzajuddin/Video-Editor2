@@ -41,6 +41,7 @@ export type SemanticsIntent =
   | 'speed'
   | 'text'
   | 'transition'
+  | 'expression'
   | 'export'
   | 'unknown';
 
@@ -300,6 +301,7 @@ const TOOL_BY_INTENT: Record<SemanticsIntent, string> = {
   'speed': 'updateClip',
   'text': 'addText',
   'transition': 'addTransition',
+  'expression': 'applyAnimationExpression',
   'export': 'exportProject',
   'unknown': '',
 };
@@ -317,6 +319,7 @@ const ARG_SHAPE_BY_INTENT: Record<SemanticsIntent, string> = {
   'speed': "{ clipId, updates: { speed: <multiplier> } }",
   'text': "{ text, startTime, duration, trackId? }",
   'transition': "{ fromClipId, toClipId, type, duration }",
+  'expression': "{ clipId, property, expression }",
   'export': "{ format, quality }",
   'unknown': '',
 };

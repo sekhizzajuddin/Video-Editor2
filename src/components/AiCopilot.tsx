@@ -188,7 +188,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
 
   return (
     <div
-      className="fixed bottom-16 right-4 w-96 max-w-[calc(100vw-2rem)] h-[600px] max-h-[calc(100vh-6rem)] bg-background/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden ring-1 ring-white/5"
+      className="fixed bottom-16 right-4 w-96 max-w-[calc(100vw-2rem)] h-[600px] max-h-[calc(100vh-6rem)] bg-background/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden ring-1 ring-white/5 animate-in slide-in-from-right-8 fade-in-0 duration-300 ease-out"
       role="region"
       aria-label="AI Copilot Assistant"
     >

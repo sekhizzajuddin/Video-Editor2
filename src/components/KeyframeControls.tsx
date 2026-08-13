@@ -60,129 +60,174 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
     });
   }, [clip, clipId, propertyKey]);
 
+  const hasExpression = !!clip?.expressions?.[propertyKey];
+  const [showFx, setShowFx] = useState(hasExpression);
+  
+  const handleExpressionChange = (expr: string) => {
+    if (!clip) return;
+    const expressions = { ...(clip.expressions || {}) };
+    if (expr.trim()) {
+      expressions[propertyKey] = expr;
+    } else {
+      delete expressions[propertyKey];
+    }
+    useEditorStore.getState().updateClip(clipId, { expressions });
+  };
+
   return (
-    <div className="flex items-center gap-1.5 ml-2">
-      {/* Jump to previous */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onJumpToPrev?.();
-        }}
-        disabled={!prevKf}
-        className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
-        title="Previous keyframe"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </button>
-
-      {/* Keyframe diamond toggle */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          if (hasKeyframe) {
-            onRemoveKeyframe(keyframe!.time);
-          } else {
-            onAddKeyframe(currentTime, value);
-          }
-        }}
-        className={`relative p-0.5 rounded transition-all ${
-          hasKeyframe 
-            ? 'text-amber-400 hover:text-amber-300' 
-            : 'text-[#555] hover:text-[#888]'
-        }`}
-        title={hasKeyframe ? 'Remove keyframe' : 'Add keyframe'}
-      >
-        <svg 
-          width="12" 
-          height="12" 
-          viewBox="0 0 24 24" 
-          fill={hasKeyframe ? "currentColor" : "none"} 
-          stroke="currentColor" 
-          strokeWidth="2"
-          style={{ 
-            transform: keyframe?.easing === 'hold' ? 'rotate(45deg)' : 'none',
-            transition: 'transform 0.15s'
+    <div className="flex flex-col w-full items-end gap-1">
+      <div className="flex items-center gap-1.5">
+        {/* Fx Toggle */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowFx(!showFx);
           }}
+          className={`p-0.5 rounded text-[9px] font-bold transition-colors ${
+            hasExpression ? 'bg-indigo-500/20 text-indigo-400' : 'text-[#555] hover:text-[#888]'
+          }`}
+          title="Toggle Expression (Fx)"
         >
-          <polygon points="12 2 22 12 12 22 2 12 12 2" />
-        </svg>
-        
-        {/* Easing indicator dot */}
-        {hasKeyframe && keyframe?.easing === 'bezier' && (
-          <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-cyan-400 rounded-full" />
-        )}
-      </button>
+          Fx
+        </button>
 
-      {/* Jump to next */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onJumpToNext?.();
-        }}
-        disabled={!nextKf}
-        className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
-        title="Next keyframe"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
-      </button>
-
-      {/* Easing dropdown */}
-      {hasKeyframe && (
-        <div className="flex items-center gap-1">
-          <select
-            value={keyframe?.easing || 'linear'}
-            onChange={(e) => {
-              e.stopPropagation();
-              const newEasing = e.target.value as PropertyKeyframe['easing'];
-              if (newEasing === 'bezier') {
-                setShowBezierEditor(true);
-              } else {
-                onUpdateEasing?.(keyframe!.time, newEasing);
-              }
-            }}
-            className="bg-[#1e1e1e] border border-[#3e3e3e] text-[9px] text-[#a0a0a0] hover:text-white rounded px-1 outline-none cursor-pointer w-16"
-            title="Easing type"
-          >
-            <option value="linear">Linear</option>
-            <option value="easeIn">Ease In</option>
-            <option value="easeOut">Ease Out</option>
-            <option value="easeInOut">Ease InOut</option>
-            <option value="bezier">Bezier</option>
-            <option value="hold">Hold</option>
-          </select>
-
-          {/* Edit Bezier icon trigger button */}
-          {keyframe?.easing === 'bezier' && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowBezierEditor(true);
-              }}
-              className="p-1 rounded bg-[#2a2a2a] hover:bg-[#3e3e3e] text-cyan-400 hover:text-cyan-300 transition-colors"
-              title="Edit Bezier Curve"
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-              </svg>
-            </button>
-          )}
-        </div>
-      )}
-
-      {showBezierEditor && keyframe && (
-        <BezierEditorModal
-          isOpen={showBezierEditor}
-          initialValue={keyframe.bezier || { x: 0.5, y: 0, inX: 0.5, inY: 1 }}
-          onClose={() => setShowBezierEditor(false)}
-          onApply={(newBezier) => {
-            onUpdateEasing?.(keyframe.time, 'bezier');
-            handleUpdateBezier(keyframe.time, newBezier);
+        {/* Jump to previous */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onJumpToPrev?.();
           }}
-        />
+          disabled={!prevKf}
+          className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
+          title="Previous keyframe"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+
+        {/* Keyframe diamond toggle */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasKeyframe) {
+              onRemoveKeyframe(keyframe!.time);
+            } else {
+              onAddKeyframe(currentTime, value);
+            }
+          }}
+          className={`relative p-0.5 rounded transition-all ${
+            hasKeyframe 
+              ? 'text-amber-400 hover:text-amber-300' 
+              : 'text-[#555] hover:text-[#888]'
+          }`}
+          title={hasKeyframe ? 'Remove keyframe' : 'Add keyframe'}
+        >
+          <svg 
+            width="12" 
+            height="12" 
+            viewBox="0 0 24 24" 
+            fill={hasKeyframe ? "currentColor" : "none"} 
+            stroke="currentColor" 
+            strokeWidth="2"
+            style={{ 
+              transform: keyframe?.easing === 'hold' ? 'rotate(45deg)' : 'none',
+              transition: 'transform 0.15s'
+            }}
+          >
+            <polygon points="12 2 22 12 12 22 2 12 12 2" />
+          </svg>
+          
+          {/* Easing indicator dot */}
+          {hasKeyframe && keyframe?.easing === 'bezier' && (
+            <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-cyan-400 rounded-full" />
+          )}
+        </button>
+
+        {/* Jump to next */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onJumpToNext?.();
+          }}
+          disabled={!nextKf}
+          className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
+          title="Next keyframe"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+
+        {/* Easing dropdown */}
+        {hasKeyframe && (
+          <div className="flex items-center gap-1">
+            <select
+              value={keyframe?.easing || 'linear'}
+              onChange={(e) => {
+                e.stopPropagation();
+                const newEasing = e.target.value as PropertyKeyframe['easing'];
+                if (newEasing === 'bezier') {
+                  setShowBezierEditor(true);
+                } else {
+                  onUpdateEasing?.(keyframe!.time, newEasing);
+                }
+              }}
+              className="bg-[#1e1e1e] border border-[#3e3e3e] text-[9px] text-[#a0a0a0] hover:text-white rounded px-1 outline-none cursor-pointer w-16"
+              title="Easing type"
+            >
+              <option value="linear">Linear</option>
+              <option value="easeIn">Ease In</option>
+              <option value="easeOut">Ease Out</option>
+              <option value="easeInOut">Ease InOut</option>
+              <option value="bezier">Bezier</option>
+              <option value="hold">Hold</option>
+            </select>
+
+            {/* Edit Bezier icon trigger button */}
+            {keyframe?.easing === 'bezier' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowBezierEditor(true);
+                }}
+                className="p-1 rounded bg-[#2a2a2a] hover:bg-[#3e3e3e] text-cyan-400 hover:text-cyan-300 transition-colors"
+                title="Edit Bezier Curve"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
+
+        {showBezierEditor && keyframe && (
+          <BezierEditorModal
+            isOpen={showBezierEditor}
+            initialValue={keyframe.bezier || { x: 0.5, y: 0, inX: 0.5, inY: 1 }}
+            onClose={() => setShowBezierEditor(false)}
+            onApply={(newBezier) => {
+              onUpdateEasing?.(keyframe.time, 'bezier');
+              handleUpdateBezier(keyframe.time, newBezier);
+            }}
+          />
+        )}
+      </div>
+
+      {showFx && (
+        <div className="w-full mt-1.5 flex gap-1">
+          <input
+            type="text"
+            placeholder="e.g. wiggle(2, 50) or Math.sin(time)*100"
+            defaultValue={clip?.expressions?.[propertyKey] || ''}
+            onBlur={(e) => handleExpressionChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleExpressionChange(e.currentTarget.value);
+            }}
+            className="w-full bg-[#141414] border border-indigo-500/50 text-indigo-300 text-[10px] font-mono px-2 py-1 rounded outline-none focus:border-indigo-400"
+          />
+        </div>
       )}
     </div>
   );

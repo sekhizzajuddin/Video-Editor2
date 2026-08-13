@@ -79,6 +79,7 @@ DOMAIN ACCURACY:
 - "audio / volume / mute" → updateClip with key "audioSettings". Shape: { volume, pan, fadeIn, fadeOut, bass, mid, treble, muted }.
 - "text" → addText tool.
 - "transition / fade" → addTransition tool.
+- "animate / expression / formula / math / jiggle / shake" → applyAnimationExpression tool. Args: { clipId, property, expression }. Example expressions: "wiggle(2, 50)" for shake, "Math.sin(time)*100" for wave.
 
 SPELLING / VOCABULARY:
 - The user's request goes through vocabulary correction. If you see "modifl" it's already "modify". Trust the normalized form.

@@ -516,6 +516,7 @@ export interface TimelineClip {
   speed: number;        // playback speed multiplier
   speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes (overrides flat speed)
   animations?: ClipAnimations; // timeline keyframes for properties
+  expressions?: Record<string, string>; // procedural JS animation expressions
   // Effects
   effects: string[];
   // For drag preview

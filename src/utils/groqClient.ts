@@ -45,7 +45,7 @@ export async function analyzeReasoningWithGroq(prompt: string, systemPrompt?: st
   messages.push({ role: 'user', content: prompt });
 
   const payload = {
-    model: 'openai/gpt-oss-120b',
+    model: 'llama-3.3-70b-versatile',
     messages,
     temperature: 0.2
   };

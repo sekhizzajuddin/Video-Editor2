@@ -62,15 +62,36 @@ function findKeyframeIndex(keyframes: PropertyKeyframe[], time: number): number 
  * @param keyframes The array of keyframes for this property.
  * @returns The interpolated value.
  */
+import { expressionEngine } from './expressionEngine';
+
 export function getAnimatedValue(
   baseValue: number,
   currentTime: number,
   clipStartTime: number,
-  keyframes?: PropertyKeyframe[]
+  keyframes?: PropertyKeyframe[],
+  expression?: string
 ): number {
-  if (!keyframes || keyframes.length === 0) return baseValue;
-
   const localTime = currentTime - clipStartTime;
+
+  if (expression) {
+    try {
+      const context = {
+        time: localTime,
+        value: baseValue,
+        fps: 30,
+        width: 1920,
+        height: 1080
+      };
+      const result = expressionEngine.evaluate(expression, context);
+      if (typeof result === 'number' && !isNaN(result)) {
+        return result;
+      }
+    } catch (e) {
+      console.warn("Expression evaluation failed:", e);
+    }
+  }
+
+  if (!keyframes || keyframes.length === 0) return baseValue;
 
   // Before first keyframe
   if (localTime <= keyframes[0].time) return keyframes[0].value;

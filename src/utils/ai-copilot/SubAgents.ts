@@ -135,6 +135,7 @@ export class EditSubAgent implements SubAgent {
     'splitClip',
     'rippleDeleteClip',
     'updateClip',
+    'applyAnimationExpression',
     'addMasterKeyframe',
     'moveClip',
     'trimClip',
@@ -245,7 +246,7 @@ export class AudioSubAgent implements SubAgent {
 export class ColorSubAgent implements SubAgent {
   name = 'Color & Effects';
   domain = 'color';
-  tools = ['updateClip', 'addMasterKeyframe'];
+  tools = ['updateClip', 'addMasterKeyframe', 'applyAnimationExpression'];
 
   capability: SubAgentCapability = {
     toolName: '*',
