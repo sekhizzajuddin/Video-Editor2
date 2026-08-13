@@ -81,6 +81,8 @@ async function configureVideoEncoder(
         bitrate,
         framerate: fps,
         hardwareAcceleration: accel,
+        bitrateMode: 'constant',
+        latencyMode: 'quality', // Critical: Prevents frame dropping during heavy encoding!
         avc: { format: avcFormat },
       };
 

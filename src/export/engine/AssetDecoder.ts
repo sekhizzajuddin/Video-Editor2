@@ -177,11 +177,15 @@ export class AssetDecoder {
   async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
     if (this.samples.length === 0 || !this.decoder) return null;
 
-    // 1. Purge frames more than 1 second behind (keep generous buffer to avoid re-decoding)
-    const purgeThreshold = timestampMicroseconds - 1_000_000;
-    while (this.decodedQueue.length > 2 && this.decodedQueue[0].timestamp < purgeThreshold) {
-      const old = this.decodedQueue.shift();
-      try { old?.frame.close(); } catch {}
+    // 1. Purge old frames to bound memory, BUT never purge the currently active frame!
+    // If the SECOND frame is also <= target, the FIRST frame is completely in the past.
+    while (this.decodedQueue.length > 1) {
+      if (this.decodedQueue[1].timestamp <= timestampMicroseconds) {
+        const old = this.decodedQueue.shift();
+        try { old?.frame.close(); } catch {}
+      } else {
+        break; // First frame is the active frame
+      }
     }
 
     // 2. Feed compressed samples to decoder until we're past the target timestamp
@@ -228,17 +232,13 @@ export class AssetDecoder {
       this.nextSampleIdx++;
     }
 
-    // 3. Wait briefly for the decoder to output the frames (hardware pipelining)
-    // We only wait if we just fed new samples and we don't already have the target frame.
-    if (fedNewSamples && this.decoder && this.decoder.state !== 'closed') {
-      let retries = 15; // Max wait 150ms per frame
-      while (retries > 0) {
-        if (this.decodedQueue.length > 0) {
-          const lastQueuedCTS = this.decodedQueue[this.decodedQueue.length - 1].timestamp;
-          if (lastQueuedCTS >= timestampMicroseconds) break;
-        }
-        await new Promise(r => setTimeout(r, 10));
-        retries--;
+    // 3. Wait for the decoder to output the frames (hardware pipelining)
+    // Use WebCodecs flush() to guarantee all fed chunks are fully decoded and output
+    if (fedNewSamples && this.decoder && this.decoder.state === 'configured') {
+      try {
+        await this.decoder.flush();
+      } catch (e: any) {
+        console.warn('[AssetDecoder] Decoder flush error:', e.message);
       }
     }
 
