@@ -299,7 +299,7 @@ interface EditorActions {
   recalcPipDurations: (pipId: string) => void;
   setAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
   setPerRatioFramingEnabled: (enabled: boolean) => void;
-  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number }) => void;
+  updateClipPerRatioFraming: (clipId: string, ratio: string, framing: { x?: number; y?: number; scale?: number; autoReframeTrackId?: string }) => void;
   reframeProject: (ratio: '16:9' | '9:16' | '1:1' | '4:3') => void;
   setAspectRatioConflictData: (data: AspectRatioConflictData | null) => void;
   resolveAspectRatioConflict: (applyNewRatio: boolean, dontAskAgain?: boolean) => void;

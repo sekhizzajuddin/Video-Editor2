@@ -577,7 +577,7 @@ export async function renderCanvasEngine({
       // Auto-Reframe Integration
       if ((customFraming as any).autoReframeTrackId) {
         const arTrackId = (customFraming as any).autoReframeTrackId;
-        const mt = clip.motionTracks?.find(t => t.id === arTrackId);
+        const mt = clip.motionTracks?.find((t: any) => t.id === arTrackId);
         if (mt) {
           const localMediaTime = currentTime - clip.startTime;
           const pos = getInterpolatedMotionPosition(mt.keyframes, localMediaTime);

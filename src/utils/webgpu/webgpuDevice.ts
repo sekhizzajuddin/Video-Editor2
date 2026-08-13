@@ -41,14 +41,14 @@ export async function getWebGPUDevice(): Promise<WebGPUDeviceState> {
         supported: false,
         adapter: null,
         device: null,
-        format: 'bgra8unorm',
+        format: 'bgra8unorm' as any,
         error: 'WebGPU is not supported by this browser.',
-      };
+      } as WebGPUDeviceState;
       return cachedState;
     }
 
     try {
-      const adapter = await navigator.gpu.requestAdapter({
+      const adapter = await (navigator as any).gpu.requestAdapter({
         powerPreference: 'high-performance',
       });
 
@@ -57,9 +57,9 @@ export async function getWebGPUDevice(): Promise<WebGPUDeviceState> {
           supported: false,
           adapter: null,
           device: null,
-          format: 'bgra8unorm',
+          format: 'bgra8unorm' as any,
           error: 'No suitable WebGPU adapter found.',
-        };
+        } as WebGPUDeviceState;
         return cachedState;
       }
 
@@ -67,9 +67,9 @@ export async function getWebGPUDevice(): Promise<WebGPUDeviceState> {
         requiredFeatures: [],
       });
 
-      const format = navigator.gpu.getPreferredCanvasFormat();
+      const format = (navigator as any).gpu.getPreferredCanvasFormat();
 
-      device.lost.then((info) => {
+      device.lost.then((info: any) => {
         console.warn(`[WebGPU] GPUDevice lost (${info.reason}): ${info.message}`);
         cachedState = null;
         initPromise = null;
@@ -79,8 +79,8 @@ export async function getWebGPUDevice(): Promise<WebGPUDeviceState> {
         supported: true,
         adapter,
         device,
-        format,
-      };
+        format: format as any,
+      } as WebGPUDeviceState;
       return cachedState;
     } catch (err: any) {
       console.warn('[WebGPU] Failed to initialize GPUDevice:', err);
@@ -88,9 +88,9 @@ export async function getWebGPUDevice(): Promise<WebGPUDeviceState> {
         supported: false,
         adapter: null,
         device: null,
-        format: 'bgra8unorm',
+        format: 'bgra8unorm' as any,
         error: err.message || 'WebGPU initialization failed.',
-      };
+      } as WebGPUDeviceState;
       return cachedState;
     }
   })();

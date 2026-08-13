@@ -38,7 +38,7 @@ export interface WebGPULayerSource {
 export class WebGPURenderEngine {
   private device: GPUDevice | null = null;
   private context: GPUCanvasContext | null = null;
-  private format: GPUTextureFormat = 'bgra8unorm';
+  private format: GPUTextureFormat = 'bgra8unorm' as any;
   private initialized = false;
 
   private compositePipeline: GPURenderPipeline | null = null;

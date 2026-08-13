@@ -16,7 +16,9 @@ interface MotionTrackingSectionProps {
 }
 
 export function MotionTrackingSection({ selectedClip }: MotionTrackingSectionProps) {
-  const { tracks, updateClip, saveSnapshot } = useEditorStore();
+  const { tracks, updateClip, saveSnapshot, mediaLibrary } = useEditorStore();
+
+  const mediaItem = mediaLibrary.find((m: any) => m.id === selectedClip.mediaId);
 
   // Find all available motion tracks across video clips
   const allVideoClips = tracks.flatMap((t) => t.clips || []).filter((c) => c.motionTracks && c.motionTracks.length > 0);
@@ -157,7 +159,7 @@ export function MotionTrackingSection({ selectedClip }: MotionTrackingSectionPro
         )}
       </div>
 
-      {selectedClip.type === 'video' && (
+      {mediaItem?.type === 'video' && (
         <div className="pt-2 mt-4 border-t border-[#3e3e3e]">
           <h4 className="text-xs font-semibold text-zinc-300 mb-2 flex items-center">
             <span className="mr-1.5">📱</span> Auto-Reframe (9:16)
