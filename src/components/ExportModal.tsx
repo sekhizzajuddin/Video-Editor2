@@ -70,6 +70,23 @@ export function ExportModal() {
 
   const handleExport = useCallback(async () => {
     const exportFilename = filename.trim() || generateFilename(projectName);
+
+    let fileHandle: FileSystemFileHandle | null = null;
+    // Standalone browser direct save dialog (OpenReel Video style)
+    if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+      try {
+        fileHandle = await (window as any).showSaveFilePicker({
+          suggestedName: `${exportFilename}.${format}`,
+          types: [{
+            description: format === 'mp4' ? 'MP4 Video' : 'WebM Video',
+            accept: format === 'mp4' ? { 'video/mp4': ['.mp4'] } : { 'video/webm': ['.webm'] }
+          }]
+        });
+      } catch (err: any) {
+        if (err.name === 'AbortError') return; // User cancelled save picker
+      }
+    }
+
     await startExport({
       fps,
       width: selectedResolution.width,
@@ -79,7 +96,7 @@ export function ExportModal() {
       filename: exportFilename,
       outputFolder: outputFolder || '',
       aspectRatio,
-    });
+    }, fileHandle);
   }, [startExport, selectedResolution, format, fps, filename, outputFolder, projectName, aspectRatio]);
 
   if (!showExportModal) return null;

@@ -51,7 +51,7 @@ export function useExportEngine() {
   const exporterRef = useRef<ExportWorkerManager | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const startExport = useCallback(async (config: ExportWorkerConfig) => {
+  const startExport = useCallback(async (config: ExportWorkerConfig, fileHandle?: FileSystemFileHandle | null) => {
     if (exporterRef.current) {
       exporterRef.current.dispose();
       exporterRef.current = null;
@@ -86,6 +86,7 @@ export function useExportEngine() {
       const exporter = new ExportWorkerManager({
         timeline,
         config,
+        fileHandle,
         callbacks: {
           onProgress: (progress, currentFrame, eta) => {
             setExportState(prev => ({

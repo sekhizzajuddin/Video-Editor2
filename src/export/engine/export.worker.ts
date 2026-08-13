@@ -24,7 +24,7 @@ import { Compositor } from './Compositor';
 import * as Mp4Muxer from 'mp4-muxer';
 
 export type WorkerMessageType = 
-  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null } }
+  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null } }
   | { type: 'CANCEL' };
 
 let isExporting = false;
@@ -35,7 +35,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
 
   switch (message.type) {
     case 'START_EXPORT':
-      await handleExport(message.payload.timeline, message.payload.config, message.payload.audioData);
+      await handleExport(
+        message.payload.timeline, 
+        message.payload.config, 
+        message.payload.audioData,
+        message.payload.fileHandle
+      );
       break;
     case 'CANCEL':
       isCancelled = true;
@@ -48,23 +53,23 @@ async function configureVideoEncoder(
   width: number,
   height: number,
   fps: number,
-  bitrate: number
+  bitrate: number,
+  useAnnexB: boolean = false
 ): Promise<void> {
   const candidateCodecs = [
-    'avc1.4d002a', // Main Profile Level 4.2 (broadly supported)
+    'avc1.4d002a', // Main Profile Level 4.2
     'avc1.42001f', // Baseline Profile Level 3.1
     'avc1.640028', // High Profile Level 4.0
     'avc1.42E01E', // Baseline
     'avc1.64001f', // High Profile Level 3.1
   ];
 
-  // prefer-software FIRST: hardware encoders have OS-level inactivity timeouts
-  // (QuotaExceededError: Codec reclaimed due to inactivity) when frames take too long.
-  // Software encoders have no such timeout. We try hardware last as a bonus.
-  const accelerationModes: ('prefer-software' | 'no-preference' | 'prefer-hardware')[] = [
-    'prefer-software',
-    'no-preference',
+  const avcFormat = useAnnexB ? 'annexb' : 'avc';
+
+  const accelerationModes: ('prefer-hardware' | 'no-preference' | 'prefer-software')[] = [
     'prefer-hardware',
+    'no-preference',
+    'prefer-software',
   ];
 
   for (const accel of accelerationModes) {
@@ -76,14 +81,15 @@ async function configureVideoEncoder(
         bitrate,
         framerate: fps,
         hardwareAcceleration: accel,
-        avc: { format: 'avc' },
+        avc: { format: avcFormat },
       };
 
       try {
-        if (typeof VideoEncoder.isConfigSupported === 'function') {
+        if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
           const support = await VideoEncoder.isConfigSupported(testConfig);
           if (support && support.supported) {
             encoder.configure(support.config || testConfig);
+            console.log(`[ExportWorker] Configured VideoEncoder with codec: ${codec}, accel: ${accel}, format: ${avcFormat}`);
             return;
           }
         } else {
@@ -96,23 +102,24 @@ async function configureVideoEncoder(
     }
   }
 
-  // Fallback direct configuration if testing loop didn't catch
+  // Fallback direct configuration
   encoder.configure({
     codec: 'avc1.42001f',
     width,
     height,
     bitrate,
     framerate: fps,
-    avc: { format: 'avc' },
+    avc: { format: avcFormat },
   });
 }
 
 async function handleExport(
   timeline: any,
   config: ExportWorkerConfig,
-  audioData?: AudioExportPayload | null
+  audioData?: AudioExportPayload | null,
+  fileHandle?: FileSystemFileHandle | null
 ) {
-  console.log('[ExportWorker] STARTING v7 - Streaming Decode + Flush', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
+  console.log('[ExportWorker] STARTING v9 - Standalone Browser & Runtime Export', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
   isExporting = true;
   isCancelled = false;
 
@@ -125,12 +132,6 @@ async function handleExport(
     // Ensure dimensions are even numbers (multiples of 2) for H.264 video encoding
     const outputWidth = Math.floor(config.width / 2) * 2;
     const outputHeight = Math.floor(config.height / 2) * 2;
-
-    // OPFS Initialization
-    const root = await navigator.storage.getDirectory();
-    const fileName = `${config.filename}.${config.format}`;
-    outputFileHandle = await root.getFileHandle(fileName, { create: true });
-    writable = await outputFileHandle.createWritable();
 
     // Frame Scheduler Initialization
     const framePool = new FramePool(30);
@@ -158,7 +159,7 @@ async function handleExport(
     let hasAudio = false;
     let audioEncoder: AudioEncoder | null = null;
 
-    if (audioData && audioData.channels && audioData.channels.length > 0 && audioData.length > 0) {
+    if (audioData && audioData.channels && audioData.channels.length > 0 && audioData.length > 0 && audioData.channels[0]) {
       const audioConfig: AudioEncoderConfig = {
         codec: 'mp4a.40.2', // AAC LC
         sampleRate: audioData.sampleRate || 48000,
@@ -167,13 +168,11 @@ async function handleExport(
       };
 
       try {
-        if (typeof AudioEncoder.isConfigSupported === 'function') {
+        if (typeof AudioEncoder !== 'undefined' && typeof AudioEncoder.isConfigSupported === 'function') {
           const support = await AudioEncoder.isConfigSupported(audioConfig);
           if (support && support.supported) {
             hasAudio = true;
           }
-        } else {
-          hasAudio = true;
         }
       } catch {
         hasAudio = false;
@@ -183,18 +182,26 @@ async function handleExport(
     let ws: WebSocket | null = null;
     let useLocalRuntime = false;
 
-    // Try to connect to Hikmah Runtime
+    // Try to connect to Hikmah Runtime (single WS attempt with short timeout)
     try {
-      const isAlive = await new Promise<boolean>((resolve) => {
-        const testWs = new WebSocket('ws://127.0.0.1:12589');
-        const timer = setTimeout(() => { testWs.close(); resolve(false); }, 600);
-        testWs.onopen = () => { clearTimeout(timer); resolve(true); };
-        testWs.onerror = () => { clearTimeout(timer); resolve(false); };
+      const testWs = new WebSocket('ws://127.0.0.1:12589');
+      const isConnected = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+          try { testWs.close(); } catch {}
+          resolve(false);
+        }, 400);
+        testWs.onopen = () => {
+          clearTimeout(timer);
+          resolve(true);
+        };
+        testWs.onerror = () => {
+          clearTimeout(timer);
+          resolve(false);
+        };
       });
 
-      if (isAlive) {
-        ws = new WebSocket('ws://127.0.0.1:12589');
-        await new Promise<void>((resolve) => { ws!.onopen = () => resolve(); });
+      if (isConnected) {
+        ws = testWs;
         ws.send(JSON.stringify({
           action: 'START_FILE_EXPORT',
           filename: config.filename || 'Export',
@@ -208,24 +215,30 @@ async function handleExport(
         useLocalRuntime = true;
         console.log('[ExportWorker] Connected to Hikmah Local Runtime');
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[ExportWorker] Hikmah Runtime connection fallback:', e);
+    }
 
-    // OPFS Initialization (fallback if no local runtime)
+    // Direct Disk Writable / OPFS Initialization (ONLY if not using local runtime)
     let muxer: any = null;
     if (!useLocalRuntime) {
-      const root = await navigator.storage.getDirectory();
-      const fileName = `${config.filename}.${config.format}`;
-      outputFileHandle = await root.getFileHandle(fileName, { create: true });
+      if (fileHandle) {
+        outputFileHandle = fileHandle;
+      } else {
+        const root = await navigator.storage.getDirectory();
+        const fileName = `${config.filename}.${config.format}`;
+        outputFileHandle = await root.getFileHandle(fileName, { create: true });
+      }
       writable = await outputFileHandle.createWritable();
 
       const muxerOptions: any = {
-        target: new Mp4Muxer.FileSystemWritableFileStreamTarget(writable!),
+        target: new Mp4Muxer.FileSystemWritableFileStreamTarget(writable),
         video: {
           codec: 'avc',
           width: outputWidth,
           height: outputHeight,
         },
-        fastStart: false,
+        fastStart: 'in-memory',
       };
 
       if (hasAudio) {
@@ -255,17 +268,18 @@ async function handleExport(
       }
     });
 
-    videoEncoder.configure({
-      codec: 'avc1.4d0034', // Main Profile, Level 5.2 (Supports up to 4K 60fps)
-      width: outputWidth,
-      height: outputHeight,
-      bitrate: config.bitrate || 12000000,
-      framerate: config.fps,
-      avc: { format: useLocalRuntime ? 'annexb' : 'avc' },
-    });
+    // Configure video encoder using supported profile lookup
+    await configureVideoEncoder(
+      videoEncoder,
+      outputWidth,
+      outputHeight,
+      config.fps,
+      config.bitrate || 12000000,
+      useLocalRuntime
+    );
 
     // Audio Encoder
-    if (hasAudio && !useLocalRuntime) {
+    if (hasAudio && !useLocalRuntime && typeof AudioEncoder !== 'undefined') {
       audioEncoder = new AudioEncoder({
         output: (chunk, meta) => muxer!.addAudioChunk(chunk, meta),
         error: e => console.error('[ExportWorker] Audio encoder error:', e)
@@ -297,10 +311,8 @@ async function handleExport(
       const vf = new VideoFrame(canvas, { timestamp: timestampMicroseconds });
       
       // Wait if encoder queue is getting too large to prevent QuotaExceededError
-      let encodeRetries = 50;
-      while (videoEncoder.encodeQueueSize > 30 && encodeRetries > 0) {
-        await new Promise(r => setTimeout(r, 10));
-        encodeRetries--;
+      while (videoEncoder.encodeQueueSize > 12 && !isCancelled) {
+        await new Promise(r => setTimeout(r, 5));
       }
 
       // Force a keyframe on the first frame and every 2 seconds
@@ -406,11 +418,22 @@ async function handleExport(
     scheduler.dispose();
     framePool.clear();
 
-    const file = await outputFileHandle!.getFile();
+    const finalFileName = outputFileHandle ? outputFileHandle.name : `${config.filename}.${config.format}`;
+    let finalFileSize = 0;
+    try {
+      if (outputFileHandle) {
+        const file = await outputFileHandle.getFile();
+        finalFileSize = file.size;
+      }
+    } catch {}
 
     postMessage({ 
       type: 'COMPLETE', 
-      payload: { fileSize: file.size, filename: fileName }, 
+      payload: { 
+        fileSize: finalFileSize, 
+        filename: finalFileName, 
+        savedDirectly: !!fileHandle 
+      }, 
     });
 
   } catch (error: any) {

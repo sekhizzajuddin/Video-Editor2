@@ -12,6 +12,7 @@ export interface ExporterCallbacks {
 export interface ExporterOptions {
   timeline: any;
   config: ExportWorkerConfig;
+  fileHandle?: FileSystemFileHandle | null;
   callbacks: ExporterCallbacks;
 }
 
@@ -96,13 +97,14 @@ export class ExportWorkerManager {
       console.warn('Audio pre-mix failed on main thread:', err);
     }
 
-    // Transfer timeline data and audio PCM to worker
+    // Transfer timeline data, audio PCM, and optional fileHandle to worker
     this.worker.postMessage({
       type: 'START_EXPORT',
       payload: {
         timeline: serializedTimeline,
         config: this.options.config,
         audioData: audioPayload,
+        fileHandle: this.options.fileHandle || null,
       }
     }, transferables);
 
@@ -132,7 +134,10 @@ export class ExportWorkerManager {
         
         const { type, payload } = event.data;
         if (type === 'COMPLETE') {
-          resolve({ filename: payload.filename, savedViaRuntime: !!payload.savedViaRuntime });
+          resolve({ 
+            filename: payload.filename, 
+            savedViaRuntime: !!payload.savedViaRuntime || !!payload.savedDirectly 
+          });
           cleanup();
         } else if (type === 'ERROR') {
           reject(new Error(payload.message));
