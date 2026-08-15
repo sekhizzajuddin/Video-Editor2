@@ -225,9 +225,6 @@ export async function renderCanvasEngine({
   const W_target = 854;
   const H_target = 480;
   const canvas_scale = canvas.width / W_target;
-  // During scrubbing use half-resolution offscreen canvases for faster drawImage ops.
-  // On scrub end, 'procut-scrub-finalize' triggers a full-res repaint automatically.
-  const DOWNSCALE = isScrubbing ? 0.5 : 1.0;
 
   // NOTE: The old needsWait early-return was removed because it blocked the entire
   // rendering pipeline when a video element was mid-seek (readyState < 1). The
@@ -525,13 +522,34 @@ export async function renderCanvasEngine({
       return true;
     }
 
-    let aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity'], clip.expressions?.['opacity']);
-    const localTime = currentTime - clip.startTime;
+    let aOpacity: number;
+    let aScale: number;
+    let aX: number;
+    let aY: number;
+    let aRot: number;
 
-    let aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale'], clip.expressions?.['transform.scale']);
-    let aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x'], clip.expressions?.['transform.x']);
-    let aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y'], clip.expressions?.['transform.y']);
-    let aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation'], clip.expressions?.['transform.rotation']);
+    // PERF: Fast-path for clips with no keyframe animations or expressions.
+    // getAnimatedValue() is called 14+ times per clip per frame. When a clip has no animations,
+    // skip the function call overhead entirely and read raw values directly.
+    const hasAnimOrExpr = !!(clip.animations && Object.keys(clip.animations).length > 0) ||
+                          !!(clip.expressions && Object.keys(clip.expressions).length > 0);
+
+    if (hasAnimOrExpr) {
+      aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity'], clip.expressions?.['opacity']);
+      aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale'], clip.expressions?.['transform.scale']);
+      aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x'], clip.expressions?.['transform.x']);
+      aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y'], clip.expressions?.['transform.y']);
+      aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation'], clip.expressions?.['transform.rotation']);
+    } else {
+      aOpacity = clip.opacity ?? 1;
+      aScale = clip.transform.scale ?? 100;
+      aX = clip.transform.x ?? 0;
+      aY = clip.transform.y ?? 0;
+      aRot = clip.transform.rotation ?? 0;
+    }
+
+    // localTime = time elapsed since clip start, used by text animations and FX timing below.
+    const localTime = currentTime - clip.startTime;
 
     // ── Motion Tracking Trajectory Offset ──────────────────────────────────
     if (clip.motionAttachment?.trackId) {
@@ -593,16 +611,16 @@ export async function renderCanvasEngine({
       }
     }
 
-    const aCropTop = getAnimatedValue(clip.crop?.top || 0, currentTime, clip.startTime, clip.animations?.['crop.top'], clip.expressions?.['crop.top']);
-    const aCropBot = getAnimatedValue(clip.crop?.bottom || 0, currentTime, clip.startTime, clip.animations?.['crop.bottom'], clip.expressions?.['crop.bottom']);
-    const aCropLeft = getAnimatedValue(clip.crop?.left || 0, currentTime, clip.startTime, clip.animations?.['crop.left'], clip.expressions?.['crop.left']);
-    const aCropRight = getAnimatedValue(clip.crop?.right || 0, currentTime, clip.startTime, clip.animations?.['crop.right'], clip.expressions?.['crop.right']);
+    const aCropTop = hasAnimOrExpr ? getAnimatedValue(clip.crop?.top || 0, currentTime, clip.startTime, clip.animations?.['crop.top'], clip.expressions?.['crop.top']) : (clip.crop?.top || 0);
+    const aCropBot = hasAnimOrExpr ? getAnimatedValue(clip.crop?.bottom || 0, currentTime, clip.startTime, clip.animations?.['crop.bottom'], clip.expressions?.['crop.bottom']) : (clip.crop?.bottom || 0);
+    const aCropLeft = hasAnimOrExpr ? getAnimatedValue(clip.crop?.left || 0, currentTime, clip.startTime, clip.animations?.['crop.left'], clip.expressions?.['crop.left']) : (clip.crop?.left || 0);
+    const aCropRight = hasAnimOrExpr ? getAnimatedValue(clip.crop?.right || 0, currentTime, clip.startTime, clip.animations?.['crop.right'], clip.expressions?.['crop.right']) : (clip.crop?.right || 0);
 
-    const aRotX = getAnimatedValue(clip.transform.rotationX ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationX'], clip.expressions?.['transform.rotationX']);
-    const aRotY = getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY'], clip.expressions?.['transform.rotationY']);
+    const aRotX = hasAnimOrExpr ? getAnimatedValue(clip.transform.rotationX ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationX'], clip.expressions?.['transform.rotationX']) : (clip.transform.rotationX ?? 0);
+    const aRotY = hasAnimOrExpr ? getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY'], clip.expressions?.['transform.rotationY']) : (clip.transform.rotationY ?? 0);
 
     const hasPerspectiveWarp = !!(clip.transform.perspectivePin || Math.abs(aRotX) > 0.01 || Math.abs(aRotY) > 0.01);
-    const aBlendIntensity = Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity'])));
+    const aBlendIntensity = hasAnimOrExpr ? Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity']))) : Math.max(0, Math.min(100, clip.transform.blendIntensity ?? 100));
     const blendMode = clip.transform.blendMode || 'source-over';
     const totalAlpha = aOpacity * opacityMultiplier;
     const needsDualBlend = blendMode !== 'source-over' && aBlendIntensity < 100;
@@ -893,7 +911,7 @@ export async function renderCanvasEngine({
                 offscreenCanvasPool.current.delete(k);
               }
             }
-            const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, Math.max(1, Math.round(dw * DOWNSCALE)), Math.max(1, Math.round(dh * DOWNSCALE)));
+            const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, Math.max(1, Math.round(dw)), Math.max(1, Math.round(dh)));
             const oCtx = offCanvas.getContext('2d')!;
             oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
 
@@ -904,7 +922,7 @@ export async function renderCanvasEngine({
             }
             if (contrast !== 100) cssFilters.push(`contrast(${Math.max(0, contrast)}%)`);
             if (saturation !== 100) cssFilters.push(`saturate(${Math.max(0, saturation)}%)`);
-            if (blur > 0) cssFilters.push(`blur(${blur * DOWNSCALE}px)`);
+            if (blur > 0) cssFilters.push(`blur(${blur}px)`);
 
             const hasFilters = cssFilters.length > 0;
             if (hasFilters) {

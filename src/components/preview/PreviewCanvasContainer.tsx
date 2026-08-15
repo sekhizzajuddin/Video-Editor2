@@ -160,26 +160,8 @@ export function PreviewCanvasContainer() {
     allClipsRef.current = allClips;
   }, [allClips]);
 
-  const tracksSignature = useMemo(() => {
-    return tracks.map((t) => 
-      `${t.id}:${t.hidden}:` + 
-      (t.clips || []).map((c) => 
-        `${c.id}:${c.startTime}:${c.duration}:${c.opacity ?? 1}:` +
-        `${c.transform?.x ?? 0}:${c.transform?.y ?? 0}:${c.transform?.scale ?? 100}:${c.transform?.rotation ?? 0}:` +
-        `${c.crop?.left ?? 0}:${c.crop?.top ?? 0}:${c.crop?.right ?? 0}:${c.crop?.bottom ?? 0}:` +
-        `${c.transform?.blendMode ?? ''}:${c.transform?.blendIntensity ?? 100}:${c.transform?.flipH ?? false}:${c.transform?.flipV ?? false}:` +
-        `${c.mask?.enabled ?? false}:${c.mask?.type ?? ''}:${c.mask?.x ?? 50}:${c.mask?.y ?? 50}:` +
-        `${c.mask?.width ?? 50}:${c.mask?.height ?? 50}:${c.mask?.rotation ?? 0}:` +
-        `${c.mask?.feather ?? 0}:${c.mask?.roundness ?? 0}:${c.mask?.invert ?? false}:` +
-        `${c.chromaKey?.enabled ?? false}:${c.chromaKey?.color ?? ''}:${c.chromaKey?.threshold ?? 0}:` +
-        `${c.objectRemoval?.enabled ?? false}:${c.objectRemoval?.mode ?? ''}:${c.objectRemoval?.shape ?? ''}:` +
-        `${c.objectRemoval?.x ?? 50}:${c.objectRemoval?.y ?? 50}:${c.objectRemoval?.width ?? 20}:${c.objectRemoval?.height ?? 20}:` +
-        `${c.objectRemoval?.rotation ?? 0}:${c.objectRemoval?.feather ?? 10}:${c.objectRemoval?.opacity ?? 100}:` +
-        `${c.objectRemoval?.stretchStrength ?? 80}:${c.objectRemoval?.patchSourceX ?? 30}:${c.objectRemoval?.patchSourceY ?? 30}:` +
-        `${c.objectRemoval?.showHighlight ?? false}:${c.objectRemoval?.quality ?? 'preview'}`
-      ).join(',')
-    ).join('|');
-  }, [tracks]);
+  // PERF: tracksSignature mega-string removed. Zustand provides a new `tracks` array reference
+  // on any mutation, so reference equality (tracks !== prev.tracks) is O(1) and sufficient.
 
   useEffect(() => {
     const allClipIds = new Set(allClips.map((c) => c.id));
@@ -284,7 +266,7 @@ export function PreviewCanvasContainer() {
     const prev = previousRenderDepsRef.current;
     if (
       !prev ||
-      prev.tracksSignature !== tracksSignature ||
+      prev.tracks !== tracks ||
       prev.imageRevision !== imageRevision ||
       prev.videoElements !== videoElements ||
       prev.viewport !== viewport ||
@@ -308,7 +290,7 @@ export function PreviewCanvasContainer() {
       framePendingRef.current = true;
       previousRenderDepsRef.current = {
         currentTime,
-        tracksSignature,
+        tracks,
         selectedClipId,
         mediaLibrary,
         videoElements,
@@ -332,7 +314,7 @@ export function PreviewCanvasContainer() {
     }
   }, [
     currentTime,
-    tracksSignature,
+    tracks,
     selectedClipId,
     mediaLibrary,
     videoElements,

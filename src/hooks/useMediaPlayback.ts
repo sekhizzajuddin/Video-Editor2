@@ -569,6 +569,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const mediaMapRef = useRef<Map<string, any>>(new Map());
   const rafIdRef = useRef<number | null>(null);
   const lastSyncTimeRef = useRef<number>(0);
+  // PERF: Cache getActiveClips() result — only recompute on track change or clip boundary crossing.
+  const cachedActiveClipsRef = useRef<ActiveClipInfo[]>([]);
+  const nextClipBoundaryRef = useRef<number>(0); // recompute when ct crosses this
+  const lastCachedStoreTracksRef = useRef<any>(null);
 
   // ---- Cache sorted tracks & media map ----
   useEffect(() => {
@@ -1008,7 +1012,27 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const isReversing = direction < 0;
 
       const pool = poolRef.current;
-      const clips = getActiveClips();
+
+      // PERF: Cache active clips list — getActiveClips() scans ALL tracks/clips/PIPs every frame.
+      // Only recompute when: (a) tracks reference changed, OR (b) currentTime crossed a clip boundary.
+      const storeTracks = store.tracks;
+      const tracksChanged = storeTracks !== lastCachedStoreTracksRef.current;
+      if (tracksChanged || ct >= nextClipBoundaryRef.current) {
+        cachedActiveClipsRef.current = getActiveClips();
+        lastCachedStoreTracksRef.current = storeTracks;
+
+        // Compute next boundary: min(clip starts > ct, clip ends > ct) across all sorted tracks
+        let nextBoundary = Infinity;
+        for (const track of sortedTracksRef.current) {
+          for (const clip of track.clips) {
+            const clipEnd = clip.startTime + clip.duration;
+            if (clip.startTime > ct && clip.startTime < nextBoundary) nextBoundary = clip.startTime;
+            if (clipEnd > ct && clipEnd < nextBoundary) nextBoundary = clipEnd;
+          }
+        }
+        nextClipBoundaryRef.current = nextBoundary;
+      }
+      const clips = cachedActiveClipsRef.current;
       const playingIds = new Set(clips.map(c => c.clipId));
       const mediaMap = mediaMapRef.current;
 
