@@ -29,7 +29,7 @@ import { getCachedImage, LocalCornerPoints } from '@/utils/canvasEffects';
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { removeBackground } from '@imgly/background-removal';
 import { toast } from 'sonner';
-import { getClipDimensions, inpaint, getOverlayMapping, clientToOverlay } from './previewMath';
+import { getClipDimensions, inpaint, getOverlayMapping, clientToOverlay, clientToViewportSpace } from './previewMath';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { isKineticMediaId, getSentenceBounds } from '@/utils/kineticSync';
 
@@ -341,9 +341,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
-            const clientXLocal = ptr.x - (427 + aX);
-            const clientYLocal = ptr.y - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -365,9 +365,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
-            const clientXLocal = ptr.x - (427 + aX);
-            const clientYLocal = ptr.y - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -389,9 +389,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
-            const clientXLocal = ptr.x - (427 + aX);
-            const clientYLocal = ptr.y - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -413,9 +413,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
-            const clientXLocal = ptr.x - (427 + aX);
-            const clientYLocal = ptr.y - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -440,9 +440,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
-            const clientXLocal = ptr.x - (427 + aX);
-            const clientYLocal = ptr.y - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -503,7 +503,12 @@ export function PreviewCanvasOverlay({
         }
 
         const newGuides: { axis: 'x' | 'y'; position: number }[] = [];
-        const snapThreshold = 12;
+        // Threshold in FRAME units, scaled to the project size and the zoom level.
+        // A flat 12 was ~2.8% of a 16:9 frame's height but ~4.4% of a 9:16 frame's
+        // width, and it did not shrink as the user zoomed in — so on vertical
+        // projects the centre line grabbed the clip over a wide band and fine
+        // positioning became a fight.
+        const snapThreshold = Math.max(2, (Math.min(W, H) * 0.02) / (viewport.zoom || 1));
 
         const draggedWidth = (dragState.baseW || 854) * (scale / 100);
         const draggedHeight = (dragState.baseH || 480) * (scale / 100);
@@ -547,17 +552,29 @@ export function PreviewCanvasOverlay({
         let minDiffX = Infinity;
         let snapXVal: number | null = null;
 
-        let W = 854;
-        let H = 480;
+        // Use the ACTUAL frame size. These locals previously hard-coded 854x480,
+        // shadowing the aspect-ratio-aware W/H computed for the rest of the
+        // component, so on a 9:16 or 1:1 project every edge-snap target sat far
+        // outside the real frame.
+        const snapW = W;
+        const snapH = H;
+
+        // Snapping must not fight the user. A plain distance test re-snaps on every
+        // mousemove, so a small drag away from a target is yanked straight back and
+        // the clip appears stuck (or, when the pointer is below centre, pulled
+        // "down" no matter which way you drag). Requiring the pointer to travel a
+        // little before snapping engages gives the handle a dead zone to escape.
+        const dragDistance = Math.hypot(dx, dy);
+        const snapArmed = dragDistance > 4;
 
         const targetsX = [
-          -W / 2,
+          -snapW / 2,
           0,
-          W / 2
+          snapW / 2
         ];
 
         otherActiveClips.forEach((other) => {
-          const dims = getClipDimensions(other, mediaLibrary, W, H);
+          const dims = getClipDimensions(other, mediaLibrary, snapW, snapH);
           const oX = other.transform?.x ?? 0;
           targetsX.push(oX - dims.width / 2);
           targetsX.push(oX);
@@ -587,7 +604,7 @@ export function PreviewCanvasOverlay({
           });
         });
 
-        if (bestSnapX !== null) {
+        if (snapArmed && bestSnapX !== null) {
           newX = bestSnapX;
           if (snapXVal !== null) {
             newGuides.push({ axis: 'x', position: snapXVal });
@@ -599,13 +616,13 @@ export function PreviewCanvasOverlay({
         let snapYVal: number | null = null;
 
         const targetsY = [
-          -H / 2,
+          -snapH / 2,
           0,
-          H / 2
+          snapH / 2
         ];
 
         otherActiveClips.forEach((other) => {
-          const dims = getClipDimensions(other, mediaLibrary, W, H);
+          const dims = getClipDimensions(other, mediaLibrary, snapW, snapH);
           const oY = other.transform?.y ?? 0;
           targetsY.push(oY - dims.height / 2);
           targetsY.push(oY);
@@ -635,7 +652,7 @@ export function PreviewCanvasOverlay({
           });
         });
 
-        if (bestSnapY !== null) {
+        if (snapArmed && bestSnapY !== null) {
           newY = bestSnapY;
           if (snapYVal !== null) {
             newGuides.push({ axis: 'y', position: snapYVal });
@@ -670,9 +687,13 @@ export function PreviewCanvasOverlay({
           getNewAnimations('crop.bottom', crop.bottom);
         }
       } else if (dragState.type === 'rot') {
-        const cx = 427 + x;
-        const cy = 240 + y;
-        const ptrAbs = clientToOverlay(e.clientX, e.clientY, rect);
+        // Centre in CLIP-LOCAL space: the handle group is drawn inside
+        // translate(offsetX, offsetY) then translate(W/2 + aX, H/2 + aY).
+        const cx = offsetX + W / 2 + x;
+        const cy = offsetY + H / 2 + y;
+        // Undo the viewport zoom/pan too, or the angle is measured in the wrong
+        // space and the clip snaps the moment the handle is grabbed.
+        const ptrAbs = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
         const mx = ptrAbs.x;
         const my = ptrAbs.y;
         let angle = Math.atan2(my - cy, mx - cx) * (180 / Math.PI);
@@ -725,9 +746,13 @@ export function PreviewCanvasOverlay({
         getNewAnimations('transform.scale', scale);
       } else {
         // Corner resize (resize-tl/tr/bl/br)
-        const cx = 427 + x;
-        const cy = 240 + y;
-        const ptrAbs = clientToOverlay(e.clientX, e.clientY, rect);
+        // Same correction as rotation: clip-local centre + viewport-aware pointer.
+        // Using (427, 240) and raw overlay units assumed zoom=1/pan=0, so grabbing
+        // a corner under any zoom or pan produced an immediate scale jump before
+        // the pointer had really moved.
+        const cx = offsetX + W / 2 + x;
+        const cy = offsetY + H / 2 + y;
+        const ptrAbs = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
         const mx = ptrAbs.x;
         const my = ptrAbs.y;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);

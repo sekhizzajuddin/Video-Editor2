@@ -91,6 +91,46 @@ export function clientToOverlay(
   };
 }
 
+
+/**
+ * Convert a client (mouse) position into the CLIP-LOCAL coordinate space that the
+ * transform handles live in.
+ *
+ * The overlay renders handles inside a nested transform:
+ *
+ *   translate(totalX, totalY) scale(zoom) translate(offsetX, offsetY)
+ *     -> translate(W/2 + aX, H/2 + aY) rotate(aRot) scale(aScale/100)
+ *
+ * `clientToOverlay` only undoes the letterboxing, giving RAW 854x480 units. The
+ * rotation and corner-resize handlers then compared that against a hard-coded
+ * centre of (427 + x, 240 + y), which silently assumes zoom = 1 and pan = 0.
+ *
+ * With any zoom or pan, the measured distance from the centre was wrong the
+ * instant the handle was grabbed — so the very first mousemove snapped the clip to
+ * a different scale (e.g. 125% at 1.25x zoom, 182% at 1.5x zoom with pan) before
+ * the user had meaningfully moved the pointer. Dragging showed the same symptom as
+ * a position jump. This undoes the viewport transform so the comparison happens in
+ * the space the handles are actually drawn in.
+ */
+export function clientToViewportSpace(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number; width: number; height: number },
+  viewport: { x: number; y: number; zoom: number }
+): { x: number; y: number } {
+  const raw = clientToOverlay(clientX, clientY, rect);
+  const zoom = viewport.zoom || 1;
+  const cx = 854 / 2;
+  const cy = 480 / 2;
+  // Inverse of: translate(totalX, totalY) scale(zoom)
+  const totalX = cx + viewport.x - cx * zoom;
+  const totalY = cy + viewport.y - cy * zoom;
+  return {
+    x: (raw.x - totalX) / zoom,
+    y: (raw.y - totalY) / zoom,
+  };
+}
+
 /**
  * Extent of a Hybrid kinetic sentence, measured from its per-word PiP layers.
  * Returns null for any clip that is not such a container.

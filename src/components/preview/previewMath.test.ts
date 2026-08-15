@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getOverlayMapping, clientToOverlay } from './previewMath';
+import { getOverlayMapping, clientToOverlay, clientToViewportSpace } from './previewMath';
 
 /**
  * The preview <canvas> uses `object-contain` and the overlay <svg> uses
@@ -112,5 +112,104 @@ describe('clientToOverlay', () => {
     const a = clientToOverlay(100, 100, rect);
     const b = clientToOverlay(200, 200, rect);
     expect(b.x - a.x).toBeCloseTo(b.y - a.y);
+  });
+});
+
+describe('clientToViewportSpace (no jump when grabbing a handle)', () => {
+  const rect = { left: 0, top: 0, width: 854, height: 480 };
+
+  /** Forward transform: clip-local point -> client pixel. */
+  const toClient = (
+    lx: number,
+    ly: number,
+    r: { left: number; top: number; width: number; height: number },
+    vp: { x: number; y: number; zoom: number }
+  ) => {
+    const CX = 427;
+    const CY = 240;
+    const totalX = CX + vp.x - CX * vp.zoom;
+    const totalY = CY + vp.y - CY * vp.zoom;
+    const overlayX = totalX + vp.zoom * lx;
+    const overlayY = totalY + vp.zoom * ly;
+    const S = Math.min(r.width / 854, r.height / 480);
+    const ox = (r.width - 854 * S) / 2;
+    const oy = (r.height - 480 * S) / 2;
+    return { clientX: r.left + ox + overlayX * S, clientY: r.top + oy + overlayY * S };
+  };
+
+  it('is the exact inverse of the viewport transform at zoom 1', () => {
+    const vp = { x: 0, y: 0, zoom: 1 };
+    const { clientX, clientY } = toClient(300, 200, rect, vp);
+    const back = clientToViewportSpace(clientX, clientY, rect, vp);
+    expect(back.x).toBeCloseTo(300);
+    expect(back.y).toBeCloseTo(200);
+  });
+
+  it('round-trips under zoom, pan, and a non-16:9 container', () => {
+    const cases = [
+      { vp: { x: 0, y: 0, zoom: 1.25 }, r: rect },
+      { vp: { x: 40, y: 25, zoom: 1 }, r: rect },
+      { vp: { x: 60, y: -30, zoom: 1.5 }, r: { left: 0, top: 0, width: 1200, height: 520 } },
+      { vp: { x: -80, y: 15, zoom: 0.75 }, r: { left: 33, top: 21, width: 900, height: 900 } },
+    ];
+    for (const { vp, r } of cases) {
+      for (const [lx, ly] of [[0, 0], [427, 240], [700, 400], [-50, -20]]) {
+        const { clientX, clientY } = toClient(lx, ly, r, vp);
+        const back = clientToViewportSpace(clientX, clientY, r, vp);
+        expect(back.x).toBeCloseTo(lx, 4);
+        expect(back.y).toBeCloseTo(ly, 4);
+      }
+    }
+  });
+
+  it('grabbing a corner with no pointer movement causes NO scale change', () => {
+    // The reported bug: the handler compared a raw overlay pointer against a
+    // hard-coded (427,240) centre, which assumes zoom=1/pan=0. Under any zoom or
+    // pan the measured radius was wrong immediately, so the clip snapped to a new
+    // scale before the user had really moved.
+    for (const ar of ['16:9', '9:16', '1:1', '4:3'] as const) {
+      let viewW = 854;
+      const viewH = 480;
+      if (ar === '9:16') viewW = Math.round(480 * (9 / 16));
+      else if (ar === '1:1') viewW = 480;
+      else if (ar === '4:3') viewW = Math.round(480 * (4 / 3));
+      const W = viewW;
+      const H = viewH;
+      const offX = (854 - viewW) / 2;
+      const offY = (480 - viewH) / 2;
+
+      for (const vp of [
+        { x: 0, y: 0, zoom: 1 },
+        { x: 0, y: 0, zoom: 1.25 },
+        { x: 40, y: 25, zoom: 1 },
+        { x: 60, y: -30, zoom: 1.5 },
+      ]) {
+        const aX = 0;
+        const aY = 0;
+        const aScale = 100;
+        const baseW = 300;
+        const baseH = 100;
+        const cx = offX + W / 2 + aX;
+        const cy = offY + H / 2 + aY;
+        const hx = cx + (baseW / 2) * (aScale / 100);
+        const hy = cy + (baseH / 2) * (aScale / 100);
+
+        const { clientX, clientY } = toClient(hx, hy, rect, vp);
+        const p = clientToViewportSpace(clientX, clientY, rect, vp);
+        const dist = Math.hypot(p.x - cx, p.y - cy);
+        const origDist = Math.hypot(baseW / 2, baseH / 2) * (aScale / 100);
+        expect((aScale * dist) / origDist).toBeCloseTo(100, 2);
+      }
+    }
+  });
+
+  it('a pure upward pointer move never yields a downward delta', () => {
+    const vp = { x: 30, y: -20, zoom: 1.4 };
+    const start = toClient(400, 300, rect, vp);
+    // Move the pointer 20 client px UP.
+    const a = clientToViewportSpace(start.clientX, start.clientY, rect, vp);
+    const b = clientToViewportSpace(start.clientX, start.clientY - 20, rect, vp);
+    expect(b.y).toBeLessThan(a.y);
+    expect(b.x).toBeCloseTo(a.x, 6);
   });
 });
