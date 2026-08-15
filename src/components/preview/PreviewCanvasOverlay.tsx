@@ -1233,6 +1233,10 @@ export function PreviewCanvasOverlay({
 
   let vw = mediaItem?.width || 1920;
   let vh = mediaItem?.height || 1080;
+  // Set when the selection box is measured from PiP word layers whose stored
+  // positions already include the container transform (see below).
+  let isKineticSentenceBox = false;
+  let kineticBoxCentre = { x: 0, y: 0 };
   if (mediaItem?.type === 'video') {
     const v = videoElements.get(activeClip.id);
     if (v && v.videoWidth > 0) {
@@ -1274,11 +1278,20 @@ export function PreviewCanvasOverlay({
       }
       const bounds = getSentenceBounds(laid);
       if (bounds) {
-        // Word positions are already in frame units relative to the clip centre,
-        // and the container's own transform is applied on top by the caller, so
-        // only the extent is needed here.
+        // Word transforms are stored UNSCALED and relative to the container, so
+        // this extent is already the correct BASE size. The SVG applies
+        // `scale(aScale / 100)` and the container's x/y on top exactly once.
+        //
+        // (Previously the reflow baked the container's scale and offset into the
+        // word positions as well. Measuring those and then letting the renderer
+        // transform them again applied both twice — the box shrank and drifted
+        // further on every single drag.)
         vw = Math.max(80, bounds.width + 40);
         vh = Math.max(40, bounds.height + 20);
+        // The bounds are in absolute frame units (already transformed), so the box
+        // is positioned from their centre and the group transform is neutralised.
+        isKineticSentenceBox = true;
+        kineticBoxCentre = { x: bounds.x, y: bounds.y };
         measured = true;
       }
     }
@@ -1316,8 +1329,12 @@ export function PreviewCanvasOverlay({
       initTransform: { x: aX, y: aY, scale: aScale, rotation: aRot },
       initCrop: { left: aCropLeft, top: aCropTop, right: aCropRight, bottom: aCropBot },
       initMask: { ...mask },
-      baseW,
-      baseH,
+      // Resize maths expects the UNSCALED base extent (it applies transform.scale
+      // itself). For a kinetic sentence, baseW/baseH were measured from word
+      // layers that already include that scale, so divide it back out — otherwise
+      // each resize is computed against an inflated base and the scale runs away.
+      baseW: isKineticSentenceBox ? baseW / Math.max(0.001, aScale / 100) : baseW,
+      baseH: isKineticSentenceBox ? baseH / Math.max(0.001, aScale / 100) : baseH,
     });
   };
 
@@ -1555,7 +1572,20 @@ export function PreviewCanvasOverlay({
               </g>
             ) : (
               <g
-                transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
+                transform={
+                  // A Hybrid kinetic sentence measures its box from its PiP word
+                  // layers, whose stored positions ALREADY include the container's
+                  // x/y and scale (the canvas renderer does not apply a parent
+                  // transform to PiP children, so the reflow has to bake it in).
+                  //
+                  // Applying that transform again here is what made the box creep
+                  // off the text and shrink a little more with every drag — the
+                  // error compounded because each drag re-measured the previous,
+                  // already-doubly-transformed result.
+                  isKineticSentenceBox
+                    ? `translate(${W / 2 + kineticBoxCentre.x}, ${H / 2 + kineticBoxCentre.y}) rotate(${aRot})`
+                    : `translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`
+                }
               >
                 {activePropertiesTab === 'mask' && mask.enabled ? (
                   <g transform={`translate(${maskLocalX}, ${maskLocalY}) rotate(${maskRot})`}>

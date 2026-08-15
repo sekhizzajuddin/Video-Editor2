@@ -377,3 +377,83 @@ describe('getSentenceBounds (issue 1: box must cover the whole sentence)', () =>
     expect(getSentenceBounds([])).toBeNull();
   });
 });
+
+describe('transform box stability (no compounding drift/shrink)', () => {
+  const words = 'Jabki Uska Koi Mass'.split(' ');
+
+  /** Mirror of the overlay: measure absolute bounds of laid-out words. */
+  const measure = (scale: number, offX: number, offY: number) =>
+    getSentenceBounds(layoutSentence(words, { scale, offsetX: offX, offsetY: offY }))!;
+
+  it('box centre tracks the container offset exactly (never doubles it)', () => {
+    // The bug: the offset was baked into word positions AND applied again by the
+    // SVG group, so the box drifted at twice the drag distance.
+    for (const off of [0, 30, 90, 150]) {
+      const b = measure(1, off, 0);
+      expect(b.x).toBeCloseTo(off, 0);
+    }
+  });
+
+  it('box size follows the container scale exactly once', () => {
+    // Pin the line structure so the comparison isolates SCALING. Without this,
+    // scaling up eventually forces a wrap onto a second line, which legitimately
+    // reduces the width ratio — real behaviour, but not what this test is about.
+    const measureFixed = (scale: number) =>
+      getSentenceBounds(layoutSentence(words, { scale, lineStructure: [words.length] }))!;
+
+    const base = measureFixed(1);
+    for (const scale of [0.5, 0.9, 1.5, 2]) {
+      const b = measureFixed(scale);
+      // Width must scale LINEARLY — applying the scale twice would make it
+      // grow/shrink quadratically, which is the reported bug.
+      expect(b.width / base.width).toBeCloseTo(scale, 1);
+    }
+  });
+
+  it('scaling up eventually wraps rather than overflowing the frame', () => {
+    // Complements the test above: with free wrapping, a large scale must add a
+    // line instead of running off the canvas.
+    const oneLine = new Set(layoutSentence(words, { scale: 1 }).map((w) => w.y)).size;
+    const scaledUp = new Set(layoutSentence(words, { scale: 2.5 }).map((w) => w.y)).size;
+    expect(scaledUp).toBeGreaterThanOrEqual(oneLine);
+  });
+
+  it('repeated transforms do not compound (the "gradually smaller" bug)', () => {
+    // Re-measuring after each drag must depend ONLY on the current transform,
+    // never on how many drags preceded it.
+    let scale = 1;
+    let off = 0;
+    const seen: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      seen.push(measure(scale, off, 0).width);
+      scale *= 0.9;
+      off += 30;
+    }
+    // Recomputing the same sequence from scratch must give identical results.
+    let scale2 = 1;
+    const fresh: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      fresh.push(measure(scale2, 0, 0).width);
+      scale2 *= 0.9;
+    }
+    for (let i = 0; i < seen.length; i++) {
+      expect(seen[i]).toBeCloseTo(fresh[i], 5);
+    }
+  });
+
+  it('a round trip out and back restores the original box', () => {
+    const before = measure(1, 0, 0);
+    measure(1.4, 80, 40);          // drag away
+    const after = measure(1, 0, 0); // drag back
+    expect(after.width).toBeCloseTo(before.width, 5);
+    expect(after.height).toBeCloseTo(before.height, 5);
+    expect(after.x).toBeCloseTo(before.x, 5);
+    expect(after.y).toBeCloseTo(before.y, 5);
+  });
+
+  it('vertical offset behaves like horizontal', () => {
+    for (const off of [0, 25, 75]) {
+      expect(measure(1, 0, off).y).toBeCloseTo(off, 0);
+    }
+  });
+});

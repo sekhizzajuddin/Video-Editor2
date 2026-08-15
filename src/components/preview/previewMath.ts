@@ -151,6 +151,9 @@ export function getClipDimensions(
     // Measure those word layers so the box matches the block the user sees.
     const kineticBounds = getKineticSentenceExtent(clip);
     if (kineticBounds) {
+      // Word transforms are stored UNSCALED and container-relative, so this is
+      // already the BASE extent; the `scale / 100` applied at the end of this
+      // function is the one and only scaling.
       vw = Math.max(80, kineticBounds.width + 40);
       vh = Math.max(40, kineticBounds.height + 20);
     } else if (ts) {

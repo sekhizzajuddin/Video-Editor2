@@ -1716,6 +1716,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     // collapsed a multi-line block onto one line.
     const lineStructure = deriveLineStructure(existing);
 
+    // The canvas renderer draws PiP child clips using ONLY their own transform —
+    // it never applies the parent container's x/y/scale. So the container's
+    // transform has to be baked into the word positions here, otherwise moving or
+    // scaling the sentence would not move the words at all.
+    //
+    // Consequence for anything that MEASURES these words (the selection box): the
+    // stored positions are already fully transformed, so the container transform
+    // must NOT be applied to them a second time. See PreviewCanvasOverlay.
     const layoutOpts = {
       scale: (primary.transform?.scale ?? 100) / 100,
       offsetX: primary.transform?.x ?? 0,

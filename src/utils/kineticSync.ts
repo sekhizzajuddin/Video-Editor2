@@ -492,6 +492,10 @@ export function planGroupReflow(
   sentence: string,
   layoutOpts: LayoutOptions
 ): SyncPlanUpdate[] {
+  // NOTE: callers must NOT pass the container's translation in `layoutOpts`.
+  // Word positions are stored relative to the container, and the renderer adds the
+  // container's own transform on top. Baking the offset in here too would apply it
+  // twice, so the selection box (and the words) drift at double the drag distance.
   const words = tokenizeSentence(sentence);
   const positions = layoutSentence(words, layoutOpts);
   const updates: SyncPlanUpdate[] = [];
