@@ -573,6 +573,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const cachedActiveClipsRef = useRef<ActiveClipInfo[]>([]);
   const nextClipBoundaryRef = useRef<number>(0); // recompute when ct crosses this
   const lastCachedStoreTracksRef = useRef<any>(null);
+  // BUG FIX: Track previous ct to detect time-went-backward (loop/seek to start).
+  // Without this, after looping from t=30→t=0, the cache still served clips from t=30
+  // because 0 < nextClipBoundaryRef (e.g. 5s), so no recompute fired.
+  const prevSyncCtRef = useRef<number>(-1);
   // PERF: Persistent Set reused every frame to avoid 2 heap allocations/frame (Array + Set).
   const playingIdsSetRef = useRef<Set<string>>(new Set());
 
@@ -1015,24 +1019,39 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       const pool = poolRef.current;
 
-      // PERF: Cache active clips list — getActiveClips() scans ALL tracks/clips/PIPs every frame.
-      // Only recompute when: (a) tracks reference changed, OR (b) currentTime crossed a clip boundary.
+      // PERF + BUG FIX: Cache active clips list with loop/seek-backward detection.
+      // Bug: when playback loops (t=30 → t=0), nextClipBoundaryRef was still > 0, so
+      // `ct >= nextClipBoundary` was false and stale end-of-timeline clips were returned.
+      // Video elements saw their clipIds as still "active" (justActivated=false), skipping
+      // the hard seek that would reset them to t=0. Result: frozen/lagging second playback.
       const storeTracks = store.tracks;
       const tracksChanged = storeTracks !== lastCachedStoreTracksRef.current;
-      if (tracksChanged || ct >= nextClipBoundaryRef.current) {
+      const timeWentBackward = ct < prevSyncCtRef.current - 0.5; // loop or seek-to-start
+      prevSyncCtRef.current = ct;
+
+      if (tracksChanged || ct >= nextClipBoundaryRef.current || timeWentBackward) {
+        if (timeWentBackward) {
+          // Reset boundary so next tick also recomputes (handles clips starting at t=0)
+          nextClipBoundaryRef.current = 0;
+          // Clear lastActiveClipIds so ALL clips at the new position are treated as
+          // freshly activated, triggering hard seeks to their correct start positions.
+          lastActiveClipIdsRef.current = new Set();
+        }
         cachedActiveClipsRef.current = getActiveClips();
         lastCachedStoreTracksRef.current = storeTracks;
 
-        // Compute next boundary: min(clip starts > ct, clip ends > ct) across all sorted tracks
-        let nextBoundary = Infinity;
-        for (const track of sortedTracksRef.current) {
-          for (const clip of track.clips) {
-            const clipEnd = clip.startTime + clip.duration;
-            if (clip.startTime > ct && clip.startTime < nextBoundary) nextBoundary = clip.startTime;
-            if (clipEnd > ct && clipEnd < nextBoundary) nextBoundary = clipEnd;
+        if (!timeWentBackward) {
+          // Compute next boundary: min(clip starts > ct, clip ends > ct)
+          let nextBoundary = Infinity;
+          for (const track of sortedTracksRef.current) {
+            for (const clip of track.clips) {
+              const clipEnd = clip.startTime + clip.duration;
+              if (clip.startTime > ct && clip.startTime < nextBoundary) nextBoundary = clip.startTime;
+              if (clipEnd > ct && clipEnd < nextBoundary) nextBoundary = clipEnd;
+            }
           }
+          nextClipBoundaryRef.current = nextBoundary;
         }
-        nextClipBoundaryRef.current = nextBoundary;
       }
       const clips = cachedActiveClipsRef.current;
       // PERF: Reuse a persistent Set instead of `new Set(clips.map(...))` every frame.

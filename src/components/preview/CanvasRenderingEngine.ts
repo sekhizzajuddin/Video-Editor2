@@ -52,6 +52,14 @@ let _cachedVideoTracks: TimelineTrack[] = [];
 let _cachedTextTracks: TimelineTrack[] = [];
 let _cachedVisualTracks: TimelineTrack[] = [];
 
+// ---------------------------------------------------------------------------
+// Per-clip animation presence cache — avoids Object.keys(clip.animations) every frame.
+// Object.keys() allocates a new Array every call. At 4 clips × 60fps = 14,400 arrays/min.
+// Invalidated when tracks reference changes (Zustand always gives new ref on mutation).
+// ---------------------------------------------------------------------------
+const _clipHasAnimCache = new Map<string, boolean>();
+let _animCacheTracksRef: TimelineTrack[] | null = null;
+
 export interface RenderCanvasParams {
   canvas: HTMLCanvasElement;
   compositeCtxRef: React.MutableRefObject<CanvasRenderingContext2D | null>;
@@ -544,11 +552,18 @@ export async function renderCanvasEngine({
     let aY: number;
     let aRot: number;
 
-    // PERF: Fast-path for clips with no keyframe animations or expressions.
-    // getAnimatedValue() is called 14+ times per clip per frame. When a clip has no animations,
-    // skip the function call overhead entirely and read raw values directly.
-    const hasAnimOrExpr = !!(clip.animations && Object.keys(clip.animations).length > 0) ||
-                          !!(clip.expressions && Object.keys(clip.expressions).length > 0);
+    // PERF: Cached hasAnimOrExpr — Object.keys() on every clip every frame allocates a new
+    // Array each call. Use a module-level Map keyed by clipId, cleared when tracks changes.
+    if (tracks !== _animCacheTracksRef) {
+      _clipHasAnimCache.clear();
+      _animCacheTracksRef = tracks;
+    }
+    let hasAnimOrExpr = _clipHasAnimCache.get(clip.id);
+    if (hasAnimOrExpr === undefined) {
+      hasAnimOrExpr = !!(clip.animations && Object.keys(clip.animations).length > 0) ||
+                      !!(clip.expressions && Object.keys(clip.expressions).length > 0);
+      _clipHasAnimCache.set(clip.id, hasAnimOrExpr);
+    }
 
     if (hasAnimOrExpr) {
       aOpacity = getAnimatedValue(clip.opacity, currentTime, clip.startTime, clip.animations?.['opacity'], clip.expressions?.['opacity']);
