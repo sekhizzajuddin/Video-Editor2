@@ -586,13 +586,22 @@ export function PreviewCanvasOverlay({
         const snapW = W;
         const snapH = H;
 
-        // Snapping must not fight the user. A plain distance test re-snaps on every
-        // mousemove, so a small drag away from a target is yanked straight back and
-        // the clip appears stuck (or, when the pointer is below centre, pulled
-        // "down" no matter which way you drag). Requiring the pointer to travel a
-        // little before snapping engages gives the handle a dead zone to escape.
-        const dragDistance = Math.hypot(dx, dy);
-        const snapArmed = dragDistance > 4;
+        // ── Alignment snapping ────────────────────────────────────────────────
+        // Snapping must assist, never fight. Two rules keep it predictable:
+        //
+        //  a) Per-axis arming. The old check used the total distance from the drag
+        //     origin, so once the pointer had travelled 4 units in ANY direction
+        //     snapping stayed armed for the rest of the gesture — the clip then
+        //     re-snapped on every frame and had to be yanked out of the band.
+        //     Arming each axis on its own movement lets a purely vertical drag
+        //     leave the horizontal guide alone, and vice versa.
+        //
+        //  b) Snap only when moving TOWARD the line. Pulling away from a guide must
+        //     always release it. Without this, dragging down from just above a
+        //     guide pushed the clip back UP onto it — the reported "moves the wrong
+        //     way" behaviour.
+        const snapArmedX = Math.abs(dx) > 2;
+        const snapArmedY = Math.abs(dy) > 2;
 
         const targetsX = [
           -snapW / 2,
@@ -617,21 +626,25 @@ export function PreviewCanvasOverlay({
         draggedAnchorsX.forEach((anchor) => {
           targetsX.forEach((targetVal) => {
             const diff = Math.abs(anchor.val - targetVal);
-            if (diff < snapThreshold && diff < minDiffX) {
-              minDiffX = diff;
-              if (anchor.type === 'left') {
-                bestSnapX = targetVal + draggedWidth / 2;
-              } else if (anchor.type === 'center') {
-                bestSnapX = targetVal;
-              } else {
-                bestSnapX = targetVal - draggedWidth / 2;
-              }
-              snapXVal = targetVal;
-            }
+            if (diff >= snapThreshold || diff >= minDiffX) return;
+            const candidate =
+              anchor.type === 'left'
+                ? targetVal + draggedWidth / 2
+                : anchor.type === 'center'
+                  ? targetVal
+                  : targetVal - draggedWidth / 2;
+            // Reject a snap whose CORRECTION would push the clip against the drag
+            // direction. Otherwise a guide just behind the pointer drags the clip
+            // backwards, which reads as "it moves the wrong way".
+            const correction = candidate - newX;
+            if (correction !== 0 && Math.sign(correction) === -Math.sign(dx)) return;
+            minDiffX = diff;
+            bestSnapX = candidate;
+            snapXVal = targetVal;
           });
         });
 
-        if (snapArmed && bestSnapX !== null) {
+        if (snapArmedX && bestSnapX !== null) {
           newX = bestSnapX;
           if (snapXVal !== null) {
             newGuides.push({ axis: 'x', position: snapXVal });
@@ -665,21 +678,22 @@ export function PreviewCanvasOverlay({
         draggedAnchorsY.forEach((anchor) => {
           targetsY.forEach((targetVal) => {
             const diff = Math.abs(anchor.val - targetVal);
-            if (diff < snapThreshold && diff < minDiffY) {
-              minDiffY = diff;
-              if (anchor.type === 'top') {
-                bestSnapY = targetVal + draggedHeight / 2;
-              } else if (anchor.type === 'center') {
-                bestSnapY = targetVal;
-              } else {
-                bestSnapY = targetVal - draggedHeight / 2;
-              }
-              snapYVal = targetVal;
-            }
+            if (diff >= snapThreshold || diff >= minDiffY) return;
+            const candidate =
+              anchor.type === 'top'
+                ? targetVal + draggedHeight / 2
+                : anchor.type === 'center'
+                  ? targetVal
+                  : targetVal - draggedHeight / 2;
+            const correction = candidate - newY;
+            if (correction !== 0 && Math.sign(correction) === -Math.sign(dy)) return;
+            minDiffY = diff;
+            bestSnapY = candidate;
+            snapYVal = targetVal;
           });
         });
 
-        if (snapArmed && bestSnapY !== null) {
+        if (snapArmedY && bestSnapY !== null) {
           newY = bestSnapY;
           if (snapYVal !== null) {
             newGuides.push({ axis: 'y', position: snapYVal });
@@ -1391,11 +1405,43 @@ export function PreviewCanvasOverlay({
   const handleMouseDown = (e: React.MouseEvent, type: string) => {
     e.stopPropagation();
     const mask = activeClip?.mask || { x: 50, y: 50, width: 50, height: 50, rotation: 0, feather: 0, roundness: 0 };
+
+    // ── Capture the BASE transform, not the displayed one ────────────────────
+    //
+    // aX/aY/aScale/aRot are the values actually on screen: keyframe-interpolated
+    // at the playhead, plus any per-aspect-ratio framing offset. The drag handler
+    // writes its result straight into `transform.x/y/scale/rotation`, which are the
+    // BASE values that keyframes and framing are applied ON TOP OF.
+    //
+    // Seeding the drag with the displayed value therefore promoted it to the base
+    // on the very first mousemove — so a clip carrying a motion keyframe (or any
+    // per-ratio framing) teleported the instant it was touched, by exactly the
+    // animation/framing offset at that playhead position. Nudge it and it lurched
+    // again, which is the "changes position up/down many times on click" report.
+    //
+    // Dragging a keyframed property still works: getNewAnimations() re-keys the
+    // property at the current local time, and deltas are applied to the base.
+    const baseTransform = activeClip?.transform ?? { x: 0, y: 0, scale: 100, rotation: 0 };
+    const hasKf = (prop: string) => !!activeClip?.animations?.[prop]?.length;
+    const framing =
+      activeClip && perRatioFramingEnabled ? perRatioFraming[aspectRatio]?.[activeClip.id] : undefined;
+
     setDragState({
       type,
       startX: e.clientX,
       startY: e.clientY,
-      initTransform: { x: aX, y: aY, scale: aScale, rotation: aRot },
+      // For a keyframed property the on-screen value IS the one being edited (the
+      // keyframe gets rewritten), so keep it. Otherwise seed from the base so the
+      // write is a no-op when the pointer has not moved. Framing offsets are always
+      // removed — they are a separate, additive layer.
+      initTransform: {
+        x: (hasKf('transform.x') ? aX : baseTransform.x ?? 0) - (framing?.x ?? 0),
+        y: (hasKf('transform.y') ? aY : baseTransform.y ?? 0) - (framing?.y ?? 0),
+        scale:
+          (hasKf('transform.scale') ? aScale : baseTransform.scale ?? 100) /
+          (framing?.scale !== undefined ? framing.scale / 100 : 1),
+        rotation: hasKf('transform.rotation') ? aRot : baseTransform.rotation ?? 0,
+      },
       initCrop: { left: aCropLeft, top: aCropTop, right: aCropRight, bottom: aCropBot },
       initMask: { ...mask },
       // Resize maths expects the UNSCALED base extent (it applies transform.scale
