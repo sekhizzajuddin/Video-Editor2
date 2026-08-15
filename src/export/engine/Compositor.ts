@@ -164,32 +164,56 @@ export class Compositor {
 
         // 6. Draw the frame, applying source metadata rotation
         this.ctx.save();
-        if (srcRot !== 0) {
-          this.ctx.rotate((srcRot * Math.PI) / 180);
-        }
         
-        if (isRotated) {
-          this.ctx.drawImage(layer.frame, -finalH / 2, -finalW / 2, finalH, finalW);
-        } else {
-          this.ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
-        }
-        this.ctx.restore();
-        
-        this.ctx.restore();
-
-        // Apply Chroma Key (Green Screen) if enabled
         if (layer.chromaKey && layer.chromaKey.enabled) {
-          this.applyChromaKey(layer.chromaKey);
+          // Optimization: Draw to a tightly-bound offscreen canvas first to apply Chroma Key ONLY 
+          // to this layer's pixels, avoiding expensive 1080p full-canvas iteration and preventing 
+          // background layer pixel destruction!
+          const tempCanvas = new OffscreenCanvas(Math.max(1, finalW), Math.max(1, finalH));
+          const tempCtx = tempCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
+          
+          tempCtx.save();
+          if (srcRot !== 0) {
+            tempCtx.translate(finalW / 2, finalH / 2);
+            tempCtx.rotate((srcRot * Math.PI) / 180);
+            if (isRotated) {
+              tempCtx.drawImage(layer.frame, -finalH / 2, -finalW / 2, finalH, finalW);
+            } else {
+              tempCtx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
+            }
+          } else {
+            if (isRotated) {
+              // Should not happen if srcRot === 0, but fallback
+              tempCtx.drawImage(layer.frame, 0, 0, finalH, finalW);
+            } else {
+              tempCtx.drawImage(layer.frame, 0, 0, finalW, finalH);
+            }
+          }
+          tempCtx.restore();
+
+          this.applyChromaKey(tempCtx, tempCanvas.width, tempCanvas.height, layer.chromaKey);
+          
+          this.ctx.drawImage(tempCanvas, -finalW / 2, -finalH / 2, finalW, finalH);
+        } else {
+          // Standard Draw
+          if (srcRot !== 0) {
+            this.ctx.rotate((srcRot * Math.PI) / 180);
+          }
+          
+          if (isRotated) {
+            this.ctx.drawImage(layer.frame, -finalH / 2, -finalW / 2, finalH, finalW);
+          } else {
+            this.ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
+          }
         }
+        
+        this.ctx.restore();
+        this.ctx.restore();
       }
     }
   }
 
-  private applyChromaKey(settings: { color: string; threshold: number; softness: number; spillSuppression: number }) {
-    const ctx = this.ctx;
-    const width = this.canvas.width;
-    const height = this.canvas.height;
-    
+  private applyChromaKey(ctx: OffscreenCanvasRenderingContext2D, width: number, height: number, settings: { color: string; threshold: number; softness: number; spillSuppression: number }) {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
     

@@ -1334,19 +1334,12 @@ export async function renderCanvasEngine({
     }
   }
 
-  // PERF: parallelize clip draws. Sequential awaits for 10 clips at 16ms each
-  // = 160ms per frame (5 dropped frames at 60fps). We fire every drawSingleClip
-  // and await only during playback (when we have time to wait) or at end of
-  // scrub (when next frame is queued via framePendingRef).
-  if (isScrubbing) {
-    // During scrub the renderer kicks off draws without awaiting; the awaits
-    // complete into the next frame's paint which is fine because we're already
-    // capping quality (skipExpensiveFX = true during scrub).
-    for (const item of drawQueue) {
-      void drawSingleClip(item.clip);
-    }
-  } else {
-    await Promise.all(drawQueue.map((item) => drawSingleClip(item.clip)));
+  // Render clips sequentially to guarantee correct Z-index order and prevent Canvas 2D
+  // context state corruption (since drawSingleClip can yield on async operations like masks/AI).
+  // Note: JavaScript is single-threaded, so Promise.all does not parallelize CPU-bound Canvas
+  // drawing anyway; it merely interleaves execution, which corrupts the shared `ctx` state stack.
+  for (const item of drawQueue) {
+    await drawSingleClip(item.clip);
   }
 
   if (!anyClipDrawn && !hasClips) {
