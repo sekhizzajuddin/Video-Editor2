@@ -50,7 +50,17 @@ export function getClipDimensions(
   } else if (mediaItem?.type === 'text' || clip.textSettings || clip.mediaId === 'text-placeholder') {
     const ts = clip.textSettings;
     if (ts) {
-      const fontSize = Number(ts.fontSize) || 48;
+      // Hybrid kinetic sentences use an INVISIBLE primary clip (fontSize 1,
+      // transparent) purely as a container for their per-word PiP layers. Sizing
+      // its selection box from that 1px font produced a sliver a few pixels tall
+      // that was effectively impossible to grab, so the sentence could not be
+      // moved or scaled as a group. Measure the container at a realistic size
+      // instead — it is never painted, so this only affects the handles.
+      const isKineticContainer =
+        typeof clip.mediaId === 'string' && clip.mediaId.startsWith('generator:kinetic') &&
+        !!clip.pipWindowIds?.length;
+      const rawFontSize = Number(ts.fontSize) || 48;
+      const fontSize = isKineticContainer ? Math.max(rawFontSize, 48) : rawFontSize;
       const text = String(ts.text || '');
       const lines = text.split('\n');
       const estCharWidth = fontSize * 0.6;

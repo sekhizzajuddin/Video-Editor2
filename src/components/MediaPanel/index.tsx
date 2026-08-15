@@ -51,6 +51,7 @@ import {
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
+import { isKineticMediaId } from '@/utils/kineticSync';
 import { useShallow } from 'zustand/react/shallow';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
@@ -432,6 +433,8 @@ export function MediaPanel() {
   // re-rendered the whole panel on every playback store write. Insertion handlers
   // that need an exact value already call useEditorStore.getState().currentTime.
   const currentTime = usePlaybackTime(5);
+  // Used to highlight the selected kinetic word layer in the text-clip list.
+  const selectedClipId = useEditorStore((s) => s.selectedClipId);
 
   const [syncTargetTrack, setSyncTargetTrack] = useState('');
   const [syncAudioClip, setSyncAudioClip] = useState('');
@@ -2195,8 +2198,15 @@ export function MediaPanel() {
                                 <div className="flex items-center gap-1.5 overflow-hidden">
                                   <Type className="w-3.5 h-3.5 text-teal-500 shrink-0" />
                                   <span className="text-[11px] text-[#d0d0d0] font-medium truncate pr-8">
-                                    {c.textSettings?.text || 'Text Clip'}
+                                    {c.textSettings?.text?.trim() || 'Text Clip'}
                                   </span>
+                                  {/* Kinetic sentence containers own their word layers; badge the
+                                      word count so the group is identifiable at a glance. */}
+                                  {isKineticMediaId(c.mediaId) && !!c.pipWindowIds?.length && (
+                                    <span className="text-[8px] uppercase tracking-wider text-purple-300 font-semibold bg-purple-500/10 px-1 rounded border border-purple-500/20 shrink-0">
+                                      {(pipWindows?.[c.pipWindowIds[0]]?.tracks?.length ?? 0)}w
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
@@ -2233,6 +2243,48 @@ export function MediaPanel() {
                                   </span>
                                 )}
                               </div>
+
+                              {/* Per-word PiP layers. These live inside a PiP window rather than
+                                  on a main track, so they were invisible in this panel — the user
+                                  could see the sentence but not the words it drives. Listing them
+                                  here makes the whole kinetic group inspectable, and clicking a
+                                  word selects it so its transform box appears on that word alone. */}
+                              {isKineticMediaId(c.mediaId) && !!c.pipWindowIds?.length && (() => {
+                                const pipWin = pipWindows?.[c.pipWindowIds[0]];
+                                const wordTracks = (pipWin?.tracks ?? []).filter(t => t.type === 'text');
+                                if (wordTracks.length === 0) return null;
+                                return (
+                                  <div className="mt-2 pl-2 border-l border-teal-500/20 space-y-1">
+                                    {wordTracks.map((wt) => {
+                                      const wordClip = wt.clips[0];
+                                      if (!wordClip) return null;
+                                      const wordText = wordClip.textSettings?.text?.trim() || '—';
+                                      const isWordSelected = selectedClipId === wordClip.id;
+                                      return (
+                                        <div
+                                          key={wordClip.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            useEditorStore.getState().setActivePipWindow(c.pipWindowIds![0]);
+                                            selectClip(wordClip.id);
+                                          }}
+                                          className={`flex items-center justify-between gap-2 px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+                                            isWordSelected
+                                              ? 'bg-teal-500/20 text-teal-200'
+                                              : 'text-[#9a9a9a] hover:bg-white/5 hover:text-white'
+                                          }`}
+                                          title={`Select "${wordText}" in the PiP window`}
+                                        >
+                                          <span className="text-[10px] truncate">{wordText}</span>
+                                          <span className="text-[8px] font-mono text-[#5a5a5a] shrink-0">
+                                            {formatSimpleTime(wordClip.startTime)}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           );
                         })}

@@ -22,6 +22,13 @@ import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAcc
 import { cleanupClipBackgroundState } from '@/utils/aiBackground';
 import { detectAspectRatio } from '@/utils/aspectRatioHelper';
 import { setPlaybackTime, getPlaybackTime } from '@/utils/playbackClock';
+import {
+  planKineticSync,
+  planGroupReflow,
+  isKineticMediaId,
+  type ExistingWordLayer,
+  type SyncPlan,
+} from '@/utils/kineticSync';
 import type { AspectRatioConflictData } from '@/types';
 
 let saveTimeoutId: any = null;
@@ -177,6 +184,11 @@ interface EditorActions {
   replaceClipMedia: (clipId: string, newMediaId: string) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>, options?: { ripple?: boolean }) => void;
+  /**
+   * Reconcile a Hybrid kinetic-typography sentence with its per-word PiP layers.
+   * Called automatically whenever the primary clip's text changes.
+   */
+  syncKineticSentence: (primaryClipId: string, opts?: { reflowOnly?: boolean }) => void;
   batchUpdateClips: (updates: { clipId: string; changes: Partial<TimelineClip> }[]) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
   moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[], resolveOverlap?: boolean) => void;
@@ -1658,6 +1670,151 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Delete Clip');
   },
 
+  syncKineticSentence: (primaryClipId, opts) => {
+    const state = get();
+    const found = findClipDeep(state, primaryClipId);
+    if (!found) return;
+    const primary = found.clip as TimelineClip;
+
+    const pipId = primary.pipWindowIds?.[0];
+    if (!pipId) return;
+    const pip = (state.pipWindows || {})[pipId];
+    if (!pip) return;
+
+    // Only Hybrid kinetic groups are managed this way. A user-authored clip that
+    // merely happens to own a PiP window must never have its child layers rewritten.
+    if (!isKineticMediaId(primary.mediaId)) return;
+
+    const sentence = primary.textSettings?.text ?? '';
+
+    // Collect the existing word layers in reading order. Each kinetic word lives
+    // on its own single-clip PiP track, so track order IS word order.
+    const existing: ExistingWordLayer[] = [];
+    for (const track of pip.tracks) {
+      if (track.type !== 'text') continue;
+      const clip = track.clips[0];
+      if (!clip) continue;
+      existing.push({
+        clipId: clip.id,
+        trackId: track.id,
+        text: clip.textSettings?.text ?? '',
+        startTime: clip.startTime,
+        duration: clip.duration,
+      });
+    }
+    if (existing.length === 0 && !sentence.trim()) return;
+
+    // The primary clip's transform drives the group layout, so moving/scaling the
+    // sentence re-flows every word at once instead of one-by-one.
+    const layoutOpts = {
+      scale: (primary.transform?.scale ?? 100) / 100,
+      offsetX: primary.transform?.x ?? 0,
+      offsetY: primary.transform?.y ?? 0,
+      layout: (primary as any).kineticLayout === 'column' ? ('column' as const) : ('row' as const),
+    };
+
+    let updates: ReturnType<typeof planGroupReflow> = [];
+    let inserts: SyncPlan['inserts'] = [];
+    let removals: string[] = [];
+
+    if (opts?.reflowOnly) {
+      updates = planGroupReflow(existing, sentence, layoutOpts);
+    } else {
+      const plan = planKineticSync(existing, sentence, pip.duration || primary.duration, layoutOpts);
+      if (plan.noop && plan.updates.length === 0) return;
+      updates = plan.updates;
+      inserts = plan.inserts;
+      removals = plan.removals;
+    }
+
+    if (updates.length === 0 && inserts.length === 0 && removals.length === 0) return;
+
+    const updateByClipId = new Map(updates.map((u) => [u.clipId, u]));
+    const removalSet = new Set(removals);
+
+    set((st) => {
+      const target = (st.pipWindows || {})[pipId];
+      if (!target) return st;
+
+      // Apply updates and drop removed words. A track whose only clip was removed
+      // is deleted outright, which is what "removing a word clears that PiP layer"
+      // means to the user.
+      const nextTracks: TimelineTrack[] = [];
+      for (const track of target.tracks) {
+        const clip = track.clips[0];
+        if (clip && removalSet.has(clip.id)) continue;
+
+        if (clip && updateByClipId.has(clip.id)) {
+          const u = updateByClipId.get(clip.id)!;
+          nextTracks.push({
+            ...track,
+            name: `Word (${u.text})`,
+            clips: [{
+              ...clip,
+              textSettings: {
+                ...(clip.textSettings as any),
+                text: u.text,
+                fontSize: u.fontSize,
+              },
+              transform: { ...clip.transform, x: u.x, y: u.y },
+            }],
+          });
+        } else {
+          nextTracks.push(track);
+        }
+      }
+
+      // Insert brand-new word layers at their reading-order position.
+      for (const ins of inserts) {
+        const newClipId = generateId();
+        const newTrackId = generateId();
+        const template = target.tracks.find((t) => t.type === 'text')?.clips[0];
+        const newTrack: TimelineTrack = {
+          id: newTrackId,
+          name: `Word (${ins.text})`,
+          type: 'text',
+          locked: false,
+          muted: false,
+          hidden: false,
+          clips: [{
+            ...(template ? { ...template } : {}),
+            id: newClipId,
+            trackId: newTrackId,
+            mediaId: 'generator:kinetic-word',
+            startTime: ins.startTime,
+            duration: ins.duration,
+            trimStart: 0,
+            trimEnd: ins.duration,
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            transform: {
+              ...(template?.transform ?? { rotation: 0 }),
+              x: ins.x,
+              y: ins.y,
+              scale: 100,
+              rotation: template?.transform?.rotation ?? 0,
+            },
+            textSettings: {
+              ...(template?.textSettings as any),
+              text: ins.text,
+              fontSize: ins.fontSize,
+            },
+          } as TimelineClip],
+        };
+        const at = Math.min(ins.index, nextTracks.length);
+        nextTracks.splice(at, 0, newTrack);
+      }
+
+      return {
+        pipWindows: {
+          ...st.pipWindows,
+          [pipId]: { ...target, tracks: nextTracks },
+        },
+      };
+    });
+  },
+
   updateClip: (clipId, updates, options) => {
     let pipsToRecalc: string[] = [];
     set((state) => {
@@ -1821,6 +1978,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (pipsToRecalc.length > 0) {
       pipsToRecalc.forEach(pid => get().recalcPipDurations(pid));
     }
+
+    // ── Kinetic typography live sync ─────────────────────────────────────────
+    // When the primary sentence clip of a Hybrid kinetic group changes, push that
+    // change down into its per-word PiP layers immediately, so the media panel,
+    // timeline and canvas all agree without the user doing anything.
+    //   - text changed      -> diff words: edit in place, add or drop only what moved
+    //   - transform changed -> re-flow the whole block in one pass
+    const touched = findClipDeep(get(), clipId);
+    if (touched && !touched.isPip && touched.clip.pipWindowIds?.length) {
+      const textChanged = updates.textSettings !== undefined;
+      const transformChanged = updates.transform !== undefined;
+      if (textChanged || transformChanged) {
+        get().syncKineticSentence(clipId, { reflowOnly: !textChanged && transformChanged });
+      }
+    }
+
     // NOTE: saveSnapshot() is intentionally NOT called here - callers call it explicitly when needed
     // This prevents excessive snapshot creation during drag operations
   },
