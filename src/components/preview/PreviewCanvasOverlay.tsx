@@ -29,8 +29,9 @@ import { getCachedImage, LocalCornerPoints } from '@/utils/canvasEffects';
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { removeBackground } from '@imgly/background-removal';
 import { toast } from 'sonner';
-import { getClipDimensions, inpaint } from './previewMath';
+import { getClipDimensions, inpaint, getOverlayMapping, clientToOverlay } from './previewMath';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
+import { isKineticMediaId, getSentenceBounds } from '@/utils/kineticSync';
 
 interface InteractiveCanvasOverlayProps {
   viewport: { x: number; y: number; zoom: number };
@@ -195,11 +196,14 @@ export function PreviewCanvasOverlay({
       const container = document.getElementById('preview-canvas-wrapper');
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      const scaleX = 854 / rect.width;
-      const scaleY = 480 / rect.height;
+      // Uniform mapping: the canvas is object-contain and the overlay svg letterboxes,
+      // so BOTH axes share one scale factor. Using 854/width and 480/height separately
+      // made drags run at different speeds per axis whenever the preview pane was not
+      // exactly 16:9 — the root of the "buggy transform box" on every media type.
+      const { scale: overlayScale } = getOverlayMapping(rect);
 
-      const dx = ((e.clientX - dragState.startX) * scaleX) / viewport.zoom;
-      const dy = ((e.clientY - dragState.startY) * scaleY) / viewport.zoom;
+      const dx = ((e.clientX - dragState.startX) * overlayScale) / viewport.zoom;
+      const dy = ((e.clientY - dragState.startY) * overlayScale) / viewport.zoom;
 
       let x = 0, y = 0, scale = 100, rotation = 0;
       if (dragState.initTransform) {
@@ -337,8 +341,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
+            const clientXLocal = ptr.x - (427 + aX);
+            const clientYLocal = ptr.y - (240 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -360,8 +365,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
+            const clientXLocal = ptr.x - (427 + aX);
+            const clientYLocal = ptr.y - (240 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -383,8 +389,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
+            const clientXLocal = ptr.x - (427 + aX);
+            const clientYLocal = ptr.y - (240 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -406,8 +413,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
+            const clientXLocal = ptr.x - (427 + aX);
+            const clientYLocal = ptr.y - (240 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -432,8 +440,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToOverlay(e.clientX, e.clientY, rect);
+            const clientXLocal = ptr.x - (427 + aX);
+            const clientYLocal = ptr.y - (240 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -663,8 +672,9 @@ export function PreviewCanvasOverlay({
       } else if (dragState.type === 'rot') {
         const cx = 427 + x;
         const cy = 240 + y;
-        const mx = (e.clientX - rect.left) * scaleX;
-        const my = (e.clientY - rect.top) * scaleY;
+        const ptrAbs = clientToOverlay(e.clientX, e.clientY, rect);
+        const mx = ptrAbs.x;
+        const my = ptrAbs.y;
         let angle = Math.atan2(my - cy, mx - cx) * (180 / Math.PI);
         angle += 90;
         // CapCut-style rotation snap: Shift -> 15° increments, Alt -> 1° (fine), no modifier -> 0.5°
@@ -717,8 +727,9 @@ export function PreviewCanvasOverlay({
         // Corner resize (resize-tl/tr/bl/br)
         const cx = 427 + x;
         const cy = 240 + y;
-        const mx = (e.clientX - rect.left) * scaleX;
-        const my = (e.clientY - rect.top) * scaleY;
+        const ptrAbs = clientToOverlay(e.clientX, e.clientY, rect);
+        const mx = ptrAbs.x;
+        const my = ptrAbs.y;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
 
         const wSpan = baseW * (1 - (crop.left + crop.right) / 100) / 2;
@@ -1236,17 +1247,55 @@ export function PreviewCanvasOverlay({
     }
   } else if (mediaItem?.type === 'text' || (activeClip as any).textSettings || (activeClip as any).mediaId === 'text-placeholder') {
     const ts = (activeClip as any).textSettings;
-    if (ts) {
-      const fontSize = Number(ts.fontSize) || 48;
-      const text = String(ts.text || '');
-      const lines = text.split('\n');
-      const estCharWidth = fontSize * 0.6;
-      const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
-      vw = Math.max(80, longestLine * estCharWidth + 40);
-      vh = lines.length * (fontSize * 1.35) + 20;
-    } else {
-      vw = 300;
-      vh = 80;
+
+    // A Hybrid kinetic sentence is an INVISIBLE container clip; the words the user
+    // sees are separate clips inside its PiP window, already wrapped onto several
+    // lines. Measuring the container's own text metrics treated the sentence as
+    // one long unwrapped line, so the selection box did not match the rendered
+    // block at all. Measure the actual word layers instead.
+    const kineticPipId = isKineticMediaId((activeClip as any).mediaId)
+      ? (activeClip as any).pipWindowIds?.[0]
+      : undefined;
+    const kineticPip = kineticPipId ? (pipWindows as any)?.[kineticPipId] : null;
+
+    let measured = false;
+    if (kineticPip) {
+      const laid: { text: string; x: number; y: number; fontSize: number }[] = [];
+      for (const track of kineticPip.tracks || []) {
+        if (track.type !== 'text') continue;
+        const wc = track.clips?.[0];
+        if (!wc) continue;
+        laid.push({
+          text: String(wc.textSettings?.text || ''),
+          x: wc.transform?.x ?? 0,
+          y: wc.transform?.y ?? 0,
+          fontSize: Number(wc.textSettings?.fontSize) || 48,
+        });
+      }
+      const bounds = getSentenceBounds(laid);
+      if (bounds) {
+        // Word positions are already in frame units relative to the clip centre,
+        // and the container's own transform is applied on top by the caller, so
+        // only the extent is needed here.
+        vw = Math.max(80, bounds.width + 40);
+        vh = Math.max(40, bounds.height + 20);
+        measured = true;
+      }
+    }
+
+    if (!measured) {
+      if (ts) {
+        const fontSize = Number(ts.fontSize) || 48;
+        const text = String(ts.text || '');
+        const lines = text.split('\n');
+        const estCharWidth = fontSize * 0.6;
+        const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
+        vw = Math.max(80, longestLine * estCharWidth + 40);
+        vh = lines.length * (fontSize * 1.35) + 20;
+      } else {
+        vw = 300;
+        vh = 80;
+      }
     }
   }
 

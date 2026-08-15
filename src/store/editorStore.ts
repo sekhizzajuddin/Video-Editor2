@@ -25,6 +25,7 @@ import { setPlaybackTime, getPlaybackTime } from '@/utils/playbackClock';
 import {
   planKineticSync,
   planGroupReflow,
+  deriveLineStructure,
   isKineticMediaId,
   type ExistingWordLayer,
   type SyncPlan,
@@ -1700,17 +1701,27 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         text: clip.textSettings?.text ?? '',
         startTime: clip.startTime,
         duration: clip.duration,
+        x: clip.transform?.x,
+        y: clip.transform?.y,
+        fontSize: clip.textSettings?.fontSize,
       });
     }
     if (existing.length === 0 && !sentence.trim()) return;
 
     // The primary clip's transform drives the group layout, so moving/scaling the
     // sentence re-flows every word at once instead of one-by-one.
+    // Preserve the CURRENT line structure. The generator chooses line breaks from
+    // the AI's per-word `breakAfter` hints, which cannot be recovered from the
+    // sentence string; without this a group move/scale re-wrapped the sentence and
+    // collapsed a multi-line block onto one line.
+    const lineStructure = deriveLineStructure(existing);
+
     const layoutOpts = {
       scale: (primary.transform?.scale ?? 100) / 100,
       offsetX: primary.transform?.x ?? 0,
       offsetY: primary.transform?.y ?? 0,
       layout: (primary as any).kineticLayout === 'column' ? ('column' as const) : ('row' as const),
+      lineStructure,
     };
 
     let updates: ReturnType<typeof planGroupReflow> = [];

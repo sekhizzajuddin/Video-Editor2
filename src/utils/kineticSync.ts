@@ -155,6 +155,16 @@ export interface LayoutOptions {
   offsetY?: number;
   /** Explicit font size; when omitted it is derived from the sentence length. */
   fontSize?: number;
+  /**
+   * Explicit line structure, as word counts per line — e.g. [2, 3, 1].
+   *
+   * The generator decides line breaks using the AI's per-word `breakAfter` hints,
+   * which cannot be recovered from the sentence string alone. When re-flowing an
+   * existing sentence we pass the CURRENT structure so a move/scale preserves the
+   * author's (and the AI's) line breaks instead of silently re-wrapping the text
+   * into a single line.
+   */
+  lineStructure?: number[];
 }
 
 /**
@@ -184,24 +194,60 @@ export function layoutSentence(words: string[], opts: LayoutOptions = {}): Layou
   }
   const fontSize = Math.max(1, baseFont * scale);
 
-  const maxLineWidth = (isColumn ? 420 : 860) * scale;
+  // NOTE: the wrap margin is deliberately NOT multiplied by `scale`.
+  //
+  // It describes the usable width of the FRAME, which does not grow when the user
+  // scales the text. Scaling it too meant the margin and the glyphs grew in
+  // lockstep, so the wrap point never moved — and because a re-flow rebuilt the
+  // lines from scratch, a multi-line sentence collapsed onto a single line the
+  // moment the user nudged the transform.
+  const maxLineWidth = isColumn ? 420 : 860;
   const charWidth = fontSize * 0.52;
   const spaceWidth = fontSize * 0.35;
   const lineHeight = fontSize * 1.35;
 
-  // Greedy word wrap.
   const lines: Array<Array<{ text: string; width: number }>> = [[]];
-  let currentLineWidth = 0;
-  for (const text of words) {
-    const width = Math.round(text.length * charWidth);
-    const isFirstOnLine = lines[lines.length - 1].length === 0;
-    if (!isFirstOnLine && currentLineWidth + spaceWidth + width > maxLineWidth) {
-      lines.push([]);
-      currentLineWidth = 0;
+
+  if (opts.lineStructure && opts.lineStructure.length > 0) {
+    // Honour the existing line structure exactly: a group move/scale must never
+    // re-flow the author's line breaks.
+    let idx = 0;
+    for (const count of opts.lineStructure) {
+      if (idx >= words.length) break;
+      const line = lines[lines.length - 1].length === 0 ? lines[lines.length - 1] : (lines.push([]), lines[lines.length - 1]);
+      for (let k = 0; k < count && idx < words.length; k++, idx++) {
+        line.push({ text: words[idx], width: Math.round(words[idx].length * charWidth) });
+      }
     }
-    const line = lines[lines.length - 1];
-    line.push({ text, width });
-    currentLineWidth += (line.length === 1 ? 0 : spaceWidth) + width;
+    // Any words beyond the known structure (e.g. the user appended some) wrap
+    // normally onto the end.
+    let currentLineWidth = lines[lines.length - 1]
+      .reduce((sum, w, i) => sum + w.width + (i === 0 ? 0 : spaceWidth), 0);
+    for (; idx < words.length; idx++) {
+      const width = Math.round(words[idx].length * charWidth);
+      const line = lines[lines.length - 1];
+      if (line.length > 0 && currentLineWidth + spaceWidth + width > maxLineWidth) {
+        lines.push([{ text: words[idx], width }]);
+        currentLineWidth = width;
+      } else {
+        line.push({ text: words[idx], width });
+        currentLineWidth += (line.length === 1 ? 0 : spaceWidth) + width;
+      }
+    }
+  } else {
+    // Greedy word wrap.
+    let currentLineWidth = 0;
+    for (const text of words) {
+      const width = Math.round(text.length * charWidth);
+      const isFirstOnLine = lines[lines.length - 1].length === 0;
+      if (!isFirstOnLine && currentLineWidth + spaceWidth + width > maxLineWidth) {
+        lines.push([]);
+        currentLineWidth = 0;
+      }
+      const line = lines[lines.length - 1];
+      line.push({ text, width });
+      currentLineWidth += (line.length === 1 ? 0 : spaceWidth) + width;
+    }
   }
 
   const totalHeight = lines.length * lineHeight;
@@ -239,6 +285,76 @@ export interface ExistingWordLayer {
   text: string;
   startTime: number;
   duration: number;
+  /** Current on-screen position, used to recover the existing line structure. */
+  x?: number;
+  y?: number;
+  fontSize?: number;
+}
+
+/**
+ * Recover the current line structure (word counts per line) from the laid-out
+ * word positions.
+ *
+ * Words on the same visual line share a Y coordinate. Grouping by Y lets a
+ * re-flow reproduce the AI's original `breakAfter` decisions, which are not
+ * recoverable from the sentence text alone.
+ */
+export function deriveLineStructure(layers: ExistingWordLayer[]): number[] {
+  const withY = layers.filter((l) => typeof l.y === 'number');
+  if (withY.length === 0) return [];
+
+  // Tolerance guards against sub-pixel rounding drift between words on a line.
+  const tolerance = 4;
+  const counts: number[] = [];
+  let currentY = withY[0].y as number;
+  let run = 0;
+
+  for (const layer of withY) {
+    const y = layer.y as number;
+    if (Math.abs(y - currentY) > tolerance) {
+      counts.push(run);
+      run = 0;
+      currentY = y;
+    }
+    run++;
+  }
+  if (run > 0) counts.push(run);
+  return counts;
+}
+
+/**
+ * Axis-aligned bounding box that encloses every word of a laid-out sentence.
+ *
+ * The transform box for a kinetic sentence must cover the words the viewer
+ * actually sees. Deriving it from the invisible container clip's own text
+ * metrics produced a box that did not match the rendered block at all (it
+ * measured the whole sentence as a single unwrapped line).
+ */
+export function getSentenceBounds(
+  words: LayoutWord[]
+): { x: number; y: number; width: number; height: number } | null {
+  if (words.length === 0) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const w of words) {
+    const halfW = (w.text.length * w.fontSize * 0.52) / 2;
+    const halfH = (w.fontSize * 1.35) / 2;
+    minX = Math.min(minX, w.x - halfW);
+    maxX = Math.max(maxX, w.x + halfW);
+    minY = Math.min(minY, w.y - halfH);
+    maxY = Math.max(maxY, w.y + halfH);
+  }
+
+  return {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
 }
 
 export interface SyncPlanUpdate {

@@ -11,6 +11,7 @@
 
 import { getAnimatedValue } from '@/utils/keyframes';
 import { useEditorStore } from '@/store/editorStore';
+import { getSentenceBounds } from '@/utils/kineticSync';
 
 /**
  * Helper to get active perRatioFraming adjustments for a clip
@@ -28,6 +29,99 @@ function getPerRatioFraming(clipId: string, aX: number, aY: number, aScale: numb
     // ignore outside store context
   }
   return { aX, aY, aScale };
+}
+
+
+
+/**
+ * Map the preview container's client box onto the 854x480 overlay coordinate
+ * space, accounting for letterboxing.
+ *
+ * The preview <canvas> is rendered with `object-contain` and the overlay <svg>
+ * uses `viewBox="0 0 854 480"` with the default `preserveAspectRatio` — both
+ * therefore letterbox: they scale UNIFORMLY and centre, leaving bars on whichever
+ * axis has spare room.
+ *
+ * The pointer maths, however, used `854 / rect.width` and `480 / rect.height`
+ * independently. Whenever the container's aspect ratio differed from 16:9 (which
+ * is most of the time, since the preview pane is freely resizable) those two
+ * factors disagreed with the single factor the browser actually applied. The
+ * result: dragging a clip moved it at the wrong speed, faster on one axis than
+ * the other, and handles drifted away from the pointer — the "buggy transform
+ * box" seen on every media type.
+ *
+ * Returns the uniform scale plus the letterbox offsets, so callers can convert
+ * both deltas and absolute positions correctly.
+ */
+export function getOverlayMapping(rect: { width: number; height: number }): {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+} {
+  const VIEW_W = 854;
+  const VIEW_H = 480;
+  if (!rect.width || !rect.height) {
+    return { scale: 1, offsetX: 0, offsetY: 0 };
+  }
+  // `object-contain` / `xMidYMid meet` == fit entirely inside, preserving ratio.
+  const displayScale = Math.min(rect.width / VIEW_W, rect.height / VIEW_H);
+  const drawnW = VIEW_W * displayScale;
+  const drawnH = VIEW_H * displayScale;
+  return {
+    // Multiply a CLIENT-pixel delta by this to get an overlay-unit delta.
+    scale: displayScale > 0 ? 1 / displayScale : 1,
+    // Client-pixel offset of the drawn area's top-left corner.
+    offsetX: (rect.width - drawnW) / 2,
+    offsetY: (rect.height - drawnH) / 2,
+  };
+}
+
+/**
+ * Convert a client (mouse) position into overlay 854x480 coordinates.
+ */
+export function clientToOverlay(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number; width: number; height: number }
+): { x: number; y: number } {
+  const { scale, offsetX, offsetY } = getOverlayMapping(rect);
+  return {
+    x: (clientX - rect.left - offsetX) * scale,
+    y: (clientY - rect.top - offsetY) * scale,
+  };
+}
+
+/**
+ * Extent of a Hybrid kinetic sentence, measured from its per-word PiP layers.
+ * Returns null for any clip that is not such a container.
+ */
+function getKineticSentenceExtent(
+  clip: any
+): { width: number; height: number } | null {
+  if (typeof clip?.mediaId !== 'string' || !clip.mediaId.startsWith('generator:kinetic')) return null;
+  const pipId = clip.pipWindowIds?.[0];
+  if (!pipId) return null;
+
+  try {
+    const pip = (useEditorStore.getState().pipWindows || {})[pipId];
+    if (!pip) return null;
+
+    const laid: { text: string; x: number; y: number; fontSize: number }[] = [];
+    for (const track of pip.tracks || []) {
+      if (track.type !== 'text') continue;
+      const wc = track.clips?.[0];
+      if (!wc) continue;
+      laid.push({
+        text: String(wc.textSettings?.text || ''),
+        x: wc.transform?.x ?? 0,
+        y: wc.transform?.y ?? 0,
+        fontSize: Number(wc.textSettings?.fontSize) || 48,
+      });
+    }
+    return getSentenceBounds(laid);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -49,18 +143,18 @@ export function getClipDimensions(
     vh = mediaItem.height || 1080;
   } else if (mediaItem?.type === 'text' || clip.textSettings || clip.mediaId === 'text-placeholder') {
     const ts = clip.textSettings;
-    if (ts) {
-      // Hybrid kinetic sentences use an INVISIBLE primary clip (fontSize 1,
-      // transparent) purely as a container for their per-word PiP layers. Sizing
-      // its selection box from that 1px font produced a sliver a few pixels tall
-      // that was effectively impossible to grab, so the sentence could not be
-      // moved or scaled as a group. Measure the container at a realistic size
-      // instead — it is never painted, so this only affects the handles.
-      const isKineticContainer =
-        typeof clip.mediaId === 'string' && clip.mediaId.startsWith('generator:kinetic') &&
-        !!clip.pipWindowIds?.length;
-      const rawFontSize = Number(ts.fontSize) || 48;
-      const fontSize = isKineticContainer ? Math.max(rawFontSize, 48) : rawFontSize;
+
+    // Hybrid kinetic sentences use an INVISIBLE primary clip (fontSize 1,
+    // transparent) purely as a container for their per-word PiP layers. Its own
+    // text metrics describe neither what is drawn nor where: the visible words
+    // live in the PiP window and are already wrapped across several lines.
+    // Measure those word layers so the box matches the block the user sees.
+    const kineticBounds = getKineticSentenceExtent(clip);
+    if (kineticBounds) {
+      vw = Math.max(80, kineticBounds.width + 40);
+      vh = Math.max(40, kineticBounds.height + 20);
+    } else if (ts) {
+      const fontSize = Number(ts.fontSize) || 48;
       const text = String(ts.text || '');
       const lines = text.split('\n');
       const estCharWidth = fontSize * 0.6;

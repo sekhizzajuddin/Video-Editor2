@@ -31,6 +31,7 @@ import {
 } from './PreviewCanvasToolbar';
 import { setOnMaskReadyCallback } from '@/utils/aiBackground';
 import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
+import { getOverlayMapping } from './previewMath';
 
 export function PreviewCanvasContainer() {
   const currentTime = useEditorStore.getState().currentTime;
@@ -651,8 +652,11 @@ export function PreviewCanvasContainer() {
       e.preventDefault();
 
       const rect = el.getBoundingClientRect();
-      const scaleX = 854 / rect.width;
-      const scaleY = 480 / rect.height;
+      // Uniform mapping — the canvas is object-contain, so panning must use one
+      // scale for both axes or the view drifts diagonally on non-16:9 panes.
+      const { scale: overlayScale } = getOverlayMapping(rect);
+      const scaleX = overlayScale;
+      const scaleY = overlayScale;
 
       const { updateClip, currentTime, settings } = useEditorStore.getState();
       const sens = settings.gestureSensitivity;
@@ -744,8 +748,11 @@ export function PreviewCanvasContainer() {
   const handlePointerMove = (e: React.PointerEvent) => {
     if (isPanning.current && (activeTool === 'hand' || isSpacePressed)) {
       const rect = containerRef.current!.getBoundingClientRect();
-      const scaleX = 854 / rect.width;
-      const scaleY = 480 / rect.height;
+      // Uniform mapping — the canvas is object-contain, so panning must use one
+      // scale for both axes or the view drifts diagonally on non-16:9 panes.
+      const { scale: overlayScale } = getOverlayMapping(rect);
+      const scaleX = overlayScale;
+      const scaleY = overlayScale;
 
       const dx = (e.clientX - lastPanPos.current.x) * scaleX;
       const dy = (e.clientY - lastPanPos.current.y) * scaleY;
