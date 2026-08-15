@@ -519,9 +519,19 @@ export function PreviewCanvasContainer() {
             if (dir < 0 && newTime <= 0) {
               newTime = 0;
               currentPause();
+              // BUG FIX: Force immediate seek to 0 — bypass the 30ms throttle.
+              // Without this, the paused else-branch reads store.currentTime (still at end)
+              // on the next tick and reverts currentTimeRef back to the end position,
+              // breaking the second playback. Also resets lastSyncTime so the throttled
+              // seek doesn't fire again right after and clobber this one.
+              currentSeek(0);
+              lastSyncTime = now;
             } else if (dir >= 0 && newTime >= maxEndSequence) {
               newTime = 0;
               currentPause();
+              // BUG FIX: Same as above — force immediate seek on forward-direction end.
+              currentSeek(0);
+              lastSyncTime = now;
             }
           }
 
@@ -546,24 +556,28 @@ export function PreviewCanvasContainer() {
       framePendingRef.current = true;
     }
     if (tabVisible && framePendingRef.current) {
-        // PERF FIX: Always use the isRendering mutex, even during playback.
-        // The old `allowConcurrent` flag bypassed the mutex during playback, letting
-        // multiple async draws run simultaneously on the same Canvas 2D context.
-        // Canvas2D is stateful and non-reentrant: concurrent ctx.save/transform/restore
-        // calls interleave across renders, producing the intermittent choppiness.
-        // If a render is still running when the next frame fires, we drop this tick
-        // (a clean frame-drop, not corruption). The hardware video decoder continues
-        // running in the background so no video frames are lost.
         const freshState = useEditorStore.getState();
         const currentlyScrubbing = freshState.isScrubbing;
         const currentlyPlaying = freshState.isPlaying;
 
-        if (!isRendering) {
-          framePendingRef.current = false;
-          isRendering = true;
-          isRenderingRef.current = true;
+        // BUG FIX: Restore split mutex strategy.
+        // Scrubbing: allow concurrent renders — scrub renders skip ALL heavy async FX
+        //   (skipExpensiveFX=true when isScrubbing), so they complete near-synchronously.
+        //   Dropping scrub frames makes the playhead feel unresponsive.
+        // Playback: enforce exclusive mutex — playback renders CAN have async mask/AI-bg
+        //   operations. Concurrent renders corrupt Canvas2D ctx.save/restore/transform state
+        //   producing the intermittent chop. A dropped playback frame is invisible;
+        //   a corrupt one is a visible glitch.
+        const allowConcurrentScrub = currentlyScrubbing;
 
-          // CRITICAL FIX: Patch renderDepsRef with FRESH store data right before rendering.
+        if (allowConcurrentScrub || !isRendering) {
+          framePendingRef.current = false;
+          if (!allowConcurrentScrub) {
+            isRendering = true;
+            isRenderingRef.current = true;
+          }
+
+          // CRITICAL: Patch renderDepsRef with FRESH store data right before rendering.
           // Without this, renderDepsRef holds stale values because React's useEffect hasn't
           // processed the Zustand state change yet when the RAF tick fires.
           const deps = renderDepsRef.current;
@@ -579,8 +593,10 @@ export function PreviewCanvasContainer() {
               console.error('Error in renderCanvas:', err);
             })
             .finally(() => {
-              isRendering = false;
-              isRenderingRef.current = false;
+              if (!allowConcurrentScrub) {
+                isRendering = false;
+                isRenderingRef.current = false;
+              }
               lastRenderedTimeRef.current = currentTimeRef.current;
             });
         }
