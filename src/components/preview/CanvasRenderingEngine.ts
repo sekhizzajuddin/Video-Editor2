@@ -42,6 +42,7 @@ import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
+import { resolveBlendPlan } from '@/utils/blendCompositor';
 import {
   findActiveTransition,
   buildTransitionPlan,
@@ -126,6 +127,21 @@ export interface RenderCanvasParams {
 
 const MAX_POOL_CANVASES = 16;
 
+/**
+ * Buffers that must never be evicted by the LRU while a frame is in flight.
+ * `composite` is the final drawing target; the blend/transition scratch buffers
+ * are read back later in the SAME frame, so recycling them mid-pass would make one
+ * clip draw into another clip's buffer — visible as tearing or a punched-out hole
+ * when several effects (e.g. background removal + a partial blend) are combined.
+ */
+const RESERVED_POOL_KEYS: ReadonlySet<string> = new Set([
+  'composite',
+  '__blend_layer',
+  '__blend_backdrop',
+  '__transition_from',
+  '__transition_to',
+]);
+
 export function getOrCreateCanvas(
   offscreenPool: Map<string, HTMLCanvasElement>,
   key: string,
@@ -136,10 +152,9 @@ export function getOrCreateCanvas(
   if (!canvas) {
     if (offscreenPool.size >= MAX_POOL_CANVASES) {
       // Evict least-recently-used entry (FIFO of Map iteration order, which
-      // we maintain by delete-then-set below). Never evict the composite
-      // canvas which is the final drawing target.
+      // we maintain by delete-then-set below). Reserved buffers are skipped.
       for (const k of offscreenPool.keys()) {
-        if (k !== 'composite') {
+        if (!RESERVED_POOL_KEYS.has(k)) {
           offscreenPool.delete(k);
           break;
         }
@@ -553,7 +568,9 @@ export async function renderCanvasEngine({
     extraTransform?: { translateX?: number; translateY?: number; scale?: number },
     targetCtx?: CanvasRenderingContext2D
   ) => {
-    const ctx = targetCtx || compositeCtxRef.current;
+    // `let` (not const): a partial blend temporarily redirects all drawing in this
+    // function to a scratch layer. See the blend compositing block below.
+    let ctx = targetCtx || compositeCtxRef.current;
     if (!ctx) return;
     // PERF: O(1) lookup via mediaMap built once per render (was mediaLibrary.find = O(N)).
     let mediaItem = mediaMap.get(clip.mediaId);
@@ -685,11 +702,78 @@ export async function renderCanvasEngine({
     const aBlendIntensity = hasAnimOrExpr ? Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity']))) : Math.max(0, Math.min(100, clip.transform.blendIntensity ?? 100));
     const blendMode = clip.transform.blendMode || 'source-over';
     const totalAlpha = aOpacity * opacityMultiplier;
-    const needsDualBlend = blendMode !== 'source-over' && aBlendIntensity < 100;
+
+    // ── Blend compositing ────────────────────────────────────────────────────
+    // Planned by the shared helper in blendCompositor.ts. The old code emulated
+    // partial blend intensity by drawing the clip TWICE (once source-over, once
+    // with the blend mode). That double-composites: the blended pass sees a
+    // backdrop that already contains the normal pass, so `multiply`/`darken`
+    // darken twice and `difference`/`color-burn` band and invert — the reported
+    // "glitch". With an alpha matte (AI background removal) the two passes also
+    // accumulate along the cutout edge, producing a bright halo.
+    //
+    // Now: full strength uses ONE native blended draw; partial strength renders
+    // the clip into a scratch layer that is mixed over the backdrop exactly once.
+    const blendPlan = resolveBlendPlan(blendMode, aBlendIntensity, totalAlpha);
+
+    // Partial blend needs a genuine three-way mix:
+    //     final = (1 - mix)·over(B, C) + mix·blend(B, C)
+    // where B is the ORIGINAL backdrop and C the clip. We therefore need both
+    // results, but the clip is rasterised only ONCE:
+    //   L = transparent layer holding the clip's pixels
+    //   S = snapshot of the backdrop B, with L blended into it  -> blend(B, C)
+    //   target: draw L source-over -> over(B, C), then draw S source-over at mix.
+    // Drawing the blended layer straight over the normal result (the obvious
+    // shortcut) would blend against an already-composited backdrop and reproduce
+    // the very double-composite artefact this replaces.
+    let blendLayer: HTMLCanvasElement | null = null;
+    let blendBackdrop: HTMLCanvasElement | null = null;
+    let targetCtxForBlend: CanvasRenderingContext2D | null = null;
+    if (blendPlan.kind === 'lerp') {
+      blendLayer = getOrCreateCanvas(
+        offscreenCanvasPool.current,
+        '__blend_layer',
+        composite.width,
+        composite.height
+      );
+      blendBackdrop = getOrCreateCanvas(
+        offscreenCanvasPool.current,
+        '__blend_backdrop',
+        composite.width,
+        composite.height
+      );
+      const blendCtx = blendLayer.getContext('2d');
+      const backdropCtx = blendBackdrop.getContext('2d');
+      if (blendCtx && backdropCtx && ctx.canvas) {
+        // Snapshot the backdrop BEFORE this clip is drawn.
+        backdropCtx.setTransform(1, 0, 0, 1, 0, 0);
+        backdropCtx.globalCompositeOperation = 'copy';
+        backdropCtx.drawImage(ctx.canvas, 0, 0);
+        backdropCtx.globalCompositeOperation = 'source-over';
+
+        blendCtx.setTransform(1, 0, 0, 1, 0, 0);
+        blendCtx.clearRect(0, 0, blendLayer.width, blendLayer.height);
+        // Mirror the world transform currently applied to the real context.
+        blendCtx.scale(canvas_scale, canvas_scale);
+        blendCtx.translate(totalX, totalY);
+        blendCtx.scale(viewport.zoom, viewport.zoom);
+        blendCtx.translate(offsetX, offsetY);
+        targetCtxForBlend = blendCtx;
+      } else {
+        blendLayer = null;
+        blendBackdrop = null;
+      }
+    }
+
+    // Redirect every draw in this function to the scratch layer when we're doing a
+    // partial blend. `ctx` is a local binding, so this is transparent to the code
+    // below and guarantees the clip is rasterised exactly once either way.
+    const outerCtx = ctx;
+    if (targetCtxForBlend) ctx = targetCtxForBlend;
 
     ctx.save();
-    ctx.globalAlpha = totalAlpha * (aBlendIntensity / 100);
-    ctx.globalCompositeOperation = blendMode;
+    ctx.globalAlpha = targetCtxForBlend ? 1 : blendPlan.alpha;
+    ctx.globalCompositeOperation = targetCtxForBlend ? 'source-over' : blendPlan.mode;
 
     if (clip.vectorMask?.enabled) {
       applyVectorMaskToContext(ctx, clip.vectorMask, W, H);
@@ -948,18 +1032,6 @@ export async function renderCanvasEngine({
 
           if (!needsOffscreen) {
             // FAST PATH: Zero-copy GPU direct render directly to target canvas!
-            if (needsDualBlend) {
-              ctx.save();
-              ctx.globalCompositeOperation = 'source-over';
-              ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
-              if (corners) {
-                drawPerspectiveTexture(ctx, sourceElement, corners);
-              } else {
-                ctx.drawImage(sourceElement, dx, dy, dw, dh);
-              }
-              ctx.restore();
-            }
-
             if (corners) {
               drawPerspectiveTexture(ctx, sourceElement, corners);
             } else {
@@ -1025,8 +1097,24 @@ export async function renderCanvasEngine({
                 // Export: block until we have an exact synchronous mask for this frame
                 await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
               } else {
-                // Interactive: fire-and-forget with early exit & scene-change gating
-                void applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+                // Interactive: we must NOT fire-and-forget onto `oCtx`.
+                //
+                // applyAiBackgroundSmart composites the matte with
+                // globalCompositeOperation='destination-in'. When left un-awaited it
+                // resolves on a later microtask/frame — by which point this clip has
+                // already been blitted and `oCtx` may have been recycled by the LRU
+                // canvas pool for a DIFFERENT clip. The late write then punches a
+                // hole in whatever now owns the buffer. That is the flicker seen when
+                // background removal and blending are used together (a partial blend
+                // adds another buffer, widening the race window).
+                //
+                // The mask pipeline is already async-cached internally: this call
+                // applies the newest cached matte synchronously and schedules
+                // re-segmentation in the background, notifying us via the
+                // mask-ready callback which flags the next repaint. So awaiting here
+                // costs a cache lookup, not an inference, and keeps every write to
+                // `oCtx` inside this clip's own draw pass.
+                await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
               }
             }
 
@@ -1137,18 +1225,6 @@ export async function renderCanvasEngine({
               await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations, clip.expressions);
             } else {
               offscreenCanvasPool.current.delete('clip_mask_temp_' + clip.id);
-            }
-
-            if (needsDualBlend) {
-              ctx.save();
-              ctx.globalCompositeOperation = 'source-over';
-              ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
-              if (corners) {
-                drawPerspectiveTexture(ctx, offCanvas, corners);
-              } else {
-                ctx.drawImage(offCanvas, dx, dy, dw, dh);
-              }
-              ctx.restore();
             }
 
             if (corners) {
@@ -1363,6 +1439,34 @@ export async function renderCanvasEngine({
     }
 
     ctx.restore();
+
+    // Resolve the partial blend (see the setup block above for the maths).
+    if (blendLayer && blendBackdrop && targetCtxForBlend) {
+      ctx = outerCtx;
+      const backdropCtx = blendBackdrop.getContext('2d');
+      if (backdropCtx) {
+        // S := blend(B, C) — blend the clip layer into the untouched backdrop copy.
+        backdropCtx.save();
+        backdropCtx.setTransform(1, 0, 0, 1, 0, 0);
+        backdropCtx.globalAlpha = blendPlan.alpha;
+        backdropCtx.globalCompositeOperation = blendPlan.mode;
+        backdropCtx.drawImage(blendLayer, 0, 0);
+        backdropCtx.restore();
+
+        ctx.save();
+        // Blit 1:1 in device pixels — both layers already hold world-space pixels.
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        // over(B, C)
+        ctx.globalAlpha = blendPlan.alpha;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(blendLayer, 0, 0);
+        // ...then mix in blend(B, C) to reach the lerp.
+        ctx.globalAlpha = blendPlan.mix;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(blendBackdrop, 0, 0);
+        ctx.restore();
+      }
+    }
   };
 
   // ─── Transition resolution ────────────────────────────────────────────────

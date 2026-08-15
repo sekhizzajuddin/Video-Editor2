@@ -1,5 +1,6 @@
 import { AssetDecoder } from './AssetDecoder';
 import { findActiveTransition, buildTransitionPlan } from '../../utils/transitionEngine';
+import { resolveBlendPlan } from '../../utils/blendCompositor';
 import { FramePool } from './memory/FramePool';
 
 export interface RenderLayer {
@@ -23,6 +24,13 @@ export interface RenderLayer {
   };
   zIndex: number;
   sourceRotation?: number;
+  /**
+   * Canvas composite operation from the clip's transform, already resolved
+   * against its blend intensity. The exporter previously ignored blend modes
+   * entirely, so a blended clip looked correct in the preview and rendered as a
+   * plain Normal composite in the exported file.
+   */
+  blendMode?: GlobalCompositeOperation;
   /**
    * Enumeration order of this layer within its frame. Video layers now decode
    * concurrently and therefore resolve out of order, so zIndex ties are broken
@@ -154,7 +162,22 @@ export class FrameScheduler {
             : null;
           if (layerDraw && !layerDraw.visible) continue; // fully faded out
           const baseOpacity = clip.opacity !== undefined ? clip.opacity : 1;
-          const opacity = layerDraw ? baseOpacity * layerDraw.opacity : baseOpacity;
+          const withTransition = layerDraw ? baseOpacity * layerDraw.opacity : baseOpacity;
+
+          // Match the preview's blend semantics. Partial blend intensity needs a
+          // backdrop copy, which this compositor cannot express per-layer, so we
+          // approximate it by scaling alpha — full-strength and Normal blends
+          // (the overwhelmingly common cases) are exact.
+          const blendPlan = resolveBlendPlan(
+            clip.transform?.blendMode,
+            clip.transform?.blendIntensity,
+            withTransition
+          );
+          const opacity = blendPlan.kind === 'lerp'
+            ? blendPlan.alpha * blendPlan.mix
+            : blendPlan.alpha;
+          const blendMode: GlobalCompositeOperation =
+            blendPlan.kind === 'normal' ? 'source-over' : blendPlan.mode;
           const transitionGeometry = layerDraw
             ? {
                 translateX: layerDraw.translateX,
@@ -190,6 +213,7 @@ export class FrameScheduler {
                     zIndex,
                     order: layerOrder,
                     transitionGeometry,
+                    blendMode,
                     sourceRotation: decoder?.rotation || 0,
                   });
                 }
@@ -204,6 +228,7 @@ export class FrameScheduler {
               zIndex,
               order: layerOrder,
               transitionGeometry,
+              blendMode,
             });
           }
         }

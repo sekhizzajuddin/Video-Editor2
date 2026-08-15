@@ -2332,6 +2332,76 @@ export function PropertiesPanel() {
                       className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
                     />
                   </div>
+
+                  {/* Matte Choke — shrink/expand the cutout edge.
+                      The engine has supported choke/spill for a while but there was
+                      no UI for either, so users had no way to fix the halo or the
+                      colour fringe that segmentation always leaves behind. */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Matte Choke (Shrink / Grow)</label>
+                      <span className="text-[10px] text-cyan-400 font-mono">
+                        {(selectedClip.aiBackground.choke ?? 0) > 0 ? '+' : ''}{selectedClip.aiBackground.choke ?? 0}px
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-10}
+                      max={10}
+                      step={0.5}
+                      value={selectedClip.aiBackground.choke ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        const existing = selectedClip.aiBackground!;
+                        updateClip(selectedClip.id, { aiBackground: { ...existing, choke: val } });
+                      }}
+                      onMouseUp={() => scheduleSaveSnapshot('Change AI Matte Choke')}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-[#707070] mt-1">Negative shrinks the cutout inward to remove a background halo; positive grows it back.</p>
+                  </div>
+
+                  {/* Spill Suppression */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Spill Suppression</label>
+                      <span className="text-[10px] text-cyan-400 font-mono">
+                        {selectedClip.aiBackground.spillSuppression ?? 0}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={selectedClip.aiBackground.spillSuppression ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        const existing = selectedClip.aiBackground!;
+                        updateClip(selectedClip.id, { aiBackground: { ...existing, spillSuppression: val } });
+                      }}
+                      onMouseUp={() => scheduleSaveSnapshot('Change AI Spill Suppression')}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-[#707070] mt-1">Desaturates colour bleeding from the old background around the subject's edge.</p>
+                  </div>
+
+                  {/* Spill colour target */}
+                  {(selectedClip.aiBackground.spillSuppression ?? 0) > 0 && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] text-[#a0a0a0] font-medium flex-1">Spill Colour</label>
+                      <input
+                        type="color"
+                        value={selectedClip.aiBackground.spillColor ?? '#00ff00'}
+                        onChange={(e) => {
+                          const existing = selectedClip.aiBackground!;
+                          updateClip(selectedClip.id, { aiBackground: { ...existing, spillColor: e.target.value } });
+                          scheduleSaveSnapshot('Change AI Spill Colour');
+                        }}
+                        className="w-8 h-6 bg-transparent border border-[#3e3e3e] rounded cursor-pointer"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -185,6 +185,9 @@ export class Compositor {
         this.ctx.rotate((layer.transform.rotation * Math.PI) / 180);
         
         this.ctx.globalAlpha = layer.opacity;
+        // Honour the clip's blend mode (Multiply/Screen/Overlay/...). Without this
+        // the export silently flattened every blended clip to Normal.
+        this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
 
         // 6. Draw the frame, applying source metadata rotation
         this.ctx.save();
@@ -233,6 +236,9 @@ export class Compositor {
         
         this.ctx.restore();
         this.ctx.restore();
+        // Defensive: ctx.restore() already unwinds this, but an early return in a
+        // future edit must never leak a blend mode onto the following layer.
+        this.ctx.globalCompositeOperation = 'source-over';
       }
     }
 

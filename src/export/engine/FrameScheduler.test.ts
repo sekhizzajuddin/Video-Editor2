@@ -28,6 +28,50 @@ function fakeDecoder(id: string, delayMs: number) {
   };
 }
 
+describe('FrameScheduler blend integration', () => {
+  it('passes the clip blend mode through to the layer', async () => {
+    const timeline = {
+      tracks: [{
+        type: 'video',
+        clips: [{
+          id: 'a', startTime: 0, duration: 10,
+          transform: { blendMode: 'multiply', blendIntensity: 100 },
+        }],
+      }],
+    };
+    const scheduler = makeScheduler(timeline, { a: fakeDecoder('a', 0) });
+    const layers = await scheduler.getLayersAtTime(1);
+    expect(layers[0].blendMode).toBe('multiply');
+    expect(layers[0].opacity).toBeCloseTo(1);
+  });
+
+  it('falls back to source-over when intensity is zero', async () => {
+    const timeline = {
+      tracks: [{
+        type: 'video',
+        clips: [{
+          id: 'a', startTime: 0, duration: 10,
+          transform: { blendMode: 'multiply', blendIntensity: 0 },
+        }],
+      }],
+    };
+    const scheduler = makeScheduler(timeline, { a: fakeDecoder('a', 0) });
+    const layers = await scheduler.getLayersAtTime(1);
+    expect(layers[0].blendMode).toBe('source-over');
+    // The clip must stay fully visible, just un-blended.
+    expect(layers[0].opacity).toBeCloseTo(1);
+  });
+
+  it('defaults to source-over when no blend mode is set', async () => {
+    const timeline = {
+      tracks: [{ type: 'video', clips: [{ id: 'a', startTime: 0, duration: 10 }] }],
+    };
+    const scheduler = makeScheduler(timeline, { a: fakeDecoder('a', 0) });
+    const layers = await scheduler.getLayersAtTime(1);
+    expect(layers[0].blendMode).toBe('source-over');
+  });
+});
+
 describe('FrameScheduler.getLayersAtTime', () => {
   it('composites in zIndex order even when slower decoders resolve last', async () => {
     // trackIdx 0 (bottom) is SLOW, trackIdx 1 (top) is FAST. If we relied on
