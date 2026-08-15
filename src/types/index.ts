@@ -553,6 +553,13 @@ export interface TimelineClip {
   motionTracks?: MotionTrackingData[];
   motionAttachment?: MotionTrackAttachment;
   pipWindowIds?: string[]; // Array of PIP window IDs attached to this clip
+  /**
+   * Authored line arrangement (word counts per line) for a Hybrid kinetic
+   * sentence container. Persisted so a resize reproduces the author's layout
+   * rather than re-deriving it from word positions, which is lossy at small
+   * scales (adjacent lines collapse together).
+   */
+  kineticLineStructure?: number[];
   // Sequencer / Interpolation (Gap #2 + #3)
   interpolation?: ClipInterpolationSettings;
   sequenceId?: string; // position in sequence membership

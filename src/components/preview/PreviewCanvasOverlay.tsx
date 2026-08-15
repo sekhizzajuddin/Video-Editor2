@@ -144,10 +144,37 @@ export function PreviewCanvasOverlay({
     }
   }
 
-  let aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']) : 0;
-  let aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']) : 0;
-  let aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']) : 100;
-  const aRot = activeClip ? getAnimatedValue(activeClip.transform.rotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']) : 0;
+  // Absolute timeline start of the selected clip.
+  //
+  // CRITICAL for PiP children (kinetic word layers): a PiP clip's `startTime` is
+  // RELATIVE to its PiP window, while `currentTime` is absolute. Evaluating
+  // keyframes with the relative value samples the animation at completely the
+  // wrong local time. Kinetic words carry a "pop" keyframe on transform.scale
+  // (135% -> 100% over 0.12s), so the overlay could read 135% while the drag
+  // handler — which already resolved the ABSOLUTE start — read 100%. The box was
+  // therefore drawn ~35% too large, and the first mousemove wrote the real value,
+  // making it snap smaller. The same disagreement on transform.x/y made the clip
+  // jump before it started following the pointer.
+  const activeClipAbsStartTime = React.useMemo(() => {
+    if (!activeClip) return 0;
+    const state = useEditorStore.getState();
+    const found = findClipDeep(state, activeClip.id);
+    if (found?.isPip && found.pipId) {
+      const pip = (state.pipWindows || {})[found.pipId];
+      if (pip) {
+        for (const t of state.tracks) {
+          const parent = t.clips.find((c) => c.id === pip.parentClipId);
+          if (parent) return parent.startTime + (pip.relativeStartTime || 0) + found.clip.startTime;
+        }
+      }
+    }
+    return activeClip.startTime;
+  }, [activeClip, tracks, pipWindows]);
+
+  let aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.x']) : 0;
+  let aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.y']) : 0;
+  let aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.scale']) : 100;
+  const aRot = activeClip ? getAnimatedValue(activeClip.transform.rotation, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.rotation']) : 0;
 
   if (activeClip && perRatioFramingEnabled && perRatioFraming[aspectRatio]?.[activeClip.id]) {
     const customFraming = perRatioFraming[aspectRatio][activeClip.id];
@@ -156,10 +183,10 @@ export function PreviewCanvasOverlay({
     if (customFraming.scale !== undefined) aScale *= (customFraming.scale / 100);
   }
 
-  const aCropLeft = activeClip ? getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']) : 0;
-  const aCropTop = activeClip ? getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']) : 0;
-  const aCropRight = activeClip ? getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']) : 0;
-  const aCropBot = activeClip ? getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']) : 0;
+  const aCropLeft = activeClip ? getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.left']) : 0;
+  const aCropTop = activeClip ? getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.top']) : 0;
+  const aCropRight = activeClip ? getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.right']) : 0;
+  const aCropBot = activeClip ? getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.bottom']) : 0;
 
   const getHeartPathData = (x: number, y: number, w: number, h: number): string => {
     return `M 0,${h * 0.15} 
@@ -669,9 +696,13 @@ export function PreviewCanvasOverlay({
         x = newX;
         y = newY;
       } else if (dragState.type.startsWith('crop-')) {
-        const theta = (-rotation * Math.PI) / 180;
-        const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (scale / 100);
-        const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) / (scale / 100);
+        // Anchor to drag-start rotation/scale (see edge-resize note): using the
+        // live values changes the conversion factor mid-drag.
+        const initRotCrop = dragState.initTransform.rotation || 0;
+        const initScaleCrop = dragState.initTransform.scale || 100;
+        const theta = (-initRotCrop * Math.PI) / 180;
+        const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (initScaleCrop / 100);
+        const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) / (initScaleCrop / 100);
 
         if (dragState.type === 'crop-left') {
           crop.left = Math.max(0, Math.min(100 - crop.right - 1, crop.left + (localDx / baseW) * 100));
@@ -715,10 +746,17 @@ export function PreviewCanvasOverlay({
       ) {
         // Edge-resize: project delta onto the clip's local (un-rotated) frame and
         // adjust the uniform scale based on the dominant axis. Shift locks aspect.
-        const theta = (-rotation * Math.PI) / 180;
-        const invScale = 100 / scale;
-        const localDx = ((dx * Math.cos(theta) - dy * Math.sin(theta)) * invScale) / 1;
-        const localDy = ((dx * Math.sin(theta) + dy * Math.cos(theta)) * invScale) / 1;
+        // Anchor the projection to the values at DRAG START. `scale` and `rotation`
+        // are mutated during the drag, so using them makes the conversion factor
+        // change under the user's hand — the clip accelerates or reverses as it
+        // resizes. Deltas are measured from the start point, so the basis must be
+        // the start basis too.
+        const initRotEdge = dragState.initTransform.rotation || 0;
+        const initScaleForProj = dragState.initTransform.scale || 100;
+        const theta = (-initRotEdge * Math.PI) / 180;
+        const invScale = 100 / initScaleForProj;
+        const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) * invScale;
+        const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) * invScale;
 
         let dxAxis = 0;
         let dyAxis = 0;
@@ -727,21 +765,27 @@ export function PreviewCanvasOverlay({
         if (dragState.type === 'resize-t') dyAxis = -localDy;
         if (dragState.type === 'resize-b') dyAxis = localDy;
 
+        // Ratios are RELATIVE to the size at drag start; they must therefore be
+        // applied to the initial scale, not used as an absolute percentage.
+        // Previously `finalScale = sx * 100` threw the current scale away, so
+        // grabbing an edge on a clip at 200% snapped it straight down to ~107%
+        // on the very first pixel of movement (and up to ~127% from 50%).
+        const initScaleEdge = dragState.initTransform.scale || 100;
         const sx = (baseW + dxAxis * 2) / baseW;
         const sy = (baseH + dyAxis * 2) / baseH;
 
         // Aspect lock: use the dominant axis when Shift is held
         const aspectLocked = e.shiftKey;
-        let finalScale: number;
+        let ratio: number;
         if (aspectLocked) {
-          finalScale = Math.max(sx, sy) * 100;
+          ratio = Math.max(sx, sy);
         } else if (Math.abs(dxAxis) > Math.abs(dyAxis)) {
-          finalScale = sx * 100;
+          ratio = sx;
         } else {
-          finalScale = sy * 100;
+          ratio = sy;
         }
 
-        scale = Math.max(10, Math.min(1000, finalScale));
+        scale = Math.max(10, Math.min(1000, initScaleEdge * ratio));
         if (!e.altKey) scale = Math.round(scale * 10) / 10;
         getNewAnimations('transform.scale', scale);
       } else {

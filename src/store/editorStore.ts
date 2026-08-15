@@ -1714,7 +1714,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     // the AI's per-word `breakAfter` hints, which cannot be recovered from the
     // sentence string; without this a group move/scale re-wrapped the sentence and
     // collapsed a multi-line block onto one line.
-    const lineStructure = deriveLineStructure(existing);
+    // Prefer the AUTHORED structure stored on the container. Deriving it from the
+    // words' Y positions is only a fallback: line spacing shrinks with the group
+    // scale, so at small scales adjacent lines fall inside the grouping tolerance
+    // and collapse into one — which is exactly how a vertical (one-word-per-line)
+    // sentence turned into a single horizontal line while being resized.
+    const storedStructure = (primary as any).kineticLineStructure as number[] | undefined;
+    const derived = deriveLineStructure(existing);
+    const lineStructure =
+      Array.isArray(storedStructure) && storedStructure.length > 0 ? storedStructure : derived;
 
     // The canvas renderer draws PiP child clips using ONLY their own transform —
     // it never applies the parent container's x/y/scale. So the container's
@@ -1825,7 +1833,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         nextTracks.splice(at, 0, newTrack);
       }
 
+      // Remember the structure we just laid out, so a later resize reproduces the
+      // author's line arrangement instead of re-deriving (and possibly losing) it.
+      const structureToStore = lineStructure.length > 0 ? lineStructure : derived;
+      const nextTracksTop = st.tracks.map((tr) => ({
+        ...tr,
+        clips: tr.clips.map((c) =>
+          c.id === primaryClipId ? ({ ...c, kineticLineStructure: structureToStore } as any) : c
+        ),
+      }));
+
       return {
+        tracks: nextTracksTop,
         pipWindows: {
           ...st.pipWindows,
           [pipId]: { ...target, tracks: nextTracks },

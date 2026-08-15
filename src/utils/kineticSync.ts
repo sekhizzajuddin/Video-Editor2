@@ -304,7 +304,16 @@ export function deriveLineStructure(layers: ExistingWordLayer[]): number[] {
   if (withY.length === 0) return [];
 
   // Tolerance guards against sub-pixel rounding drift between words on a line.
-  const tolerance = 4;
+  // It must scale with the text: line spacing is ~1.35x the font size, so a fixed
+  // tolerance eventually exceeds the gap between lines at small scales and merges
+  // them, destroying a vertical arrangement. Derive it from the smallest font
+  // present and cap it well below one line height.
+  const minFont = withY.reduce(
+    (m, l) => Math.min(m, typeof l.fontSize === 'number' && l.fontSize > 0 ? l.fontSize : 48),
+    Infinity
+  );
+  const safeFont = Number.isFinite(minFont) ? minFont : 48;
+  const tolerance = Math.max(1, Math.min(4, safeFont * 1.35 * 0.35));
   const counts: number[] = [];
   let currentY = withY[0].y as number;
   let run = 0;
