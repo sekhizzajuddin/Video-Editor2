@@ -856,12 +856,9 @@ export async function renderCanvasEngine({
               offscreenCanvasPool.current.delete(k);
             }
           }
-          const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, dw * DOWNSCALE, dh * DOWNSCALE);
+          const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, Math.max(1, Math.round(dw * DOWNSCALE)), Math.max(1, Math.round(dh * DOWNSCALE)));
           const oCtx = offCanvas.getContext('2d')!;
           oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
-
-          oCtx.save();
-          oCtx.scale(DOWNSCALE, DOWNSCALE);
 
           const cssFilters: string[] = [];
           if (exposure !== 0) {
@@ -870,7 +867,7 @@ export async function renderCanvasEngine({
           }
           if (contrast !== 100) cssFilters.push(`contrast(${Math.max(0, contrast)}%)`);
           if (saturation !== 100) cssFilters.push(`saturate(${Math.max(0, saturation)}%)`);
-          if (blur > 0) cssFilters.push(`blur(${blur}px)`);
+          if (blur > 0) cssFilters.push(`blur(${blur * DOWNSCALE}px)`);
 
           const hasFilters = cssFilters.length > 0;
           if (hasFilters) {
@@ -881,10 +878,10 @@ export async function renderCanvasEngine({
           const sy = cTop * vh;
           const sw = vw * (1 - cLeft - cRight);
           const sh = vh * (1 - cTop - cBot);
-          const odx = cLeft * dw;
-          const ody = cTop * dh;
-          const odw = dw * (1 - cLeft - cRight);
-          const odh = dh * (1 - cTop - cBot);
+          const odx = cLeft * offCanvas.width;
+          const ody = cTop * offCanvas.height;
+          const odw = offCanvas.width * (1 - cLeft - cRight);
+          const odh = offCanvas.height * (1 - cTop - cBot);
 
           oCtx.drawImage(sourceElement, sx, sy, sw, sh, odx, ody, odw, odh);
           if (hasFilters) {
@@ -1019,14 +1016,10 @@ export async function renderCanvasEngine({
           }
 
           if (clip.mask?.enabled) {
-            // With DOWNSCALE=1.0, offCanvas dimensions match logical dimensions,
-            // so the mask can be applied directly without transform manipulation.
             await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations, clip.expressions);
           } else {
             offscreenCanvasPool.current.delete('clip_mask_temp_' + clip.id);
           }
-
-          oCtx.restore();
 
           if (needsDualBlend) {
             ctx.save();

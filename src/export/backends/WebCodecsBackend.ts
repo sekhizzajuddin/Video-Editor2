@@ -19,8 +19,8 @@ export class WebCodecsBackend implements EncoderBackend {
     if (typeof window.VideoEncoder === 'undefined') {
       return false;
     }
-    const codec = this.selectH264Codec(opts.width, opts.height);
     try {
+      const codec = await this.getSupportedCodec(opts.width, opts.height, opts.bitrate || 5_000_000, opts.fps);
       const res = await window.VideoEncoder.isConfigSupported({
         codec,
         width: opts.width,
@@ -34,11 +34,33 @@ export class WebCodecsBackend implements EncoderBackend {
     }
   }
 
-  private selectH264Codec(width: number, height: number): string {
-    if (width > 1920 || height > 1080) {
-      return 'avc1.640034'; // High Profile Level 5.2 for 4K
+  private async getSupportedCodec(width: number, height: number, bitrate: number, fps: number): Promise<string> {
+    const candidates = [
+      'avc1.640034', // High Profile Level 5.2 (4K & High FPS)
+      'avc1.640028', // High Profile Level 4.0 (1080p high quality)
+      'avc1.4d002a', // Main Profile Level 4.2
+      'avc1.4d0028', // Main Profile Level 4.0
+      'avc1.42001f', // Baseline Profile Level 3.1
+      'avc1.42E01F', // Baseline Profile Level 3.1 (Alternate)
+    ];
+
+    for (const codec of candidates) {
+      try {
+        const res = await window.VideoEncoder.isConfigSupported({
+          codec,
+          width,
+          height,
+          bitrate,
+          framerate: fps,
+        });
+        if (res.supported) {
+          return codec;
+        }
+      } catch {
+        // try next candidate
+      }
     }
-    return 'avc1.42E01F'; // Baseline Profile Level 3.1 for general high compatibility
+    return (width > 1920 || height > 1080) ? 'avc1.640034' : 'avc1.42E01F';
   }
 
   async export(opts: ExportOptions): Promise<Blob> {
@@ -47,9 +69,9 @@ export class WebCodecsBackend implements EncoderBackend {
       throw new Error('No target canvas provided for rendering.');
     }
 
-    opts.setStatusMsg?.('Initializing hardware GPU H.264 video encoder...');
-    const codec = this.selectH264Codec(opts.width, opts.height);
     const bitrate = opts.bitrate || 5_000_000;
+    opts.setStatusMsg?.('Initializing hardware GPU H.264 video encoder...');
+    const codec = await this.getSupportedCodec(opts.width, opts.height, bitrate, opts.fps);
 
     // Determine if AudioEncoder is supported in this browser
     const supportsAudio = typeof window.AudioEncoder !== 'undefined' && typeof window.OfflineAudioContext !== 'undefined';
