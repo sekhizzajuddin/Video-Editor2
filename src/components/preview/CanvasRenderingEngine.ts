@@ -849,198 +849,232 @@ export async function renderCanvasEngine({
         const clipH = dh * (1 - cTop - cBot);
 
         if (clipW > 0 && clipH > 0) {
-          const offCanvasKey = `clip_${clip.id}_${Math.round(dw)}x${Math.round(dh)}`;
-          const prefix = `clip_${clip.id}_`;
-          for (const k of offscreenCanvasPool.current.keys()) {
-            if (k.startsWith(prefix) && k !== offCanvasKey) {
-              offscreenCanvasPool.current.delete(k);
+          const hasCrop = cLeft > 0 || cRight > 0 || cTop > 0 || cBot > 0;
+          const hasCssFilters = exposure !== 0 || contrast !== 100 || saturation !== 100 || blur > 0;
+          const hasAiBg = !!clip.aiBackground?.enabled;
+          const hasChroma = !skipExpensiveFX && !!clip.chromaKey?.enabled;
+          const hasLuma = !skipExpensiveFX && !!clip.lumaKey?.enabled;
+          const hasObjRemoval = !skipExpensiveFX && !!clip.objectRemoval?.enabled;
+          const hasColorWheels = !skipExpensiveFX && !!(filters.shadows || filters.midtones || filters.highlights);
+          const curvesData = clip.colorFilters?.curves;
+          const hasCurves = !skipExpensiveFX && !!curvesData && (isCurveOn(curvesData.rgb) || isCurveOn(curvesData.r) || isCurveOn(curvesData.g) || isCurveOn(curvesData.b) || isCurveOn(curvesData.luma));
+          const hasOverlays = !skipExpensiveFX && (filters.temperature !== 0 || filters.tint !== 0 || filters.fadedFilm !== 0 || filters.vignette !== 0);
+          const lutData = mediaMap.get(clip.lut?.mediaId || clip.lutFilter?.mediaId)?.lutData;
+          const hasLut = !skipExpensiveFX && !!lutData;
+          const hasFx = !skipExpensiveFX && !!clip.fxSettings;
+          const hasMask = !!clip.mask?.enabled;
+
+          const needsOffscreen = hasCrop || hasCssFilters || hasAiBg || hasChroma || hasLuma || hasObjRemoval || hasColorWheels || hasCurves || hasOverlays || hasLut || hasFx || hasMask;
+
+          if (!needsOffscreen) {
+            // FAST PATH: Zero-copy GPU direct render directly to target canvas!
+            if (needsDualBlend) {
+              ctx.save();
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
+              if (corners) {
+                drawPerspectiveTexture(ctx, sourceElement, corners);
+              } else {
+                ctx.drawImage(sourceElement, dx, dy, dw, dh);
+              }
+              ctx.restore();
             }
-          }
-          const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, Math.max(1, Math.round(dw * DOWNSCALE)), Math.max(1, Math.round(dh * DOWNSCALE)));
-          const oCtx = offCanvas.getContext('2d')!;
-          oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
 
-          const cssFilters: string[] = [];
-          if (exposure !== 0) {
-            const brightnessVal = 100 + (exposure * 0.7);
-            cssFilters.push(`brightness(${Math.max(0, brightnessVal)}%)`);
-          }
-          if (contrast !== 100) cssFilters.push(`contrast(${Math.max(0, contrast)}%)`);
-          if (saturation !== 100) cssFilters.push(`saturate(${Math.max(0, saturation)}%)`);
-          if (blur > 0) cssFilters.push(`blur(${blur * DOWNSCALE}px)`);
-
-          const hasFilters = cssFilters.length > 0;
-          if (hasFilters) {
-            oCtx.filter = cssFilters.join(' ');
-          }
-
-          const sx = cLeft * vw;
-          const sy = cTop * vh;
-          const sw = vw * (1 - cLeft - cRight);
-          const sh = vh * (1 - cTop - cBot);
-          const odx = cLeft * offCanvas.width;
-          const ody = cTop * offCanvas.height;
-          const odw = offCanvas.width * (1 - cLeft - cRight);
-          const odh = offCanvas.height * (1 - cTop - cBot);
-
-          oCtx.drawImage(sourceElement, sx, sy, sw, sh, odx, ody, odw, odh);
-          if (hasFilters) {
-            oCtx.filter = 'none';
-          }
-
-          // AI Background Removal — always non-blocking during interactive preview.
-          // Only awaits during export to guarantee frame-accurate masks.
-          if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
-            const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur'], clip.expressions?.['aiBackground.edgeBlur']);
-            const smartOpts = {
-              playbackQuality: clip.aiBackground.playbackQuality ?? 'balanced',
-              isPlaying: !isExporting,
-              edgeBlur: animEdgeBlur,
-              modelSelection: (clip.aiBackground.modelSelection ?? 1) as 0 | 1 | 2 | 3,
-              useROI: true,        // Enable smart ROI cropping for high effective resolution
-              skinThreshold: 0.008, // 0.8% skin pixels triggers human detection early-exit
-              choke: clip.aiBackground.choke ?? 0,
-              feather: clip.aiBackground.feather ?? 0,
-              spillSuppression: clip.aiBackground.spillSuppression ?? 0,
-              spillColor: clip.aiBackground.spillColor,
-            };
-            if (isExporting) {
-              // Export: block until we have an exact synchronous mask for this frame
-              await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+            if (corners) {
+              drawPerspectiveTexture(ctx, sourceElement, corners);
             } else {
-              // Interactive: fire-and-forget with early exit & scene-change gating
-              void applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+              ctx.drawImage(sourceElement, dx, dy, dw, dh);
             }
-          }
-
-          if (!skipExpensiveFX) {
-            if (clip.chromaKey?.enabled) {
-              const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold'], clip.expressions?.['chromaKey.threshold']);
-              const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness'], clip.expressions?.['chromaKey.softness']);
-              const animSpill = getAnimatedValue(clip.chromaKey.spillSuppression ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.spillSuppression'], clip.expressions?.['chromaKey.spillSuppression']);
-              const animFeather = getAnimatedValue(clip.chromaKey.edgeFeather ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.edgeFeather'], clip.expressions?.['chromaKey.edgeFeather']);
-              applyChromaKeyOnData(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                clip.chromaKey.color,
-                animThresh,
-                animSoft,
-                animSpill,
-                animFeather
-              );
-            }
-            if (clip.lumaKey?.enabled) {
-              const animThresh = getAnimatedValue(clip.lumaKey.threshold, currentTime, clip.startTime, clip.animations?.['lumaKey.threshold'], clip.expressions?.['lumaKey.threshold']);
-              const animSoft = getAnimatedValue(clip.lumaKey.softness, currentTime, clip.startTime, clip.animations?.['lumaKey.softness'], clip.expressions?.['lumaKey.softness']);
-              applyLumaKeyOnData(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                clip.lumaKey.type,
-                animThresh,
-                animSoft
-              );
-            }
-            // Object Removal — intentionally left inside skipExpensiveFX but now
-            // uses temporal caching via humanDetection.ts for playback optimization.
-            // This is safe because objectRemoval was removed from isAutoFast above.
-            if (clip.objectRemoval?.enabled) {
-              applyObjectRemoval(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                clip.objectRemoval,
-                currentTime,
-                clip.startTime,
-                offCanvas,
-                clip.animations,
-                isPlaying,
-                clip.id
-              );
-            }
-            if (filters.shadows || filters.midtones || filters.highlights) {
-              applyColorGradingWheelsOnData(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                filters.shadows,
-                filters.midtones,
-                filters.highlights
-              );
-            }
-
-            const curvesData = clip.colorFilters?.curves;
-            if (curvesData && (isCurveOn(curvesData.rgb) || isCurveOn(curvesData.r) || isCurveOn(curvesData.g) || isCurveOn(curvesData.b) || isCurveOn(curvesData.luma))) {
-              const rgbLut = isCurveOn(curvesData.rgb) ? buildLUT(curvesData.rgb) : new Uint8ClampedArray(256).map((_, i) => i);
-              const rLut = isCurveOn(curvesData.r) ? buildLUT(curvesData.r) : null;
-              const gLut = isCurveOn(curvesData.g) ? buildLUT(curvesData.g) : null;
-              const bLut = isCurveOn(curvesData.b) ? buildLUT(curvesData.b) : null;
-              const lumaLut = isCurveOn(curvesData.luma) ? buildLUT(curvesData.luma) : null;
-              try {
-                const imgData = oCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
-                applyCurves(imgData, rgbLut, rLut, gLut, bLut, lumaLut);
-                oCtx.putImageData(imgData, 0, 0);
-              } catch (e) {
-                console.warn('Curves apply failed:', e);
+          } else {
+            const offCanvasKey = `clip_${clip.id}_${Math.round(dw)}x${Math.round(dh)}`;
+            const prefix = `clip_${clip.id}_`;
+            for (const k of offscreenCanvasPool.current.keys()) {
+              if (k.startsWith(prefix) && k !== offCanvasKey) {
+                offscreenCanvasPool.current.delete(k);
               }
             }
-            if (filters.temperature !== 0 || filters.tint !== 0 || filters.fadedFilm !== 0 || filters.vignette !== 0) {
-              applyColorOverlays(oCtx, 0, 0, offCanvas.width, offCanvas.height, filters);
+            const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, Math.max(1, Math.round(dw * DOWNSCALE)), Math.max(1, Math.round(dh * DOWNSCALE)));
+            const oCtx = offCanvas.getContext('2d')!;
+            oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
+
+            const cssFilters: string[] = [];
+            if (exposure !== 0) {
+              const brightnessVal = 100 + (exposure * 0.7);
+              cssFilters.push(`brightness(${Math.max(0, brightnessVal)}%)`);
             }
-            const lutData = mediaMap.get(clip.lut?.mediaId || clip.lutFilter?.mediaId)?.lutData;
-            if (lutData) {
-              const baseIntensity = clip.lut?.intensity ?? clip.lutFilter?.intensity ?? 100;
-              const animIntensity = getAnimatedValue(
-                baseIntensity,
-                currentTime,
-                clip.startTime,
-                clip.animations?.['lut.intensity'] || clip.animations?.['lutFilter.intensity']
-              );
-              applyLutToCanvas(oCtx, offCanvas.width, offCanvas.height, lutData, animIntensity);
+            if (contrast !== 100) cssFilters.push(`contrast(${Math.max(0, contrast)}%)`);
+            if (saturation !== 100) cssFilters.push(`saturate(${Math.max(0, saturation)}%)`);
+            if (blur > 0) cssFilters.push(`blur(${blur * DOWNSCALE}px)`);
+
+            const hasFilters = cssFilters.length > 0;
+            if (hasFilters) {
+              oCtx.filter = cssFilters.join(' ');
             }
 
-            if (clip.fxSettings && !skipExpensiveFX) {
-              const fxIntensity = clip.fxSettings.intensity ?? 100;
-              const fxRelTime = Math.max(0, currentTime - clip.startTime);
-              applyFxEffect(
-                oCtx,
-                offCanvas.width,
-                offCanvas.height,
-                clip.fxSettings.type,
-                fxIntensity,
-                fxRelTime,
-                isPlaying
-              );
+            const sx = cLeft * vw;
+            const sy = cTop * vh;
+            const sw = vw * (1 - cLeft - cRight);
+            const sh = vh * (1 - cTop - cBot);
+            const odx = cLeft * offCanvas.width;
+            const ody = cTop * offCanvas.height;
+            const odw = offCanvas.width * (1 - cLeft - cRight);
+            const odh = offCanvas.height * (1 - cTop - cBot);
+
+            oCtx.drawImage(sourceElement, sx, sy, sw, sh, odx, ody, odw, odh);
+            if (hasFilters) {
+              oCtx.filter = 'none';
             }
-          }
 
-          if (clip.mask?.enabled) {
-            await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations, clip.expressions);
-          } else {
-            offscreenCanvasPool.current.delete('clip_mask_temp_' + clip.id);
-          }
+            // AI Background Removal — always non-blocking during interactive preview.
+            // Only awaits during export to guarantee frame-accurate masks.
+            if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
+              const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur'], clip.expressions?.['aiBackground.edgeBlur']);
+              const smartOpts = {
+                playbackQuality: clip.aiBackground.playbackQuality ?? 'balanced',
+                isPlaying: !isExporting,
+                edgeBlur: animEdgeBlur,
+                modelSelection: (clip.aiBackground.modelSelection ?? 1) as 0 | 1 | 2 | 3,
+                useROI: true,        // Enable smart ROI cropping for high effective resolution
+                skinThreshold: 0.008, // 0.8% skin pixels triggers human detection early-exit
+                choke: clip.aiBackground.choke ?? 0,
+                feather: clip.aiBackground.feather ?? 0,
+                spillSuppression: clip.aiBackground.spillSuppression ?? 0,
+                spillColor: clip.aiBackground.spillColor,
+              };
+              if (isExporting) {
+                // Export: block until we have an exact synchronous mask for this frame
+                await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+              } else {
+                // Interactive: fire-and-forget with early exit & scene-change gating
+                void applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+              }
+            }
 
-          if (needsDualBlend) {
-            ctx.save();
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
+            if (!skipExpensiveFX) {
+              if (clip.chromaKey?.enabled) {
+                const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold'], clip.expressions?.['chromaKey.threshold']);
+                const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness'], clip.expressions?.['chromaKey.softness']);
+                const animSpill = getAnimatedValue(clip.chromaKey.spillSuppression ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.spillSuppression'], clip.expressions?.['chromaKey.spillSuppression']);
+                const animFeather = getAnimatedValue(clip.chromaKey.edgeFeather ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.edgeFeather'], clip.expressions?.['chromaKey.edgeFeather']);
+                applyChromaKeyOnData(
+                  oCtx,
+                  offCanvas.width,
+                  offCanvas.height,
+                  clip.chromaKey.color,
+                  animThresh,
+                  animSoft,
+                  animSpill,
+                  animFeather
+                );
+              }
+              if (clip.lumaKey?.enabled) {
+                const animThresh = getAnimatedValue(clip.lumaKey.threshold, currentTime, clip.startTime, clip.animations?.['lumaKey.threshold'], clip.expressions?.['lumaKey.threshold']);
+                const animSoft = getAnimatedValue(clip.lumaKey.softness, currentTime, clip.startTime, clip.animations?.['lumaKey.softness'], clip.expressions?.['lumaKey.softness']);
+                applyLumaKeyOnData(
+                  oCtx,
+                  offCanvas.width,
+                  offCanvas.height,
+                  clip.lumaKey.type,
+                  animThresh,
+                  animSoft
+                );
+              }
+              // Object Removal
+              if (clip.objectRemoval?.enabled) {
+                applyObjectRemoval(
+                  oCtx,
+                  offCanvas.width,
+                  offCanvas.height,
+                  clip.objectRemoval,
+                  currentTime,
+                  clip.startTime,
+                  offCanvas,
+                  clip.animations,
+                  isPlaying,
+                  clip.id
+                );
+              }
+              if (filters.shadows || filters.midtones || filters.highlights) {
+                applyColorGradingWheelsOnData(
+                  oCtx,
+                  offCanvas.width,
+                  offCanvas.height,
+                  filters.shadows,
+                  filters.midtones,
+                  filters.highlights
+                );
+              }
+
+              if (curvesData && (isCurveOn(curvesData.rgb) || isCurveOn(curvesData.r) || isCurveOn(curvesData.g) || isCurveOn(curvesData.b) || isCurveOn(curvesData.luma))) {
+                const rgbLut = isCurveOn(curvesData.rgb) ? buildLUT(curvesData.rgb) : new Uint8ClampedArray(256).map((_, i) => i);
+                const rLut = isCurveOn(curvesData.r) ? buildLUT(curvesData.r) : null;
+                const gLut = isCurveOn(curvesData.g) ? buildLUT(curvesData.g) : null;
+                const bLut = isCurveOn(curvesData.b) ? buildLUT(curvesData.b) : null;
+                const lumaLut = isCurveOn(curvesData.luma) ? buildLUT(curvesData.luma) : null;
+                try {
+                  const imgData = oCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+                  applyCurves(imgData, rgbLut, rLut, gLut, bLut, lumaLut);
+                  oCtx.putImageData(imgData, 0, 0);
+                } catch (e) {
+                  console.warn('Curves apply failed:', e);
+                }
+              }
+              if (filters.temperature !== 0 || filters.tint !== 0 || filters.fadedFilm !== 0 || filters.vignette !== 0) {
+                applyColorOverlays(oCtx, 0, 0, offCanvas.width, offCanvas.height, filters);
+              }
+              if (lutData) {
+                const baseIntensity = clip.lut?.intensity ?? clip.lutFilter?.intensity ?? 100;
+                const animIntensity = getAnimatedValue(
+                  baseIntensity,
+                  currentTime,
+                  clip.startTime,
+                  clip.animations?.['lut.intensity'] || clip.animations?.['lutFilter.intensity']
+                );
+                applyLutToCanvas(oCtx, offCanvas.width, offCanvas.height, lutData, animIntensity);
+              }
+
+              if (clip.fxSettings && !skipExpensiveFX) {
+                const fxIntensity = clip.fxSettings.intensity ?? 100;
+                const fxRelTime = Math.max(0, currentTime - clip.startTime);
+                applyFxEffect(
+                  oCtx,
+                  offCanvas.width,
+                  offCanvas.height,
+                  clip.fxSettings.type,
+                  fxIntensity,
+                  fxRelTime,
+                  isPlaying
+                );
+              }
+            }
+
+            if (clip.mask?.enabled) {
+              await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations, clip.expressions);
+            } else {
+              offscreenCanvasPool.current.delete('clip_mask_temp_' + clip.id);
+            }
+
+            if (needsDualBlend) {
+              ctx.save();
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
+              if (corners) {
+                drawPerspectiveTexture(ctx, offCanvas, corners);
+              } else {
+                ctx.drawImage(offCanvas, dx, dy, dw, dh);
+              }
+              ctx.restore();
+            }
+
             if (corners) {
               drawPerspectiveTexture(ctx, offCanvas, corners);
             } else {
               ctx.drawImage(offCanvas, dx, dy, dw, dh);
             }
-            ctx.restore();
-          }
-
-          if (corners) {
-            drawPerspectiveTexture(ctx, offCanvas, corners);
-          } else {
-            ctx.drawImage(offCanvas, dx, dy, dw, dh);
           }
 
           if (clip.fxSettings?.type === 'subject_outline_flash') {
-            const sourceEl = videoEl || imageEl || offCanvas;
+            const sourceEl = videoEl || imageEl;
             if (sourceEl) {
               const neonOpts = {
                 color: clip.fxSettings.outlineColor || '#00f0ff',

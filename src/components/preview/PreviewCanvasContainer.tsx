@@ -545,7 +545,7 @@ export function PreviewCanvasContainer() {
 
           currentTimeRef.current = newTime;
 
-          if (now - lastSyncTime > 15) {
+          if (now - lastSyncTime > 30) {
             currentSeek(newTime);
             lastSyncTime = now;
           }

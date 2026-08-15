@@ -560,6 +560,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
   const isExporting = useEditorStore((s) => s.isExporting);
 
+  // Throttle pool updates during playback to 1-second chunks (or 0.25s while scrubbing/paused)
+  const ctBucket = isPlaying ? Math.floor(currentTime) : Math.round(currentTime * 4) / 4;
+
   const pendingSeeksRef = useRef<Map<string, number>>(new Map());
   const lastActiveClipIdsRef = useRef<Set<string>>(new Set());
   const sortedTracksRef = useRef<any[]>([]);
@@ -862,7 +865,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         pendingSeeksRef.current.delete(clipId);
       }
     }
-  }, [tracks, mediaLibrary, currentTime, triggerRedraw, isPrimary]);
+  }, [tracks, mediaLibrary, ctBucket, triggerRedraw, isPrimary]);
 
   // ---- Proximity source loader ----
   useEffect(() => {
@@ -890,13 +893,22 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       return;
     }
 
-    const videoEntries: any[] = [];
+    // Priority-based video src loading (nearest clips get loaded first)
+    const videoEntries: Array<{
+      clipId: string;
+      entry: MediaElement;
+      dist: number;
+      absStart: number;
+      clipDuration: number;
+      media: any;
+      clipObj: any;
+    }> = [];
+
     for (const [clipId, entry] of pool) {
       if (entry.type !== 'video') continue;
       const foundNode = findClipById(clipId);
-      const clipTrack = foundNode ? foundNode.track : null;
       const clipObj = foundNode ? foundNode.clip : null;
-      if (!clipObj || !clipTrack || clipTrack.hidden) continue;
+      if (!clipObj) continue;
       const media = mediaMapRef.current.get(entry.mediaId);
       if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
       const absStart = foundNode ? foundNode.absStartTime : clipObj.startTime;
@@ -967,7 +979,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
     }
-  }, [currentTime, tracks, mediaLibrary, isExporting, isPrimary]);
+  }, [ctBucket, tracks, mediaLibrary, isExporting, isPrimary]);
 
   // ============================================================
   // SINGLE RAF SYNC LOOP — The Heart of the Fix
@@ -1092,11 +1104,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         }
 
-        // ---- VIDEO SYNC STRATEGY (Aggressive) ----
+        // ---- VIDEO SYNC STRATEGY (Smooth PLL without seek-storm stutter) ----
         else if (entry.type === 'video') {
-          const VIDEO_HARD_SEEK_THRESHOLD = 0.10;  // 100ms
-          const VIDEO_PLL_THRESHOLD = 0.05;        // 20ms
-          const VIDEO_MAX_PLL_ADJUST = 0.03;       // 3%
+          const VIDEO_HARD_SEEK_THRESHOLD = 0.45;  // 450ms (prevents false-alarm seeks during decode)
+          const VIDEO_PLL_THRESHOLD = 0.025;       // 25ms
+          const VIDEO_MAX_PLL_ADJUST = 0.10;       // 10% dynamic playback rate modulation
 
           if (playing && !isReversing) {
             if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
@@ -1105,7 +1117,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 pendingSeeksRef.current.delete(clip.clipId);
               }
             } else if (Math.abs(rawDrift) > VIDEO_PLL_THRESHOLD) {
-              let adjustment = rawDrift * 0.3;
+              // Smoothly modulate playback speed to catch up / slow down without stopping decoder
+              let adjustment = rawDrift * 0.4;
               adjustment = Math.max(-VIDEO_MAX_PLL_ADJUST, Math.min(VIDEO_MAX_PLL_ADJUST, adjustment));
               const targetRate = Math.max(0.1, globalSpeed * clip.speed * (1 - adjustment));
               if (Math.abs(el.playbackRate - targetRate) > 0.005) {
