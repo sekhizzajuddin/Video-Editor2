@@ -19,6 +19,8 @@ import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
+import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
+import { getPlaybackTime } from '@/utils/playbackClock';
 
 // ---------------------------------------------------------------------------
 // Global Master Audio Context
@@ -553,15 +555,28 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
   const isPlaying = useEditorStore((s) => s.isPlaying);
-  const currentTime = useEditorStore((s) => s.currentTime);
   const volume = useEditorStore((s) => s.volume);
   const isMuted = useEditorStore((s) => s.isMuted);
   const muteTimelineAudio = useEditorStore((s) => s.muteTimelineAudio);
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
   const isExporting = useEditorStore((s) => s.isExporting);
 
-  // Throttle pool updates during playback to 1-second chunks (or 0.25s while scrubbing/paused)
-  const ctBucket = isPlaying ? Math.floor(currentTime) : Math.round(currentTime * 4) / 4;
+  // PERF (playback stutter fix): this hook is mounted by BOTH PreviewCanvasContainer
+  // and PropertiesPanel. Previously it selected `s.currentTime` directly, so every
+  // one of the ~33 store writes per second the playback loop performs re-rendered
+  // both of those very large component trees (PropertiesPanel alone is ~7k lines).
+  // That React work competes with canvas compositing on the same main thread and is
+  // the primary cause of the intermittent lag when several tracks are loaded.
+  //
+  // Pool residency and proximity loading only need a coarse position, so we
+  // subscribe to a quantised bucket instead: 1 s steps while playing, 0.25 s steps
+  // while paused/scrubbing — identical semantics to the previous `ctBucket`, but it
+  // only triggers a render when the bucket actually changes (~1×/s instead of 33×/s).
+  const ctBucket = useTimeBucket(1, 0.25);
+
+  // Throttled time for the reactive audio-parameter effect (see below). Exact values
+  // are always read via useEditorStore.getState() inside the effect body.
+  const audioParamTime = usePlaybackTime(10);
 
   const pendingSeeksRef = useRef<Map<string, number>>(new Map());
   const lastActiveClipIdsRef = useRef<Set<string>>(new Set());
@@ -629,7 +644,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
   // ---- Build active clips (with PIP & transitions) ----
   const getActiveClips = useCallback((): ActiveClipInfo[] => {
-    const ct = useEditorStore.getState().currentTime;
+    // Exact playhead — this decides clip activation/deactivation, so a stale value
+    // here delays hard-seeks at clip boundaries and shows the wrong frame.
+    const ct = getPlaybackTime();
     const result: ActiveClipInfo[] = [];
     const added = new Set<string>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
@@ -716,7 +733,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
   useEffect(() => {
     if (!isPrimary) return;
-    const ct = useEditorStore.getState().currentTime;
+    const ct = getPlaybackTime();
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio' }>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
 
@@ -903,6 +920,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       return;
     }
 
+    // Read the exact playhead position once. (The effect itself is scheduled off
+    // the coarse `ctBucket`, so we must not rely on a stale rendered value here.)
+    const nowTime = useEditorStore.getState().currentTime;
+
     // Priority-based video src loading (nearest clips get loaded first)
     const videoEntries: Array<{
       clipId: string;
@@ -923,9 +944,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
       const absStart = foundNode ? foundNode.absStartTime : clipObj.startTime;
       const clipEnd = absStart + clipObj.duration;
-      const dist = currentTime >= absStart && currentTime < clipEnd
+      const dist = nowTime >= absStart && nowTime < clipEnd
         ? 0
-        : Math.min(Math.abs(currentTime - absStart), Math.abs(currentTime - clipEnd));
+        : Math.min(Math.abs(nowTime - absStart), Math.abs(nowTime - clipEnd));
       videoEntries.push({ clipId, entry, dist, absStart, clipDuration: clipObj.duration, media, clipObj });
     }
 
@@ -1009,7 +1030,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       lastRafTime = now;
 
       const store = useEditorStore.getState();
-      const ct = store.currentTime;
+      // CRITICAL (stutter fix): read the playhead from the React-free clock, not
+      // from the store. The store's `currentTime` is only refreshed ~10x/second
+      // during playback, so it is a staircase signal. Every drift measurement taken
+      // against it carried up to ~100ms of quantisation error — far above the 25ms
+      // video PLL threshold — so the controller constantly "corrected" drift that
+      // did not exist, modulating playbackRate and, past the hard-seek threshold,
+      // issuing spurious seeks that flush the decode pipeline. The clock is updated
+      // every animation frame with the exact position, so drift is now real.
+      const ct = getPlaybackTime();
       const playing = store.isPlaying;
       const scrubbing = store.isScrubbing;
       const globalSpeed = store.playbackSpeed;
@@ -1242,7 +1271,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
     }
 
-    const ct = useEditorStore.getState().currentTime;
+    const ct = getPlaybackTime();
 
     for (const [clipId, entry] of pool) {
       if (!playingIds.has(clipId)) continue;
@@ -1506,7 +1535,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (entry.el.volume !== finalVolume) entry.el.volume = finalVolume;
       }
     }
-  }, [tracks, volume, isMuted, muteTimelineAudio, playbackSpeed, currentTime, isPlaying, mediaLibrary, isPrimary]);
+    // PERF: keyed off `audioParamTime` (10 Hz) rather than raw `currentTime` (~33 Hz).
+    // Fades, keyframed volume and transition ramps are all applied through
+    // AudioParam.setTargetAtTime with an 80 ms time-constant, so a 100 ms update
+    // cadence is inaudible while cutting this effect's cost by ~3×.
+  }, [tracks, volume, isMuted, muteTimelineAudio, playbackSpeed, audioParamTime, isPlaying, mediaLibrary, isPrimary]);
 
   // ---- Cleanup orphaned analysers ----
   useEffect(() => {

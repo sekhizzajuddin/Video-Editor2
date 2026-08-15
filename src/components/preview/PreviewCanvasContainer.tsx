@@ -30,6 +30,7 @@ import {
   PreviewCanvasTransportControls,
 } from './PreviewCanvasToolbar';
 import { setOnMaskReadyCallback } from '@/utils/aiBackground';
+import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 
 export function PreviewCanvasContainer() {
   const currentTime = useEditorStore.getState().currentTime;
@@ -394,20 +395,32 @@ export function PreviewCanvasContainer() {
   // or tracks change during scrubbing/editing. This bypasses React's async render
   // cycle — state updates via useEffect can be delayed 16-50ms.
   useEffect(() => {
-    let lastTime = useEditorStore.getState().currentTime;
+    let lastTime = getPlaybackTime();
     let lastTracks = useEditorStore.getState().tracks;
-    const unsub = useEditorStore.subscribe((state) => {
+
+    const unsubStore = useEditorStore.subscribe((state) => {
       if (state.isPlaying) return;
-      const timeChanged = Math.abs(state.currentTime - lastTime) > 0.001;
-      const tracksChanged = state.tracks !== lastTracks;
-      if (timeChanged || tracksChanged) {
-        lastTime = state.currentTime;
+      if (state.tracks !== lastTracks) {
         lastTracks = state.tracks;
-        currentTimeRef.current = state.currentTime;
         framePendingRef.current = true;
       }
     });
-    return unsub;
+
+    // Time changes come from the clock rather than the store: scrubbing and
+    // frame-stepping push exact positions there first, so this fires without
+    // waiting for the store's React notification.
+    const unsubClock = subscribePlaybackTime((t) => {
+      if (useEditorStore.getState().isPlaying) return;
+      if (Math.abs(t - lastTime) <= 0.001) return;
+      lastTime = t;
+      currentTimeRef.current = t;
+      framePendingRef.current = true;
+    });
+
+    return () => {
+      unsubStore();
+      unsubClock();
+    };
   }, []);
 
   useEffect(() => {
@@ -466,7 +479,9 @@ export function PreviewCanvasContainer() {
       rafId = requestAnimationFrame(tick);
 
       const state = useEditorStore.getState();
-      const actualTime = state.currentTime;
+      // While paused, the clock and the store agree exactly (seek/pause both flush
+      // it), so this is the authoritative position in every state.
+      const actualTime = getPlaybackTime();
 
       if (state.isPlaying) {
         framePendingRef.current = true;
@@ -537,7 +552,17 @@ export function PreviewCanvasContainer() {
 
           currentTimeRef.current = newTime;
 
-          if (now - lastSyncTime > 30) {
+          // Publish the EXACT position to the React-free clock every single frame.
+          // The media-sync PLL reads this, so it now measures true drift instead of
+          // the up-to-33ms staircase produced by the throttled store write below.
+          // Removing that quantisation noise is what stops the PLL from chasing
+          // phantom drift and wobbling playbackRate on multi-track timelines.
+          setPlaybackTime(newTime);
+
+          // The store is only a low-rate mirror for React consumers. 10 Hz is
+          // plenty for timecode readouts and panel state, and it cuts the
+          // re-render load during playback by ~3x versus the old 30ms cadence.
+          if (now - lastSyncTime > 100) {
             currentSeek(newTime);
             lastSyncTime = now;
           }

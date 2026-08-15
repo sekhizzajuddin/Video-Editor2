@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 import { formatDetailedTooltipTime } from '../timelineUtils';
 import { RULER_HEIGHT } from '../timelineConstants';
 
@@ -7,17 +8,17 @@ export function RulerPlayhead({ zoomLevel }: { zoomLevel: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
-    // Initial position
-    if (containerRef.current) {
-      containerRef.current.style.left = `${useEditorStore.getState().currentTime * zoomLevel}px`;
-    }
-    
-    // Imperative subscription for high-frequency updates
-    return useEditorStore.subscribe((state) => {
+    // Imperative, render-free positioning driven by the playback clock.
+    // The store's `currentTime` is only a ~10Hz mirror during playback, so
+    // subscribing to it made the playhead visibly step; the clock is updated every
+    // animation frame with the exact position.
+    const paint = (t: number) => {
       if (containerRef.current) {
-        containerRef.current.style.left = `${state.currentTime * zoomLevel}px`;
+        containerRef.current.style.left = `${t * zoomLevel}px`;
       }
-    });
+    };
+    paint(getPlaybackTime());
+    return subscribePlaybackTime(paint);
   }, [zoomLevel]);
 
   return (
@@ -34,17 +35,17 @@ export function WorkspacePlayhead({ zoomLevel }: { zoomLevel: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
-    // Initial position
-    if (containerRef.current) {
-      containerRef.current.style.left = `${useEditorStore.getState().currentTime * zoomLevel}px`;
-    }
-    
-    // Imperative subscription for high-frequency updates
-    return useEditorStore.subscribe((state) => {
+    // Imperative, render-free positioning driven by the playback clock.
+    // The store's `currentTime` is only a ~10Hz mirror during playback, so
+    // subscribing to it made the playhead visibly step; the clock is updated every
+    // animation frame with the exact position.
+    const paint = (t: number) => {
       if (containerRef.current) {
-        containerRef.current.style.left = `${state.currentTime * zoomLevel}px`;
+        containerRef.current.style.left = `${t * zoomLevel}px`;
       }
-    });
+    };
+    paint(getPlaybackTime());
+    return subscribePlaybackTime(paint);
   }, [zoomLevel]);
 
   return (
@@ -80,8 +81,10 @@ export function FloatingScrubTooltip({
         // scrollLeft is unreliable. trackContainerRef always holds the
         // true live scroll position.
         const liveScrollLeft = trackContainerRef.current?.scrollLeft ?? state.scrollLeft;
-        containerRef.current.style.left = `${state.currentTime * zoomLevel - liveScrollLeft}px`;
-        textRef.current.textContent = formatDetailedTooltipTime(state.currentTime);
+        // Exact position from the playback clock (the store lags during playback).
+        const t = getPlaybackTime();
+        containerRef.current.style.left = `${t * zoomLevel - liveScrollLeft}px`;
+        textRef.current.textContent = formatDetailedTooltipTime(t);
       }
     };
     
@@ -120,13 +123,15 @@ export function PlaybackAutoScroller({
   const lastStoreWriteRef = useRef<number>(0); // throttle Zustand store writes to ~10Hz
 
   useEffect(() => {
-    return useEditorStore.subscribe((state) => {
+    // Driven by the playback clock rather than the store so auto-scroll stays
+    // smooth now that store writes are throttled to ~10Hz during playback.
+    return subscribePlaybackTime(() => {
       // Auto-scroll ONLY during active playback. During scrubbing the user
       // has explicitly scrolled the timeline to the position they want to seek
       // to — firing here causes a scroll fight: the old currentTime triggers a
       // scroll BACK to the previous playhead area before seek() runs with the
       // new time, making the timeline jump to a completely wrong position.
-      if (!state.isPlaying) return;
+      if (!useEditorStore.getState().isPlaying) return;
       const container = trackContainerRef.current;
       if (!container) return;
 
@@ -134,7 +139,7 @@ export function PlaybackAutoScroller({
       const totalMediaWidth = totalDuration * zoomLevel;
       if (totalMediaWidth <= visibleWidth) return;
 
-      const playheadX = state.currentTime * zoomLevel;
+      const playheadX = getPlaybackTime() * zoomLevel;
       const thresholdX = container.scrollLeft + visibleWidth * 0.6;
       let targetScroll = -1;
 

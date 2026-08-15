@@ -50,6 +50,7 @@ import {
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { useShallow } from 'zustand/react/shallow';
 import type { MediaTab, MediaType, MediaItem } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
@@ -390,7 +391,6 @@ export function MediaPanel() {
     addTextMedia,
     rippleDeleteClip,
     removeClip,
-    currentTime,
     seek,
     aiVideoIsGenerating,
     aiVideoProgress,
@@ -421,11 +421,17 @@ export function MediaPanel() {
     addTextMedia: s.addTextMedia,
     rippleDeleteClip: s.rippleDeleteClip,
     removeClip: s.removeClip,
-    currentTime: s.currentTime,
     seek: s.seek,
     aiVideoIsGenerating: s.aiVideoIsGenerating,
     aiVideoProgress: s.aiVideoProgress,
   })));
+
+  // PERF: MediaPanel (~3.5k lines) only uses the playhead to highlight which
+  // timeline text clip is currently active and as the default insertion point for
+  // new clips. Both tolerate a 5 Hz signal, whereas selecting raw `currentTime`
+  // re-rendered the whole panel on every playback store write. Insertion handlers
+  // that need an exact value already call useEditorStore.getState().currentTime.
+  const currentTime = usePlaybackTime(5);
 
   const [syncTargetTrack, setSyncTargetTrack] = useState('');
   const [syncAudioClip, setSyncAudioClip] = useState('');

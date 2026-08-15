@@ -48,6 +48,25 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
   }
 };
 
+/**
+ * Resolve on the encoder's next `dequeue` event (fired whenever encodeQueueSize
+ * drops), or after `timeoutMs` for engines that don't emit it.
+ */
+function waitForEncoderDrain(encoder: VideoEncoder, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      encoder.removeEventListener('dequeue', done);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    encoder.addEventListener('dequeue', done);
+  });
+}
+
 async function configureVideoEncoder(
   encoder: VideoEncoder,
   width: number,
@@ -316,9 +335,11 @@ async function handleExport(
         duration: durationMicroseconds,
       });
       
-      // Wait if encoder queue is getting too large to prevent QuotaExceededError
+      // Wait if encoder queue is getting too large to prevent QuotaExceededError.
+      // PERF: previously polled every 5ms; now driven by the encoder's `dequeue`
+      // event so we resume the instant there is room instead of on the next tick.
       while (videoEncoder.encodeQueueSize > 12 && !isCancelled) {
-        await new Promise(r => setTimeout(r, 5));
+        await waitForEncoderDrain(videoEncoder, 25);
       }
 
       // Force a keyframe on the first frame and every 2 seconds

@@ -60,6 +60,31 @@ let _cachedVisualTracks: TimelineTrack[] = [];
 const _clipHasAnimCache = new Map<string, boolean>();
 let _animCacheTracksRef: TimelineTrack[] | null = null;
 
+// ---------------------------------------------------------------------------
+// Curve LUT memoisation.
+// buildCurveLUT() interpolates a spline into a 256-entry table. That result only
+// depends on the curve definition, so we key a WeakMap on the curve object itself:
+// editing a curve produces a new object (immutable store updates) and therefore a
+// natural cache miss, while steady-state playback is a single map lookup.
+// A WeakMap also means deleted clips' LUTs are collected automatically.
+// ---------------------------------------------------------------------------
+const IDENTITY_LUT = (() => {
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) lut[i] = i;
+  return lut;
+})();
+
+const _curveLutCache = new WeakMap<object, Uint8ClampedArray>();
+
+function getCachedCurveLUT(curve: any): Uint8ClampedArray {
+  if (!curve || typeof curve !== 'object') return buildLUT(curve);
+  const hit = _curveLutCache.get(curve);
+  if (hit) return hit;
+  const lut = buildLUT(curve);
+  _curveLutCache.set(curve, lut);
+  return lut;
+}
+
 export interface RenderCanvasParams {
   canvas: HTMLCanvasElement;
   compositeCtxRef: React.MutableRefObject<CanvasRenderingContext2D | null>;
@@ -1055,11 +1080,16 @@ export async function renderCanvasEngine({
               }
 
               if (curvesData && (isCurveOn(curvesData.rgb) || isCurveOn(curvesData.r) || isCurveOn(curvesData.g) || isCurveOn(curvesData.b) || isCurveOn(curvesData.luma))) {
-                const rgbLut = isCurveOn(curvesData.rgb) ? buildLUT(curvesData.rgb) : new Uint8ClampedArray(256).map((_, i) => i);
-                const rLut = isCurveOn(curvesData.r) ? buildLUT(curvesData.r) : null;
-                const gLut = isCurveOn(curvesData.g) ? buildLUT(curvesData.g) : null;
-                const bLut = isCurveOn(curvesData.b) ? buildLUT(curvesData.b) : null;
-                const lumaLut = isCurveOn(curvesData.luma) ? buildLUT(curvesData.luma) : null;
+                // PERF: LUTs are a pure function of the curve definition, which only
+                // changes when the user edits it. Rebuilding five 256-entry LUTs per
+                // clip per frame was pure waste; they are now memoised on the curve
+                // object's identity (Zustand hands out a new object on every edit,
+                // so the cache invalidates itself).
+                const rgbLut = isCurveOn(curvesData.rgb) ? getCachedCurveLUT(curvesData.rgb) : IDENTITY_LUT;
+                const rLut = isCurveOn(curvesData.r) ? getCachedCurveLUT(curvesData.r) : null;
+                const gLut = isCurveOn(curvesData.g) ? getCachedCurveLUT(curvesData.g) : null;
+                const bLut = isCurveOn(curvesData.b) ? getCachedCurveLUT(curvesData.b) : null;
+                const lumaLut = isCurveOn(curvesData.luma) ? getCachedCurveLUT(curvesData.luma) : null;
                 try {
                   const imgData = oCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
                   applyCurves(imgData, rgbLut, rLut, gLut, bLut, lumaLut);

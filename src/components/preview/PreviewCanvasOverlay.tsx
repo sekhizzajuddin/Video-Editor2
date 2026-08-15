@@ -30,6 +30,7 @@ import { saveFileToDB } from '@/utils/projectPersistence';
 import { removeBackground } from '@imgly/background-removal';
 import { toast } from 'sonner';
 import { getClipDimensions, inpaint } from './previewMath';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 
 interface InteractiveCanvasOverlayProps {
   viewport: { x: number; y: number; zoom: number };
@@ -42,7 +43,12 @@ export function PreviewCanvasOverlay({
   videoElements,
   containerRef
 }: InteractiveCanvasOverlayProps) {
-  const currentTime = useEditorStore(s => s.currentTime);
+  // PERF: the overlay only draws selection/transform handles, so it does not need
+  // a 60 Hz time signal — following the animated transform at 15 Hz is visually
+  // indistinguishable. Selecting raw `currentTime` re-rendered this ~2k-line
+  // component on every playback store write, competing with canvas compositing.
+  // Drag handlers below read the exact time from the store when they need it.
+  const currentTime = usePlaybackTime(15);
   const selectedClipId = useEditorStore(s => s.selectedClipId);
   const canvasTransformMode = useEditorStore(s => s.canvasTransformMode);
   const setCanvasTransformMode = useEditorStore(s => s.setCanvasTransformMode);

@@ -28,6 +28,7 @@ import {
   Zap
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 
 interface PreviewCanvasToolbarHeaderProps {
   aspectRatio: string;
@@ -310,33 +311,41 @@ export function PreviewCanvasTransportControls({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const speedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 
-  // Smooth time display: low-pass filter the currentTime so the on-screen
-  // timecode advances smoothly instead of stepping in 1-frame increments.
-  // Display-only — the seek input below still uses the raw value.
-  const displayedTimeRef = useRef(currentTime);
-  const [, forceUpdate] = useState(0);
+  // Smooth time display, updated WITHOUT React renders.
+  //
+  // PERF: this used to run a rAF loop that called forceUpdate() every frame, so the
+  // transport bar re-rendered ~60x/second for the whole of playback. Rendering React
+  // on the same main thread that composites the canvas is exactly what makes
+  // multi-track playback stutter. The timecode, progress fill and scrub thumb are
+  // pure display, so we now write them straight to the DOM from the playback clock
+  // — zero renders, and the readout is genuinely per-frame smooth instead of
+  // following the throttled store value.
+  const timecodeRef = useRef<HTMLSpanElement>(null);
+  const progressFillRef = useRef<HTMLDivElement>(null);
+  const scrubThumbRef = useRef<HTMLDivElement>(null);
+  const seekInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      const target = currentTime;
-      const cur = displayedTimeRef.current;
-      const diff = target - cur;
-      // Snap if close, otherwise ease toward target (≈ 0.25 per frame).
-      displayedTimeRef.current =
-        Math.abs(diff) < 0.001 ? target : cur + diff * 0.25;
-      if (Math.abs(diff) >= 0.001) {
-        forceUpdate((n) => (n + 1) & 0xffff);
-        raf = requestAnimationFrame(tick);
+    const paint = (t: number) => {
+      const mm = String(Math.floor(t / 60)).padStart(2, '0');
+      const ss = String(Math.floor(t % 60)).padStart(2, '0');
+      const cs = String(Math.floor((t % 1) * 100)).padStart(2, '0');
+      if (timecodeRef.current) timecodeRef.current.textContent = `${mm}:${ss}.${cs}`;
+
+      const pct = Math.min(100, Math.max(0, (t / (totalDuration || 1)) * 100));
+      if (progressFillRef.current) progressFillRef.current.style.width = `${pct}%`;
+      if (scrubThumbRef.current) scrubThumbRef.current.style.left = `${pct}%`;
+      // Keep the (visually hidden) range input in sync so dragging it starts from
+      // the correct position without making it a controlled, re-rendering input.
+      if (seekInputRef.current && document.activeElement !== seekInputRef.current) {
+        seekInputRef.current.value = String(t);
       }
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [currentTime]);
-  const displayTime = displayedTimeRef.current;
 
-  const progressPercent = Math.min(100, Math.max(0, (currentTime / (totalDuration || 1)) * 100));
-  const progressBarStyle = { width: `${progressPercent}%` };
-  const scrubThumbStyle = { left: `${progressPercent}%` };
+    paint(getPlaybackTime());
+    return subscribePlaybackTime(paint);
+  }, [totalDuration]);
+
   const volumeBarStyle = { width: `${(isMuted ? 0 : volume) * 100}%` };
 
   return (
@@ -349,22 +358,23 @@ export function PreviewCanvasTransportControls({
         <div className="relative h-1.5 group cursor-pointer">
           <div className="absolute inset-0 rounded-full bg-[#333]" />
           <div
+            ref={progressFillRef}
             className="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400"
-            style={progressBarStyle}
           />
           <input
+            ref={seekInputRef}
             type="range"
             min={0}
             max={totalDuration || 1}
             step={0.01}
-            value={currentTime}
+            defaultValue={currentTime}
             onChange={handleTimelineSeek}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             style={{ margin: 0 }}
           />
           <div
+            ref={scrubThumbRef}
             className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-amber-400 shadow-lg shadow-amber-500/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-            style={scrubThumbStyle}
           />
         </div>
       </div>
@@ -374,7 +384,7 @@ export function PreviewCanvasTransportControls({
         {/* Left: Time Display */}
         <div className="flex items-center gap-2 min-w-[90px]">
           <span className="text-[10px] font-mono text-[#a0a0a0] tabular-nums select-text">
-            {String(Math.floor(displayTime / 60)).padStart(2, '0')}:{String(Math.floor(displayTime % 60)).padStart(2, '0')}<span className="text-[#666]">.{String(Math.floor((displayTime % 1) * 100)).padStart(2, '0')}</span>
+            <span ref={timecodeRef}>00:00.00</span>
             <span className="text-[#555]"> / {String(Math.floor(totalDuration / 60)).padStart(2, '0')}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
           </span>
         </div>

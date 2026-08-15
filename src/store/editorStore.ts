@@ -21,6 +21,7 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
 import { cleanupClipBackgroundState } from '@/utils/aiBackground';
 import { detectAspectRatio } from '@/utils/aspectRatioHelper';
+import { setPlaybackTime, getPlaybackTime } from '@/utils/playbackClock';
 import type { AspectRatioConflictData } from '@/types';
 
 let saveTimeoutId: any = null;
@@ -2890,7 +2891,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
     set({ isPlaying: true, playbackDirection: 1 });
   },
-  pause: () => set({ isPlaying: false, playbackDirection: 0 }),
+  // During playback the store's `currentTime` is a throttled (~10 Hz) mirror of the
+  // playback clock, so it can trail the true playhead by up to ~100ms. Flush the
+  // exact clock value on pause, otherwise the playhead visibly snaps backwards the
+  // moment playback stops and the media elements re-seek to that stale position.
+  pause: () => set({ isPlaying: false, playbackDirection: 0, currentTime: getPlaybackTime() }),
   togglePlayback: () => {
     const { tracks, isPlaying, selectedClipIds, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips || []);
@@ -2911,13 +2916,21 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
     }
-    set((state) => ({ 
-      isPlaying: !state.isPlaying, 
-      playbackDirection: !state.isPlaying ? 1 : 0 
-    }));
+    set((state) => {
+      const nextPlaying = !state.isPlaying;
+      return {
+        isPlaying: nextPlaying,
+        playbackDirection: nextPlaying ? 1 : 0,
+        // Pausing: adopt the exact clock position (see `pause` above for why).
+        ...(nextPlaying ? {} : { currentTime: getPlaybackTime() }),
+      };
+    });
   },
   seek: (time) => {
     const clamped = Math.max(0, time);
+    // Keep the React-free playback clock in front of the store at all times so
+    // the media-sync loop and canvas renderer never read a stale playhead.
+    setPlaybackTime(clamped);
     // During scrubbing, write directly to store state without triggering React's
     // reconciler. Zustand subscribers (RAF loop, media playback) still get notified
     // via the store's own subscription mechanism — React components do NOT re-render
@@ -4643,6 +4656,27 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Add Adjustment Layer');
   }
 }));
+
+// Safety net: `currentTime` is also written directly by snapshot restore, project
+// load, undo/redo and a few other paths that do not go through `seek()`. Mirror
+// those writes into the playback clock so the render/sync path can never read a
+// stale playhead.
+//
+// IMPORTANT: we must only react to an ACTUAL change of `currentTime`, never to the
+// store's current value. During playback the clock intentionally runs ahead of the
+// store (the store is a throttled ~10Hz mirror), so blindly pushing
+// `state.currentTime` on every store notification — including notifications caused
+// by completely unrelated mutations such as selecting a clip — would drag the
+// playhead backwards several times a second and reintroduce the very stutter this
+// clock exists to remove. Tracking the last observed value means we only push when
+// something genuinely reassigned the time.
+let _lastObservedStoreTime = useEditorStore.getState().currentTime;
+useEditorStore.subscribe((state) => {
+  const t = state.currentTime;
+  if (t === _lastObservedStoreTime) return;
+  _lastObservedStoreTime = t;
+  setPlaybackTime(t);
+});
 
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', (event) => {

@@ -33,6 +33,7 @@ import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { trackMotion } from '@/utils/motionTracker';
 import { compileStoryboard } from '@/utils/storyboardCompiler';
 import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini, AIMotionGraphicSuggestion } from '@/utils/aiClient';
@@ -265,7 +266,6 @@ export function PropertiesPanel() {
     copyClip,
     duplicateClip,
     splitClip,
-    currentTime,
     selectedTransitionClipId,
     updateTransition,
     removeTransition,
@@ -299,7 +299,6 @@ export function PropertiesPanel() {
     copyClip: s.copyClip,
     duplicateClip: s.duplicateClip,
     splitClip: s.splitClip,
-    currentTime: s.currentTime,
     selectedTransitionClipId: s.selectedTransitionClipId,
     updateTransition: s.updateTransition,
     removeTransition: s.removeTransition,
@@ -322,6 +321,14 @@ export function PropertiesPanel() {
     pasteColorGrade: s.pasteColorGrade,
     applyColorGradeToAll: s.applyColorGradeToAll,
   })));
+
+  // PERF: this panel is ~7k lines and re-rendering it is expensive. It used to
+  // select `s.currentTime`, so it re-rendered on every playback store write and
+  // stole main-thread time from the canvas compositor — a major contributor to
+  // choppy multi-track playback. The panel only needs the time to display
+  // keyframe/animated values, which are perfectly readable at 10 Hz. Event
+  // handlers that need an exact time read useEditorStore.getState().currentTime.
+  const currentTime = usePlaybackTime(10);
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [isPickingChromaColor, setIsPickingChromaColor] = useState(false);
