@@ -43,6 +43,15 @@ import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
 
+// ---------------------------------------------------------------------------
+// Module-level track list cache — avoids filter()+sort()+spread on every frame.
+// Tracks reference is stable (Zustand gives new ref on mutation), so this is safe.
+// ---------------------------------------------------------------------------
+let _cachedTracksRef: TimelineTrack[] | null = null;
+let _cachedVideoTracks: TimelineTrack[] = [];
+let _cachedTextTracks: TimelineTrack[] = [];
+let _cachedVisualTracks: TimelineTrack[] = [];
+
 export interface RenderCanvasParams {
   canvas: HTMLCanvasElement;
   compositeCtxRef: React.MutableRefObject<CanvasRenderingContext2D | null>;
@@ -304,15 +313,22 @@ export async function renderCanvasEngine({
   }
   // ---------------------------------
 
-  const videoTracks = tracks
-    .filter((t) => t.type === 'video' && !t.hidden)
-    .sort((a, b) => {
-      const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
-      const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
-      return numA - numB;
-    });
-  const textTracks = tracks.filter((t) => t.type === 'text' && !t.hidden);
-  const visualTracks = [...videoTracks, ...textTracks];
+  // PERF: Cache filtered+sorted track lists. filter()+sort()+spread creates 3 new arrays
+  // every frame (60/s). Now only rebuilds when the `tracks` reference changes.
+  if (tracks !== _cachedTracksRef) {
+    _cachedVideoTracks = tracks
+      .filter((t) => t.type === 'video' && !t.hidden)
+      .sort((a, b) => {
+        const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+        return numA - numB;
+      });
+    _cachedTextTracks = tracks.filter((t) => t.type === 'text' && !t.hidden);
+    _cachedVisualTracks = [..._cachedVideoTracks, ..._cachedTextTracks];
+    _cachedTracksRef = tracks;
+  }
+  const videoTracks = _cachedVideoTracks;
+  const visualTracks = _cachedVisualTracks;
 
   let anyClipDrawn = false;
 

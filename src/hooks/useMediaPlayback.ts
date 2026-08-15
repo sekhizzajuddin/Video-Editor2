@@ -573,6 +573,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const cachedActiveClipsRef = useRef<ActiveClipInfo[]>([]);
   const nextClipBoundaryRef = useRef<number>(0); // recompute when ct crosses this
   const lastCachedStoreTracksRef = useRef<any>(null);
+  // PERF: Persistent Set reused every frame to avoid 2 heap allocations/frame (Array + Set).
+  const playingIdsSetRef = useRef<Set<string>>(new Set());
 
   // ---- Cache sorted tracks & media map ----
   useEffect(() => {
@@ -1033,7 +1035,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         nextClipBoundaryRef.current = nextBoundary;
       }
       const clips = cachedActiveClipsRef.current;
-      const playingIds = new Set(clips.map(c => c.clipId));
+      // PERF: Reuse a persistent Set instead of `new Set(clips.map(...))` every frame.
+      // That pattern creates 2 heap objects (Array + Set) at 60fps = 7200 GC-eligible objects/min.
+      const playingIds = playingIdsSetRef.current;
+      playingIds.clear();
+      for (const c of clips) playingIds.add(c.clipId);
       const mediaMap = mediaMapRef.current;
 
       // ---- 1. Scrubbing: pause everything ----

@@ -546,20 +546,22 @@ export function PreviewCanvasContainer() {
       framePendingRef.current = true;
     }
     if (tabVisible && framePendingRef.current) {
-        // During scrubbing or playback: skip the isRendering mutex so we never
-        // drop frames waiting for an in-flight (but already cheap) render to finish.
-        // During scrub the engine skips all heavy FX so renders complete in <4ms.
+        // PERF FIX: Always use the isRendering mutex, even during playback.
+        // The old `allowConcurrent` flag bypassed the mutex during playback, letting
+        // multiple async draws run simultaneously on the same Canvas 2D context.
+        // Canvas2D is stateful and non-reentrant: concurrent ctx.save/transform/restore
+        // calls interleave across renders, producing the intermittent choppiness.
+        // If a render is still running when the next frame fires, we drop this tick
+        // (a clean frame-drop, not corruption). The hardware video decoder continues
+        // running in the background so no video frames are lost.
         const freshState = useEditorStore.getState();
         const currentlyScrubbing = freshState.isScrubbing;
         const currentlyPlaying = freshState.isPlaying;
-        const allowConcurrent = currentlyScrubbing || currentlyPlaying;
 
-        if (allowConcurrent || !isRendering) {
+        if (!isRendering) {
           framePendingRef.current = false;
-          if (!allowConcurrent) {
-            isRendering = true;
-            isRenderingRef.current = true;
-          }
+          isRendering = true;
+          isRenderingRef.current = true;
 
           // CRITICAL FIX: Patch renderDepsRef with FRESH store data right before rendering.
           // Without this, renderDepsRef holds stale values because React's useEffect hasn't
@@ -576,13 +578,11 @@ export function PreviewCanvasContainer() {
             .catch((err: unknown) => {
               console.error('Error in renderCanvas:', err);
             })
-.finally(() => {
-                if (!allowConcurrent) {
-                  isRendering = false;
-                  isRenderingRef.current = false;
-                }
-                lastRenderedTimeRef.current = currentTimeRef.current;
-              });
+            .finally(() => {
+              isRendering = false;
+              isRenderingRef.current = false;
+              lastRenderedTimeRef.current = currentTimeRef.current;
+            });
         }
       }
     };
