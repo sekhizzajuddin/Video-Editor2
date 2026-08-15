@@ -486,6 +486,43 @@ export const getAllClipsDeep = (state: EditorState): TimelineClip[] => {
   return [...mainClips, ...pipClips];
 };
 
+/**
+ * Apply a clip transform to every clip nested inside PiP windows, returning a new
+ * pipWindows object (or the original reference when nothing changed, so Zustand
+ * subscribers are not needlessly woken).
+ */
+const mapPipWindowClips = (
+  pipWindows: Record<string, PipWindow> | undefined,
+  fn: (clip: TimelineClip) => TimelineClip
+): Record<string, PipWindow> | undefined => {
+  if (!pipWindows) return pipWindows;
+  let changed = false;
+  const next: Record<string, PipWindow> = {};
+
+  for (const [pipId, pip] of Object.entries(pipWindows)) {
+    let pipChanged = false;
+    const tracks = pip.tracks.map((track) => {
+      let trackChanged = false;
+      const clips = track.clips.map((clip) => {
+        const updated = fn(clip);
+        if (updated !== clip) trackChanged = true;
+        return updated;
+      });
+      if (!trackChanged) return track;
+      pipChanged = true;
+      return { ...track, clips };
+    });
+    if (!pipChanged) {
+      next[pipId] = pip;
+    } else {
+      changed = true;
+      next[pipId] = { ...pip, tracks };
+    }
+  }
+
+  return changed ? next : pipWindows;
+};
+
 export const findClipDeep = (state: EditorState, clipId: string) => {
   for (const track of state.tracks) {
     const clip = track.clips.find(c => c.id === clipId);
@@ -2668,40 +2705,59 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedClipId: null,
       selectedClipIds: [],
     }),
+  // NOTE: a transition can live on EITHER the incoming clip (`transitionIn`) or
+  // the outgoing one (`transitionOut`) — drag-and-drop assigns whichever edge the
+  // user dropped nearest. The original implementation only ever updated/removed
+  // `transitionIn`, so editing or deleting a transition that had been dropped on a
+  // clip's END silently did nothing. Both edges are now handled, and `params` are
+  // merged rather than replaced so partial updates (e.g. only `softness`) don't
+  // wipe out the other settings.
   updateTransition: (clipId, updates) => {
     set((state) => {
+      const applyUpdate = (existing: Transition): Transition => ({
+        ...existing,
+        ...updates,
+        params: { ...(existing.params || {}), ...((updates as any).params || {}) },
+      });
+
+      const patchClip = (clip: TimelineClip): TimelineClip => {
+        if (clip.id !== clipId) return clip;
+        if (clip.transitionIn) {
+          return { ...clip, transitionIn: applyUpdate(clip.transitionIn) };
+        }
+        if (clip.transitionOut) {
+          return { ...clip, transitionOut: applyUpdate(clip.transitionOut) };
+        }
+        return clip;
+      };
+
       const newTracks = state.tracks.map((track) => ({
         ...track,
-        clips: track.clips.map((clip) => {
-          if (clip.id === clipId && clip.transitionIn) {
-            return {
-              ...clip,
-              transitionIn: { ...clip.transitionIn, ...updates },
-            };
-          }
-          return clip;
-        }),
+        clips: track.clips.map(patchClip),
       }));
-      return { tracks: newTracks };
+
+      // Transitions can also exist on clips nested inside PiP windows.
+      const newPipWindows = mapPipWindowClips(state.pipWindows, patchClip);
+
+      return { tracks: newTracks, pipWindows: newPipWindows };
     });
     get().saveSnapshot('Update Transition');
   },
   removeTransition: (clipId) => {
     set((state) => {
+      const stripClip = (clip: TimelineClip): TimelineClip =>
+        clip.id === clipId
+          ? { ...clip, transitionIn: undefined, transitionOut: undefined }
+          : clip;
+
       const newTracks = state.tracks.map((track) => ({
         ...track,
-        clips: track.clips.map((clip) => {
-          if (clip.id === clipId) {
-            return {
-              ...clip,
-              transitionIn: undefined,
-            };
-          }
-          return clip;
-        }),
+        clips: track.clips.map(stripClip),
       }));
+
       return {
         tracks: newTracks,
+        pipWindows: mapPipWindowClips(state.pipWindows, stripClip),
         selectedTransitionClipId:
           state.selectedTransitionClipId === clipId ? null : state.selectedTransitionClipId,
       };

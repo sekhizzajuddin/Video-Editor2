@@ -322,10 +322,13 @@ async function handleExport(
       }
       
       const timestampSeconds = i / config.fps;
-      const layers = await scheduler.getLayersAtTime(timestampSeconds);
+      // getFramePlanAtTime also resolves clip-to-clip transitions (layer blend +
+      // any full-frame overlay) using the same engine the preview uses, so the
+      // exported file matches what the user saw.
+      const { layers, overlays } = await scheduler.getFramePlanAtTime(timestampSeconds);
 
       // Render frame with WebGL (or 2D fallback if context lost)
-      await compositor.render(layers);
+      await compositor.render(layers, overlays);
       
       // Capture the canvas and encode it
       const timestampMicroseconds = Math.round(i * (1_000_000 / config.fps));

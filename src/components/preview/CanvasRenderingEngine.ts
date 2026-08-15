@@ -42,6 +42,12 @@ import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
+import {
+  findActiveTransition,
+  buildTransitionPlan,
+  type ActiveTransition,
+  type LayerDraw,
+} from '@/utils/transitionEngine';
 
 // ---------------------------------------------------------------------------
 // Module-level track list cache — avoids filter()+sort()+spread on every frame.
@@ -1359,13 +1365,44 @@ export async function renderCanvasEngine({
     ctx.restore();
   };
 
+  // ─── Transition resolution ────────────────────────────────────────────────
+  // Determine, per visual track, whether a clip-to-clip transition is active on
+  // this frame. Transitions were previously stored and drawn on the timeline but
+  // never composited here, which is why they had no visible effect. A track can
+  // have at most one active transition per frame (findActiveTransition enforces
+  // that), so overlapping windows can't double-composite and flicker.
+  const activeTransitions = new Map<string, ActiveTransition>();
+  // Clips that are being handled by a transition; they must NOT also be drawn by
+  // the normal draw queue or they'd be painted twice (once opaque), which would
+  // completely hide the blend.
+  const transitionClipIds = new Set<string>();
+
+  for (const track of visualTracks) {
+    const active = findActiveTransition(track.clips, currentTime);
+    if (active) {
+      activeTransitions.set(track.id, active);
+      transitionClipIds.add(active.from.id);
+      transitionClipIds.add(active.to.id);
+    }
+  }
+
   const drawQueue: { clip: any; layer: number }[] = [];
   for (const track of visualTracks) {
     for (const clip of track.clips) {
+      if (transitionClipIds.has(clip.id)) continue; // drawn by the transition pass
       if (!clip.disabled && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration + 0.001) {
         drawQueue.push({ clip, layer: track.id.startsWith('text') ? 100 : 0 });
       }
     }
+  }
+
+  // Queue the transition pass at the owning track's layer so z-ordering against
+  // text/PiP layers is preserved.
+  for (const [trackId, active] of activeTransitions) {
+    drawQueue.push({
+      clip: { __transition: active, id: `__transition_${trackId}` },
+      layer: trackId.startsWith('text') ? 100 : 0,
+    });
   }
 
   // Also collect active clips inside PiP Windows attached to active timeline clips
@@ -1413,12 +1450,97 @@ export async function renderCanvasEngine({
     }
   }
 
+  /**
+   * Composite one clip of a transition onto the frame.
+   *
+   * Each layer is rendered into its own offscreen buffer first and only then
+   * blitted with the transition's opacity/offset/scale/clip-rect. Drawing the two
+   * clips straight onto the shared composite context would be wrong: clips carry
+   * their own transforms and per-clip alpha, and Canvas2D has no way to express
+   * "apply this extra alpha to everything I'm about to draw" without a separate
+   * buffer. The buffer also makes wipes possible, since we need to mask the fully
+   * drawn layer rather than each of its individual draw calls.
+   */
+  const drawTransitionLayer = async (
+    clipToDraw: any,
+    layer: LayerDraw,
+    bufferKey: string
+  ) => {
+    if (!layer.visible) return;
+
+    // The buffer holds ONLY the frame region (W x H in local units), rendered at
+    // the same device resolution the frame currently occupies so the layer is not
+    // softened by a round-trip through a lower-res buffer.
+    const bufScale = Math.max(0.1, canvas_scale * viewport.zoom);
+    const bufW = Math.max(1, Math.round(W * bufScale));
+    const bufH = Math.max(1, Math.round(H * bufScale));
+
+    const buf = getOrCreateCanvas(offscreenCanvasPool.current, bufferKey, bufW, bufH);
+    const bctx = buf.getContext('2d');
+    if (!bctx) return;
+
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    bctx.clearRect(0, 0, buf.width, buf.height);
+
+    // drawSingleClip works in "local frame space": (0,0) is the frame's top-left
+    // and the frame is W x H units. Scaling by bufScale reproduces that space
+    // exactly, so the clip lands where it normally would.
+    bctx.save();
+    bctx.scale(bufScale, bufScale);
+    await drawSingleClip(clipToDraw, 1, undefined, bctx);
+    bctx.restore();
+
+    // Blit the finished layer with the transition's geometry + alpha. `ctx` is
+    // already in local frame space, so we work in W/H units throughout.
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
+
+    if (layer.clipRect) {
+      const r = layer.clipRect;
+      ctx.beginPath();
+      ctx.rect(r.x * W, r.y * H, r.w * W, r.h * H);
+      ctx.clip();
+    }
+
+    // Geometry is expressed in frame fractions, so it is resolution independent.
+    const cxF = W / 2;
+    const cyF = H / 2;
+    ctx.translate(cxF + layer.translateX * W, cyF + layer.translateY * H);
+    if (layer.rotation) ctx.rotate(layer.rotation);
+    if (layer.scale !== 1) ctx.scale(layer.scale, layer.scale);
+    ctx.translate(-cxF, -cyF);
+
+    ctx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+    ctx.restore();
+  };
+
+  /** Render a full clip-to-clip transition (both layers + overlay + post effect). */
+  const drawTransition = async (active: ActiveTransition) => {
+    const plan = buildTransitionPlan(active);
+    anyClipDrawn = true;
+
+    await drawTransitionLayer(active.from, plan.from, '__transition_from');
+    await drawTransitionLayer(active.to, plan.to, '__transition_to');
+
+    if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, plan.overlay.alpha);
+      ctx.fillStyle = plan.overlay.color;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  };
+
   // Render clips sequentially to guarantee correct Z-index order and prevent Canvas 2D
   // context state corruption (since drawSingleClip can yield on async operations like masks/AI).
   // Note: JavaScript is single-threaded, so Promise.all does not parallelize CPU-bound Canvas
   // drawing anyway; it merely interleaves execution, which corrupts the shared `ctx` state stack.
   for (const item of drawQueue) {
-    await drawSingleClip(item.clip);
+    if (item.clip.__transition) {
+      await drawTransition(item.clip.__transition as ActiveTransition);
+    } else {
+      await drawSingleClip(item.clip);
+    }
   }
 
   if (!anyClipDrawn && !hasClips) {

@@ -21,6 +21,7 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
 import { getPlaybackTime } from '@/utils/playbackClock';
+import { findActiveTransition, getTransitionAudioGains } from '@/utils/transitionEngine';
 
 // ---------------------------------------------------------------------------
 // Global Master Audio Context
@@ -697,29 +698,18 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         }
 
-        // Transitions
-        if (idx > 0) {
-          const prevClip = track.clips[idx - 1];
-          const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
-          const trans = (Math.abs(gap) < 0.1 && clip.transitionIn)
-            ? clip.transitionIn
-            : (Math.abs(gap) < 0.1 && prevClip.transitionOut)
-              ? prevClip.transitionOut
-              : null;
-          if (trans) {
-            const duration = trans.duration;
-            const alignment = trans.params?.alignment || 'center';
-            const boundary = clip.startTime;
-            let leftSec = boundary - duration / 2;
-            if (alignment === 'left') leftSec = boundary;
-            else if (alignment === 'right') leftSec = boundary - duration;
-            const rightSec = leftSec + duration;
-            if (ct >= leftSec && ct < rightSec) {
-              addIfNew(prevClip, track, prevClip.startTime);
-              addIfNew(clip, track, clip.startTime);
-            }
-          }
-        }
+      }
+
+      // Transitions: keep BOTH clips of an active transition alive so the
+      // outgoing clip's video element continues decoding and its audio keeps
+      // playing while it fades out. Delegated to the shared transition engine so
+      // the window maths can never drift from what the renderer composites — a
+      // mismatch here shows up as the outgoing clip freezing or going silent
+      // partway through the blend.
+      const activeTransition = findActiveTransition(track.clips, ct);
+      if (activeTransition) {
+        addIfNew(activeTransition.from, track, activeTransition.from.startTime);
+        addIfNew(activeTransition.to, track, activeTransition.to.startTime);
       }
     }
     return result;
@@ -1442,78 +1432,43 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         fadeOutMultiplier = Math.min(1, Math.max(0, timeLeft / audioSettings.fadeOut));
       }
 
-      // Transition volume (simplified, no O(N²) sort)
+      // ── Transition audio cross-fade ──────────────────────────────────────
+      // Delegated to the shared transition engine so the window maths matches the
+      // renderer exactly, and using an EQUAL-POWER curve rather than the previous
+      // linear ramp. Two linearly cross-faded uncorrelated sources lose ~3dB at
+      // the midpoint, which is audible as a dip right at the cut.
       let transitionVolumeMultiplier = 1;
       let isTransitionMuted = false;
 
-      // Check transitionIn on this clip
-      if (fullClip.transitionIn) {
-        const trans = fullClip.transitionIn;
-        const transDur = trans.duration;
-        const alignment = trans.params?.alignment || 'center';
-        let leftSec = fullClip.startTime - transDur / 2;
-        if (alignment === 'left') leftSec = fullClip.startTime;
-        else if (alignment === 'right') leftSec = fullClip.startTime - transDur;
-        const rightSec = leftSec + transDur;
-        if (ct >= leftSec && ct < rightSec) {
-          const t = (ct - leftSec) / transDur;
-          // Split clip check using sorted track clips
-          const track = sortedTracksRef.current.find((t: any) => t.id === targetTrack?.id);
-          if (track) {
-            const sorted = track.clips;
-            const clipIdx = sorted.findIndex((c: any) => c.id === clipId);
-            if (clipIdx > 0) {
-              const prevClip = sorted[clipIdx - 1];
-              if (prevClip.mediaId === fullClip.mediaId) {
-                const prevMediaTime = getMediaTimeForClip(prevClip, fullClip.startTime);
-                const currMediaTime = getMediaTimeForClip(fullClip, fullClip.startTime);
-                if (Math.abs(prevMediaTime - currMediaTime) < 0.1) {
-                  if (ct < fullClip.startTime) isTransitionMuted = true;
-                } else {
-                  transitionVolumeMultiplier = t;
-                }
-              } else {
-                transitionVolumeMultiplier = t;
-              }
-            } else {
-              transitionVolumeMultiplier = t;
-            }
-          }
-        }
-      }
+      const transTrack = targetTrack
+        ? sortedTracksRef.current.find((t: any) => t.id === targetTrack.id)
+        : null;
 
-      // Check outgoing transition (next clip)
-      if (targetTrack) {
-        const track = sortedTracksRef.current.find((t: any) => t.id === targetTrack.id);
-        if (track) {
-          const sorted = track.clips;
-          const clipIdx = sorted.findIndex((c: any) => c.id === clipId);
-          if (clipIdx !== -1 && clipIdx < sorted.length - 1) {
-            const nextClip = sorted[clipIdx + 1];
-            const activeTrans = nextClip.transitionIn || fullClip.transitionOut || null;
-            if (activeTrans) {
-              const transDur = activeTrans.duration;
-              const alignment = activeTrans.params?.alignment || 'center';
-              const boundary = nextClip.startTime;
-              let leftSec = boundary - transDur / 2;
-              if (alignment === 'left') leftSec = boundary;
-              else if (alignment === 'right') leftSec = boundary - transDur;
-              const rightSec = leftSec + transDur;
-              if (ct >= leftSec && ct < rightSec) {
-                const t = (ct - leftSec) / transDur;
-                if (nextClip.mediaId === fullClip.mediaId) {
-                  const prevMediaTime = getMediaTimeForClip(fullClip, nextClip.startTime);
-                  const currMediaTime = getMediaTimeForClip(nextClip, nextClip.startTime);
-                  if (Math.abs(prevMediaTime - currMediaTime) < 0.1) {
-                    if (ct >= nextClip.startTime) isTransitionMuted = true;
-                  } else {
-                    transitionVolumeMultiplier = 1 - t;
-                  }
-                } else {
-                  transitionVolumeMultiplier = 1 - t;
-                }
-              }
-            }
+      if (transTrack) {
+        const active = findActiveTransition(transTrack.clips, ct);
+        if (active && (active.from.id === clipId || active.to.id === clipId)) {
+          const isOutgoing = active.from.id === clipId;
+          const other = isOutgoing ? active.to : active.from;
+
+          // Special case: a transition placed on a SPLIT of one continuous source
+          // (both sides share a mediaId and their media timelines are contiguous).
+          // Cross-fading a source against itself causes comb filtering / flanging,
+          // so we keep exactly one side audible and hard-mute the other.
+          const sameSource = other.mediaId === fullClip.mediaId;
+          let contiguous = false;
+          if (sameSource) {
+            const boundary = active.to.startTime;
+            const fromMediaTime = getMediaTimeForClip(active.from, boundary);
+            const toMediaTime = getMediaTimeForClip(active.to, boundary);
+            contiguous = Math.abs(fromMediaTime - toMediaTime) < 0.1;
+          }
+
+          if (contiguous) {
+            // Play whichever side owns the current time; mute the other.
+            isTransitionMuted = isOutgoing ? ct >= active.to.startTime : ct < active.to.startTime;
+          } else {
+            const gains = getTransitionAudioGains(active.progress);
+            transitionVolumeMultiplier = isOutgoing ? gains.fromGain : gains.toGain;
           }
         }
       }

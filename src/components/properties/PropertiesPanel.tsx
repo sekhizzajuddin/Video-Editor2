@@ -34,6 +34,12 @@ import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
+import {
+  normalizeTransition,
+  getMaxTransitionDuration,
+  TRANSITION_KIND_INFO,
+  TRANSITION_EASINGS,
+} from '@/utils/transitionEngine';
 import { trackMotion } from '@/utils/motionTracker';
 import { compileStoryboard } from '@/utils/storyboardCompiler';
 import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini, AIMotionGraphicSuggestion } from '@/utils/aiClient';
@@ -759,15 +765,19 @@ export function PropertiesPanel() {
     }
   };
 
-  // Find the selected transition
-  let selectedTransitionClip = null;
-  let selectedTransition = null;
+  // Find the selected transition.
+  // A transition may be stored on either edge — `transitionIn` of the incoming
+  // clip or `transitionOut` of the outgoing one — depending on which side the
+  // user dropped it. Only checking `transitionIn` (the old behaviour) meant the
+  // properties panel appeared empty for half of all transitions.
+  let selectedTransitionClip: any = null;
+  let selectedTransition: any = null;
   if (selectedTransitionClipId) {
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === selectedTransitionClipId);
-      if (clip && clip.transitionIn) {
+      if (clip && (clip.transitionIn || clip.transitionOut)) {
         selectedTransitionClip = clip;
-        selectedTransition = clip.transitionIn;
+        selectedTransition = clip.transitionIn || clip.transitionOut;
         break;
       }
     }
@@ -1074,7 +1084,29 @@ export function PropertiesPanel() {
   const tabs = baseTabs;
 
   if (selectedTransition && selectedTransitionClip) {
-    const alignment = selectedTransition.params?.alignment as string || 'center';
+    const norm = normalizeTransition(selectedTransition);
+    const alignment = (selectedTransition.params?.alignment as string) || 'center';
+    const kindInfo = TRANSITION_KIND_INFO.find((k) => k.kind === norm.kind);
+    const supports = (feature: string) => !!kindInfo?.supports.includes(feature as any);
+
+    // Longest transition that still fits between the two neighbouring clips.
+    // Exceeding this is what produced the overlapping-window flicker, so the UI
+    // caps the slider rather than letting the renderer clamp silently.
+    const maxDuration = getMaxTransitionDuration(tracks, selectedTransitionClip.id);
+
+    // Patch helper: merges into params (the store also merges, but doing it here
+    // keeps the optimistic UI value consistent).
+    const setParam = (key: string, value: any) =>
+      updateTransition(selectedTransitionClip.id, {
+        params: { ...(selectedTransition.params || {}), [key]: value },
+      } as any);
+
+    const directions: Array<{ v: string; label: string }> = [
+      { v: 'left', label: 'Left' },
+      { v: 'right', label: 'Right' },
+      { v: 'up', label: 'Up' },
+      { v: 'down', label: 'Down' },
+    ];
 
     return (
       <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
@@ -1089,7 +1121,7 @@ export function PropertiesPanel() {
             <div>
               <h3 className="text-sm font-semibold text-white">Transition Settings</h3>
               <p className="text-[11px] text-[#a0a0a0] truncate max-w-[180px]">
-                {selectedTransition.name}
+                {selectedTransition.name || kindInfo?.label || selectedTransition.type}
               </p>
             </div>
           </div>
@@ -1103,62 +1135,60 @@ export function PropertiesPanel() {
 
         {/* Content */}
         <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-          {/* Transition Type Info */}
-          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
-            <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider block mb-1">
-              Effect Type
-            </span>
-            <span className="text-sm text-white font-medium capitalize">
-              {selectedTransition.type}
-            </span>
+          {/* Effect type */}
+          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <label className="text-xs text-white font-medium block">Effect</label>
+            <div className="relative">
+              <select
+                value={norm.kind}
+                onChange={(e) => setParam('kind', e.target.value)}
+                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+              >
+                {TRANSITION_KIND_INFO.map((k) => (
+                  <option key={k.kind} value={k.kind}>{k.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
           </div>
 
-          {/* Duration Slider */}
+          {/* Duration */}
           <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
             <div className="flex justify-between items-center">
               <label className="text-xs text-white font-medium">Duration</label>
               <span className="text-xs font-mono text-purple-300">
-                {(selectedTransition?.duration ?? 0.5).toFixed(1)}s
+                {(selectedTransition?.duration ?? 0.5).toFixed(2)}s
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min={0.1}
-                max={5.0}
-                step={0.1}
-                value={(selectedTransition?.duration ?? 0.5)}
-                onChange={(e) => {
-                  let val = parseFloat(e.target.value);
-                  const maxDur = selectedTransitionClip.duration / 2;
-                  if (val > maxDur) {
-                    val = maxDur;
-                    toast.warning("Transition duration limited to 50% of clip length");
-                  }
-                  updateTransition(selectedTransitionClip.id, {
-                    duration: val,
-                  });
-                }}
-                className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
-              />
-            </div>
+            <input
+              type="range"
+              min={0.1}
+              max={Math.max(0.2, maxDuration)}
+              step={0.05}
+              value={Math.min(selectedTransition?.duration ?? 0.5, Math.max(0.2, maxDuration))}
+              onChange={(e) => {
+                let val = parseFloat(e.target.value);
+                if (val > maxDuration) {
+                  val = maxDuration;
+                  toast.warning('Transition limited by the length of the adjacent clips');
+                }
+                updateTransition(selectedTransitionClip.id, { duration: val });
+              }}
+              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
+            />
             <div className="flex justify-between text-[9px] text-[#a0a0a0]">
               <span>0.1s</span>
-              <span>5.0s</span>
+              <span>max {maxDuration.toFixed(2)}s</span>
             </div>
           </div>
 
-          {/* Alignment Selector */}
+          {/* Alignment */}
           <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
             <label className="text-xs text-white font-medium block">Alignment</label>
             <div className="relative">
               <select
                 value={alignment}
-                onChange={(e) =>
-                  updateTransition(selectedTransitionClip.id, {
-                    params: { ...selectedTransition.params, alignment: e.target.value },
-                  })
-                }
+                onChange={(e) => setParam('alignment', e.target.value)}
                 className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
               >
                 <option value="center">Center at Cut</option>
@@ -1169,7 +1199,110 @@ export function PropertiesPanel() {
             </div>
           </div>
 
-          {/* Delete Button */}
+          {/* Easing */}
+          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <label className="text-xs text-white font-medium block">Easing</label>
+            <div className="relative">
+              <select
+                value={norm.easing}
+                onChange={(e) => updateTransition(selectedTransitionClip.id, { easing: e.target.value })}
+                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+              >
+                {TRANSITION_EASINGS.map((e) => (
+                  <option key={e.value} value={e.value}>{e.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Direction — only for effects that travel */}
+          {supports('direction') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <label className="text-xs text-white font-medium block">Direction</label>
+              <div className="grid grid-cols-4 gap-1">
+                {directions.map((d) => (
+                  <button
+                    key={d.v}
+                    onClick={() => setParam('direction', d.v)}
+                    className={`py-1.5 text-[10px] rounded border transition-colors ${
+                      norm.direction === d.v
+                        ? 'bg-purple-600 border-purple-500 text-white'
+                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-purple-500/50'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Zoom direction */}
+          {supports('zoomDirection') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <label className="text-xs text-white font-medium block">Zoom</label>
+              <div className="grid grid-cols-2 gap-1">
+                {['in', 'out'].map((z) => (
+                  <button
+                    key={z}
+                    onClick={() => setParam('zoomDirection', z)}
+                    className={`py-1.5 text-[10px] rounded border capitalize transition-colors ${
+                      norm.zoomDirection === z
+                        ? 'bg-purple-600 border-purple-500 text-white'
+                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-purple-500/50'
+                    }`}
+                  >
+                    Zoom {z}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Edge softness — wipes only */}
+          {supports('softness') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-white font-medium">Edge Softness</label>
+                <span className="text-xs font-mono text-purple-300">
+                  {Math.round(norm.softness * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={norm.softness}
+                onChange={(e) => setParam('softness', parseFloat(e.target.value))}
+                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
+              />
+            </div>
+          )}
+
+          {/* Intensity */}
+          {supports('intensity') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-white font-medium">Intensity</label>
+                <span className="text-xs font-mono text-purple-300">
+                  {Math.round(norm.intensity * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={norm.intensity}
+                onChange={(e) => setParam('intensity', parseFloat(e.target.value))}
+                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
+              />
+            </div>
+          )}
+
+          {/* Delete */}
           <button
             onClick={() => removeTransition(selectedTransitionClip.id)}
             className="w-full py-2 bg-red-600/10 hover:bg-red-600 border border-red-500/20 hover:border-red-500 text-red-400 hover:text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 mt-4"

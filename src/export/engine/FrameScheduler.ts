@@ -1,4 +1,5 @@
 import { AssetDecoder } from './AssetDecoder';
+import { findActiveTransition, buildTransitionPlan } from '../../utils/transitionEngine';
 import { FramePool } from './memory/FramePool';
 
 export interface RenderLayer {
@@ -28,6 +29,30 @@ export interface RenderLayer {
    * with this instead of relying on push order.
    */
   order?: number;
+  /**
+   * Extra geometry contributed by an active clip-to-clip transition, expressed in
+   * fractions of the frame so it is resolution independent. Applied by the
+   * Compositor on top of the clip's own transform.
+   */
+  transitionGeometry?: {
+    translateX: number;
+    translateY: number;
+    scale: number;
+    rotation: number;
+    clipRect?: { x: number; y: number; w: number; h: number };
+  };
+}
+
+/** Full-frame overlay (flash / dip-to-colour / light leak) for a single frame. */
+export interface FrameOverlay {
+  color: string;
+  alpha: number;
+}
+
+/** Everything needed to composite one output frame. */
+export interface FramePlan {
+  layers: RenderLayer[];
+  overlays: FrameOverlay[];
 }
 
 export class FrameScheduler {
@@ -88,10 +113,32 @@ export class FrameScheduler {
       const track = tracks[trackIdx];
       if (track.muted || track.isMuted || track.hidden) continue;
 
+      // Resolve any clip-to-clip transition active on this track for this frame.
+      // Uses the SAME engine as the live preview, so an export is guaranteed to
+      // match what the user saw — previously the exporter had no transition
+      // support at all and silently produced hard cuts.
+      const activeTransition = findActiveTransition(track.clips || [], timestampSeconds);
+      const plan = activeTransition ? buildTransitionPlan(activeTransition) : null;
+
       for (const clip of track.clips || []) {
         if (clip.disabled) continue;
-        // Is this clip visible at this timestamp?
-        if (timestampSeconds >= clip.startTime && timestampSeconds < (clip.startTime + clip.duration)) {
+
+        // A clip taking part in a transition must be rendered even when the
+        // playhead has already passed its end (the outgoing clip keeps showing
+        // during the blend), so widen the visibility test for those two clips.
+        const transitionRole = activeTransition
+          ? (activeTransition.from.id === clip.id
+              ? 'from'
+              : activeTransition.to.id === clip.id
+                ? 'to'
+                : null)
+          : null;
+
+        const normallyVisible =
+          timestampSeconds >= clip.startTime &&
+          timestampSeconds < (clip.startTime + clip.duration);
+
+        if (normallyVisible || transitionRole) {
           const transform = {
             x: clip.transform?.x ?? clip.position?.x ?? 0,
             y: clip.transform?.y ?? clip.position?.y ?? 0,
@@ -101,10 +148,34 @@ export class FrameScheduler {
           const zIndex = clip.zIndex !== undefined ? clip.zIndex : trackIdx;
           const layerOrder = order++;
 
+          // Fold the transition's contribution into this layer.
+          const layerDraw = plan && transitionRole
+            ? (transitionRole === 'from' ? plan.from : plan.to)
+            : null;
+          if (layerDraw && !layerDraw.visible) continue; // fully faded out
+          const baseOpacity = clip.opacity !== undefined ? clip.opacity : 1;
+          const opacity = layerDraw ? baseOpacity * layerDraw.opacity : baseOpacity;
+          const transitionGeometry = layerDraw
+            ? {
+                translateX: layerDraw.translateX,
+                translateY: layerDraw.translateY,
+                scale: layerDraw.scale,
+                rotation: layerDraw.rotation,
+                clipRect: layerDraw.clipRect,
+              }
+            : undefined;
+
           if (track.type === 'video' && this.decoders.has(clip.id)) {
             const decoder = this.decoders.get(clip.id);
             // Calculate local clip time (accounting for trimming and speed)
-            const localTimeSeconds = ((timestampSeconds - clip.startTime) * (clip.speed || 1)) + (clip.trimStart || clip.startOffset || 0);
+            // Clamp into the clip's own range: during a transition the playhead
+            // can sit slightly outside the outgoing clip, and asking a decoder for
+            // a negative/overrun timestamp yields a black or repeated frame.
+            const clampedTime = Math.min(
+              Math.max(timestampSeconds, clip.startTime),
+              clip.startTime + clip.duration
+            );
+            const localTimeSeconds = ((clampedTime - clip.startTime) * (clip.speed || 1)) + (clip.trimStart || clip.startOffset || 0);
 
             pending.push(
               (async () => {
@@ -113,11 +184,12 @@ export class FrameScheduler {
                   layers.push({
                     type: 'video',
                     frame,
-                    opacity: clip.opacity !== undefined ? clip.opacity : 1,
+                    opacity,
                     chromaKey: clip.chromaKey,
                     transform,
                     zIndex,
                     order: layerOrder,
+                    transitionGeometry,
                     sourceRotation: decoder?.rotation || 0,
                   });
                 }
@@ -127,10 +199,11 @@ export class FrameScheduler {
             layers.push({
               type: 'text',
               textData: clip,
-              opacity: clip.opacity !== undefined ? clip.opacity : 1,
+              opacity,
               transform,
               zIndex,
               order: layerOrder,
+              transitionGeometry,
             });
           }
         }
@@ -145,7 +218,27 @@ export class FrameScheduler {
     // Layers resolve out of order when decoded concurrently, so the sort below is
     // what establishes correct compositing order; `order` breaks zIndex ties using
     // the original track/clip enumeration order.
-    return layers.sort((a, b) => (a.zIndex - b.zIndex) || ((a.order ?? 0) - (b.order ?? 0)));
+    layers.sort((a, b) => (a.zIndex - b.zIndex) || ((a.order ?? 0) - (b.order ?? 0)));
+    return layers;
+  }
+
+  /**
+   * Full frame plan: layers plus any full-frame transition overlays.
+   * Preferred over getLayersAtTime() for rendering.
+   */
+  async getFramePlanAtTime(timestampSeconds: number): Promise<FramePlan> {
+    const overlays: FrameOverlay[] = [];
+    for (const track of this.timeline.tracks || []) {
+      if (track.muted || track.isMuted || track.hidden) continue;
+      const active = findActiveTransition(track.clips || [], timestampSeconds);
+      if (!active) continue;
+      const plan = buildTransitionPlan(active);
+      if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
+        overlays.push({ color: plan.overlay.color, alpha: plan.overlay.alpha });
+      }
+    }
+    const layers = await this.getLayersAtTime(timestampSeconds);
+    return { layers, overlays };
   }
 
   dispose() {
