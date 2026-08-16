@@ -32,6 +32,13 @@ export class AssetDecoder {
 
   private onReadyCallback: (() => void) | null = null;
 
+  /**
+   * Pending getFrameAt() waiter. Resolved by the decoder's `output` callback as
+   * soon as a frame with CTS >= `targetCts` is produced, so we never sleep longer
+   * than strictly necessary.
+   */
+  private frameWaiter: { targetCts: number; resolve: () => void } | null = null;
+
   constructor(url: string, framePool: FramePool) {
     this.url = url;
     this.framePool = framePool;
@@ -133,6 +140,8 @@ export class AssetDecoder {
     this.decoder = new VideoDecoder({
       output: (frame) => {
         this.decodedQueue.push({ timestamp: frame.timestamp, frame });
+        // Wake any getFrameAt() that is waiting for a frame at/after this CTS.
+        this.notifyFrameArrived(frame.timestamp);
       },
       error: (e) => {
         console.warn('[AssetDecoder] VideoDecoder error:', e.message);
@@ -210,10 +219,12 @@ export class AssetDecoder {
         if (!this.decoder) return null;
       }
 
-      // Throttle decoder input queue to prevent hardware decoder crashes
+      // Throttle decoder input queue to prevent hardware decoder crashes.
+      // `dequeue` fires as the decoder drains, so we wait on that rather than
+      // burning 5ms timer ticks.
       let queueRetries = 20;
       while (this.decoder.decodeQueueSize >= 15 && queueRetries > 0) {
-        await new Promise(r => setTimeout(r, 5));
+        await this.waitForDequeue(this.decoder, 25);
         queueRetries--;
       }
 
@@ -236,16 +247,15 @@ export class AssetDecoder {
     // DO NOT use decoder.flush() mid-stream! On many hardware decoders (especially Chrome/Edge),
     // calling flush() before the end of the stream resets the reference frame buffer (GOP),
     // causing subsequent P-frames to fail decoding, crashing the decoder, and triggering an infinite re-init loop!
+    //
+    // PERF (export stutter fix): this used to poll with `setTimeout(10)`. Nested
+    // setTimeout in a worker is clamped (and 10ms is coarse regardless), so a frame
+    // that was ready after 1ms still cost a full 10ms tick — and with several tracks
+    // that penalty was paid per clip per frame. We now have the decoder's `output`
+    // callback resolve a waiter the instant the needed frame arrives, and only fall
+    // back to a timer for the overall timeout.
     if (fedNewSamples && this.decoder && this.decoder.state === 'configured') {
-      let retries = 100; // Max wait 1000ms
-      while (retries > 0) {
-        if (this.decodedQueue.length > 0) {
-          const lastQueuedCTS = this.decodedQueue[this.decodedQueue.length - 1].timestamp;
-          if (lastQueuedCTS >= timestampMicroseconds) break;
-        }
-        await new Promise(r => setTimeout(r, 10));
-        retries--;
-      }
+      await this.waitForFrame(timestampMicroseconds, 1000);
     }
 
     if (this.decodedQueue.length === 0) return null;
@@ -273,6 +283,64 @@ export class AssetDecoder {
     return this.decodedQueue[bestIdx].frame.clone();
   }
 
+  /**
+   * Resolve on the decoder's next `dequeue` event (emitted whenever
+   * decodeQueueSize drops), or after `timeoutMs` as a safety net for engines that
+   * do not implement the event.
+   */
+  private waitForDequeue(decoder: VideoDecoder, timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        decoder.removeEventListener('dequeue', done);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      decoder.addEventListener('dequeue', done);
+    });
+  }
+
+  /** Called from the VideoDecoder output callback for every decoded frame. */
+  private notifyFrameArrived(cts: number): void {
+    const waiter = this.frameWaiter;
+    if (waiter && cts >= waiter.targetCts) {
+      this.frameWaiter = null;
+      waiter.resolve();
+    }
+  }
+
+  /**
+   * Resolve once a frame with CTS >= `targetCts` has been decoded, or after
+   * `timeoutMs`. Event-driven: no polling.
+   */
+  private waitForFrame(targetCts: number, timeoutMs: number): Promise<void> {
+    // Already have it — don't even yield.
+    if (this.decodedQueue.length > 0) {
+      const lastQueuedCTS = this.decodedQueue[this.decodedQueue.length - 1].timestamp;
+      if (lastQueuedCTS >= targetCts) return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (this.frameWaiter && this.frameWaiter.resolve === done) {
+          this.frameWaiter = null;
+        }
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      // Only one getFrameAt is ever in flight per decoder; release any stale waiter.
+      if (this.frameWaiter) this.frameWaiter.resolve();
+      this.frameWaiter = { targetCts, resolve: done };
+    });
+  }
+
   private clearDecodedQueue(): void {
     for (const item of this.decodedQueue) {
       try { item.frame.close(); } catch {}
@@ -281,6 +349,12 @@ export class AssetDecoder {
   }
 
   dispose() {
+    // Release any in-flight waiter so a pending getFrameAt() cannot hang the export.
+    if (this.frameWaiter) {
+      const w = this.frameWaiter;
+      this.frameWaiter = null;
+      w.resolve();
+    }
     this.clearDecodedQueue();
     if (this.decoder) {
       try { this.decoder.close(); } catch {}

@@ -42,6 +42,14 @@ import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
+import { resolveBlendPlan } from '@/utils/blendCompositor';
+import { applyMotionEffect } from '@/utils/motionEffects';
+import {
+  findActiveTransition,
+  buildTransitionPlan,
+  type ActiveTransition,
+  type LayerDraw,
+} from '@/utils/transitionEngine';
 
 // ---------------------------------------------------------------------------
 // Module-level track list cache — avoids filter()+sort()+spread on every frame.
@@ -59,6 +67,31 @@ let _cachedVisualTracks: TimelineTrack[] = [];
 // ---------------------------------------------------------------------------
 const _clipHasAnimCache = new Map<string, boolean>();
 let _animCacheTracksRef: TimelineTrack[] | null = null;
+
+// ---------------------------------------------------------------------------
+// Curve LUT memoisation.
+// buildCurveLUT() interpolates a spline into a 256-entry table. That result only
+// depends on the curve definition, so we key a WeakMap on the curve object itself:
+// editing a curve produces a new object (immutable store updates) and therefore a
+// natural cache miss, while steady-state playback is a single map lookup.
+// A WeakMap also means deleted clips' LUTs are collected automatically.
+// ---------------------------------------------------------------------------
+const IDENTITY_LUT = (() => {
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) lut[i] = i;
+  return lut;
+})();
+
+const _curveLutCache = new WeakMap<object, Uint8ClampedArray>();
+
+function getCachedCurveLUT(curve: any): Uint8ClampedArray {
+  if (!curve || typeof curve !== 'object') return buildLUT(curve);
+  const hit = _curveLutCache.get(curve);
+  if (hit) return hit;
+  const lut = buildLUT(curve);
+  _curveLutCache.set(curve, lut);
+  return lut;
+}
 
 export interface RenderCanvasParams {
   canvas: HTMLCanvasElement;
@@ -95,6 +128,21 @@ export interface RenderCanvasParams {
 
 const MAX_POOL_CANVASES = 16;
 
+/**
+ * Buffers that must never be evicted by the LRU while a frame is in flight.
+ * `composite` is the final drawing target; the blend/transition scratch buffers
+ * are read back later in the SAME frame, so recycling them mid-pass would make one
+ * clip draw into another clip's buffer — visible as tearing or a punched-out hole
+ * when several effects (e.g. background removal + a partial blend) are combined.
+ */
+const RESERVED_POOL_KEYS: ReadonlySet<string> = new Set([
+  'composite',
+  '__blend_layer',
+  '__blend_backdrop',
+  '__transition_from',
+  '__transition_to',
+]);
+
 export function getOrCreateCanvas(
   offscreenPool: Map<string, HTMLCanvasElement>,
   key: string,
@@ -105,10 +153,9 @@ export function getOrCreateCanvas(
   if (!canvas) {
     if (offscreenPool.size >= MAX_POOL_CANVASES) {
       // Evict least-recently-used entry (FIFO of Map iteration order, which
-      // we maintain by delete-then-set below). Never evict the composite
-      // canvas which is the final drawing target.
+      // we maintain by delete-then-set below). Reserved buffers are skipped.
       for (const k of offscreenPool.keys()) {
-        if (k !== 'composite') {
+        if (!RESERVED_POOL_KEYS.has(k)) {
           offscreenPool.delete(k);
           break;
         }
@@ -522,7 +569,9 @@ export async function renderCanvasEngine({
     extraTransform?: { translateX?: number; translateY?: number; scale?: number },
     targetCtx?: CanvasRenderingContext2D
   ) => {
-    const ctx = targetCtx || compositeCtxRef.current;
+    // `let` (not const): a partial blend temporarily redirects all drawing in this
+    // function to a scratch layer. See the blend compositing block below.
+    let ctx = targetCtx || compositeCtxRef.current;
     if (!ctx) return;
     // PERF: O(1) lookup via mediaMap built once per render (was mediaLibrary.find = O(N)).
     let mediaItem = mediaMap.get(clip.mediaId);
@@ -539,6 +588,83 @@ export async function renderCanvasEngine({
       }
     }
     if (!mediaItem) return;
+
+    // ── Motion-tracked region effects: frame-space post-pass ──────────────────
+    //
+    // A region is authored in FRAME space — the user points at a spot on the
+    // picture. The previous implementation applied it inside the clip's own media
+    // buffer, treating the coordinates as a fraction of 854 and mapping them onto
+    // a buffer that is neither 854 wide nor aligned with the frame, and which
+    // knows nothing about the clip's translate/scale. The shaken pixels were
+    // therefore never the ones the box was drawn over — the effect always landed
+    // somewhere else, which is exactly the reported symptom.
+    //
+    // The fix: render the clip normally into a full-frame buffer, then apply the
+    // region effect to THAT, where (x, y) means the same thing it does on the
+    // overlay. Same trick `drawTransitionLayer` already uses.
+    if (
+      !skipExpensiveFX &&
+      !clip.__motionFxPass &&
+      Array.isArray(clip.motionEffects) &&
+      clip.motionEffects.some((m: any) => m?.enabled)
+    ) {
+      const bufScale = Math.max(0.1, canvas_scale * viewport.zoom);
+      const bufW = Math.max(1, Math.round(W * bufScale));
+      const bufH = Math.max(1, Math.round(H * bufScale));
+      const buf = getOrCreateCanvas(
+        offscreenCanvasPool.current,
+        `__motionfx_${clip.id}`,
+        bufW,
+        bufH
+      );
+      const bctx = buf.getContext('2d');
+      if (bctx) {
+        bctx.setTransform(1, 0, 0, 1, 0, 0);
+        bctx.clearRect(0, 0, buf.width, buf.height);
+
+        // Reproduce local frame space inside the buffer so the clip lands exactly
+        // where it normally would, transform and all.
+        bctx.save();
+        bctx.scale(bufScale, bufScale);
+        await drawSingleClip(
+          { ...clip, __motionFxPass: true },
+          opacityMultiplier,
+          extraTransform,
+          bctx
+        );
+        bctx.restore();
+
+        // Now the buffer holds the finished clip in frame space. Region
+        // coordinates map onto it by the single factor `bufScale` — no letterbox
+        // offset (the buffer IS the frame) and no per-clip fudge.
+        const meRelTime = Math.max(0, currentTime - clip.startTime);
+        for (let mi = 0; mi < clip.motionEffects.length; mi++) {
+          const me = clip.motionEffects[mi];
+          if (!me?.enabled) continue;
+          applyMotionEffect(
+            bctx,
+            buf.width,
+            buf.height,
+            me,
+            meRelTime,
+            `${clip.id}_me${mi}`,
+            bufScale,
+            bufScale
+          );
+        }
+
+        // Known limitation: the inner pass blends against an EMPTY buffer rather
+        // than the real backdrop, so a region effect combined with a non-normal
+        // blend mode composites the clip over transparent black first. Normal
+        // (source-over) clips — the overwhelming majority, and every case region
+        // effects are used for — are pixel-identical.
+        ctx.save();
+        ctx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+        ctx.restore();
+        anyClipDrawn = true;
+        return true;
+      }
+    }
 
     if (clip.isAdjustmentLayer || clip.mediaId?.startsWith('adj_') || mediaItem.type === 'adjustment') {
       applyAdjustmentLayerPass(ctx, clip, W, H);
@@ -651,14 +777,97 @@ export async function renderCanvasEngine({
     const aRotY = hasAnimOrExpr ? getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY'], clip.expressions?.['transform.rotationY']) : (clip.transform.rotationY ?? 0);
 
     const hasPerspectiveWarp = !!(clip.transform.perspectivePin || Math.abs(aRotX) > 0.01 || Math.abs(aRotY) > 0.01);
-    const aBlendIntensity = hasAnimOrExpr ? Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity']))) : Math.max(0, Math.min(100, clip.transform.blendIntensity ?? 100));
-    const blendMode = clip.transform.blendMode || 'source-over';
-    const totalAlpha = aOpacity * opacityMultiplier;
-    const needsDualBlend = blendMode !== 'source-over' && aBlendIntensity < 100;
+    const inheritedBlendIntensity =
+      clip.transform.blendMode && clip.transform.blendMode !== 'source-over'
+        ? clip.transform.blendIntensity ?? 100
+        : (clip as any).__parentTransform?.blendIntensity ?? clip.transform.blendIntensity ?? 100;
+    const aBlendIntensity = hasAnimOrExpr ? Math.max(0, Math.min(100, getAnimatedValue(inheritedBlendIntensity, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity']))) : Math.max(0, Math.min(100, inheritedBlendIntensity));
+    // A PiP child inherits the container's opacity and blend mode, so fading or
+    // blending the sentence affects the whole group. The child's own values still
+    // compose on top (multiplied for opacity; the child wins for blend mode when
+    // it sets one explicitly).
+    const parentForBlend = (clip as any).__parentTransform;
+    const parentOpacityRaw = (clip as any).__parentOpacity;
+    const parentOpacity =
+      parentForBlend && typeof parentOpacityRaw === 'number' ? parentOpacityRaw : 1;
+    const ownBlend = clip.transform.blendMode;
+    const blendMode =
+      ownBlend && ownBlend !== 'source-over'
+        ? ownBlend
+        : parentForBlend?.blendMode || 'source-over';
+    const totalAlpha = aOpacity * opacityMultiplier * parentOpacity;
+
+    // ── Blend compositing ────────────────────────────────────────────────────
+    // Planned by the shared helper in blendCompositor.ts. The old code emulated
+    // partial blend intensity by drawing the clip TWICE (once source-over, once
+    // with the blend mode). That double-composites: the blended pass sees a
+    // backdrop that already contains the normal pass, so `multiply`/`darken`
+    // darken twice and `difference`/`color-burn` band and invert — the reported
+    // "glitch". With an alpha matte (AI background removal) the two passes also
+    // accumulate along the cutout edge, producing a bright halo.
+    //
+    // Now: full strength uses ONE native blended draw; partial strength renders
+    // the clip into a scratch layer that is mixed over the backdrop exactly once.
+    const blendPlan = resolveBlendPlan(blendMode, aBlendIntensity, totalAlpha);
+
+    // Partial blend needs a genuine three-way mix:
+    //     final = (1 - mix)·over(B, C) + mix·blend(B, C)
+    // where B is the ORIGINAL backdrop and C the clip. We therefore need both
+    // results, but the clip is rasterised only ONCE:
+    //   L = transparent layer holding the clip's pixels
+    //   S = snapshot of the backdrop B, with L blended into it  -> blend(B, C)
+    //   target: draw L source-over -> over(B, C), then draw S source-over at mix.
+    // Drawing the blended layer straight over the normal result (the obvious
+    // shortcut) would blend against an already-composited backdrop and reproduce
+    // the very double-composite artefact this replaces.
+    let blendLayer: HTMLCanvasElement | null = null;
+    let blendBackdrop: HTMLCanvasElement | null = null;
+    let targetCtxForBlend: CanvasRenderingContext2D | null = null;
+    if (blendPlan.kind === 'lerp') {
+      blendLayer = getOrCreateCanvas(
+        offscreenCanvasPool.current,
+        '__blend_layer',
+        composite.width,
+        composite.height
+      );
+      blendBackdrop = getOrCreateCanvas(
+        offscreenCanvasPool.current,
+        '__blend_backdrop',
+        composite.width,
+        composite.height
+      );
+      const blendCtx = blendLayer.getContext('2d');
+      const backdropCtx = blendBackdrop.getContext('2d');
+      if (blendCtx && backdropCtx && ctx.canvas) {
+        // Snapshot the backdrop BEFORE this clip is drawn.
+        backdropCtx.setTransform(1, 0, 0, 1, 0, 0);
+        backdropCtx.globalCompositeOperation = 'copy';
+        backdropCtx.drawImage(ctx.canvas, 0, 0);
+        backdropCtx.globalCompositeOperation = 'source-over';
+
+        blendCtx.setTransform(1, 0, 0, 1, 0, 0);
+        blendCtx.clearRect(0, 0, blendLayer.width, blendLayer.height);
+        // Mirror the world transform currently applied to the real context.
+        blendCtx.scale(canvas_scale, canvas_scale);
+        blendCtx.translate(totalX, totalY);
+        blendCtx.scale(viewport.zoom, viewport.zoom);
+        blendCtx.translate(offsetX, offsetY);
+        targetCtxForBlend = blendCtx;
+      } else {
+        blendLayer = null;
+        blendBackdrop = null;
+      }
+    }
+
+    // Redirect every draw in this function to the scratch layer when we're doing a
+    // partial blend. `ctx` is a local binding, so this is transparent to the code
+    // below and guarantees the clip is rasterised exactly once either way.
+    const outerCtx = ctx;
+    if (targetCtxForBlend) ctx = targetCtxForBlend;
 
     ctx.save();
-    ctx.globalAlpha = totalAlpha * (aBlendIntensity / 100);
-    ctx.globalCompositeOperation = blendMode;
+    ctx.globalAlpha = targetCtxForBlend ? 1 : blendPlan.alpha;
+    ctx.globalCompositeOperation = targetCtxForBlend ? 'source-over' : blendPlan.mode;
 
     if (clip.vectorMask?.enabled) {
       applyVectorMaskToContext(ctx, clip.vectorMask, W, H);
@@ -727,9 +936,32 @@ export async function renderCanvasEngine({
           };
         }
       } else {
-        const vw = mediaItem.width || 854;
-        const vh = mediaItem.height || 480;
-        const fitScale = Math.min(W / vw, H / vh);
+        // Text media has no intrinsic width/height, so falling back to 854x480
+        // projected a full-frame quad and the 3D rotate looked wrong (the glyphs
+        // were warped as if they filled the canvas). Measure the text box instead,
+        // mirroring previewMath.getClipDimensions.
+        const isTextClip =
+          mediaItem.type === 'text' || !!clip.textSettings || clip.mediaId === 'text-placeholder';
+
+        let vw: number;
+        let vh: number;
+        let fitScale: number;
+
+        if (isTextClip) {
+          const tsm = clip.textSettings;
+          const fontSizeM = Number(tsm?.fontSize) || 48;
+          const linesM = String(tsm?.text ?? '').split('\n');
+          const longestM = linesM.reduce((m: number, l: string) => Math.max(m, l.length), 0);
+          vw = Math.max(80, longestM * fontSizeM * 0.6 + 40);
+          vh = linesM.length * (fontSizeM * 1.35) + 20;
+          // Text is drawn at its natural size (no fit-to-frame downscale).
+          fitScale = 1;
+        } else {
+          vw = mediaItem.width || 854;
+          vh = mediaItem.height || 480;
+          fitScale = Math.min(W / vw, H / vh);
+        }
+
         corners = getProjectedCorners(
           vw, vh,
           (aScale / 100) * fitScale,
@@ -789,6 +1021,135 @@ export async function renderCanvasEngine({
         const pseudoRand = seed - Math.floor(seed);
         fxShakeX = (Math.sin(fxRelTime * 45) * 12 + (pseudoRand - 0.5) * 10) * intensity;
         fxShakeY = (Math.cos(fxRelTime * 55) * 12 + (pseudoRand - 0.5) * 10) * intensity;
+      }
+    }
+
+    // ── Parent (PiP container) transform ─────────────────────────────────────
+    //
+    // The renderer previously drew PiP children with ONLY their own transform, so
+    // the container's transform had to be BAKED into each child's stored position
+    // by the kinetic reflow. That works for translate and scale but CANNOT express
+    // rotation: rotating the sentence turned the selection box but left the words
+    // flat and, because the reflow re-laid them out at the same time, bunched them
+    // together.
+    //
+    // Applying the parent transform here makes the PiP a proper group: children
+    // inherit position, scale AND rotation, and the reflow no longer has to bake
+    // anything (see editorStore.syncKineticSentence).
+    const parentT = (clip as any).__parentTransform;
+    if (parentT) {
+      const pid = (clip as any).__parentId;
+      const pStart = (clip as any).__parentStartTime ?? 0;
+      const pAnims = (clip as any).__parentAnimations;
+      const pX = getAnimatedValue(parentT.x ?? 0, currentTime, pStart, pAnims?.['transform.x']);
+      const pY = getAnimatedValue(parentT.y ?? 0, currentTime, pStart, pAnims?.['transform.y']);
+      const pScale = getAnimatedValue(parentT.scale ?? 100, currentTime, pStart, pAnims?.['transform.scale']);
+      const pRot = getAnimatedValue(parentT.rotation ?? 0, currentTime, pStart, pAnims?.['transform.rotation']);
+
+      // Group crop, applied BEFORE the transform so the crop rectangle stays
+      // axis-aligned to the frame — the same way crop behaves on a normal clip.
+      // (Clipping after the rotate would spin the crop window with the text.)
+      // The sentence is trimmed as one rectangle rather than each word being
+      // cropped in isolation, which is what makes it useful for framing a
+      // stylised thumbnail.
+      const pCrop = (clip as any).__parentCrop;
+      if (pCrop) {
+        const cl = getAnimatedValue(pCrop.left ?? 0, currentTime, pStart, pAnims?.['crop.left']) / 100;
+        const cr = getAnimatedValue(pCrop.right ?? 0, currentTime, pStart, pAnims?.['crop.right']) / 100;
+        const ct2 = getAnimatedValue(pCrop.top ?? 0, currentTime, pStart, pAnims?.['crop.top']) / 100;
+        const cb = getAnimatedValue(pCrop.bottom ?? 0, currentTime, pStart, pAnims?.['crop.bottom']) / 100;
+        if (cl > 0 || cr > 0 || ct2 > 0 || cb > 0) {
+          // Guard against a fully-collapsed rect, which would hide the group.
+          const l = Math.min(cl, 0.98);
+          const r = Math.min(cr, 0.98 - l);
+          const t2 = Math.min(ct2, 0.98);
+          const b = Math.min(cb, 0.98 - t2);
+          ctx.beginPath();
+          ctx.rect(l * W, t2 * H, Math.max(1, W * (1 - l - r)), Math.max(1, H * (1 - t2 - b)));
+          ctx.clip();
+        }
+      }
+
+      // Rotate/scale about the frame centre so the group pivots as a whole rather
+      // than each word spinning about its own origin.
+      ctx.translate(cx + pX, cy + pY);
+      ctx.rotate((pRot * Math.PI) / 180);
+      const ps = (pScale || 100) / 100;
+      if (ps !== 1) ctx.scale(ps, ps);
+      if (parentT.flipH) ctx.scale(-1, 1);
+      if (parentT.flipV) ctx.scale(1, -1);
+
+      // ── Simulated 3D rotation (rotationX / rotationY) ──────────────────────
+      //
+      // A uniform squash (scale by cos) makes the group narrow correctly but looks
+      // flat: every word shrinks by the same amount, so there is no sense of one
+      // edge being nearer the viewer.
+      //
+      // Because PiP children are drawn INDIVIDUALLY, we can do better than a
+      // single affine squash without needing a projected quad: rotate each child's
+      // offset around the group's axis in 3D, then divide by its depth. Words that
+      // swing toward the camera land further out and are drawn larger; words that
+      // swing away converge toward the vanishing point and shrink. That is real
+      // one-point perspective — the group visibly turns in space, yet every child
+      // still shares one coordinate system so the sentence never pulls apart.
+      //
+      // Implemented as a translate+scale per child (not ctx.transform) so the
+      // glyphs stay axis-aligned and crisp; skewing text this small reads as
+      // blur rather than depth.
+      const pRotX = getAnimatedValue(parentT.rotationX ?? 0, currentTime, pStart, pAnims?.['transform.rotationX']);
+      const pRotY = getAnimatedValue(parentT.rotationY ?? 0, currentTime, pStart, pAnims?.['transform.rotationY']);
+
+      if (Math.abs(pRotX) > 0.01 || Math.abs(pRotY) > 0.01) {
+        const rx = (pRotX * Math.PI) / 180;
+        const ry = (pRotY * Math.PI) / 180;
+
+        // The child's own offset within the group, in group-local units.
+        const ox = clip.transform?.x ?? 0;
+        const oy = clip.transform?.y ?? 0;
+
+        // Rotate that offset in 3D. z starts at 0 (all children coplanar).
+        // +z is AWAY from the camera. A positive rotationY must swing the RIGHT
+        // edge away (matching how the 2D preview and the video branch behave), so
+        // a positive x maps to a positive z.
+        const x1 = ox * Math.cos(ry);
+        const z1 = ox * Math.sin(ry);
+        const y2 = oy * Math.cos(rx) - z1 * Math.sin(rx);
+        const z2 = oy * Math.sin(rx) + z1 * Math.cos(rx);
+
+        // Perspective divide. FOCAL is the virtual camera distance: larger is a
+        // longer lens (subtler depth), smaller is wider (more dramatic). 900 units
+        // against an 854-wide frame is roughly a normal lens.
+        const FOCAL = 900;
+        const denom = FOCAL + z2;
+        // Clamp so a child rotated behind the camera cannot invert or blow up.
+        const persp = FOCAL / Math.max(FOCAL * 0.25, denom);
+
+        // Move the child from its flat offset to its projected position, then
+        // scale it by the same factor so nearer words are genuinely larger.
+        ctx.translate(x1 * persp - ox, y2 * persp - oy);
+        ctx.scale(persp, persp);
+
+        // Fade edges that have rotated far from the viewer. Subtle — it reads as
+        // depth shading, not as the text disappearing.
+        const depthFade = 1 - Math.min(0.45, Math.max(0, z2 / (FOCAL * 1.6)));
+        ctx.globalAlpha = ctx.globalAlpha * depthFade;
+      }
+
+      ctx.translate(-cx, -cy);
+
+      if (pid) {
+        const pFraming = storeState.perRatioFramingEnabled
+          ? storeState.perRatioFraming?.[storeState.aspectRatio]?.[pid]
+          : undefined;
+        if (pFraming) {
+          ctx.translate(pFraming.x ?? 0, pFraming.y ?? 0);
+          if (pFraming.scale !== undefined) {
+            const fs = pFraming.scale / 100;
+            ctx.translate(cx, cy);
+            ctx.scale(fs, fs);
+            ctx.translate(-cx, -cy);
+          }
+        }
       }
     }
 
@@ -913,22 +1274,16 @@ export async function renderCanvasEngine({
           const hasFx = !skipExpensiveFX && !!clip.fxSettings;
           const hasMask = !!clip.mask?.enabled;
 
+          // NOTE: motion-tracked region effects are NOT handled here any more.
+          // They used to run inside this per-clip media buffer, which mapped the
+          // region as a fraction of 854 onto a buffer that is neither 854 wide
+          // nor aligned to the frame — so the shaken pixels were never the ones
+          // under the box. They now run as a frame-space post-pass; see the
+          // `__motionFxPass` block at the top of drawSingleClip.
           const needsOffscreen = hasCrop || hasCssFilters || hasAiBg || hasChroma || hasLuma || hasObjRemoval || hasColorWheels || hasCurves || hasOverlays || hasLut || hasFx || hasMask;
 
           if (!needsOffscreen) {
             // FAST PATH: Zero-copy GPU direct render directly to target canvas!
-            if (needsDualBlend) {
-              ctx.save();
-              ctx.globalCompositeOperation = 'source-over';
-              ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
-              if (corners) {
-                drawPerspectiveTexture(ctx, sourceElement, corners);
-              } else {
-                ctx.drawImage(sourceElement, dx, dy, dw, dh);
-              }
-              ctx.restore();
-            }
-
             if (corners) {
               drawPerspectiveTexture(ctx, sourceElement, corners);
             } else {
@@ -994,8 +1349,24 @@ export async function renderCanvasEngine({
                 // Export: block until we have an exact synchronous mask for this frame
                 await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
               } else {
-                // Interactive: fire-and-forget with early exit & scene-change gating
-                void applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+                // Interactive: we must NOT fire-and-forget onto `oCtx`.
+                //
+                // applyAiBackgroundSmart composites the matte with
+                // globalCompositeOperation='destination-in'. When left un-awaited it
+                // resolves on a later microtask/frame — by which point this clip has
+                // already been blitted and `oCtx` may have been recycled by the LRU
+                // canvas pool for a DIFFERENT clip. The late write then punches a
+                // hole in whatever now owns the buffer. That is the flicker seen when
+                // background removal and blending are used together (a partial blend
+                // adds another buffer, widening the race window).
+                //
+                // The mask pipeline is already async-cached internally: this call
+                // applies the newest cached matte synchronously and schedules
+                // re-segmentation in the background, notifying us via the
+                // mask-ready callback which flags the next repaint. So awaiting here
+                // costs a cache lookup, not an inference, and keeps every write to
+                // `oCtx` inside this clip's own draw pass.
+                await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
               }
             }
 
@@ -1055,11 +1426,16 @@ export async function renderCanvasEngine({
               }
 
               if (curvesData && (isCurveOn(curvesData.rgb) || isCurveOn(curvesData.r) || isCurveOn(curvesData.g) || isCurveOn(curvesData.b) || isCurveOn(curvesData.luma))) {
-                const rgbLut = isCurveOn(curvesData.rgb) ? buildLUT(curvesData.rgb) : new Uint8ClampedArray(256).map((_, i) => i);
-                const rLut = isCurveOn(curvesData.r) ? buildLUT(curvesData.r) : null;
-                const gLut = isCurveOn(curvesData.g) ? buildLUT(curvesData.g) : null;
-                const bLut = isCurveOn(curvesData.b) ? buildLUT(curvesData.b) : null;
-                const lumaLut = isCurveOn(curvesData.luma) ? buildLUT(curvesData.luma) : null;
+                // PERF: LUTs are a pure function of the curve definition, which only
+                // changes when the user edits it. Rebuilding five 256-entry LUTs per
+                // clip per frame was pure waste; they are now memoised on the curve
+                // object's identity (Zustand hands out a new object on every edit,
+                // so the cache invalidates itself).
+                const rgbLut = isCurveOn(curvesData.rgb) ? getCachedCurveLUT(curvesData.rgb) : IDENTITY_LUT;
+                const rLut = isCurveOn(curvesData.r) ? getCachedCurveLUT(curvesData.r) : null;
+                const gLut = isCurveOn(curvesData.g) ? getCachedCurveLUT(curvesData.g) : null;
+                const bLut = isCurveOn(curvesData.b) ? getCachedCurveLUT(curvesData.b) : null;
+                const lumaLut = isCurveOn(curvesData.luma) ? getCachedCurveLUT(curvesData.luma) : null;
                 try {
                   const imgData = oCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
                   applyCurves(imgData, rgbLut, rLut, gLut, bLut, lumaLut);
@@ -1101,18 +1477,6 @@ export async function renderCanvasEngine({
               await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations, clip.expressions);
             } else {
               offscreenCanvasPool.current.delete('clip_mask_temp_' + clip.id);
-            }
-
-            if (needsDualBlend) {
-              ctx.save();
-              ctx.globalCompositeOperation = 'source-over';
-              ctx.globalAlpha = totalAlpha * (1 - (aBlendIntensity / 100));
-              if (corners) {
-                drawPerspectiveTexture(ctx, offCanvas, corners);
-              } else {
-                ctx.drawImage(offCanvas, dx, dy, dw, dh);
-              }
-              ctx.restore();
             }
 
             if (corners) {
@@ -1241,8 +1605,65 @@ export async function renderCanvasEngine({
         }
       }
 
+      // ── Crop + perspective-warp support for TEXT ─────────────────────────
+      //
+      // The video/image branch renders into an offscreen canvas whenever crop,
+      // perspective or pixel effects are needed. The text branch drew straight to
+      // the target instead, so two Transform-tab controls silently did nothing on
+      // text (and on PiP text): Crop, and Perspective Warp / 3D rotate.
+      //
+      // Perspective is the reason this cannot simply be a clip rect: when
+      // `hasPerspectiveWarp` is set, the shared transform block above is SKIPPED
+      // (the corner projection replaces it), so a text clip received no transform
+      // at all and rendered unwarped at the origin.
+      //
+      // Render the glyphs into a buffer, then reuse exactly the same crop and
+      // drawPerspectiveTexture paths the video branch uses.
+      const textNeedsCrop = cLeft > 0 || cRight > 0 || cTop > 0 || cBot > 0;
+      const textNeedsOffscreen = textNeedsCrop || !!corners;
+
+      let textTargetCtx = ctx;
+      let textBuffer: HTMLCanvasElement | null = null;
+
+      // Buffer must match the quad that `corners` was projected from, otherwise
+      // drawPerspectiveTexture stretches the glyphs. `corners` is built from the
+      // measured text box (see the getProjectedCorners branch above), so measure
+      // it the same way here. A little padding keeps descenders and strokes from
+      // clipping at the edges.
+      const tsMeasure = clip.textSettings;
+      const measFont = Number(tsMeasure?.fontSize) || 48;
+      const measLines = String(tsMeasure?.text ?? '').split('\n');
+      const measLongest = measLines.reduce((m: number, l: string) => Math.max(m, l.length), 0);
+      const textBufW = Math.max(1, Math.round(Math.max(80, measLongest * measFont * 0.6 + 40)));
+      const textBufH = Math.max(1, Math.round(measLines.length * (measFont * 1.35) + 20));
+
+      if (textNeedsOffscreen) {
+        textBuffer = getOrCreateCanvas(
+          offscreenCanvasPool.current,
+          `text_${clip.id}_${textBufW}x${textBufH}`,
+          textBufW,
+          textBufH
+        );
+        const tCtx = textBuffer.getContext('2d');
+        if (tCtx) {
+          tCtx.setTransform(1, 0, 0, 1, 0, 0);
+          tCtx.clearRect(0, 0, textBufW, textBufH);
+          // Draw centred in the buffer; the buffer is then placed as a unit.
+          tCtx.translate(textBufW / 2, textBufH / 2);
+          textTargetCtx = tCtx;
+        } else {
+          textBuffer = null;
+        }
+      }
+
+      // Swap the drawing target for the remainder of the text branch. `ctx` is a
+      // local binding, so every fillText/strokeText below is redirected untouched.
+      const textOuterCtx = ctx;
+      ctx = textTargetCtx;
+
       ctx.save();
-      ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+      // Opacity/blend are applied when the buffer is composited, not inside it.
+      ctx.globalAlpha = textBuffer ? animOpacity : ctx.globalAlpha * animOpacity;
       ctx.translate(animOffsetX, animOffsetY);
       ctx.scale(animScaleX, animScaleY);
 
@@ -1324,18 +1745,127 @@ export async function renderCanvasEngine({
       }
 
       ctx.restore();
+
+      // ── Composite the text buffer, applying crop then perspective ──────────
+      if (textBuffer) {
+        ctx = textOuterCtx;
+
+        // Crop is expressed as fractions of the clip's own box, matching the
+        // video branch: trim the source rect and place it at the same fraction of
+        // the destination so the remaining pixels do not shift.
+        const sx = cLeft * textBufW;
+        const sy = cTop * textBufH;
+        const sw = Math.max(1, textBufW * (1 - cLeft - cRight));
+        const sh = Math.max(1, textBufH * (1 - cTop - cBot));
+
+        if (corners) {
+          // Perspective replaces the (skipped) shared transform entirely, so the
+          // cropped buffer is projected straight onto the four corner points.
+          if (textNeedsCrop) {
+            const cropped = getOrCreateCanvas(
+              offscreenCanvasPool.current,
+              `text_crop_${clip.id}`,
+              Math.round(sw),
+              Math.round(sh)
+            );
+            const cCtx = cropped.getContext('2d');
+            if (cCtx) {
+              cCtx.setTransform(1, 0, 0, 1, 0, 0);
+              cCtx.clearRect(0, 0, cropped.width, cropped.height);
+              cCtx.drawImage(textBuffer, sx, sy, sw, sh, 0, 0, cropped.width, cropped.height);
+              ctx.save();
+              ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+              drawPerspectiveTexture(ctx, cropped, corners);
+              ctx.restore();
+            }
+          } else {
+            ctx.save();
+            ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+            drawPerspectiveTexture(ctx, textBuffer, corners);
+            ctx.restore();
+          }
+        } else {
+          // No perspective: the shared transform block already positioned `ctx`,
+          // so blit the buffer back around the origin it was drawn about.
+          const dxT = -textBufW / 2 + sx;
+          const dyT = -textBufH / 2 + sy;
+          ctx.save();
+          ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+          ctx.drawImage(textBuffer, sx, sy, sw, sh, dxT, dyT, sw, sh);
+          ctx.restore();
+        }
+      }
     }
 
     ctx.restore();
+
+    // Resolve the partial blend (see the setup block above for the maths).
+    if (blendLayer && blendBackdrop && targetCtxForBlend) {
+      ctx = outerCtx;
+      const backdropCtx = blendBackdrop.getContext('2d');
+      if (backdropCtx) {
+        // S := blend(B, C) — blend the clip layer into the untouched backdrop copy.
+        backdropCtx.save();
+        backdropCtx.setTransform(1, 0, 0, 1, 0, 0);
+        backdropCtx.globalAlpha = blendPlan.alpha;
+        backdropCtx.globalCompositeOperation = blendPlan.mode;
+        backdropCtx.drawImage(blendLayer, 0, 0);
+        backdropCtx.restore();
+
+        ctx.save();
+        // Blit 1:1 in device pixels — both layers already hold world-space pixels.
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        // over(B, C)
+        ctx.globalAlpha = blendPlan.alpha;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(blendLayer, 0, 0);
+        // ...then mix in blend(B, C) to reach the lerp.
+        ctx.globalAlpha = blendPlan.mix;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(blendBackdrop, 0, 0);
+        ctx.restore();
+      }
+    }
   };
+
+  // ─── Transition resolution ────────────────────────────────────────────────
+  // Determine, per visual track, whether a clip-to-clip transition is active on
+  // this frame. Transitions were previously stored and drawn on the timeline but
+  // never composited here, which is why they had no visible effect. A track can
+  // have at most one active transition per frame (findActiveTransition enforces
+  // that), so overlapping windows can't double-composite and flicker.
+  const activeTransitions = new Map<string, ActiveTransition>();
+  // Clips that are being handled by a transition; they must NOT also be drawn by
+  // the normal draw queue or they'd be painted twice (once opaque), which would
+  // completely hide the blend.
+  const transitionClipIds = new Set<string>();
+
+  for (const track of visualTracks) {
+    const active = findActiveTransition(track.clips, currentTime);
+    if (active) {
+      activeTransitions.set(track.id, active);
+      transitionClipIds.add(active.from.id);
+      transitionClipIds.add(active.to.id);
+    }
+  }
 
   const drawQueue: { clip: any; layer: number }[] = [];
   for (const track of visualTracks) {
     for (const clip of track.clips) {
+      if (transitionClipIds.has(clip.id)) continue; // drawn by the transition pass
       if (!clip.disabled && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration + 0.001) {
         drawQueue.push({ clip, layer: track.id.startsWith('text') ? 100 : 0 });
       }
     }
+  }
+
+  // Queue the transition pass at the owning track's layer so z-ordering against
+  // text/PiP layers is preserved.
+  for (const [trackId, active] of activeTransitions) {
+    drawQueue.push({
+      clip: { __transition: active, id: `__transition_${trackId}` },
+      layer: trackId.startsWith('text') ? 100 : 0,
+    });
   }
 
   // Also collect active clips inside PiP Windows attached to active timeline clips
@@ -1361,6 +1891,15 @@ export async function renderCanvasEngine({
               const syntheticClip = {
                 ...pClip,
                 startTime: pAbsStart,
+                // Carry the parent container's transform down to the child so the
+                // whole PiP group moves/scales/rotates as one unit. See the
+                // __parentTransform handling in drawSingleClip.
+                __parentTransform: parentClip.transform,
+                __parentId: parentClip.id,
+                __parentStartTime: parentClip.startTime,
+                __parentAnimations: parentClip.animations,
+                __parentOpacity: parentClip.opacity,
+                __parentCrop: parentClip.crop,
               };
               drawQueue.push({ clip: syntheticClip, layer: 200 + (pTrack.type === 'text' ? 100 : 0) });
             }
@@ -1383,12 +1922,97 @@ export async function renderCanvasEngine({
     }
   }
 
+  /**
+   * Composite one clip of a transition onto the frame.
+   *
+   * Each layer is rendered into its own offscreen buffer first and only then
+   * blitted with the transition's opacity/offset/scale/clip-rect. Drawing the two
+   * clips straight onto the shared composite context would be wrong: clips carry
+   * their own transforms and per-clip alpha, and Canvas2D has no way to express
+   * "apply this extra alpha to everything I'm about to draw" without a separate
+   * buffer. The buffer also makes wipes possible, since we need to mask the fully
+   * drawn layer rather than each of its individual draw calls.
+   */
+  const drawTransitionLayer = async (
+    clipToDraw: any,
+    layer: LayerDraw,
+    bufferKey: string
+  ) => {
+    if (!layer.visible) return;
+
+    // The buffer holds ONLY the frame region (W x H in local units), rendered at
+    // the same device resolution the frame currently occupies so the layer is not
+    // softened by a round-trip through a lower-res buffer.
+    const bufScale = Math.max(0.1, canvas_scale * viewport.zoom);
+    const bufW = Math.max(1, Math.round(W * bufScale));
+    const bufH = Math.max(1, Math.round(H * bufScale));
+
+    const buf = getOrCreateCanvas(offscreenCanvasPool.current, bufferKey, bufW, bufH);
+    const bctx = buf.getContext('2d');
+    if (!bctx) return;
+
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    bctx.clearRect(0, 0, buf.width, buf.height);
+
+    // drawSingleClip works in "local frame space": (0,0) is the frame's top-left
+    // and the frame is W x H units. Scaling by bufScale reproduces that space
+    // exactly, so the clip lands where it normally would.
+    bctx.save();
+    bctx.scale(bufScale, bufScale);
+    await drawSingleClip(clipToDraw, 1, undefined, bctx);
+    bctx.restore();
+
+    // Blit the finished layer with the transition's geometry + alpha. `ctx` is
+    // already in local frame space, so we work in W/H units throughout.
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
+
+    if (layer.clipRect) {
+      const r = layer.clipRect;
+      ctx.beginPath();
+      ctx.rect(r.x * W, r.y * H, r.w * W, r.h * H);
+      ctx.clip();
+    }
+
+    // Geometry is expressed in frame fractions, so it is resolution independent.
+    const cxF = W / 2;
+    const cyF = H / 2;
+    ctx.translate(cxF + layer.translateX * W, cyF + layer.translateY * H);
+    if (layer.rotation) ctx.rotate(layer.rotation);
+    if (layer.scale !== 1) ctx.scale(layer.scale, layer.scale);
+    ctx.translate(-cxF, -cyF);
+
+    ctx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+    ctx.restore();
+  };
+
+  /** Render a full clip-to-clip transition (both layers + overlay + post effect). */
+  const drawTransition = async (active: ActiveTransition) => {
+    const plan = buildTransitionPlan(active);
+    anyClipDrawn = true;
+
+    await drawTransitionLayer(active.from, plan.from, '__transition_from');
+    await drawTransitionLayer(active.to, plan.to, '__transition_to');
+
+    if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, plan.overlay.alpha);
+      ctx.fillStyle = plan.overlay.color;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  };
+
   // Render clips sequentially to guarantee correct Z-index order and prevent Canvas 2D
   // context state corruption (since drawSingleClip can yield on async operations like masks/AI).
   // Note: JavaScript is single-threaded, so Promise.all does not parallelize CPU-bound Canvas
   // drawing anyway; it merely interleaves execution, which corrupts the shared `ctx` state stack.
   for (const item of drawQueue) {
-    await drawSingleClip(item.clip);
+    if (item.clip.__transition) {
+      await drawTransition(item.clip.__transition as ActiveTransition);
+    } else {
+      await drawSingleClip(item.clip);
+    }
   }
 
   if (!anyClipDrawn && !hasClips) {

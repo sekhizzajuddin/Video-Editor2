@@ -295,6 +295,10 @@ export default defineConfig({
   plugins: [react(), audioSeparatorPlugin()],
   server: {
     port: 3000,
+    // Allow proxied preview hosts (e.g. sandboxed *.e2b.app) to reach the dev
+    // server. Vite blocks unknown Host headers by default, which returns a 403
+    // for any tunnelled/remote preview URL.
+    allowedHosts: true,
     proxy: {
       '/cf-api': {
         target: 'https://api.cloudflare.com/client/v4',

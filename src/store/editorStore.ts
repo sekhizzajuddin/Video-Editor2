@@ -21,6 +21,15 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
 import { cleanupClipBackgroundState } from '@/utils/aiBackground';
 import { detectAspectRatio } from '@/utils/aspectRatioHelper';
+import { setPlaybackTime, getPlaybackTime } from '@/utils/playbackClock';
+import {
+  planKineticSync,
+  planGroupReflow,
+  deriveLineStructure,
+  isKineticMediaId,
+  type ExistingWordLayer,
+  type SyncPlan,
+} from '@/utils/kineticSync';
 import type { AspectRatioConflictData } from '@/types';
 
 let saveTimeoutId: any = null;
@@ -176,6 +185,13 @@ interface EditorActions {
   replaceClipMedia: (clipId: string, newMediaId: string) => void;
   removeClip: (clipId: string) => void;
   updateClip: (clipId: string, updates: Partial<TimelineClip>, options?: { ripple?: boolean }) => void;
+  /**
+   * Reconcile a Hybrid kinetic-typography sentence with its per-word PiP layers.
+   * Called automatically whenever the primary clip's text changes.
+   */
+  syncKineticSentence: (primaryClipId: string, opts?: { reflowOnly?: boolean }) => void;
+  /** Strip container transforms baked into PiP word positions by older versions. */
+  normalizeKineticBakedTransforms: () => void;
   batchUpdateClips: (updates: { clipId: string; changes: Partial<TimelineClip> }[]) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
   moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[], resolveOverlap?: boolean) => void;
@@ -483,6 +499,43 @@ export const getAllClipsDeep = (state: EditorState): TimelineClip[] => {
   const mainClips = state.tracks.flatMap((t) => t.clips || []);
   const pipClips = Object.values(state.pipWindows || {}).flatMap(p => p.tracks.flatMap(t => t.clips || []));
   return [...mainClips, ...pipClips];
+};
+
+/**
+ * Apply a clip transform to every clip nested inside PiP windows, returning a new
+ * pipWindows object (or the original reference when nothing changed, so Zustand
+ * subscribers are not needlessly woken).
+ */
+const mapPipWindowClips = (
+  pipWindows: Record<string, PipWindow> | undefined,
+  fn: (clip: TimelineClip) => TimelineClip
+): Record<string, PipWindow> | undefined => {
+  if (!pipWindows) return pipWindows;
+  let changed = false;
+  const next: Record<string, PipWindow> = {};
+
+  for (const [pipId, pip] of Object.entries(pipWindows)) {
+    let pipChanged = false;
+    const tracks = pip.tracks.map((track) => {
+      let trackChanged = false;
+      const clips = track.clips.map((clip) => {
+        const updated = fn(clip);
+        if (updated !== clip) trackChanged = true;
+        return updated;
+      });
+      if (!trackChanged) return track;
+      pipChanged = true;
+      return { ...track, clips };
+    });
+    if (!pipChanged) {
+      next[pipId] = pip;
+    } else {
+      changed = true;
+      next[pipId] = { ...pip, tracks };
+    }
+  }
+
+  return changed ? next : pipWindows;
 };
 
 export const findClipDeep = (state: EditorState, clipId: string) => {
@@ -1620,6 +1673,221 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Delete Clip');
   },
 
+  /**
+   * One-time normalisation for projects saved before the renderer applied the PiP
+   * container transform to its children.
+   *
+   * Those files have the container's scale/offset baked into each word position.
+   * Now that the renderer applies the transform itself, the baked copy would be
+   * applied twice. Re-laying the words out in local space removes it; the visual
+   * result is identical because the renderer immediately re-applies the transform.
+   */
+  normalizeKineticBakedTransforms: () => {
+    const state = get();
+    for (const track of state.tracks) {
+      for (const clip of track.clips) {
+        if (!isKineticMediaId(clip.mediaId)) continue;
+        if (!clip.pipWindowIds?.length) continue;
+        if ((clip as any).kineticLocalSpace) continue; // already normalised
+        const t = clip.transform;
+        const isIdentity =
+          (t?.x ?? 0) === 0 && (t?.y ?? 0) === 0 && (t?.scale ?? 100) === 100;
+        if (!isIdentity) {
+          get().syncKineticSentence(clip.id, { reflowOnly: true });
+        }
+        set((st) => ({
+          tracks: st.tracks.map((tr) => ({
+            ...tr,
+            clips: tr.clips.map((c) =>
+              c.id === clip.id ? ({ ...c, kineticLocalSpace: true } as any) : c
+            ),
+          })),
+        }));
+      }
+    }
+  },
+
+  syncKineticSentence: (primaryClipId, opts) => {
+    const state = get();
+    const found = findClipDeep(state, primaryClipId);
+    if (!found) return;
+    const primary = found.clip as TimelineClip;
+
+    const pipId = primary.pipWindowIds?.[0];
+    if (!pipId) return;
+    const pip = (state.pipWindows || {})[pipId];
+    if (!pip) return;
+
+    // Only Hybrid kinetic groups are managed this way. A user-authored clip that
+    // merely happens to own a PiP window must never have its child layers rewritten.
+    if (!isKineticMediaId(primary.mediaId)) return;
+
+    const sentence = primary.textSettings?.text ?? '';
+
+    // Collect the existing word layers in reading order. Each kinetic word lives
+    // on its own single-clip PiP track, so track order IS word order.
+    const existing: ExistingWordLayer[] = [];
+    for (const track of pip.tracks) {
+      if (track.type !== 'text') continue;
+      const clip = track.clips[0];
+      if (!clip) continue;
+      existing.push({
+        clipId: clip.id,
+        trackId: track.id,
+        text: clip.textSettings?.text ?? '',
+        startTime: clip.startTime,
+        duration: clip.duration,
+        x: clip.transform?.x,
+        y: clip.transform?.y,
+        fontSize: clip.textSettings?.fontSize,
+      });
+    }
+    if (existing.length === 0 && !sentence.trim()) return;
+
+    // The primary clip's transform drives the group layout, so moving/scaling the
+    // sentence re-flows every word at once instead of one-by-one.
+    // Preserve the CURRENT line structure. The generator chooses line breaks from
+    // the AI's per-word `breakAfter` hints, which cannot be recovered from the
+    // sentence string; without this a group move/scale re-wrapped the sentence and
+    // collapsed a multi-line block onto one line.
+    // Prefer the AUTHORED structure stored on the container. Deriving it from the
+    // words' Y positions is only a fallback: line spacing shrinks with the group
+    // scale, so at small scales adjacent lines fall inside the grouping tolerance
+    // and collapse into one — which is exactly how a vertical (one-word-per-line)
+    // sentence turned into a single horizontal line while being resized.
+    const storedStructure = (primary as any).kineticLineStructure as number[] | undefined;
+    const derived = deriveLineStructure(existing);
+    const lineStructure =
+      Array.isArray(storedStructure) && storedStructure.length > 0 ? storedStructure : derived;
+
+    // Word positions are stored in the container's LOCAL space — no baking.
+    //
+    // The renderer now applies the PiP container's full transform (translate,
+    // scale, rotate, flip) to its children, so the group behaves like a real
+    // group. Baking the container transform in here as well would apply it twice,
+    // and rotation cannot be baked into x/y at all — that is why rotating the
+    // sentence used to spin the selection box while leaving the words flat and
+    // bunched together.
+    const layoutOpts = {
+      layout: (primary as any).kineticLayout === 'column' ? ('column' as const) : ('row' as const),
+      lineStructure,
+    };
+
+    let updates: ReturnType<typeof planGroupReflow> = [];
+    let inserts: SyncPlan['inserts'] = [];
+    let removals: string[] = [];
+
+    if (opts?.reflowOnly) {
+      // Re-lay-out in LOCAL space. Used by the one-time migration below to strip
+      // a container transform that older projects baked into word positions.
+      updates = planGroupReflow(existing, sentence, layoutOpts);
+    } else {
+      const plan = planKineticSync(existing, sentence, pip.duration || primary.duration, layoutOpts);
+      if (plan.noop && plan.updates.length === 0) return;
+      updates = plan.updates;
+      inserts = plan.inserts;
+      removals = plan.removals;
+    }
+
+    if (updates.length === 0 && inserts.length === 0 && removals.length === 0) return;
+
+    const updateByClipId = new Map(updates.map((u) => [u.clipId, u]));
+    const removalSet = new Set(removals);
+
+    set((st) => {
+      const target = (st.pipWindows || {})[pipId];
+      if (!target) return st;
+
+      // Apply updates and drop removed words. A track whose only clip was removed
+      // is deleted outright, which is what "removing a word clears that PiP layer"
+      // means to the user.
+      const nextTracks: TimelineTrack[] = [];
+      for (const track of target.tracks) {
+        const clip = track.clips[0];
+        if (clip && removalSet.has(clip.id)) continue;
+
+        if (clip && updateByClipId.has(clip.id)) {
+          const u = updateByClipId.get(clip.id)!;
+          nextTracks.push({
+            ...track,
+            name: `Word (${u.text})`,
+            clips: [{
+              ...clip,
+              textSettings: {
+                ...(clip.textSettings as any),
+                text: u.text,
+                fontSize: u.fontSize,
+              },
+              transform: { ...clip.transform, x: u.x, y: u.y },
+            }],
+          });
+        } else {
+          nextTracks.push(track);
+        }
+      }
+
+      // Insert brand-new word layers at their reading-order position.
+      for (const ins of inserts) {
+        const newClipId = generateId();
+        const newTrackId = generateId();
+        const template = target.tracks.find((t) => t.type === 'text')?.clips[0];
+        const newTrack: TimelineTrack = {
+          id: newTrackId,
+          name: `Word (${ins.text})`,
+          type: 'text',
+          locked: false,
+          muted: false,
+          hidden: false,
+          clips: [{
+            ...(template ? { ...template } : {}),
+            id: newClipId,
+            trackId: newTrackId,
+            mediaId: 'generator:kinetic-word',
+            startTime: ins.startTime,
+            duration: ins.duration,
+            trimStart: 0,
+            trimEnd: ins.duration,
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            transform: {
+              ...(template?.transform ?? { rotation: 0 }),
+              x: ins.x,
+              y: ins.y,
+              scale: 100,
+              rotation: template?.transform?.rotation ?? 0,
+            },
+            textSettings: {
+              ...(template?.textSettings as any),
+              text: ins.text,
+              fontSize: ins.fontSize,
+            },
+          } as TimelineClip],
+        };
+        const at = Math.min(ins.index, nextTracks.length);
+        nextTracks.splice(at, 0, newTrack);
+      }
+
+      // Remember the structure we just laid out, so a later resize reproduces the
+      // author's line arrangement instead of re-deriving (and possibly losing) it.
+      const structureToStore = lineStructure.length > 0 ? lineStructure : derived;
+      const nextTracksTop = st.tracks.map((tr) => ({
+        ...tr,
+        clips: tr.clips.map((c) =>
+          c.id === primaryClipId ? ({ ...c, kineticLineStructure: structureToStore } as any) : c
+        ),
+      }));
+
+      return {
+        tracks: nextTracksTop,
+        pipWindows: {
+          ...st.pipWindows,
+          [pipId]: { ...target, tracks: nextTracks },
+        },
+      };
+    });
+  },
+
   updateClip: (clipId, updates, options) => {
     let pipsToRecalc: string[] = [];
     set((state) => {
@@ -1753,24 +2021,24 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
-      let updatedPerRatioFraming = state.perRatioFraming;
-      if (state.perRatioFramingEnabled && updates.transform) {
-        const ratio = state.aspectRatio;
-        const currentRatioMap = updatedPerRatioFraming[ratio] || {};
-        const currentClipMap = currentRatioMap[clipId] || {};
-        updatedPerRatioFraming = {
-          ...updatedPerRatioFraming,
-          [ratio]: {
-            ...currentRatioMap,
-            [clipId]: {
-              ...currentClipMap,
-              ...(updates.transform.x !== undefined ? { x: updates.transform.x } : {}),
-              ...(updates.transform.y !== undefined ? { y: updates.transform.y } : {}),
-              ...(updates.transform.scale !== undefined ? { scale: updates.transform.scale } : {}),
-            },
-          },
-        };
-      }
+      // NOTE: `perRatioFraming` is deliberately NOT written here.
+      //
+      // It is an ADDITIVE per-aspect-ratio layer: renderers compute
+      //     effectiveX = transform.x + framing.x
+      //     effectiveScale = transform.scale * framing.scale / 100
+      //
+      // This block used to mirror the ABSOLUTE transform into it on every update,
+      // which is a different quantity entirely. The consequences compounded:
+      //   - Resizing to 250 stored framing.scale = 250 as well, so the clip
+      //     actually rendered at 250 * 2.5 = 625%.
+      //   - Moving to x = 40 stored framing.x = 40, doubling it to 80.
+      //   - Worst of all, the overlay divides the framing back out when seeding a
+      //     drag, so transform.scale / (framing.scale / 100) collapsed to exactly
+      //     100 — which is why moving a resized clip snapped it back to 100%.
+      //
+      // Per-ratio framing is authored through its own dedicated action
+      // (updateClipPerRatioFraming); a normal transform edit must leave it alone.
+      const updatedPerRatioFraming = state.perRatioFraming;
 
       return { 
         tracks, 
@@ -1783,6 +2051,28 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (pipsToRecalc.length > 0) {
       pipsToRecalc.forEach(pid => get().recalcPipDurations(pid));
     }
+
+    // ── Kinetic typography live sync ─────────────────────────────────────────
+    // When the primary sentence clip of a Hybrid kinetic group changes, push that
+    // change down into its per-word PiP layers immediately, so the media panel,
+    // timeline and canvas all agree without the user doing anything.
+    //   - text changed      -> diff words: edit in place, add or drop only what moved
+    //   - transform changed -> re-flow the whole block in one pass
+    const touched = findClipDeep(get(), clipId);
+    if (touched && !touched.isPip && touched.clip.pipWindowIds?.length) {
+      // ONLY a text change re-lays-out the words.
+      //
+      // Transform changes must NOT trigger a reflow any more: the renderer now
+      // applies the container transform to PiP children, so moving/scaling/
+      // rotating the sentence already moves the words. Re-laying them out on top
+      // of that recomputed the wrap from the transformed font size and bunched
+      // the words together — visible as the words collapsing into each other
+      // while the selection box rotated around them.
+      if (updates.textSettings !== undefined) {
+        get().syncKineticSentence(clipId);
+      }
+    }
+
     // NOTE: saveSnapshot() is intentionally NOT called here - callers call it explicitly when needed
     // This prevents excessive snapshot creation during drag operations
   },
@@ -2667,40 +2957,59 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedClipId: null,
       selectedClipIds: [],
     }),
+  // NOTE: a transition can live on EITHER the incoming clip (`transitionIn`) or
+  // the outgoing one (`transitionOut`) — drag-and-drop assigns whichever edge the
+  // user dropped nearest. The original implementation only ever updated/removed
+  // `transitionIn`, so editing or deleting a transition that had been dropped on a
+  // clip's END silently did nothing. Both edges are now handled, and `params` are
+  // merged rather than replaced so partial updates (e.g. only `softness`) don't
+  // wipe out the other settings.
   updateTransition: (clipId, updates) => {
     set((state) => {
+      const applyUpdate = (existing: Transition): Transition => ({
+        ...existing,
+        ...updates,
+        params: { ...(existing.params || {}), ...((updates as any).params || {}) },
+      });
+
+      const patchClip = (clip: TimelineClip): TimelineClip => {
+        if (clip.id !== clipId) return clip;
+        if (clip.transitionIn) {
+          return { ...clip, transitionIn: applyUpdate(clip.transitionIn) };
+        }
+        if (clip.transitionOut) {
+          return { ...clip, transitionOut: applyUpdate(clip.transitionOut) };
+        }
+        return clip;
+      };
+
       const newTracks = state.tracks.map((track) => ({
         ...track,
-        clips: track.clips.map((clip) => {
-          if (clip.id === clipId && clip.transitionIn) {
-            return {
-              ...clip,
-              transitionIn: { ...clip.transitionIn, ...updates },
-            };
-          }
-          return clip;
-        }),
+        clips: track.clips.map(patchClip),
       }));
-      return { tracks: newTracks };
+
+      // Transitions can also exist on clips nested inside PiP windows.
+      const newPipWindows = mapPipWindowClips(state.pipWindows, patchClip);
+
+      return { tracks: newTracks, pipWindows: newPipWindows };
     });
     get().saveSnapshot('Update Transition');
   },
   removeTransition: (clipId) => {
     set((state) => {
+      const stripClip = (clip: TimelineClip): TimelineClip =>
+        clip.id === clipId
+          ? { ...clip, transitionIn: undefined, transitionOut: undefined }
+          : clip;
+
       const newTracks = state.tracks.map((track) => ({
         ...track,
-        clips: track.clips.map((clip) => {
-          if (clip.id === clipId) {
-            return {
-              ...clip,
-              transitionIn: undefined,
-            };
-          }
-          return clip;
-        }),
+        clips: track.clips.map(stripClip),
       }));
+
       return {
         tracks: newTracks,
+        pipWindows: mapPipWindowClips(state.pipWindows, stripClip),
         selectedTransitionClipId:
           state.selectedTransitionClipId === clipId ? null : state.selectedTransitionClipId,
       };
@@ -2890,7 +3199,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
     set({ isPlaying: true, playbackDirection: 1 });
   },
-  pause: () => set({ isPlaying: false, playbackDirection: 0 }),
+  // During playback the store's `currentTime` is a throttled (~10 Hz) mirror of the
+  // playback clock, so it can trail the true playhead by up to ~100ms. Flush the
+  // exact clock value on pause, otherwise the playhead visibly snaps backwards the
+  // moment playback stops and the media elements re-seek to that stale position.
+  pause: () => set({ isPlaying: false, playbackDirection: 0, currentTime: getPlaybackTime() }),
   togglePlayback: () => {
     const { tracks, isPlaying, selectedClipIds, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips || []);
@@ -2911,13 +3224,21 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
     }
-    set((state) => ({ 
-      isPlaying: !state.isPlaying, 
-      playbackDirection: !state.isPlaying ? 1 : 0 
-    }));
+    set((state) => {
+      const nextPlaying = !state.isPlaying;
+      return {
+        isPlaying: nextPlaying,
+        playbackDirection: nextPlaying ? 1 : 0,
+        // Pausing: adopt the exact clock position (see `pause` above for why).
+        ...(nextPlaying ? {} : { currentTime: getPlaybackTime() }),
+      };
+    });
   },
   seek: (time) => {
     const clamped = Math.max(0, time);
+    // Keep the React-free playback clock in front of the store at all times so
+    // the media-sync loop and canvas renderer never read a stale playhead.
+    setPlaybackTime(clamped);
     // During scrubbing, write directly to store state without triggering React's
     // reconciler. Zustand subscribers (RAF loop, media playback) still get notified
     // via the store's own subscription mechanism — React components do NOT re-render
@@ -3736,6 +4057,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: 0
       });
       get().recalcTotalDuration();
+      // Older projects baked the PiP container transform into word positions;
+      // the renderer now applies it itself, so strip the baked copy once.
+      try { get().normalizeKineticBakedTransforms(); } catch (e) { console.warn('Kinetic normalise skipped:', e); }
       // Auto load templates from IndexedDB
       get().loadTemplatesFromDB().catch(err => console.error('Failed to load templates:', err));
       return true;
@@ -4643,6 +4967,27 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Add Adjustment Layer');
   }
 }));
+
+// Safety net: `currentTime` is also written directly by snapshot restore, project
+// load, undo/redo and a few other paths that do not go through `seek()`. Mirror
+// those writes into the playback clock so the render/sync path can never read a
+// stale playhead.
+//
+// IMPORTANT: we must only react to an ACTUAL change of `currentTime`, never to the
+// store's current value. During playback the clock intentionally runs ahead of the
+// store (the store is a throttled ~10Hz mirror), so blindly pushing
+// `state.currentTime` on every store notification — including notifications caused
+// by completely unrelated mutations such as selecting a clip — would drag the
+// playhead backwards several times a second and reintroduce the very stutter this
+// clock exists to remove. Tracking the last observed value means we only push when
+// something genuinely reassigned the time.
+let _lastObservedStoreTime = useEditorStore.getState().currentTime;
+useEditorStore.subscribe((state) => {
+  const t = state.currentTime;
+  if (t === _lastObservedStoreTime) return;
+  _lastObservedStoreTime = t;
+  setPlaybackTime(t);
+});
 
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', (event) => {

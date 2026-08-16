@@ -1,5 +1,6 @@
 import { CornerPoints } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
+import { getFrameSize, getClipFramePlacement } from './frameSpace';
 
 interface Point {
   x: number;
@@ -103,30 +104,51 @@ export async function trackMotion(
   startTime: number,
   duration: number,
   initialCorners: CornerPoints,
-  onProgress?: TrackProgressCallback
+  onProgress?: TrackProgressCallback,
+  /**
+   * The clip's transform, so the analysis reproduces where the media actually
+   * appears in the frame. Omitted = assume an untransformed, frame-filling clip
+   * (the historical behaviour).
+   */
+  clipTransform?: { x?: number; y?: number; scale?: number } | null
 ): Promise<{ time: number; corners: CornerPoints }[]> {
   const fps = 15; // Track at 15 frames per second for high performance and accuracy
   const frameInterval = 1 / fps;
   const numSteps = Math.ceil(duration / frameInterval);
 
-  // Setup offscreen canvas dynamically based on aspect ratio
+  // Setup offscreen canvas in FRAME space (the visible picture), so tracked
+  // coordinates are directly comparable with the region box the user drew.
   const store = useEditorStore.getState();
   const aspectRatio = store.aspectRatio || '16:9';
-  let W = 854;
-  const H = 480;
-  if (aspectRatio === '9:16') {
-    W = 270;
-  } else if (aspectRatio === '1:1') {
-    W = 480;
-  } else if (aspectRatio === '4:3') {
-    W = 640;
-  }
+  const { W, H } = getFrameSize(aspectRatio);
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Could not create 2D canvas context');
+
+  // Where the clip's media actually sits inside the frame.
+  //
+  // Previously the video was blitted edge-to-edge across the frame canvas
+  // (`drawImage(videoEl, 0, 0, W, H)`), which silently assumed the clip filled
+  // the frame exactly with no transform. On a portrait project showing a
+  // landscape video — or on any clip that has been scaled or panned — the
+  // analysed picture was stretched and shifted relative to what the user sees,
+  // so the template lifted from "under the box" was a different part of the
+  // image and the track followed the wrong thing.
+  const placement = getClipFramePlacement(
+    videoEl.videoWidth || 1920,
+    videoEl.videoHeight || 1080,
+    W,
+    H,
+    clipTransform
+  );
+
+  const paintFrame = () => {
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(videoEl, placement.x, placement.y, placement.w, placement.h);
+  };
 
   const seekVideo = (time: number): Promise<void> => {
     return new Promise((resolve) => {
@@ -136,7 +158,7 @@ export async function trackMotion(
           resolved = true;
           videoEl.removeEventListener('seeked', onSeeked);
           try {
-            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            paintFrame();
           } catch (e) {}
           resolve();
         }
@@ -148,7 +170,7 @@ export async function trackMotion(
           clearTimeout(timeoutId);
           videoEl.removeEventListener('seeked', onSeeked);
           try {
-            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            paintFrame();
           } catch (e) {}
           resolve();
         }
@@ -158,7 +180,7 @@ export async function trackMotion(
         resolved = true;
         clearTimeout(timeoutId);
         try {
-          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          paintFrame();
         } catch (e) {}
         resolve();
         return;

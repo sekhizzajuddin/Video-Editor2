@@ -1,4 +1,4 @@
-import { RenderLayer } from './FrameScheduler';
+import { RenderLayer, FrameOverlay } from './FrameScheduler';
 import { ExportWorkerConfig } from './export.worker';
 
 const vertexShaderSource = `#version 300 es
@@ -100,7 +100,7 @@ export class Compositor {
     this.ctx.imageSmoothingQuality = 'high';
   }
 
-  public render(layers: RenderLayer[]) {
+  public render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
     // Fill background
     this.ctx.fillStyle = '#0a0a0a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -108,7 +108,31 @@ export class Compositor {
     for (const layer of layers) {
       if (layer.type === 'video' && layer.frame) {
         this.ctx.save();
-        
+
+        // Clip-to-clip transition geometry. Expressed in fractions of the frame by
+        // the shared transition engine, so it maps onto any export resolution.
+        // Applied OUTSIDE the clip's own transform so it behaves like a camera
+        // move on the finished layer, exactly as the preview does it.
+        const tg = layer.transitionGeometry;
+        if (tg) {
+          const CW = this.canvas.width;
+          const CH = this.canvas.height;
+          if (tg.clipRect) {
+            this.ctx.beginPath();
+            this.ctx.rect(
+              tg.clipRect.x * CW,
+              tg.clipRect.y * CH,
+              tg.clipRect.w * CW,
+              tg.clipRect.h * CH
+            );
+            this.ctx.clip();
+          }
+          this.ctx.translate(CW / 2 + tg.translateX * CW, CH / 2 + tg.translateY * CH);
+          if (tg.rotation) this.ctx.rotate(tg.rotation);
+          if (tg.scale !== 1) this.ctx.scale(tg.scale, tg.scale);
+          this.ctx.translate(-CW / 2, -CH / 2);
+        }
+
         let vw = layer.frame.displayWidth;
         let vh = layer.frame.displayHeight;
         const srcRot = layer.sourceRotation || 0;
@@ -161,6 +185,9 @@ export class Compositor {
         this.ctx.rotate((layer.transform.rotation * Math.PI) / 180);
         
         this.ctx.globalAlpha = layer.opacity;
+        // Honour the clip's blend mode (Multiply/Screen/Overlay/...). Without this
+        // the export silently flattened every blended clip to Normal.
+        this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
 
         // 6. Draw the frame, applying source metadata rotation
         this.ctx.save();
@@ -209,7 +236,20 @@ export class Compositor {
         
         this.ctx.restore();
         this.ctx.restore();
+        // Defensive: ctx.restore() already unwinds this, but an early return in a
+        // future edit must never leak a blend mode onto the following layer.
+        this.ctx.globalCompositeOperation = 'source-over';
       }
+    }
+
+    // Full-frame transition overlays (flash, dip-to-black/white, light leak).
+    for (const ov of overlays) {
+      if (!ov || !(ov.alpha > 0.001)) continue;
+      this.ctx.save();
+      this.ctx.globalAlpha = Math.min(1, ov.alpha);
+      this.ctx.fillStyle = ov.color;
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      this.ctx.restore();
     }
   }
 

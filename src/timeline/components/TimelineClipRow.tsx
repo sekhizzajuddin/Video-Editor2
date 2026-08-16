@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import { Film, Music, Image, Sparkles, Type, Plus } from 'lucide-react';
+import { getKineticClipLabel, isKineticMediaId } from '@/utils/kineticSync';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem, EditorState, PipWindow } from '@/types';
 import { getTrackHeight } from '../trackGeometry';
@@ -582,7 +583,20 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
       {/* ── Clips ──────────────────────────────────────── */}
       {(track.clips || []).map((clip) => {
         // P0 FIX: O(1) map lookup instead of O(N) .find() per clip per render
-        const media = mediaMap.get(clip.mediaId) ?? defaultMedia;
+        // Kinetic-typography clips use synthetic `generator:*` mediaIds that are
+        // deliberately absent from the media library, so they used to fall through
+        // to `defaultMedia` and render as "Unknown" with a video icon. Resolve them
+        // to a text-typed descriptor named after their actual content instead.
+        const resolvedMedia = mediaMap.get(clip.mediaId);
+        const media = resolvedMedia ?? (
+          (clip as any).textSettings || isKineticMediaId(clip.mediaId)
+            ? {
+                ...defaultMedia,
+                type: 'text' as const,
+                name: getKineticClipLabel(clip as any, 'Text'),
+              }
+            : defaultMedia
+        );
         const isSelected = selectedClipIds.includes(clip.id);
         const isDragging = draggingClipId === clip.id;
 

@@ -31,6 +31,19 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
     });
   }
 
+  // 1b. Motion-tracked region effects
+  (selectedClip.motionEffects ?? []).forEach((me: any, i: number) => {
+    if (!me?.enabled) return;
+    activeEffects.push({
+      id: `motion-fx-${i}`,
+      name: `Motion: ${me.type} (region ${i + 1})`,
+      onRemove: () => {
+        const next = (selectedClip.motionEffects ?? []).filter((_: any, j: number) => j !== i);
+        updateClip(selectedClip.id, { motionEffects: next } as any);
+      },
+    });
+  });
+
   // 2. Luma Key
   if (selectedClip.lumaKey?.enabled) {
     activeEffects.push({

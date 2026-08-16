@@ -29,7 +29,17 @@ import { getCachedImage, LocalCornerPoints } from '@/utils/canvasEffects';
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { removeBackground } from '@imgly/background-removal';
 import { toast } from 'sonner';
-import { getClipDimensions, inpaint } from './previewMath';
+import { getClipDimensions, inpaint, getOverlayMapping, clientToOverlay, clientToViewportSpace } from './previewMath';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
+import { isKineticMediaId, getSentenceBounds } from '@/utils/kineticSync';
+import { encodeMaskRle } from '@/utils/motionMask';
+import {
+  getFrameSize,
+  getFrameOffset,
+  quadToRect,
+  rectToQuad,
+  normalizeRegionToFrame,
+} from '@/utils/frameSpace';
 
 interface InteractiveCanvasOverlayProps {
   viewport: { x: number; y: number; zoom: number };
@@ -42,7 +52,12 @@ export function PreviewCanvasOverlay({
   videoElements,
   containerRef
 }: InteractiveCanvasOverlayProps) {
-  const currentTime = useEditorStore(s => s.currentTime);
+  // PERF: the overlay only draws selection/transform handles, so it does not need
+  // a 60 Hz time signal — following the animated transform at 15 Hz is visually
+  // indistinguishable. Selecting raw `currentTime` re-rendered this ~2k-line
+  // component on every playback store write, competing with canvas compositing.
+  // Drag handlers below read the exact time from the store when they need it.
+  const currentTime = usePlaybackTime(15);
   const selectedClipId = useEditorStore(s => s.selectedClipId);
   const canvasTransformMode = useEditorStore(s => s.canvasTransformMode);
   const setCanvasTransformMode = useEditorStore(s => s.setCanvasTransformMode);
@@ -74,11 +89,102 @@ export function PreviewCanvasOverlay({
     baseW?: number;
     baseH?: number;
     initCorners?: LocalCornerPoints;
+    /**
+     * Distance from the clip centre to the POINTER at mousedown, in clip-local
+     * units. Corner resize is driven by the ratio of the current pointer distance
+     * to this, so the exact spot you grab inside the handle no longer matters.
+     */
+    initPointerDist?: number;
+    /** Per-axis |pointer - centre| at mousedown, for the Shift aspect lock. */
+    initPointerDx?: number;
+    initPointerDy?: number;
+    /** Pointer angle (deg) about the clip centre at mousedown, for rotation. */
+    initPointerAngle?: number;
     initMask?: any;
     initVirtualCamera?: { x: number; y: number };
   } | null>(null);
   
   const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
+
+  /**
+   * Drag state for the motion-tracked REGION boxes (FX tab).
+   *
+   * Deliberately separate from `dragState`: a motion region is authored in
+   * absolute 854x480 frame space so it can sit over any part of the picture,
+   * whereas `dragState` operates in clip-local space and is affected by the
+   * clip's own transform.
+   */
+  /**
+   * Paint-brush stroke being drawn for a motion region, in 854x480 frame space.
+   * Kept as a point list while drawing and rasterised on mouse-up.
+   */
+  const [paintStroke, setPaintStroke] = useState<{
+    index: number;
+    points: Array<{ x: number; y: number }>;
+  } | null>(null);
+
+  /**
+   * Which motion region is currently armed for painting, or null.
+   * Set from the FX panel's "Paint Region" button via a global event, so the
+   * panel and overlay stay decoupled.
+   */
+  const [paintArmedIndex, setPaintArmedIndex] = useState<number | null>(null);
+
+  /**
+   * Which region is currently being EDITED (box handles or brush), or null.
+   *
+   * While editing, the clip's own transform box is hidden and its handles are
+   * disabled. Without this the two overlays sit on top of each other: a drag
+   * intended to move the region box instead grabs the clip and repositions the
+   * whole shot, which makes the region impossible to place.
+   */
+  const [editingRegionIndex, setEditingRegionIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setEditingRegionIndex(
+        detail && typeof detail.index === 'number' && detail.clipId === selectedClipId
+          ? detail.index
+          : null
+      );
+    };
+    window.addEventListener('procut-motion-region-edit', onEdit);
+    return () => window.removeEventListener('procut-motion-region-edit', onEdit);
+  }, [selectedClipId]);
+
+  useEffect(() => { setEditingRegionIndex(null); }, [selectedClipId]);
+
+  useEffect(() => {
+    const onArm = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setPaintArmedIndex(
+        detail && typeof detail.index === 'number' && detail.clipId === selectedClipId
+          ? detail.index
+          : null
+      );
+    };
+    window.addEventListener('procut-motion-paint-arm', onArm);
+    return () => window.removeEventListener('procut-motion-paint-arm', onArm);
+  }, [selectedClipId]);
+
+  // Disarm when the selection changes, so a stray click on another clip cannot
+  // paint into the wrong region.
+  useEffect(() => { setPaintArmedIndex(null); }, [selectedClipId]);
+
+  const [regionDrag, setRegionDrag] = useState<{
+    index: number;
+    mode: 'move' | 'nw' | 'ne' | 'se' | 'sw' | 'new';
+    startX: number;
+    startY: number;
+    init: { cx: number; cy: number; w: number; h: number };
+  } | null>(null);
+
+  /**
+   * Live brush position in FRAME space, for the Photoshop-style brush ring.
+   * Null when the pointer is outside the picture.
+   */
+  const [brushCursor, setBrushCursor] = useState<{ x: number; y: number } | null>(null);
 
   const [imageEditorTool, setImageEditorTool] = useState<'none' | 'magic' | 'lasso' | 'poly'>('none');
   const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[]>([]);
@@ -137,10 +243,37 @@ export function PreviewCanvasOverlay({
     }
   }
 
-  let aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClip.startTime, activeClip.animations?.['transform.x']) : 0;
-  let aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClip.startTime, activeClip.animations?.['transform.y']) : 0;
-  let aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClip.startTime, activeClip.animations?.['transform.scale']) : 100;
-  const aRot = activeClip ? getAnimatedValue(activeClip.transform.rotation, currentTime, activeClip.startTime, activeClip.animations?.['transform.rotation']) : 0;
+  // Absolute timeline start of the selected clip.
+  //
+  // CRITICAL for PiP children (kinetic word layers): a PiP clip's `startTime` is
+  // RELATIVE to its PiP window, while `currentTime` is absolute. Evaluating
+  // keyframes with the relative value samples the animation at completely the
+  // wrong local time. Kinetic words carry a "pop" keyframe on transform.scale
+  // (135% -> 100% over 0.12s), so the overlay could read 135% while the drag
+  // handler — which already resolved the ABSOLUTE start — read 100%. The box was
+  // therefore drawn ~35% too large, and the first mousemove wrote the real value,
+  // making it snap smaller. The same disagreement on transform.x/y made the clip
+  // jump before it started following the pointer.
+  const activeClipAbsStartTime = React.useMemo(() => {
+    if (!activeClip) return 0;
+    const state = useEditorStore.getState();
+    const found = findClipDeep(state, activeClip.id);
+    if (found?.isPip && found.pipId) {
+      const pip = (state.pipWindows || {})[found.pipId];
+      if (pip) {
+        for (const t of state.tracks) {
+          const parent = t.clips.find((c) => c.id === pip.parentClipId);
+          if (parent) return parent.startTime + (pip.relativeStartTime || 0) + found.clip.startTime;
+        }
+      }
+    }
+    return activeClip.startTime;
+  }, [activeClip, tracks, pipWindows]);
+
+  let aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.x']) : 0;
+  let aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.y']) : 0;
+  let aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.scale']) : 100;
+  const aRot = activeClip ? getAnimatedValue(activeClip.transform.rotation, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.rotation']) : 0;
 
   if (activeClip && perRatioFramingEnabled && perRatioFraming[aspectRatio]?.[activeClip.id]) {
     const customFraming = perRatioFraming[aspectRatio][activeClip.id];
@@ -149,10 +282,10 @@ export function PreviewCanvasOverlay({
     if (customFraming.scale !== undefined) aScale *= (customFraming.scale / 100);
   }
 
-  const aCropLeft = activeClip ? getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.left']) : 0;
-  const aCropTop = activeClip ? getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.top']) : 0;
-  const aCropRight = activeClip ? getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.right']) : 0;
-  const aCropBot = activeClip ? getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClip.startTime, activeClip.animations?.['crop.bottom']) : 0;
+  const aCropLeft = activeClip ? getAnimatedValue(activeClip.crop?.left || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.left']) : 0;
+  const aCropTop = activeClip ? getAnimatedValue(activeClip.crop?.top || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.top']) : 0;
+  const aCropRight = activeClip ? getAnimatedValue(activeClip.crop?.right || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.right']) : 0;
+  const aCropBot = activeClip ? getAnimatedValue(activeClip.crop?.bottom || 0, currentTime, activeClipAbsStartTime, activeClip.animations?.['crop.bottom']) : 0;
 
   const getHeartPathData = (x: number, y: number, w: number, h: number): string => {
     return `M 0,${h * 0.15} 
@@ -189,11 +322,14 @@ export function PreviewCanvasOverlay({
       const container = document.getElementById('preview-canvas-wrapper');
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      const scaleX = 854 / rect.width;
-      const scaleY = 480 / rect.height;
+      // Uniform mapping: the canvas is object-contain and the overlay svg letterboxes,
+      // so BOTH axes share one scale factor. Using 854/width and 480/height separately
+      // made drags run at different speeds per axis whenever the preview pane was not
+      // exactly 16:9 — the root of the "buggy transform box" on every media type.
+      const { scale: overlayScale } = getOverlayMapping(rect);
 
-      const dx = ((e.clientX - dragState.startX) * scaleX) / viewport.zoom;
-      const dy = ((e.clientY - dragState.startY) * scaleY) / viewport.zoom;
+      const dx = ((e.clientX - dragState.startX) * overlayScale) / viewport.zoom;
+      const dy = ((e.clientY - dragState.startY) * overlayScale) / viewport.zoom;
 
       let x = 0, y = 0, scale = 100, rotation = 0;
       if (dragState.initTransform) {
@@ -233,6 +369,27 @@ export function PreviewCanvasOverlay({
         if (animations[prop]) {
           animations = { ...animations, [prop]: addOrUpdateKeyframe(animations[prop], localTime, val) };
         }
+      };
+
+      /**
+       * Scale an ENTIRE keyframe track by a ratio, preserving its shape.
+       *
+       * Kinetic word clips ship with a "pop" on transform.scale (135% -> 100%).
+       * Because that track exists, the animated value — not `transform.scale` —
+       * is what renders. Resizing wrote the new size into the base only, so the
+       * keyframes kept forcing 100% and the resize appeared to work but was
+       * discarded the moment anything else touched the clip.
+       *
+       * Multiplying every keyframe by the same ratio keeps the animation's
+       * character (the pop still overshoots by 35%) while honouring the new size.
+       */
+      const scaleAnimationTrack = (prop: string, ratio: number) => {
+        const track = animations[prop];
+        if (!track?.length || !Number.isFinite(ratio) || ratio <= 0) return;
+        animations = {
+          ...animations,
+          [prop]: track.map((k: any) => ({ ...k, value: k.value * ratio })),
+        };
       };
 
       if (dragState.type.startsWith('perspective-corner-')) {
@@ -331,8 +488,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -354,8 +512,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -377,8 +536,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -400,8 +560,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -426,8 +587,9 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const clientXLocal = (e.clientX - rect.left) * scaleX - (427 + aX);
-            const clientYLocal = (e.clientY - rect.top) * scaleY - (240 + aY);
+            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
+            const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
             const clipRotRad = (-aRot * Math.PI) / 180;
             const mxLocal = clientXLocal * Math.cos(clipRotRad) - clientYLocal * Math.sin(clipRotRad);
@@ -488,7 +650,12 @@ export function PreviewCanvasOverlay({
         }
 
         const newGuides: { axis: 'x' | 'y'; position: number }[] = [];
-        const snapThreshold = 12;
+        // Threshold in FRAME units, scaled to the project size and the zoom level.
+        // A flat 12 was ~2.8% of a 16:9 frame's height but ~4.4% of a 9:16 frame's
+        // width, and it did not shrink as the user zoomed in — so on vertical
+        // projects the centre line grabbed the clip over a wide band and fine
+        // positioning became a fight.
+        const snapThreshold = Math.max(2, (Math.min(W, H) * 0.02) / (viewport.zoom || 1));
 
         const draggedWidth = (dragState.baseW || 854) * (scale / 100);
         const draggedHeight = (dragState.baseH || 480) * (scale / 100);
@@ -532,17 +699,38 @@ export function PreviewCanvasOverlay({
         let minDiffX = Infinity;
         let snapXVal: number | null = null;
 
-        let W = 854;
-        let H = 480;
+        // Use the ACTUAL frame size. These locals previously hard-coded 854x480,
+        // shadowing the aspect-ratio-aware W/H computed for the rest of the
+        // component, so on a 9:16 or 1:1 project every edge-snap target sat far
+        // outside the real frame.
+        const snapW = W;
+        const snapH = H;
+
+        // ── Alignment snapping ────────────────────────────────────────────────
+        // Snapping must assist, never fight. Two rules keep it predictable:
+        //
+        //  a) Per-axis arming. The old check used the total distance from the drag
+        //     origin, so once the pointer had travelled 4 units in ANY direction
+        //     snapping stayed armed for the rest of the gesture — the clip then
+        //     re-snapped on every frame and had to be yanked out of the band.
+        //     Arming each axis on its own movement lets a purely vertical drag
+        //     leave the horizontal guide alone, and vice versa.
+        //
+        //  b) Snap only when moving TOWARD the line. Pulling away from a guide must
+        //     always release it. Without this, dragging down from just above a
+        //     guide pushed the clip back UP onto it — the reported "moves the wrong
+        //     way" behaviour.
+        const snapArmedX = Math.abs(dx) > 2;
+        const snapArmedY = Math.abs(dy) > 2;
 
         const targetsX = [
-          -W / 2,
+          -snapW / 2,
           0,
-          W / 2
+          snapW / 2
         ];
 
         otherActiveClips.forEach((other) => {
-          const dims = getClipDimensions(other, mediaLibrary, W, H);
+          const dims = getClipDimensions(other, mediaLibrary, snapW, snapH);
           const oX = other.transform?.x ?? 0;
           targetsX.push(oX - dims.width / 2);
           targetsX.push(oX);
@@ -558,21 +746,25 @@ export function PreviewCanvasOverlay({
         draggedAnchorsX.forEach((anchor) => {
           targetsX.forEach((targetVal) => {
             const diff = Math.abs(anchor.val - targetVal);
-            if (diff < snapThreshold && diff < minDiffX) {
-              minDiffX = diff;
-              if (anchor.type === 'left') {
-                bestSnapX = targetVal + draggedWidth / 2;
-              } else if (anchor.type === 'center') {
-                bestSnapX = targetVal;
-              } else {
-                bestSnapX = targetVal - draggedWidth / 2;
-              }
-              snapXVal = targetVal;
-            }
+            if (diff >= snapThreshold || diff >= minDiffX) return;
+            const candidate =
+              anchor.type === 'left'
+                ? targetVal + draggedWidth / 2
+                : anchor.type === 'center'
+                  ? targetVal
+                  : targetVal - draggedWidth / 2;
+            // Reject a snap whose CORRECTION would push the clip against the drag
+            // direction. Otherwise a guide just behind the pointer drags the clip
+            // backwards, which reads as "it moves the wrong way".
+            const correction = candidate - newX;
+            if (correction !== 0 && Math.sign(correction) === -Math.sign(dx)) return;
+            minDiffX = diff;
+            bestSnapX = candidate;
+            snapXVal = targetVal;
           });
         });
 
-        if (bestSnapX !== null) {
+        if (snapArmedX && bestSnapX !== null) {
           newX = bestSnapX;
           if (snapXVal !== null) {
             newGuides.push({ axis: 'x', position: snapXVal });
@@ -584,13 +776,13 @@ export function PreviewCanvasOverlay({
         let snapYVal: number | null = null;
 
         const targetsY = [
-          -H / 2,
+          -snapH / 2,
           0,
-          H / 2
+          snapH / 2
         ];
 
         otherActiveClips.forEach((other) => {
-          const dims = getClipDimensions(other, mediaLibrary, W, H);
+          const dims = getClipDimensions(other, mediaLibrary, snapW, snapH);
           const oY = other.transform?.y ?? 0;
           targetsY.push(oY - dims.height / 2);
           targetsY.push(oY);
@@ -606,21 +798,22 @@ export function PreviewCanvasOverlay({
         draggedAnchorsY.forEach((anchor) => {
           targetsY.forEach((targetVal) => {
             const diff = Math.abs(anchor.val - targetVal);
-            if (diff < snapThreshold && diff < minDiffY) {
-              minDiffY = diff;
-              if (anchor.type === 'top') {
-                bestSnapY = targetVal + draggedHeight / 2;
-              } else if (anchor.type === 'center') {
-                bestSnapY = targetVal;
-              } else {
-                bestSnapY = targetVal - draggedHeight / 2;
-              }
-              snapYVal = targetVal;
-            }
+            if (diff >= snapThreshold || diff >= minDiffY) return;
+            const candidate =
+              anchor.type === 'top'
+                ? targetVal + draggedHeight / 2
+                : anchor.type === 'center'
+                  ? targetVal
+                  : targetVal - draggedHeight / 2;
+            const correction = candidate - newY;
+            if (correction !== 0 && Math.sign(correction) === -Math.sign(dy)) return;
+            minDiffY = diff;
+            bestSnapY = candidate;
+            snapYVal = targetVal;
           });
         });
 
-        if (bestSnapY !== null) {
+        if (snapArmedY && bestSnapY !== null) {
           newY = bestSnapY;
           if (snapYVal !== null) {
             newGuides.push({ axis: 'y', position: snapYVal });
@@ -637,9 +830,13 @@ export function PreviewCanvasOverlay({
         x = newX;
         y = newY;
       } else if (dragState.type.startsWith('crop-')) {
-        const theta = (-rotation * Math.PI) / 180;
-        const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (scale / 100);
-        const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) / (scale / 100);
+        // Anchor to drag-start rotation/scale (see edge-resize note): using the
+        // live values changes the conversion factor mid-drag.
+        const initRotCrop = dragState.initTransform.rotation || 0;
+        const initScaleCrop = dragState.initTransform.scale || 100;
+        const theta = (-initRotCrop * Math.PI) / 180;
+        const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) / (initScaleCrop / 100);
+        const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) / (initScaleCrop / 100);
 
         if (dragState.type === 'crop-left') {
           crop.left = Math.max(0, Math.min(100 - crop.right - 1, crop.left + (localDx / baseW) * 100));
@@ -655,12 +852,23 @@ export function PreviewCanvasOverlay({
           getNewAnimations('crop.bottom', crop.bottom);
         }
       } else if (dragState.type === 'rot') {
-        const cx = 427 + x;
-        const cy = 240 + y;
-        const mx = (e.clientX - rect.left) * scaleX;
-        const my = (e.clientY - rect.top) * scaleY;
-        let angle = Math.atan2(my - cy, mx - cx) * (180 / Math.PI);
-        angle += 90;
+        // Centre in CLIP-LOCAL space: the handle group is drawn inside
+        // translate(offsetX, offsetY) then translate(W/2 + aX, H/2 + aY).
+        const cx = offsetX + W / 2 + x;
+        const cy = offsetY + H / 2 + y;
+        // Undo the viewport zoom/pan too, or the angle is measured in the wrong
+        // space and the clip snaps the moment the handle is grabbed.
+        const ptrAbs = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+        const mx = ptrAbs.x;
+        const my = ptrAbs.y;
+        // Rotate by the CHANGE in pointer angle since mousedown, applied to the
+        // rotation the clip already had. Setting an absolute angle from the
+        // pointer (the old `angle + 90`) assumed you grabbed the handle at exactly
+        // 12 o'clock relative to the clip: any other grab point — or a clip that
+        // was already rotated — snapped it to a new angle on the first mousemove.
+        const pointerAngleNow = (Math.atan2(my - cy, mx - cx) * 180) / Math.PI;
+        const grabAngle = dragState.initPointerAngle ?? pointerAngleNow;
+        let angle = (dragState.initTransform.rotation || 0) + (pointerAngleNow - grabAngle);
         // CapCut-style rotation snap: Shift -> 15° increments, Alt -> 1° (fine), no modifier -> 0.5°
         if (e.shiftKey) {
           rotation = Math.round(angle / 15) * 15;
@@ -678,10 +886,17 @@ export function PreviewCanvasOverlay({
       ) {
         // Edge-resize: project delta onto the clip's local (un-rotated) frame and
         // adjust the uniform scale based on the dominant axis. Shift locks aspect.
-        const theta = (-rotation * Math.PI) / 180;
-        const invScale = 100 / scale;
-        const localDx = ((dx * Math.cos(theta) - dy * Math.sin(theta)) * invScale) / 1;
-        const localDy = ((dx * Math.sin(theta) + dy * Math.cos(theta)) * invScale) / 1;
+        // Anchor the projection to the values at DRAG START. `scale` and `rotation`
+        // are mutated during the drag, so using them makes the conversion factor
+        // change under the user's hand — the clip accelerates or reverses as it
+        // resizes. Deltas are measured from the start point, so the basis must be
+        // the start basis too.
+        const initRotEdge = dragState.initTransform.rotation || 0;
+        const initScaleForProj = dragState.initTransform.scale || 100;
+        const theta = (-initRotEdge * Math.PI) / 180;
+        const invScale = 100 / initScaleForProj;
+        const localDx = (dx * Math.cos(theta) - dy * Math.sin(theta)) * invScale;
+        const localDy = (dx * Math.sin(theta) + dy * Math.cos(theta)) * invScale;
 
         let dxAxis = 0;
         let dyAxis = 0;
@@ -690,49 +905,92 @@ export function PreviewCanvasOverlay({
         if (dragState.type === 'resize-t') dyAxis = -localDy;
         if (dragState.type === 'resize-b') dyAxis = localDy;
 
+        // Ratios are RELATIVE to the size at drag start; they must therefore be
+        // applied to the initial scale, not used as an absolute percentage.
+        // Previously `finalScale = sx * 100` threw the current scale away, so
+        // grabbing an edge on a clip at 200% snapped it straight down to ~107%
+        // on the very first pixel of movement (and up to ~127% from 50%).
+        const initScaleEdge = dragState.initTransform.scale || 100;
         const sx = (baseW + dxAxis * 2) / baseW;
         const sy = (baseH + dyAxis * 2) / baseH;
 
         // Aspect lock: use the dominant axis when Shift is held
         const aspectLocked = e.shiftKey;
-        let finalScale: number;
+        let ratio: number;
         if (aspectLocked) {
-          finalScale = Math.max(sx, sy) * 100;
+          ratio = Math.max(sx, sy);
         } else if (Math.abs(dxAxis) > Math.abs(dyAxis)) {
-          finalScale = sx * 100;
+          ratio = sx;
         } else {
-          finalScale = sy * 100;
+          ratio = sy;
         }
 
-        scale = Math.max(10, Math.min(1000, finalScale));
+        scale = Math.max(10, Math.min(1000, initScaleEdge * ratio));
         if (!e.altKey) scale = Math.round(scale * 10) / 10;
-        getNewAnimations('transform.scale', scale);
+        // Rescale the whole scale track (see scaleAnimationTrack) rather than
+        // dropping a single keyframe, so an existing animation cannot snap the
+        // clip back to its old size later.
+        scaleAnimationTrack('transform.scale', scale / (initScaleEdge || 100));
       } else {
         // Corner resize (resize-tl/tr/bl/br)
-        const cx = 427 + x;
-        const cy = 240 + y;
-        const mx = (e.clientX - rect.left) * scaleX;
-        const my = (e.clientY - rect.top) * scaleY;
+        // Same correction as rotation: clip-local centre + viewport-aware pointer.
+        // Using (427, 240) and raw overlay units assumed zoom=1/pan=0, so grabbing
+        // a corner under any zoom or pan produced an immediate scale jump before
+        // the pointer had really moved.
+        const cx = offsetX + W / 2 + x;
+        const cy = offsetY + H / 2 + y;
+        const ptrAbs = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+        const mx = ptrAbs.x;
+        const my = ptrAbs.y;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
 
-        const wSpan = baseW * (1 - (crop.left + crop.right) / 100) / 2;
-        const hSpan = baseH * (1 - (crop.top + crop.bottom) / 100) / 2;
+        // Scale from the RATIO of the pointer's distance now vs at mousedown.
+        //
+        // The old code compared the live distance against a computed corner radius
+        // (origDist). Two things made that jump the instant a handle was touched:
+        //
+        //   1. The pointer never lands exactly on the corner — the handle is ~12
+        //      units across — and that grab offset was applied immediately as a
+        //      scale change (up to ~4% just from where inside the handle you
+        //      clicked, and more when zoomed out).
+        //   2. origDist used CROP-ADJUSTED spans while the handles are drawn at the
+        //      un-cropped ±baseW/2, ±baseH/2. With any crop the two disagreed
+        //      badly — a 25% crop on all sides produced an instant 200% jump.
+        //
+        // Using the recorded grab distance makes the gesture relative: at the
+        // moment of grabbing the ratio is exactly 1, so nothing moves until the
+        // pointer actually does. `initPointerDist` is measured with the same
+        // centre and the same viewport-aware mapping, so the two are consistent.
+        const grabDist = dragState.initPointerDist;
+        const initScaleCorner = dragState.initTransform.scale || 100;
 
-        const origDist = Math.sqrt(wSpan ** 2 + hSpan ** 2) * (dragState.initTransform.scale / 100);
-        const scaleDelta = dist / origDist;
-        scale = dragState.initTransform.scale * scaleDelta;
-        // Aspect lock for corners: when Shift, derive from dominant axis
-        if (e.shiftKey) {
-          const initScale = dragState.initTransform.scale;
-          const initCrop = dragState.initCrop || { left: 0, top: 0, right: 0, bottom: 0 };
-          const wRatio = (baseW * (1 - (initCrop.left + initCrop.right) / 100)) / baseW;
-          const hRatio = (baseH * (1 - (initCrop.top + initCrop.bottom) / 100)) / baseH;
-          const sx = (baseW + Math.abs(mx - cx) * 2 - baseW * wRatio) / (baseW * wRatio);
-          const sy = (baseH + Math.abs(my - cy) * 2 - baseH * hRatio) / (baseH * hRatio);
-          scale = initScale * Math.max(sx, sy);
+        if (grabDist !== undefined && grabDist > 1) {
+          scale = initScaleCorner * (dist / grabDist);
+        } else {
+          // Degenerate grab (pointer effectively on the centre): fall back to the
+          // geometric radius rather than dividing by ~0.
+          const wSpanFallback = baseW / 2;
+          const hSpanFallback = baseH / 2;
+          const origDist = Math.hypot(wSpanFallback, hSpanFallback) * (initScaleCorner / 100);
+          scale = origDist > 0 ? initScaleCorner * (dist / origDist) : initScaleCorner;
         }
+
+        // Aspect lock for corners: Shift drives scale from whichever axis the
+        // pointer has moved most, as a ratio against that axis' grab distance —
+        // so it starts at exactly 1 and cannot jump either.
+        if (e.shiftKey) {
+          const gx = dragState.initPointerDx ?? 0;
+          const gy = dragState.initPointerDy ?? 0;
+          const nx = Math.abs(mx - cx);
+          const ny = Math.abs(my - cy);
+          const useX = Math.abs(nx - gx) >= Math.abs(ny - gy);
+          const grabAxis = useX ? gx : gy;
+          const nowAxis = useX ? nx : ny;
+          if (grabAxis > 1) scale = initScaleCorner * (nowAxis / grabAxis);
+        }
+
         scale = Math.max(10, Math.min(1000, e.altKey ? scale : Math.round(scale * 10) / 10));
-        getNewAnimations('transform.scale', scale);
+        scaleAnimationTrack('transform.scale', scale / (initScaleCorner || 100));
       }
 
       updateClip(activeClip.id, { transform: { ...activeClip.transform, x, y, scale, rotation }, crop, animations });
@@ -751,6 +1009,259 @@ export function PreviewCanvasOverlay({
       window.removeEventListener('mouseup', handleUp);
     };
   }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime, aspectRatio]);
+
+  // ── Motion-tracked region editing (FX tab) ────────────────────────────────
+  //
+  // Region boxes are stored as CornerPoints in absolute 854x480 preview space,
+  // which is exactly the space `clientToViewportSpace` returns — so pointer
+  // positions map onto them directly, with no clip transform involved.
+  const motionEffects: any[] = (activeClip as any)?.motionEffects ?? [];
+  // Region overlays appear only while the user is actively adding or editing a
+  // region, so they do not clutter the canvas the rest of the time.
+  const showRegions =
+    activePropertiesTab === 'effects' &&
+    motionEffects.length > 0 &&
+    editingRegionIndex !== null;
+
+  /** True while a region is being placed — the clip transform must stand down. */
+  const regionEditActive = showRegions;
+
+  /** Visible picture size for the CURRENT aspect ratio (single source of truth). */
+  const frame = getFrameSize(aspectRatio);
+  const frameOff = getFrameOffset(aspectRatio);
+
+  /**
+   * Client (mouse) position -> FRAME space, i.e. the space region boxes and
+   * painted strokes are stored in: (0,0) is the top-left of the visible picture.
+   *
+   * `clientToViewportSpace` undoes the letterboxing of the SVG element and the
+   * viewport pan/zoom, but leaves the result in raw 854x480 overlay units. The
+   * region overlay is drawn inside a `translate(offsetX, offsetY)` group, so the
+   * offset has to come off exactly once here. Getting this wrong in either
+   * direction is what put the box off-canvas and made the brush miss the cursor.
+   */
+  const clientToFrame = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const container = document.getElementById('preview-canvas-wrapper');
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const p = clientToViewportSpace(clientX, clientY, rect, viewport);
+    return { x: p.x - frameOff.offsetX, y: p.y - frameOff.offsetY };
+  };
+
+  const regionRect = (c: any) => {
+    // Defaults follow the FRAME, not a hard-coded 16:9 centre. The old
+    // (427, 240) fallback sits outside every portrait and square project.
+    const norm = normalizeRegionToFrame(c, frame.W, frame.H);
+    return quadToRect(norm);
+  };
+
+  const rectToCorners = (cx: number, cy: number, w: number, h: number) => rectToQuad(cx, cy, w, h);
+
+  const writeRegion = (index: number, cx: number, cy: number, w: number, h: number) => {
+    if (!activeClip) return;
+    const next = motionEffects.map((m: any, i: number) =>
+      i === index
+        ? {
+            ...m,
+            baseCorners: rectToCorners(cx, cy, w, h),
+            // Moving or resizing the box invalidates any existing trajectory —
+            // it was tracked from the old position.
+            track: undefined,
+          }
+        : m
+    );
+    updateClip(activeClip.id, { motionEffects: next } as any);
+  };
+
+  /**
+   * Rasterise a painted polyline into a binary stroke mask and store it on the
+   * effect, along with a bounding box so box-mode controls still make sense.
+   *
+   * Stored at a modest 240px-wide resolution: the signature only needs the
+   * colours under the brush, and keeping it small keeps the project file light.
+   */
+  const commitPaintStroke = (index: number, points: Array<{ x: number; y: number }>, brush: number) => {
+    if (!activeClip || points.length === 0) return;
+
+    // The stroke mask covers the VISIBLE picture, not a notional 854x480 box.
+    // Rasterising a portrait project against a 16:9 grid squashed every stroke
+    // horizontally and shifted it, so the colour signature was sampled from the
+    // wrong pixels even when the user painted in the right place.
+    const MW = 240;
+    const MH = Math.max(2, Math.round((MW * frame.H) / frame.W));
+    const cnv = document.createElement('canvas');
+    cnv.width = MW;
+    cnv.height = MH;
+    const c = cnv.getContext('2d');
+    if (!c) return;
+
+    const toMaskX = (x: number) => (x * MW) / frame.W;
+    const toMaskY = (y: number) => (y * MH) / frame.H;
+
+    c.fillStyle = '#000';
+    c.fillRect(0, 0, MW, MH);
+    c.strokeStyle = '#fff';
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    c.lineWidth = Math.max(2, (brush * MW) / frame.W);
+    c.beginPath();
+    points.forEach((pt, i) => {
+      const x = toMaskX(pt.x);
+      const y = toMaskY(pt.y);
+      if (i === 0) c.moveTo(x, y);
+      else c.lineTo(x, y);
+    });
+    // A single tap should still paint a dot, not nothing.
+    if (points.length === 1) {
+      c.lineTo(toMaskX(points[0].x) + 0.01, toMaskY(points[0].y));
+    }
+    c.stroke();
+
+    const img = c.getImageData(0, 0, MW, MH);
+    const stroke = new Uint8Array(MW * MH);
+    for (let i = 0; i < stroke.length; i++) {
+      stroke[i] = img.data[i * 4] > 127 ? 1 : 0;
+    }
+
+    // Bounding box of the stroke, so the box controls and the initial preview
+    // reflect what was painted.
+    let minX = MW, minY = MH, maxX = -1, maxY = -1;
+    for (let y = 0; y < MH; y++) {
+      for (let x = 0; x < MW; x++) {
+        if (stroke[y * MW + x]) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    const next = motionEffects.map((m: any, i: number) => {
+      if (i !== index) return m;
+      const patched: any = {
+        ...m,
+        regionMode: 'paint',
+        strokeRle: encodeMaskRle(new Uint8ClampedArray(stroke.map((v) => (v ? 255 : 0)))),
+        strokeWidth: MW,
+        strokeHeight: MH,
+        // A new stroke invalidates the old analysis — it described different pixels.
+        maskCache: undefined,
+        colorSignature: undefined,
+      };
+      if (maxX >= 0) {
+        const bx0 = (minX / MW) * frame.W;
+        const bx1 = (maxX / MW) * frame.W;
+        const by0 = (minY / MH) * frame.H;
+        const by1 = (maxY / MH) * frame.H;
+        patched.baseCorners = {
+          x0: bx0, y0: by0,
+          x1: bx1, y1: by0,
+          x2: bx1, y2: by1,
+          x3: bx0, y3: by1,
+        };
+      }
+      return patched;
+    });
+
+    updateClip(activeClip.id, { motionEffects: next } as any);
+    useEditorStore.getState().saveSnapshot('Paint Motion Region');
+  };
+
+  // Paint interaction: pointer events on a full-frame capture rect.
+  useEffect(() => {
+    if (!paintStroke || !activeClip) return;
+
+    const onMove = (e: MouseEvent) => {
+      const p = clientToFrame(e.clientX, e.clientY);
+      if (!p) return;
+      // Keep the brush ring glued to the pointer while the stroke is in progress —
+      // the capture rect stops receiving mousemove once the drag leaves it.
+      setBrushCursor(p);
+      setPaintStroke((prev) => (prev ? { ...prev, points: [...prev.points, p] } : prev));
+    };
+
+    const onUp = () => {
+      setPaintStroke((prev) => {
+        if (prev) {
+          const brush = motionEffects[prev.index]?.brushSize ?? 40;
+          commitPaintStroke(prev.index, prev.points, brush);
+        }
+        return null;
+      });
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paintStroke, activeClip, viewport, motionEffects]);
+
+  const beginRegionDrag = (
+    e: React.MouseEvent,
+    index: number,
+    mode: 'move' | 'nw' | 'ne' | 'se' | 'sw'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const r = regionRect(motionEffects[index]?.baseCorners);
+    setRegionDrag({ index, mode, startX: e.clientX, startY: e.clientY, init: r });
+  };
+
+  useEffect(() => {
+    if (!regionDrag || !activeClip) return;
+
+    const onMove = (e: MouseEvent) => {
+      const container = document.getElementById('preview-canvas-wrapper');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      // Same viewport-aware mapping the transform handles use, so the box tracks
+      // the cursor exactly under any zoom or pan.
+      const { scale } = getOverlayMapping(rect);
+      const dx = ((e.clientX - regionDrag.startX) * scale) / (viewport.zoom || 1);
+      const dy = ((e.clientY - regionDrag.startY) * scale) / (viewport.zoom || 1);
+
+      const { cx, cy, w, h } = regionDrag.init;
+      let nx = cx, ny = cy, nw = w, nh = h;
+
+      if (regionDrag.mode === 'move') {
+        nx = cx + dx;
+        ny = cy + dy;
+      } else {
+        // Resize from a corner: the opposite corner stays pinned.
+        const signX = regionDrag.mode === 'ne' || regionDrag.mode === 'se' ? 1 : -1;
+        const signY = regionDrag.mode === 'se' || regionDrag.mode === 'sw' ? 1 : -1;
+        nw = Math.max(16, w + dx * signX * 2);
+        nh = Math.max(16, h + dy * signY * 2);
+      }
+
+      // Keep the box inside the VISIBLE picture; a region dragged into the
+      // letterbox bars has no pixels to track. Clamping against 854x480 (the
+      // overlay box, not the frame) let it wander off the picture entirely.
+      nw = Math.min(nw, frame.W);
+      nh = Math.min(nh, frame.H);
+      nx = Math.max(nw / 2, Math.min(frame.W - nw / 2, nx));
+      ny = Math.max(nh / 2, Math.min(frame.H - nh / 2, ny));
+
+      writeRegion(regionDrag.index, nx, ny, nw, nh);
+    };
+
+    const onUp = () => {
+      setRegionDrag(null);
+      useEditorStore.getState().saveSnapshot('Adjust Motion Region');
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionDrag, activeClip, viewport, motionEffects]);
 
   const clientToImagePixel = (e: React.PointerEvent<SVGElement>): { x: number; y: number } | null => {
     const svgEl = e.currentTarget.closest('svg') as SVGSVGElement | null;
@@ -1216,6 +1727,10 @@ export function PreviewCanvasOverlay({
 
   let vw = mediaItem?.width || 1920;
   let vh = mediaItem?.height || 1080;
+  // Set when the selection box is measured from PiP word layers whose stored
+  // positions already include the container transform (see below).
+  let isKineticSentenceBox = false;
+  let kineticBoxCentre = { x: 0, y: 0 };
   if (mediaItem?.type === 'video') {
     const v = videoElements.get(activeClip.id);
     if (v && v.videoWidth > 0) {
@@ -1230,17 +1745,66 @@ export function PreviewCanvasOverlay({
     }
   } else if (mediaItem?.type === 'text' || (activeClip as any).textSettings || (activeClip as any).mediaId === 'text-placeholder') {
     const ts = (activeClip as any).textSettings;
-    if (ts) {
-      const fontSize = Number(ts.fontSize) || 48;
-      const text = String(ts.text || '');
-      const lines = text.split('\n');
-      const estCharWidth = fontSize * 0.6;
-      const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
-      vw = Math.max(80, longestLine * estCharWidth + 40);
-      vh = lines.length * (fontSize * 1.35) + 20;
-    } else {
-      vw = 300;
-      vh = 80;
+
+    // A Hybrid kinetic sentence is an INVISIBLE container clip; the words the user
+    // sees are separate clips inside its PiP window, already wrapped onto several
+    // lines. Measuring the container's own text metrics treated the sentence as
+    // one long unwrapped line, so the selection box did not match the rendered
+    // block at all. Measure the actual word layers instead.
+    const kineticPipId = isKineticMediaId((activeClip as any).mediaId)
+      ? (activeClip as any).pipWindowIds?.[0]
+      : undefined;
+    const kineticPip = kineticPipId ? (pipWindows as any)?.[kineticPipId] : null;
+
+    let measured = false;
+    if (kineticPip) {
+      const laid: { text: string; x: number; y: number; fontSize: number }[] = [];
+      for (const track of kineticPip.tracks || []) {
+        if (track.type !== 'text') continue;
+        const wc = track.clips?.[0];
+        if (!wc) continue;
+        laid.push({
+          text: String(wc.textSettings?.text || ''),
+          x: wc.transform?.x ?? 0,
+          y: wc.transform?.y ?? 0,
+          fontSize: Number(wc.textSettings?.fontSize) || 48,
+        });
+      }
+      const bounds = getSentenceBounds(laid);
+      if (bounds) {
+        // Word transforms are stored UNSCALED and relative to the container, so
+        // this extent is already the correct BASE size. The SVG applies
+        // `scale(aScale / 100)` and the container's x/y on top exactly once.
+        //
+        // (Previously the reflow baked the container's scale and offset into the
+        // word positions as well. Measuring those and then letting the renderer
+        // transform them again applied both twice — the box shrank and drifted
+        // further on every single drag.)
+        // Word positions are now stored in the container's LOCAL space (the
+        // renderer applies the container transform to PiP children), so these
+        // bounds are the un-transformed base extent. The standard
+        // translate(aX,aY) scale(aScale) group below transforms them exactly once.
+        vw = Math.max(80, bounds.width + 40);
+        vh = Math.max(40, bounds.height + 20);
+        isKineticSentenceBox = true;
+        kineticBoxCentre = { x: bounds.x, y: bounds.y };
+        measured = true;
+      }
+    }
+
+    if (!measured) {
+      if (ts) {
+        const fontSize = Number(ts.fontSize) || 48;
+        const text = String(ts.text || '');
+        const lines = text.split('\n');
+        const estCharWidth = fontSize * 0.6;
+        const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
+        vw = Math.max(80, longestLine * estCharWidth + 40);
+        vh = lines.length * (fontSize * 1.35) + 20;
+      } else {
+        vw = 300;
+        vh = 80;
+      }
     }
   }
 
@@ -1253,14 +1817,86 @@ export function PreviewCanvasOverlay({
 
   const handleMouseDown = (e: React.MouseEvent, type: string) => {
     e.stopPropagation();
+    // Belt and braces: even if a transform handle is somehow still reachable
+    // while a motion region is being placed, refuse to start a clip drag. The
+    // region must be positionable without the shot moving underneath it.
+    if (regionEditActive) return;
     const mask = activeClip?.mask || { x: 50, y: 50, width: 50, height: 50, rotation: 0, feather: 0, roundness: 0 };
+
+    // ── Capture the BASE transform, not the displayed one ────────────────────
+    //
+    // aX/aY/aScale/aRot are the values actually on screen: keyframe-interpolated
+    // at the playhead, plus any per-aspect-ratio framing offset. The drag handler
+    // writes its result straight into `transform.x/y/scale/rotation`, which are the
+    // BASE values that keyframes and framing are applied ON TOP OF.
+    //
+    // Seeding the drag with the displayed value therefore promoted it to the base
+    // on the very first mousemove — so a clip carrying a motion keyframe (or any
+    // per-ratio framing) teleported the instant it was touched, by exactly the
+    // animation/framing offset at that playhead position. Nudge it and it lurched
+    // again, which is the "changes position up/down many times on click" report.
+    //
+    // Dragging a keyframed property still works: getNewAnimations() re-keys the
+    // property at the current local time, and deltas are applied to the base.
+    const baseTransform = activeClip?.transform ?? { x: 0, y: 0, scale: 100, rotation: 0 };
+    const hasKf = (prop: string) => !!activeClip?.animations?.[prop]?.length;
+    const framing =
+      activeClip && perRatioFramingEnabled ? perRatioFraming[aspectRatio]?.[activeClip.id] : undefined;
+
     setDragState({
       type,
       startX: e.clientX,
       startY: e.clientY,
-      initTransform: { x: aX, y: aY, scale: aScale, rotation: aRot },
+      // For a keyframed property the on-screen value IS the one being edited (the
+      // keyframe gets rewritten), so keep it. Otherwise seed from the base so the
+      // write is a no-op when the pointer has not moved. Framing offsets are always
+      // removed — they are a separate, additive layer.
+      initTransform: {
+        x: (hasKf('transform.x') ? aX : baseTransform.x ?? 0) - (framing?.x ?? 0),
+        y: (hasKf('transform.y') ? aY : baseTransform.y ?? 0) - (framing?.y ?? 0),
+        // Always seed scale from the BASE, even when a keyframe track exists.
+        //
+        // Resizing now rescales the whole track proportionally and also writes the
+        // new base, so base and track stay in agreement. Seeding from the animated
+        // value instead meant a later MOVE (which never touches the scale track)
+        // wrote that sampled value back as the base — for a kinetic word, whose
+        // pop keyframe settles at 100%, that silently reset a resized clip to
+        // 100% the moment it was dragged.
+        scale:
+          (baseTransform.scale ?? 100) /
+          (framing?.scale !== undefined ? framing.scale / 100 : 1),
+        rotation: hasKf('transform.rotation') ? aRot : baseTransform.rotation ?? 0,
+      },
+      // Distance from the clip centre to the pointer at the moment of grabbing.
+      // Corner resize uses the RATIO against this, so clicking anywhere inside the
+      // handle (it is ~12 units across) no longer instantly rescales the clip.
+      ...(() => {
+        const container = document.getElementById('preview-canvas-wrapper');
+        if (!container) return {};
+        const r = container.getBoundingClientRect();
+        const p = clientToViewportSpace(e.clientX, e.clientY, r, viewport);
+        const gx = Math.abs(p.x - (offsetX + W / 2 + aX));
+        const gy = Math.abs(p.y - (offsetY + H / 2 + aY));
+        return {
+          initPointerDist: Math.hypot(gx, gy),
+          initPointerDx: gx,
+          initPointerDy: gy,
+          initPointerAngle:
+            (Math.atan2(
+              p.y - (offsetY + H / 2 + aY),
+              p.x - (offsetX + W / 2 + aX)
+            ) *
+              180) /
+            Math.PI,
+        };
+      })(),
       initCrop: { left: aCropLeft, top: aCropTop, right: aCropRight, bottom: aCropBot },
       initMask: { ...mask },
+      // Resize maths expects the UNSCALED base extent (it applies transform.scale
+      // itself). For a kinetic sentence, baseW/baseH were measured from word
+      // layers that already include that scale, so divide it back out — otherwise
+      // each resize is computed against an inflated base and the scale runs away.
+      // Bounds are measured in local (unscaled) space now, so no de-scaling.
       baseW,
       baseH,
     });
@@ -1463,6 +2099,168 @@ export function PreviewCanvasOverlay({
           aria-label="Interactive canvas overlay"
         >
           <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom}) translate(${offsetX}, ${offsetY})`}>
+            {/* ── Motion-tracked region boxes ──────────────────────────────────
+                Rendered INSIDE the viewport group (so they pan/zoom with the
+                picture) but OUTSIDE the clip-transform group, because a region is
+                authored in absolute frame space — it must stay where the user put
+                it even if the clip itself is scaled or rotated. */}
+            {/* Paint capture surface — only while a region is in paint mode and
+                armed. Covers the frame so a stroke can start anywhere. */}
+            {showRegions && paintArmedIndex !== null && (
+              <rect
+                // Covers exactly the VISIBLE picture. It used to be a flat
+                // 854x480 placed inside this already-offset group, so on any
+                // non-16:9 project it hung off the right-hand edge — you could
+                // start a stroke in the black letterbox bar and the coordinates
+                // that came back were outside the frame.
+                x={0}
+                y={0}
+                width={W}
+                height={H}
+                fill="rgba(251,146,60,0.06)"
+                className="pointer-events-auto"
+                style={{ cursor: 'none' }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  const p = clientToFrame(e.clientX, e.clientY);
+                  if (!p) return;
+                  setPaintStroke({ index: paintArmedIndex, points: [p] });
+                }}
+                onMouseMove={(e) => {
+                  const p = clientToFrame(e.clientX, e.clientY);
+                  if (p) setBrushCursor(p);
+                }}
+                onMouseLeave={() => setBrushCursor(null)}
+              />
+            )}
+
+            {/* Photoshop-style brush cursor: a circle the exact size of the
+                brush, so you can see what you are about to paint. Without it the
+                only feedback was the OS crosshair, which told you nothing about
+                the brush diameter — the user reported "the circle is not
+                showing" and could not tell where the paint would land. */}
+            {showRegions && paintArmedIndex !== null && brushCursor && (
+              <g className="pointer-events-none">
+                <circle
+                  cx={brushCursor.x}
+                  cy={brushCursor.y}
+                  r={Math.max(2, (motionEffects[paintArmedIndex]?.brushSize ?? 40) / 2)}
+                  fill="rgba(251,146,60,0.18)"
+                  stroke="#fb923c"
+                  strokeWidth={1.5 / viewport.zoom}
+                />
+                <circle
+                  cx={brushCursor.x}
+                  cy={brushCursor.y}
+                  r={Math.max(2, (motionEffects[paintArmedIndex]?.brushSize ?? 40) / 2)}
+                  fill="none"
+                  stroke="#141414"
+                  strokeWidth={0.6 / viewport.zoom}
+                  strokeDasharray={`${3 / viewport.zoom},${3 / viewport.zoom}`}
+                />
+                <circle cx={brushCursor.x} cy={brushCursor.y} r={1.5 / viewport.zoom} fill="#fb923c" />
+              </g>
+            )}
+
+            {/* Live stroke preview */}
+            {paintStroke && paintStroke.points.length > 0 && (
+              <polyline
+                points={paintStroke.points.map((pt) => `${pt.x},${pt.y}`).join(' ')}
+                fill="none"
+                stroke="#fb923c"
+                strokeOpacity={0.85}
+                strokeWidth={(motionEffects[paintStroke.index]?.brushSize ?? 40)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="pointer-events-none"
+              />
+            )}
+
+            {showRegions && motionEffects.map((me: any, i: number) => {
+              if (!me?.enabled) return null;
+              // Paint regions show their analysed bounds, not draggable handles —
+              // the selection is the painted colour, not the rectangle.
+              if (me.regionMode === 'paint') {
+                const pr = regionRect(me.baseCorners);
+                const hasMask = (me.maskCache?.frames?.length ?? 0) > 0;
+                return (
+                  <g key={`motion-paint-${i}`} className="pointer-events-none">
+                    <rect
+                      x={pr.cx - pr.w / 2}
+                      y={pr.cy - pr.h / 2}
+                      width={pr.w}
+                      height={pr.h}
+                      fill="none"
+                      stroke={hasMask ? '#34d399' : '#fb923c'}
+                      strokeWidth={1.5 / viewport.zoom}
+                      strokeDasharray={`${3 / viewport.zoom},${3 / viewport.zoom}`}
+                      opacity={0.7}
+                    />
+                    <text
+                      x={pr.cx - pr.w / 2}
+                      y={pr.cy - pr.h / 2 - 6 / viewport.zoom}
+                      fill={hasMask ? '#34d399' : '#fb923c'}
+                      fontSize={12 / viewport.zoom}
+                      className="select-none"
+                    >
+                      {`R${i + 1} ${me.type} · paint${hasMask ? ' ✓' : ' (re-track)'}${me.applyMode === 'outside' ? ' · outside' : ''}`}
+                    </text>
+                  </g>
+                );
+              }
+              const r = regionRect(me.baseCorners);
+              const tracked = (me.track?.length ?? 0) > 0;
+              const stroke = tracked ? '#34d399' : '#fb923c';
+              const hs = 7 / viewport.zoom;
+              const corners: Array<['nw' | 'ne' | 'se' | 'sw', number, number]> = [
+                ['nw', r.cx - r.w / 2, r.cy - r.h / 2],
+                ['ne', r.cx + r.w / 2, r.cy - r.h / 2],
+                ['se', r.cx + r.w / 2, r.cy + r.h / 2],
+                ['sw', r.cx - r.w / 2, r.cy + r.h / 2],
+              ];
+              return (
+                <g key={`motion-region-${i}`}>
+                  <rect
+                    x={r.cx - r.w / 2}
+                    y={r.cy - r.h / 2}
+                    width={r.w}
+                    height={r.h}
+                    fill="rgba(251,146,60,0.10)"
+                    stroke={stroke}
+                    strokeWidth={2 / viewport.zoom}
+                    strokeDasharray={tracked ? undefined : `${6 / viewport.zoom},${4 / viewport.zoom}`}
+                    className="pointer-events-auto cursor-move"
+                    onMouseDown={(e) => beginRegionDrag(e, i, 'move')}
+                  />
+                  <text
+                    x={r.cx - r.w / 2}
+                    y={r.cy - r.h / 2 - 6 / viewport.zoom}
+                    fill={stroke}
+                    fontSize={12 / viewport.zoom}
+                    className="pointer-events-none select-none"
+                  >
+                    {`R${i + 1} ${me.type}${tracked ? ' ✓' : ''}`}
+                  </text>
+                  {corners.map(([mode, hx, hy]) => (
+                    <rect
+                      key={mode}
+                      x={hx - hs}
+                      y={hy - hs}
+                      width={hs * 2}
+                      height={hs * 2}
+                      fill={stroke}
+                      stroke="#141414"
+                      strokeWidth={1.5 / viewport.zoom}
+                      className="pointer-events-auto"
+                      style={{ cursor: mode === 'nw' || mode === 'se' ? 'nwse-resize' : 'nesw-resize' }}
+                      onMouseDown={(e) => beginRegionDrag(e, i, mode)}
+                    />
+                  ))}
+                </g>
+              );
+            })}
+
             {activeClip.transform.perspectivePin ? (
               <g>
                 <polygon
@@ -1500,7 +2298,24 @@ export function PreviewCanvasOverlay({
               </g>
             ) : (
               <g
-                transform={`translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`}
+                transform={
+                  // A Hybrid kinetic sentence measures its box from its PiP word
+                  // layers, whose stored positions ALREADY include the container's
+                  // x/y and scale (the canvas renderer does not apply a parent
+                  // transform to PiP children, so the reflow has to bake it in).
+                  //
+                  // Applying that transform again here is what made the box creep
+                  // off the text and shrink a little more with every drag — the
+                  // error compounded because each drag re-measured the previous,
+                  // already-doubly-transformed result.
+                  // The kinetic box is offset by its measured local centre (the
+                  // words are rarely centred exactly on the origin), then given
+                  // the SAME transform as any other clip — so it rotates and
+                  // scales with the sentence instead of only translating.
+                  isKineticSentenceBox
+                    ? `translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100}) translate(${kineticBoxCentre.x}, ${kineticBoxCentre.y})`
+                    : `translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`
+                }
               >
                 {activePropertiesTab === 'mask' && mask.enabled ? (
                   <g transform={`translate(${maskLocalX}, ${maskLocalY}) rotate(${maskRot})`}>
@@ -1770,7 +2585,10 @@ export function PreviewCanvasOverlay({
                   />
                 )}
 
-                {activePropertiesTab === 'mask' && mask.enabled ? null : imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
+                {/* Hidden while a motion region is being placed: the two overlays
+                    would otherwise overlap and a drag meant for the region box
+                    would move the whole clip instead. */}
+                {regionEditActive ? null : activePropertiesTab === 'mask' && mask.enabled ? null : imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
                   <>
                     {/* Move bounding box (transparent, captures pointer for moving) */}
                     <rect

@@ -33,6 +33,13 @@ import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
+import {
+  normalizeTransition,
+  getMaxTransitionDuration,
+  TRANSITION_KIND_INFO,
+  TRANSITION_EASINGS,
+} from '@/utils/transitionEngine';
 import { trackMotion } from '@/utils/motionTracker';
 import { compileStoryboard } from '@/utils/storyboardCompiler';
 import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini, AIMotionGraphicSuggestion } from '@/utils/aiClient';
@@ -50,6 +57,7 @@ import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeCont
 import { SequenceProperties } from './SequenceProperties';
 import { AIMotionGraphicsSection } from './tabs/effects';
 import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
+import { MotionEffectsPanel } from './tabs/effects/MotionEffectsPanel';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
 
@@ -265,7 +273,6 @@ export function PropertiesPanel() {
     copyClip,
     duplicateClip,
     splitClip,
-    currentTime,
     selectedTransitionClipId,
     updateTransition,
     removeTransition,
@@ -299,7 +306,6 @@ export function PropertiesPanel() {
     copyClip: s.copyClip,
     duplicateClip: s.duplicateClip,
     splitClip: s.splitClip,
-    currentTime: s.currentTime,
     selectedTransitionClipId: s.selectedTransitionClipId,
     updateTransition: s.updateTransition,
     removeTransition: s.removeTransition,
@@ -322,6 +328,14 @@ export function PropertiesPanel() {
     pasteColorGrade: s.pasteColorGrade,
     applyColorGradeToAll: s.applyColorGradeToAll,
   })));
+
+  // PERF: this panel is ~7k lines and re-rendering it is expensive. It used to
+  // select `s.currentTime`, so it re-rendered on every playback store write and
+  // stole main-thread time from the canvas compositor — a major contributor to
+  // choppy multi-track playback. The panel only needs the time to display
+  // keyframe/animated values, which are perfectly readable at 10 Hz. Event
+  // handlers that need an exact time read useEditorStore.getState().currentTime.
+  const currentTime = usePlaybackTime(10);
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [isPickingChromaColor, setIsPickingChromaColor] = useState(false);
@@ -752,15 +766,19 @@ export function PropertiesPanel() {
     }
   };
 
-  // Find the selected transition
-  let selectedTransitionClip = null;
-  let selectedTransition = null;
+  // Find the selected transition.
+  // A transition may be stored on either edge — `transitionIn` of the incoming
+  // clip or `transitionOut` of the outgoing one — depending on which side the
+  // user dropped it. Only checking `transitionIn` (the old behaviour) meant the
+  // properties panel appeared empty for half of all transitions.
+  let selectedTransitionClip: any = null;
+  let selectedTransition: any = null;
   if (selectedTransitionClipId) {
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === selectedTransitionClipId);
-      if (clip && clip.transitionIn) {
+      if (clip && (clip.transitionIn || clip.transitionOut)) {
         selectedTransitionClip = clip;
-        selectedTransition = clip.transitionIn;
+        selectedTransition = clip.transitionIn || clip.transitionOut;
         break;
       }
     }
@@ -1067,7 +1085,29 @@ export function PropertiesPanel() {
   const tabs = baseTabs;
 
   if (selectedTransition && selectedTransitionClip) {
-    const alignment = selectedTransition.params?.alignment as string || 'center';
+    const norm = normalizeTransition(selectedTransition);
+    const alignment = (selectedTransition.params?.alignment as string) || 'center';
+    const kindInfo = TRANSITION_KIND_INFO.find((k) => k.kind === norm.kind);
+    const supports = (feature: string) => !!kindInfo?.supports.includes(feature as any);
+
+    // Longest transition that still fits between the two neighbouring clips.
+    // Exceeding this is what produced the overlapping-window flicker, so the UI
+    // caps the slider rather than letting the renderer clamp silently.
+    const maxDuration = getMaxTransitionDuration(tracks, selectedTransitionClip.id);
+
+    // Patch helper: merges into params (the store also merges, but doing it here
+    // keeps the optimistic UI value consistent).
+    const setParam = (key: string, value: any) =>
+      updateTransition(selectedTransitionClip.id, {
+        params: { ...(selectedTransition.params || {}), [key]: value },
+      } as any);
+
+    const directions: Array<{ v: string; label: string }> = [
+      { v: 'left', label: 'Left' },
+      { v: 'right', label: 'Right' },
+      { v: 'up', label: 'Up' },
+      { v: 'down', label: 'Down' },
+    ];
 
     return (
       <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
@@ -1082,7 +1122,7 @@ export function PropertiesPanel() {
             <div>
               <h3 className="text-sm font-semibold text-white">Transition Settings</h3>
               <p className="text-[11px] text-[#a0a0a0] truncate max-w-[180px]">
-                {selectedTransition.name}
+                {selectedTransition.name || kindInfo?.label || selectedTransition.type}
               </p>
             </div>
           </div>
@@ -1096,62 +1136,60 @@ export function PropertiesPanel() {
 
         {/* Content */}
         <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-          {/* Transition Type Info */}
-          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
-            <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider block mb-1">
-              Effect Type
-            </span>
-            <span className="text-sm text-white font-medium capitalize">
-              {selectedTransition.type}
-            </span>
+          {/* Effect type */}
+          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <label className="text-xs text-white font-medium block">Effect</label>
+            <div className="relative">
+              <select
+                value={norm.kind}
+                onChange={(e) => setParam('kind', e.target.value)}
+                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+              >
+                {TRANSITION_KIND_INFO.map((k) => (
+                  <option key={k.kind} value={k.kind}>{k.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
           </div>
 
-          {/* Duration Slider */}
+          {/* Duration */}
           <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
             <div className="flex justify-between items-center">
               <label className="text-xs text-white font-medium">Duration</label>
               <span className="text-xs font-mono text-purple-300">
-                {(selectedTransition?.duration ?? 0.5).toFixed(1)}s
+                {(selectedTransition?.duration ?? 0.5).toFixed(2)}s
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min={0.1}
-                max={5.0}
-                step={0.1}
-                value={(selectedTransition?.duration ?? 0.5)}
-                onChange={(e) => {
-                  let val = parseFloat(e.target.value);
-                  const maxDur = selectedTransitionClip.duration / 2;
-                  if (val > maxDur) {
-                    val = maxDur;
-                    toast.warning("Transition duration limited to 50% of clip length");
-                  }
-                  updateTransition(selectedTransitionClip.id, {
-                    duration: val,
-                  });
-                }}
-                className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
-              />
-            </div>
+            <input
+              type="range"
+              min={0.1}
+              max={Math.max(0.2, maxDuration)}
+              step={0.05}
+              value={Math.min(selectedTransition?.duration ?? 0.5, Math.max(0.2, maxDuration))}
+              onChange={(e) => {
+                let val = parseFloat(e.target.value);
+                if (val > maxDuration) {
+                  val = maxDuration;
+                  toast.warning('Transition limited by the length of the adjacent clips');
+                }
+                updateTransition(selectedTransitionClip.id, { duration: val });
+              }}
+              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
+            />
             <div className="flex justify-between text-[9px] text-[#a0a0a0]">
               <span>0.1s</span>
-              <span>5.0s</span>
+              <span>max {maxDuration.toFixed(2)}s</span>
             </div>
           </div>
 
-          {/* Alignment Selector */}
+          {/* Alignment */}
           <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
             <label className="text-xs text-white font-medium block">Alignment</label>
             <div className="relative">
               <select
                 value={alignment}
-                onChange={(e) =>
-                  updateTransition(selectedTransitionClip.id, {
-                    params: { ...selectedTransition.params, alignment: e.target.value },
-                  })
-                }
+                onChange={(e) => setParam('alignment', e.target.value)}
                 className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
               >
                 <option value="center">Center at Cut</option>
@@ -1162,7 +1200,110 @@ export function PropertiesPanel() {
             </div>
           </div>
 
-          {/* Delete Button */}
+          {/* Easing */}
+          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <label className="text-xs text-white font-medium block">Easing</label>
+            <div className="relative">
+              <select
+                value={norm.easing}
+                onChange={(e) => updateTransition(selectedTransitionClip.id, { easing: e.target.value })}
+                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+              >
+                {TRANSITION_EASINGS.map((e) => (
+                  <option key={e.value} value={e.value}>{e.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Direction — only for effects that travel */}
+          {supports('direction') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <label className="text-xs text-white font-medium block">Direction</label>
+              <div className="grid grid-cols-4 gap-1">
+                {directions.map((d) => (
+                  <button
+                    key={d.v}
+                    onClick={() => setParam('direction', d.v)}
+                    className={`py-1.5 text-[10px] rounded border transition-colors ${
+                      norm.direction === d.v
+                        ? 'bg-purple-600 border-purple-500 text-white'
+                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-purple-500/50'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Zoom direction */}
+          {supports('zoomDirection') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <label className="text-xs text-white font-medium block">Zoom</label>
+              <div className="grid grid-cols-2 gap-1">
+                {['in', 'out'].map((z) => (
+                  <button
+                    key={z}
+                    onClick={() => setParam('zoomDirection', z)}
+                    className={`py-1.5 text-[10px] rounded border capitalize transition-colors ${
+                      norm.zoomDirection === z
+                        ? 'bg-purple-600 border-purple-500 text-white'
+                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-purple-500/50'
+                    }`}
+                  >
+                    Zoom {z}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Edge softness — wipes only */}
+          {supports('softness') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-white font-medium">Edge Softness</label>
+                <span className="text-xs font-mono text-purple-300">
+                  {Math.round(norm.softness * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={norm.softness}
+                onChange={(e) => setParam('softness', parseFloat(e.target.value))}
+                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
+              />
+            </div>
+          )}
+
+          {/* Intensity */}
+          {supports('intensity') && (
+            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-white font-medium">Intensity</label>
+                <span className="text-xs font-mono text-purple-300">
+                  {Math.round(norm.intensity * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={norm.intensity}
+                onChange={(e) => setParam('intensity', parseFloat(e.target.value))}
+                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
+              />
+            </div>
+          )}
+
+          {/* Delete */}
           <button
             onClick={() => removeTransition(selectedTransitionClip.id)}
             className="w-full py-2 bg-red-600/10 hover:bg-red-600 border border-red-500/20 hover:border-red-500 text-red-400 hover:text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 mt-4"
@@ -2192,6 +2333,76 @@ export function PropertiesPanel() {
                       className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
                     />
                   </div>
+
+                  {/* Matte Choke — shrink/expand the cutout edge.
+                      The engine has supported choke/spill for a while but there was
+                      no UI for either, so users had no way to fix the halo or the
+                      colour fringe that segmentation always leaves behind. */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Matte Choke (Shrink / Grow)</label>
+                      <span className="text-[10px] text-cyan-400 font-mono">
+                        {(selectedClip.aiBackground.choke ?? 0) > 0 ? '+' : ''}{selectedClip.aiBackground.choke ?? 0}px
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-10}
+                      max={10}
+                      step={0.5}
+                      value={selectedClip.aiBackground.choke ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        const existing = selectedClip.aiBackground!;
+                        updateClip(selectedClip.id, { aiBackground: { ...existing, choke: val } });
+                      }}
+                      onMouseUp={() => scheduleSaveSnapshot('Change AI Matte Choke')}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-[#707070] mt-1">Negative shrinks the cutout inward to remove a background halo; positive grows it back.</p>
+                  </div>
+
+                  {/* Spill Suppression */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Spill Suppression</label>
+                      <span className="text-[10px] text-cyan-400 font-mono">
+                        {selectedClip.aiBackground.spillSuppression ?? 0}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={selectedClip.aiBackground.spillSuppression ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        const existing = selectedClip.aiBackground!;
+                        updateClip(selectedClip.id, { aiBackground: { ...existing, spillSuppression: val } });
+                      }}
+                      onMouseUp={() => scheduleSaveSnapshot('Change AI Spill Suppression')}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-[#707070] mt-1">Desaturates colour bleeding from the old background around the subject's edge.</p>
+                  </div>
+
+                  {/* Spill colour target */}
+                  {(selectedClip.aiBackground.spillSuppression ?? 0) > 0 && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] text-[#a0a0a0] font-medium flex-1">Spill Colour</label>
+                      <input
+                        type="color"
+                        value={selectedClip.aiBackground.spillColor ?? '#00ff00'}
+                        onChange={(e) => {
+                          const existing = selectedClip.aiBackground!;
+                          updateClip(selectedClip.id, { aiBackground: { ...existing, spillColor: e.target.value } });
+                          scheduleSaveSnapshot('Change AI Spill Colour');
+                        }}
+                        className="w-8 h-6 bg-transparent border border-[#3e3e3e] rounded cursor-pointer"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2651,6 +2862,7 @@ export function PropertiesPanel() {
               )}
             </div>
             <ObjectRemovalPanel selectedClip={selectedClip} />
+            <MotionEffectsPanel selectedClip={selectedClip} videoElements={videoElements} />
     </div>
   );
 

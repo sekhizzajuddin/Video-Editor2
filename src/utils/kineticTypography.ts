@@ -494,6 +494,10 @@ processedClips.push({
       const totalSentenceHeight = lines.length * lineHeight;
       const startY = -totalSentenceHeight / 2 + lineHeight / 2;
 
+      // Record the authored line arrangement on the container so later resizes
+      // reproduce it exactly instead of re-deriving it from word positions.
+      (primaryClip as any).kineticLineStructure = lines.map((l) => l.length);
+
       lines.forEach((line, lineIdx) => {
         const lineW = line.reduce((sum, item) => sum + item.width, 0) + (line.length - 1) * spaceWidth;
         let currentX = -lineW / 2;
