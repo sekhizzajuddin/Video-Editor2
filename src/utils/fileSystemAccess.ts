@@ -182,7 +182,7 @@ export async function openProjectFile(): Promise<any> {
       const [handle] = await (window as any).showOpenFilePicker({
         types: [{
           description: 'ProCut Project File',
-          accept: { 'application/x-procut': ['.procut'] },
+          accept: { 'application/x-procut': ['.procut', '.json'] },
         }],
         multiple: false
       });
