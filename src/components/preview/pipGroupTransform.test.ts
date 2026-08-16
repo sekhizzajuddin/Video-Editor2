@@ -110,52 +110,109 @@ describe('PiP children inherit the container transform', () => {
  * rotationX/Y (3D), blend, opacity and crop.
  */
 
-const safeAxis = (v: number) => (Math.abs(v) < 0.02 ? (v < 0 ? -0.02 : 0.02) : v);
+const FOCAL = 900;
 
-/** Mirrors the 3D-rotation foreshortening applied to the group. */
-function apply3D(word: { x: number; y: number }, rotX = 0, rotY = 0) {
-  const fx = safeAxis(Math.cos((rotY * Math.PI) / 180));
-  const fy = safeAxis(Math.cos((rotX * Math.PI) / 180));
-  return { x: CX + word.x * fx, y: CY + word.y * fy };
+/**
+ * Mirrors the simulated-3D projection applied to each PiP child.
+ * Children are drawn individually, so instead of one flat cos() squash each
+ * child's offset is rotated in 3D and divided by its depth — giving real
+ * one-point perspective while keeping every child in one coordinate system.
+ */
+function project3D(word: { x: number; y: number }, rotX = 0, rotY = 0) {
+  const rx = (rotX * Math.PI) / 180;
+  const ry = (rotY * Math.PI) / 180;
+  const x1 = word.x * Math.cos(ry);
+  const z1 = word.x * Math.sin(ry);
+  const y2 = word.y * Math.cos(rx) - z1 * Math.sin(rx);
+  const z2 = word.y * Math.sin(rx) + z1 * Math.cos(rx);
+  const persp = FOCAL / Math.max(FOCAL * 0.25, FOCAL + z2);
+  return {
+    x: x1 * persp,
+    y: y2 * persp,
+    scale: persp,
+    z: z2,
+    alpha: 1 - Math.min(0.45, Math.max(0, z2 / (FOCAL * 1.6))),
+  };
 }
 
-const groupWidth = (pts: { x: number; y: number }[]) => Math.abs(pts[pts.length - 1].x - pts[0].x);
+const ROW = [
+  { x: -200, y: 0 },
+  { x: -100, y: 0 },
+  { x: 0, y: 0 },
+  { x: 100, y: 0 },
+  { x: 200, y: 0 },
+];
 
-describe('PiP group: 3D rotation', () => {
-  it('rotationY foreshortens the width as the group turns away', () => {
-    const full = groupWidth(WORDS.map((w) => apply3D(w, 0, 0)));
-    const turned = groupWidth(WORDS.map((w) => apply3D(w, 0, 60)));
-    expect(turned).toBeLessThan(full);
-    expect(turned).toBeCloseTo(full * 0.5, 4); // cos(60) = 0.5
+describe('PiP group: simulated 3D rotation', () => {
+  it('is an exact no-op at zero', () => {
+    for (const w of ROW) {
+      const p = project3D(w, 0, 0);
+      expect(p.x).toBeCloseTo(w.x, 9);
+      expect(p.scale).toBeCloseTo(1, 9);
+      expect(p.alpha).toBeCloseTo(1, 9);
+    }
   });
 
-  it('rotationX foreshortens the height', () => {
+  it('gives real depth: the near edge is LARGER than the far edge', () => {
+    // This is what a flat cos() squash could not do — it shrank both edges
+    // equally, so the group narrowed but never looked like it turned.
+    const near = project3D({ x: -200, y: 0 }, 0, 45);
+    const far = project3D({ x: 200, y: 0 }, 0, 45);
+    expect(near.scale).toBeGreaterThan(far.scale);
+    expect(near.scale / far.scale).toBeGreaterThan(1.2);
+  });
+
+  it('positive rotationY swings the RIGHT edge away from the camera', () => {
+    expect(project3D({ x: 200, y: 0 }, 0, 45).z).toBeGreaterThan(0);
+    expect(project3D({ x: -200, y: 0 }, 0, 45).z).toBeLessThan(0);
+  });
+
+  it('narrows the group overall as it turns', () => {
+    const flat = Math.abs(project3D(ROW[4], 0, 0).x - project3D(ROW[0], 0, 0).x);
+    const turned = Math.abs(project3D(ROW[4], 0, 60).x - project3D(ROW[0], 0, 60).x);
+    expect(turned).toBeLessThan(flat);
+  });
+
+  it('never turns the group inside out (left-to-right order preserved)', () => {
+    for (const rot of [15, 45, 60, 89]) {
+      const xs = ROW.map((w) => project3D(w, 0, rot).x);
+      for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeGreaterThan(xs[i - 1]);
+    }
+  });
+
+  it('rotationX gives vertical depth', () => {
     const col = [
-      { x: 0, y: -60 },
-      { x: 0, y: 60 },
+      { x: 0, y: -150 },
+      { x: 0, y: 150 },
     ];
-    const h0 = Math.abs(apply3D(col[1], 0, 0).y - apply3D(col[0], 0, 0).y);
-    const h45 = Math.abs(apply3D(col[1], 45, 0).y - apply3D(col[0], 45, 0).y);
-    expect(h45).toBeLessThan(h0);
-    expect(h45).toBeCloseTo(h0 * Math.cos(Math.PI / 4), 4);
+    const top = project3D(col[0], 45, 0);
+    const bottom = project3D(col[1], 45, 0);
+    expect(top.scale).not.toBeCloseTo(bottom.scale, 3);
+    expect(Math.abs(bottom.y - top.y)).toBeLessThan(300);
   });
 
-  it('never collapses the group to zero at 90 degrees', () => {
-    // A zero scale is unrecoverable and would make the sentence disappear.
-    expect(groupWidth(WORDS.map((w) => apply3D(w, 0, 90)))).toBeGreaterThan(0);
-    expect(groupWidth(WORDS.map((w) => apply3D(w, 90, 0)))).toBeGreaterThan(0);
+  it('stays finite and bounded at extreme angles', () => {
+    for (const rot of [90, 120, 180, -90, 270]) {
+      const p = project3D({ x: 200, y: 0 }, 0, rot);
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.scale)).toBe(true);
+      expect(p.scale).toBeGreaterThan(0);
+      expect(p.scale).toBeLessThanOrEqual(4);
+    }
   });
 
-  it('mirrors past 90 degrees, as a real rotation would', () => {
-    expect(apply3D({ x: 100, y: 0 }, 0, 180).x - CX).toBeLessThan(0);
+  it('fades receding words subtly, never to invisibility', () => {
+    const away = project3D({ x: 400, y: 0 }, 0, 80);
+    expect(away.alpha).toBeLessThan(1);
+    expect(away.alpha).toBeGreaterThanOrEqual(0.55);
   });
 
-  it('leaves the group untouched at zero', () => {
-    WORDS.forEach((w) => {
-      const p = apply3D(w, 0, 0);
-      expect(p.x).toBeCloseTo(CX + w.x, 9);
-      expect(p.y).toBeCloseTo(CY + w.y, 9);
-    });
+  it('the group centre is the pivot and never moves', () => {
+    for (const rot of [30, 60, 90]) {
+      const c = project3D({ x: 0, y: 0 }, 0, rot);
+      expect(c.x).toBeCloseTo(0, 9);
+      expect(c.scale).toBeCloseTo(1, 9);
+    }
   });
 });
 

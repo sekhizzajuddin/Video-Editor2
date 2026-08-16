@@ -1001,22 +1001,60 @@ export async function renderCanvasEngine({
       if (parentT.flipH) ctx.scale(-1, 1);
       if (parentT.flipV) ctx.scale(1, -1);
 
-      // 3D rotate (rotationX / rotationY) as an affine approximation.
+      // ── Simulated 3D rotation (rotationX / rotationY) ──────────────────────
       //
-      // True perspective needs a projected quad, which Canvas2D can only do per
-      // texture — not for a group of independently drawn children. Foreshortening
-      // the axis being rotated about reproduces the dominant visual effect (the
-      // group narrowing/flattening as it turns away) and, crucially, keeps every
-      // child in the SAME space so the words stay together. Beyond 90 degrees the
-      // sign flips, which mirrors the group exactly as a real rotation would.
+      // A uniform squash (scale by cos) makes the group narrow correctly but looks
+      // flat: every word shrinks by the same amount, so there is no sense of one
+      // edge being nearer the viewer.
+      //
+      // Because PiP children are drawn INDIVIDUALLY, we can do better than a
+      // single affine squash without needing a projected quad: rotate each child's
+      // offset around the group's axis in 3D, then divide by its depth. Words that
+      // swing toward the camera land further out and are drawn larger; words that
+      // swing away converge toward the vanishing point and shrink. That is real
+      // one-point perspective — the group visibly turns in space, yet every child
+      // still shares one coordinate system so the sentence never pulls apart.
+      //
+      // Implemented as a translate+scale per child (not ctx.transform) so the
+      // glyphs stay axis-aligned and crisp; skewing text this small reads as
+      // blur rather than depth.
       const pRotX = getAnimatedValue(parentT.rotationX ?? 0, currentTime, pStart, pAnims?.['transform.rotationX']);
       const pRotY = getAnimatedValue(parentT.rotationY ?? 0, currentTime, pStart, pAnims?.['transform.rotationY']);
+
       if (Math.abs(pRotX) > 0.01 || Math.abs(pRotY) > 0.01) {
-        const fx = Math.cos((pRotY * Math.PI) / 180); // Y-rotation squashes width
-        const fy = Math.cos((pRotX * Math.PI) / 180); // X-rotation squashes height
-        // Never fully collapse: a zero scale is unrecoverable and hides the group.
-        const safe = (v: number) => (Math.abs(v) < 0.02 ? (v < 0 ? -0.02 : 0.02) : v);
-        ctx.scale(safe(fx), safe(fy));
+        const rx = (pRotX * Math.PI) / 180;
+        const ry = (pRotY * Math.PI) / 180;
+
+        // The child's own offset within the group, in group-local units.
+        const ox = clip.transform?.x ?? 0;
+        const oy = clip.transform?.y ?? 0;
+
+        // Rotate that offset in 3D. z starts at 0 (all children coplanar).
+        // +z is AWAY from the camera. A positive rotationY must swing the RIGHT
+        // edge away (matching how the 2D preview and the video branch behave), so
+        // a positive x maps to a positive z.
+        const x1 = ox * Math.cos(ry);
+        const z1 = ox * Math.sin(ry);
+        const y2 = oy * Math.cos(rx) - z1 * Math.sin(rx);
+        const z2 = oy * Math.sin(rx) + z1 * Math.cos(rx);
+
+        // Perspective divide. FOCAL is the virtual camera distance: larger is a
+        // longer lens (subtler depth), smaller is wider (more dramatic). 900 units
+        // against an 854-wide frame is roughly a normal lens.
+        const FOCAL = 900;
+        const denom = FOCAL + z2;
+        // Clamp so a child rotated behind the camera cannot invert or blow up.
+        const persp = FOCAL / Math.max(FOCAL * 0.25, denom);
+
+        // Move the child from its flat offset to its projected position, then
+        // scale it by the same factor so nearer words are genuinely larger.
+        ctx.translate(x1 * persp - ox, y2 * persp - oy);
+        ctx.scale(persp, persp);
+
+        // Fade edges that have rotated far from the viewer. Subtle — it reads as
+        // depth shading, not as the text disappearing.
+        const depthFade = 1 - Math.min(0.45, Math.max(0, z2 / (FOCAL * 1.6)));
+        ctx.globalAlpha = ctx.globalAlpha * depthFade;
       }
 
       ctx.translate(-cx, -cy);
