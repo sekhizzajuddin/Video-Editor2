@@ -589,6 +589,83 @@ export async function renderCanvasEngine({
     }
     if (!mediaItem) return;
 
+    // ── Motion-tracked region effects: frame-space post-pass ──────────────────
+    //
+    // A region is authored in FRAME space — the user points at a spot on the
+    // picture. The previous implementation applied it inside the clip's own media
+    // buffer, treating the coordinates as a fraction of 854 and mapping them onto
+    // a buffer that is neither 854 wide nor aligned with the frame, and which
+    // knows nothing about the clip's translate/scale. The shaken pixels were
+    // therefore never the ones the box was drawn over — the effect always landed
+    // somewhere else, which is exactly the reported symptom.
+    //
+    // The fix: render the clip normally into a full-frame buffer, then apply the
+    // region effect to THAT, where (x, y) means the same thing it does on the
+    // overlay. Same trick `drawTransitionLayer` already uses.
+    if (
+      !skipExpensiveFX &&
+      !clip.__motionFxPass &&
+      Array.isArray(clip.motionEffects) &&
+      clip.motionEffects.some((m: any) => m?.enabled)
+    ) {
+      const bufScale = Math.max(0.1, canvas_scale * viewport.zoom);
+      const bufW = Math.max(1, Math.round(W * bufScale));
+      const bufH = Math.max(1, Math.round(H * bufScale));
+      const buf = getOrCreateCanvas(
+        offscreenCanvasPool.current,
+        `__motionfx_${clip.id}`,
+        bufW,
+        bufH
+      );
+      const bctx = buf.getContext('2d');
+      if (bctx) {
+        bctx.setTransform(1, 0, 0, 1, 0, 0);
+        bctx.clearRect(0, 0, buf.width, buf.height);
+
+        // Reproduce local frame space inside the buffer so the clip lands exactly
+        // where it normally would, transform and all.
+        bctx.save();
+        bctx.scale(bufScale, bufScale);
+        await drawSingleClip(
+          { ...clip, __motionFxPass: true },
+          opacityMultiplier,
+          extraTransform,
+          bctx
+        );
+        bctx.restore();
+
+        // Now the buffer holds the finished clip in frame space. Region
+        // coordinates map onto it by the single factor `bufScale` — no letterbox
+        // offset (the buffer IS the frame) and no per-clip fudge.
+        const meRelTime = Math.max(0, currentTime - clip.startTime);
+        for (let mi = 0; mi < clip.motionEffects.length; mi++) {
+          const me = clip.motionEffects[mi];
+          if (!me?.enabled) continue;
+          applyMotionEffect(
+            bctx,
+            buf.width,
+            buf.height,
+            me,
+            meRelTime,
+            `${clip.id}_me${mi}`,
+            bufScale,
+            bufScale
+          );
+        }
+
+        // Known limitation: the inner pass blends against an EMPTY buffer rather
+        // than the real backdrop, so a region effect combined with a non-normal
+        // blend mode composites the clip over transparent black first. Normal
+        // (source-over) clips — the overwhelming majority, and every case region
+        // effects are used for — are pixel-identical.
+        ctx.save();
+        ctx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+        ctx.restore();
+        anyClipDrawn = true;
+        return true;
+      }
+    }
+
     if (clip.isAdjustmentLayer || clip.mediaId?.startsWith('adj_') || mediaItem.type === 'adjustment') {
       applyAdjustmentLayerPass(ctx, clip, W, H);
       anyClipDrawn = true;
@@ -1197,13 +1274,13 @@ export async function renderCanvasEngine({
           const hasFx = !skipExpensiveFX && !!clip.fxSettings;
           const hasMask = !!clip.mask?.enabled;
 
-          // Motion-tracked region effects read pixels back from the canvas, so
-          // they need the offscreen buffer too. Without this a clip whose ONLY
-          // effect is a region shake would take the zero-copy fast path and the
-          // effect would silently never run.
-          const hasMotionFx = !skipExpensiveFX && !!clip.motionEffects?.some((m: any) => m?.enabled);
-
-          const needsOffscreen = hasCrop || hasCssFilters || hasAiBg || hasChroma || hasLuma || hasObjRemoval || hasColorWheels || hasCurves || hasOverlays || hasLut || hasFx || hasMask || hasMotionFx;
+          // NOTE: motion-tracked region effects are NOT handled here any more.
+          // They used to run inside this per-clip media buffer, which mapped the
+          // region as a fraction of 854 onto a buffer that is neither 854 wide
+          // nor aligned to the frame — so the shaken pixels were never the ones
+          // under the box. They now run as a frame-space post-pass; see the
+          // `__motionFxPass` block at the top of drawSingleClip.
+          const needsOffscreen = hasCrop || hasCssFilters || hasAiBg || hasChroma || hasLuma || hasObjRemoval || hasColorWheels || hasCurves || hasOverlays || hasLut || hasFx || hasMask;
 
           if (!needsOffscreen) {
             // FAST PATH: Zero-copy GPU direct render directly to target canvas!
@@ -1379,31 +1456,6 @@ export async function renderCanvasEngine({
                   clip.animations?.['lut.intensity'] || clip.animations?.['lutFilter.intensity']
                 );
                 applyLutToCanvas(oCtx, offCanvas.width, offCanvas.height, lutData, animIntensity);
-              }
-
-              // Motion-tracked region effects (shake a hand, jiggle a face...).
-              // Applied AFTER the frame-wide FX so the region effect operates on
-              // the finished pixels — a shaken patch should carry the clip's
-              // grade and effects with it, not a raw un-graded copy.
-              if (clip.motionEffects?.length && !skipExpensiveFX) {
-                const meRelTime = Math.max(0, currentTime - clip.startTime);
-                // Region coords are authored against the 854x480 preview space.
-                const meScaleX = offCanvas.width / 854;
-                const meScaleY = offCanvas.height / 480;
-                for (let mi = 0; mi < clip.motionEffects.length; mi++) {
-                  const me = clip.motionEffects[mi];
-                  if (!me?.enabled) continue;
-                  applyMotionEffect(
-                    oCtx,
-                    offCanvas.width,
-                    offCanvas.height,
-                    me,
-                    meRelTime,
-                    `${clip.id}_me${mi}`,
-                    meScaleX,
-                    meScaleY
-                  );
-                }
               }
 
               if (clip.fxSettings && !skipExpensiveFX) {

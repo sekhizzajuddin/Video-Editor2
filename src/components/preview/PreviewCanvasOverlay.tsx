@@ -33,6 +33,13 @@ import { getClipDimensions, inpaint, getOverlayMapping, clientToOverlay, clientT
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { isKineticMediaId, getSentenceBounds } from '@/utils/kineticSync';
 import { encodeMaskRle } from '@/utils/motionMask';
+import {
+  getFrameSize,
+  getFrameOffset,
+  quadToRect,
+  rectToQuad,
+  normalizeRegionToFrame,
+} from '@/utils/frameSpace';
 
 interface InteractiveCanvasOverlayProps {
   viewport: { x: number; y: number; zoom: number };
@@ -172,6 +179,12 @@ export function PreviewCanvasOverlay({
     startY: number;
     init: { cx: number; cy: number; w: number; h: number };
   } | null>(null);
+
+  /**
+   * Live brush position in FRAME space, for the Photoshop-style brush ring.
+   * Null when the pointer is outside the picture.
+   */
+  const [brushCursor, setBrushCursor] = useState<{ x: number; y: number } | null>(null);
 
   const [imageEditorTool, setImageEditorTool] = useState<'none' | 'magic' | 'lasso' | 'poly'>('none');
   const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[]>([]);
@@ -1013,25 +1026,36 @@ export function PreviewCanvasOverlay({
   /** True while a region is being placed — the clip transform must stand down. */
   const regionEditActive = showRegions;
 
-  const regionRect = (c: any) => {
-    if (!c) return { cx: 427, cy: 240, w: 140, h: 140 };
-    const xs = [c.x0, c.x1, c.x2, c.x3];
-    const ys = [c.y0, c.y1, c.y2, c.y3];
-    const minX = Math.min(...xs), maxX = Math.max(...xs);
-    const minY = Math.min(...ys), maxY = Math.max(...ys);
-    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX, h: maxY - minY };
+  /** Visible picture size for the CURRENT aspect ratio (single source of truth). */
+  const frame = getFrameSize(aspectRatio);
+  const frameOff = getFrameOffset(aspectRatio);
+
+  /**
+   * Client (mouse) position -> FRAME space, i.e. the space region boxes and
+   * painted strokes are stored in: (0,0) is the top-left of the visible picture.
+   *
+   * `clientToViewportSpace` undoes the letterboxing of the SVG element and the
+   * viewport pan/zoom, but leaves the result in raw 854x480 overlay units. The
+   * region overlay is drawn inside a `translate(offsetX, offsetY)` group, so the
+   * offset has to come off exactly once here. Getting this wrong in either
+   * direction is what put the box off-canvas and made the brush miss the cursor.
+   */
+  const clientToFrame = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const container = document.getElementById('preview-canvas-wrapper');
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const p = clientToViewportSpace(clientX, clientY, rect, viewport);
+    return { x: p.x - frameOff.offsetX, y: p.y - frameOff.offsetY };
   };
 
-  const rectToCorners = (cx: number, cy: number, w: number, h: number) => {
-    const hw = Math.max(8, w) / 2;
-    const hh = Math.max(8, h) / 2;
-    return {
-      x0: cx - hw, y0: cy - hh,
-      x1: cx + hw, y1: cy - hh,
-      x2: cx + hw, y2: cy + hh,
-      x3: cx - hw, y3: cy + hh,
-    };
+  const regionRect = (c: any) => {
+    // Defaults follow the FRAME, not a hard-coded 16:9 centre. The old
+    // (427, 240) fallback sits outside every portrait and square project.
+    const norm = normalizeRegionToFrame(c, frame.W, frame.H);
+    return quadToRect(norm);
   };
+
+  const rectToCorners = (cx: number, cy: number, w: number, h: number) => rectToQuad(cx, cy, w, h);
 
   const writeRegion = (index: number, cx: number, cy: number, w: number, h: number) => {
     if (!activeClip) return;
@@ -1059,30 +1083,37 @@ export function PreviewCanvasOverlay({
   const commitPaintStroke = (index: number, points: Array<{ x: number; y: number }>, brush: number) => {
     if (!activeClip || points.length === 0) return;
 
+    // The stroke mask covers the VISIBLE picture, not a notional 854x480 box.
+    // Rasterising a portrait project against a 16:9 grid squashed every stroke
+    // horizontally and shifted it, so the colour signature was sampled from the
+    // wrong pixels even when the user painted in the right place.
     const MW = 240;
-    const MH = Math.round((MW * 480) / 854);
+    const MH = Math.max(2, Math.round((MW * frame.H) / frame.W));
     const cnv = document.createElement('canvas');
     cnv.width = MW;
     cnv.height = MH;
     const c = cnv.getContext('2d');
     if (!c) return;
 
+    const toMaskX = (x: number) => (x * MW) / frame.W;
+    const toMaskY = (y: number) => (y * MH) / frame.H;
+
     c.fillStyle = '#000';
     c.fillRect(0, 0, MW, MH);
     c.strokeStyle = '#fff';
     c.lineCap = 'round';
     c.lineJoin = 'round';
-    c.lineWidth = Math.max(2, (brush * MW) / 854);
+    c.lineWidth = Math.max(2, (brush * MW) / frame.W);
     c.beginPath();
     points.forEach((pt, i) => {
-      const x = (pt.x * MW) / 854;
-      const y = (pt.y * MH) / 480;
+      const x = toMaskX(pt.x);
+      const y = toMaskY(pt.y);
       if (i === 0) c.moveTo(x, y);
       else c.lineTo(x, y);
     });
     // A single tap should still paint a dot, not nothing.
     if (points.length === 1) {
-      c.lineTo((points[0].x * MW) / 854 + 0.01, (points[0].y * MH) / 480);
+      c.lineTo(toMaskX(points[0].x) + 0.01, toMaskY(points[0].y));
     }
     c.stroke();
 
@@ -1119,10 +1150,10 @@ export function PreviewCanvasOverlay({
         colorSignature: undefined,
       };
       if (maxX >= 0) {
-        const bx0 = (minX / MW) * 854;
-        const bx1 = (maxX / MW) * 854;
-        const by0 = (minY / MH) * 480;
-        const by1 = (maxY / MH) * 480;
+        const bx0 = (minX / MW) * frame.W;
+        const bx1 = (maxX / MW) * frame.W;
+        const by0 = (minY / MH) * frame.H;
+        const by1 = (maxY / MH) * frame.H;
         patched.baseCorners = {
           x0: bx0, y0: by0,
           x1: bx1, y1: by0,
@@ -1142,23 +1173,12 @@ export function PreviewCanvasOverlay({
     if (!paintStroke || !activeClip) return;
 
     const onMove = (e: MouseEvent) => {
-      const container = document.getElementById('preview-canvas-wrapper');
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const p = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
-      // Points are in frame space; subtract the letterbox offset applied to the
-      // viewport group so the stroke lands under the cursor. Computed locally
-      // because the component-level offsetX/Y are declared further down.
-      const ar = useEditorStore.getState().aspectRatio;
-      let vW = 854;
-      if (ar === '9:16') vW = Math.round(480 * (9 / 16));
-      else if (ar === '1:1') vW = 480;
-      else if (ar === '4:3') vW = Math.round(480 * (4 / 3));
-      const offX = (854 - vW) / 2;
-      const offY = 0;
-      setPaintStroke((prev) =>
-        prev ? { ...prev, points: [...prev.points, { x: p.x - offX, y: p.y - offY }] } : prev
-      );
+      const p = clientToFrame(e.clientX, e.clientY);
+      if (!p) return;
+      // Keep the brush ring glued to the pointer while the stroke is in progress —
+      // the capture rect stops receiving mousemove once the drag leaves it.
+      setBrushCursor(p);
+      setPaintStroke((prev) => (prev ? { ...prev, points: [...prev.points, p] } : prev));
     };
 
     const onUp = () => {
@@ -1218,9 +1238,13 @@ export function PreviewCanvasOverlay({
         nh = Math.max(16, h + dy * signY * 2);
       }
 
-      // Keep the box on screen; a region dragged off-frame cannot be tracked.
-      nx = Math.max(nw / 2, Math.min(854 - nw / 2, nx));
-      ny = Math.max(nh / 2, Math.min(480 - nh / 2, ny));
+      // Keep the box inside the VISIBLE picture; a region dragged into the
+      // letterbox bars has no pixels to track. Clamping against 854x480 (the
+      // overlay box, not the frame) let it wander off the picture entirely.
+      nw = Math.min(nw, frame.W);
+      nh = Math.min(nh, frame.H);
+      nx = Math.max(nw / 2, Math.min(frame.W - nw / 2, nx));
+      ny = Math.max(nh / 2, Math.min(frame.H - nh / 2, ny));
 
       writeRegion(regionDrag.index, nx, ny, nw, nh);
     };
@@ -2084,26 +2108,59 @@ export function PreviewCanvasOverlay({
                 armed. Covers the frame so a stroke can start anywhere. */}
             {showRegions && paintArmedIndex !== null && (
               <rect
+                // Covers exactly the VISIBLE picture. It used to be a flat
+                // 854x480 placed inside this already-offset group, so on any
+                // non-16:9 project it hung off the right-hand edge — you could
+                // start a stroke in the black letterbox bar and the coordinates
+                // that came back were outside the frame.
                 x={0}
                 y={0}
-                width={854}
-                height={480}
+                width={W}
+                height={H}
                 fill="rgba(251,146,60,0.06)"
                 className="pointer-events-auto"
-                style={{ cursor: 'crosshair' }}
+                style={{ cursor: 'none' }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  const container = document.getElementById('preview-canvas-wrapper');
-                  if (!container) return;
-                  const rect = container.getBoundingClientRect();
-                  const p = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
-                  setPaintStroke({
-                    index: paintArmedIndex,
-                    points: [{ x: p.x - offsetX, y: p.y - offsetY }],
-                  });
+                  const p = clientToFrame(e.clientX, e.clientY);
+                  if (!p) return;
+                  setPaintStroke({ index: paintArmedIndex, points: [p] });
                 }}
+                onMouseMove={(e) => {
+                  const p = clientToFrame(e.clientX, e.clientY);
+                  if (p) setBrushCursor(p);
+                }}
+                onMouseLeave={() => setBrushCursor(null)}
               />
+            )}
+
+            {/* Photoshop-style brush cursor: a circle the exact size of the
+                brush, so you can see what you are about to paint. Without it the
+                only feedback was the OS crosshair, which told you nothing about
+                the brush diameter — the user reported "the circle is not
+                showing" and could not tell where the paint would land. */}
+            {showRegions && paintArmedIndex !== null && brushCursor && (
+              <g className="pointer-events-none">
+                <circle
+                  cx={brushCursor.x}
+                  cy={brushCursor.y}
+                  r={Math.max(2, (motionEffects[paintArmedIndex]?.brushSize ?? 40) / 2)}
+                  fill="rgba(251,146,60,0.18)"
+                  stroke="#fb923c"
+                  strokeWidth={1.5 / viewport.zoom}
+                />
+                <circle
+                  cx={brushCursor.x}
+                  cy={brushCursor.y}
+                  r={Math.max(2, (motionEffects[paintArmedIndex]?.brushSize ?? 40) / 2)}
+                  fill="none"
+                  stroke="#141414"
+                  strokeWidth={0.6 / viewport.zoom}
+                  strokeDasharray={`${3 / viewport.zoom},${3 / viewport.zoom}`}
+                />
+                <circle cx={brushCursor.x} cy={brushCursor.y} r={1.5 / viewport.zoom} fill="#fb923c" />
+              </g>
             )}
 
             {/* Live stroke preview */}

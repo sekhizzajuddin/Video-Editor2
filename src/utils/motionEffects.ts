@@ -34,6 +34,7 @@
  */
 
 import type { CornerPoints } from '@/types';
+import { normalizeRegionToFrame } from './frameSpace';
 import type { ColorSignature, MaskApplyMode, RegionMode } from './motionMask';
 import {
   decodeMaskRle,
@@ -425,7 +426,15 @@ export function applyMotionEffect(
     // Box mode (or paint mode before Re-track has been pressed).
     const corners = getTrackedCorners(settings.track, settings.baseCorners, relTime);
     if (!corners) return;
-    const rect = cornersToRect(corners);
+
+    // `ctx` holds the frame at `scaleX` device pixels per frame unit, so this
+    // recovers the frame's own dimensions. Regions saved before frame space was
+    // unified — or authored under a different aspect ratio — can lie outside it;
+    // clamping keeps the effect visible on the picture instead of shaking a
+    // zero-width sliver against the edge, which looked like nothing happening.
+    const frameW = scaleX > 0 ? canvasW / scaleX : canvasW;
+    const frameH = scaleY > 0 ? canvasH / scaleY : canvasH;
+    const rect = cornersToRect(normalizeRegionToFrame(corners, frameW, frameH));
     const grow = Math.max(1, (settings.regionScale ?? 110) / 100);
     const cxR = (rect.x + rect.w / 2) * scaleX;
     const cyR = (rect.y + rect.h / 2) * scaleY;

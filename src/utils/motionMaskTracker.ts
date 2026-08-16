@@ -15,6 +15,7 @@
  * the face.
  */
 
+import { getFrameSize, getClipFramePlacement } from './frameSpace';
 import {
   buildColorSignature,
   chokeMask,
@@ -37,6 +38,10 @@ export interface MaskTrackOptions {
   feather?: number;
   onProgress?: (progress: number) => void;
   shouldCancel?: () => boolean;
+  /** Project aspect ratio, so analysis happens in the same space as the stroke. */
+  aspectRatio?: string;
+  /** Clip transform, so the media is placed in the frame exactly as rendered. */
+  clipTransform?: { x?: number; y?: number; scale?: number } | null;
 }
 
 export interface MaskTrackResult {
@@ -62,15 +67,43 @@ export async function trackColorMask(
   opts: MaskTrackOptions = {}
 ): Promise<MaskTrackResult | null> {
   const analysisW = Math.max(64, Math.min(480, opts.analysisWidth ?? 240));
-  const vidW = videoEl.videoWidth || 1920;
-  const vidH = videoEl.videoHeight || 1080;
-  const analysisH = Math.max(36, Math.round((analysisW * vidH) / vidW));
+
+  // Analyse in FRAME space, downscaled.
+  //
+  // The analysis canvas used to be shaped to the VIDEO's aspect ratio and the
+  // video blitted across all of it. The painted stroke, however, is authored
+  // against the visible PICTURE. On any project where those two differ (a
+  // landscape clip in a 9:16 timeline is the common case) the stroke and the
+  // pixels it was supposed to describe were in different spaces, so the colour
+  // signature was learned from whatever happened to be at the mirrored
+  // coordinates — usually background. That is why painting "on the person"
+  // could still select nothing useful.
+  const { W: frameW, H: frameH } = getFrameSize(opts.aspectRatio ?? '16:9');
+  const analysisH = Math.max(36, Math.round((analysisW * frameH) / frameW));
+  const analysisScale = analysisW / frameW;
+
+  const placement = getClipFramePlacement(
+    videoEl.videoWidth || 1920,
+    videoEl.videoHeight || 1080,
+    frameW,
+    frameH,
+    opts.clipTransform
+  );
+  const drawX = placement.x * analysisScale;
+  const drawY = placement.y * analysisScale;
+  const drawW = placement.w * analysisScale;
+  const drawH = placement.h * analysisScale;
 
   const canvas = document.createElement('canvas');
   canvas.width = analysisW;
   canvas.height = analysisH;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
+
+  const paintFrame = () => {
+    ctx.clearRect(0, 0, analysisW, analysisH);
+    ctx.drawImage(videoEl, drawX, drawY, drawW, drawH);
+  };
 
   const seekTo = (t: number): Promise<void> =>
     new Promise((resolve) => {
@@ -94,7 +127,7 @@ export async function trackColorMask(
 
   // ── Learn the signature from the first frame ────────────────────────────
   await seekTo(startTime);
-  ctx.drawImage(videoEl, 0, 0, analysisW, analysisH);
+  paintFrame();
   let first: ImageData;
   try {
     first = ctx.getImageData(0, 0, analysisW, analysisH);
@@ -151,7 +184,7 @@ export async function trackColorMask(
     const rel = Math.min(duration, i * step);
     await seekTo(startTime + rel);
     try {
-      ctx.drawImage(videoEl, 0, 0, analysisW, analysisH);
+      paintFrame();
     } catch {
       break;
     }

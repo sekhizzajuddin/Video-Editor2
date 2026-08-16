@@ -16,7 +16,14 @@
 import { useState } from 'react';
 import { Activity, Crosshair, Plus, Trash2, Loader2, Brush, SquareDashed } from 'lucide-react';
 import { toast } from 'sonner';
-import type { TimelineClip, CornerPoints } from '@/types';
+import type { TimelineClip } from '@/types';
+import {
+  getFrameSize,
+  quadToRect,
+  rectToQuad,
+  defaultRegionQuad,
+  normalizeRegionToFrame,
+} from '@/utils/frameSpace';
 import { useEditorStore } from '@/store/editorStore';
 import { trackMotion } from '@/utils/motionTracker';
 import { trackColorMask } from '@/utils/motionMaskTracker';
@@ -34,39 +41,8 @@ interface MotionEffectsPanelProps {
   videoElements: Map<string, HTMLVideoElement>;
 }
 
-/** A centred default box — big enough to grab, small enough to reposition. */
-function defaultCorners(): CornerPoints {
-  const cx = 427;
-  const cy = 240;
-  const half = 70;
-  return {
-    x0: cx - half, y0: cy - half,
-    x1: cx + half, y1: cy - half,
-    x2: cx + half, y2: cy + half,
-    x3: cx - half, y3: cy + half,
-  };
-}
-
-function rectOf(c: CornerPoints) {
-  const xs = [c.x0, c.x1, c.x2, c.x3];
-  const ys = [c.y0, c.y1, c.y2, c.y3];
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX, h: maxY - minY };
-}
-
-function cornersFrom(cx: number, cy: number, w: number, h: number): CornerPoints {
-  const hw = Math.max(8, w) / 2;
-  const hh = Math.max(8, h) / 2;
-  return {
-    x0: cx - hw, y0: cy - hh,
-    x1: cx + hw, y1: cy - hh,
-    x2: cx + hw, y2: cy + hh,
-    x3: cx - hw, y3: cy + hh,
-  };
-}
+const rectOf = quadToRect;
+const cornersFrom = rectToQuad;
 
 export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffectsPanelProps) {
   const updateClip = useEditorStore((s) => s.updateClip);
@@ -74,6 +50,11 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
   const [trackProgress, setTrackProgress] = useState(0);
   const [paintArmed, setPaintArmed] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+
+  // Regions live in FRAME space — the visible picture, which is 854x480 only on
+  // a 16:9 project. Every default, clamp and readout below follows this.
+  const aspectRatio = useEditorStore((s) => s.aspectRatio);
+  const frame = getFrameSize(aspectRatio);
 
   const effects: MotionEffectSettings[] = selectedClip.motionEffects ?? [];
 
@@ -92,7 +73,11 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
         ...DEFAULT_MOTION_EFFECT,
         enabled: true,
         seed: Math.floor(Math.random() * 1000) + 1,
-        baseCorners: defaultCorners(),
+        // Centred in the VISIBLE picture for the current aspect ratio. The old
+        // hard-coded (427, 240) is the centre of a 16:9 overlay box, which on a
+        // 9:16 project is 157px to the RIGHT of the picture's right-hand edge —
+        // the box appeared outside the canvas and nothing could be painted.
+        baseCorners: defaultRegionQuad(frame.W, frame.H),
       },
     ]);
     useEditorStore.getState().saveSnapshot('Add Motion Effect');
@@ -174,6 +159,9 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
             tolerance: effect.colorTolerance ?? 22,
             choke: effect.maskChoke ?? 0,
             feather: Math.round((effect.feather ?? 12) / 3),
+            // Analyse in the same space the stroke was painted in.
+            aspectRatio,
+            clipTransform: selectedClip.transform,
             onProgress: (p) => setTrackProgress(Math.round(p * 100)),
           }
         );
@@ -203,8 +191,12 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
           videoEl,
           store.currentTime,
           remaining,
-          effect.baseCorners,
-          (progress) => setTrackProgress(Math.round(progress * 100))
+          // Clamp first: a region saved before the frame-space fix (or authored
+          // under a different aspect ratio) can sit outside the picture, and the
+          // tracker would then lift its template from blank canvas and go nowhere.
+          normalizeRegionToFrame(effect.baseCorners, frame.W, frame.H),
+          (progress) => setTrackProgress(Math.round(progress * 100)),
+          selectedClip.transform
         );
         const track = results.map((r) => ({
           time: Math.max(0, r.time - selectedClip.startTime),
@@ -256,7 +248,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
         {effects.map((effect, index) => {
           const info = MOTION_EFFECT_INFO.find((m) => m.type === effect.type);
-          const r = rectOf(effect.baseCorners ?? defaultCorners());
+          const r = rectOf(normalizeRegionToFrame(effect.baseCorners, frame.W, frame.H));
           const isTracking = trackingIndex === index;
           const tracked = (effect.track?.length ?? 0) > 0;
 
@@ -460,7 +452,12 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                           const v = parseFloat(e.target.value);
                           if (!Number.isFinite(v)) return;
                           // Editing the box invalidates any existing track.
-                          patch(index, { baseCorners: build(v), track: undefined });
+                          // Clamp to the frame so a typo cannot push the region
+                          // into the letterbox bars, where there is nothing to track.
+                          patch(index, {
+                            baseCorners: normalizeRegionToFrame(build(v), frame.W, frame.H),
+                            track: undefined,
+                          });
                         }}
                         className="w-full px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px] text-white focus:outline-none focus:border-orange-500"
                       />
@@ -470,6 +467,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                 <p className="text-[9px] text-[#707070]">
                   Drag the <span className="text-orange-400">orange box</span> on the preview to place it
                   over the feature — or type exact values above. Then press Track.
+                  Coordinates are in frame space: {frame.W} x {frame.H} for this {aspectRatio} project.
                 </p>
               </div>
               )}
