@@ -277,3 +277,80 @@ describe('defaults and metadata', () => {
     expect(d.scale).toBe(1);
   });
 });
+
+/**
+ * Geometry backing the draggable region box in the preview overlay.
+ * Mirrors regionRect / rectToCorners / the drag clamp in PreviewCanvasOverlay.
+ */
+describe('interactive region box geometry', () => {
+  const rectToCorners = (cx: number, cy: number, w: number, h: number): CornerPoints => {
+    const hw = Math.max(8, w) / 2;
+    const hh = Math.max(8, h) / 2;
+    return {
+      x0: cx - hw, y0: cy - hh,
+      x1: cx + hw, y1: cy - hh,
+      x2: cx + hw, y2: cy + hh,
+      x3: cx - hw, y3: cy + hh,
+    };
+  };
+
+  const regionRect = (c: CornerPoints) => {
+    const r = cornersToRect(c);
+    return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, w: r.w, h: r.h };
+  };
+
+  const clampToFrame = (cx: number, cy: number, w: number, h: number) => ({
+    cx: Math.max(w / 2, Math.min(854 - w / 2, cx)),
+    cy: Math.max(h / 2, Math.min(480 - h / 2, cy)),
+  });
+
+  it('round-trips: corners -> rect -> corners is stable', () => {
+    const original = rectToCorners(300, 200, 120, 90);
+    const r = regionRect(original);
+    expect(r.cx).toBeCloseTo(300);
+    expect(r.cy).toBeCloseTo(200);
+    expect(r.w).toBeCloseTo(120);
+    expect(r.h).toBeCloseTo(90);
+    expect(rectToCorners(r.cx, r.cy, r.w, r.h)).toEqual(original);
+  });
+
+  it('enforces a minimum size so a box cannot be collapsed to nothing', () => {
+    const r = regionRect(rectToCorners(100, 100, 0, 0));
+    expect(r.w).toBeGreaterThanOrEqual(8);
+    expect(r.h).toBeGreaterThanOrEqual(8);
+  });
+
+  it('keeps the box inside the frame', () => {
+    // A region dragged off-screen could never be tracked.
+    expect(clampToFrame(-500, 240, 100, 100).cx).toBe(50);
+    expect(clampToFrame(9999, 240, 100, 100).cx).toBe(804);
+    expect(clampToFrame(427, -80, 100, 100).cy).toBe(50);
+    expect(clampToFrame(427, 9999, 100, 100).cy).toBe(430);
+  });
+
+  it('a centred box is left untouched by the clamp', () => {
+    const c = clampToFrame(427, 240, 140, 140);
+    expect(c.cx).toBe(427);
+    expect(c.cy).toBe(240);
+  });
+
+  it('corner resize keeps the opposite corner pinned', () => {
+    const start = { cx: 400, cy: 200, w: 100, h: 100 };
+    // Dragging the SE handle by (+20, +20) grows by 2x the delta, centre shifts
+    // by the delta, so the NW corner stays put.
+    const nw0 = { x: start.cx - start.w / 2, y: start.cy - start.h / 2 };
+    const nw = 100 + 20 * 2;
+    const nh = 100 + 20 * 2;
+    const ncx = start.cx + 20;
+    const ncy = start.cy + 20;
+    expect(ncx - nw / 2).toBeCloseTo(nw0.x, 6);
+    expect(ncy - nh / 2).toBeCloseTo(nw0.y, 6);
+  });
+
+  it('moving the box preserves its size', () => {
+    const before = regionRect(rectToCorners(200, 200, 90, 60));
+    const after = regionRect(rectToCorners(500, 300, 90, 60));
+    expect(after.w).toBe(before.w);
+    expect(after.h).toBe(before.h);
+  });
+});

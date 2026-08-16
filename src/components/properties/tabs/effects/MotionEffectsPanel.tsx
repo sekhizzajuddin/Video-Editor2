@@ -173,7 +173,8 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
           <p className="text-[10px] text-[#808080] leading-relaxed">
             Shake, jiggle or pulse just <span className="text-[#b0b0b0]">part</span> of the frame —
             a hand, a face — and have it follow the subject as they move.
-            Press <span className="text-orange-400">+</span> to add one.
+            Press <span className="text-orange-400">+</span> to add one, then drag the box that
+            appears on the preview over the feature.
           </p>
         )}
 
@@ -256,7 +257,8 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                   ))}
                 </div>
                 <p className="text-[9px] text-[#707070]">
-                  Coordinates are in preview space (854 x 480). Place the box over the feature, then track.
+                  Drag the <span className="text-orange-400">orange box</span> on the preview to place it
+                  over the feature — or type exact values above. Then press Track.
                 </p>
               </div>
 

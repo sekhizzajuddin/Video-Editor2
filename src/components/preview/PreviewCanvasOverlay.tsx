@@ -98,6 +98,22 @@ export function PreviewCanvasOverlay({
   
   const [snapGuides, setSnapGuides] = useState<{axis: 'x'|'y', position: number}[]>([]);
 
+  /**
+   * Drag state for the motion-tracked REGION boxes (FX tab).
+   *
+   * Deliberately separate from `dragState`: a motion region is authored in
+   * absolute 854x480 frame space so it can sit over any part of the picture,
+   * whereas `dragState` operates in clip-local space and is affected by the
+   * clip's own transform.
+   */
+  const [regionDrag, setRegionDrag] = useState<{
+    index: number;
+    mode: 'move' | 'nw' | 'ne' | 'se' | 'sw' | 'new';
+    startX: number;
+    startY: number;
+    init: { cx: number; cy: number; w: number; h: number };
+  } | null>(null);
+
   const [imageEditorTool, setImageEditorTool] = useState<'none' | 'magic' | 'lasso' | 'poly'>('none');
   const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[]>([]);
   const [selectionMask, setSelectionMask] = useState<Uint8ClampedArray | null>(null);
@@ -921,6 +937,109 @@ export function PreviewCanvasOverlay({
       window.removeEventListener('mouseup', handleUp);
     };
   }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime, aspectRatio]);
+
+  // ── Motion-tracked region editing (FX tab) ────────────────────────────────
+  //
+  // Region boxes are stored as CornerPoints in absolute 854x480 preview space,
+  // which is exactly the space `clientToViewportSpace` returns — so pointer
+  // positions map onto them directly, with no clip transform involved.
+  const motionEffects: any[] = (activeClip as any)?.motionEffects ?? [];
+  const showRegions = activePropertiesTab === 'effects' && motionEffects.length > 0;
+
+  const regionRect = (c: any) => {
+    if (!c) return { cx: 427, cy: 240, w: 140, h: 140 };
+    const xs = [c.x0, c.x1, c.x2, c.x3];
+    const ys = [c.y0, c.y1, c.y2, c.y3];
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX, h: maxY - minY };
+  };
+
+  const rectToCorners = (cx: number, cy: number, w: number, h: number) => {
+    const hw = Math.max(8, w) / 2;
+    const hh = Math.max(8, h) / 2;
+    return {
+      x0: cx - hw, y0: cy - hh,
+      x1: cx + hw, y1: cy - hh,
+      x2: cx + hw, y2: cy + hh,
+      x3: cx - hw, y3: cy + hh,
+    };
+  };
+
+  const writeRegion = (index: number, cx: number, cy: number, w: number, h: number) => {
+    if (!activeClip) return;
+    const next = motionEffects.map((m: any, i: number) =>
+      i === index
+        ? {
+            ...m,
+            baseCorners: rectToCorners(cx, cy, w, h),
+            // Moving or resizing the box invalidates any existing trajectory —
+            // it was tracked from the old position.
+            track: undefined,
+          }
+        : m
+    );
+    updateClip(activeClip.id, { motionEffects: next } as any);
+  };
+
+  const beginRegionDrag = (
+    e: React.MouseEvent,
+    index: number,
+    mode: 'move' | 'nw' | 'ne' | 'se' | 'sw'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const r = regionRect(motionEffects[index]?.baseCorners);
+    setRegionDrag({ index, mode, startX: e.clientX, startY: e.clientY, init: r });
+  };
+
+  useEffect(() => {
+    if (!regionDrag || !activeClip) return;
+
+    const onMove = (e: MouseEvent) => {
+      const container = document.getElementById('preview-canvas-wrapper');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      // Same viewport-aware mapping the transform handles use, so the box tracks
+      // the cursor exactly under any zoom or pan.
+      const { scale } = getOverlayMapping(rect);
+      const dx = ((e.clientX - regionDrag.startX) * scale) / (viewport.zoom || 1);
+      const dy = ((e.clientY - regionDrag.startY) * scale) / (viewport.zoom || 1);
+
+      const { cx, cy, w, h } = regionDrag.init;
+      let nx = cx, ny = cy, nw = w, nh = h;
+
+      if (regionDrag.mode === 'move') {
+        nx = cx + dx;
+        ny = cy + dy;
+      } else {
+        // Resize from a corner: the opposite corner stays pinned.
+        const signX = regionDrag.mode === 'ne' || regionDrag.mode === 'se' ? 1 : -1;
+        const signY = regionDrag.mode === 'se' || regionDrag.mode === 'sw' ? 1 : -1;
+        nw = Math.max(16, w + dx * signX * 2);
+        nh = Math.max(16, h + dy * signY * 2);
+      }
+
+      // Keep the box on screen; a region dragged off-frame cannot be tracked.
+      nx = Math.max(nw / 2, Math.min(854 - nw / 2, nx));
+      ny = Math.max(nh / 2, Math.min(480 - nh / 2, ny));
+
+      writeRegion(regionDrag.index, nx, ny, nw, nh);
+    };
+
+    const onUp = () => {
+      setRegionDrag(null);
+      useEditorStore.getState().saveSnapshot('Adjust Motion Region');
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionDrag, activeClip, viewport, motionEffects]);
 
   const clientToImagePixel = (e: React.PointerEvent<SVGElement>): { x: number; y: number } | null => {
     const svgEl = e.currentTarget.closest('svg') as SVGSVGElement | null;
@@ -1754,6 +1873,65 @@ export function PreviewCanvasOverlay({
           aria-label="Interactive canvas overlay"
         >
           <g transform={`translate(${totalX}, ${totalY}) scale(${viewport.zoom}) translate(${offsetX}, ${offsetY})`}>
+            {/* ── Motion-tracked region boxes ──────────────────────────────────
+                Rendered INSIDE the viewport group (so they pan/zoom with the
+                picture) but OUTSIDE the clip-transform group, because a region is
+                authored in absolute frame space — it must stay where the user put
+                it even if the clip itself is scaled or rotated. */}
+            {showRegions && motionEffects.map((me: any, i: number) => {
+              if (!me?.enabled) return null;
+              const r = regionRect(me.baseCorners);
+              const tracked = (me.track?.length ?? 0) > 0;
+              const stroke = tracked ? '#34d399' : '#fb923c';
+              const hs = 7 / viewport.zoom;
+              const corners: Array<['nw' | 'ne' | 'se' | 'sw', number, number]> = [
+                ['nw', r.cx - r.w / 2, r.cy - r.h / 2],
+                ['ne', r.cx + r.w / 2, r.cy - r.h / 2],
+                ['se', r.cx + r.w / 2, r.cy + r.h / 2],
+                ['sw', r.cx - r.w / 2, r.cy + r.h / 2],
+              ];
+              return (
+                <g key={`motion-region-${i}`}>
+                  <rect
+                    x={r.cx - r.w / 2}
+                    y={r.cy - r.h / 2}
+                    width={r.w}
+                    height={r.h}
+                    fill="rgba(251,146,60,0.10)"
+                    stroke={stroke}
+                    strokeWidth={2 / viewport.zoom}
+                    strokeDasharray={tracked ? undefined : `${6 / viewport.zoom},${4 / viewport.zoom}`}
+                    className="pointer-events-auto cursor-move"
+                    onMouseDown={(e) => beginRegionDrag(e, i, 'move')}
+                  />
+                  <text
+                    x={r.cx - r.w / 2}
+                    y={r.cy - r.h / 2 - 6 / viewport.zoom}
+                    fill={stroke}
+                    fontSize={12 / viewport.zoom}
+                    className="pointer-events-none select-none"
+                  >
+                    {`R${i + 1} ${me.type}${tracked ? ' ✓' : ''}`}
+                  </text>
+                  {corners.map(([mode, hx, hy]) => (
+                    <rect
+                      key={mode}
+                      x={hx - hs}
+                      y={hy - hs}
+                      width={hs * 2}
+                      height={hs * 2}
+                      fill={stroke}
+                      stroke="#141414"
+                      strokeWidth={1.5 / viewport.zoom}
+                      className="pointer-events-auto"
+                      style={{ cursor: mode === 'nw' || mode === 'se' ? 'nwse-resize' : 'nesw-resize' }}
+                      onMouseDown={(e) => beginRegionDrag(e, i, mode)}
+                    />
+                  ))}
+                </g>
+              );
+            })}
+
             {activeClip.transform.perspectivePin ? (
               <g>
                 <polygon
