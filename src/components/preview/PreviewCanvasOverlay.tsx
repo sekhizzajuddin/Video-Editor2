@@ -81,6 +81,17 @@ export function PreviewCanvasOverlay({
     baseW?: number;
     baseH?: number;
     initCorners?: LocalCornerPoints;
+    /**
+     * Distance from the clip centre to the POINTER at mousedown, in clip-local
+     * units. Corner resize is driven by the ratio of the current pointer distance
+     * to this, so the exact spot you grab inside the handle no longer matters.
+     */
+    initPointerDist?: number;
+    /** Per-axis |pointer - centre| at mousedown, for the Shift aspect lock. */
+    initPointerDx?: number;
+    initPointerDy?: number;
+    /** Pointer angle (deg) about the clip centre at mousedown, for rotation. */
+    initPointerAngle?: number;
     initMask?: any;
     initVirtualCamera?: { x: number; y: number };
   } | null>(null);
@@ -741,8 +752,14 @@ export function PreviewCanvasOverlay({
         const ptrAbs = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
         const mx = ptrAbs.x;
         const my = ptrAbs.y;
-        let angle = Math.atan2(my - cy, mx - cx) * (180 / Math.PI);
-        angle += 90;
+        // Rotate by the CHANGE in pointer angle since mousedown, applied to the
+        // rotation the clip already had. Setting an absolute angle from the
+        // pointer (the old `angle + 90`) assumed you grabbed the handle at exactly
+        // 12 o'clock relative to the clip: any other grab point — or a clip that
+        // was already rotated — snapped it to a new angle on the first mousemove.
+        const pointerAngleNow = (Math.atan2(my - cy, mx - cx) * 180) / Math.PI;
+        const grabAngle = dragState.initPointerAngle ?? pointerAngleNow;
+        let angle = (dragState.initTransform.rotation || 0) + (pointerAngleNow - grabAngle);
         // CapCut-style rotation snap: Shift -> 15° increments, Alt -> 1° (fine), no modifier -> 0.5°
         if (e.shiftKey) {
           rotation = Math.round(angle / 15) * 15;
@@ -815,22 +832,51 @@ export function PreviewCanvasOverlay({
         const my = ptrAbs.y;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
 
-        const wSpan = baseW * (1 - (crop.left + crop.right) / 100) / 2;
-        const hSpan = baseH * (1 - (crop.top + crop.bottom) / 100) / 2;
+        // Scale from the RATIO of the pointer's distance now vs at mousedown.
+        //
+        // The old code compared the live distance against a computed corner radius
+        // (origDist). Two things made that jump the instant a handle was touched:
+        //
+        //   1. The pointer never lands exactly on the corner — the handle is ~12
+        //      units across — and that grab offset was applied immediately as a
+        //      scale change (up to ~4% just from where inside the handle you
+        //      clicked, and more when zoomed out).
+        //   2. origDist used CROP-ADJUSTED spans while the handles are drawn at the
+        //      un-cropped ±baseW/2, ±baseH/2. With any crop the two disagreed
+        //      badly — a 25% crop on all sides produced an instant 200% jump.
+        //
+        // Using the recorded grab distance makes the gesture relative: at the
+        // moment of grabbing the ratio is exactly 1, so nothing moves until the
+        // pointer actually does. `initPointerDist` is measured with the same
+        // centre and the same viewport-aware mapping, so the two are consistent.
+        const grabDist = dragState.initPointerDist;
+        const initScaleCorner = dragState.initTransform.scale || 100;
 
-        const origDist = Math.sqrt(wSpan ** 2 + hSpan ** 2) * (dragState.initTransform.scale / 100);
-        const scaleDelta = dist / origDist;
-        scale = dragState.initTransform.scale * scaleDelta;
-        // Aspect lock for corners: when Shift, derive from dominant axis
-        if (e.shiftKey) {
-          const initScale = dragState.initTransform.scale;
-          const initCrop = dragState.initCrop || { left: 0, top: 0, right: 0, bottom: 0 };
-          const wRatio = (baseW * (1 - (initCrop.left + initCrop.right) / 100)) / baseW;
-          const hRatio = (baseH * (1 - (initCrop.top + initCrop.bottom) / 100)) / baseH;
-          const sx = (baseW + Math.abs(mx - cx) * 2 - baseW * wRatio) / (baseW * wRatio);
-          const sy = (baseH + Math.abs(my - cy) * 2 - baseH * hRatio) / (baseH * hRatio);
-          scale = initScale * Math.max(sx, sy);
+        if (grabDist !== undefined && grabDist > 1) {
+          scale = initScaleCorner * (dist / grabDist);
+        } else {
+          // Degenerate grab (pointer effectively on the centre): fall back to the
+          // geometric radius rather than dividing by ~0.
+          const wSpanFallback = baseW / 2;
+          const hSpanFallback = baseH / 2;
+          const origDist = Math.hypot(wSpanFallback, hSpanFallback) * (initScaleCorner / 100);
+          scale = origDist > 0 ? initScaleCorner * (dist / origDist) : initScaleCorner;
         }
+
+        // Aspect lock for corners: Shift drives scale from whichever axis the
+        // pointer has moved most, as a ratio against that axis' grab distance —
+        // so it starts at exactly 1 and cannot jump either.
+        if (e.shiftKey) {
+          const gx = dragState.initPointerDx ?? 0;
+          const gy = dragState.initPointerDy ?? 0;
+          const nx = Math.abs(mx - cx);
+          const ny = Math.abs(my - cy);
+          const useX = Math.abs(nx - gx) >= Math.abs(ny - gy);
+          const grabAxis = useX ? gx : gy;
+          const nowAxis = useX ? nx : ny;
+          if (grabAxis > 1) scale = initScaleCorner * (nowAxis / grabAxis);
+        }
+
         scale = Math.max(10, Math.min(1000, e.altKey ? scale : Math.round(scale * 10) / 10));
         getNewAnimations('transform.scale', scale);
       }
@@ -1442,6 +1488,29 @@ export function PreviewCanvasOverlay({
           (framing?.scale !== undefined ? framing.scale / 100 : 1),
         rotation: hasKf('transform.rotation') ? aRot : baseTransform.rotation ?? 0,
       },
+      // Distance from the clip centre to the pointer at the moment of grabbing.
+      // Corner resize uses the RATIO against this, so clicking anywhere inside the
+      // handle (it is ~12 units across) no longer instantly rescales the clip.
+      ...(() => {
+        const container = document.getElementById('preview-canvas-wrapper');
+        if (!container) return {};
+        const r = container.getBoundingClientRect();
+        const p = clientToViewportSpace(e.clientX, e.clientY, r, viewport);
+        const gx = Math.abs(p.x - (offsetX + W / 2 + aX));
+        const gy = Math.abs(p.y - (offsetY + H / 2 + aY));
+        return {
+          initPointerDist: Math.hypot(gx, gy),
+          initPointerDx: gx,
+          initPointerDy: gy,
+          initPointerAngle:
+            (Math.atan2(
+              p.y - (offsetY + H / 2 + aY),
+              p.x - (offsetX + W / 2 + aX)
+            ) *
+              180) /
+            Math.PI,
+        };
+      })(),
       initCrop: { left: aCropLeft, top: aCropTop, right: aCropRight, bottom: aCropBot },
       initMask: { ...mask },
       // Resize maths expects the UNSCALED base extent (it applies transform.scale
