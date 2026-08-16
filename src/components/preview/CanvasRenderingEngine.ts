@@ -842,9 +842,32 @@ export async function renderCanvasEngine({
           };
         }
       } else {
-        const vw = mediaItem.width || 854;
-        const vh = mediaItem.height || 480;
-        const fitScale = Math.min(W / vw, H / vh);
+        // Text media has no intrinsic width/height, so falling back to 854x480
+        // projected a full-frame quad and the 3D rotate looked wrong (the glyphs
+        // were warped as if they filled the canvas). Measure the text box instead,
+        // mirroring previewMath.getClipDimensions.
+        const isTextClip =
+          mediaItem.type === 'text' || !!clip.textSettings || clip.mediaId === 'text-placeholder';
+
+        let vw: number;
+        let vh: number;
+        let fitScale: number;
+
+        if (isTextClip) {
+          const tsm = clip.textSettings;
+          const fontSizeM = Number(tsm?.fontSize) || 48;
+          const linesM = String(tsm?.text ?? '').split('\n');
+          const longestM = linesM.reduce((m: number, l: string) => Math.max(m, l.length), 0);
+          vw = Math.max(80, longestM * fontSizeM * 0.6 + 40);
+          vh = linesM.length * (fontSizeM * 1.35) + 20;
+          // Text is drawn at its natural size (no fit-to-frame downscale).
+          fitScale = 1;
+        } else {
+          vw = mediaItem.width || 854;
+          vh = mediaItem.height || 480;
+          fitScale = Math.min(W / vw, H / vh);
+        }
+
         corners = getProjectedCorners(
           vw, vh,
           (aScale / 100) * fitScale,
@@ -1353,8 +1376,65 @@ export async function renderCanvasEngine({
         }
       }
 
+      // ── Crop + perspective-warp support for TEXT ─────────────────────────
+      //
+      // The video/image branch renders into an offscreen canvas whenever crop,
+      // perspective or pixel effects are needed. The text branch drew straight to
+      // the target instead, so two Transform-tab controls silently did nothing on
+      // text (and on PiP text): Crop, and Perspective Warp / 3D rotate.
+      //
+      // Perspective is the reason this cannot simply be a clip rect: when
+      // `hasPerspectiveWarp` is set, the shared transform block above is SKIPPED
+      // (the corner projection replaces it), so a text clip received no transform
+      // at all and rendered unwarped at the origin.
+      //
+      // Render the glyphs into a buffer, then reuse exactly the same crop and
+      // drawPerspectiveTexture paths the video branch uses.
+      const textNeedsCrop = cLeft > 0 || cRight > 0 || cTop > 0 || cBot > 0;
+      const textNeedsOffscreen = textNeedsCrop || !!corners;
+
+      let textTargetCtx = ctx;
+      let textBuffer: HTMLCanvasElement | null = null;
+
+      // Buffer must match the quad that `corners` was projected from, otherwise
+      // drawPerspectiveTexture stretches the glyphs. `corners` is built from the
+      // measured text box (see the getProjectedCorners branch above), so measure
+      // it the same way here. A little padding keeps descenders and strokes from
+      // clipping at the edges.
+      const tsMeasure = clip.textSettings;
+      const measFont = Number(tsMeasure?.fontSize) || 48;
+      const measLines = String(tsMeasure?.text ?? '').split('\n');
+      const measLongest = measLines.reduce((m: number, l: string) => Math.max(m, l.length), 0);
+      const textBufW = Math.max(1, Math.round(Math.max(80, measLongest * measFont * 0.6 + 40)));
+      const textBufH = Math.max(1, Math.round(measLines.length * (measFont * 1.35) + 20));
+
+      if (textNeedsOffscreen) {
+        textBuffer = getOrCreateCanvas(
+          offscreenCanvasPool.current,
+          `text_${clip.id}_${textBufW}x${textBufH}`,
+          textBufW,
+          textBufH
+        );
+        const tCtx = textBuffer.getContext('2d');
+        if (tCtx) {
+          tCtx.setTransform(1, 0, 0, 1, 0, 0);
+          tCtx.clearRect(0, 0, textBufW, textBufH);
+          // Draw centred in the buffer; the buffer is then placed as a unit.
+          tCtx.translate(textBufW / 2, textBufH / 2);
+          textTargetCtx = tCtx;
+        } else {
+          textBuffer = null;
+        }
+      }
+
+      // Swap the drawing target for the remainder of the text branch. `ctx` is a
+      // local binding, so every fillText/strokeText below is redirected untouched.
+      const textOuterCtx = ctx;
+      ctx = textTargetCtx;
+
       ctx.save();
-      ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+      // Opacity/blend are applied when the buffer is composited, not inside it.
+      ctx.globalAlpha = textBuffer ? animOpacity : ctx.globalAlpha * animOpacity;
       ctx.translate(animOffsetX, animOffsetY);
       ctx.scale(animScaleX, animScaleY);
 
@@ -1436,6 +1516,56 @@ export async function renderCanvasEngine({
       }
 
       ctx.restore();
+
+      // ── Composite the text buffer, applying crop then perspective ──────────
+      if (textBuffer) {
+        ctx = textOuterCtx;
+
+        // Crop is expressed as fractions of the clip's own box, matching the
+        // video branch: trim the source rect and place it at the same fraction of
+        // the destination so the remaining pixels do not shift.
+        const sx = cLeft * textBufW;
+        const sy = cTop * textBufH;
+        const sw = Math.max(1, textBufW * (1 - cLeft - cRight));
+        const sh = Math.max(1, textBufH * (1 - cTop - cBot));
+
+        if (corners) {
+          // Perspective replaces the (skipped) shared transform entirely, so the
+          // cropped buffer is projected straight onto the four corner points.
+          if (textNeedsCrop) {
+            const cropped = getOrCreateCanvas(
+              offscreenCanvasPool.current,
+              `text_crop_${clip.id}`,
+              Math.round(sw),
+              Math.round(sh)
+            );
+            const cCtx = cropped.getContext('2d');
+            if (cCtx) {
+              cCtx.setTransform(1, 0, 0, 1, 0, 0);
+              cCtx.clearRect(0, 0, cropped.width, cropped.height);
+              cCtx.drawImage(textBuffer, sx, sy, sw, sh, 0, 0, cropped.width, cropped.height);
+              ctx.save();
+              ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+              drawPerspectiveTexture(ctx, cropped, corners);
+              ctx.restore();
+            }
+          } else {
+            ctx.save();
+            ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+            drawPerspectiveTexture(ctx, textBuffer, corners);
+            ctx.restore();
+          }
+        } else {
+          // No perspective: the shared transform block already positioned `ctx`,
+          // so blit the buffer back around the origin it was drawn about.
+          const dxT = -textBufW / 2 + sx;
+          const dyT = -textBufH / 2 + sy;
+          ctx.save();
+          ctx.globalAlpha = ctx.globalAlpha * animOpacity;
+          ctx.drawImage(textBuffer, sx, sy, sw, sh, dxT, dyT, sw, sh);
+          ctx.restore();
+        }
+      }
     }
 
     ctx.restore();
