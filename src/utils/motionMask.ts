@@ -63,6 +63,36 @@ export interface ColorSignature {
    * no hue to go on, so brightness carries the signal and this rises above 1.
    */
   lumaWeight: number;
+
+  // ── Spatial footprint ─────────────────────────────────────────────────────
+  /**
+   * Radius of the painted stroke itself, in analysis pixels.
+   *
+   * This is what stops "paint the sleeve" becoming "select the whole gown". A
+   * sleeve and a skirt are the same cloth — identical chroma, identical luma,
+   * and physically connected — so NO colour metric can separate them. The only
+   * thing that distinguishes the part the user pointed at is how far it extends,
+   * so we record the intended extent and refuse to grow far beyond it.
+   */
+  patchRadius: number;
+  /** Area the user actually painted, in analysis pixels. Drives scale tracking. */
+  patchArea: number;
+
+  // ── Texture footprint ─────────────────────────────────────────────────────
+  /**
+   * Mean local luma contrast of the painted pixels — a cheap texture descriptor.
+   *
+   * Two surfaces can share a colour and still look nothing alike: gold embroidery
+   * is busy and high-contrast, the plain cloth beside it is smooth. Comparing
+   * local detail separates them where colour cannot. It is a coarse descriptor,
+   * not a true feature vector, but it is stable under scale changes and costs
+   * one pass over the frame.
+   */
+  textureMean: number;
+  /** Spread of that contrast, used to size the acceptance window. */
+  textureStd: number;
+  /** How strongly texture counts. 0 disables it (e.g. a featureless surface). */
+  textureWeight: number;
   /** Chroma saturation of the sample — distance from neutral. Diagnostic. */
   saturation: number;
   /** Number of pixels sampled — low counts mean a less reliable signature. */
@@ -78,6 +108,8 @@ export interface MaskFrameResult {
   centroid: { x: number; y: number } | null;
   /** Fraction of the frame that matched, 0-1. Useful for sanity checks. */
   coverage: number;
+  /** Number of selected pixels. Drives the per-frame scale estimate. */
+  area: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +129,44 @@ export function rgbToYCbCr(r: number, g: number, b: number): { y: number; cb: nu
     cb: -0.168736 * r - 0.331264 * g + 0.5 * b + 128,
     cr: 0.5 * r - 0.418688 * g - 0.081312 * b + 128,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Texture
+// ---------------------------------------------------------------------------
+
+/**
+ * Local luma contrast at one pixel: the mean absolute difference from its
+ * 4-neighbours, sampled at `gap` pixels out.
+ *
+ * This is the "digital footprint" beyond colour. Embroidery, hair and fabric
+ * weave produce high values; skin, plain cloth, sky and concrete produce low
+ * ones. Sampling at a gap rather than adjacent pixels makes it far less
+ * sensitive to compression noise, and keeps it meaningful after the frame has
+ * been downscaled for analysis.
+ */
+function localContrast(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  gap: number = 2
+): number {
+  const lumaAt = (px: number, py: number): number => {
+    const cx = px < 0 ? 0 : px >= width ? width - 1 : px;
+    const cy = py < 0 ? 0 : py >= height ? height - 1 : py;
+    const p = (cy * width + cx) * 4;
+    return 0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2];
+  };
+  const c = lumaAt(x, y);
+  return (
+    (Math.abs(lumaAt(x - gap, y) - c) +
+      Math.abs(lumaAt(x + gap, y) - c) +
+      Math.abs(lumaAt(x, y - gap) - c) +
+      Math.abs(lumaAt(x, y + gap) - c)) /
+    4
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +198,12 @@ export function buildColorSignature(
   const total = width * height;
   const step = Math.max(1, Math.floor(total / 8000));
 
+  // Texture and spatial extent are measured over the painted pixels too.
+  const textures: number[] = [];
+  let paintedCount = 0;
+  let sumX = 0;
+  let sumY = 0;
+
   for (let i = 0; i < total; i += step) {
     if (!strokeMask[i]) continue;
     const p = i * 4;
@@ -136,6 +212,16 @@ export function buildColorSignature(
     samples.push({ cb, cr, y });
     if (y < lumaMin) lumaMin = y;
     if (y > lumaMax) lumaMax = y;
+    textures.push(localContrast(pixels, width, height, i % width, (i / width) | 0));
+  }
+
+  // Full-resolution pass for extent: the subsampled loop above is fine for a
+  // colour distribution but would badly under-count area.
+  for (let i = 0; i < total; i++) {
+    if (!strokeMask[i]) continue;
+    paintedCount++;
+    sumX += i % width;
+    sumY += (i / width) | 0;
   }
 
   if (samples.length < 4) return null;
@@ -181,11 +267,37 @@ export function buildColorSignature(
     lumaWeight = W_NEUTRAL + t * (W_VIVID - W_NEUTRAL);
   }
 
+  // ── Spatial footprint ────────────────────────────────────────────────────
+  // Radius of a circle with the same area as the stroke. Using area rather than
+  // the stroke's bounding box makes this stable for a squiggle as well as a dab.
+  const patchArea = Math.max(1, paintedCount);
+  const patchRadius = Math.max(3, Math.sqrt(patchArea / Math.PI));
+
+  // ── Texture footprint ────────────────────────────────────────────────────
+  let textureMean = 0;
+  let textureStd = 0;
+  if (textures.length > 0) {
+    textureMean = textures.reduce((a, b) => a + b, 0) / textures.length;
+    const varSum = textures.reduce((a, b) => a + (b - textureMean) ** 2, 0);
+    textureStd = Math.sqrt(varSum / textures.length);
+  }
+
+  // Only trust texture when the painted area HAS a distinctive amount of it.
+  // On a smooth surface every candidate scores near zero, so the comparison
+  // carries no information and would only add noise — disable it there.
+  const TEXTURE_MIN_SIGNAL = 4;
+  const textureWeight = textureMean >= TEXTURE_MIN_SIGNAL ? 0.6 : 0;
+
   return {
     centers,
     tolerance,
     lumaWeight,
     saturation,
+    patchRadius,
+    patchArea,
+    textureMean,
+    textureStd,
+    textureWeight,
     // Widen the luma window: the feature will pass through brighter and darker
     // light than the single frame we sampled.
     lumaMin: Math.max(0, lumaMin - 60),
@@ -335,11 +447,39 @@ export function computeMaskForFrame(
   height: number,
   sig: ColorSignature,
   seed?: { x: number; y: number } | null,
-  opts: { minScore?: number; searchRadius?: number } = {}
+  opts: {
+    minScore?: number;
+    searchRadius?: number;
+    /**
+     * Current size of the feature relative to when it was painted.
+     *
+     * The user's observation: a subject walking toward camera grows, so a patch
+     * measured in fixed pixels is wrong everywhere except the frame it was
+     * painted on. The tracker re-estimates this each frame from the measured
+     * blob area and feeds it back, so the extent limit breathes with the
+     * subject instead of clipping them up close or leaking when they recede.
+     */
+    scaleHint?: number;
+    /** Set false to ignore the texture footprint (diagnostics/tests). */
+    useTexture?: boolean;
+    /**
+     * How far the fill may spread, as a multiple of the painted radius.
+     * Defaults to 2.2. Zero or negative disables the bound entirely.
+     */
+    spreadLimit?: number;
+  } = {}
 ): MaskFrameResult {
   const n = width * height;
   const raw = new Uint8ClampedArray(n);
   const minScore = opts.minScore ?? 0.15;
+  const scaleHint = opts.scaleHint && opts.scaleHint > 0 ? opts.scaleHint : 1;
+
+  const useTexture =
+    (opts.useTexture ?? true) && (sig.textureWeight ?? 0) > 0 && sig.textureMean > 0;
+  // Acceptance window for local contrast. Widened by the sample's own spread so
+  // a naturally varied surface is not penalised, and floored so it never becomes
+  // so tight that nothing passes.
+  const texTol = Math.max(6, (sig.textureStd ?? 0) * 1.5 + sig.textureMean * 0.9);
 
   // Optional search window around the seed. Bounding the search keeps cost down
   // AND prevents a far-away colour match from stealing the blob after a cut.
@@ -357,12 +497,40 @@ export function computeMaskForFrame(
       const i = y * width + x;
       const p = i * 4;
       if (pixels[p + 3] < 8) continue;
-      const s = scorePixel(sig, pixels[p], pixels[p + 1], pixels[p + 2]);
+      let s = scorePixel(sig, pixels[p], pixels[p + 1], pixels[p + 2]);
+
+      // Texture gate: reject a colour match whose local detail is nothing like
+      // what was painted. This is what separates busy gold embroidery from the
+      // plain cloth around it, which are close enough in colour to be
+      // indistinguishable otherwise.
+      if (s > 0 && useTexture) {
+        const t = localContrast(pixels, width, height, x, y);
+        const dt = Math.abs(t - sig.textureMean);
+        if (dt > texTol) {
+          s = 0;
+        } else {
+          // Soft penalty rather than a cliff, so the mask edge stays smooth.
+          s *= 1 - (sig.textureWeight ?? 0) * (dt / texTol);
+        }
+      }
+
       if (s >= minScore) raw[i] = Math.round(s * 255);
     }
   }
 
-  const connected = seed ? keepConnectedBlob(raw, width, height, seed) : raw;
+  // ── Bound the fill to the painted footprint ──────────────────────────────
+  // Scaled by the current subject size, with generous headroom (x2.2) so the
+  // selection can follow a limb that swings or a garment that billows, while
+  // still refusing to swallow an entire outfit.
+  const EXTENT_HEADROOM = opts.spreadLimit ?? 2.2;
+  const maxRadius =
+    sig.patchRadius && sig.patchRadius > 0 && EXTENT_HEADROOM > 0
+      ? sig.patchRadius * scaleHint * EXTENT_HEADROOM
+      : undefined;
+
+  const connected = seed
+    ? keepConnectedBlob(raw, width, height, seed, maxRadius)
+    : raw;
 
   let sumX = 0;
   let sumY = 0;
@@ -383,6 +551,7 @@ export function computeMaskForFrame(
     height,
     centroid: count > 0 ? { x: sumX / count, y: sumY / count } : null,
     coverage: count / n,
+    area: count,
   };
 }
 
@@ -397,10 +566,24 @@ function keepConnectedBlob(
   raw: Uint8ClampedArray,
   width: number,
   height: number,
-  seed: { x: number; y: number }
+  seed: { x: number; y: number },
+  /**
+   * Hard limit on how far the fill may travel from the seed, in pixels.
+   *
+   * THIS is what stops "paint the sleeve" from becoming "select the whole
+   * outfit". The sleeve and the skirt are one garment: same chroma, same luma,
+   * physically connected. Colour can never separate them, so the fill has to be
+   * told how big the thing the user pointed at actually was.
+   *
+   * Omitted = unbounded (the historical behaviour), used when no footprint is
+   * known.
+   */
+  maxRadius?: number
 ): Uint8ClampedArray {
   const n = width * height;
   const out = new Uint8ClampedArray(n);
+  const limit = maxRadius && maxRadius > 0 ? maxRadius : Infinity;
+  const limitSq = limit === Infinity ? Infinity : limit * limit;
 
   let sx = Math.round(seed.x);
   let sy = Math.round(seed.y);
@@ -428,10 +611,23 @@ function keepConnectedBlob(
     const x = idx % width;
     const y = (idx / width) | 0;
 
-    if (x > 0) { const t = idx - 1; if (!seen[t] && raw[t] > 0) { seen[t] = 1; stack[sp++] = t; } }
-    if (x < width - 1) { const t = idx + 1; if (!seen[t] && raw[t] > 0) { seen[t] = 1; stack[sp++] = t; } }
-    if (y > 0) { const t = idx - width; if (!seen[t] && raw[t] > 0) { seen[t] = 1; stack[sp++] = t; } }
-    if (y < height - 1) { const t = idx + width; if (!seen[t] && raw[t] > 0) { seen[t] = 1; stack[sp++] = t; } }
+    // Only step to a neighbour that is still within the allowed extent. Testing
+    // at push time (rather than pop) keeps the stack small on a big garment.
+    const push = (t: number, tx: number, ty: number) => {
+      if (seen[t] || raw[t] === 0) return;
+      if (limitSq !== Infinity) {
+        const dx = tx - seed.x;
+        const dy = ty - seed.y;
+        if (dx * dx + dy * dy > limitSq) return;
+      }
+      seen[t] = 1;
+      stack[sp++] = t;
+    };
+
+    if (x > 0) push(idx - 1, x - 1, y);
+    if (x < width - 1) push(idx + 1, x + 1, y);
+    if (y > 0) push(idx - width, x, y - 1);
+    if (y < height - 1) push(idx + width, x, y + 1);
   }
 
   return out;

@@ -115,6 +115,16 @@ export interface MotionEffectSettings {
   /** Grow/shrink the matched mask, in mask pixels. */
   maskChoke?: number;
   /**
+   * How far the selection may spread beyond the painted stroke, as a multiple of
+   * the stroke's own radius.
+   *
+   * This is the control for "I painted a sleeve but it selected the whole
+   * outfit". Colour cannot distinguish parts of one garment — they are the same
+   * cloth — so extent is the only lever. Low values hug the stroke; high values
+   * let the selection follow a whole limb. 0 = unbounded (legacy behaviour).
+   */
+  spreadLimit?: number;
+  /**
    * Per-frame cached masks, built when the user presses Re-track.
    * Cached because scoring every pixel each frame is far too slow for playback.
    */
@@ -138,6 +148,7 @@ export const DEFAULT_MOTION_EFFECT: MotionEffectSettings = {
   brushSize: 40,
   colorTolerance: 22,
   maskChoke: 0,
+  spreadLimit: 2.2,
 };
 
 /** UI metadata: which controls actually do something for each effect. */

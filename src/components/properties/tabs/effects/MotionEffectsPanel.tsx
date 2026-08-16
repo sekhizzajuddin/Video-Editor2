@@ -158,6 +158,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
           {
             tolerance: effect.colorTolerance ?? 22,
             choke: effect.maskChoke ?? 0,
+            spreadLimit: effect.spreadLimit ?? 2.2,
             feather: Math.round((effect.feather ?? 12) / 3),
             // Analyse in the same space the stroke was painted in.
             aspectRatio,
@@ -437,6 +438,29 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                     />
                     <p className="text-[9px] text-[#707070] mt-1">
                       Higher catches more shades of the painted colour. Re-track after changing.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] text-[#a0a0a0] font-medium">Spread Limit</label>
+                      <span className="text-[10px] text-orange-400 font-mono">
+                        {(effect.spreadLimit ?? 2.2) === 0
+                          ? 'off'
+                          : `${(effect.spreadLimit ?? 2.2).toFixed(1)}x`}
+                      </span>
+                    </div>
+                    <input
+                      type="range" min={0} max={8} step={0.2}
+                      value={effect.spreadLimit ?? 2.2}
+                      onChange={(e) => patch(index, { spreadLimit: parseFloat(e.target.value) })}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-orange-500 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-[#707070] mt-1">
+                      How far the selection may spread beyond your stroke. Parts of one
+                      garment share a colour exactly, so this — not tolerance — is what
+                      stops a sleeve becoming the whole outfit. Lower to tighten.
+                      <span className="text-[#5a5a5a]"> 0 = unlimited.</span>
                     </p>
                   </div>
 
