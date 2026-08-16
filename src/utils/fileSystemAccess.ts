@@ -63,7 +63,7 @@ export function loadProjectData(data: any) {
     historyIndex: 0,
     projectFileHandle: data._handle || null,
     projectName: data.projectName || 'Untitled Project',
-    projectId: data.projectId || 'default',
+    projectId: data.projectId && data.projectId !== 'default' ? data.projectId : crypto.randomUUID(),
   });
 
   useEditorStore.getState().recalcTotalDuration();
