@@ -100,7 +100,7 @@ export class Compositor {
     this.ctx.imageSmoothingQuality = 'high';
   }
 
-  public render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
+  public async render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
     // Fill background
     this.ctx.fillStyle = '#0a0a0a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -133,13 +133,13 @@ export class Compositor {
           this.ctx.translate(-CW / 2, -CH / 2);
         }
 
-        let vw = layer.frame.displayWidth;
-        let vh = layer.frame.displayHeight;
+        let vw = layer.frame.displayWidth || (layer.frame as any).codedWidth || (layer.frame as any).width || 1920;
+        let vh = layer.frame.displayHeight || (layer.frame as any).codedHeight || (layer.frame as any).height || 1080;
         const srcRot = layer.sourceRotation || 0;
         const isRotated = srcRot === 90 || srcRot === 270 || srcRot === -90;
         if (isRotated) {
-          vw = layer.frame.displayHeight;
-          vh = layer.frame.displayWidth;
+          vw = layer.frame.displayHeight || (layer.frame as any).codedHeight || (layer.frame as any).height || 1080;
+          vh = layer.frame.displayWidth || (layer.frame as any).codedWidth || (layer.frame as any).width || 1920;
         }
 
         const W = this.canvas.width;
@@ -192,6 +192,16 @@ export class Compositor {
         // 6. Draw the frame, applying source metadata rotation
         this.ctx.save();
         
+        // Convert VideoFrame to ImageBitmap to fix blank rendering on 2D contexts for YUV frames
+        let drawable: CanvasImageSource = layer.frame;
+        try {
+          if (typeof createImageBitmap !== 'undefined') {
+            drawable = await createImageBitmap(layer.frame);
+          }
+        } catch (e) {
+          console.warn('Failed to create ImageBitmap from frame', e);
+        }
+        
         if (layer.chromaKey && layer.chromaKey.enabled) {
           // Optimization: Draw to a tightly-bound offscreen canvas first to apply Chroma Key ONLY 
           // to this layer's pixels, avoiding expensive 1080p full-canvas iteration and preventing 
@@ -204,16 +214,16 @@ export class Compositor {
             tempCtx.translate(finalW / 2, finalH / 2);
             tempCtx.rotate((srcRot * Math.PI) / 180);
             if (isRotated) {
-              tempCtx.drawImage(layer.frame, -finalH / 2, -finalW / 2, finalH, finalW);
+              tempCtx.drawImage(drawable, -finalH / 2, -finalW / 2, finalH, finalW);
             } else {
-              tempCtx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
+              tempCtx.drawImage(drawable, -finalW / 2, -finalH / 2, finalW, finalH);
             }
           } else {
             if (isRotated) {
               // Should not happen if srcRot === 0, but fallback
-              tempCtx.drawImage(layer.frame, 0, 0, finalH, finalW);
+              tempCtx.drawImage(drawable, 0, 0, finalH, finalW);
             } else {
-              tempCtx.drawImage(layer.frame, 0, 0, finalW, finalH);
+              tempCtx.drawImage(drawable, 0, 0, finalW, finalH);
             }
           }
           tempCtx.restore();
@@ -228,10 +238,14 @@ export class Compositor {
           }
           
           if (isRotated) {
-            this.ctx.drawImage(layer.frame, -finalH / 2, -finalW / 2, finalH, finalW);
+            this.ctx.drawImage(drawable, -finalH / 2, -finalW / 2, finalH, finalW);
           } else {
-            this.ctx.drawImage(layer.frame, -finalW / 2, -finalH / 2, finalW, finalH);
+            this.ctx.drawImage(drawable, -finalW / 2, -finalH / 2, finalW, finalH);
           }
+        }
+        
+        if (drawable !== layer.frame) {
+          (drawable as ImageBitmap).close?.();
         }
         
         this.ctx.restore();

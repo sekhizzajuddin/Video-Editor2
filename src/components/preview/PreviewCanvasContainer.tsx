@@ -883,6 +883,7 @@ export function PreviewCanvasContainer() {
       >
         <canvas
           id="preview-canvas"
+          data-preview-canvas
           ref={canvasRef}
           width={activeCanvasWidth}
           height={activeCanvasHeight}

@@ -87,6 +87,8 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
     });
   };
 
+
+
   const renderSliderControl = (
     label: string,
     propName: keyof ClipObjectRemovalSettings,
@@ -267,6 +269,7 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
               />
             </label>
           </div>
+
 
           {/* Position and Geometry Sliders */}
           <div className="space-y-3 pt-1">
