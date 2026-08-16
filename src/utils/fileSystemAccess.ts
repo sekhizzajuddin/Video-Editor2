@@ -81,14 +81,14 @@ export async function getProcutFilesInDirectory(): Promise<any[]> {
   const projects = [];
   
   for await (const entry of dirHandle.values()) {
-    if (entry.kind === 'file' && entry.name.endsWith('.procut')) {
+    if (entry.kind === 'file' && (entry.name.endsWith('.procut') || entry.name.endsWith('.json'))) {
       try {
         const file = await entry.getFile();
         const text = await file.text();
         const data = JSON.parse(text);
         projects.push({
           id: data.projectId || entry.name,
-          name: data.projectName || entry.name.replace('.procut', ''),
+          name: data.projectName || entry.name.replace('.procut', '').replace('.json', ''),
           lastModified: file.lastModified,
           handle: entry,
           data: data
