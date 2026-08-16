@@ -49,6 +49,10 @@ export interface MaskTrackResult {
   height: number;
   frames: Array<{ time: number; rle: number[]; centroid: { x: number; y: number } | null }>;
   signature: ColorSignature;
+  /** Mean fraction of the frame selected. Lets the UI warn about a bad stroke. */
+  avgCoverage: number;
+  /** How many frames were rejected by the runaway-blob guard. */
+  leakedFrames: number;
 }
 
 /**
@@ -173,6 +177,10 @@ export async function trackColorMask(
   const step = 1 / fps;
   const steps = Math.max(1, Math.ceil(duration / step));
   const frames: MaskTrackResult['frames'] = [];
+  /** Last mask that passed the leak check, reused when a frame goes bad. */
+  let lastGoodMask: Uint8ClampedArray | null = null;
+  const coverageSamples: number[] = [];
+  let leakedFrames = 0;
 
   // Bound the per-frame search around the last known position: keeps the cost
   // down and stops a distant same-coloured object from stealing the blob.
@@ -205,25 +213,57 @@ export async function trackColorMask(
       { searchRadius }
     );
 
+    // ── Runaway-blob guard ───────────────────────────────────────────────────
+    //
+    // The mask is grown by flood fill, so if the subject touches anything of a
+    // similar tone the fill escapes into it and the blob balloons to most of the
+    // frame. That is bad twice over: the effect is applied to the background, and
+    // the centroid is dragged toward the leak, so the NEXT frame searches in the
+    // wrong place and the error compounds until the track is lost entirely.
+    //
+    // A selection covering more than half the frame is never what someone painting
+    // a hand or a face meant. Treat it as a failed frame: keep the previous seed so
+    // the search stays anchored where the subject actually was, and let the
+    // established mask stand rather than committing the leak to the cache.
+    const LEAK_COVERAGE = 0.5;
+    const leaked = result.coverage > LEAK_COVERAGE;
+    coverageSamples.push(result.coverage);
+    if (leaked) leakedFrames++;
+
     let mask = result.mask;
-    if (opts.choke) mask = chokeMask(mask, analysisW, analysisH, opts.choke);
-    if (opts.feather) mask = featherMask(mask, analysisW, analysisH, opts.feather);
+    if (leaked && lastGoodMask) {
+      mask = lastGoodMask;
+    } else if (!leaked) {
+      if (opts.choke) mask = chokeMask(mask, analysisW, analysisH, opts.choke);
+      if (opts.feather) mask = featherMask(mask, analysisW, analysisH, opts.feather);
+      lastGoodMask = mask;
+    }
 
     frames.push({
       time: rel,
       rle: encodeMaskRle(mask),
-      centroid: result.centroid,
+      centroid: leaked ? seed : result.centroid,
     });
 
     // Follow the blob: next frame searches around where we just found it.
     // Falling back to the previous seed (rather than null) means a brief
-    // occlusion does not reset the tracker to a global search.
-    if (result.centroid) seed = result.centroid;
+    // occlusion does not reset the tracker to a global search. A leaked frame
+    // deliberately does NOT move the seed — see the guard above.
+    if (result.centroid && !leaked) seed = result.centroid;
 
     opts.onProgress?.((i + 1) / (steps + 1));
   }
 
   if (frames.length === 0) return null;
 
-  return { width: analysisW, height: analysisH, frames, signature };
+  return {
+    width: analysisW,
+    height: analysisH,
+    frames,
+    signature,
+    avgCoverage: coverageSamples.length
+      ? coverageSamples.reduce((a, b) => a + b, 0) / coverageSamples.length
+      : 0,
+    leakedFrames,
+  };
 }

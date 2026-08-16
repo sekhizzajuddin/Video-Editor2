@@ -180,7 +180,32 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
           },
         });
         useEditorStore.getState().saveSnapshot('Track Colour Region');
-        toast.success(`Analysed ${result.frames.length} frames — the effect now follows the painted colour.`);
+
+        // Tell the user WHAT was selected, not just that something happened.
+        // A stroke on a low-contrast subject can match half the frame; silently
+        // reporting success there is how you end up thinking the feature is
+        // broken rather than that the tolerance needs lowering.
+        const pct = Math.round(result.avgCoverage * 100);
+        if (result.avgCoverage > 0.35) {
+          toast.warning(
+            `Selection covers ~${pct}% of the frame — that is probably grabbing the background. ` +
+              `Lower Colour Tolerance and Re-track.`,
+            { duration: 7000 }
+          );
+        } else if (result.avgCoverage < 0.004) {
+          toast.warning(
+            `Selection is only ~${pct}% of the frame — barely anything matched. ` +
+              `Raise Colour Tolerance, or paint a broader stroke, and Re-track.`,
+            { duration: 7000 }
+          );
+        } else {
+          toast.success(
+            `Analysed ${result.frames.length} frames — selection ~${pct}% of frame.` +
+              (result.leakedFrames > 0
+                ? ` (${result.leakedFrames} unstable frame(s) held steady.)`
+                : '')
+          );
+        }
       } else {
         // ── Box tracking ───────────────────────────────────────────────────
         if (!effect.baseCorners) {

@@ -42,13 +42,29 @@ export type RegionMode = 'box' | 'paint';
  * plus a luma range used only as a soft guard against pure black/white areas.
  */
 export interface ColorSignature {
-  /** Cluster centres in (Cb, Cr) space. */
-  centers: Array<{ cb: number; cr: number; weight: number }>;
+  /**
+   * Cluster centres. Each carries its own LUMA as well as chroma: for a
+   * desaturated subject (cream, white, grey, black) brightness is the only thing
+   * that distinguishes it from the background, so it has to be part of the match
+   * rather than a loose gate.
+   */
+  centers: Array<{ cb: number; cr: number; y: number; weight: number }>;
   /** Chroma radius that counted as "matching" when the signature was built. */
   tolerance: number;
   /** Luma range of the sample, widened a little for shading headroom. */
   lumaMin: number;
   lumaMax: number;
+  /**
+   * How strongly luma counts towards the match, relative to chroma.
+   *
+   * Derived from how saturated the painted colour is. A vivid colour (a red
+   * glove) is identified by its hue alone and should tolerate large brightness
+   * swings, so this is near 0. A near-neutral colour (an ivory gown) has almost
+   * no hue to go on, so brightness carries the signal and this rises above 1.
+   */
+  lumaWeight: number;
+  /** Chroma saturation of the sample — distance from neutral. Diagnostic. */
+  saturation: number;
   /** Number of pixels sampled — low counts mean a less reliable signature. */
   sampleCount: number;
 }
@@ -103,7 +119,7 @@ export function buildColorSignature(
   tolerance: number = 22,
   maxClusters: number = 3
 ): ColorSignature | null {
-  const samples: Array<{ cb: number; cr: number }> = [];
+  const samples: Array<{ cb: number; cr: number; y: number }> = [];
   let lumaMin = 255;
   let lumaMax = 0;
 
@@ -117,7 +133,7 @@ export function buildColorSignature(
     const p = i * 4;
     if (pixels[p + 3] < 8) continue; // ignore transparent
     const { y, cb, cr } = rgbToYCbCr(pixels[p], pixels[p + 1], pixels[p + 2]);
-    samples.push({ cb, cr });
+    samples.push({ cb, cr, y });
     if (y < lumaMin) lumaMin = y;
     if (y > lumaMax) lumaMax = y;
   }
@@ -128,9 +144,48 @@ export function buildColorSignature(
   const centers = kMeansChroma(samples, k);
   if (centers.length === 0) return null;
 
+  // ── How much can chroma alone be trusted? ────────────────────────────────
+  //
+  // This is the crux of why painting used to select the background.
+  //
+  // Matching was chroma-ONLY, with luma as a +/-60 gate. Chroma is a great
+  // descriptor for a saturated subject, but most real footage is full of
+  // near-neutral surfaces — a cream gown, a white hijab, grey concrete, an
+  // overcast sky — and near-neutral colours all sit in a tight cluster around
+  // (128, 128). Measured on the user's own frame, a cream gown signature at
+  // tolerance 22 also matched concrete, sky and skin: everything except the
+  // couple of genuinely coloured objects. The stroke was fine; the metric could
+  // not tell those surfaces apart, because in chroma terms they are the same.
+  //
+  // So weight luma by how little hue there is to go on. A vivid colour keeps its
+  // brightness tolerance (a red glove passing through shade is still red); a
+  // desaturated one leans on brightness, which is the only thing separating a
+  // bright ivory gown from mid-grey concrete.
+  let satSum = 0;
+  let satWeight = 0;
+  for (const c of centers) {
+    satSum += Math.hypot(c.cb - 128, c.cr - 128) * c.weight;
+    satWeight += c.weight;
+  }
+  const saturation = satWeight > 0 ? satSum / satWeight : 0;
+
+  const SAT_VIVID = 30;   // above this, hue identifies the subject on its own
+  const SAT_NEUTRAL = 8;  // below this, there is essentially no hue information
+  const W_VIVID = 0.1;
+  const W_NEUTRAL = 1.6;
+  let lumaWeight: number;
+  if (saturation >= SAT_VIVID) lumaWeight = W_VIVID;
+  else if (saturation <= SAT_NEUTRAL) lumaWeight = W_NEUTRAL;
+  else {
+    const t = (saturation - SAT_NEUTRAL) / (SAT_VIVID - SAT_NEUTRAL);
+    lumaWeight = W_NEUTRAL + t * (W_VIVID - W_NEUTRAL);
+  }
+
   return {
     centers,
     tolerance,
+    lumaWeight,
+    saturation,
     // Widen the luma window: the feature will pass through brighter and darker
     // light than the single frame we sampled.
     lumaMin: Math.max(0, lumaMin - 60),
@@ -146,21 +201,28 @@ export function buildColorSignature(
  * produces the same signature — important for reproducible exports.
  */
 function kMeansChroma(
-  samples: Array<{ cb: number; cr: number }>,
+  samples: Array<{ cb: number; cr: number; y: number }>,
   k: number,
   iterations: number = 8
-): Array<{ cb: number; cr: number; weight: number }> {
+): Array<{ cb: number; cr: number; y: number; weight: number }> {
   if (samples.length === 0) return [];
 
-  const centers: Array<{ cb: number; cr: number; weight: number }> = [];
+  const centers: Array<{ cb: number; cr: number; y: number; weight: number }> = [];
   const stride = Math.max(1, Math.floor(samples.length / k));
   for (let i = 0; i < k; i++) {
     const s = samples[Math.min(samples.length - 1, i * stride)];
-    centers.push({ cb: s.cb, cr: s.cr, weight: 0 });
+    centers.push({ cb: s.cb, cr: s.cr, y: s.y, weight: 0 });
   }
 
+  // Cluster on chroma but CARRY the luma of each cluster, so a two-tone feature
+  // (lit side + shadow side) records both brightness levels instead of collapsing
+  // to one. Assignment stays chroma-driven: clustering on luma too would split a
+  // single-coloured object into "bright bit" and "dark bit" and the tracker would
+  // then only follow one of them.
+  const LUMA_ASSIGN_W = 0.15;
+
   for (let iter = 0; iter < iterations; iter++) {
-    const sums = centers.map(() => ({ cb: 0, cr: 0, n: 0 }));
+    const sums = centers.map(() => ({ cb: 0, cr: 0, y: 0, n: 0 }));
 
     for (const s of samples) {
       let best = 0;
@@ -168,11 +230,13 @@ function kMeansChroma(
       for (let c = 0; c < centers.length; c++) {
         const dcb = s.cb - centers[c].cb;
         const dcr = s.cr - centers[c].cr;
-        const d = dcb * dcb + dcr * dcr;
+        const dy = (s.y - centers[c].y) * LUMA_ASSIGN_W;
+        const d = dcb * dcb + dcr * dcr + dy * dy;
         if (d < bestD) { bestD = d; best = c; }
       }
       sums[best].cb += s.cb;
       sums[best].cr += s.cr;
+      sums[best].y += s.y;
       sums[best].n++;
     }
 
@@ -180,6 +244,7 @@ function kMeansChroma(
       if (sums[c].n > 0) {
         centers[c].cb = sums[c].cb / sums[c].n;
         centers[c].cr = sums[c].cr / sums[c].n;
+        centers[c].y = sums[c].y / sums[c].n;
         centers[c].weight = sums[c].n / samples.length;
       }
     }
@@ -194,21 +259,64 @@ function kMeansChroma(
 // Per-frame matching
 // ---------------------------------------------------------------------------
 
-/** How closely a pixel matches the signature: 0 = no match, 1 = dead centre. */
+/**
+ * Luma tolerance, in the same "1.0 = at the limit" units as chroma tolerance.
+ *
+ * Fixed rather than user-facing: the Colour Tolerance slider already scales the
+ * chroma axis, and `lumaWeight` scales this one relative to it, so one control
+ * is enough.
+ */
+const LUMA_TOLERANCE = 45;
+
+/**
+ * How closely a pixel matches the signature: 0 = no match, 1 = dead centre.
+ *
+ * Distance is measured in a normalised chroma+luma space:
+ *
+ *     d = sqrt( (dChroma / tolerance)^2 + lumaWeight * (dLuma / 45)^2 )
+ *
+ * and a pixel matches when d <= 1.
+ *
+ * The previous version used chroma distance ONLY, with luma as a wide +/-60
+ * pass/fail gate. That works for saturated subjects but fails badly on the
+ * near-neutral surfaces that dominate real footage: a cream gown, grey concrete
+ * and an overcast sky are all within ~19 chroma units of each other, so at the
+ * default tolerance of 22 they were indistinguishable and the "paint the person"
+ * stroke happily selected the balcony and the sky as well. Folding luma in with a
+ * saturation-derived weight restores the discrimination that chroma cannot
+ * provide, without breaking the lighting-invariance that made chroma the right
+ * primary axis in the first place.
+ */
 function scorePixel(sig: ColorSignature, r: number, g: number, b: number): number {
   const { y, cb, cr } = rgbToYCbCr(r, g, b);
+
+  // Hard luma gate retained as a cheap early-out for wildly wrong pixels.
   if (y < sig.lumaMin || y > sig.lumaMax) return 0;
+
+  const chromaTol = Math.max(1, sig.tolerance);
+  // Older projects were saved before these fields existed; default to the
+  // historical chroma-only behaviour rather than producing NaN.
+  const wl = sig.lumaWeight ?? 0;
 
   let best = 0;
   for (const c of sig.centers) {
     const dcb = cb - c.cb;
     const dcr = cr - c.cr;
-    const dist = Math.sqrt(dcb * dcb + dcr * dcr);
-    if (dist <= sig.tolerance) {
-      // Linear falloff to the tolerance edge gives a soft, natural boundary
-      // instead of a hard binary cut that would alias badly.
-      const s = 1 - dist / sig.tolerance;
-      if (s > best) best = s;
+    const chromaN = Math.sqrt(dcb * dcb + dcr * dcr) / chromaTol;
+
+    let d: number;
+    if (wl > 0 && typeof c.y === 'number') {
+      const lumaN = (y - c.y) / LUMA_TOLERANCE;
+      d = Math.sqrt(chromaN * chromaN + wl * lumaN * lumaN);
+    } else {
+      d = chromaN;
+    }
+
+    if (d <= 1) {
+      // Linear falloff to the boundary gives a soft, natural edge instead of a
+      // hard binary cut that would alias badly.
+      const sc = 1 - d;
+      if (sc > best) best = sc;
     }
   }
   return best;
