@@ -1986,24 +1986,24 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
-      let updatedPerRatioFraming = state.perRatioFraming;
-      if (state.perRatioFramingEnabled && updates.transform) {
-        const ratio = state.aspectRatio;
-        const currentRatioMap = updatedPerRatioFraming[ratio] || {};
-        const currentClipMap = currentRatioMap[clipId] || {};
-        updatedPerRatioFraming = {
-          ...updatedPerRatioFraming,
-          [ratio]: {
-            ...currentRatioMap,
-            [clipId]: {
-              ...currentClipMap,
-              ...(updates.transform.x !== undefined ? { x: updates.transform.x } : {}),
-              ...(updates.transform.y !== undefined ? { y: updates.transform.y } : {}),
-              ...(updates.transform.scale !== undefined ? { scale: updates.transform.scale } : {}),
-            },
-          },
-        };
-      }
+      // NOTE: `perRatioFraming` is deliberately NOT written here.
+      //
+      // It is an ADDITIVE per-aspect-ratio layer: renderers compute
+      //     effectiveX = transform.x + framing.x
+      //     effectiveScale = transform.scale * framing.scale / 100
+      //
+      // This block used to mirror the ABSOLUTE transform into it on every update,
+      // which is a different quantity entirely. The consequences compounded:
+      //   - Resizing to 250 stored framing.scale = 250 as well, so the clip
+      //     actually rendered at 250 * 2.5 = 625%.
+      //   - Moving to x = 40 stored framing.x = 40, doubling it to 80.
+      //   - Worst of all, the overlay divides the framing back out when seeding a
+      //     drag, so transform.scale / (framing.scale / 100) collapsed to exactly
+      //     100 — which is why moving a resized clip snapped it back to 100%.
+      //
+      // Per-ratio framing is authored through its own dedicated action
+      // (updateClipPerRatioFraming); a normal transform edit must leave it alone.
+      const updatedPerRatioFraming = state.perRatioFraming;
 
       return { 
         tracks, 
