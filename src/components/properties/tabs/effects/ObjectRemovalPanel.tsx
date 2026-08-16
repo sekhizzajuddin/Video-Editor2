@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import type { TimelineClip, ClipObjectRemovalSettings, ObjectRemovalMode, ObjectRemovalShape } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { KeyframeControl } from '@/components/KeyframeControls';
+import { captureTrackingTemplate, brushStrokesToBounds, clearTrackingCache } from '@/utils/objectTrackingEngine';
 
 interface ObjectRemovalPanelProps {
   selectedClip: TimelineClip;
@@ -31,6 +32,10 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
   const updateClip = useEditorStore((state) => state.updateClip);
   const saveSnapshot = useEditorStore((state) => state.saveSnapshot);
   const currentTime = useEditorStore((state) => state.currentTime);
+
+  const [isPaintMode, setIsPaintMode] = useState(false);
+  const [paintStrokes, setPaintStrokes] = useState<{ x: number; y: number; radius: number }[]>([]);
+  const isPaintingRef = useRef(false);
 
   const or = selectedClip.objectRemoval || defaultSettings;
   const animations = selectedClip.animations || {};
@@ -86,6 +91,43 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
       animations: { ...animations, [propKey]: updatedKfs },
     });
   };
+
+  // ── Paintbrush event handlers ────────────────────────────────────────
+  const getCanvasRelativePos = useCallback((e: MouseEvent): { x: number; y: number } | null => {
+    const canvas = document.querySelector('canvas[data-preview-canvas]') as HTMLCanvasElement;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    return { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) };
+  }, []);
+
+  const handlePaintStart = useCallback((e: MouseEvent) => {
+    const canvas = document.querySelector('canvas[data-preview-canvas]') as HTMLCanvasElement;
+    if (!canvas || !canvas.contains(e.target as Node)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isPaintingRef.current = true;
+    const pos = getCanvasRelativePos(e);
+    if (pos) {
+      setPaintStrokes(prev => [...prev, { x: pos.x, y: pos.y, radius: 3 }]);
+    }
+  }, [getCanvasRelativePos]);
+
+  const handlePaintMove = useCallback((e: MouseEvent) => {
+    if (!isPaintingRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pos = getCanvasRelativePos(e);
+    if (pos) {
+      setPaintStrokes(prev => [...prev, { x: pos.x, y: pos.y, radius: 3 }]);
+    }
+  }, [getCanvasRelativePos]);
+
+  const handlePaintEnd = useCallback((e: MouseEvent) => {
+    if (!isPaintingRef.current) return;
+    isPaintingRef.current = false;
+  }, []);
 
   const renderSliderControl = (
     label: string,
@@ -266,6 +308,173 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
                 className="rounded text-cyan-500 bg-[#282838] border-[#404058] focus:ring-0 cursor-pointer"
               />
             </label>
+          </div>
+
+          {/* ── Paintbrush Auto-Tracking Section ─────────────────────── */}
+          <div className="bg-gradient-to-br from-violet-950/40 to-fuchsia-950/40 p-3 rounded-lg border border-violet-700/50 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-400 tracking-wide uppercase">
+                🎯 Auto-Track Object
+              </span>
+              <button
+                onClick={() => {
+                  const newVal = !or.trackingEnabled;
+                  updateOR({ trackingEnabled: newVal });
+                  if (!newVal) clearTrackingCache(selectedClip.id);
+                  saveSnapshot();
+                }}
+                className={`w-9 h-5 rounded-full transition-all relative ${
+                  or.trackingEnabled ? 'bg-violet-500 shadow-[0_0_12px_rgba(139,92,246,0.5)]' : 'bg-[#3e3e4e]'
+                }`}
+              >
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                    or.trackingEnabled ? 'left-[18px]' : 'left-[2px]'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {or.trackingEnabled && (
+              <div className="space-y-2.5 animate-fadeIn">
+                <p className="text-[10px] text-violet-300/70 leading-relaxed">
+                  Paint on the object to track. The effect will automatically follow it across frames.
+                </p>
+
+                {/* Paint Target Button */}
+                <button
+                  onClick={() => {
+                    if (isPaintMode) {
+                      // Finish painting — capture template from the preview canvas
+                      if (paintStrokes.length > 0) {
+                        const previewCanvas = document.querySelector('canvas[data-preview-canvas]') as HTMLCanvasElement;
+                        if (previewCanvas) {
+                          const template = captureTrackingTemplate(
+                            previewCanvas,
+                            paintStrokes,
+                            previewCanvas.width,
+                            previewCanvas.height
+                          );
+                          if (template) {
+                            template.capturedAtTime = currentTime;
+                            const bounds = brushStrokesToBounds(paintStrokes);
+                            updateOR({
+                              trackingTemplate: template,
+                              brushStrokes: paintStrokes,
+                              x: bounds.x,
+                              y: bounds.y,
+                              width: bounds.width,
+                              height: bounds.height,
+                            });
+                            clearTrackingCache(selectedClip.id);
+                            saveSnapshot();
+                          }
+                        }
+                      }
+                      setIsPaintMode(false);
+                      setPaintStrokes([]);
+                      // Remove paint overlay listener
+                      document.removeEventListener('mousedown', handlePaintStart as any, true);
+                      document.removeEventListener('mousemove', handlePaintMove as any, true);
+                      document.removeEventListener('mouseup', handlePaintEnd as any, true);
+                    } else {
+                      // Enter paint mode
+                      setIsPaintMode(true);
+                      setPaintStrokes([]);
+                      // Attach paint overlay listeners
+                      setTimeout(() => {
+                        document.addEventListener('mousedown', handlePaintStart as any, true);
+                        document.addEventListener('mousemove', handlePaintMove as any, true);
+                        document.addEventListener('mouseup', handlePaintEnd as any, true);
+                      }, 50);
+                    }
+                  }}
+                  className={`w-full py-2 rounded-md text-[11px] font-semibold transition-all flex items-center justify-center gap-2 ${
+                    isPaintMode
+                      ? 'bg-fuchsia-600 text-white shadow-[0_0_16px_rgba(217,70,239,0.4)] ring-2 ring-fuchsia-400/50 animate-pulse'
+                      : 'bg-violet-600/40 text-violet-200 hover:bg-violet-600/60 border border-violet-500/40'
+                  }`}
+                >
+                  {isPaintMode ? '✅ Finish Painting' : '🖌️ Paint Target Object'}
+                </button>
+
+                {isPaintMode && (
+                  <p className="text-[10px] text-fuchsia-300 text-center animate-pulse">
+                    Click and drag on the preview to paint the object you want to track
+                  </p>
+                )}
+
+                {/* Template Status */}
+                {or.trackingTemplate && (
+                  <div className="flex items-center gap-2 bg-[#0a0a14] p-2 rounded border border-violet-800/30">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"></div>
+                    <span className="text-[10px] text-emerald-300 font-medium">
+                      Template captured ({or.trackingTemplate.patchSize}×{or.trackingTemplate.patchSize}px)
+                    </span>
+                    <button
+                      onClick={() => {
+                        // Re-capture at current playhead
+                        const previewCanvas = document.querySelector('canvas[data-preview-canvas]') as HTMLCanvasElement;
+                        if (previewCanvas && or.brushStrokes && or.brushStrokes.length > 0) {
+                          const template = captureTrackingTemplate(
+                            previewCanvas,
+                            or.brushStrokes,
+                            previewCanvas.width,
+                            previewCanvas.height
+                          );
+                          if (template) {
+                            template.capturedAtTime = currentTime;
+                            updateOR({ trackingTemplate: template });
+                            clearTrackingCache(selectedClip.id);
+                            saveSnapshot();
+                          }
+                        }
+                      }}
+                      className="ml-auto text-[10px] text-violet-300 hover:text-white px-2 py-0.5 rounded bg-violet-700/30 hover:bg-violet-700/50 transition-colors"
+                    >
+                      🔄 Re-capture
+                    </button>
+                  </div>
+                )}
+
+                {/* Search Radius */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-[#a0a0a0] font-medium">Search Radius</span>
+                    <span className="text-[11px] text-violet-400 font-mono">{or.trackSearchRadius ?? 15}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={5}
+                    max={40}
+                    step={1}
+                    value={or.trackSearchRadius ?? 15}
+                    onChange={(e) => updateOR({ trackSearchRadius: parseFloat(e.target.value) })}
+                    onMouseUp={() => {
+                      clearTrackingCache(selectedClip.id);
+                      saveSnapshot();
+                    }}
+                    className="w-full h-1.5 bg-[#1a1a2e] rounded-lg appearance-none cursor-pointer accent-violet-500 hover:accent-violet-400 transition-all"
+                  />
+                </div>
+
+                {/* Clear Tracking */}
+                <button
+                  onClick={() => {
+                    updateOR({
+                      trackingEnabled: false,
+                      trackingTemplate: undefined,
+                      brushStrokes: undefined,
+                    });
+                    clearTrackingCache(selectedClip.id);
+                    saveSnapshot();
+                  }}
+                  className="w-full py-1.5 rounded text-[10px] text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-950/50 border border-red-800/30 transition-colors"
+                >
+                  ✕ Clear Tracking Data
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Position and Geometry Sliders */}

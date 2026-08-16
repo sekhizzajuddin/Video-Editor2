@@ -389,6 +389,21 @@ export interface ClipObjectRemovalSettings {
   temporalSmoothing?: boolean; // Frame-to-frame stabilization for video
   quality?: 'preview' | 'export'; // Fast preview vs studio export quality
   points?: { x: number; y: number }[]; // For custom polygon lasso bounding
+
+  // ── Paintbrush Auto-Tracking ─────────────────────────────────────────
+  trackingEnabled?: boolean;           // Whether auto-tracking is active
+  trackingTemplate?: {                 // Captured reference from paintbrush
+    patchData: number[];               // Grayscale template patch (serializable)
+    patchSize: number;                 // Template size (e.g. 32)
+    colorHistogram?: number[];         // RGB histogram for color validation
+    capturedAtTime: number;            // Timeline time when captured
+    capturedX: number;                 // Initial center X (%)
+    capturedY: number;                 // Initial center Y (%)
+    capturedWidth: number;             // Initial box width (%)
+    capturedHeight: number;            // Initial box height (%)
+  };
+  brushStrokes?: { x: number; y: number; radius: number }[]; // Raw brush data for re-capture
+  trackSearchRadius?: number;          // Search radius in % (default 15)
 }
 
 export interface ClipKenBurnsSettings {
