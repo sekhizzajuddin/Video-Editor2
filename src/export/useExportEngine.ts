@@ -124,6 +124,13 @@ export function useExportEngine() {
               warnings: [...prev.warnings, error.message]
             }));
           },
+          onWarning: (message) => {
+            console.warn('Export warning:', message);
+            setExportState(prev => ({
+              ...prev,
+              warnings: prev.warnings.includes(message) ? prev.warnings : [...prev.warnings, message]
+            }));
+          },
         }
       });
 

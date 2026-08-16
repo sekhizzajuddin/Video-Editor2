@@ -1,7 +1,20 @@
 import { AssetDecoder } from './AssetDecoder';
+import { StillImageSource } from './StillImageSource';
 import { findActiveTransition, buildTransitionPlan } from '../../utils/transitionEngine';
 import { resolveBlendPlan } from '../../utils/blendCompositor';
 import { FramePool } from './memory/FramePool';
+
+/**
+ * Anything that can hand the compositor a VideoFrame for a clip: a real MP4
+ * demux/decode pipeline (AssetDecoder) or a decoded still (StillImageSource).
+ */
+export interface ClipFrameSource {
+  rotation: number;
+  ready: boolean;
+  loadError: string | null;
+  getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null>;
+  dispose(): void;
+}
 
 export interface RenderLayer {
   type: 'video' | 'text' | 'image';
@@ -66,7 +79,13 @@ export interface FramePlan {
 export class FrameScheduler {
   private timeline: any;
   private framePool: FramePool;
-  private decoders: Map<string, AssetDecoder> = new Map();
+  private decoders: Map<string, ClipFrameSource> = new Map();
+  /**
+   * Human-readable problems collected while preparing frame sources (media that
+   * failed to demux/decode). Surfaced to the user as export warnings so a
+   * black/blank output is never silent.
+   */
+  public warnings: string[] = [];
 
   constructor(timeline: any, framePool: FramePool) {
     this.timeline = timeline;
@@ -81,23 +100,57 @@ export class FrameScheduler {
         mediaMap.set(m.id, m);
       }
     }
-    
+
     for (const track of this.timeline.tracks || []) {
       if (track.type === 'video') {
         for (const clip of track.clips || []) {
           if (!this.decoders.has(clip.id)) {
             const media = mediaMap.get(clip.mediaId);
             const url = media?.url || clip.url;
-            if (url) {
-              const decoder = new AssetDecoder(url, this.framePool);
-              this.decoders.set(clip.id, decoder);
-              promises.push(decoder.load());
+            if (!url) continue;
+
+            const mediaName: string = media?.name || '';
+            const isImage =
+              media?.type === 'image' ||
+              /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
+
+            // Images used to be pushed through the MP4 demuxer, which cannot
+            // parse them; every image clip exported as black. Route them to a
+            // dedicated still-image source instead.
+            if (isImage) {
+              const source = new StillImageSource(url);
+              this.decoders.set(clip.id, source);
+              promises.push(source.load());
+              continue;
             }
+
+            const decoder = new AssetDecoder(url, this.framePool);
+            this.decoders.set(clip.id, decoder);
+            promises.push(
+              decoder.load().then(async () => {
+                if (decoder.ready) return;
+                // MP4 demux failed. If the file is actually a still image with
+                // a video-ish name/type, decode it as one before giving up.
+                const fallback = new StillImageSource(url);
+                await fallback.load();
+                if (fallback.ready) {
+                  decoder.dispose();
+                  this.decoders.set(clip.id, fallback);
+                } else {
+                  fallback.dispose();
+                  this.warnings.push(
+                    `"${mediaName || clip.mediaId}" could not be decoded for export` +
+                    (decoder.loadError ? ` (${decoder.loadError})` : '') +
+                    '. Its frames will be missing from the output.'
+                  );
+                }
+              })
+            );
           }
         }
       }
     }
-    
+
     await Promise.allSettled(promises);
   }
 

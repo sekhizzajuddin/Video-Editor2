@@ -304,6 +304,18 @@ export function ExportModal() {
             </div>
           )}
 
+          {exportState.phase !== 'error' && exportState.warnings.length > 0 && (
+            <div className="bg-yellow-900/30 border border-yellow-500/40 rounded p-3 flex items-start gap-2">
+               <AlertCircle className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />
+               <div>
+                 <p className="text-xs text-yellow-200 font-semibold mb-1">Export Warnings</p>
+                 {exportState.warnings.map((w, i) => (
+                   <p key={i} className="text-[10px] text-yellow-300">{w}</p>
+                 ))}
+               </div>
+            </div>
+          )}
+
         </div>
 
         {/* Action Buttons */}

@@ -33,6 +33,16 @@ export class AssetDecoder {
   private onReadyCallback: (() => void) | null = null;
 
   /**
+   * True once load() finished with a parseable MP4 video track AND a configured
+   * decoder. Stays false for non-ISO-BMFF containers (WebM/MKV/OGG), images
+   * mistakenly routed here, or unsupported codecs. Callers MUST check this and
+   * fall back to another frame source instead of silently rendering black.
+   */
+  public ready: boolean = false;
+  /** Human-readable reason when ready === false. */
+  public loadError: string | null = null;
+
+  /**
    * Pending getFrameAt() waiter. Resolved by the decoder's `output` callback as
    * soon as a frame with CTS >= `targetCts` is produced, so we never sleep longer
    * than strictly necessary.
@@ -72,11 +82,28 @@ export class AssetDecoder {
   }
 
   async load(): Promise<void> {
-    const response = await fetch(this.url);
-    const buffer = await response.arrayBuffer();
+    let buffer: ArrayBuffer;
+    try {
+      const response = await fetch(this.url);
+      if (!response.ok) throw new Error(`fetch failed (${response.status})`);
+      buffer = await response.arrayBuffer();
+    } catch (e: any) {
+      this.loadError = `Could not read media: ${e?.message || e}`;
+      console.warn('[AssetDecoder]', this.loadError, this.url);
+      return;
+    }
+
     (buffer as any).fileStart = 0;
-    this.mp4boxfile.appendBuffer(buffer as any);
-    this.mp4boxfile.flush();
+    try {
+      this.mp4boxfile.appendBuffer(buffer as any);
+      this.mp4boxfile.flush();
+    } catch (e: any) {
+      // Non-ISO-BMFF input (WebM/MKV/OGG/image bytes) makes MP4Box throw.
+      // Report it instead of leaving the export to silently render black.
+      this.loadError = `Not an MP4/MOV container: ${e?.message || e}`;
+      console.warn('[AssetDecoder]', this.loadError, this.url);
+      return;
+    }
 
     // Wait for MP4Box to read track header
     await new Promise<void>((resolve) => {
@@ -90,6 +117,7 @@ export class AssetDecoder {
     // Samples arrive in DTS (decoding) order from MP4Box — do NOT re-sort.
 
     if (this.samples.length === 0 || !this.trackInfo) {
+      this.loadError = 'No decodable video track found in media';
       console.warn('[AssetDecoder] Empty media or failed track parsing');
       return;
     }
@@ -123,6 +151,10 @@ export class AssetDecoder {
     }
 
     this.initDecoder();
+    this.ready = this.decoder !== null && this.decoder.state === 'configured';
+    if (!this.ready && !this.loadError) {
+      this.loadError = `VideoDecoder rejected codec ${codec}`;
+    }
     console.log(`[AssetDecoder] v7 streaming-decode ready | ${this.samples.length} samples | ${codec} ${width}x${height} | rotation=${rotation}`);
   }
 
