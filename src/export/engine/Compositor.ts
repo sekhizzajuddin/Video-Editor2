@@ -100,12 +100,37 @@ export class Compositor {
     this.ctx.imageSmoothingQuality = 'high';
   }
 
+  /**
+   * Width/height of the UI preview coordinate space for the current aspect
+   * ratio. Clip transforms (x/y) and text font sizes are authored in this
+   * space, so export rendering scales them by canvas/view.
+   */
+  private getViewSize(): { viewW: number; viewH: number } {
+    let viewW = 854;
+    const viewH = 480;
+    if (this.aspectRatio === '9:16') {
+      viewW = Math.round(480 * (9 / 16));
+    } else if (this.aspectRatio === '1:1') {
+      viewW = 480;
+    } else if (this.aspectRatio === '4:3') {
+      viewW = Math.round(480 * (4 / 3));
+    }
+    return { viewW, viewH };
+  }
+
   public async render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
     // Fill background
     this.ctx.fillStyle = '#0a0a0a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     for (const layer of layers) {
+      if (layer.type === 'text') {
+        // Text/title clips previously had NO export path at all — the preview
+        // showed them but the rendered file dropped them (or produced a black
+        // frame when text was the only visible layer).
+        this.renderTextLayer(layer);
+        continue;
+      }
       if (layer.type === 'video' && layer.frame) {
         this.ctx.save();
 
@@ -265,6 +290,136 @@ export class Compositor {
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
       this.ctx.restore();
     }
+  }
+
+  /**
+   * Draw a text/title clip. Mirrors the preview's text branch in
+   * CanvasRenderingEngine (font construction, background pill, stroke, shadow,
+   * underline) scaled from the UI view space to the export resolution.
+   */
+  private renderTextLayer(layer: RenderLayer) {
+    const clip = layer.textData || {};
+    const ts = clip.textSettings || {
+      text: clip.text || 'Text',
+      fontSize: 48,
+      fontFamily: 'sans-serif',
+      color: '#ffffff',
+    };
+    const text: string = ts.text || clip.textContent || 'Text';
+    if (!text) return;
+
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const { viewW, viewH } = this.getViewSize();
+    // Font sizes are authored against the preview view; scale to export size.
+    const uiScale = Math.min(W / viewW, H / viewH);
+
+    this.ctx.save();
+
+    const tg = layer.transitionGeometry;
+    if (tg) {
+      if (tg.clipRect) {
+        this.ctx.beginPath();
+        this.ctx.rect(tg.clipRect.x * W, tg.clipRect.y * H, tg.clipRect.w * W, tg.clipRect.h * H);
+        this.ctx.clip();
+      }
+      this.ctx.translate(W / 2 + tg.translateX * W, H / 2 + tg.translateY * H);
+      if (tg.rotation) this.ctx.rotate(tg.rotation);
+      if (tg.scale !== 1) this.ctx.scale(tg.scale, tg.scale);
+      this.ctx.translate(-W / 2, -H / 2);
+    }
+
+    const exportScaleX = W / viewW;
+    const exportScaleY = H / viewH;
+    const tx = (layer.transform.x || 0) * exportScaleX;
+    const ty = (layer.transform.y || 0) * exportScaleY;
+
+    let scale = layer.transform.scale ?? 100;
+    if (scale <= 10 && scale > 0) scale = scale * 100; // legacy '1' scale
+    const finalScale = (scale / 100) * uiScale;
+
+    this.ctx.translate(W / 2 + tx, H / 2 + ty);
+    this.ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
+    this.ctx.scale(finalScale, finalScale);
+
+    this.ctx.globalAlpha = layer.opacity;
+    this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+
+    const fontStyle: string[] = [];
+    if (ts.italic) fontStyle.push('italic');
+    if (ts.bold) fontStyle.push('bold');
+    const fontWeightStyle = fontStyle.join(' ');
+    const fontSize = ts.fontSize || 48;
+    this.ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${fontSize}px ${ts.fontFamily || 'sans-serif'}`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+
+    const lines = String(text).split('\n');
+    const lineHeight = fontSize * 1.2;
+    const blockHeight = lines.length * lineHeight;
+
+    // Background pill (matches preview padding maths)
+    if (ts.backgroundColor && ts.backgroundColor !== 'transparent') {
+      let maxWidth = 0;
+      for (const line of lines) {
+        maxWidth = Math.max(maxWidth, this.ctx.measureText(line).width);
+      }
+      const paddingX = fontSize * 0.5;
+      const paddingY = fontSize * 0.3;
+      const bgX = -(maxWidth / 2) - paddingX;
+      const bgY = -(blockHeight / 2) - paddingY;
+      const bgW = maxWidth + paddingX * 2;
+      const bgH = blockHeight + paddingY * 2;
+      const radius = Math.min(8, bgH / 4);
+      this.ctx.fillStyle = ts.backgroundColor;
+      this.ctx.beginPath();
+      this.ctx.moveTo(bgX + radius, bgY);
+      this.ctx.lineTo(bgX + bgW - radius, bgY);
+      this.ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
+      this.ctx.lineTo(bgX + bgW, bgY + bgH - radius);
+      this.ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
+      this.ctx.lineTo(bgX + radius, bgY + bgH);
+      this.ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
+      this.ctx.lineTo(bgX, bgY + radius);
+      this.ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
+
+    if (ts.shadow) {
+      this.ctx.shadowColor = ts.shadowColor || 'rgba(0,0,0,0.8)';
+      this.ctx.shadowBlur = ts.shadowBlur !== undefined ? ts.shadowBlur : 10;
+      this.ctx.shadowOffsetX = 2;
+      this.ctx.shadowOffsetY = 2;
+    }
+
+    const firstLineY = -(blockHeight / 2) + lineHeight / 2;
+    for (let i = 0; i < lines.length; i++) {
+      const lineY = firstLineY + i * lineHeight;
+      if (ts.strokeColor && ts.strokeWidth) {
+        this.ctx.strokeStyle = ts.strokeColor;
+        this.ctx.lineWidth = ts.strokeWidth;
+        this.ctx.strokeText(lines[i], 0, lineY);
+      }
+      this.ctx.fillStyle = ts.color || '#ffffff';
+      this.ctx.fillText(lines[i], 0, lineY);
+
+      if (ts.underline) {
+        const lw = this.ctx.measureText(lines[i]).width;
+        this.ctx.save();
+        this.ctx.shadowColor = 'transparent';
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = ts.color || '#ffffff';
+        this.ctx.lineWidth = Math.max(1, fontSize / 15);
+        this.ctx.moveTo(-lw / 2, lineY + fontSize * 0.45);
+        this.ctx.lineTo(lw / 2, lineY + fontSize * 0.45);
+        this.ctx.stroke();
+        this.ctx.restore();
+      }
+    }
+
+    this.ctx.restore();
+    this.ctx.globalCompositeOperation = 'source-over';
   }
 
   private applyChromaKey(ctx: OffscreenCanvasRenderingContext2D, width: number, height: number, settings: { color: string; threshold: number; softness: number; spillSuppression: number }) {

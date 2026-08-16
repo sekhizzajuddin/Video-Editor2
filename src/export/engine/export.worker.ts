@@ -159,6 +159,12 @@ async function handleExport(
     const scheduler = new FrameScheduler(timeline, framePool);
     await scheduler.initializeDecoders();
 
+    // Surface per-clip decode failures immediately — a silently black export
+    // is the worst possible outcome.
+    for (const warning of scheduler.warnings) {
+      postMessage({ type: 'WARNING', payload: { message: warning } });
+    }
+
     // Compositor Initialization
     const canvas = new OffscreenCanvas(outputWidth, outputHeight);
     const compositor = new Compositor(canvas, config.aspectRatio);
@@ -315,6 +321,11 @@ async function handleExport(
 
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'rendering' } });
     
+    // Track whether ANY visual layer was composited during the export. If the
+    // count stays at zero the file would be pure black — tell the user why
+    // instead of shipping a silent black video.
+    let renderedLayerCount = 0;
+
     // Render video frames
     for (let i = 0; i < totalFrames; i++) {
       if (isCancelled) {
@@ -326,6 +337,7 @@ async function handleExport(
       // any full-frame overlay) using the same engine the preview uses, so the
       // exported file matches what the user saw.
       const { layers, overlays } = await scheduler.getFramePlanAtTime(timestampSeconds);
+      renderedLayerCount += layers.length;
 
       // Render frame with WebGL (or 2D fallback if context lost)
       await compositor.render(layers, overlays);
@@ -372,6 +384,17 @@ async function handleExport(
           payload: { progress, currentFrame: i + 1, eta: 0 }, 
         });
       }
+    }
+
+    if (renderedLayerCount === 0 && totalFrames > 0) {
+      postMessage({
+        type: 'WARNING',
+        payload: {
+          message:
+            'No visual layers could be rendered — the exported video is black. ' +
+            'Check that your clips use supported media (MP4/MOV video or images) and are not hidden/disabled.',
+        },
+      });
     }
 
     // Process Audio Encoding if audio is present

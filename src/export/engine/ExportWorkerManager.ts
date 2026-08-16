@@ -1,12 +1,15 @@
 import { ExportWorkerConfig } from './export.worker';
 import { ExportPhase } from '../types';
 import { AudioMixer } from './AudioMixer';
+import { normalizeVideoForExport } from './VideoNormalizer';
 
 export interface ExporterCallbacks {
   onProgress: (progress: number, currentFrame: number, eta: number) => void;
   onPhaseChange: (phase: ExportPhase) => void;
   onComplete: (fileSize: number) => void;
   onError: (error: Error) => void;
+  /** Non-fatal problems (e.g. a clip that could not be decoded). */
+  onWarning?: (message: string) => void;
 }
 
 export interface ExporterOptions {
@@ -60,6 +63,10 @@ export class ExportWorkerManager {
         case 'ERROR':
           this.options.callbacks.onError(new Error(payload.message));
           break;
+
+        case 'WARNING':
+          this.options.callbacks.onWarning?.(payload.message);
+          break;
       }
     };
   }
@@ -71,6 +78,13 @@ export class ExportWorkerManager {
 
     // Mix audio on main thread where OfflineAudioContext is fully supported
     this.options.callbacks.onPhaseChange('preparing');
+
+    // Make every video media exportable BEFORE handing off to the worker.
+    // The worker demuxes with MP4Box (ISO-BMFF only); WebM/MKV screen
+    // recordings and similar files must be transcoded to MP4 here on the main
+    // thread (HTMLVideoElement decode isn't available in workers), otherwise
+    // the export renders black frames with working audio.
+    await this.normalizeTimelineMedia(serializedTimeline);
     let audioPayload: any = null;
     const transferables: Transferable[] = [];
 
@@ -172,6 +186,37 @@ export class ExportWorkerManager {
 
   dispose(): void {
     this.worker.terminate();
+  }
+
+  /**
+   * Replace non-MP4 video URLs in the serialized timeline with transcoded MP4
+   * object URLs so the worker's MP4Box demuxer can read every clip. Mutates
+   * only the serialized copy — never the store.
+   */
+  private async normalizeTimelineMedia(serializedTimeline: any): Promise<void> {
+    const media: any[] = serializedTimeline.media || [];
+    const videoItems = media.filter((m) => {
+      if (!m?.url) return false;
+      if (m.type === 'video') return true;
+      // Some imports lack a type; sniff by extension, defaulting to video-ish names.
+      const name = String(m.name || '');
+      return /\.(mp4|mov|m4v|webm|mkv|ogv|ogg|avi)$/i.test(name);
+    });
+
+    await Promise.all(videoItems.map(async (m) => {
+      try {
+        const result = await normalizeVideoForExport(m.url, m.name);
+        if (result.warning) {
+          this.options.callbacks.onWarning?.(result.warning);
+        } else if (result.transcoded) {
+          m.url = result.url;
+        }
+      } catch (e: any) {
+        this.options.callbacks.onWarning?.(
+          `"${m.name || m.id}" could not be prepared for export: ${e?.message || e}`
+        );
+      }
+    }));
   }
 
   private serializeTimeline(timeline: any): any {
