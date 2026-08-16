@@ -104,3 +104,112 @@ describe('PiP children inherit the container transform', () => {
     expect(a).toEqual(b);
   });
 });
+
+/**
+ * The remaining Transform-tab controls must also reach PiP children:
+ * rotationX/Y (3D), blend, opacity and crop.
+ */
+
+const safeAxis = (v: number) => (Math.abs(v) < 0.02 ? (v < 0 ? -0.02 : 0.02) : v);
+
+/** Mirrors the 3D-rotation foreshortening applied to the group. */
+function apply3D(word: { x: number; y: number }, rotX = 0, rotY = 0) {
+  const fx = safeAxis(Math.cos((rotY * Math.PI) / 180));
+  const fy = safeAxis(Math.cos((rotX * Math.PI) / 180));
+  return { x: CX + word.x * fx, y: CY + word.y * fy };
+}
+
+const groupWidth = (pts: { x: number; y: number }[]) => Math.abs(pts[pts.length - 1].x - pts[0].x);
+
+describe('PiP group: 3D rotation', () => {
+  it('rotationY foreshortens the width as the group turns away', () => {
+    const full = groupWidth(WORDS.map((w) => apply3D(w, 0, 0)));
+    const turned = groupWidth(WORDS.map((w) => apply3D(w, 0, 60)));
+    expect(turned).toBeLessThan(full);
+    expect(turned).toBeCloseTo(full * 0.5, 4); // cos(60) = 0.5
+  });
+
+  it('rotationX foreshortens the height', () => {
+    const col = [
+      { x: 0, y: -60 },
+      { x: 0, y: 60 },
+    ];
+    const h0 = Math.abs(apply3D(col[1], 0, 0).y - apply3D(col[0], 0, 0).y);
+    const h45 = Math.abs(apply3D(col[1], 45, 0).y - apply3D(col[0], 45, 0).y);
+    expect(h45).toBeLessThan(h0);
+    expect(h45).toBeCloseTo(h0 * Math.cos(Math.PI / 4), 4);
+  });
+
+  it('never collapses the group to zero at 90 degrees', () => {
+    // A zero scale is unrecoverable and would make the sentence disappear.
+    expect(groupWidth(WORDS.map((w) => apply3D(w, 0, 90)))).toBeGreaterThan(0);
+    expect(groupWidth(WORDS.map((w) => apply3D(w, 90, 0)))).toBeGreaterThan(0);
+  });
+
+  it('mirrors past 90 degrees, as a real rotation would', () => {
+    expect(apply3D({ x: 100, y: 0 }, 0, 180).x - CX).toBeLessThan(0);
+  });
+
+  it('leaves the group untouched at zero', () => {
+    WORDS.forEach((w) => {
+      const p = apply3D(w, 0, 0);
+      expect(p.x).toBeCloseTo(CX + w.x, 9);
+      expect(p.y).toBeCloseTo(CY + w.y, 9);
+    });
+  });
+});
+
+describe('PiP group: inherited opacity and blend', () => {
+  const resolveAlpha = (own: number, parent: number | undefined) => own * (parent ?? 1);
+  const resolveBlend = (own: string | undefined, parent: string | undefined) =>
+    own && own !== 'source-over' ? own : parent || 'source-over';
+
+  it('parent opacity multiplies the child opacity', () => {
+    expect(resolveAlpha(1, 0.5)).toBeCloseTo(0.5);
+    expect(resolveAlpha(0.5, 0.5)).toBeCloseTo(0.25);
+    expect(resolveAlpha(1, undefined)).toBeCloseTo(1);
+  });
+
+  it('the child inherits the parent blend mode when it has none', () => {
+    expect(resolveBlend(undefined, 'multiply')).toBe('multiply');
+    expect(resolveBlend('source-over', 'screen')).toBe('screen');
+  });
+
+  it('an explicit child blend mode wins', () => {
+    expect(resolveBlend('overlay', 'multiply')).toBe('overlay');
+  });
+
+  it('defaults to normal when neither sets one', () => {
+    expect(resolveBlend(undefined, undefined)).toBe('source-over');
+  });
+});
+
+describe('PiP group: crop', () => {
+  const W = 854;
+  const H = 480;
+  const cropRect = (l: number, r: number, t: number, b: number) => {
+    const L = Math.min(l, 0.98);
+    const R = Math.min(r, 0.98 - L);
+    const T = Math.min(t, 0.98);
+    const B = Math.min(b, 0.98 - T);
+    return { x: L * W, y: T * H, w: Math.max(1, W * (1 - L - R)), h: Math.max(1, H * (1 - T - B)) };
+  };
+
+  it('no crop leaves the full frame', () => {
+    const r = cropRect(0, 0, 0, 0);
+    expect(r).toEqual({ x: 0, y: 0, w: W, h: H });
+  });
+
+  it('trims from the correct edges', () => {
+    const r = cropRect(0.25, 0, 0.1, 0);
+    expect(r.x).toBeCloseTo(0.25 * W);
+    expect(r.y).toBeCloseTo(0.1 * H);
+    expect(r.w).toBeCloseTo(0.75 * W);
+  });
+
+  it('never collapses to nothing even at extreme values', () => {
+    const r = cropRect(0.99, 0.99, 0.99, 0.99);
+    expect(r.w).toBeGreaterThanOrEqual(1);
+    expect(r.h).toBeGreaterThanOrEqual(1);
+  });
+});

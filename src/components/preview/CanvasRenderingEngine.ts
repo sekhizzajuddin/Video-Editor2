@@ -699,9 +699,25 @@ export async function renderCanvasEngine({
     const aRotY = hasAnimOrExpr ? getAnimatedValue(clip.transform.rotationY ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationY'], clip.expressions?.['transform.rotationY']) : (clip.transform.rotationY ?? 0);
 
     const hasPerspectiveWarp = !!(clip.transform.perspectivePin || Math.abs(aRotX) > 0.01 || Math.abs(aRotY) > 0.01);
-    const aBlendIntensity = hasAnimOrExpr ? Math.max(0, Math.min(100, getAnimatedValue(clip.transform.blendIntensity ?? 100, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity']))) : Math.max(0, Math.min(100, clip.transform.blendIntensity ?? 100));
-    const blendMode = clip.transform.blendMode || 'source-over';
-    const totalAlpha = aOpacity * opacityMultiplier;
+    const inheritedBlendIntensity =
+      clip.transform.blendMode && clip.transform.blendMode !== 'source-over'
+        ? clip.transform.blendIntensity ?? 100
+        : (clip as any).__parentTransform?.blendIntensity ?? clip.transform.blendIntensity ?? 100;
+    const aBlendIntensity = hasAnimOrExpr ? Math.max(0, Math.min(100, getAnimatedValue(inheritedBlendIntensity, currentTime, clip.startTime, clip.animations?.['transform.blendIntensity'], clip.expressions?.['transform.blendIntensity']))) : Math.max(0, Math.min(100, inheritedBlendIntensity));
+    // A PiP child inherits the container's opacity and blend mode, so fading or
+    // blending the sentence affects the whole group. The child's own values still
+    // compose on top (multiplied for opacity; the child wins for blend mode when
+    // it sets one explicitly).
+    const parentForBlend = (clip as any).__parentTransform;
+    const parentOpacityRaw = (clip as any).__parentOpacity;
+    const parentOpacity =
+      parentForBlend && typeof parentOpacityRaw === 'number' ? parentOpacityRaw : 1;
+    const ownBlend = clip.transform.blendMode;
+    const blendMode =
+      ownBlend && ownBlend !== 'source-over'
+        ? ownBlend
+        : parentForBlend?.blendMode || 'source-over';
+    const totalAlpha = aOpacity * opacityMultiplier * parentOpacity;
 
     // ── Blend compositing ────────────────────────────────────────────────────
     // Planned by the shared helper in blendCompositor.ts. The old code emulated
@@ -952,6 +968,30 @@ export async function renderCanvasEngine({
       const pScale = getAnimatedValue(parentT.scale ?? 100, currentTime, pStart, pAnims?.['transform.scale']);
       const pRot = getAnimatedValue(parentT.rotation ?? 0, currentTime, pStart, pAnims?.['transform.rotation']);
 
+      // Group crop, applied BEFORE the transform so the crop rectangle stays
+      // axis-aligned to the frame — the same way crop behaves on a normal clip.
+      // (Clipping after the rotate would spin the crop window with the text.)
+      // The sentence is trimmed as one rectangle rather than each word being
+      // cropped in isolation, which is what makes it useful for framing a
+      // stylised thumbnail.
+      const pCrop = (clip as any).__parentCrop;
+      if (pCrop) {
+        const cl = getAnimatedValue(pCrop.left ?? 0, currentTime, pStart, pAnims?.['crop.left']) / 100;
+        const cr = getAnimatedValue(pCrop.right ?? 0, currentTime, pStart, pAnims?.['crop.right']) / 100;
+        const ct2 = getAnimatedValue(pCrop.top ?? 0, currentTime, pStart, pAnims?.['crop.top']) / 100;
+        const cb = getAnimatedValue(pCrop.bottom ?? 0, currentTime, pStart, pAnims?.['crop.bottom']) / 100;
+        if (cl > 0 || cr > 0 || ct2 > 0 || cb > 0) {
+          // Guard against a fully-collapsed rect, which would hide the group.
+          const l = Math.min(cl, 0.98);
+          const r = Math.min(cr, 0.98 - l);
+          const t2 = Math.min(ct2, 0.98);
+          const b = Math.min(cb, 0.98 - t2);
+          ctx.beginPath();
+          ctx.rect(l * W, t2 * H, Math.max(1, W * (1 - l - r)), Math.max(1, H * (1 - t2 - b)));
+          ctx.clip();
+        }
+      }
+
       // Rotate/scale about the frame centre so the group pivots as a whole rather
       // than each word spinning about its own origin.
       ctx.translate(cx + pX, cy + pY);
@@ -960,6 +1000,25 @@ export async function renderCanvasEngine({
       if (ps !== 1) ctx.scale(ps, ps);
       if (parentT.flipH) ctx.scale(-1, 1);
       if (parentT.flipV) ctx.scale(1, -1);
+
+      // 3D rotate (rotationX / rotationY) as an affine approximation.
+      //
+      // True perspective needs a projected quad, which Canvas2D can only do per
+      // texture — not for a group of independently drawn children. Foreshortening
+      // the axis being rotated about reproduces the dominant visual effect (the
+      // group narrowing/flattening as it turns away) and, crucially, keeps every
+      // child in the SAME space so the words stay together. Beyond 90 degrees the
+      // sign flips, which mirrors the group exactly as a real rotation would.
+      const pRotX = getAnimatedValue(parentT.rotationX ?? 0, currentTime, pStart, pAnims?.['transform.rotationX']);
+      const pRotY = getAnimatedValue(parentT.rotationY ?? 0, currentTime, pStart, pAnims?.['transform.rotationY']);
+      if (Math.abs(pRotX) > 0.01 || Math.abs(pRotY) > 0.01) {
+        const fx = Math.cos((pRotY * Math.PI) / 180); // Y-rotation squashes width
+        const fy = Math.cos((pRotX * Math.PI) / 180); // X-rotation squashes height
+        // Never fully collapse: a zero scale is unrecoverable and hides the group.
+        const safe = (v: number) => (Math.abs(v) < 0.02 ? (v < 0 ? -0.02 : 0.02) : v);
+        ctx.scale(safe(fx), safe(fy));
+      }
+
       ctx.translate(-cx, -cy);
 
       if (pid) {
@@ -1717,6 +1776,8 @@ export async function renderCanvasEngine({
                 __parentId: parentClip.id,
                 __parentStartTime: parentClip.startTime,
                 __parentAnimations: parentClip.animations,
+                __parentOpacity: parentClip.opacity,
+                __parentCrop: parentClip.crop,
               };
               drawQueue.push({ clip: syntheticClip, layer: 200 + (pTrack.type === 'text' ? 100 : 0) });
             }
