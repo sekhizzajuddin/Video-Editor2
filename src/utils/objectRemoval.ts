@@ -10,7 +10,6 @@
 import type { ClipObjectRemovalSettings } from '@/types';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { detectSceneChange } from './humanDetection';
-import { trackObjectInFrame } from './objectTrackingEngine';
 
 // Scratch canvases for offscreen compositing (reused across frames to prevent GC pauses)
 let scratchCanvas: HTMLCanvasElement | null = null;
@@ -496,36 +495,6 @@ export function applyObjectRemoval(
 
   // Interpolate keyframes for fluid temporal motion tracking
   const interpolated = interpolateSettings(settings, currentTime, clipStartTime, animations);
-
-  // ── Paintbrush Auto-Tracking Override ─────────────────────────────────
-  // If tracking is enabled and a template exists, run template matching
-  // to find the object's new position in this frame. The tracked position
-  // overrides the manual x/y coordinates so the effect follows the object.
-  if (interpolated.trackingEnabled && interpolated.trackingTemplate) {
-    const tmpl = interpolated.trackingTemplate;
-    const lastX = interpolated.x;
-    const lastY = interpolated.y;
-    const searchRadius = interpolated.trackSearchRadius ?? 15;
-
-    const tracked = trackObjectInFrame(
-      sourceCanvas,
-      tmpl,
-      lastX,
-      lastY,
-      clipWidth,
-      clipHeight,
-      searchRadius,
-      clipId,
-      currentTime,
-      clipStartTime
-    );
-
-    if (tracked && tracked.confidence > 0.15) {
-      interpolated.x = tracked.x;
-      interpolated.y = tracked.y;
-    }
-    // If tracking fails (null or low confidence), keep manual position as fallback
-  }
 
   // Calculate pixel bounding box and dimensions
   const bounds = getPixelBounds(interpolated, clipWidth, clipHeight);

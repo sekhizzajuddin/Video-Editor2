@@ -16,6 +16,7 @@
  */
 
 import { getFrameSize, getClipFramePlacement } from './frameSpace';
+import { captureSsdTemplate, ssdTrackPosition, type SsdTemplate } from './ssdPositionTracker';
 import {
   buildColorSignature,
   chokeMask,
@@ -174,6 +175,23 @@ export async function trackColorMask(
     if (n > 0) seed = { x: sx / n, y: sy / n };
   }
 
+  // ── Capture SSD template for hybrid position tracking ───────────────────
+  //
+  // The colour signature learns WHAT the feature looks like; the SSD template
+  // learns WHERE it is. On each frame we run SSD first (fast, <1ms) to find the
+  // new position, then seed the colour mask from there instead of from the
+  // previous frame's centroid. This stops same-coloured objects elsewhere in the
+  // frame from stealing the blob.
+  let ssdTemplate: SsdTemplate | null = null;
+  if (seed) {
+    ssdTemplate = captureSsdTemplate(first, seed.x, seed.y, 32);
+  }
+  // Last known SSD position — initialised from the paint centroid, updated
+  // every frame where SSD succeeds. Used as the search origin for SSD and
+  // as a fallback seed when the colour centroid drifts.
+  let ssdLastX = seed?.x ?? analysisW / 2;
+  let ssdLastY = seed?.y ?? analysisH / 2;
+
   // ── Walk the clip ────────────────────────────────────────────────────────
   const fps = Math.max(2, Math.min(30, opts.fps ?? 12));
   const step = 1 / fps;
@@ -217,6 +235,44 @@ export async function trackColorMask(
       { searchRadius, scaleHint, spreadLimit: opts.spreadLimit }
     );
 
+    // ── Hybrid SSD position refinement ──────────────────────────────────────
+    //
+    // Run SSD template matching to find where the painted region moved. If SSD
+    // gives a confident result, use it to OVERRIDE the colour centroid. This
+    // prevents colour-leaking: a sleeve won't jump to the whole outfit even
+    // when they share the exact same colour, because SSD tracks the specific
+    // texture patch.
+    let ssdTracked = false;
+    if (ssdTemplate && i > 0) {
+      const ssdResult = ssdTrackPosition(
+        frame,
+        ssdTemplate,
+        ssdLastX,
+        ssdLastY,
+        searchRadius
+      );
+      if (ssdResult && ssdResult.confidence > 0.15) {
+        // SSD found the object — use its position as the authoritative seed
+        // for the colour mask. This overrides the flood-fill seed, keeping
+        // the colour blob anchored to where SSD says the object actually is.
+        ssdLastX = ssdResult.x;
+        ssdLastY = ssdResult.y;
+        ssdTracked = true;
+
+        // If the colour centroid drifted far from SSD, re-seed from SSD.
+        // This is what stops the mask from leaking to a same-coloured object.
+        if (seed) {
+          const driftDist = Math.hypot(ssdResult.x - seed.x, ssdResult.y - seed.y);
+          if (driftDist > searchRadius * 0.5) {
+            // Colour centroid has drifted too far — reset it to SSD position
+            seed = { x: ssdResult.x, y: ssdResult.y };
+          }
+        } else {
+          seed = { x: ssdResult.x, y: ssdResult.y };
+        }
+      }
+    }
+
     // ── Runaway-blob guard ───────────────────────────────────────────────────
     //
     // The mask is grown by flood fill, so if the subject touches anything of a
@@ -250,10 +306,15 @@ export async function trackColorMask(
     });
 
     // Follow the blob: next frame searches around where we just found it.
-    // Falling back to the previous seed (rather than null) means a brief
-    // occlusion does not reset the tracker to a global search. A leaked frame
-    // deliberately does NOT move the seed — see the guard above.
-    if (result.centroid && !leaked) seed = result.centroid;
+    // When SSD tracked successfully, prefer the SSD position — it is more
+    // stable than the colour centroid and does not drift to similar objects.
+    if (!leaked) {
+      if (ssdTracked) {
+        seed = { x: ssdLastX, y: ssdLastY };
+      } else if (result.centroid) {
+        seed = result.centroid;
+      }
+    }
 
     // ── Adaptive scale ───────────────────────────────────────────────────────
     //
