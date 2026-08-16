@@ -14,11 +14,13 @@
  */
 
 import { useState } from 'react';
-import { Activity, Crosshair, Plus, Trash2, Loader2 } from 'lucide-react';
+import { Activity, Crosshair, Plus, Trash2, Loader2, Brush, SquareDashed } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TimelineClip, CornerPoints } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { trackMotion } from '@/utils/motionTracker';
+import { trackColorMask } from '@/utils/motionMaskTracker';
+import { decodeMaskRle } from '@/utils/motionMask';
 import {
   DEFAULT_MOTION_EFFECT,
   MOTION_EFFECT_INFO,
@@ -70,6 +72,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
   const updateClip = useEditorStore((s) => s.updateClip);
   const [trackingIndex, setTrackingIndex] = useState<number | null>(null);
   const [trackProgress, setTrackProgress] = useState(0);
+  const [paintArmed, setPaintArmed] = useState<number | null>(null);
 
   const effects: MotionEffectSettings[] = selectedClip.motionEffects ?? [];
 
@@ -99,16 +102,21 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
     useEditorStore.getState().saveSnapshot('Remove Motion Effect');
   };
 
+  const armPaint = (index: number | null) => {
+    window.dispatchEvent(
+      new CustomEvent('procut-motion-paint-arm', {
+        detail: index === null ? null : { index, clipId: selectedClip.id },
+      })
+    );
+    setPaintArmed(index);
+  };
+
   const runTracking = async (index: number) => {
     const effect = effects[index];
     const videoEl = videoElements.get(selectedClip.id);
 
     if (!videoEl) {
       toast.error('Video not loaded yet — move the playhead over this clip first.');
-      return;
-    }
-    if (!effect.baseCorners) {
-      toast.error('Position the region box first.');
       return;
     }
 
@@ -120,24 +128,71 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
     setTrackProgress(0);
 
     try {
-      const results = await trackMotion(
-        videoEl,
-        store.currentTime,
-        remaining,
-        effect.baseCorners,
-        (progress) => setTrackProgress(Math.round(progress * 100))
-      );
+      if (effect.regionMode === 'paint') {
+        // ── Colour-signature tracking ──────────────────────────────────────
+        if (!effect.strokeRle || !effect.strokeWidth || !effect.strokeHeight) {
+          toast.error('Paint over the feature first, then press Re-track.');
+          return;
+        }
 
-      // Store times RELATIVE to the clip so the track stays valid if the clip is
-      // moved along the timeline.
-      const track = results.map((r) => ({
-        time: Math.max(0, r.time - selectedClip.startTime),
-        corners: r.corners,
-      }));
+        const decoded = decodeMaskRle(
+          effect.strokeRle,
+          effect.strokeWidth * effect.strokeHeight
+        );
+        const stroke = new Uint8Array(decoded.length);
+        for (let i = 0; i < decoded.length; i++) stroke[i] = decoded[i] > 127 ? 1 : 0;
 
-      patch(index, { track });
-      useEditorStore.getState().saveSnapshot('Track Motion Region');
-      toast.success(`Tracked ${track.length} frames — the effect now follows the subject.`);
+        const result = await trackColorMask(
+          videoEl,
+          store.currentTime,
+          remaining,
+          stroke,
+          effect.strokeWidth,
+          effect.strokeHeight,
+          {
+            tolerance: effect.colorTolerance ?? 22,
+            choke: effect.maskChoke ?? 0,
+            feather: Math.round((effect.feather ?? 12) / 3),
+            onProgress: (p) => setTrackProgress(Math.round(p * 100)),
+          }
+        );
+
+        if (!result) {
+          toast.error('Could not analyse the painted area — try a broader stroke.');
+          return;
+        }
+
+        patch(index, {
+          colorSignature: result.signature,
+          maskCache: {
+            width: result.width,
+            height: result.height,
+            frames: result.frames,
+          },
+        });
+        useEditorStore.getState().saveSnapshot('Track Colour Region');
+        toast.success(`Analysed ${result.frames.length} frames — the effect now follows the painted colour.`);
+      } else {
+        // ── Box tracking ───────────────────────────────────────────────────
+        if (!effect.baseCorners) {
+          toast.error('Position the region box first.');
+          return;
+        }
+        const results = await trackMotion(
+          videoEl,
+          store.currentTime,
+          remaining,
+          effect.baseCorners,
+          (progress) => setTrackProgress(Math.round(progress * 100))
+        );
+        const track = results.map((r) => ({
+          time: Math.max(0, r.time - selectedClip.startTime),
+          corners: r.corners,
+        }));
+        patch(index, { track });
+        useEditorStore.getState().saveSnapshot('Track Motion Region');
+        toast.success(`Tracked ${track.length} frames — the effect now follows the subject.`);
+      }
     } catch (err: any) {
       console.error('[MotionEffects] tracking failed:', err);
       toast.error(`Tracking failed: ${err?.message ?? 'unknown error'}`);
@@ -230,7 +285,121 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                 {info && <p className="text-[9px] text-[#707070] mt-1">{info.description}</p>}
               </div>
 
-              {/* Region placement */}
+              {/* Selection shape: box vs painted colour */}
+              <div className="space-y-1.5 pt-1 border-t border-[#3e3e3e]/30">
+                <span className="text-[10px] text-[#a0a0a0] font-medium">Selection</span>
+                <div className="grid grid-cols-2 gap-1">
+                  {([
+                    ['box', 'Box', SquareDashed],
+                    ['paint', 'Paint', Brush],
+                  ] as const).map(([mode, label, Icon]) => (
+                    <button
+                      key={mode}
+                      onClick={() => {
+                        patch(index, { regionMode: mode });
+                        if (mode !== 'paint') armPaint(null);
+                      }}
+                      className={`py-1.5 text-[10px] rounded border transition-colors flex items-center justify-center gap-1 ${
+                        (effect.regionMode ?? 'box') === mode
+                          ? 'bg-orange-600 border-orange-500 text-white'
+                          : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" /> {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Inside vs outside */}
+                <span className="text-[10px] text-[#a0a0a0] font-medium block pt-1">Apply To</span>
+                <div className="grid grid-cols-2 gap-1">
+                  {([
+                    ['inside', 'Inside selection'],
+                    ['outside', 'Outside selection'],
+                  ] as const).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      onClick={() => patch(index, { applyMode: mode })}
+                      className={`py-1.5 text-[10px] rounded border transition-colors ${
+                        (effect.applyMode ?? 'inside') === mode
+                          ? 'bg-orange-600 border-orange-500 text-white'
+                          : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-[#707070]">
+                  {(effect.applyMode ?? 'inside') === 'outside'
+                    ? 'Everything EXCEPT the selection moves — hold a subject steady while the scene shakes.'
+                    : 'Only the selected area moves.'}
+                </p>
+              </div>
+
+              {/* Paint controls */}
+              {effect.regionMode === 'paint' && (
+                <div className="space-y-1.5 pt-1 border-t border-[#3e3e3e]/30">
+                  <button
+                    onClick={() => armPaint(paintArmed === index ? null : index)}
+                    className={`w-full py-1.5 rounded text-[10px] font-medium transition-colors flex items-center justify-center gap-1.5 border ${
+                      paintArmed === index
+                        ? 'bg-orange-600 border-orange-500 text-white'
+                        : 'bg-[#1f2933] border-orange-500/30 text-orange-300 hover:bg-[#283542]'
+                    }`}
+                  >
+                    <Brush className="w-3 h-3" />
+                    {paintArmed === index ? 'Painting — drag on the preview' : 'Paint Region'}
+                  </button>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] text-[#a0a0a0] font-medium">Brush Size</label>
+                      <span className="text-[10px] text-orange-400 font-mono">{effect.brushSize ?? 40}px</span>
+                    </div>
+                    <input
+                      type="range" min={8} max={160} step={2}
+                      value={effect.brushSize ?? 40}
+                      onChange={(e) => patch(index, { brushSize: parseFloat(e.target.value) } as any)}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-orange-500 cursor-pointer"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] text-[#a0a0a0] font-medium">Colour Tolerance</label>
+                      <span className="text-[10px] text-orange-400 font-mono">{effect.colorTolerance ?? 22}</span>
+                    </div>
+                    <input
+                      type="range" min={5} max={60} step={1}
+                      value={effect.colorTolerance ?? 22}
+                      onChange={(e) => patch(index, { colorTolerance: parseFloat(e.target.value) })}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-orange-500 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-[#707070] mt-1">
+                      Higher catches more shades of the painted colour. Re-track after changing.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] text-[#a0a0a0] font-medium">Mask Choke</label>
+                      <span className="text-[10px] text-orange-400 font-mono">
+                        {(effect.maskChoke ?? 0) > 0 ? '+' : ''}{effect.maskChoke ?? 0}px
+                      </span>
+                    </div>
+                    <input
+                      type="range" min={-6} max={6} step={1}
+                      value={effect.maskChoke ?? 0}
+                      onChange={(e) => patch(index, { maskChoke: parseFloat(e.target.value) })}
+                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-orange-500 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Region placement (box mode only) */}
+              {(effect.regionMode ?? 'box') === 'box' && (
               <div className="space-y-1.5 pt-1 border-t border-[#3e3e3e]/30">
                 <span className="text-[10px] text-[#a0a0a0] font-medium">Region</span>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -261,6 +430,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                   over the feature — or type exact values above. Then press Track.
                 </p>
               </div>
+              )}
 
               {/* Track */}
               <button

@@ -32,6 +32,7 @@ import { toast } from 'sonner';
 import { getClipDimensions, inpaint, getOverlayMapping, clientToOverlay, clientToViewportSpace } from './previewMath';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { isKineticMediaId, getSentenceBounds } from '@/utils/kineticSync';
+import { encodeMaskRle } from '@/utils/motionMask';
 
 interface InteractiveCanvasOverlayProps {
   viewport: { x: number; y: number; zoom: number };
@@ -106,6 +107,39 @@ export function PreviewCanvasOverlay({
    * whereas `dragState` operates in clip-local space and is affected by the
    * clip's own transform.
    */
+  /**
+   * Paint-brush stroke being drawn for a motion region, in 854x480 frame space.
+   * Kept as a point list while drawing and rasterised on mouse-up.
+   */
+  const [paintStroke, setPaintStroke] = useState<{
+    index: number;
+    points: Array<{ x: number; y: number }>;
+  } | null>(null);
+
+  /**
+   * Which motion region is currently armed for painting, or null.
+   * Set from the FX panel's "Paint Region" button via a global event, so the
+   * panel and overlay stay decoupled.
+   */
+  const [paintArmedIndex, setPaintArmedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    const onArm = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setPaintArmedIndex(
+        detail && typeof detail.index === 'number' && detail.clipId === selectedClipId
+          ? detail.index
+          : null
+      );
+    };
+    window.addEventListener('procut-motion-paint-arm', onArm);
+    return () => window.removeEventListener('procut-motion-paint-arm', onArm);
+  }, [selectedClipId]);
+
+  // Disarm when the selection changes, so a stray click on another clip cannot
+  // paint into the wrong region.
+  useEffect(() => { setPaintArmedIndex(null); }, [selectedClipId]);
+
   const [regionDrag, setRegionDrag] = useState<{
     index: number;
     mode: 'move' | 'nw' | 'ne' | 'se' | 'sw' | 'new';
@@ -981,6 +1015,137 @@ export function PreviewCanvasOverlay({
     );
     updateClip(activeClip.id, { motionEffects: next } as any);
   };
+
+  /**
+   * Rasterise a painted polyline into a binary stroke mask and store it on the
+   * effect, along with a bounding box so box-mode controls still make sense.
+   *
+   * Stored at a modest 240px-wide resolution: the signature only needs the
+   * colours under the brush, and keeping it small keeps the project file light.
+   */
+  const commitPaintStroke = (index: number, points: Array<{ x: number; y: number }>, brush: number) => {
+    if (!activeClip || points.length === 0) return;
+
+    const MW = 240;
+    const MH = Math.round((MW * 480) / 854);
+    const cnv = document.createElement('canvas');
+    cnv.width = MW;
+    cnv.height = MH;
+    const c = cnv.getContext('2d');
+    if (!c) return;
+
+    c.fillStyle = '#000';
+    c.fillRect(0, 0, MW, MH);
+    c.strokeStyle = '#fff';
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    c.lineWidth = Math.max(2, (brush * MW) / 854);
+    c.beginPath();
+    points.forEach((pt, i) => {
+      const x = (pt.x * MW) / 854;
+      const y = (pt.y * MH) / 480;
+      if (i === 0) c.moveTo(x, y);
+      else c.lineTo(x, y);
+    });
+    // A single tap should still paint a dot, not nothing.
+    if (points.length === 1) {
+      c.lineTo((points[0].x * MW) / 854 + 0.01, (points[0].y * MH) / 480);
+    }
+    c.stroke();
+
+    const img = c.getImageData(0, 0, MW, MH);
+    const stroke = new Uint8Array(MW * MH);
+    for (let i = 0; i < stroke.length; i++) {
+      stroke[i] = img.data[i * 4] > 127 ? 1 : 0;
+    }
+
+    // Bounding box of the stroke, so the box controls and the initial preview
+    // reflect what was painted.
+    let minX = MW, minY = MH, maxX = -1, maxY = -1;
+    for (let y = 0; y < MH; y++) {
+      for (let x = 0; x < MW; x++) {
+        if (stroke[y * MW + x]) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    const next = motionEffects.map((m: any, i: number) => {
+      if (i !== index) return m;
+      const patched: any = {
+        ...m,
+        regionMode: 'paint',
+        strokeRle: encodeMaskRle(new Uint8ClampedArray(stroke.map((v) => (v ? 255 : 0)))),
+        strokeWidth: MW,
+        strokeHeight: MH,
+        // A new stroke invalidates the old analysis — it described different pixels.
+        maskCache: undefined,
+        colorSignature: undefined,
+      };
+      if (maxX >= 0) {
+        const bx0 = (minX / MW) * 854;
+        const bx1 = (maxX / MW) * 854;
+        const by0 = (minY / MH) * 480;
+        const by1 = (maxY / MH) * 480;
+        patched.baseCorners = {
+          x0: bx0, y0: by0,
+          x1: bx1, y1: by0,
+          x2: bx1, y2: by1,
+          x3: bx0, y3: by1,
+        };
+      }
+      return patched;
+    });
+
+    updateClip(activeClip.id, { motionEffects: next } as any);
+    useEditorStore.getState().saveSnapshot('Paint Motion Region');
+  };
+
+  // Paint interaction: pointer events on a full-frame capture rect.
+  useEffect(() => {
+    if (!paintStroke || !activeClip) return;
+
+    const onMove = (e: MouseEvent) => {
+      const container = document.getElementById('preview-canvas-wrapper');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const p = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+      // Points are in frame space; subtract the letterbox offset applied to the
+      // viewport group so the stroke lands under the cursor. Computed locally
+      // because the component-level offsetX/Y are declared further down.
+      const ar = useEditorStore.getState().aspectRatio;
+      let vW = 854;
+      if (ar === '9:16') vW = Math.round(480 * (9 / 16));
+      else if (ar === '1:1') vW = 480;
+      else if (ar === '4:3') vW = Math.round(480 * (4 / 3));
+      const offX = (854 - vW) / 2;
+      const offY = 0;
+      setPaintStroke((prev) =>
+        prev ? { ...prev, points: [...prev.points, { x: p.x - offX, y: p.y - offY }] } : prev
+      );
+    };
+
+    const onUp = () => {
+      setPaintStroke((prev) => {
+        if (prev) {
+          const brush = motionEffects[prev.index]?.brushSize ?? 40;
+          commitPaintStroke(prev.index, prev.points, brush);
+        }
+        return null;
+      });
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paintStroke, activeClip, viewport, motionEffects]);
 
   const beginRegionDrag = (
     e: React.MouseEvent,
@@ -1878,8 +2043,78 @@ export function PreviewCanvasOverlay({
                 picture) but OUTSIDE the clip-transform group, because a region is
                 authored in absolute frame space — it must stay where the user put
                 it even if the clip itself is scaled or rotated. */}
+            {/* Paint capture surface — only while a region is in paint mode and
+                armed. Covers the frame so a stroke can start anywhere. */}
+            {showRegions && paintArmedIndex !== null && (
+              <rect
+                x={0}
+                y={0}
+                width={854}
+                height={480}
+                fill="rgba(251,146,60,0.06)"
+                className="pointer-events-auto"
+                style={{ cursor: 'crosshair' }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  const container = document.getElementById('preview-canvas-wrapper');
+                  if (!container) return;
+                  const rect = container.getBoundingClientRect();
+                  const p = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+                  setPaintStroke({
+                    index: paintArmedIndex,
+                    points: [{ x: p.x - offsetX, y: p.y - offsetY }],
+                  });
+                }}
+              />
+            )}
+
+            {/* Live stroke preview */}
+            {paintStroke && paintStroke.points.length > 0 && (
+              <polyline
+                points={paintStroke.points.map((pt) => `${pt.x},${pt.y}`).join(' ')}
+                fill="none"
+                stroke="#fb923c"
+                strokeOpacity={0.85}
+                strokeWidth={(motionEffects[paintStroke.index]?.brushSize ?? 40)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="pointer-events-none"
+              />
+            )}
+
             {showRegions && motionEffects.map((me: any, i: number) => {
               if (!me?.enabled) return null;
+              // Paint regions show their analysed bounds, not draggable handles —
+              // the selection is the painted colour, not the rectangle.
+              if (me.regionMode === 'paint') {
+                const pr = regionRect(me.baseCorners);
+                const hasMask = (me.maskCache?.frames?.length ?? 0) > 0;
+                return (
+                  <g key={`motion-paint-${i}`} className="pointer-events-none">
+                    <rect
+                      x={pr.cx - pr.w / 2}
+                      y={pr.cy - pr.h / 2}
+                      width={pr.w}
+                      height={pr.h}
+                      fill="none"
+                      stroke={hasMask ? '#34d399' : '#fb923c'}
+                      strokeWidth={1.5 / viewport.zoom}
+                      strokeDasharray={`${3 / viewport.zoom},${3 / viewport.zoom}`}
+                      opacity={0.7}
+                    />
+                    <text
+                      x={pr.cx - pr.w / 2}
+                      y={pr.cy - pr.h / 2 - 6 / viewport.zoom}
+                      fill={hasMask ? '#34d399' : '#fb923c'}
+                      fontSize={12 / viewport.zoom}
+                      className="select-none"
+                    >
+                      {`R${i + 1} ${me.type} · paint${hasMask ? ' ✓' : ' (re-track)'}${me.applyMode === 'outside' ? ' · outside' : ''}`}
+                    </text>
+                  </g>
+                );
+              }
               const r = regionRect(me.baseCorners);
               const tracked = (me.track?.length ?? 0) > 0;
               const stroke = tracked ? '#34d399' : '#fb923c';

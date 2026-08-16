@@ -34,6 +34,15 @@
  */
 
 import type { CornerPoints } from '@/types';
+import type { ColorSignature, MaskApplyMode, RegionMode } from './motionMask';
+import {
+  decodeMaskRle,
+  invertMask,
+  maskBounds,
+  maskToImageData,
+  pickCachedMask,
+  resampleMask,
+} from './motionMask';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,6 +86,42 @@ export interface MotionEffectSettings {
   track?: { time: number; corners: CornerPoints }[];
   /** The box the user originally drew, used before/without tracking. */
   baseCorners?: CornerPoints;
+
+  // ── Selection shape ──────────────────────────────────────────────────────
+  /**
+   * 'box'   — the rectangle above.
+   * 'paint' — a painted stroke whose COLOUR is learned and re-found each frame,
+   *           so the selection follows the feature even as it deforms.
+   */
+  regionMode?: RegionMode;
+  /**
+   * Apply the motion INSIDE the selection (default) or OUTSIDE it.
+   * Outside is how you shake the whole scene but hold one subject steady.
+   */
+  applyMode?: MaskApplyMode;
+
+  // ── Paint mode data ──────────────────────────────────────────────────────
+  /** Learned colour signature of the painted pixels. */
+  colorSignature?: ColorSignature;
+  /** The painted stroke, run-length encoded at `strokeWidth` x `strokeHeight`. */
+  strokeRle?: number[];
+  strokeWidth?: number;
+  strokeHeight?: number;
+  /** Brush diameter used when painting, in preview-space pixels. */
+  brushSize?: number;
+  /** Chroma match tolerance, 5-60. Higher catches more shades. */
+  colorTolerance?: number;
+  /** Grow/shrink the matched mask, in mask pixels. */
+  maskChoke?: number;
+  /**
+   * Per-frame cached masks, built when the user presses Re-track.
+   * Cached because scoring every pixel each frame is far too slow for playback.
+   */
+  maskCache?: {
+    width: number;
+    height: number;
+    frames: Array<{ time: number; rle: number[]; centroid: { x: number; y: number } | null }>;
+  };
 }
 
 export const DEFAULT_MOTION_EFFECT: MotionEffectSettings = {
@@ -87,6 +132,11 @@ export const DEFAULT_MOTION_EFFECT: MotionEffectSettings = {
   feather: 12,
   regionScale: 110,
   seed: 1,
+  regionMode: 'box',
+  applyMode: 'inside',
+  brushSize: 40,
+  colorTolerance: 22,
+  maskChoke: 0,
 };
 
 /** UI metadata: which controls actually do something for each effect. */
@@ -324,25 +374,113 @@ export function applyMotionEffect(
 ): void {
   if (!settings?.enabled) return;
 
-  const corners = getTrackedCorners(settings.track, settings.baseCorners, relTime);
-  if (!corners) return;
+  const isPaint = settings.regionMode === 'paint';
+  const applyOutside = settings.applyMode === 'outside';
 
-  const rect = cornersToRect(corners);
+  // ── Resolve the selection mask ──────────────────────────────────────────
+  // Paint mode uses the cached per-frame colour mask; box mode synthesises a
+  // rectangular mask from the tracked corners. Both end up as an alpha matte, so
+  // the compositing path below is shared — including inside/outside.
+  let matte: HTMLCanvasElement | null = null;
+  let region: { sx: number; sy: number; sw: number; sh: number } | null = null;
 
-  // Grow the region a little so the displaced patch still has pixels at its old
-  // edge — otherwise a shake exposes a hard rectangular seam.
-  const grow = Math.max(1, (settings.regionScale ?? 110) / 100);
-  const cxR = (rect.x + rect.w / 2) * scaleX;
-  const cyR = (rect.y + rect.h / 2) * scaleY;
-  const rw = rect.w * scaleX * grow;
-  const rh = rect.h * scaleY * grow;
+  if (isPaint && settings.maskCache?.frames?.length) {
+    const cache = settings.maskCache;
+    const picked = pickCachedMask(cache.frames, relTime);
+    if (!picked) return;
 
-  // Clamp to the canvas; a zero-area region would throw in drawImage.
-  const sx = Math.max(0, Math.min(canvasW - 1, cxR - rw / 2));
-  const sy = Math.max(0, Math.min(canvasH - 1, cyR - rh / 2));
-  const sw = Math.max(1, Math.min(canvasW - sx, rw));
-  const sh = Math.max(1, Math.min(canvasH - sy, rh));
-  if (sw < 2 || sh < 2) return;
+    const maskData = decodeMaskRle(picked.rle, cache.width * cache.height);
+    const scaled = resampleMask(maskData, cache.width, cache.height, canvasW, canvasH);
+    const finalMask = applyOutside ? invertMask(scaled) : scaled;
+
+    const bounds = applyOutside
+      ? { x: 0, y: 0, w: canvasW, h: canvasH }
+      : maskBounds(scaled, canvasW, canvasH);
+    if (!bounds) return;
+
+    // Pad so a displaced patch still has pixels at its former edge.
+    const pad = Math.max(8, Math.round(Math.min(bounds.w, bounds.h) * 0.25));
+    const sx = Math.max(0, bounds.x - pad);
+    const sy = Math.max(0, bounds.y - pad);
+    const sw = Math.min(canvasW - sx, bounds.w + pad * 2);
+    const sh = Math.min(canvasH - sy, bounds.h + pad * 2);
+    if (sw < 2 || sh < 2) return;
+    region = { sx, sy, sw, sh };
+
+    matte = getScratch(`${cacheKey}_matte`, sw, sh);
+    if (!matte) return;
+    const mctx = matte.getContext('2d');
+    if (!mctx) return;
+    const img = maskToImageData(finalMask, canvasW, canvasH);
+    if (!img) return;
+    const full = getScratch(`${cacheKey}_full`, canvasW, canvasH);
+    if (!full) return;
+    const fctx = full.getContext('2d');
+    if (!fctx) return;
+    fctx.putImageData(img, 0, 0);
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    mctx.clearRect(0, 0, matte.width, matte.height);
+    mctx.drawImage(full, sx, sy, sw, sh, 0, 0, sw, sh);
+  } else {
+    // Box mode (or paint mode before Re-track has been pressed).
+    const corners = getTrackedCorners(settings.track, settings.baseCorners, relTime);
+    if (!corners) return;
+    const rect = cornersToRect(corners);
+    const grow = Math.max(1, (settings.regionScale ?? 110) / 100);
+    const cxR = (rect.x + rect.w / 2) * scaleX;
+    const cyR = (rect.y + rect.h / 2) * scaleY;
+    const rw = rect.w * scaleX * grow;
+    const rh = rect.h * scaleY * grow;
+
+    if (applyOutside) {
+      region = { sx: 0, sy: 0, sw: canvasW, sh: canvasH };
+    } else {
+      const sx = Math.max(0, Math.min(canvasW - 1, cxR - rw / 2));
+      const sy = Math.max(0, Math.min(canvasH - 1, cyR - rh / 2));
+      const sw = Math.max(1, Math.min(canvasW - sx, rw));
+      const sh = Math.max(1, Math.min(canvasH - sy, rh));
+      if (sw < 2 || sh < 2) return;
+      region = { sx, sy, sw, sh };
+    }
+
+    // Build a soft-edged rectangular matte so box mode also blends, and so the
+    // outside variant has a hole punched where the box is.
+    matte = getScratch(`${cacheKey}_matte`, region.sw, region.sh);
+    if (!matte) return;
+    const mctx = matte.getContext('2d');
+    if (!mctx) return;
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    mctx.clearRect(0, 0, matte.width, matte.height);
+
+    const feather = Math.max(0, settings.feather ?? 0);
+    const bx = applyOutside ? cxR - rw / 2 : 0;
+    const by = applyOutside ? cyR - rh / 2 : 0;
+
+    if (applyOutside) {
+      mctx.fillStyle = 'rgba(255,255,255,1)';
+      mctx.fillRect(0, 0, matte.width, matte.height);
+      mctx.globalCompositeOperation = 'destination-out';
+    }
+
+    const gx = bx + rw / 2;
+    const gy = by + rh / 2;
+    const outer = Math.max(rw, rh) / 2;
+    const inner = Math.max(0, outer - feather);
+    const grad = mctx.createRadialGradient(gx, gy, inner, gx, gy, outer);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    mctx.fillStyle = grad;
+    mctx.save();
+    mctx.translate(gx, gy);
+    mctx.scale(1, Math.max(0.01, rh / Math.max(1, rw)));
+    mctx.translate(-gx, -gy);
+    mctx.fillRect(bx - outer, by - outer, outer * 2, outer * 2);
+    mctx.restore();
+    mctx.globalCompositeOperation = 'source-over';
+  }
+
+  if (!region || !matte) return;
+  const { sx, sy, sw, sh } = region;
 
   const disp = getMotionDisplacement(settings, relTime, Math.min(sw, sh));
 
@@ -363,40 +501,11 @@ export function applyMotionEffect(
     applyRegionRgbSplit(pctx, patch.width, patch.height, disp.rgbSplit);
   }
 
-  // Feather the patch edges so it melts into the untouched frame instead of
-  // showing a rectangle. Done with destination-in + a radial gradient.
-  const feather = Math.max(0, settings.feather ?? 0);
-  if (feather > 0) {
-    const mask = getScratch(`${cacheKey}_mask`, sw, sh);
-    if (mask) {
-      const mctx = mask.getContext('2d');
-      if (mctx) {
-        mctx.setTransform(1, 0, 0, 1, 0, 0);
-        mctx.clearRect(0, 0, mask.width, mask.height);
-        const gx = mask.width / 2;
-        const gy = mask.height / 2;
-        const outer = Math.max(gx, gy);
-        const inner = Math.max(0, outer - feather);
-        const grad = mctx.createRadialGradient(gx, gy, inner, gx, gy, outer);
-        grad.addColorStop(0, 'rgba(255,255,255,1)');
-        grad.addColorStop(1, 'rgba(255,255,255,0)');
-        mctx.fillStyle = grad;
-        // Ellipse-shaped falloff matches the region's aspect better than a circle.
-        mctx.save();
-        mctx.translate(gx, gy);
-        mctx.scale(1, mask.height / Math.max(1, mask.width));
-        mctx.translate(-gx, -gy);
-        mctx.fillRect(0, 0, mask.width, mask.height);
-        mctx.restore();
+  // Cut the patch to the matte so only the selected side is affected.
+  pctx.globalCompositeOperation = 'destination-in';
+  pctx.drawImage(matte, 0, 0);
+  pctx.globalCompositeOperation = 'source-over';
 
-        pctx.globalCompositeOperation = 'destination-in';
-        pctx.drawImage(mask, 0, 0);
-        pctx.globalCompositeOperation = 'source-over';
-      }
-    }
-  }
-
-  // Composite the transformed patch back over the frame.
   ctx.save();
   ctx.translate(sx + sw / 2 + disp.dx, sy + sh / 2 + disp.dy);
   if (disp.rotation) ctx.rotate((disp.rotation * Math.PI) / 180);
