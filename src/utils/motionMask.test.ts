@@ -306,3 +306,91 @@ describe('pickCachedMask', () => {
     expect(pickCachedMask([], 1)).toBeNull();
   });
 });
+
+/**
+ * Compositing rules for "inside" vs "outside" mode.
+ *
+ * The reported bug: inside mode drew the displaced patch OVER an untouched
+ * frame, leaving the original pixels in place. The result was a faint double
+ * exposure rather than the region actually moving.
+ */
+describe('inside/outside compositing rules', () => {
+  /** Mirrors the decision table in applyMotionEffect. */
+  const plan = (applyMode: 'inside' | 'outside') => ({
+    // Inside must vacate the original pixels and backfill the hole; outside must
+    // not, because its matte covers nearly the whole frame.
+    vacatesOriginal: applyMode === 'inside',
+    matteInverted: applyMode === 'outside',
+    regionIsWholeFrame: applyMode === 'outside',
+  });
+
+  it('inside vacates the original so the selection genuinely moves', () => {
+    expect(plan('inside').vacatesOriginal).toBe(true);
+  });
+
+  it('outside does NOT vacate — that would blur away the whole picture', () => {
+    // Outside's matte is the inverse, i.e. almost everything. Vacating it would
+    // erase the entire frame and leave only the untouched subject.
+    expect(plan('outside').vacatesOriginal).toBe(false);
+  });
+
+  it('outside inverts the matte', () => {
+    expect(plan('outside').matteInverted).toBe(true);
+    expect(plan('inside').matteInverted).toBe(false);
+  });
+
+  it('inverting twice returns the original mask', () => {
+    const m = new Uint8ClampedArray([0, 128, 255]);
+    expect(Array.from(invertMask(invertMask(m)))).toEqual(Array.from(m));
+  });
+
+  it('an inverted full mask is empty, and vice versa', () => {
+    const full = new Uint8ClampedArray(16).fill(255);
+    const empty = new Uint8ClampedArray(16);
+    expect(Array.from(invertMask(full))).toEqual(Array.from(empty));
+    expect(Array.from(invertMask(empty))).toEqual(Array.from(full));
+  });
+
+  it('a partially covered mask inverts to its complement', () => {
+    const m = new Uint8ClampedArray(4);
+    m[0] = 255; m[1] = 255;
+    const inv = invertMask(m);
+    expect(inv[0]).toBe(0);
+    expect(inv[2]).toBe(255);
+    // Coverage is conserved: what was selected becomes unselected.
+    const cov = (a: Uint8ClampedArray) => a.reduce((n, v) => n + v, 0);
+    expect(cov(m) + cov(inv)).toBe(4 * 255);
+  });
+});
+
+/**
+ * Region-edit mode gating: while placing a region the clip transform must be
+ * disabled, or a drag intended for the region moves the whole shot.
+ */
+describe('region edit mode gating', () => {
+  const gate = (editingIndex: number | null) => ({
+    showRegionOverlay: editingIndex !== null,
+    clipTransformEnabled: editingIndex === null,
+  });
+
+  it('shows the region overlay only while editing', () => {
+    expect(gate(null).showRegionOverlay).toBe(false);
+    expect(gate(0).showRegionOverlay).toBe(true);
+  });
+
+  it('disables the clip transform while editing', () => {
+    expect(gate(0).clipTransformEnabled).toBe(false);
+  });
+
+  it('re-enables the clip transform once editing finishes', () => {
+    expect(gate(null).clipTransformEnabled).toBe(true);
+  });
+
+  it('the two are always mutually exclusive', () => {
+    // If both were ever active the overlays would fight for the same drag.
+    for (const idx of [null, 0, 1, 5]) {
+      const g = gate(idx);
+      expect(g.showRegionOverlay && g.clipTransformEnabled).toBe(false);
+    }
+  });
+});

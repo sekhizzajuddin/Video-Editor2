@@ -73,6 +73,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
   const [trackingIndex, setTrackingIndex] = useState<number | null>(null);
   const [trackProgress, setTrackProgress] = useState(0);
   const [paintArmed, setPaintArmed] = useState<number | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const effects: MotionEffectSettings[] = selectedClip.motionEffects ?? [];
 
@@ -95,9 +96,12 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
       },
     ]);
     useEditorStore.getState().saveSnapshot('Add Motion Effect');
+    // Jump straight into placing it — that is always the next thing the user wants.
+    setEditing(effects.length);
   };
 
   const removeEffect = (index: number) => {
+    if (editingIndex === index) setEditing(null);
     writeEffects(effects.filter((_, i) => i !== index));
     useEditorStore.getState().saveSnapshot('Remove Motion Effect');
   };
@@ -109,6 +113,23 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
       })
     );
     setPaintArmed(index);
+  };
+
+  /**
+   * Enter / leave region-edit mode.
+   *
+   * While editing, the overlay shows the region box or brush AND disables the
+   * clip's transform handles — otherwise a drag intended for the region moves
+   * the whole clip and the region can never be placed.
+   */
+  const setEditing = (index: number | null) => {
+    window.dispatchEvent(
+      new CustomEvent('procut-motion-region-edit', {
+        detail: index === null ? null : { index, clipId: selectedClip.id },
+      })
+    );
+    setEditingIndex(index);
+    if (index === null) armPaint(null);
   };
 
   const runTracking = async (index: number) => {
@@ -261,6 +282,21 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                     </span>
                   )}
                   <button
+                    onClick={() => setEditing(editingIndex === index ? null : index)}
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border transition-colors ${
+                      editingIndex === index
+                        ? 'bg-orange-600 border-orange-500 text-white'
+                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                    }`}
+                    title={
+                      editingIndex === index
+                        ? 'Finish placing — re-enables the clip transform box'
+                        : 'Show the region on the preview and disable the clip transform box'
+                    }
+                  >
+                    {editingIndex === index ? 'Done' : 'Edit Region'}
+                  </button>
+                  <button
                     onClick={() => removeEffect(index)}
                     className="p-1 rounded text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-colors"
                     title="Remove"
@@ -283,6 +319,12 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                   ))}
                 </select>
                 {info && <p className="text-[9px] text-[#707070] mt-1">{info.description}</p>}
+                {editingIndex === index && (
+                  <p className="text-[9px] text-orange-400/90 mt-1.5 leading-relaxed">
+                    Placing region — the clip transform box is disabled so it cannot move
+                    while you work. Press <span className="font-semibold">Done</span> when finished.
+                  </p>
+                )}
               </div>
 
               {/* Selection shape: box vs painted colour */}

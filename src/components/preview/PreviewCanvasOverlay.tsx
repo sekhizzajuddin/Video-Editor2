@@ -123,6 +123,31 @@ export function PreviewCanvasOverlay({
    */
   const [paintArmedIndex, setPaintArmedIndex] = useState<number | null>(null);
 
+  /**
+   * Which region is currently being EDITED (box handles or brush), or null.
+   *
+   * While editing, the clip's own transform box is hidden and its handles are
+   * disabled. Without this the two overlays sit on top of each other: a drag
+   * intended to move the region box instead grabs the clip and repositions the
+   * whole shot, which makes the region impossible to place.
+   */
+  const [editingRegionIndex, setEditingRegionIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setEditingRegionIndex(
+        detail && typeof detail.index === 'number' && detail.clipId === selectedClipId
+          ? detail.index
+          : null
+      );
+    };
+    window.addEventListener('procut-motion-region-edit', onEdit);
+    return () => window.removeEventListener('procut-motion-region-edit', onEdit);
+  }, [selectedClipId]);
+
+  useEffect(() => { setEditingRegionIndex(null); }, [selectedClipId]);
+
   useEffect(() => {
     const onArm = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -978,7 +1003,15 @@ export function PreviewCanvasOverlay({
   // which is exactly the space `clientToViewportSpace` returns — so pointer
   // positions map onto them directly, with no clip transform involved.
   const motionEffects: any[] = (activeClip as any)?.motionEffects ?? [];
-  const showRegions = activePropertiesTab === 'effects' && motionEffects.length > 0;
+  // Region overlays appear only while the user is actively adding or editing a
+  // region, so they do not clutter the canvas the rest of the time.
+  const showRegions =
+    activePropertiesTab === 'effects' &&
+    motionEffects.length > 0 &&
+    editingRegionIndex !== null;
+
+  /** True while a region is being placed — the clip transform must stand down. */
+  const regionEditActive = showRegions;
 
   const regionRect = (c: any) => {
     if (!c) return { cx: 427, cy: 240, w: 140, h: 140 };
@@ -1760,6 +1793,10 @@ export function PreviewCanvasOverlay({
 
   const handleMouseDown = (e: React.MouseEvent, type: string) => {
     e.stopPropagation();
+    // Belt and braces: even if a transform handle is somehow still reachable
+    // while a motion region is being placed, refuse to start a clip drag. The
+    // region must be positionable without the shot moving underneath it.
+    if (regionEditActive) return;
     const mask = activeClip?.mask || { x: 50, y: 50, width: 50, height: 50, rotation: 0, feather: 0, roundness: 0 };
 
     // ── Capture the BASE transform, not the displayed one ────────────────────
@@ -2491,7 +2528,10 @@ export function PreviewCanvasOverlay({
                   />
                 )}
 
-                {activePropertiesTab === 'mask' && mask.enabled ? null : imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
+                {/* Hidden while a motion region is being placed: the two overlays
+                    would otherwise overlap and a drag meant for the region box
+                    would move the whole clip instead. */}
+                {regionEditActive ? null : activePropertiesTab === 'mask' && mask.enabled ? null : imageEditorTool !== 'none' ? null : canvasTransformMode === 'resize' ? (
                   <>
                     {/* Move bounding box (transparent, captures pointer for moving) */}
                     <rect

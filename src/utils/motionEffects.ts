@@ -506,6 +506,56 @@ export function applyMotionEffect(
   pctx.drawImage(matte, 0, 0);
   pctx.globalCompositeOperation = 'source-over';
 
+  // ── Vacate the original pixels ──────────────────────────────────────────
+  //
+  // Drawing the displaced patch on top of an untouched frame leaves the ORIGINAL
+  // pixels in place, so the region appears twice — a faint double exposure that
+  // reads as "the effect is barely working" rather than as movement.
+  //
+  // To make the selection genuinely move we must first remove it, then fill the
+  // hole it leaves. The fill is a blurred, slightly enlarged copy of the region's
+  // own surroundings: cheap, and far less distracting than a transparent gap or a
+  // hard black hole. This is a background approximation, not true inpainting —
+  // for a small shake the displaced patch covers most of it anyway.
+  //
+  // Only for INSIDE mode. In outside mode the matte covers nearly the whole
+  // frame, so vacating it would blur away the entire picture and leave only the
+  // untouched subject — the opposite of what is wanted. There the displaced
+  // background naturally covers its own former position.
+  const holeFill = applyOutside ? null : getScratch(`${cacheKey}_fill`, sw, sh);
+  if (holeFill) {
+    const hctx = holeFill.getContext('2d');
+    if (hctx) {
+      hctx.setTransform(1, 0, 0, 1, 0, 0);
+      hctx.clearRect(0, 0, holeFill.width, holeFill.height);
+
+      // Sample the region scaled up ~1.35x so the centre of the hole is filled
+      // with what surrounds it rather than with itself.
+      const zoom = 1.35;
+      const zw = sw / zoom;
+      const zh = sh / zoom;
+      const zx = sx + (sw - zw) / 2;
+      const zy = sy + (sh - zh) / 2;
+      try {
+        hctx.filter = 'blur(6px)';
+        hctx.drawImage(ctx.canvas, zx, zy, zw, zh, 0, 0, sw, sh);
+        hctx.filter = 'none';
+      } catch {
+        /* tainted canvas — fall through, the erase below still applies */
+      }
+
+      // Restrict the fill to the matte, then paint it over the frame. That both
+      // erases the original and patches the hole in a single pass.
+      hctx.globalCompositeOperation = 'destination-in';
+      hctx.drawImage(matte, 0, 0);
+      hctx.globalCompositeOperation = 'source-over';
+
+      ctx.save();
+      ctx.drawImage(holeFill, sx, sy, sw, sh);
+      ctx.restore();
+    }
+  }
+
   ctx.save();
   ctx.translate(sx + sw / 2 + disp.dx, sy + sh / 2 + disp.dy);
   if (disp.rotation) ctx.rotate((disp.rotation * Math.PI) / 180);
