@@ -120,3 +120,91 @@ describe('rotation: no jump on grab', () => {
     expect(back).toBeCloseTo(init, 9);
   });
 });
+
+/**
+ * Resize must survive a subsequent move.
+ *
+ * Kinetic word clips ship with a "pop" keyframe track on transform.scale
+ * (135% -> 100%). Because that track exists it — not `transform.scale` — decides
+ * what renders. Resizing used to write only the base, so the track kept forcing
+ * 100%, and the next move (which seeded from the animated value) wrote that 100
+ * back as the base, discarding the resize.
+ */
+describe('resize persists through a later move', () => {
+  const makeClip = () => ({
+    base: { scale: 100 },
+    track: [
+      { t: 0, v: 135 },
+      { t: 0.12, v: 100 },
+    ],
+  });
+
+  const sample = (track: { t: number; v: number }[], local: number) => {
+    if (local <= track[0].t) return track[0].v;
+    if (local >= track[track.length - 1].t) return track[track.length - 1].v;
+    const span = track[1].t - track[0].t;
+    return track[0].v + (track[1].v - track[0].v) * ((local - track[0].t) / span);
+  };
+
+  /** Mirrors scaleAnimationTrack + the base write. */
+  const resize = (clip: ReturnType<typeof makeClip>, newScale: number) => {
+    const ratio = newScale / clip.base.scale;
+    clip.track = clip.track.map((k) => ({ ...k, v: k.v * ratio }));
+    clip.base = { scale: newScale };
+  };
+
+  /** Mirrors a move: scale is seeded from the BASE and written back unchanged. */
+  const move = (clip: ReturnType<typeof makeClip>) => {
+    clip.base = { scale: clip.base.scale };
+  };
+
+  it('a move after a resize does not reset the size', () => {
+    const clip = makeClip();
+    resize(clip, 250);
+    move(clip);
+    expect(clip.base.scale).toBe(250);
+    expect(sample(clip.track, 0.5)).toBe(250);
+  });
+
+  it('survives repeated moves', () => {
+    const clip = makeClip();
+    resize(clip, 180);
+    for (let i = 0; i < 5; i++) move(clip);
+    expect(clip.base.scale).toBe(180);
+    expect(sample(clip.track, 0.5)).toBe(180);
+  });
+
+  it('keeps the animation shape (the pop still overshoots proportionally)', () => {
+    const clip = makeClip();
+    resize(clip, 250);
+    // 135 -> 337.5 : the 35% overshoot is preserved relative to the new size.
+    expect(sample(clip.track, 0)).toBeCloseTo(337.5, 6);
+    expect(sample(clip.track, 0) / sample(clip.track, 0.5)).toBeCloseTo(1.35, 6);
+  });
+
+  it('shrinking works the same way', () => {
+    const clip = makeClip();
+    resize(clip, 40);
+    move(clip);
+    expect(clip.base.scale).toBe(40);
+    expect(sample(clip.track, 0.5)).toBe(40);
+  });
+
+  it('successive resizes compose correctly', () => {
+    const clip = makeClip();
+    resize(clip, 200);
+    resize(clip, 300);
+    move(clip);
+    expect(clip.base.scale).toBe(300);
+    expect(sample(clip.track, 0.5)).toBe(300);
+  });
+
+  it('a clip with NO scale track is unaffected', () => {
+    const clip = { base: { scale: 100 }, track: [] as { t: number; v: number }[] };
+    const ratio = 250 / clip.base.scale;
+    clip.track = clip.track.map((k) => ({ ...k, v: k.v * ratio }));
+    clip.base = { scale: 250 };
+    expect(clip.base.scale).toBe(250);
+    expect(clip.track).toEqual([]);
+  });
+});

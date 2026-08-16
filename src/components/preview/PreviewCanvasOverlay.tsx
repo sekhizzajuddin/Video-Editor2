@@ -283,6 +283,27 @@ export function PreviewCanvasOverlay({
         }
       };
 
+      /**
+       * Scale an ENTIRE keyframe track by a ratio, preserving its shape.
+       *
+       * Kinetic word clips ship with a "pop" on transform.scale (135% -> 100%).
+       * Because that track exists, the animated value — not `transform.scale` —
+       * is what renders. Resizing wrote the new size into the base only, so the
+       * keyframes kept forcing 100% and the resize appeared to work but was
+       * discarded the moment anything else touched the clip.
+       *
+       * Multiplying every keyframe by the same ratio keeps the animation's
+       * character (the pop still overshoots by 35%) while honouring the new size.
+       */
+      const scaleAnimationTrack = (prop: string, ratio: number) => {
+        const track = animations[prop];
+        if (!track?.length || !Number.isFinite(ratio) || ratio <= 0) return;
+        animations = {
+          ...animations,
+          [prop]: track.map((k: any) => ({ ...k, value: k.value * ratio })),
+        };
+      };
+
       if (dragState.type.startsWith('perspective-corner-')) {
         const cornerIdx = parseInt(dragState.type.split('-')[2]);
         const initCorners = dragState.initCorners!;
@@ -818,7 +839,10 @@ export function PreviewCanvasOverlay({
 
         scale = Math.max(10, Math.min(1000, initScaleEdge * ratio));
         if (!e.altKey) scale = Math.round(scale * 10) / 10;
-        getNewAnimations('transform.scale', scale);
+        // Rescale the whole scale track (see scaleAnimationTrack) rather than
+        // dropping a single keyframe, so an existing animation cannot snap the
+        // clip back to its old size later.
+        scaleAnimationTrack('transform.scale', scale / (initScaleEdge || 100));
       } else {
         // Corner resize (resize-tl/tr/bl/br)
         // Same correction as rotation: clip-local centre + viewport-aware pointer.
@@ -878,7 +902,7 @@ export function PreviewCanvasOverlay({
         }
 
         scale = Math.max(10, Math.min(1000, e.altKey ? scale : Math.round(scale * 10) / 10));
-        getNewAnimations('transform.scale', scale);
+        scaleAnimationTrack('transform.scale', scale / (initScaleCorner || 100));
       }
 
       updateClip(activeClip.id, { transform: { ...activeClip.transform, x, y, scale, rotation }, crop, animations });
@@ -1483,8 +1507,16 @@ export function PreviewCanvasOverlay({
       initTransform: {
         x: (hasKf('transform.x') ? aX : baseTransform.x ?? 0) - (framing?.x ?? 0),
         y: (hasKf('transform.y') ? aY : baseTransform.y ?? 0) - (framing?.y ?? 0),
+        // Always seed scale from the BASE, even when a keyframe track exists.
+        //
+        // Resizing now rescales the whole track proportionally and also writes the
+        // new base, so base and track stay in agreement. Seeding from the animated
+        // value instead meant a later MOVE (which never touches the scale track)
+        // wrote that sampled value back as the base — for a kinetic word, whose
+        // pop keyframe settles at 100%, that silently reset a resized clip to
+        // 100% the moment it was dragged.
         scale:
-          (hasKf('transform.scale') ? aScale : baseTransform.scale ?? 100) /
+          (baseTransform.scale ?? 100) /
           (framing?.scale !== undefined ? framing.scale / 100 : 1),
         rotation: hasKf('transform.rotation') ? aRot : baseTransform.rotation ?? 0,
       },
