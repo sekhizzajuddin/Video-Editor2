@@ -36,6 +36,8 @@ export interface MaskTrackOptions {
   choke?: number;
   /** Feather radius applied to the cached mask. */
   feather?: number;
+  /** How far the selection may spread beyond the stroke. See MotionEffectSettings. */
+  spreadLimit?: number;
   onProgress?: (progress: number) => void;
   shouldCancel?: () => boolean;
   /** Project aspect ratio, so analysis happens in the same space as the stroke. */
@@ -181,6 +183,8 @@ export async function trackColorMask(
   let lastGoodMask: Uint8ClampedArray | null = null;
   const coverageSamples: number[] = [];
   let leakedFrames = 0;
+  /** Feature size relative to paint time; re-estimated each frame. */
+  let scaleHint = 1;
 
   // Bound the per-frame search around the last known position: keeps the cost
   // down and stops a distant same-coloured object from stealing the blob.
@@ -210,7 +214,7 @@ export async function trackColorMask(
       analysisH,
       signature,
       seed,
-      { searchRadius }
+      { searchRadius, scaleHint, spreadLimit: opts.spreadLimit }
     );
 
     // ── Runaway-blob guard ───────────────────────────────────────────────────
@@ -250,6 +254,24 @@ export async function trackColorMask(
     // occlusion does not reset the tracker to a global search. A leaked frame
     // deliberately does NOT move the seed — see the guard above.
     if (result.centroid && !leaked) seed = result.centroid;
+
+    // ── Adaptive scale ───────────────────────────────────────────────────────
+    //
+    // The subject walks toward or away from camera, so the feature's apparent
+    // size changes: measured on a typical walk-in, a garment can grow ~1.2x over
+    // a few seconds. A fixed pixel budget would clip the selection when they
+    // approach and leak into the rest of the outfit when they recede.
+    //
+    // Re-derive the scale from the measured area (radius ~ sqrt(area)) and feed
+    // it back into the next frame's extent limit. Heavily smoothed and clamped:
+    // the estimate is noisy frame to frame, and letting it run away would defeat
+    // the very bound it is feeding.
+    if (!leaked && result.area > 0 && signature.patchArea > 0) {
+      const measured = Math.sqrt(result.area / signature.patchArea);
+      const clamped = Math.max(0.4, Math.min(2.5, measured));
+      // 0.2 gain ~= a 5-frame time constant: tracks a walk-in, ignores jitter.
+      scaleHint = scaleHint + (clamped - scaleHint) * 0.2;
+    }
 
     opts.onProgress?.((i + 1) / (steps + 1));
   }
