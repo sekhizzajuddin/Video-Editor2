@@ -560,6 +560,12 @@ export interface TimelineClip {
    * scales (adjacent lines collapse together).
    */
   kineticLineStructure?: number[];
+  /**
+   * Marks that this kinetic container's word positions are stored in LOCAL space
+   * (no baked container transform). Absent on projects saved before the renderer
+   * applied the PiP parent transform; those are normalised once on load.
+   */
+  kineticLocalSpace?: boolean;
   // Sequencer / Interpolation (Gap #2 + #3)
   interpolation?: ClipInterpolationSettings;
   sequenceId?: string; // position in sequence membership

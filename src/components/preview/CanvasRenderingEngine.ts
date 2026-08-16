@@ -930,6 +930,54 @@ export async function renderCanvasEngine({
       }
     }
 
+    // ── Parent (PiP container) transform ─────────────────────────────────────
+    //
+    // The renderer previously drew PiP children with ONLY their own transform, so
+    // the container's transform had to be BAKED into each child's stored position
+    // by the kinetic reflow. That works for translate and scale but CANNOT express
+    // rotation: rotating the sentence turned the selection box but left the words
+    // flat and, because the reflow re-laid them out at the same time, bunched them
+    // together.
+    //
+    // Applying the parent transform here makes the PiP a proper group: children
+    // inherit position, scale AND rotation, and the reflow no longer has to bake
+    // anything (see editorStore.syncKineticSentence).
+    const parentT = (clip as any).__parentTransform;
+    if (parentT) {
+      const pid = (clip as any).__parentId;
+      const pStart = (clip as any).__parentStartTime ?? 0;
+      const pAnims = (clip as any).__parentAnimations;
+      const pX = getAnimatedValue(parentT.x ?? 0, currentTime, pStart, pAnims?.['transform.x']);
+      const pY = getAnimatedValue(parentT.y ?? 0, currentTime, pStart, pAnims?.['transform.y']);
+      const pScale = getAnimatedValue(parentT.scale ?? 100, currentTime, pStart, pAnims?.['transform.scale']);
+      const pRot = getAnimatedValue(parentT.rotation ?? 0, currentTime, pStart, pAnims?.['transform.rotation']);
+
+      // Rotate/scale about the frame centre so the group pivots as a whole rather
+      // than each word spinning about its own origin.
+      ctx.translate(cx + pX, cy + pY);
+      ctx.rotate((pRot * Math.PI) / 180);
+      const ps = (pScale || 100) / 100;
+      if (ps !== 1) ctx.scale(ps, ps);
+      if (parentT.flipH) ctx.scale(-1, 1);
+      if (parentT.flipV) ctx.scale(1, -1);
+      ctx.translate(-cx, -cy);
+
+      if (pid) {
+        const pFraming = storeState.perRatioFramingEnabled
+          ? storeState.perRatioFraming?.[storeState.aspectRatio]?.[pid]
+          : undefined;
+        if (pFraming) {
+          ctx.translate(pFraming.x ?? 0, pFraming.y ?? 0);
+          if (pFraming.scale !== undefined) {
+            const fs = pFraming.scale / 100;
+            ctx.translate(cx, cy);
+            ctx.scale(fs, fs);
+            ctx.translate(-cx, -cy);
+          }
+        }
+      }
+    }
+
     if (!hasPerspectiveWarp) {
       let tx = cx + fxShakeX;
       let ty = cy + fxShakeY;
@@ -1662,6 +1710,13 @@ export async function renderCanvasEngine({
               const syntheticClip = {
                 ...pClip,
                 startTime: pAbsStart,
+                // Carry the parent container's transform down to the child so the
+                // whole PiP group moves/scales/rotates as one unit. See the
+                // __parentTransform handling in drawSingleClip.
+                __parentTransform: parentClip.transform,
+                __parentId: parentClip.id,
+                __parentStartTime: parentClip.startTime,
+                __parentAnimations: parentClip.animations,
               };
               drawQueue.push({ clip: syntheticClip, layer: 200 + (pTrack.type === 'text' ? 100 : 0) });
             }

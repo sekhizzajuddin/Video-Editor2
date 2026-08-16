@@ -1439,10 +1439,12 @@ export function PreviewCanvasOverlay({
         // word positions as well. Measuring those and then letting the renderer
         // transform them again applied both twice — the box shrank and drifted
         // further on every single drag.)
+        // Word positions are now stored in the container's LOCAL space (the
+        // renderer applies the container transform to PiP children), so these
+        // bounds are the un-transformed base extent. The standard
+        // translate(aX,aY) scale(aScale) group below transforms them exactly once.
         vw = Math.max(80, bounds.width + 40);
         vh = Math.max(40, bounds.height + 20);
-        // The bounds are in absolute frame units (already transformed), so the box
-        // is positioned from their centre and the group transform is neutralised.
         isKineticSentenceBox = true;
         kineticBoxCentre = { x: bounds.x, y: bounds.y };
         measured = true;
@@ -1549,8 +1551,9 @@ export function PreviewCanvasOverlay({
       // itself). For a kinetic sentence, baseW/baseH were measured from word
       // layers that already include that scale, so divide it back out — otherwise
       // each resize is computed against an inflated base and the scale runs away.
-      baseW: isKineticSentenceBox ? baseW / Math.max(0.001, aScale / 100) : baseW,
-      baseH: isKineticSentenceBox ? baseH / Math.max(0.001, aScale / 100) : baseH,
+      // Bounds are measured in local (unscaled) space now, so no de-scaling.
+      baseW,
+      baseH,
     });
   };
 
@@ -1798,8 +1801,12 @@ export function PreviewCanvasOverlay({
                   // off the text and shrink a little more with every drag — the
                   // error compounded because each drag re-measured the previous,
                   // already-doubly-transformed result.
+                  // The kinetic box is offset by its measured local centre (the
+                  // words are rarely centred exactly on the origin), then given
+                  // the SAME transform as any other clip — so it rotates and
+                  // scales with the sentence instead of only translating.
                   isKineticSentenceBox
-                    ? `translate(${W / 2 + kineticBoxCentre.x}, ${H / 2 + kineticBoxCentre.y}) rotate(${aRot})`
+                    ? `translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100}) translate(${kineticBoxCentre.x}, ${kineticBoxCentre.y})`
                     : `translate(${W / 2 + aX}, ${H / 2 + aY}) rotate(${aRot}) scale(${aScale / 100})`
                 }
               >

@@ -190,6 +190,8 @@ interface EditorActions {
    * Called automatically whenever the primary clip's text changes.
    */
   syncKineticSentence: (primaryClipId: string, opts?: { reflowOnly?: boolean }) => void;
+  /** Strip container transforms baked into PiP word positions by older versions. */
+  normalizeKineticBakedTransforms: () => void;
   batchUpdateClips: (updates: { clipId: string; changes: Partial<TimelineClip> }[]) => void;
   moveClip: (clipId: string, newStartTime: number, newTrackId?: string, resolveOverlap?: boolean) => boolean;
   moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[], resolveOverlap?: boolean) => void;
@@ -1671,6 +1673,40 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Delete Clip');
   },
 
+  /**
+   * One-time normalisation for projects saved before the renderer applied the PiP
+   * container transform to its children.
+   *
+   * Those files have the container's scale/offset baked into each word position.
+   * Now that the renderer applies the transform itself, the baked copy would be
+   * applied twice. Re-laying the words out in local space removes it; the visual
+   * result is identical because the renderer immediately re-applies the transform.
+   */
+  normalizeKineticBakedTransforms: () => {
+    const state = get();
+    for (const track of state.tracks) {
+      for (const clip of track.clips) {
+        if (!isKineticMediaId(clip.mediaId)) continue;
+        if (!clip.pipWindowIds?.length) continue;
+        if ((clip as any).kineticLocalSpace) continue; // already normalised
+        const t = clip.transform;
+        const isIdentity =
+          (t?.x ?? 0) === 0 && (t?.y ?? 0) === 0 && (t?.scale ?? 100) === 100;
+        if (!isIdentity) {
+          get().syncKineticSentence(clip.id, { reflowOnly: true });
+        }
+        set((st) => ({
+          tracks: st.tracks.map((tr) => ({
+            ...tr,
+            clips: tr.clips.map((c) =>
+              c.id === clip.id ? ({ ...c, kineticLocalSpace: true } as any) : c
+            ),
+          })),
+        }));
+      }
+    }
+  },
+
   syncKineticSentence: (primaryClipId, opts) => {
     const state = get();
     const found = findClipDeep(state, primaryClipId);
@@ -1724,18 +1760,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const lineStructure =
       Array.isArray(storedStructure) && storedStructure.length > 0 ? storedStructure : derived;
 
-    // The canvas renderer draws PiP child clips using ONLY their own transform —
-    // it never applies the parent container's x/y/scale. So the container's
-    // transform has to be baked into the word positions here, otherwise moving or
-    // scaling the sentence would not move the words at all.
+    // Word positions are stored in the container's LOCAL space — no baking.
     //
-    // Consequence for anything that MEASURES these words (the selection box): the
-    // stored positions are already fully transformed, so the container transform
-    // must NOT be applied to them a second time. See PreviewCanvasOverlay.
+    // The renderer now applies the PiP container's full transform (translate,
+    // scale, rotate, flip) to its children, so the group behaves like a real
+    // group. Baking the container transform in here as well would apply it twice,
+    // and rotation cannot be baked into x/y at all — that is why rotating the
+    // sentence used to spin the selection box while leaving the words flat and
+    // bunched together.
     const layoutOpts = {
-      scale: (primary.transform?.scale ?? 100) / 100,
-      offsetX: primary.transform?.x ?? 0,
-      offsetY: primary.transform?.y ?? 0,
       layout: (primary as any).kineticLayout === 'column' ? ('column' as const) : ('row' as const),
       lineStructure,
     };
@@ -1745,6 +1778,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     let removals: string[] = [];
 
     if (opts?.reflowOnly) {
+      // Re-lay-out in LOCAL space. Used by the one-time migration below to strip
+      // a container transform that older projects baked into word positions.
       updates = planGroupReflow(existing, sentence, layoutOpts);
     } else {
       const plan = planKineticSync(existing, sentence, pip.duration || primary.duration, layoutOpts);
@@ -2025,10 +2060,16 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     //   - transform changed -> re-flow the whole block in one pass
     const touched = findClipDeep(get(), clipId);
     if (touched && !touched.isPip && touched.clip.pipWindowIds?.length) {
-      const textChanged = updates.textSettings !== undefined;
-      const transformChanged = updates.transform !== undefined;
-      if (textChanged || transformChanged) {
-        get().syncKineticSentence(clipId, { reflowOnly: !textChanged && transformChanged });
+      // ONLY a text change re-lays-out the words.
+      //
+      // Transform changes must NOT trigger a reflow any more: the renderer now
+      // applies the container transform to PiP children, so moving/scaling/
+      // rotating the sentence already moves the words. Re-laying them out on top
+      // of that recomputed the wrap from the transformed font size and bunched
+      // the words together — visible as the words collapsing into each other
+      // while the selection box rotated around them.
+      if (updates.textSettings !== undefined) {
+        get().syncKineticSentence(clipId);
       }
     }
 
@@ -4016,6 +4057,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         historyIndex: 0
       });
       get().recalcTotalDuration();
+      // Older projects baked the PiP container transform into word positions;
+      // the renderer now applies it itself, so strip the baked copy once.
+      try { get().normalizeKineticBakedTransforms(); } catch (e) { console.warn('Kinetic normalise skipped:', e); }
       // Auto load templates from IndexedDB
       get().loadTemplatesFromDB().catch(err => console.error('Failed to load templates:', err));
       return true;
