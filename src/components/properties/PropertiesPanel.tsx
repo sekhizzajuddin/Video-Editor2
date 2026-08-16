@@ -57,6 +57,7 @@ import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeCont
 import { SequenceProperties } from './SequenceProperties';
 import { AIMotionGraphicsSection } from './tabs/effects';
 import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
+import { MotionEffectsPanel } from './tabs/effects/MotionEffectsPanel';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
 
@@ -2861,6 +2862,7 @@ export function PropertiesPanel() {
               )}
             </div>
             <ObjectRemovalPanel selectedClip={selectedClip} />
+            <MotionEffectsPanel selectedClip={selectedClip} videoElements={videoElements} />
     </div>
   );
 

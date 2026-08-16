@@ -43,6 +43,7 @@ import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
 import { resolveBlendPlan } from '@/utils/blendCompositor';
+import { applyMotionEffect } from '@/utils/motionEffects';
 import {
   findActiveTransition,
   buildTransitionPlan,
@@ -1196,7 +1197,13 @@ export async function renderCanvasEngine({
           const hasFx = !skipExpensiveFX && !!clip.fxSettings;
           const hasMask = !!clip.mask?.enabled;
 
-          const needsOffscreen = hasCrop || hasCssFilters || hasAiBg || hasChroma || hasLuma || hasObjRemoval || hasColorWheels || hasCurves || hasOverlays || hasLut || hasFx || hasMask;
+          // Motion-tracked region effects read pixels back from the canvas, so
+          // they need the offscreen buffer too. Without this a clip whose ONLY
+          // effect is a region shake would take the zero-copy fast path and the
+          // effect would silently never run.
+          const hasMotionFx = !skipExpensiveFX && !!clip.motionEffects?.some((m: any) => m?.enabled);
+
+          const needsOffscreen = hasCrop || hasCssFilters || hasAiBg || hasChroma || hasLuma || hasObjRemoval || hasColorWheels || hasCurves || hasOverlays || hasLut || hasFx || hasMask || hasMotionFx;
 
           if (!needsOffscreen) {
             // FAST PATH: Zero-copy GPU direct render directly to target canvas!
@@ -1372,6 +1379,31 @@ export async function renderCanvasEngine({
                   clip.animations?.['lut.intensity'] || clip.animations?.['lutFilter.intensity']
                 );
                 applyLutToCanvas(oCtx, offCanvas.width, offCanvas.height, lutData, animIntensity);
+              }
+
+              // Motion-tracked region effects (shake a hand, jiggle a face...).
+              // Applied AFTER the frame-wide FX so the region effect operates on
+              // the finished pixels — a shaken patch should carry the clip's
+              // grade and effects with it, not a raw un-graded copy.
+              if (clip.motionEffects?.length && !skipExpensiveFX) {
+                const meRelTime = Math.max(0, currentTime - clip.startTime);
+                // Region coords are authored against the 854x480 preview space.
+                const meScaleX = offCanvas.width / 854;
+                const meScaleY = offCanvas.height / 480;
+                for (let mi = 0; mi < clip.motionEffects.length; mi++) {
+                  const me = clip.motionEffects[mi];
+                  if (!me?.enabled) continue;
+                  applyMotionEffect(
+                    oCtx,
+                    offCanvas.width,
+                    offCanvas.height,
+                    me,
+                    meRelTime,
+                    `${clip.id}_me${mi}`,
+                    meScaleX,
+                    meScaleY
+                  );
+                }
               }
 
               if (clip.fxSettings && !skipExpensiveFX) {

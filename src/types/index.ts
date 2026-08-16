@@ -539,6 +539,11 @@ export interface TimelineClip {
   // Text and FX
   textSettings?: ClipTextSettings;
   fxSettings?: ClipFxSettings;
+  /**
+   * Motion-tracked region effects: shake/jiggle/pulse applied to ONE tracked
+   * area (a hand, a face) rather than the whole frame. See utils/motionEffects.
+   */
+  motionEffects?: import('@/utils/motionEffects').MotionEffectSettings[];
   particleSettings?: ClipParticleSettings;
   aiBackground?: ClipAiBackgroundSettings;
   chromaKey?: ClipChromaKeySettings;
