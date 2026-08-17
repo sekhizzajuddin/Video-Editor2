@@ -206,20 +206,20 @@ export class ExportWorkerManager {
    * only the serialized copy — never the store.
    */
   private async normalizeTimelineMedia(serializedTimeline: any): Promise<void> {
-    const media: any[] = serializedTimeline.media || [];
-    const videoItems = media.filter((m) => {
-      if (!m?.id) return false;
-      if (m.type === 'video') return true;
-      const name = String(m.name || '');
-      return /\.(mp4|mov|m4v|webm|mkv|ogv|ogg|avi)$/i.test(name);
-    });
+    const mediaMap = new Map<string, any>();
+    for (const m of (serializedTimeline.media || [])) {
+      if (m?.id) mediaMap.set(m.id, m);
+    }
+    for (const track of (serializedTimeline.tracks || [])) {
+      for (const clip of (track.clips || [])) {
+        if (clip.mediaId && !mediaMap.has(clip.mediaId)) {
+          mediaMap.set(clip.mediaId, { id: clip.mediaId, url: clip.url, name: clip.name });
+        }
+      }
+    }
 
-    await Promise.all(videoItems.map(async (m) => {
+    await Promise.all(Array.from(mediaMap.values()).map(async (m) => {
       try {
-        // PRIMARY PATH: Load the raw File directly from IndexedDB.
-        // This is the most reliable source — files are always saved to IDB
-        // on import and on project re-link. Blob URLs can be revoked,
-        // dead after page reload, or inaccessible from inside a worker.
         let fileBlob: Blob | null = null;
         try {
           fileBlob = await getFileFromDB(m.id);
@@ -232,45 +232,16 @@ export class ExportWorkerManager {
           try {
             const response = await fetch(m.url);
             if (response.ok) fileBlob = await response.blob();
-          } catch {
-            // blob URL may have been revoked — handled below
-          }
+          } catch {}
         }
 
-        if (!fileBlob) {
-          this.options.callbacks.onWarning?.(
-            `"${m.name || m.id}" media could not be loaded for export — please re-import the file. Its frames will be missing from the output.`
-          );
-          return;
-        }
-
-        // Normalize (transcode WebM/MKV → MP4 if needed)
-        const normalizedUrl = URL.createObjectURL(fileBlob);
-        try {
-          const result = await normalizeVideoForExport(normalizedUrl, m.name);
-          if (result.warning) {
-            this.options.callbacks.onWarning?.(result.warning);
-            URL.revokeObjectURL(normalizedUrl);
-            return;
-          }
-          // result.url may be a new transcoded URL, or the same normalizedUrl
-          const finalBlob = result.transcoded
-            ? await fetch(result.url).then(r => r.blob())
-            : fileBlob;
-          if (result.transcoded) URL.revokeObjectURL(normalizedUrl);
-
-          // Pass the Blob directly to the worker! Blobs are zero-copy StructuredCloneable.
-          m._fileBlob = finalBlob;
-        } catch (e: any) {
-          URL.revokeObjectURL(normalizedUrl);
-          this.options.callbacks.onWarning?.(
-            `"${m.name || m.id}" could not be prepared for export: ${e?.message || e}`
-          );
+        if (fileBlob) {
+          m._fileBlob = fileBlob;
+        } else {
+          console.warn('[Export] Media could not be loaded:', m.id);
         }
       } catch (e: any) {
-        this.options.callbacks.onWarning?.(
-          `"${m.name || m.id}" could not be prepared for export: ${e?.message || e}`
-        );
+        console.warn('[Export] Media prep failed for:', m.id, e);
       }
     }));
   }
