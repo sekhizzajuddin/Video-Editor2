@@ -1,6 +1,5 @@
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { useEditorStore } from '@/store/editorStore';
-import { synchronousSeek, globalVideoMap } from '@/hooks/useMediaPlayback';
 import { renderCanvasEngine } from '@/components/preview/CanvasRenderingEngine';
 import { AudioMixer } from './AudioMixer';
 import { ExportPhase } from '../types';
@@ -91,18 +90,78 @@ export class WysiwygExportEngine {
     const totalFrames = Math.ceil(duration * this.config.fps);
     const startTime = Date.now();
 
-    this.callbacks.onPhaseChange('preparing');
-
-    // Pause normal playback to give full GPU control to the frame stepper
-    if (store.isPlaying) store.pause();
-    store.setIsExporting(true);
-
     const abortHandler = () => {
       this.cancel();
     };
     signal.addEventListener('abort', abortHandler);
 
-    // 2. Setup Export Canvas at exact target resolution
+    // 2. Setup Dedicated Export Video Elements Pool
+    const exportVideoMap = new Map<string, HTMLVideoElement>();
+    const mediaLibraryMap = new Map(store.mediaLibrary?.map((m: any) => [m.id, m.url]) || []);
+
+    const getSpeedRampMediaTime = (clip: any, ct: number): number => {
+      const elapsed = ct - clip.startTime;
+      const trim = clip.trimStart ?? clip.startOffset ?? 0;
+      const speed = clip.speed ?? 1;
+      const ramp = clip.speedRamp;
+      if (!ramp || ramp.length < 2) return elapsed * speed + trim;
+      try {
+        const keys = [...ramp].sort((a: any, b: any) => a.sourceTime - b.sourceTime);
+        let timelineCursor = 0;
+        for (let j = 0; j < keys.length - 1; j++) {
+          const a = keys[j];
+          const b = keys[j + 1];
+          const deltaSource = b.sourceTime - a.sourceTime;
+          const avgSpeed = (a.speed + b.speed) / 2;
+          const segTimeline = avgSpeed > 0.001 ? deltaSource / avgSpeed : 0;
+          if (elapsed < timelineCursor + segTimeline) {
+            const local = elapsed - timelineCursor;
+            const ratio = segTimeline > 0.001 ? local / segTimeline : 0;
+            return a.sourceTime + ratio * deltaSource * (a.speed / Math.max(0.001, avgSpeed));
+          }
+          timelineCursor += segTimeline;
+        }
+        const last = keys[keys.length - 1];
+        return last.sourceTime + Math.max(0, elapsed - timelineCursor) * last.speed + trim;
+      } catch {
+        return elapsed * speed + trim;
+      }
+    };
+
+    this.callbacks.onPhaseChange('preparing');
+
+    // Pre-load all required video elements invisibly
+    const loadPromises: Promise<void>[] = [];
+    for (const track of store.tracks) {
+      if (track.type !== 'video' || track.hidden || track.muted) continue;
+      for (const clip of track.clips || []) {
+        const mediaId = clip.mediaId || clip.id;
+        const url = mediaLibraryMap.get(mediaId) || (clip as any).url;
+        if (!url || exportVideoMap.has(clip.id)) continue;
+
+        const video = document.createElement('video');
+        video.src = url;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.crossOrigin = 'anonymous';
+
+        loadPromises.push(new Promise<void>((resolve) => {
+          let resolved = false;
+          const done = () => { if (!resolved) { resolved = true; resolve(); } };
+          video.onloadedmetadata = done;
+          video.onerror = done;
+          setTimeout(done, 10000); // 10s max wait per video
+        }));
+
+        exportVideoMap.set(clip.id, video);
+      }
+    }
+    if (loadPromises.length > 0) {
+      await Promise.all(loadPromises);
+    }
+
+    // 3. Setup Export Canvas at exact target resolution
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = this.config.width;
     exportCanvas.height = this.config.height;
@@ -113,7 +172,7 @@ export class WysiwygExportEngine {
     const lastParticleTimeRef: { current: number | null } = { current: null };
     const lastFrameCanvasRef: { current: HTMLCanvasElement | null } = { current: null };
 
-    // 3. Configure VideoEncoder & mp4-muxer
+    // 4. Configure VideoEncoder & mp4-muxer
     const bitrate = this.config.bitrate || 15_000_000;
     const codec = await this.getSupportedCodec(this.config.width, this.config.height, bitrate, this.config.fps);
     const supportsAudio = typeof window.AudioEncoder !== 'undefined' && typeof window.OfflineAudioContext !== 'undefined';
@@ -162,10 +221,6 @@ export class WysiwygExportEngine {
 
       this.callbacks.onPhaseChange('rendering');
 
-      // 4. Initial Seek
-      await synchronousSeek(0);
-      await new Promise((r) => setTimeout(r, 20));
-
       // 5. Deterministic Frame Stepping Loop (WYSIWYG)
       for (let i = 0; i < totalFrames; i++) {
         if (this.cancelled || signal.aborted) {
@@ -175,10 +230,38 @@ export class WysiwygExportEngine {
 
         const currentTime = Math.min(duration, i / this.config.fps);
 
-        // Seek all active DOM video elements synchronously
-        await synchronousSeek(currentTime);
+        // Seek all dedicated export video elements synchronously
+        const seekPromises: Promise<void>[] = [];
+        for (const track of store.tracks) {
+          if (track.type !== 'video' || track.hidden || track.muted) continue;
+          for (const clip of track.clips || []) {
+            if (currentTime >= clip.startTime && currentTime <= clip.startTime + clip.duration) {
+              const v = exportVideoMap.get(clip.id);
+              if (v && v.readyState >= 1) {
+                const mediaTime = getSpeedRampMediaTime(clip, currentTime);
+                if (Math.abs(v.currentTime - mediaTime) > 0.01) {
+                  seekPromises.push(new Promise<void>((resolve) => {
+                    let resolved = false;
+                    const handler = () => {
+                      if (resolved) return;
+                      resolved = true;
+                      v.removeEventListener('seeked', handler);
+                      resolve();
+                    };
+                    v.addEventListener('seeked', handler);
+                    v.currentTime = mediaTime;
+                    setTimeout(handler, 800); // 800ms generous fallback timeout
+                  }));
+                }
+              }
+            }
+          }
+        }
+        if (seekPromises.length > 0) {
+          await Promise.all(seekPromises);
+        }
 
-        // Render scene onto export canvas
+        // Render scene onto export canvas using dedicated exportVideoMap
         const currentStore = useEditorStore.getState();
         await renderCanvasEngine({
           canvas: exportCanvas,
@@ -193,7 +276,7 @@ export class WysiwygExportEngine {
             tracks: currentStore.tracks,
             selectedClipId: null,
             mediaLibrary: currentStore.mediaLibrary,
-            videoElements: globalVideoMap,
+            videoElements: exportVideoMap,
             viewport: { x: 0, y: 0, zoom: 1 },
             settings: currentStore.settings,
             showGrid: false,
@@ -345,8 +428,13 @@ export class WysiwygExportEngine {
     } finally {
       signal.removeEventListener('abort', abortHandler);
       store.setIsExporting(false);
-      // Restore initial timeline position
-      void synchronousSeek(0);
+      // Clean up headless video pool
+      exportVideoMap.forEach(v => {
+        v.removeAttribute('src');
+        v.load();
+      });
+      exportVideoMap.clear();
+      
       if (videoEncoder && (videoEncoder as any).state !== 'closed') {
         try { videoEncoder.close(); } catch {}
       }
