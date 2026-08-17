@@ -1,4 +1,4 @@
-import { AssetDecoder } from './AssetDecoder';
+import { AssetDecoder, DemuxedMedia } from './AssetDecoder';
 import { StillImageSource } from './StillImageSource';
 import { findActiveTransition, buildTransitionPlan } from '../../utils/transitionEngine';
 import { resolveBlendPlan } from '../../utils/blendCompositor';
@@ -95,7 +95,6 @@ export class FrameScheduler {
   }
 
   async initializeDecoders() {
-    const promises: Promise<void>[] = [];
     const mediaMap = new Map<string, any>();
     if (this.timeline.media) {
       for (const m of this.timeline.media) {
@@ -103,8 +102,7 @@ export class FrameScheduler {
       }
     }
 
-    // Convert Blobs to ArrayBuffers ONCE per mediaId to save memory!
-    // If a 1GB file is used across 5 clips, they all share this ONE ArrayBuffer.
+    // 1. Convert Blobs to ArrayBuffers once per unique mediaId to save memory
     if (this.mediaBuffers) {
       for (const mediaId of Object.keys(this.mediaBuffers)) {
         const blobOrBuffer = this.mediaBuffers[mediaId];
@@ -114,80 +112,112 @@ export class FrameScheduler {
       }
     }
 
+    // 2. Pre-demux unique video media files once
+    const demuxPromises: Promise<void>[] = [];
+    const demuxCache = new Map<string, DemuxedMedia>();
+
+    for (const track of this.timeline.tracks || []) {
+      if (track.type === 'video') {
+        for (const clip of track.clips || []) {
+          const mediaId = clip.mediaId;
+          if (mediaId && !demuxCache.has(mediaId)) {
+            const media = mediaMap.get(mediaId);
+            const url = media?.url || clip.url || '';
+            const preBuffer = this.mediaBuffers[mediaId];
+            const mediaName: string = media?.name || '';
+            const isImage =
+              media?.type === 'image' ||
+              /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
+
+            if (!isImage && (url || preBuffer)) {
+              demuxCache.set(mediaId, null as any); // Mark as pending
+              demuxPromises.push(
+                AssetDecoder.demux(url, preBuffer).then((demuxed) => {
+                  demuxCache.set(mediaId, demuxed);
+                })
+              );
+            }
+          }
+        }
+      }
+    }
+
+    await Promise.allSettled(demuxPromises);
+
+    // 3. Initialize clip decoders / image sources
+    const loadPromises: Promise<void>[] = [];
+
     for (const track of this.timeline.tracks || []) {
       if (track.type === 'video') {
         for (const clip of track.clips || []) {
           if (!this.decoders.has(clip.id)) {
             const media = mediaMap.get(clip.mediaId);
             const url = media?.url || clip.url || '';
-            // Don't require a URL when the main thread already transferred the
-            // raw bytes: restored/re-linked projects can have a dead/blob-less
-            // URL (e.g. 'PENDING_RESTORE') while mediaBuffers holds the bytes
-            // needed to decode. Skipping here silently produced black exports.
-            const hasBuffer = !!this.mediaBuffers[clip.mediaId];
-            if (!url && !hasBuffer) continue;
-
+            const preBuffer = this.mediaBuffers[clip.mediaId];
             const mediaName: string = media?.name || '';
             const isImage =
               media?.type === 'image' ||
               /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
 
-            // Images used to be pushed through the MP4 demuxer, which cannot
-            // parse them; every image clip exported as black. Route them to a
-            // dedicated still-image source instead.
             if (isImage) {
               const source = new StillImageSource(url);
               this.decoders.set(clip.id, source);
-              promises.push(source.load());
+              loadPromises.push(source.load(preBuffer));
               continue;
             }
 
-            const decoder = new AssetDecoder(url, this.framePool);
-            this.decoders.set(clip.id, decoder);
-            // Use pre-fetched ArrayBuffer if available (critical fix for blob URLs
-            // which cannot be fetched from inside a worker thread).
-            const preBuffer = this.mediaBuffers[clip.mediaId];
-            promises.push(
-              decoder.load(preBuffer).then(async () => {
-                if (decoder.ready) return;
-                // MP4 demux failed. If the file is actually a still image with
-                // a video-ish name/type, decode it as one before giving up.
-                const fallback = new StillImageSource(url);
-                await fallback.load();
-                if (fallback.ready) {
-                  decoder.dispose();
-                  this.decoders.set(clip.id, fallback);
-                } else {
-                  fallback.dispose();
-                  this.warnings.push(
-                    `"${mediaName || clip.mediaId}" could not be decoded for export` +
-                    (decoder.loadError ? ` (${decoder.loadError})` : '') +
-                    '. Its frames will be missing from the output.'
-                  );
-                }
-              })
-            );
+            const demuxed = clip.mediaId ? demuxCache.get(clip.mediaId) : null;
+            if (demuxed && demuxed.ready) {
+              const decoder = new AssetDecoder(url, this.framePool);
+              decoder.initFromDemuxed(demuxed);
+              this.decoders.set(clip.id, decoder);
+            } else {
+              // Fallback to standalone load or StillImageSource
+              const decoder = new AssetDecoder(url, this.framePool);
+              this.decoders.set(clip.id, decoder);
+              loadPromises.push(
+                decoder.load(preBuffer).then(async () => {
+                  if (decoder.ready) return;
+                  const fallback = new StillImageSource(url);
+                  await fallback.load(preBuffer);
+                  if (fallback.ready) {
+                    decoder.dispose();
+                    this.decoders.set(clip.id, fallback);
+                  } else {
+                    fallback.dispose();
+                    this.warnings.push(
+                      `"${mediaName || clip.mediaId}" could not be decoded for export` +
+                      (decoder.loadError ? ` (${decoder.loadError})` : '') +
+                      '. Its frames will be missing from the output.'
+                    );
+                  }
+                })
+              );
+            }
           }
         }
       }
     }
 
-    await Promise.allSettled(promises);
+    await Promise.allSettled(loadPromises);
   }
 
   async getLayersAtTime(timestampSeconds: number): Promise<RenderLayer[]> {
     const layers: RenderLayer[] = [];
-    // PERF (export stutter fix): video decodes used to be awaited one clip at a
-    // time inside this loop. Each `getFrameAt` can block while its decoder drains,
-    // so the cost of a frame was the SUM of every track's decode latency instead of
-    // the MAX. With one video track exports ran near real time; with three or four
-    // the per-frame cost tripled and the export visibly crawled.
-    //
-    // Decoders are fully independent (one VideoDecoder per clip), so we now kick
-    // them all off first and await them together. Text layers need no async work
-    // and are pushed inline.
     const pending: Array<Promise<void>> = [];
     let order = 0;
+
+    // Release decoders for completed clips to keep GPU hardware decoder sessions low
+    for (const track of this.timeline.tracks || []) {
+      for (const clip of track.clips || []) {
+        if (timestampSeconds > (clip.startTime + clip.duration) + 0.5) {
+          const dec = this.decoders.get(clip.id);
+          if (dec instanceof AssetDecoder) {
+            dec.releaseDecoder();
+          }
+        }
+      }
+    }
 
     // Sort tracks by zIndex (or their array order)
     const tracks = this.timeline.tracks || [];
@@ -195,19 +225,12 @@ export class FrameScheduler {
       const track = tracks[trackIdx];
       if (track.muted || track.isMuted || track.hidden) continue;
 
-      // Resolve any clip-to-clip transition active on this track for this frame.
-      // Uses the SAME engine as the live preview, so an export is guaranteed to
-      // match what the user saw — previously the exporter had no transition
-      // support at all and silently produced hard cuts.
       const activeTransition = findActiveTransition(track.clips || [], timestampSeconds);
       const plan = activeTransition ? buildTransitionPlan(activeTransition) : null;
 
       for (const clip of track.clips || []) {
         if (clip.disabled) continue;
 
-        // A clip taking part in a transition must be rendered even when the
-        // playhead has already passed its end (the outgoing clip keeps showing
-        // during the blend), so widen the visibility test for those two clips.
         const transitionRole = activeTransition
           ? (activeTransition.from.id === clip.id
               ? 'from'
@@ -230,7 +253,7 @@ export class FrameScheduler {
           const zIndex = clip.zIndex !== undefined ? clip.zIndex : trackIdx;
           const layerOrder = order++;
 
-          // Fold the transition's contribution into this layer.
+          // Fold the transition's contribution into this layer
           const layerDraw = plan && transitionRole
             ? (transitionRole === 'from' ? plan.from : plan.to)
             : null;
@@ -238,10 +261,6 @@ export class FrameScheduler {
           const baseOpacity = clip.opacity !== undefined ? clip.opacity : 1;
           const withTransition = layerDraw ? baseOpacity * layerDraw.opacity : baseOpacity;
 
-          // Match the preview's blend semantics. Partial blend intensity needs a
-          // backdrop copy, which this compositor cannot express per-layer, so we
-          // approximate it by scaling alpha — full-strength and Normal blends
-          // (the overwhelmingly common cases) are exact.
           const blendPlan = resolveBlendPlan(
             clip.transform?.blendMode,
             clip.transform?.blendIntensity,
@@ -264,10 +283,6 @@ export class FrameScheduler {
 
           if (track.type === 'video' && this.decoders.has(clip.id)) {
             const decoder = this.decoders.get(clip.id);
-            // Calculate local clip time (accounting for trimming and speed)
-            // Clamp into the clip's own range: during a transition the playhead
-            // can sit slightly outside the outgoing clip, and asking a decoder for
-            // a negative/overrun timestamp yields a black or repeated frame.
             const clampedTime = Math.min(
               Math.max(timestampSeconds, clip.startTime),
               clip.startTime + clip.duration
@@ -310,13 +325,10 @@ export class FrameScheduler {
     }
 
     if (pending.length > 0) {
-      // allSettled: one failing decoder must not abort the whole frame.
       await Promise.allSettled(pending);
     }
 
-    // Layers resolve out of order when decoded concurrently, so the sort below is
-    // what establishes correct compositing order; `order` breaks zIndex ties using
-    // the original track/clip enumeration order.
+    // Sort layers by zIndex and order
     layers.sort((a, b) => (a.zIndex - b.zIndex) || ((a.order ?? 0) - (b.order ?? 0)));
     return layers;
   }

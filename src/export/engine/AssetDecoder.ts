@@ -6,37 +6,35 @@ export interface AssetFrame {
   frame: VideoFrame;
 }
 
-interface StoredSample {
+export interface StoredSample {
   timestamp: number;   // µs (CTS)
   duration: number;    // µs
   data: Uint8Array;
   isKeyframe: boolean;
 }
 
+export interface DemuxedMedia {
+  samples: StoredSample[];
+  trackInfo: any;
+  rotation: number;
+  decoderConfig: VideoDecoderConfig;
+  ready: boolean;
+  loadError: string | null;
+}
+
 export class AssetDecoder {
   private url: string;
   private framePool: FramePool;
-  private mp4boxfile: any;
-  private trackId: number = 0;
-  private trackInfo: any = null;
+  private demuxed: DemuxedMedia | null = null;
   public rotation: number = 0;
 
-  // Compressed MP4 samples in DTS (decoding) order from MP4Box
-  private samples: StoredSample[] = [];
-
-  // Live decoding state
+  // Live decoding state (lazy initialized when playhead reaches this clip)
   private decoder: VideoDecoder | null = null;
-  private decoderConfig: VideoDecoderConfig | null = null;
   private decodedQueue: AssetFrame[] = [];
   private nextSampleIdx: number = 0;
 
-  private onReadyCallback: (() => void) | null = null;
-
   /**
-   * True once load() finished with a parseable MP4 video track AND a configured
-   * decoder. Stays false for non-ISO-BMFF containers (WebM/MKV/OGG), images
-   * mistakenly routed here, or unsupported codecs. Callers MUST check this and
-   * fall back to another frame source instead of silently rendering black.
+   * True once demuxed with a parseable MP4 video track AND a valid codec config.
    */
   public ready: boolean = false;
   /** Human-readable reason when ready === false. */
@@ -44,96 +42,131 @@ export class AssetDecoder {
 
   /**
    * Pending getFrameAt() waiter. Resolved by the decoder's `output` callback as
-   * soon as a frame with CTS >= `targetCts` is produced, so we never sleep longer
-   * than strictly necessary.
+   * soon as a frame with CTS >= `targetCts` is produced.
    */
   private frameWaiter: { targetCts: number; resolve: () => void } | null = null;
 
   constructor(url: string, framePool: FramePool) {
     this.url = url;
     this.framePool = framePool;
-
-    this.mp4boxfile = MP4Box.createFile();
-
-    this.mp4boxfile.onReady = (info: any) => {
-      const track = info.videoTracks?.[0];
-      if (!track) {
-        console.warn('[AssetDecoder] No video track found:', this.url);
-        this.onReadyCallback?.();
-        return;
-      }
-      this.trackId = track.id;
-      this.trackInfo = track;
-      this.mp4boxfile.setExtractionOptions(this.trackId, null, { nbSamples: 100000 });
-      this.mp4boxfile.start();
-      this.onReadyCallback?.();
-    };
-
-    this.mp4boxfile.onSamples = (_id: number, _user: any, samples: any[]) => {
-      for (const sample of samples) {
-        this.samples.push({
-          timestamp: Math.round((sample.cts * 1_000_000) / sample.timescale),
-          duration:  Math.round((sample.duration * 1_000_000) / sample.timescale),
-          data:      new Uint8Array(sample.data),
-          isKeyframe: sample.is_sync,
-        });
-      }
-    };
   }
 
-  async load(preBuffer?: ArrayBuffer): Promise<void> {
+  /**
+   * Static helper: Demuxes an MP4 ArrayBuffer exactly ONCE per media file.
+   * Returns the extracted samples, track info, rotation, and VideoDecoderConfig.
+   */
+  public static async demux(url: string, preBuffer?: ArrayBuffer): Promise<DemuxedMedia> {
     let buffer: ArrayBuffer;
     if (preBuffer) {
       buffer = preBuffer;
     } else {
       try {
-        const response = await fetch(this.url);
+        const response = await fetch(url);
         if (!response.ok) throw new Error(`fetch failed (${response.status})`);
         buffer = await response.arrayBuffer();
       } catch (e: any) {
-        this.loadError = `Could not read media: ${e?.message || e}`;
-        console.warn('[AssetDecoder]', this.loadError, this.url);
-        return;
+        return {
+          samples: [],
+          trackInfo: null,
+          rotation: 0,
+          decoderConfig: {} as any,
+          ready: false,
+          loadError: `Could not read media: ${e?.message || e}`,
+        };
       }
     }
 
+    const mp4boxfile = MP4Box.createFile();
+    const samples: StoredSample[] = [];
+    let trackInfo: any = null;
+    let trackId = 0;
+    let loadError: string | null = null;
+    let onReadyResolve: (() => void) | null = null;
+
+    mp4boxfile.onReady = (info: any) => {
+      const track = info.videoTracks?.[0];
+      if (!track) {
+        loadError = 'No video track found';
+        onReadyResolve?.();
+        return;
+      }
+      trackId = track.id;
+      trackInfo = track;
+      mp4boxfile.setExtractionOptions(trackId, null, { nbSamples: 100000 });
+      mp4boxfile.start();
+      onReadyResolve?.();
+    };
+
+    mp4boxfile.onSamples = (_id: number, _user: any, rawSamples: any[]) => {
+      for (const s of rawSamples) {
+        samples.push({
+          timestamp: Math.round((s.cts * 1_000_000) / s.timescale),
+          duration:  Math.round((s.duration * 1_000_000) / s.timescale),
+          data:      new Uint8Array(s.data),
+          isKeyframe: s.is_sync,
+        });
+      }
+    };
+
     (buffer as any).fileStart = 0;
     try {
-      this.mp4boxfile.appendBuffer(buffer as any);
-      this.mp4boxfile.flush();
+      mp4boxfile.appendBuffer(buffer as any);
+      mp4boxfile.flush();
     } catch (e: any) {
-      // Non-ISO-BMFF input (WebM/MKV/OGG/image bytes) makes MP4Box throw.
-      // Report it instead of leaving the export to silently render black.
-      this.loadError = `Not an MP4/MOV container: ${e?.message || e}`;
-      console.warn('[AssetDecoder]', this.loadError, this.url);
-      return;
+      return {
+        samples: [],
+        trackInfo: null,
+        rotation: 0,
+        decoderConfig: {} as any,
+        ready: false,
+        loadError: `Not an MP4/MOV container: ${e?.message || e}`,
+      };
     }
 
     // Wait for MP4Box to read track header
     await new Promise<void>((resolve) => {
-      if (this.trackInfo) { resolve(); return; }
-      this.onReadyCallback = resolve;
+      if (trackInfo || loadError) { resolve(); return; }
+      onReadyResolve = resolve;
       setTimeout(resolve, 3000);
     });
 
-    // Give MP4Box 150ms to finish sample parsing
+    // Give MP4Box 150ms to finish sample extraction
     await new Promise<void>((r) => setTimeout(r, 150));
-    // Samples arrive in DTS (decoding) order from MP4Box — do NOT re-sort.
 
-    if (this.samples.length === 0 || !this.trackInfo) {
-      this.loadError = 'No decodable video track found in media';
-      console.warn('[AssetDecoder] Empty media or failed track parsing');
-      return;
+    if (samples.length === 0 || !trackInfo) {
+      return {
+        samples: [],
+        trackInfo: null,
+        rotation: 0,
+        decoderConfig: {} as any,
+        ready: false,
+        loadError: loadError || 'No decodable video track found in media',
+      };
     }
 
-    const description = this.extractCodecDescription();
-    const codec  = this.trackInfo.codec ?? 'avc1.42E01E';
-    const width  = this.trackInfo.video?.width  ?? 1920;
-    const height = this.trackInfo.video?.height ?? 1080;
+    // Extract AVCDecoderConfigurationRecord (avcC) or HEVCDecoderConfigurationRecord (hvcC) bytes
+    let description: Uint8Array | undefined;
+    try {
+      const trak = mp4boxfile.getTrackById?.(trackId);
+      const entry = trak?.mdia?.minf?.stbl?.stsd?.entries?.[0] as any;
+      const box = entry?.avcC ?? entry?.hvcC;
+      if (box) {
+        const DataStream = (MP4Box as any).DataStream;
+        const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
+        box.write(stream);
+        description = new Uint8Array(stream.buffer, 8); // Skip 8-byte box header
+      }
+    } catch (e) {
+      console.warn('[AssetDecoder] Could not extract codec description:', e);
+    }
+
+    const codec  = trackInfo.codec ?? 'avc1.42E01E';
+    const width  = trackInfo.video?.width  ?? 1920;
+    const height = trackInfo.video?.height ?? 1080;
 
     // Extract rotation from MP4 track matrix
     let rotation = 0;
-    const matrix = this.trackInfo.matrix;
+    const matrix = trackInfo.matrix;
     if (matrix && matrix.length === 9) {
       if (matrix[0] === 0 && matrix[1] === 65536 && matrix[3] === -65536 && matrix[4] === 0) {
         rotation = 90;
@@ -143,23 +176,44 @@ export class AssetDecoder {
         rotation = 270;
       }
     }
-    this.rotation = rotation;
 
-    this.decoderConfig = {
+    const decoderConfig: VideoDecoderConfig = {
       codec,
       codedWidth: width,
       codedHeight: height,
     };
     if (description) {
-      this.decoderConfig.description = description;
+      decoderConfig.description = description;
     }
 
-    this.initDecoder();
-    this.ready = this.decoder !== null && this.decoder.state === 'configured';
-    if (!this.ready && !this.loadError) {
-      this.loadError = `VideoDecoder rejected codec ${codec}`;
-    }
-    console.log(`[AssetDecoder] v7 streaming-decode ready | ${this.samples.length} samples | ${codec} ${width}x${height} | rotation=${rotation}`);
+    console.log(`[AssetDecoder] Demuxed ready | ${samples.length} samples | ${codec} ${width}x${height} | rotation=${rotation}`);
+
+    return {
+      samples,
+      trackInfo,
+      rotation,
+      decoderConfig,
+      ready: true,
+      loadError: null,
+    };
+  }
+
+  /**
+   * Fast initialization from a shared DemuxedMedia object (avoids re-parsing the MP4).
+   */
+  public initFromDemuxed(demuxed: DemuxedMedia): void {
+    this.demuxed = demuxed;
+    this.rotation = demuxed.rotation;
+    this.ready = demuxed.ready;
+    this.loadError = demuxed.loadError;
+  }
+
+  /**
+   * Fallback load method for standalone usage / tests.
+   */
+  async load(preBuffer?: ArrayBuffer): Promise<void> {
+    const demuxed = await AssetDecoder.demux(this.url, preBuffer);
+    this.initFromDemuxed(demuxed);
   }
 
   private initDecoder(): void {
@@ -171,12 +225,11 @@ export class AssetDecoder {
     this.clearDecodedQueue();
     this.nextSampleIdx = 0;
 
-    if (!this.decoderConfig) return;
+    if (!this.demuxed || !this.demuxed.decoderConfig) return;
 
     this.decoder = new VideoDecoder({
       output: (frame) => {
         this.decodedQueue.push({ timestamp: frame.timestamp, frame });
-        // Wake any getFrameAt() that is waiting for a frame at/after this CTS.
         this.notifyFrameArrived(frame.timestamp);
       },
       error: (e) => {
@@ -185,42 +238,29 @@ export class AssetDecoder {
     });
 
     try {
-      this.decoder.configure(this.decoderConfig);
+      this.decoder.configure(this.demuxed.decoderConfig);
     } catch (e: any) {
       console.error('[AssetDecoder] VideoDecoder configure failed:', e.message);
     }
   }
 
-  /** Extract AVCDecoderConfigurationRecord (avcC) or HEVCDecoderConfigurationRecord (hvcC) bytes */
-  private extractCodecDescription(): Uint8Array | undefined {
-    try {
-      const trak = this.mp4boxfile.getTrackById?.(this.trackId);
-      const entry = trak?.mdia?.minf?.stbl?.stsd?.entries?.[0];
-      const box = entry?.avcC ?? entry?.hvcC;
-      if (!box) return undefined;
-
-      const DataStream = (MP4Box as any).DataStream;
-      const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
-      box.write(stream);
-      return new Uint8Array(stream.buffer, 8); // Skip 8-byte box header
-    } catch (e) {
-      console.warn('[AssetDecoder] Could not extract codec description:', e);
-      return undefined;
+  /**
+   * Release the VideoDecoder and GPU session when this clip has finished playing.
+   */
+  public releaseDecoder(): void {
+    if (this.decoder) {
+      try { this.decoder.close(); } catch {}
+      this.decoder = null;
     }
+    this.clearDecodedQueue();
+    this.nextSampleIdx = 0;
   }
 
-  /**
-   * Streaming sequential decoder optimized for export.
-   * 
-   * Strategy for smooth export:
-   * 1. Feed all compressed samples up to (and 500ms past) the target timestamp to the decoder
-   * 2. Use decoder.flush() to guarantee all frames are decoded (no setTimeout polling)
-   * 3. Sort decoded queue by CTS (presentation time) for correct frame selection
-   * 4. Binary search for the closest frame
-   * 5. Purge frames more than 1 second behind to bound memory usage
-   */
   async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
-    // Hard timeout: never block the export worker more than 10s per frame.
+    if (!this.demuxed || !this.ready || this.demuxed.samples.length === 0) {
+      return null;
+    }
+
     let timedOut = false;
     const deadline = new Promise<null>((resolve) => {
       setTimeout(() => {
@@ -232,7 +272,6 @@ export class AssetDecoder {
 
     const getFramePromise = this._getFrameAtImpl(timestampMicroseconds).then(frame => {
       if (timedOut && frame) {
-        // If we already returned null due to timeout, this frame is an orphan.
         try { frame.close(); } catch {}
         return null;
       }
@@ -243,30 +282,34 @@ export class AssetDecoder {
   }
 
   private async _getFrameAtImpl(timestampMicroseconds: number): Promise<VideoFrame | null> {
-    if (this.samples.length === 0 || !this.decoder) return null;
+    if (!this.demuxed || this.demuxed.samples.length === 0) return null;
 
-    // 1. Purge old frames to bound memory, BUT never purge the currently active frame!
-    // If the SECOND frame is also <= target, the FIRST frame is completely in the past.
+    // Lazy initialization of the hardware decoder on first frame request
+    if (!this.decoder || this.decoder.state === 'closed') {
+      this.initDecoder();
+      if (!this.decoder) return null;
+    }
+
+    const samples = this.demuxed.samples;
+
+    // 1. Purge old frames to bound memory, keeping the active frame
     while (this.decodedQueue.length > 1) {
       if (this.decodedQueue[1].timestamp <= timestampMicroseconds) {
         const old = this.decodedQueue.shift();
         try { old?.frame.close(); } catch {}
       } else {
-        break; // First frame is the active frame
+        break;
       }
     }
 
     // 2. Feed compressed samples to decoder until we're past the target timestamp
-    //    Feed all samples whose CTS <= target + 500ms (look-ahead for B-frame reordering)
     const lookAheadTarget = timestampMicroseconds + 500_000;
     let fedNewSamples = false;
 
-    while (this.nextSampleIdx < this.samples.length) {
-      const sample = this.samples[this.nextSampleIdx];
+    while (this.nextSampleIdx < samples.length) {
+      const sample = samples[this.nextSampleIdx];
 
-      // Stop feeding if we've gone well past the target AND we have frames past it
       if (sample.timestamp > lookAheadTarget && this.nextSampleIdx > 0) {
-        // Check if the last frame we queued is past our target
         const lastQueuedCTS = this.decodedQueue.length > 0
           ? this.decodedQueue[this.decodedQueue.length - 1].timestamp
           : -1;
@@ -278,8 +321,7 @@ export class AssetDecoder {
         if (!this.decoder) return null;
       }
 
-      // STRICT throttle: hardware decoders (especially NVDEC/MF on Windows) hang if fed too many frames
-      // concurrently across multiple instances. Limit to 3 frames per decoder to prevent GPU starvation.
+      // STRICT throttle: hardware decoders hang if fed too many frames concurrently.
       let queueRetries = 50;
       while (this.decoder.decodeQueueSize >= 3 && queueRetries > 0) {
         await this.waitForDequeue(this.decoder, 10);
@@ -301,46 +343,34 @@ export class AssetDecoder {
       this.nextSampleIdx++;
     }
 
-    // 3. Wait for the decoder to output the frames (hardware pipelining)
-    // DO NOT use decoder.flush() mid-stream! On many hardware decoders (especially Chrome/Edge),
-    // calling flush() before the end of the stream resets the reference frame buffer (GOP),
-    // causing subsequent P-frames to fail decoding, crashing the decoder, and triggering an infinite re-init loop!
+    // 3. Wait for the decoder to output the frames
     if (fedNewSamples && this.decoder && this.decoder.state === 'configured') {
-      // 400ms is enough for hardware decoders to drain a GOP; the outer 2s deadline
-      // in getFrameAt catches any decoder that never responds.
       await this.waitForFrame(timestampMicroseconds, 400);
     }
 
     if (this.decodedQueue.length === 0) return null;
 
-    // 4. Sort decoded queue by CTS (presentation time) for correct frame selection
+    // 4. Sort decoded queue by CTS for correct frame selection
     this.decodedQueue.sort((a, b) => a.timestamp - b.timestamp);
 
-    // 5. Select the last decoded frame whose presentation timestamp is <= requested timestamp
-    // Never select future frames (which causes frame jumping / stuttering)
-    const epsilonUs = 1000; // 1ms rounding tolerance
+    // 5. Select the last decoded frame whose timestamp is <= requested timestamp
+    const epsilonUs = 1000;
     let bestIdx = -1;
     for (let i = 0; i < this.decodedQueue.length; i++) {
       if (this.decodedQueue[i].timestamp <= timestampMicroseconds + epsilonUs) {
         bestIdx = i;
       } else {
-        break; // Queue is sorted ascending
+        break;
       }
     }
 
     if (bestIdx === -1) {
-      bestIdx = 0; // Fallback to first frame if before start
+      bestIdx = 0;
     }
 
-    // Return a clone so caller can close() their copy independently
     return this.decodedQueue[bestIdx].frame.clone();
   }
 
-  /**
-   * Resolve on the decoder's next `dequeue` event (emitted whenever
-   * decodeQueueSize drops), or after `timeoutMs` as a safety net for engines that
-   * do not implement the event.
-   */
   private waitForDequeue(decoder: VideoDecoder, timeoutMs: number): Promise<void> {
     return new Promise<void>((resolve) => {
       let settled = false;
@@ -356,7 +386,6 @@ export class AssetDecoder {
     });
   }
 
-  /** Called from the VideoDecoder output callback for every decoded frame. */
   private notifyFrameArrived(cts: number): void {
     const waiter = this.frameWaiter;
     if (waiter && cts >= waiter.targetCts) {
@@ -365,12 +394,7 @@ export class AssetDecoder {
     }
   }
 
-  /**
-   * Resolve once a frame with CTS >= `targetCts` has been decoded, or after
-   * `timeoutMs`. Event-driven: no polling.
-   */
   private waitForFrame(targetCts: number, timeoutMs: number): Promise<void> {
-    // Already have it — don't even yield.
     if (this.decodedQueue.length > 0) {
       const lastQueuedCTS = this.decodedQueue[this.decodedQueue.length - 1].timestamp;
       if (lastQueuedCTS >= targetCts) return Promise.resolve();
@@ -388,7 +412,6 @@ export class AssetDecoder {
         resolve();
       };
       const timer = setTimeout(done, timeoutMs);
-      // Only one getFrameAt is ever in flight per decoder; release any stale waiter.
       if (this.frameWaiter) this.frameWaiter.resolve();
       this.frameWaiter = { targetCts, resolve: done };
     });
@@ -402,17 +425,12 @@ export class AssetDecoder {
   }
 
   dispose() {
-    // Release any in-flight waiter so a pending getFrameAt() cannot hang the export.
     if (this.frameWaiter) {
       const w = this.frameWaiter;
       this.frameWaiter = null;
       w.resolve();
     }
-    this.clearDecodedQueue();
-    if (this.decoder) {
-      try { this.decoder.close(); } catch {}
-      this.decoder = null;
-    }
-    this.samples = [];
+    this.releaseDecoder();
+    this.demuxed = null;
   }
 }

@@ -28,13 +28,18 @@ export class StillImageSource {
     this.url = url;
   }
 
-  async load(): Promise<void> {
+  async load(preBuffer?: ArrayBuffer | Blob): Promise<void> {
     try {
-      const response = await fetch(this.url);
-      if (!response.ok) {
-        throw new Error(`fetch failed (${response.status})`);
+      let blob: Blob;
+      if (preBuffer) {
+        blob = preBuffer instanceof Blob ? preBuffer : new Blob([preBuffer]);
+      } else {
+        const response = await fetch(this.url);
+        if (!response.ok) {
+          throw new Error(`fetch failed (${response.status})`);
+        }
+        blob = await response.blob();
       }
-      const blob = await response.blob();
       this.bitmap = await createImageBitmap(blob);
       this.ready = true;
     } catch (e: any) {
