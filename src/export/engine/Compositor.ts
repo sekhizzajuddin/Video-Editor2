@@ -242,6 +242,11 @@ export class Compositor {
   }
 
   public async render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
+    // Diagnostic log to see if layers are being dropped before compositor
+    if (Math.random() < 0.05) { // Log occasionally to avoid spam
+       console.log('[Compositor] rendering frame with layers:', layers.map(l => ({ type: l.type, zIndex: l.zIndex })));
+    }
+
     // Fill background
     this.ctx.fillStyle = '#0a0a0a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
