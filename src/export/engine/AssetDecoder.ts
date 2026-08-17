@@ -64,27 +64,27 @@ export class AssetDecoder {
   }
 
   async getFrameAt(timestampMicroseconds: number): Promise<CanvasImageSource | null> {
-    if (!this.sink || !this.ready) return null;
+    if (!this.sink || !this.ready) return this.reusableCanvas || null;
     const timestampSeconds = Math.max(0, timestampMicroseconds / 1_000_000);
 
     const framePromise = this.decodeTail.then(async () => {
       try {
         const wrapped = await this.sink!.getCanvas(timestampSeconds);
-        if (!wrapped || !wrapped.canvas) return null;
+        if (wrapped && wrapped.canvas) {
+          const w = wrapped.canvas.width;
+          const h = wrapped.canvas.height;
+          if (!this.reusableCanvas || this.reusableCanvas.width !== w || this.reusableCanvas.height !== h) {
+            this.reusableCanvas = new OffscreenCanvas(w, h);
+            this.reusableCtx = this.reusableCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
+          }
 
-        const w = wrapped.canvas.width;
-        const h = wrapped.canvas.height;
-        if (!this.reusableCanvas || this.reusableCanvas.width !== w || this.reusableCanvas.height !== h) {
-          this.reusableCanvas = new OffscreenCanvas(w, h);
-          this.reusableCtx = this.reusableCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
+          this.reusableCtx!.clearRect(0, 0, w, h);
+          this.reusableCtx!.drawImage(wrapped.canvas, 0, 0);
         }
-
-        this.reusableCtx!.clearRect(0, 0, w, h);
-        this.reusableCtx!.drawImage(wrapped.canvas, 0, 0);
-        return this.reusableCanvas;
+        return this.reusableCanvas || null;
       } catch (err: any) {
-        console.warn(`[AssetDecoder] getCanvas error @${timestampSeconds}s:`, err?.message || err);
-        return null;
+        // In case of decoder seek glitch at clip boundary, reuse the last stable frame
+        return this.reusableCanvas || null;
       }
     });
 

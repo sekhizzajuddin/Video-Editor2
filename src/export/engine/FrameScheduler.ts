@@ -72,21 +72,25 @@ export class FrameScheduler {
   }
 
   async initializeDecoders() {
+    const visualMediaMap = new Map<string, any>();
     const mediaMap = new Map<string, any>();
     for (const m of (this.timeline.media || [])) {
       if (m?.id) mediaMap.set(m.id, m);
     }
     for (const track of (this.timeline.tracks || [])) {
-      for (const clip of (track.clips || [])) {
-        if (clip.mediaId && !mediaMap.has(clip.mediaId)) {
-          mediaMap.set(clip.mediaId, { id: clip.mediaId, url: clip.url, name: clip.name });
+      if (track.type === 'video') {
+        for (const clip of (track.clips || [])) {
+          if (clip.mediaId) {
+            const media = mediaMap.get(clip.mediaId) || { id: clip.mediaId, url: clip.url, name: clip.name };
+            visualMediaMap.set(clip.mediaId, media);
+          }
         }
       }
     }
 
     const loadPromises: Promise<void>[] = [];
 
-    for (const [mediaId, media] of mediaMap.entries()) {
+    for (const [mediaId, media] of visualMediaMap.entries()) {
       if (!this.mediaDecoders.has(mediaId)) {
         const url = media?.url || '';
         const preBuffer = this.mediaBuffers[mediaId];

@@ -218,7 +218,9 @@ export class ExportWorkerManager {
       }
     }
 
-    await Promise.all(Array.from(mediaMap.values()).map(async (m) => {
+    serializedTimeline.media = Array.from(mediaMap.values());
+
+    await Promise.all(serializedTimeline.media.map(async (m: any) => {
       try {
         let fileBlob: Blob | null = null;
         try {
