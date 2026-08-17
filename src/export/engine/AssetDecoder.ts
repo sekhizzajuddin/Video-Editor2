@@ -13,9 +13,11 @@ export class AssetDecoder {
   private url: string;
   private input: any = null;
   private sink: InstanceType<typeof CanvasSink> | null = null;
+  private reusableCanvas: OffscreenCanvas | null = null;
+  private reusableCtx: OffscreenCanvasRenderingContext2D | null = null;
   private decodeTail: Promise<any> = Promise.resolve();
 
-  constructor(url: string, _framePool?: any) {
+  constructor(url: string) {
     this.url = url;
   }
 
@@ -61,7 +63,7 @@ export class AssetDecoder {
     }
   }
 
-  async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
+  async getFrameAt(timestampMicroseconds: number): Promise<CanvasImageSource | null> {
     if (!this.sink || !this.ready) return null;
     const timestampSeconds = Math.max(0, timestampMicroseconds / 1_000_000);
 
@@ -69,11 +71,19 @@ export class AssetDecoder {
       try {
         const wrapped = await this.sink!.getCanvas(timestampSeconds);
         if (!wrapped || !wrapped.canvas) return null;
-        return new VideoFrame(wrapped.canvas, {
-          timestamp: timestampMicroseconds,
-        });
+
+        const w = wrapped.canvas.width;
+        const h = wrapped.canvas.height;
+        if (!this.reusableCanvas || this.reusableCanvas.width !== w || this.reusableCanvas.height !== h) {
+          this.reusableCanvas = new OffscreenCanvas(w, h);
+          this.reusableCtx = this.reusableCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
+        }
+
+        this.reusableCtx!.clearRect(0, 0, w, h);
+        this.reusableCtx!.drawImage(wrapped.canvas, 0, 0);
+        return this.reusableCanvas;
       } catch (err: any) {
-        console.warn(`[AssetDecoder] getCanvas failed @${timestampSeconds}s:`, err?.message || err);
+        console.warn(`[AssetDecoder] getCanvas error @${timestampSeconds}s:`, err?.message || err);
         return null;
       }
     });
@@ -101,6 +111,8 @@ export class AssetDecoder {
       this.input = null;
     }
     this.sink = null;
+    this.reusableCanvas = null;
+    this.reusableCtx = null;
     this.ready = false;
   }
 }

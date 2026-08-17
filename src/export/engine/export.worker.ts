@@ -653,7 +653,7 @@ async function handleExport(
       // Cleanup frames for this tick
       for (const layer of layers) {
         if (layer.frame) {
-          layer.frame.close();
+          try { (layer.frame as any).close?.(); } catch {}
         }
       }
 

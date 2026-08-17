@@ -5,20 +5,20 @@ import { resolveBlendPlan } from '../../utils/blendCompositor';
 import { FramePool } from './memory/FramePool';
 
 /**
- * Anything that can hand the compositor a VideoFrame for a clip: a real MediaBunny
+ * Anything that can hand the compositor a frame for a clip: a real MediaBunny
  * decode pipeline (AssetDecoder) or a decoded still (StillImageSource).
  */
 export interface ClipFrameSource {
   rotation: number;
   ready: boolean;
   loadError: string | null;
-  getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null>;
+  getFrameAt(timestampMicroseconds: number): Promise<CanvasImageSource | VideoFrame | null>;
   dispose(): void;
 }
 
 export interface RenderLayer {
   type: 'video' | 'text' | 'image';
-  frame?: VideoFrame; // For video/image
+  frame?: CanvasImageSource | VideoFrame; // For video/image
   textData?: any;     // For text
   opacity: number;
   chromaKey?: {
@@ -62,7 +62,7 @@ export class FrameScheduler {
   private timeline: any;
   private framePool: FramePool;
   private mediaBuffers: Record<string, any>;
-  private decoders: Map<string, ClipFrameSource> = new Map();
+  private mediaDecoders: Map<string, ClipFrameSource> = new Map();
   public warnings: string[] = [];
 
   constructor(timeline: any, framePool: FramePool, mediaBuffers?: Record<string, any>) {
@@ -73,55 +73,55 @@ export class FrameScheduler {
 
   async initializeDecoders() {
     const mediaMap = new Map<string, any>();
-    if (this.timeline.media) {
-      for (const m of this.timeline.media) {
-        mediaMap.set(m.id, m);
+    for (const m of (this.timeline.media || [])) {
+      if (m?.id) mediaMap.set(m.id, m);
+    }
+    for (const track of (this.timeline.tracks || [])) {
+      for (const clip of (track.clips || [])) {
+        if (clip.mediaId && !mediaMap.has(clip.mediaId)) {
+          mediaMap.set(clip.mediaId, { id: clip.mediaId, url: clip.url, name: clip.name });
+        }
       }
     }
 
     const loadPromises: Promise<void>[] = [];
 
-    for (const track of this.timeline.tracks || []) {
-      if (track.type === 'video') {
-        for (const clip of track.clips || []) {
-          if (!this.decoders.has(clip.id)) {
-            const media = mediaMap.get(clip.mediaId);
-            const url = media?.url || clip.url || '';
-            const preBuffer = this.mediaBuffers[clip.mediaId];
-            const mediaName: string = media?.name || '';
-            const isImage =
-              media?.type === 'image' ||
-              /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
+    for (const [mediaId, media] of mediaMap.entries()) {
+      if (!this.mediaDecoders.has(mediaId)) {
+        const url = media?.url || '';
+        const preBuffer = this.mediaBuffers[mediaId];
+        const mediaName: string = media?.name || '';
+        const isImage =
+          media?.type === 'image' ||
+          /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
 
-            if (isImage) {
-              const source = new StillImageSource(url);
-              this.decoders.set(clip.id, source);
-              loadPromises.push(source.load(preBuffer));
-              continue;
-            }
-
-            const decoder = new AssetDecoder(url, this.framePool);
-            this.decoders.set(clip.id, decoder);
-            loadPromises.push(
-              decoder.load(preBuffer).then(async () => {
-                if (decoder.ready) return;
-                const fallback = new StillImageSource(url);
-                await fallback.load(preBuffer);
-                if (fallback.ready) {
-                  decoder.dispose();
-                  this.decoders.set(clip.id, fallback);
-                } else {
-                  fallback.dispose();
-                  this.warnings.push(
-                    `"${mediaName || clip.mediaId}" could not be decoded for export` +
-                    (decoder.loadError ? ` (${decoder.loadError})` : '') +
-                    '. Its frames will be missing from the output.'
-                  );
-                }
-              })
-            );
-          }
+        if (isImage) {
+          const source = new StillImageSource(url);
+          this.mediaDecoders.set(mediaId, source);
+          loadPromises.push(source.load(preBuffer));
+          continue;
         }
+
+        const decoder = new AssetDecoder(url);
+        this.mediaDecoders.set(mediaId, decoder);
+        loadPromises.push(
+          decoder.load(preBuffer).then(async () => {
+            if (decoder.ready) return;
+            const fallback = new StillImageSource(url);
+            await fallback.load(preBuffer);
+            if (fallback.ready) {
+              decoder.dispose();
+              this.mediaDecoders.set(mediaId, fallback);
+            } else {
+              fallback.dispose();
+              this.warnings.push(
+                `"${mediaName || mediaId}" could not be decoded for export` +
+                (decoder.loadError ? ` (${decoder.loadError})` : '') +
+                '. Its frames will be missing from the output.'
+              );
+            }
+          })
+        );
       }
     }
 
@@ -193,8 +193,8 @@ export class FrameScheduler {
               }
             : undefined;
 
-          if (track.type === 'video' && this.decoders.has(clip.id)) {
-            const decoder = this.decoders.get(clip.id);
+          if (track.type === 'video' && clip.mediaId && this.mediaDecoders.has(clip.mediaId)) {
+            const decoder = this.mediaDecoders.get(clip.mediaId);
             const clampedTime = Math.min(
               Math.max(timestampSeconds, clip.startTime),
               clip.startTime + clip.duration
@@ -260,7 +260,7 @@ export class FrameScheduler {
   }
 
   dispose() {
-    this.decoders.forEach(d => d.dispose());
-    this.decoders.clear();
+    this.mediaDecoders.forEach(d => d.dispose());
+    this.mediaDecoders.clear();
   }
 }

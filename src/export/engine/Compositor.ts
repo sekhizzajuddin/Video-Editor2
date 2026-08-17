@@ -286,13 +286,14 @@ export class Compositor {
           this.ctx.translate(-CW / 2, -CH / 2);
         }
 
-        let vw = layer.frame.displayWidth || (layer.frame as any).codedWidth || (layer.frame as any).width || 1920;
-        let vh = layer.frame.displayHeight || (layer.frame as any).codedHeight || (layer.frame as any).height || 1080;
+        const frameAny = layer.frame as any;
+        let vw = frameAny.displayWidth || frameAny.codedWidth || frameAny.width || 1920;
+        let vh = frameAny.displayHeight || frameAny.codedHeight || frameAny.height || 1080;
         const srcRot = layer.sourceRotation || 0;
         const isRotated = srcRot === 90 || srcRot === 270 || srcRot === -90;
         if (isRotated) {
-          vw = layer.frame.displayHeight || (layer.frame as any).codedHeight || (layer.frame as any).height || 1080;
-          vh = layer.frame.displayWidth || (layer.frame as any).codedWidth || (layer.frame as any).width || 1920;
+          vw = frameAny.displayHeight || frameAny.codedHeight || frameAny.height || 1080;
+          vh = frameAny.displayWidth || frameAny.codedWidth || frameAny.width || 1920;
         }
 
         const W = this.canvas.width;
@@ -345,25 +346,7 @@ export class Compositor {
         // 6. Draw the frame, applying source metadata rotation
         this.ctx.save();
         
-        // Convert VideoFrame → RGBA ImageBitmap for reliable rendering.
-        // Hardware-decoded NV12/YUV frames (Windows, Android) render as solid
-        // black when passed directly to a 2D canvas in a Web Worker.  WebGL's
-        // texImage2D handles the YUV→RGBA conversion natively on the GPU.
-        let drawable: CanvasImageSource = layer.frame;
-        try {
-          // Primary: WebGL GPU conversion (synchronous, most reliable)
-          const webglBitmap = this.convertFrameWebGL(layer.frame);
-          if (webglBitmap) {
-            drawable = webglBitmap;
-          } else if (typeof createImageBitmap !== 'undefined') {
-            // Fallback 1: createImageBitmap — works when frames are already RGBA
-            drawable = await createImageBitmap(layer.frame);
-          }
-        } catch (e) {
-          // Fallback 2: raw VideoFrame — may render black but won't crash
-          console.warn('[Compositor] Frame conversion failed, using raw VideoFrame:', e);
-          drawable = layer.frame;
-        }
+        const drawable: CanvasImageSource = layer.frame;
         
         if (layer.chromaKey && layer.chromaKey.enabled) {
           // Optimization: Draw to a tightly-bound offscreen canvas first to apply Chroma Key ONLY 
