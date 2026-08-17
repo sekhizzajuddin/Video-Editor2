@@ -108,8 +108,13 @@ export class FrameScheduler {
         for (const clip of track.clips || []) {
           if (!this.decoders.has(clip.id)) {
             const media = mediaMap.get(clip.mediaId);
-            const url = media?.url || clip.url;
-            if (!url) continue;
+            const url = media?.url || clip.url || '';
+            // Don't require a URL when the main thread already transferred the
+            // raw bytes: restored/re-linked projects can have a dead/blob-less
+            // URL (e.g. 'PENDING_RESTORE') while mediaBuffers holds the bytes
+            // needed to decode. Skipping here silently produced black exports.
+            const hasBuffer = !!this.mediaBuffers[clip.mediaId];
+            if (!url && !hasBuffer) continue;
 
             const mediaName: string = media?.name || '';
             const isImage =

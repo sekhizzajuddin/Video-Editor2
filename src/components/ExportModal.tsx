@@ -71,16 +71,26 @@ export function ExportModal() {
   const handleExport = useCallback(async () => {
     const exportFilename = filename.trim() || generateFilename(projectName);
 
+    // The save dialog's extension/MIME must match what the worker actually
+    // writes, otherwise players that trust the extension show a black screen.
+    // (ProRes can't be encoded in-browser — the worker produces MP4 instead,
+    // so even the picker advertises .mp4 for it.)
+    const PICKER_TYPES: Record<string, { description: string; accept: Record<string, string[]>; ext: string }> = {
+      mp4:    { description: 'MP4 Video',     accept: { 'video/mp4': ['.mp4'] },        ext: 'mp4' },
+      webm:   { description: 'WebM Video',    accept: { 'video/webm': ['.webm'] },      ext: 'webm' },
+      gif:    { description: 'Animated GIF',  accept: { 'image/gif': ['.gif'] },        ext: 'gif' },
+      wav:    { description: 'WAV Audio',     accept: { 'audio/wav': ['.wav'] },        ext: 'wav' },
+      prores: { description: 'MP4 Video',     accept: { 'video/mp4': ['.mp4'] },        ext: 'mp4' },
+    };
+    const pickerCfg = PICKER_TYPES[format] || PICKER_TYPES.mp4;
+
     let fileHandle: FileSystemFileHandle | null = null;
     // Standalone browser direct save dialog (OpenReel Video style)
     if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
       try {
         fileHandle = await (window as any).showSaveFilePicker({
-          suggestedName: `${exportFilename}.${format}`,
-          types: [{
-            description: format === 'mp4' ? 'MP4 Video' : 'WebM Video',
-            accept: format === 'mp4' ? { 'video/mp4': ['.mp4'] } : { 'video/webm': ['.webm'] }
-          }]
+          suggestedName: `${exportFilename}.${pickerCfg.ext}`,
+          types: [pickerCfg]
         });
       } catch (err: any) {
         if (err.name === 'AbortError') return; // User cancelled save picker
