@@ -24,7 +24,7 @@ import { Compositor } from './Compositor';
 import * as Mp4Muxer from 'mp4-muxer';
 
 export type WorkerMessageType = 
-  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null } }
+  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null; mediaBuffers?: Record<string, ArrayBuffer> } }
   | { type: 'CANCEL' };
 
 let isExporting = false;
@@ -39,7 +39,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
         message.payload.timeline, 
         message.payload.config, 
         message.payload.audioData,
-        message.payload.fileHandle
+        message.payload.fileHandle,
+        message.payload.mediaBuffers
       );
       break;
     case 'CANCEL':
@@ -138,7 +139,8 @@ async function handleExport(
   timeline: any,
   config: ExportWorkerConfig,
   audioData?: AudioExportPayload | null,
-  fileHandle?: FileSystemFileHandle | null
+  fileHandle?: FileSystemFileHandle | null,
+  mediaBuffers?: Record<string, ArrayBuffer>
 ) {
   console.log('[ExportWorker] STARTING v9 - Standalone Browser & Runtime Export', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
   isExporting = true;
@@ -156,7 +158,7 @@ async function handleExport(
 
     // Frame Scheduler Initialization
     const framePool = new FramePool(30);
-    const scheduler = new FrameScheduler(timeline, framePool);
+    const scheduler = new FrameScheduler(timeline, framePool, mediaBuffers);
     await scheduler.initializeDecoders();
 
     // Surface per-clip decode failures immediately — a silently black export
@@ -351,10 +353,11 @@ async function handleExport(
       });
       
       // Wait if encoder queue is getting too large to prevent QuotaExceededError.
-      // PERF: previously polled every 5ms; now driven by the encoder's `dequeue`
-      // event so we resume the instant there is room instead of on the next tick.
-      while (videoEncoder.encodeQueueSize > 12 && !isCancelled) {
-        await waitForEncoderDrain(videoEncoder, 25);
+      // Raised from 12 to 30 to prevent starvation deadlock when multiple video
+      // tracks decode concurrently (each decoder blocks until the encoder drains,
+      // causing a multi-track export to hang indefinitely at low queue limits).
+      while (videoEncoder.encodeQueueSize > 30 && !isCancelled) {
+        await waitForEncoderDrain(videoEncoder, 50);
       }
 
       // Force a keyframe on the first frame and every 2 seconds

@@ -111,6 +111,17 @@ export class ExportWorkerManager {
       console.warn('Audio pre-mix failed on main thread:', err);
     }
 
+    // Collect all pre-fetched ArrayBuffers from media items and transfer them
+    // to the worker to avoid cross-thread blob URL access failures.
+    const mediaBuffers: Record<string, ArrayBuffer> = {};
+    for (const m of (serializedTimeline.media || [])) {
+      if (m._arrayBuffer) {
+        mediaBuffers[m.id] = m._arrayBuffer;
+        transferables.push(m._arrayBuffer);
+        delete m._arrayBuffer; // Don't try to JSON-clone the ArrayBuffer
+      }
+    }
+
     // Transfer timeline data, audio PCM, and optional fileHandle to worker
     this.worker.postMessage({
       type: 'START_EXPORT',
@@ -119,6 +130,7 @@ export class ExportWorkerManager {
         config: this.options.config,
         audioData: audioPayload,
         fileHandle: this.options.fileHandle || null,
+        mediaBuffers,
       }
     }, transferables);
 
@@ -205,11 +217,37 @@ export class ExportWorkerManager {
 
     await Promise.all(videoItems.map(async (m) => {
       try {
+        // Step 1: Normalize (transcode WebM/MKV to MP4 if needed).
         const result = await normalizeVideoForExport(m.url, m.name);
         if (result.warning) {
           this.options.callbacks.onWarning?.(result.warning);
-        } else if (result.transcoded) {
+          return;
+        }
+        if (result.transcoded) {
           m.url = result.url;
+        }
+
+        // Step 2: CRITICAL FIX — Blob URLs (blob:http://...) live in the main
+        // thread's memory and CANNOT be fetched from inside a Web Worker.
+        // The AssetDecoder in the worker calls fetch(url) which silently returns
+        // an error → no frames decoded → black video.
+        //
+        // Solution: fetch the bytes here on the main thread (where blob URLs are
+        // accessible) and replace the url with a data-URI string, OR attach the
+        // ArrayBuffer directly on the media item so the worker can use it.
+        if (m.url && (m.url.startsWith('blob:') || m.url.startsWith('http://localhost'))) {
+          try {
+            const response = await fetch(m.url);
+            if (!response.ok) throw new Error(`fetch ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            // Attach the raw bytes. We'll transfer this buffer to the worker later.
+            m._arrayBuffer = arrayBuffer;
+            // Keep url as a signal for AssetDecoder; it will prefer _arrayBuffer.
+          } catch (fetchErr: any) {
+            this.options.callbacks.onWarning?.(
+              `"${m.name || m.id}" media could not be read: ${fetchErr?.message || fetchErr}. It may appear black in the output.`
+            );
+          }
         }
       } catch (e: any) {
         this.options.callbacks.onWarning?.(

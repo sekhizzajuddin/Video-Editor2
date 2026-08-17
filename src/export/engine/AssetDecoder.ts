@@ -81,16 +81,23 @@ export class AssetDecoder {
     };
   }
 
-  async load(): Promise<void> {
+  async load(preBuffer?: ArrayBuffer): Promise<void> {
     let buffer: ArrayBuffer;
-    try {
-      const response = await fetch(this.url);
-      if (!response.ok) throw new Error(`fetch failed (${response.status})`);
-      buffer = await response.arrayBuffer();
-    } catch (e: any) {
-      this.loadError = `Could not read media: ${e?.message || e}`;
-      console.warn('[AssetDecoder]', this.loadError, this.url);
-      return;
+    if (preBuffer) {
+      // Use the pre-fetched buffer passed from the main thread.
+      // Blob URLs cannot be fetched from inside a Web Worker, so we always
+      // prefer a pre-fetched buffer when one is available.
+      buffer = preBuffer;
+    } else {
+      try {
+        const response = await fetch(this.url);
+        if (!response.ok) throw new Error(`fetch failed (${response.status})`);
+        buffer = await response.arrayBuffer();
+      } catch (e: any) {
+        this.loadError = `Could not read media: ${e?.message || e}`;
+        console.warn('[AssetDecoder]', this.loadError, this.url);
+        return;
+      }
     }
 
     (buffer as any).fileStart = 0;

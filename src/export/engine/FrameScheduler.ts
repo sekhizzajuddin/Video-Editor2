@@ -79,6 +79,7 @@ export interface FramePlan {
 export class FrameScheduler {
   private timeline: any;
   private framePool: FramePool;
+  private mediaBuffers: Record<string, ArrayBuffer>;
   private decoders: Map<string, ClipFrameSource> = new Map();
   /**
    * Human-readable problems collected while preparing frame sources (media that
@@ -87,9 +88,10 @@ export class FrameScheduler {
    */
   public warnings: string[] = [];
 
-  constructor(timeline: any, framePool: FramePool) {
+  constructor(timeline: any, framePool: FramePool, mediaBuffers?: Record<string, ArrayBuffer>) {
     this.timeline = timeline;
     this.framePool = framePool;
+    this.mediaBuffers = mediaBuffers || {};
   }
 
   async initializeDecoders() {
@@ -126,8 +128,11 @@ export class FrameScheduler {
 
             const decoder = new AssetDecoder(url, this.framePool);
             this.decoders.set(clip.id, decoder);
+            // Use pre-fetched ArrayBuffer if available (critical fix for blob URLs
+            // which cannot be fetched from inside a worker thread).
+            const preBuffer = this.mediaBuffers[clip.mediaId];
             promises.push(
-              decoder.load().then(async () => {
+              decoder.load(preBuffer).then(async () => {
                 if (decoder.ready) return;
                 // MP4 demux failed. If the file is actually a still image with
                 // a video-ish name/type, decode it as one before giving up.
