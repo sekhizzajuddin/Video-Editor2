@@ -4,6 +4,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
 import { ExportPhase } from '@/export/types';
+import { recommendedVideoBitrate } from '@/export/quality';
 
 const RUNTIME_URL = 'http://127.0.0.1:12589';
 
@@ -101,13 +102,14 @@ export function ExportModal() {
       fps,
       width: selectedResolution.width,
       height: selectedResolution.height,
-      bitrate: selectedResolution.maxBitrate,
+      bitrate: recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality),
+      quality,
       format,
       filename: exportFilename,
       outputFolder: outputFolder || '',
       aspectRatio,
     }, fileHandle);
-  }, [startExport, selectedResolution, format, fps, filename, outputFolder, projectName, aspectRatio]);
+  }, [startExport, selectedResolution, format, fps, quality, filename, outputFolder, projectName, aspectRatio]);
 
   if (!showExportModal) return null;
 
@@ -225,6 +227,33 @@ export function ExportModal() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Quality / compression selector */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs text-[#a0a0a0]">Quality &amp; file size</label>
+              <span className="text-[10px] text-[#707070]">
+                ~{(recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality) / 1_000_000).toFixed(1)} Mbps
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {(['low', 'medium', 'high', 'ultra'] as const).map((level) => (
+                <button
+                  key={level}
+                  disabled={!canEdit}
+                  onClick={() => setQuality(level)}
+                  className={`px-2 py-1.5 rounded text-[11px] capitalize border transition-colors ${
+                    quality === level
+                      ? 'bg-amber-600/20 border-amber-500 text-amber-400'
+                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white disabled:opacity-40'
+                  }`}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10px] text-[#666]">High is recommended for YouTube: sharp H.264 with a smaller upload.</p>
           </div>
 
           {/* FPS & Format Row */}

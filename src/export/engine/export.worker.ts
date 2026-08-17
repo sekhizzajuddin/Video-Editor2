@@ -9,6 +9,7 @@ export interface ExportWorkerConfig {
   filename: string;
   aspectRatio: string;
   outputFolder?: string;
+  quality?: 'low' | 'medium' | 'high' | 'ultra';
 }
 
 export interface AudioExportPayload {
@@ -24,6 +25,7 @@ import { Compositor } from './Compositor';
 import * as Mp4Muxer from 'mp4-muxer';
 import * as WebMMuxerImport from 'webm-muxer';
 import { Gif89aEncoder } from '../gifEncoder';
+import { h264CodecCandidates } from '../quality';
 
 export type WorkerMessageType =
   | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null; mediaBuffers?: Record<string, ArrayBuffer> } }
@@ -78,16 +80,12 @@ async function configureVideoEncoder(
   bitrate: number,
   useAnnexB: boolean = false
 ): Promise<void> {
-  const candidateCodecs = [
-    'avc1.4d002a', // Main Profile Level 4.2
-    'avc1.42001f', // Baseline Profile Level 3.1
-    'avc1.640028', // High Profile Level 4.0
-    'avc1.42E01E', // Baseline
-    'avc1.64001f', // High Profile Level 3.1
-  ];
-
+  const candidateCodecs = h264CodecCandidates(width, height, fps);
   const avcFormat = useAnnexB ? 'annexb' : 'avc';
 
+  // Latest Chrome is stricter about AVC level limits and about combinations of
+  // constant bitrate + quality latency on hardware encoders. A variable target
+  // with realtime latency is both considerably faster and more widely accepted.
   const accelerationModes: ('prefer-hardware' | 'no-preference' | 'prefer-software')[] = [
     'prefer-hardware',
     'no-preference',
@@ -103,38 +101,32 @@ async function configureVideoEncoder(
         bitrate,
         framerate: fps,
         hardwareAcceleration: accel,
-        bitrateMode: 'constant',
-        latencyMode: 'quality', // Critical: Prevents frame dropping during heavy encoding!
+        bitrateMode: 'variable',
+        latencyMode: 'realtime',
         avc: { format: avcFormat },
       };
 
       try {
         if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
           const support = await VideoEncoder.isConfigSupported(testConfig);
-          if (support && support.supported) {
-            encoder.configure(support.config || testConfig);
-            console.log(`[ExportWorker] Configured VideoEncoder with codec: ${codec}, accel: ${accel}, format: ${avcFormat}`);
-            return;
-          }
-        } else {
-          encoder.configure(testConfig);
-          return;
+          if (!support?.supported) continue;
         }
+        // Do not configure with support.config. Chrome may return a normalized
+        // dictionary without the AVC `format`, causing Annex-B chunks to be fed
+        // to an MP4 muxer that requires length-prefixed AVC chunks.
+        encoder.configure(testConfig);
+        console.log(`[ExportWorker] Configured H.264 ${codec}, ${accel}, ${avcFormat}`);
+        return;
       } catch {
-        // try next candidate
+        // Try the next profile / acceleration mode.
       }
     }
   }
 
-  // Fallback direct configuration
-  encoder.configure({
-    codec: 'avc1.42001f',
-    width,
-    height,
-    bitrate,
-    framerate: fps,
-    avc: { format: avcFormat },
-  });
+  throw new Error(
+    `This Chrome installation cannot encode H.264 at ${width}x${height} ${fps}fps. ` +
+    'Try a lower resolution/frame rate, enable browser hardware acceleration, or export WebM.'
+  );
 }
 
 /** Pick a working VP9/VP8 config for WebM output. */
@@ -158,7 +150,8 @@ async function configureWebmVideoEncoder(
       height,
       bitrate,
       framerate: fps,
-      latencyMode: 'quality',
+      latencyMode: 'realtime',
+      bitrateMode: 'variable',
     };
     try {
       if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
@@ -538,8 +531,10 @@ async function handleExport(
             console.error('[ExportWorker] Video encoder error:', e);
             // Remember it so the render loop can abort instead of exporting a
             // file with missing (black) frames.
-            videoEncoderError = e.message;
-            postMessage({ type: 'ERROR', payload: { message: `Video encoder failed: ${e.message}` } });
+            videoEncoderError = `Video encoder failed: ${e.message}`;
+            // The render loop throws this value and the outer catch emits one
+            // terminal ERROR. Emitting here as well used to start the fallback
+            // while this worker was still writing the same file handle.
           }
         })
       : null;
@@ -661,11 +656,9 @@ async function handleExport(
           duration: durationMicroseconds,
         });
         
-        // Wait if encoder queue is getting too large to prevent QuotaExceededError.
-        // Raised from 12 to 30 to prevent starvation deadlock when multiple video
-        // tracks decode concurrently (each decoder blocks until the encoder drains,
-        // causing a multi-track export to hang indefinitely at low queue limits).
-        while (videoEncoder!.encodeQueueSize > 30 && !isCancelled) {
+        // Bound queued GPU surfaces. Eight to twelve frames keeps hardware
+        // encoders saturated without the severe VRAM pressure Chrome can hit at 4K.
+        while (videoEncoder!.encodeQueueSize > 10 && !isCancelled) {
           await waitForEncoderDrain(videoEncoder!, 50);
         }
 

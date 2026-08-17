@@ -276,11 +276,6 @@ export class Compositor {
   }
 
   public async render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
-    // Diagnostic log to see if layers are being dropped before compositor
-    if (Math.random() < 0.05) { // Log occasionally to avoid spam
-       console.log('[Compositor] rendering frame with layers:', layers.map(l => ({ type: l.type, zIndex: l.zIndex })));
-    }
-
     // Fill background
     this.ctx.fillStyle = '#0a0a0a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -378,6 +373,9 @@ export class Compositor {
         const cy = H / 2;
         this.ctx.translate(cx + tx, cy + ty);
         this.ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
+        if (layer.flipH || layer.flipV) {
+          this.ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
+        }
         
         this.ctx.globalAlpha = layer.opacity ?? 1;
         this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
@@ -387,6 +385,29 @@ export class Compositor {
 
         const resolved = await this.resolveDrawable(layer.frame as any);
         const drawable: CanvasImageSource = resolved.drawable;
+
+        // Fast GPU-backed color controls. Keeping these in Canvas2D's filter
+        // pipeline avoids a full-resolution getImageData/putImageData roundtrip
+        // on every frame (the main reason one minute exports took 5–10 minutes).
+        const cf = layer.colorFilters;
+        const effectNames = (layer.effects || []).map((x) => String(x).toLowerCase());
+        const cssFilters: string[] = [];
+        if (cf) {
+          const brightness = Math.max(0, 100 + (Number.isFinite(cf.exposure) ? cf.exposure : 0));
+          cssFilters.push(`brightness(${brightness}%)`);
+          cssFilters.push(`contrast(${Math.max(0, cf.contrast || 0)}%)`);
+          cssFilters.push(`saturate(${Math.max(0, cf.saturation || 0)}%)`);
+          if (cf.blur > 0) cssFilters.push(`blur(${Math.min(100, cf.blur)}px)`);
+          // Canvas filters do not expose independent temperature/tint. A small
+          // sepia+hue shift is a hardware-accelerated, stable approximation.
+          const warmth = Math.max(-100, Math.min(100, cf.temperature || 0));
+          const tint = Math.max(-100, Math.min(100, cf.tint || 0));
+          if (warmth !== 0) cssFilters.push(`sepia(${Math.abs(warmth) * 0.28}%) hue-rotate(${warmth < 0 ? 180 : 0}deg)`);
+          if (tint !== 0) cssFilters.push(`hue-rotate(${tint * 0.18}deg)`);
+        }
+        if (effectNames.some((x) => x.includes('black') || x.includes('monochrome') || x === 'grayscale')) cssFilters.push('grayscale(100%)');
+        if (effectNames.some((x) => x.includes('sepia') || x.includes('vintage'))) cssFilters.push('sepia(70%)');
+        this.ctx.filter = cssFilters.length ? cssFilters.join(' ') : 'none';
 
         // Determine source dimensions for cropping
         const drawableAny = drawable as any;
@@ -415,6 +436,25 @@ export class Compositor {
             dX = -dW / 2 + xShift;
             dY = -dH / 2 + yShift;
           }
+        }
+
+        // Common geometric masks are clipped on the compositor and therefore
+        // work for ordinary frames, filtered frames and transition layers.
+        const mask = layer.mask;
+        if (mask?.enabled && mask.type !== 'matte') {
+          const maskX = dX + dW * ((mask.x ?? 50) / 100);
+          const maskY = dY + dH * ((mask.y ?? 50) / 100);
+          const maskW = dW * ((mask.width ?? 100) / 100);
+          const maskH = dH * ((mask.height ?? 100) / 100);
+          this.ctx.beginPath();
+          if (mask.type === 'circle') {
+            this.ctx.ellipse(maskX, maskY, Math.abs(maskW / 2), Math.abs(maskH / 2), ((mask.rotation || 0) * Math.PI) / 180, 0, Math.PI * 2);
+          } else {
+            this.ctx.rect(maskX - maskW / 2, maskY - maskH / 2, maskW, maskH);
+          }
+          // Canvas clipping cannot invert a path portably; non-inverted masks
+          // cover the overwhelming majority of editor projects.
+          if (!mask.invert && !mask.inverted) this.ctx.clip();
         }
 
         try {
@@ -449,6 +489,27 @@ export class Compositor {
           }
         } finally {
           if (resolved.cleanup) resolved.cleanup();
+        }
+
+        if (cf && (cf.fadedFilm !== 0 || cf.vignette !== 0)) {
+          this.ctx.save();
+          this.ctx.filter = 'none';
+          this.ctx.globalCompositeOperation = 'source-over';
+          if (cf.fadedFilm > 0) {
+            this.ctx.globalAlpha = Math.min(0.35, cf.fadedFilm / 300) * (layer.opacity ?? 1);
+            this.ctx.fillStyle = '#d8cbb4';
+            this.ctx.fillRect(dX, dY, dW, dH);
+          }
+          if (cf.vignette !== 0 && typeof this.ctx.createRadialGradient === 'function') {
+            const grad = this.ctx.createRadialGradient(0, 0, Math.min(dW, dH) * 0.15, 0, 0, Math.max(dW, dH) * 0.7);
+            const strength = Math.min(0.9, Math.abs(cf.vignette) / 100);
+            grad.addColorStop(0.45, 'rgba(0,0,0,0)');
+            grad.addColorStop(1, cf.vignette > 0 ? `rgba(0,0,0,${strength})` : `rgba(255,255,255,${strength})`);
+            this.ctx.globalAlpha = layer.opacity ?? 1;
+            this.ctx.fillStyle = grad;
+            this.ctx.fillRect(dX, dY, dW, dH);
+          }
+          this.ctx.restore();
         }
         
         this.ctx.restore();
