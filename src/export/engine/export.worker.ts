@@ -53,6 +53,16 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
   }
 };
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 /**
  * Resolve on the encoder's next `dequeue` event (fired whenever encodeQueueSize
  * drops), or after `timeoutMs` for engines that don't emit it.
@@ -274,7 +284,7 @@ class BlackFrameMonitor {
     if (!this.scratch) {
       this.scratch = new OffscreenCanvas(BlackFrameMonitor.SIZE, BlackFrameMonitor.SIZE);
     }
-    const ctx = this.scratch.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
+    const ctx = this.scratch.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null;
     if (!ctx) return 255;
     try {
       ctx.drawImage(canvas, 0, 0, BlackFrameMonitor.SIZE, BlackFrameMonitor.SIZE);
@@ -432,7 +442,9 @@ async function handleExport(
     // Try to connect to Hikmah Runtime — MP4 only (it receives a raw Annex-B
     // H.264 stream; streaming VP9/GIF over it would produce another mislabeled
     // file).
-    if (containerFormat === 'mp4') {
+    const workerHostname = (self as any).location?.hostname || '';
+    const isLocalApp = workerHostname === 'localhost' || workerHostname === '127.0.0.1';
+    if (containerFormat === 'mp4' && isLocalApp) {
       try {
         const testWs = new WebSocket('ws://127.0.0.1:12589');
         const isConnected = await new Promise<boolean>((resolve) => {
@@ -607,7 +619,9 @@ async function handleExport(
     const blackMonitor = new BlackFrameMonitor();
     let sampledFramesWithVisualLayers = 0;
     let blackSampledFrames = 0;
-    const SAMPLE_EVERY = 10;
+    // GPU readback forces a synchronization point. Sampling once per second is
+    // enough to catch broken/black exports without stalling every few frames.
+    const SAMPLE_EVERY = Math.max(1, config.fps);
 
     // Render video frames
     for (let i = 0; i < totalFrames; i++) {
@@ -624,7 +638,11 @@ async function handleExport(
       // getFramePlanAtTime also resolves clip-to-clip transitions (layer blend +
       // any full-frame overlay) using the same engine the preview uses, so the
       // exported file matches what the user saw.
-      const { layers, overlays } = await scheduler.getFramePlanAtTime(timestampSeconds);
+      const { layers, overlays } = await withTimeout(
+        scheduler.getFramePlanAtTime(timestampSeconds),
+        20_000,
+        `Source decoding stalled at ${timestampSeconds.toFixed(2)}s. The export was stopped instead of hanging.`,
+      );
       renderedLayerCount += layers.length;
 
       // Render frame with WebGL (or 2D fallback if context lost)
