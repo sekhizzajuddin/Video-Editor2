@@ -144,7 +144,9 @@ export class WysiwygExportEngine {
         video.muted = true;
         video.playsInline = true;
         video.preload = 'auto';
-        video.crossOrigin = 'anonymous';
+        if (!url.startsWith('blob:') && !url.startsWith('data:')) {
+          video.crossOrigin = 'anonymous';
+        }
 
         loadPromises.push(new Promise<void>((resolve) => {
           let resolved = false;
