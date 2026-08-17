@@ -480,10 +480,8 @@ async function handleExport(
     // Muxer Initialisation (skipped for GIF — frames feed the GIF encoder directly)
     let muxer: any = null;
     if (containerFormat === 'mp4' && !useLocalRuntime) {
-      writable = await outputFileHandle.createWritable();
-
       const muxerOptions: any = {
-        target: new Mp4Muxer.FileSystemWritableFileStreamTarget(writable),
+        target: new Mp4Muxer.ArrayBufferTarget(),
         video: {
           codec: 'avc',
           width: outputWidth,
@@ -812,20 +810,14 @@ async function handleExport(
       await writable.write({ type: 'write', position: 0, data: gifBytes } as any);
       await writable.close();
       writable = null;
-    } else if (containerFormat === 'webm' && muxer) {
+    } else if (muxer) {
+      // MP4 / WebM
       muxer.finalize();
-      const { buffer } = muxer.target as WebMMuxerImport.ArrayBufferTarget;
+      const { buffer } = muxer.target;
       writable = await outputFileHandle.createWritable();
       await writable.write({ type: 'write', position: 0, data: new Uint8Array(buffer) } as any);
       await writable.close();
       writable = null;
-    } else if (muxer) {
-      // MP4: chunks already streamed into the writable via the muxer target
-      muxer.finalize();
-      if (writable) {
-        await writable.close();
-        writable = null;
-      }
     }
     
     compositor.dispose();
