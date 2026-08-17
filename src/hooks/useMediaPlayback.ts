@@ -1649,7 +1649,7 @@ export async function synchronousSeek(targetTime: number): Promise<void> {
   const promises: Promise<void>[] = [];
 
   for (const track of tracks) {
-    if (track.muted || track.hidden || track.type !== 'video') continue;
+    if (track.hidden || track.type !== 'video') continue;
     for (const clip of (track.clips || [])) {
       if (targetTime >= clip.startTime && targetTime <= clip.startTime + clip.duration) {
         const v = globalVideoMap.get(clip.id);
@@ -1684,5 +1684,3 @@ export async function getLiveAudioStream(): Promise<MediaStream | null> {
   if (!master || master.getAudioTracks().length === 0) return null;
   return master.clone();
 }
-
-export { globalVideoMap };

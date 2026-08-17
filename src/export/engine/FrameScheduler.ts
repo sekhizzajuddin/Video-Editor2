@@ -226,7 +226,7 @@ export class FrameScheduler {
     const tracks = this.timeline.tracks || [];
     for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
       const track = tracks[trackIdx];
-      if (track.muted || track.isMuted || track.hidden) continue;
+      if (track.hidden) continue;
 
       const activeTransition = findActiveTransition(track.clips || [], timestampSeconds);
       const plan = activeTransition ? buildTransitionPlan(activeTransition) : null;
@@ -401,7 +401,7 @@ export class FrameScheduler {
   async getFramePlanAtTime(timestampSeconds: number): Promise<FramePlan> {
     const overlays: FrameOverlay[] = [];
     for (const track of this.timeline.tracks || []) {
-      if (track.muted || track.isMuted || track.hidden) continue;
+      if (track.hidden) continue;
       const active = findActiveTransition(track.clips || [], timestampSeconds);
       if (!active) continue;
       const plan = buildTransitionPlan(active);
