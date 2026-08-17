@@ -1,436 +1,164 @@
-import * as MP4Box from 'mp4box';
-import { FramePool } from './memory/FramePool';
-
-export interface AssetFrame {
-  timestamp: number; // µs (CTS - presentation time)
-  frame: VideoFrame;
-}
-
-export interface StoredSample {
-  timestamp: number;   // µs (CTS)
-  duration: number;    // µs
-  data: Uint8Array;
-  isKeyframe: boolean;
-}
-
-export interface DemuxedMedia {
-  samples: StoredSample[];
-  trackInfo: any;
-  rotation: number;
-  decoderConfig: VideoDecoderConfig;
-  ready: boolean;
-  loadError: string | null;
-}
+import {
+  Input,
+  ALL_FORMATS,
+  BlobSource,
+  CanvasSink,
+} from 'mediabunny';
 
 export class AssetDecoder {
-  private url: string;
-  private framePool: FramePool;
-  private demuxed: DemuxedMedia | null = null;
   public rotation: number = 0;
-
-  // Live decoding state (lazy initialized when playhead reaches this clip)
-  private decoder: VideoDecoder | null = null;
-  private decodedQueue: AssetFrame[] = [];
-  private nextSampleIdx: number = 0;
-
-  /**
-   * True once demuxed with a parseable MP4 video track AND a valid codec config.
-   */
   public ready: boolean = false;
-  /** Human-readable reason when ready === false. */
   public loadError: string | null = null;
 
-  /**
-   * Pending getFrameAt() waiter. Resolved by the decoder's `output` callback as
-   * soon as a frame with CTS >= `targetCts` is produced.
-   */
-  private frameWaiter: { targetCts: number; resolve: () => void } | null = null;
+  private url: string;
+  private input: any = null;
+  private sink: InstanceType<typeof CanvasSink> | null = null;
+  private canvasIterator: AsyncIterator<any> | null = null;
+  private currentFrame: any = null;
+  private nextFrame: any = null;
+  private iteratorDone: boolean = false;
+  private decodeTail: Promise<any> = Promise.resolve();
 
-  constructor(url: string, framePool: FramePool) {
+  constructor(url: string, _framePool?: any) {
     this.url = url;
-    this.framePool = framePool;
   }
 
-  /**
-   * Static helper: Demuxes an MP4 ArrayBuffer exactly ONCE per media file.
-   * Returns the extracted samples, track info, rotation, and VideoDecoderConfig.
-   */
-  public static async demux(url: string, preBuffer?: ArrayBuffer): Promise<DemuxedMedia> {
-    let buffer: ArrayBuffer;
-    if (preBuffer) {
-      buffer = preBuffer;
-    } else {
-      try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`fetch failed (${response.status})`);
-        buffer = await response.arrayBuffer();
-      } catch (e: any) {
-        return {
-          samples: [],
-          trackInfo: null,
-          rotation: 0,
-          decoderConfig: {} as any,
-          ready: false,
-          loadError: `Could not read media: ${e?.message || e}`,
-        };
+  async load(preBuffer?: ArrayBuffer | Blob): Promise<void> {
+    try {
+      let source: any;
+      if (preBuffer) {
+        const blob = preBuffer instanceof Blob ? preBuffer : new Blob([preBuffer]);
+        source = new BlobSource(blob);
+      } else {
+        const resp = await fetch(this.url);
+        if (!resp.ok) throw new Error(`fetch failed (${resp.status})`);
+        const blob = await resp.blob();
+        source = new BlobSource(blob);
       }
-    }
 
-    const mp4boxfile = MP4Box.createFile();
-    const samples: StoredSample[] = [];
-    let trackInfo: any = null;
-    let trackId = 0;
-    let loadError: string | null = null;
-    let onReadyResolve: (() => void) | null = null;
+      this.input = new Input({
+        source,
+        formats: ALL_FORMATS,
+      });
 
-    mp4boxfile.onReady = (info: any) => {
-      const track = info.videoTracks?.[0];
-      if (!track) {
-        loadError = 'No video track found';
-        onReadyResolve?.();
+      const videoTrack = await this.input.getPrimaryVideoTrack();
+      if (!videoTrack) {
+        this.loadError = 'No video track found in media';
+        this.dispose();
         return;
       }
-      trackId = track.id;
-      trackInfo = track;
-      mp4boxfile.setExtractionOptions(trackId, null, { nbSamples: 100000 });
-      mp4boxfile.start();
-      onReadyResolve?.();
-    };
 
-    mp4boxfile.onSamples = (_id: number, _user: any, rawSamples: any[]) => {
-      for (const s of rawSamples) {
-        samples.push({
-          timestamp: Math.round((s.cts * 1_000_000) / s.timescale),
-          duration:  Math.round((s.duration * 1_000_000) / s.timescale),
-          data:      new Uint8Array(s.data),
-          isKeyframe: s.is_sync,
-        });
+      const canDecode = await videoTrack.canDecode();
+      if (!canDecode) {
+        this.loadError = 'Codec not supported by browser WebCodecs';
+        this.dispose();
+        return;
       }
-    };
 
-    (buffer as any).fileStart = 0;
-    try {
-      mp4boxfile.appendBuffer(buffer as any);
-      mp4boxfile.flush();
+      this.rotation = (videoTrack as any).rotation || 0;
+      this.sink = new CanvasSink(videoTrack, { poolSize: 2 });
+      this.ready = true;
     } catch (e: any) {
-      return {
-        samples: [],
-        trackInfo: null,
-        rotation: 0,
-        decoderConfig: {} as any,
-        ready: false,
-        loadError: `Not an MP4/MOV container: ${e?.message || e}`,
-      };
+      this.loadError = `Media initialization failed: ${e?.message || e}`;
+      console.warn('[AssetDecoder]', this.loadError, this.url);
+      this.dispose();
     }
-
-    // Wait for MP4Box to read track header
-    await new Promise<void>((resolve) => {
-      if (trackInfo || loadError) { resolve(); return; }
-      onReadyResolve = resolve;
-      setTimeout(resolve, 3000);
-    });
-
-    // Give MP4Box 150ms to finish sample extraction
-    await new Promise<void>((r) => setTimeout(r, 150));
-
-    if (samples.length === 0 || !trackInfo) {
-      return {
-        samples: [],
-        trackInfo: null,
-        rotation: 0,
-        decoderConfig: {} as any,
-        ready: false,
-        loadError: loadError || 'No decodable video track found in media',
-      };
-    }
-
-    // Extract AVCDecoderConfigurationRecord (avcC) or HEVCDecoderConfigurationRecord (hvcC) bytes
-    let description: Uint8Array | undefined;
-    try {
-      const trak = mp4boxfile.getTrackById?.(trackId);
-      const entry = trak?.mdia?.minf?.stbl?.stsd?.entries?.[0] as any;
-      const box = entry?.avcC ?? entry?.hvcC;
-      if (box) {
-        const DataStream = (MP4Box as any).DataStream;
-        const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
-        box.write(stream);
-        description = new Uint8Array(stream.buffer, 8); // Skip 8-byte box header
-      }
-    } catch (e) {
-      console.warn('[AssetDecoder] Could not extract codec description:', e);
-    }
-
-    const codec  = trackInfo.codec ?? 'avc1.42E01E';
-    const width  = trackInfo.video?.width  ?? 1920;
-    const height = trackInfo.video?.height ?? 1080;
-
-    // Extract rotation from MP4 track matrix
-    let rotation = 0;
-    const matrix = trackInfo.matrix;
-    if (matrix && matrix.length === 9) {
-      if (matrix[0] === 0 && matrix[1] === 65536 && matrix[3] === -65536 && matrix[4] === 0) {
-        rotation = 90;
-      } else if (matrix[0] === -65536 && matrix[1] === 0 && matrix[3] === 0 && matrix[4] === -65536) {
-        rotation = 180;
-      } else if (matrix[0] === 0 && matrix[1] === -65536 && matrix[3] === 65536 && matrix[4] === 0) {
-        rotation = 270;
-      }
-    }
-
-    const decoderConfig: VideoDecoderConfig = {
-      codec,
-      codedWidth: width,
-      codedHeight: height,
-    };
-    if (description) {
-      decoderConfig.description = description;
-    }
-
-    console.log(`[AssetDecoder] Demuxed ready | ${samples.length} samples | ${codec} ${width}x${height} | rotation=${rotation}`);
-
-    return {
-      samples,
-      trackInfo,
-      rotation,
-      decoderConfig,
-      ready: true,
-      loadError: null,
-    };
-  }
-
-  /**
-   * Fast initialization from a shared DemuxedMedia object (avoids re-parsing the MP4).
-   */
-  public initFromDemuxed(demuxed: DemuxedMedia): void {
-    this.demuxed = demuxed;
-    this.rotation = demuxed.rotation;
-    this.ready = demuxed.ready;
-    this.loadError = demuxed.loadError;
-  }
-
-  /**
-   * Fallback load method for standalone usage / tests.
-   */
-  async load(preBuffer?: ArrayBuffer): Promise<void> {
-    const demuxed = await AssetDecoder.demux(this.url, preBuffer);
-    this.initFromDemuxed(demuxed);
-  }
-
-  private initDecoder(): void {
-    if (this.decoder) {
-      try { this.decoder.close(); } catch {}
-      this.decoder = null;
-    }
-
-    this.clearDecodedQueue();
-    this.nextSampleIdx = 0;
-
-    if (!this.demuxed || !this.demuxed.decoderConfig) return;
-
-    this.decoder = new VideoDecoder({
-      output: (frame) => {
-        this.decodedQueue.push({ timestamp: frame.timestamp, frame });
-        this.notifyFrameArrived(frame.timestamp);
-      },
-      error: (e) => {
-        console.warn('[AssetDecoder] VideoDecoder error:', e.message);
-      },
-    });
-
-    try {
-      this.decoder.configure(this.demuxed.decoderConfig);
-    } catch (e: any) {
-      console.error('[AssetDecoder] VideoDecoder configure failed:', e.message);
-    }
-  }
-
-  /**
-   * Release the VideoDecoder and GPU session when this clip has finished playing.
-   */
-  public releaseDecoder(): void {
-    if (this.decoder) {
-      try { this.decoder.close(); } catch {}
-      this.decoder = null;
-    }
-    this.clearDecodedQueue();
-    this.nextSampleIdx = 0;
   }
 
   async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
-    if (!this.demuxed || !this.ready || this.demuxed.samples.length === 0) {
+    const timestampSeconds = timestampMicroseconds / 1_000_000;
+    const framePromise = this.decodeTail.then(() => this.getSequentialFrame(timestampSeconds, timestampMicroseconds));
+    this.decodeTail = framePromise.then(
+      () => undefined,
+      () => undefined,
+    );
+    return framePromise;
+  }
+
+  private async getSequentialFrame(timestampSeconds: number, timestampMicroseconds: number): Promise<VideoFrame | null> {
+    if (!this.sink || !this.ready) return null;
+
+    // Start a new sequential decode for the first request or whenever the
+    // timeline moves backwards (reverse playback, a loop, or a later clip
+    // reusing the same media from an earlier in-point).
+    if (!this.canvasIterator || (this.currentFrame && timestampSeconds < this.currentFrame.timestamp - 1e-8)) {
+      await this.resetCanvasIterator(timestampSeconds);
+    }
+
+    if (!this.currentFrame) return null;
+
+    // Keep one decoded frame of lookahead so selection exactly matches:
+    // the last source frame starting at or before the requested timestamp.
+    while (true) {
+      if (!this.nextFrame && !this.iteratorDone && this.canvasIterator) {
+        const next = await this.canvasIterator.next();
+        if (next.done) {
+          this.iteratorDone = true;
+        } else {
+          this.nextFrame = next.value;
+        }
+      }
+
+      if (this.nextFrame && this.nextFrame.timestamp <= timestampSeconds + 1e-8) {
+        this.currentFrame = this.nextFrame;
+        this.nextFrame = null;
+        continue;
+      }
+      break;
+    }
+
+    if (this.currentFrame.timestamp > timestampSeconds + 1e-8) return null;
+
+    try {
+      return new VideoFrame(this.currentFrame.canvas, {
+        timestamp: timestampMicroseconds,
+      });
+    } catch (e) {
       return null;
     }
-
-    let timedOut = false;
-    const deadline = new Promise<null>((resolve) => {
-      setTimeout(() => {
-        console.warn('[AssetDecoder] getFrameAt TIMEOUT for target CTS', timestampMicroseconds);
-        timedOut = true;
-        resolve(null);
-      }, 10000);
-    });
-
-    const getFramePromise = this._getFrameAtImpl(timestampMicroseconds).then(frame => {
-      if (timedOut && frame) {
-        try { frame.close(); } catch {}
-        return null;
-      }
-      return frame;
-    });
-
-    return Promise.race([getFramePromise, deadline]);
   }
 
-  private async _getFrameAtImpl(timestampMicroseconds: number): Promise<VideoFrame | null> {
-    if (!this.demuxed || this.demuxed.samples.length === 0) return null;
+  private async resetCanvasIterator(timestamp: number): Promise<void> {
+    await this.canvasIterator?.return?.();
+    this.currentFrame = null;
+    this.nextFrame = null;
+    this.iteratorDone = false;
 
-    // Lazy initialization of the hardware decoder on first frame request
-    if (!this.decoder || this.decoder.state === 'closed') {
-      this.initDecoder();
-      if (!this.decoder) return null;
+    const sink = this.sink;
+    if (!sink) return;
+    this.canvasIterator = sink.canvases(timestamp)[Symbol.asyncIterator]();
+
+    const iterator = this.canvasIterator;
+    if (!iterator) return;
+    const first = await iterator.next();
+    if (first.done) {
+      this.iteratorDone = true;
+      return;
     }
+    this.currentFrame = first.value;
+  }
 
-    const samples = this.demuxed.samples;
-
-    // 1. Purge old frames to bound memory, keeping the active frame
-    while (this.decodedQueue.length > 1) {
-      if (this.decodedQueue[1].timestamp <= timestampMicroseconds) {
-        const old = this.decodedQueue.shift();
-        try { old?.frame.close(); } catch {}
-      } else {
-        break;
-      }
-    }
-
-    // 2. Feed compressed samples to decoder until we're past the target timestamp
-    const lookAheadTarget = timestampMicroseconds + 500_000;
-    let fedNewSamples = false;
-
-    while (this.nextSampleIdx < samples.length) {
-      const sample = samples[this.nextSampleIdx];
-
-      if (sample.timestamp > lookAheadTarget && this.nextSampleIdx > 0) {
-        const lastQueuedCTS = this.decodedQueue.length > 0
-          ? this.decodedQueue[this.decodedQueue.length - 1].timestamp
-          : -1;
-        if (lastQueuedCTS >= timestampMicroseconds) break;
-      }
-
-      if (this.decoder.state === 'closed') {
-        this.initDecoder();
-        if (!this.decoder) return null;
-      }
-
-      // STRICT throttle: hardware decoders hang if fed too many frames concurrently.
-      let queueRetries = 50;
-      while (this.decoder.decodeQueueSize >= 3 && queueRetries > 0) {
-        await this.waitForDequeue(this.decoder, 10);
-        queueRetries--;
-      }
-
+  dispose(): void {
+    void this.canvasIterator?.return?.();
+    if (this.input) {
       try {
-        this.decoder.decode(new EncodedVideoChunk({
-          type:      sample.isKeyframe ? 'key' : 'delta',
-          timestamp: sample.timestamp,
-          duration:  sample.duration,
-          data:      sample.data,
-        }));
-        fedNewSamples = true;
-      } catch (e: any) {
-        console.warn(`[AssetDecoder] Decode chunk error @${sample.timestamp}:`, e.message);
-      }
-
-      this.nextSampleIdx++;
-    }
-
-    // 3. Wait for the decoder to output the frames
-    if (fedNewSamples && this.decoder && this.decoder.state === 'configured') {
-      await this.waitForFrame(timestampMicroseconds, 400);
-    }
-
-    if (this.decodedQueue.length === 0) return null;
-
-    // 4. Sort decoded queue by CTS for correct frame selection
-    this.decodedQueue.sort((a, b) => a.timestamp - b.timestamp);
-
-    // 5. Select the last decoded frame whose timestamp is <= requested timestamp
-    const epsilonUs = 1000;
-    let bestIdx = -1;
-    for (let i = 0; i < this.decodedQueue.length; i++) {
-      if (this.decodedQueue[i].timestamp <= timestampMicroseconds + epsilonUs) {
-        bestIdx = i;
-      } else {
-        break;
-      }
-    }
-
-    if (bestIdx === -1) {
-      bestIdx = 0;
-    }
-
-    return this.decodedQueue[bestIdx].frame.clone();
-  }
-
-  private waitForDequeue(decoder: VideoDecoder, timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve) => {
-      let settled = false;
-      const done = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        decoder.removeEventListener('dequeue', done);
-        resolve();
-      };
-      const timer = setTimeout(done, timeoutMs);
-      decoder.addEventListener('dequeue', done);
-    });
-  }
-
-  private notifyFrameArrived(cts: number): void {
-    const waiter = this.frameWaiter;
-    if (waiter && cts >= waiter.targetCts) {
-      this.frameWaiter = null;
-      waiter.resolve();
-    }
-  }
-
-  private waitForFrame(targetCts: number, timeoutMs: number): Promise<void> {
-    if (this.decodedQueue.length > 0) {
-      const lastQueuedCTS = this.decodedQueue[this.decodedQueue.length - 1].timestamp;
-      if (lastQueuedCTS >= targetCts) return Promise.resolve();
-    }
-
-    return new Promise<void>((resolve) => {
-      let settled = false;
-      const done = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (this.frameWaiter && this.frameWaiter.resolve === done) {
-          this.frameWaiter = null;
+        const disposable = this.input as any;
+        if (typeof disposable.dispose === 'function') {
+          disposable.dispose();
+        } else {
+          const symDispose = (Symbol as any).dispose;
+          if (symDispose && typeof disposable[symDispose] === 'function') {
+            disposable[symDispose]();
+          }
         }
-        resolve();
-      };
-      const timer = setTimeout(done, timeoutMs);
-      if (this.frameWaiter) this.frameWaiter.resolve();
-      this.frameWaiter = { targetCts, resolve: done };
-    });
-  }
-
-  private clearDecodedQueue(): void {
-    for (const item of this.decodedQueue) {
-      try { item.frame.close(); } catch {}
+      } catch {}
+      this.input = null;
     }
-    this.decodedQueue = [];
-  }
-
-  dispose() {
-    if (this.frameWaiter) {
-      const w = this.frameWaiter;
-      this.frameWaiter = null;
-      w.resolve();
-    }
-    this.releaseDecoder();
-    this.demuxed = null;
+    this.sink = null;
+    this.canvasIterator = null;
+    this.currentFrame = null;
+    this.nextFrame = null;
+    this.iteratorDone = false;
+    this.ready = false;
   }
 }

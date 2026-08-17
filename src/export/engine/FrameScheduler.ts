@@ -1,12 +1,12 @@
-import { AssetDecoder, DemuxedMedia } from './AssetDecoder';
+import { AssetDecoder } from './AssetDecoder';
 import { StillImageSource } from './StillImageSource';
 import { findActiveTransition, buildTransitionPlan } from '../../utils/transitionEngine';
 import { resolveBlendPlan } from '../../utils/blendCompositor';
 import { FramePool } from './memory/FramePool';
 
 /**
- * Anything that can hand the compositor a VideoFrame for a clip: a real MP4
- * demux/decode pipeline (AssetDecoder) or a decoded still (StillImageSource).
+ * Anything that can hand the compositor a VideoFrame for a clip: a real MediaBunny
+ * decode pipeline (AssetDecoder) or a decoded still (StillImageSource).
  */
 export interface ClipFrameSource {
   rotation: number;
@@ -37,24 +37,8 @@ export interface RenderLayer {
   };
   zIndex: number;
   sourceRotation?: number;
-  /**
-   * Canvas composite operation from the clip's transform, already resolved
-   * against its blend intensity. The exporter previously ignored blend modes
-   * entirely, so a blended clip looked correct in the preview and rendered as a
-   * plain Normal composite in the exported file.
-   */
   blendMode?: GlobalCompositeOperation;
-  /**
-   * Enumeration order of this layer within its frame. Video layers now decode
-   * concurrently and therefore resolve out of order, so zIndex ties are broken
-   * with this instead of relying on push order.
-   */
   order?: number;
-  /**
-   * Extra geometry contributed by an active clip-to-clip transition, expressed in
-   * fractions of the frame so it is resolution independent. Applied by the
-   * Compositor on top of the clip's own transform.
-   */
   transitionGeometry?: {
     translateX: number;
     translateY: number;
@@ -64,13 +48,11 @@ export interface RenderLayer {
   };
 }
 
-/** Full-frame overlay (flash / dip-to-colour / light leak) for a single frame. */
 export interface FrameOverlay {
   color: string;
   alpha: number;
 }
 
-/** Everything needed to composite one output frame. */
 export interface FramePlan {
   layers: RenderLayer[];
   overlays: FrameOverlay[];
@@ -79,16 +61,11 @@ export interface FramePlan {
 export class FrameScheduler {
   private timeline: any;
   private framePool: FramePool;
-  private mediaBuffers: Record<string, ArrayBuffer>;
+  private mediaBuffers: Record<string, any>;
   private decoders: Map<string, ClipFrameSource> = new Map();
-  /**
-   * Human-readable problems collected while preparing frame sources (media that
-   * failed to demux/decode). Surfaced to the user as export warnings so a
-   * black/blank output is never silent.
-   */
   public warnings: string[] = [];
 
-  constructor(timeline: any, framePool: FramePool, mediaBuffers?: Record<string, ArrayBuffer>) {
+  constructor(timeline: any, framePool: FramePool, mediaBuffers?: Record<string, any>) {
     this.timeline = timeline;
     this.framePool = framePool;
     this.mediaBuffers = mediaBuffers || {};
@@ -102,49 +79,6 @@ export class FrameScheduler {
       }
     }
 
-    // 1. Convert Blobs to ArrayBuffers once per unique mediaId to save memory
-    if (this.mediaBuffers) {
-      for (const mediaId of Object.keys(this.mediaBuffers)) {
-        const blobOrBuffer = this.mediaBuffers[mediaId];
-        if (blobOrBuffer instanceof Blob) {
-          this.mediaBuffers[mediaId] = await blobOrBuffer.arrayBuffer();
-        }
-      }
-    }
-
-    // 2. Pre-demux unique video media files once
-    const demuxPromises: Promise<void>[] = [];
-    const demuxCache = new Map<string, DemuxedMedia>();
-
-    for (const track of this.timeline.tracks || []) {
-      if (track.type === 'video') {
-        for (const clip of track.clips || []) {
-          const mediaId = clip.mediaId;
-          if (mediaId && !demuxCache.has(mediaId)) {
-            const media = mediaMap.get(mediaId);
-            const url = media?.url || clip.url || '';
-            const preBuffer = this.mediaBuffers[mediaId];
-            const mediaName: string = media?.name || '';
-            const isImage =
-              media?.type === 'image' ||
-              /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
-
-            if (!isImage && (url || preBuffer)) {
-              demuxCache.set(mediaId, null as any); // Mark as pending
-              demuxPromises.push(
-                AssetDecoder.demux(url, preBuffer).then((demuxed) => {
-                  demuxCache.set(mediaId, demuxed);
-                })
-              );
-            }
-          }
-        }
-      }
-    }
-
-    await Promise.allSettled(demuxPromises);
-
-    // 3. Initialize clip decoders / image sources
     const loadPromises: Promise<void>[] = [];
 
     for (const track of this.timeline.tracks || []) {
@@ -166,34 +100,26 @@ export class FrameScheduler {
               continue;
             }
 
-            const demuxed = clip.mediaId ? demuxCache.get(clip.mediaId) : null;
-            if (demuxed && demuxed.ready) {
-              const decoder = new AssetDecoder(url, this.framePool);
-              decoder.initFromDemuxed(demuxed);
-              this.decoders.set(clip.id, decoder);
-            } else {
-              // Fallback to standalone load or StillImageSource
-              const decoder = new AssetDecoder(url, this.framePool);
-              this.decoders.set(clip.id, decoder);
-              loadPromises.push(
-                decoder.load(preBuffer).then(async () => {
-                  if (decoder.ready) return;
-                  const fallback = new StillImageSource(url);
-                  await fallback.load(preBuffer);
-                  if (fallback.ready) {
-                    decoder.dispose();
-                    this.decoders.set(clip.id, fallback);
-                  } else {
-                    fallback.dispose();
-                    this.warnings.push(
-                      `"${mediaName || clip.mediaId}" could not be decoded for export` +
-                      (decoder.loadError ? ` (${decoder.loadError})` : '') +
-                      '. Its frames will be missing from the output.'
-                    );
-                  }
-                })
-              );
-            }
+            const decoder = new AssetDecoder(url, this.framePool);
+            this.decoders.set(clip.id, decoder);
+            loadPromises.push(
+              decoder.load(preBuffer).then(async () => {
+                if (decoder.ready) return;
+                const fallback = new StillImageSource(url);
+                await fallback.load(preBuffer);
+                if (fallback.ready) {
+                  decoder.dispose();
+                  this.decoders.set(clip.id, fallback);
+                } else {
+                  fallback.dispose();
+                  this.warnings.push(
+                    `"${mediaName || clip.mediaId}" could not be decoded for export` +
+                    (decoder.loadError ? ` (${decoder.loadError})` : '') +
+                    '. Its frames will be missing from the output.'
+                  );
+                }
+              })
+            );
           }
         }
       }
@@ -207,19 +133,6 @@ export class FrameScheduler {
     const pending: Array<Promise<void>> = [];
     let order = 0;
 
-    // Release decoders for completed clips to keep GPU hardware decoder sessions low
-    for (const track of this.timeline.tracks || []) {
-      for (const clip of track.clips || []) {
-        if (timestampSeconds > (clip.startTime + clip.duration) + 0.5) {
-          const dec = this.decoders.get(clip.id);
-          if (dec instanceof AssetDecoder) {
-            dec.releaseDecoder();
-          }
-        }
-      }
-    }
-
-    // Sort tracks by zIndex (or their array order)
     const tracks = this.timeline.tracks || [];
     for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
       const track = tracks[trackIdx];
@@ -253,11 +166,10 @@ export class FrameScheduler {
           const zIndex = clip.zIndex !== undefined ? clip.zIndex : trackIdx;
           const layerOrder = order++;
 
-          // Fold the transition's contribution into this layer
           const layerDraw = plan && transitionRole
             ? (transitionRole === 'from' ? plan.from : plan.to)
             : null;
-          if (layerDraw && !layerDraw.visible) continue; // fully faded out
+          if (layerDraw && !layerDraw.visible) continue;
           const baseOpacity = clip.opacity !== undefined ? clip.opacity : 1;
           const withTransition = layerDraw ? baseOpacity * layerDraw.opacity : baseOpacity;
 
@@ -328,15 +240,10 @@ export class FrameScheduler {
       await Promise.allSettled(pending);
     }
 
-    // Sort layers by zIndex and order
     layers.sort((a, b) => (a.zIndex - b.zIndex) || ((a.order ?? 0) - (b.order ?? 0)));
     return layers;
   }
 
-  /**
-   * Full frame plan: layers plus any full-frame transition overlays.
-   * Preferred over getLayersAtTime() for rendering.
-   */
   async getFramePlanAtTime(timestampSeconds: number): Promise<FramePlan> {
     const overlays: FrameOverlay[] = [];
     for (const track of this.timeline.tracks || []) {
