@@ -49,18 +49,19 @@ export class StillImageSource {
   }
 
   /**
-   * Returns a fresh VideoFrame wrapping the decoded bitmap. The caller owns the
-   * returned frame and must close() it (the export loop already does); the
-   * underlying bitmap is retained until dispose().
+   * Returns the decoded ImageBitmap directly. Previously this wrapped the bitmap
+   * in a VideoFrame which triggered a YUV→RGBA GPU conversion path that is
+   * black on some Windows hardware decoders and in OffscreenCanvas 2D contexts.
+   * Returning the bitmap itself is a pure CanvasImageSource, so
+   * Compositor can draw it with a plain drawImage and never hits the VideoFrame
+   * black-screen path.
+   *
+   * The bitmap is owned by this source; callers must NOT close it — dispose()
+   * handles lifetime.
    */
-  async getFrameAt(_timestampMicroseconds: number): Promise<VideoFrame | null> {
+  async getFrameAt(_timestampMicroseconds: number): Promise<CanvasImageSource | null> {
     if (!this.bitmap) return null;
-    try {
-      return new VideoFrame(this.bitmap, { timestamp: 0 });
-    } catch (e: any) {
-      console.warn('[StillImageSource] VideoFrame wrap failed:', e?.message);
-      return null;
-    }
+    return this.bitmap;
   }
 
   dispose() {

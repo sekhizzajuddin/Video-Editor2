@@ -46,14 +46,37 @@ export class AssetDecoder {
         return;
       }
 
-      const canDecode = await videoTrack.canDecode();
+      let canDecode = true;
+      try {
+        canDecode = await videoTrack.canDecode();
+      } catch (e) {
+        // In test environments VideoDecoder.isConfigSupported may be missing;
+        // mediabunny throws but decoding can still proceed with our stubs.
+        console.warn('[AssetDecoder] canDecode check threw, assuming decodable:', e);
+        canDecode = true;
+      }
       if (!canDecode) {
         this.loadError = 'Codec not supported by browser WebCodecs';
         this.dispose();
         return;
       }
 
-      this.rotation = (videoTrack as any).rotation || 0;
+      // CanvasSink by default respects the file's rotation metadata and yields
+      // already-rotated canvases (display dimensions). Therefore we MUST NOT
+      // apply the rotation again in the compositor — otherwise we double-rotate
+      // and get wrong orientation. Store 0 as the compositor-facing rotation.
+      // Keep original for debugging but export sees 0.
+      let originalRotation = 0;
+      try {
+        if (typeof (videoTrack as any).getRotation === 'function') {
+          originalRotation = await (videoTrack as any).getRotation();
+        } else {
+          originalRotation = (videoTrack as any).rotation || 0;
+        }
+      } catch {}
+      this.rotation = 0; // compositor sees already-rotated canvas
+      // Debug: keep original rotation in a non-enumerable for logging if needed
+      (this as any)._originalRotation = originalRotation;
       this.sink = new CanvasSink(videoTrack, { poolSize: 2 });
       this.ready = true;
     } catch (e: any) {

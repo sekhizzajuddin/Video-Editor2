@@ -241,6 +241,40 @@ export class Compositor {
     return canvas.transferToImageBitmap();
   }
 
+  /**
+   * Resolve a CanvasImageSource that is safe to draw in a 2D context.
+   * - If the source is a VideoFrame (e.g. from mediabunny off-main-thread path
+   *   that bypassed CanvasSink), we convert it via WebGL (GPU YUV→RGBA) or
+   *   via createImageBitmap as fallback — drawing VideoFrame directly onto
+   *   OffscreenCanvas 2D is black on Windows hardware decoders.
+   * - OffscreenCanvas / ImageBitmap / HTMLCanvasElement are returned as-is.
+   */
+  private async resolveDrawable(frame: CanvasImageSource | VideoFrame): Promise<{ drawable: CanvasImageSource, cleanup: (() => void) | null }> {
+    const anyFrame = frame as any;
+    // Detect VideoFrame by presence of codedWidth/codedHeight or class name
+    const isVideoFrame = typeof VideoFrame !== 'undefined' && frame instanceof VideoFrame;
+    if (!isVideoFrame) {
+      return { drawable: frame as CanvasImageSource, cleanup: null };
+    }
+    const vf = frame as VideoFrame;
+    // Try WebGL converter first (avoids black NV12 frames)
+    try {
+      const bmp = this.convertFrameWebGL(vf);
+      if (bmp) {
+        return { drawable: bmp, cleanup: () => { try { bmp.close(); } catch {} } };
+      }
+    } catch {}
+    // Fallback: createImageBitmap is widely supported in workers and handles
+    // VideoFrame → RGBA conversion.
+    try {
+      const bmp2 = await createImageBitmap(vf);
+      return { drawable: bmp2, cleanup: () => { try { bmp2.close(); } catch {} } };
+    } catch {
+      // Last resort: return the VideoFrame itself — may be black on some drivers
+      return { drawable: vf as unknown as CanvasImageSource, cleanup: null };
+    }
+  }
+
   public async render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
     // Diagnostic log to see if layers are being dropped before compositor
     if (Math.random() < 0.05) { // Log occasionally to avoid spam
@@ -253,19 +287,13 @@ export class Compositor {
 
     for (const layer of layers) {
       if (layer.type === 'text') {
-        // Text/title clips previously had NO export path at all — the preview
-        // showed them but the rendered file dropped them (or produced a black
-        // frame when text was the only visible layer).
         this.renderTextLayer(layer);
         continue;
       }
       if (layer.type === 'video' && layer.frame) {
         this.ctx.save();
 
-        // Clip-to-clip transition geometry. Expressed in fractions of the frame by
-        // the shared transition engine, so it maps onto any export resolution.
-        // Applied OUTSIDE the clip's own transform so it behaves like a camera
-        // move on the finished layer, exactly as the preview does it.
+        // Clip-to-clip transition geometry (fractional, resolution-agnostic)
         const tg = layer.transitionGeometry;
         if (tg) {
           const CW = this.canvas.width;
@@ -286,20 +314,34 @@ export class Compositor {
           this.ctx.translate(-CW / 2, -CH / 2);
         }
 
+        // --------------------------------------------------------------------
+        // ORIENTATION FIX:
+        // AssetDecoder's CanvasSink already yields canvases in DISPLAY
+        // dimensions (rotated according to metadata). Previously we swapped
+        // width/height again based on sourceRotation, which double-rotated and
+        // produced "wrong orientation". Now sourceRotation is always 0 from
+        // AssetDecoder (see its comment), so vw/vh are simply the frame's
+        // intrinsic size. If a future decoder returns raw frames, we still
+        // handle rotation via sourceRotation below — but we do NOT pre-swap
+        // vw/vh. The size for layout is display size; drawing handles rotation.
+        // --------------------------------------------------------------------
         const frameAny = layer.frame as any;
-        let vw = frameAny.displayWidth || frameAny.codedWidth || frameAny.width || 1920;
-        let vh = frameAny.displayHeight || frameAny.codedHeight || frameAny.height || 1080;
-        const srcRot = layer.sourceRotation || 0;
-        const isRotated = srcRot === 90 || srcRot === 270 || srcRot === -90;
-        if (isRotated) {
-          vw = frameAny.displayHeight || frameAny.codedHeight || frameAny.height || 1080;
-          vh = frameAny.displayWidth || frameAny.codedWidth || frameAny.width || 1920;
+        let vw = frameAny.displayWidth || frameAny.width || frameAny.videoWidth || frameAny.codedWidth || 1920;
+        let vh = frameAny.displayHeight || frameAny.height || frameAny.videoHeight || frameAny.codedHeight || 1080;
+        // Fallback: if frame is OffscreenCanvas, its .width/.height are display dims
+        if (frameAny.__isCanvas || frameAny instanceof OffscreenCanvas) {
+          vw = frameAny.width || vw;
+          vh = frameAny.height || vh;
         }
+        const srcRot = layer.sourceRotation || 0;
+        // NOTE: srcRot is 0 when CanvasSink already rotated. If a decoder
+        // ever returns raw + rotation, we will rotate at draw time, not size time.
+        // Do NOT swap vw/vh here — that caused double-swap bug.
 
         const W = this.canvas.width;
         const H = this.canvas.height;
         
-        // 1. Calculate active view dimensions based on PROJECT aspect ratio (matches UI preview)
+        // 1. Calculate active view dimensions based on PROJECT aspect ratio
         let viewW = 854;
         let viewH = 480;
         if (this.aspectRatio === '9:16') {
@@ -310,99 +352,112 @@ export class Compositor {
             viewW = Math.round(480 * (4 / 3));
         }
 
-        // 2. Calculate base size to fit the export canvas (matching UI previewMath.ts)
+        // 2. Calculate base size to fit the export canvas
         const scaleToFit = Math.min(W / vw, H / vh);
         const baseW = vw * scaleToFit;
         const baseH = vh * scaleToFit;
 
         // 3. Extract and convert scale (UI uses 100 for 100%)
         let scale = layer.transform.scale;
-        if (scale <= 10 && scale > 0) scale = scale * 100; // Auto-correct legacy '1' scale
+        if (scale <= 10 && scale > 0) scale = scale * 100; // legacy '1' scale
+        if (!Number.isFinite(scale) || scale <= 0) scale = 100;
         const finalScale = scale / 100;
         
-        const finalW = baseW * finalScale;
-        const finalH = baseH * finalScale;
+        const finalW = Math.max(1, baseW * finalScale);
+        const finalH = Math.max(1, baseH * finalScale);
 
-        // 4. Scale UI coordinates (relative to viewW x viewH) to Export Resolution
-        // UI coordinates (transform.x/y) represent 1 unit per pixel in the view area.
-        // We need to scale these units up to the export canvas size.
+        // 4. Scale UI coordinates (relative to viewW x viewH) to export resolution
         const exportScaleX = W / viewW;
         const exportScaleY = H / viewH;
         
-        const tx = layer.transform.x * exportScaleX;
-        const ty = layer.transform.y * exportScaleY;
+        const tx = (layer.transform.x || 0) * exportScaleX;
+        const ty = (layer.transform.y || 0) * exportScaleY;
 
         // 5. Apply global translation + rotation
         const cx = W / 2;
         const cy = H / 2;
         this.ctx.translate(cx + tx, cy + ty);
-        this.ctx.rotate((layer.transform.rotation * Math.PI) / 180);
+        this.ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
         
-        this.ctx.globalAlpha = layer.opacity;
-        // Honour the clip's blend mode (Multiply/Screen/Overlay/...). Without this
-        // the export silently flattened every blended clip to Normal.
+        this.ctx.globalAlpha = layer.opacity ?? 1;
         this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
 
-        // 6. Draw the frame, applying source metadata rotation
+        // 6. Resolve drawable + crop handling
         this.ctx.save();
-        
-        const drawable: CanvasImageSource = layer.frame;
-        
-        if (layer.chromaKey && layer.chromaKey.enabled) {
-          // Optimization: Draw to a tightly-bound offscreen canvas first to apply Chroma Key ONLY 
-          // to this layer's pixels, avoiding expensive 1080p full-canvas iteration and preventing 
-          // background layer pixel destruction!
-          const tempCanvas = new OffscreenCanvas(Math.max(1, finalW), Math.max(1, finalH));
-          const tempCtx = tempCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
-          
-          tempCtx.save();
-          if (srcRot !== 0) {
-            tempCtx.translate(finalW / 2, finalH / 2);
-            tempCtx.rotate((srcRot * Math.PI) / 180);
-            if (isRotated) {
-              tempCtx.drawImage(drawable, -finalH / 2, -finalW / 2, finalH, finalW);
-            } else {
-              tempCtx.drawImage(drawable, -finalW / 2, -finalH / 2, finalW, finalH);
-            }
-          } else {
-            if (isRotated) {
-              // Should not happen if srcRot === 0, but fallback
-              tempCtx.drawImage(drawable, 0, 0, finalH, finalW);
-            } else {
-              tempCtx.drawImage(drawable, 0, 0, finalW, finalH);
-            }
-          }
-          tempCtx.restore();
 
-          this.applyChromaKey(tempCtx, tempCanvas.width, tempCanvas.height, layer.chromaKey);
-          
-          this.ctx.drawImage(tempCanvas, -finalW / 2, -finalH / 2, finalW, finalH);
-        } else {
-          // Standard Draw
-          if (srcRot !== 0) {
-            this.ctx.rotate((srcRot * Math.PI) / 180);
+        const resolved = await this.resolveDrawable(layer.frame as any);
+        const drawable: CanvasImageSource = resolved.drawable;
+
+        // Determine source dimensions for cropping
+        const drawableAny = drawable as any;
+        const srcFullW = drawableAny.width || drawableAny.videoWidth || vw || finalW;
+        const srcFullH = drawableAny.height || drawableAny.videoHeight || vh || finalH;
+
+        let sx = 0, sy = 0, sW = srcFullW, sH = srcFullH;
+        let dW = finalW, dH = finalH;
+        let dX = -finalW / 2, dY = -finalH / 2;
+
+        if (layer.crop) {
+          const l = Math.max(0, Math.min(0.99, (layer.crop.left || 0) / 100));
+          const r = Math.max(0, Math.min(0.99, (layer.crop.right || 0) / 100));
+          const t = Math.max(0, Math.min(0.99, (layer.crop.top || 0) / 100));
+          const b = Math.max(0, Math.min(0.99, (layer.crop.bottom || 0) / 100));
+          if (l + r < 0.99 && t + b < 0.99) {
+            sW = srcFullW * (1 - l - r);
+            sH = srcFullH * (1 - t - b);
+            sx = srcFullW * l;
+            sy = srcFullH * t;
+            dW = finalW * (1 - l - r);
+            dH = finalH * (1 - t - b);
+            // Keep visual center stable by offsetting for asymmetric crop
+            const xShift = (l - r) * finalW * 0.5;
+            const yShift = (t - b) * finalH * 0.5;
+            dX = -dW / 2 + xShift;
+            dY = -dH / 2 + yShift;
           }
-          
-          if (isRotated) {
-            this.ctx.drawImage(drawable, -finalH / 2, -finalW / 2, finalH, finalW);
+        }
+
+        try {
+          if (layer.chromaKey && layer.chromaKey.enabled) {
+            const tempCanvas = new OffscreenCanvas(Math.max(1, Math.round(dW)), Math.max(1, Math.round(dH)));
+            const tempCtx = tempCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
+            if (tempCtx) {
+              if (srcRot !== 0) {
+                tempCtx.translate(dW / 2, dH / 2);
+                tempCtx.rotate((srcRot * Math.PI) / 180);
+                // For rotated case, source crop handling is approximate
+                tempCtx.drawImage(drawable as any, sx, sy, sW, sH, -dW / 2, -dH / 2, dW, dH);
+              } else {
+                tempCtx.drawImage(drawable as any, sx, sy, sW, sH, 0, 0, dW, dH);
+              }
+              this.applyChromaKey(tempCtx, tempCanvas.width, tempCanvas.height, layer.chromaKey);
+              this.ctx.drawImage(tempCanvas, dX, dY, dW, dH);
+            } else {
+              if (srcRot !== 0) this.ctx.rotate((srcRot * Math.PI) / 180);
+              this.ctx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
+            }
           } else {
-            this.ctx.drawImage(drawable, -finalW / 2, -finalH / 2, finalW, finalH);
+            if (srcRot !== 0) {
+              this.ctx.rotate((srcRot * Math.PI) / 180);
+            }
+            // Use 9-arg drawImage when crop present or source dimensions differ
+            if (sx !== 0 || sy !== 0 || sW !== srcFullW || sH !== srcFullH) {
+              this.ctx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
+            } else {
+              this.ctx.drawImage(drawable, dX, dY, dW, dH);
+            }
           }
-        }
-        
-        if (drawable !== layer.frame) {
-          (drawable as ImageBitmap).close?.();
+        } finally {
+          if (resolved.cleanup) resolved.cleanup();
         }
         
         this.ctx.restore();
         this.ctx.restore();
-        // Defensive: ctx.restore() already unwinds this, but an early return in a
-        // future edit must never leak a blend mode onto the following layer.
         this.ctx.globalCompositeOperation = 'source-over';
       }
     }
 
-    // Full-frame transition overlays (flash, dip-to-black/white, light leak).
+    // Full-frame transition overlays
     for (const ov of overlays) {
       if (!ov || !(ov.alpha > 0.001)) continue;
       this.ctx.save();
