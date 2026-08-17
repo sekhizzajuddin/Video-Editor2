@@ -22,8 +22,10 @@ import { FramePool } from './memory/FramePool';
 import { FrameScheduler } from './FrameScheduler';
 import { Compositor } from './Compositor';
 import * as Mp4Muxer from 'mp4-muxer';
+import * as WebMMuxerImport from 'webm-muxer';
+import { Gif89aEncoder } from '../gifEncoder';
 
-export type WorkerMessageType = 
+export type WorkerMessageType =
   | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null; mediaBuffers?: Record<string, ArrayBuffer> } }
   | { type: 'CANCEL' };
 
@@ -135,6 +137,137 @@ async function configureVideoEncoder(
   });
 }
 
+/** Pick a working VP9/VP8 config for WebM output. */
+async function configureWebmVideoEncoder(
+  encoder: VideoEncoder,
+  width: number,
+  height: number,
+  fps: number,
+  bitrate: number
+): Promise<'V_VP9' | 'V_VP8'> {
+  const candidates: Array<{ codec: string; muxCodec: 'V_VP9' | 'V_VP8' }> = [
+    { codec: 'vp09.00.10.08', muxCodec: 'V_VP9' }, // VP9 Profile 0, Level 1, 8-bit
+    { codec: 'vp09.00.20.08', muxCodec: 'V_VP9' },
+    { codec: 'vp8', muxCodec: 'V_VP8' },
+  ];
+
+  for (const { codec, muxCodec } of candidates) {
+    const testConfig: VideoEncoderConfig = {
+      codec,
+      width,
+      height,
+      bitrate,
+      framerate: fps,
+      latencyMode: 'quality',
+    };
+    try {
+      if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
+        const support = await VideoEncoder.isConfigSupported(testConfig);
+        if (support && support.supported) {
+          encoder.configure(support.config || testConfig);
+          console.log(`[ExportWorker] Configured WebM VideoEncoder with codec: ${codec}`);
+          return muxCodec;
+        }
+      } else {
+        encoder.configure(testConfig);
+        return muxCodec;
+      }
+    } catch {
+      // try next
+    }
+  }
+
+  // Last resort: raw VP8 attempt (very widely supported)
+  encoder.configure({ codec: 'vp8', width, height, bitrate, framerate: fps, latencyMode: 'quality' });
+  return 'V_VP8';
+}
+
+/** Write a 16-bit PCM stereo WAV file from the mixed audio payload. */
+async function writeWavFile(
+  audioData: AudioExportPayload,
+  writable: FileSystemWritableFileStream
+): Promise<number> {
+  const sampleRate = audioData.sampleRate || 48000;
+  const numChannels = 2;
+  const ch0: Float32Array = audioData.channels[0];
+  const ch1: Float32Array = audioData.channels[1] || ch0;
+  const numSamples = ch0.length;
+  const dataSize = numSamples * numChannels * 2;
+  const byteRate = sampleRate * numChannels * 2;
+  const blockAlign = numChannels * 2;
+
+  const header = new Uint8Array(44);
+  const view = new DataView(header.buffer);
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) header[offset + i] = s.charCodeAt(i);
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM fmt chunk size
+  view.setUint16(20, 1, true); // PCM format tag
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  await writable.write({ type: 'write', position: 0, data: header } as any);
+
+  // Interleave + quantize to 16-bit PCM in chunks to bound memory.
+  const CHUNK = 65536; // samples
+  for (let offset = 0; offset < numSamples; offset += CHUNK) {
+    if (isCancelled) throw new Error('Export cancelled');
+    const n = Math.min(CHUNK, numSamples - offset);
+    const pcm = new Int16Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const l = Math.max(-1, Math.min(1, ch0[offset + i] || 0));
+      const r = Math.max(-1, Math.min(1, ch1[offset + i] || 0));
+      pcm[i * 2] = l < 0 ? l * 0x8000 : l * 0x7fff;
+      pcm[i * 2 + 1] = r < 0 ? r * 0x8000 : r * 0x7fff;
+    }
+    await writable.write({
+      type: 'write',
+      position: 44 + offset * 4,
+      data: new Uint8Array(pcm.buffer),
+    } as any);
+  }
+
+  return 44 + dataSize;
+}
+
+/** Downsampled-luma sampler used to detect silently-black exports. */
+class BlackFrameMonitor {
+  private scratch: OffscreenCanvas | null = null;
+  private static readonly SIZE = 8;
+  /** Background fill is #0a0a0a (10); real content pushes past this fast. */
+  private static readonly BLACK_THRESHOLD = 16;
+
+  /** Max channel value over an 8x8 downsample of the composited frame. */
+  sample(canvas: OffscreenCanvas): number {
+    if (!this.scratch) {
+      this.scratch = new OffscreenCanvas(BlackFrameMonitor.SIZE, BlackFrameMonitor.SIZE);
+    }
+    const ctx = this.scratch.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
+    if (!ctx) return 255; // cannot check → don't cry wolf
+    ctx.drawImage(canvas, 0, 0, BlackFrameMonitor.SIZE, BlackFrameMonitor.SIZE);
+    const data = ctx.getImageData(0, 0, BlackFrameMonitor.SIZE, BlackFrameMonitor.SIZE).data;
+    let max = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const v = Math.max(data[i], data[i + 1], data[i + 2]);
+      if (v > max) max = v;
+    }
+    return max;
+  }
+
+  isBlack(luma: number): boolean {
+    return luma < BlackFrameMonitor.BLACK_THRESHOLD;
+  }
+}
+
 async function handleExport(
   timeline: any,
   config: ExportWorkerConfig,
@@ -142,7 +275,7 @@ async function handleExport(
   fileHandle?: FileSystemFileHandle | null,
   mediaBuffers?: Record<string, ArrayBuffer>
 ) {
-  console.log('[ExportWorker] STARTING v9 - Standalone Browser & Runtime Export', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio });
+  console.log('[ExportWorker] STARTING v10 - format-aware export', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio, format: config.format });
   isExporting = true;
   isCancelled = false;
 
@@ -151,8 +284,65 @@ async function handleExport(
 
   try {
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'preparing' } });
-    
-    // Ensure dimensions are even numbers (multiples of 2) for H.264 video encoding
+
+    // ── Format resolution ────────────────────────────────────────────────
+    // Previously the worker ALWAYS emitted an H.264 MP4 regardless of the
+    // selected format and just renamed the output (".webm", ".gif", ".wav"…).
+    // Strict players (Windows Media Player/Photos, QuickTime, most mobile
+    // share targets) then showed a black screen or refused the file — this is
+    // the reported "export is a black-screen video" bug.
+    const requestedFormat = config.format;
+    if (requestedFormat === 'prores') {
+      // WebCodecs cannot encode ProRes; produce the closest in-browser master
+      // and SAY so instead of shipping a mislabeled .mov.
+      postMessage({
+        type: 'WARNING',
+        payload: {
+          message:
+            'Apple ProRes encoding is not available in the browser build — producing high-bitrate H.264 MP4 instead.',
+        },
+      });
+    }
+    type VideoContainerFormat = 'mp4' | 'webm';
+    const containerFormat: 'mp4' | 'webm' | 'gif' | 'wav' =
+      requestedFormat === 'webm' ? 'webm'
+      : requestedFormat === 'gif' ? 'gif'
+      : requestedFormat === 'wav' ? 'wav'
+      : 'mp4'; // mp4 + prores fallback
+    const videoContainer: VideoContainerFormat = containerFormat === 'webm' ? 'webm' : 'mp4';
+    const outputExt = containerFormat; // extension now always matches content
+    const outFileName = `${config.filename}.${outputExt}`;
+
+    // Resolve the output file (dark-pattern-free: the name always matches the payload).
+    if (fileHandle) {
+      outputFileHandle = fileHandle;
+    } else {
+      const root = await navigator.storage.getDirectory();
+      outputFileHandle = await root.getFileHandle(outFileName, { create: true });
+    }
+
+    // ── WAV: audio-only export, no compositor required ───────────────────
+    if (containerFormat === 'wav') {
+      if (!audioData || !audioData.channels || audioData.channels.length === 0 || !audioData.length) {
+        throw new Error('WAV export needs audio — the timeline has no audio to export.');
+      }
+      postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'encoding' } });
+      writable = await outputFileHandle.createWritable();
+      const wavSize = await writeWavFile(audioData, writable);
+      await writable.close();
+      writable = null;
+      postMessage({
+        type: 'COMPLETE',
+        payload: {
+          fileSize: wavSize || (await outputFileHandle.getFile()).size,
+          filename: outputFileHandle.name,
+          savedDirectly: !!fileHandle,
+        },
+      });
+      return;
+    }
+
+    // Ensure dimensions are even numbers (multiples of 2) for video encoding
     const outputWidth = Math.floor(config.width / 2) * 2;
     const outputHeight = Math.floor(config.height / 2) * 2;
 
@@ -184,13 +374,14 @@ async function handleExport(
     duration = Math.max(0.1, duration);
     const totalFrames = Math.max(1, Math.ceil(duration * config.fps));
 
-    // Audio status & configuration check
+    // Audio status & configuration check (codec depends on container)
     let hasAudio = false;
     let audioEncoder: AudioEncoder | null = null;
+    const audioCodec = videoContainer === 'webm' ? 'opus' : 'mp4a.40.2';
 
-    if (audioData && audioData.channels && audioData.channels.length > 0 && audioData.length > 0 && audioData.channels[0]) {
+    if (audioData && audioData.channels && audioData.channels.length > 0 && audioData.length > 0 && audioData.channels[0] && containerFormat !== 'gif') {
       const audioConfig: AudioEncoderConfig = {
-        codec: 'mp4a.40.2', // AAC LC
+        codec: audioCodec,
         sampleRate: audioData.sampleRate || 48000,
         numberOfChannels: 2,
         bitrate: 128_000,
@@ -211,53 +402,50 @@ async function handleExport(
     let ws: WebSocket | null = null;
     let useLocalRuntime = false;
 
-    // Try to connect to Hikmah Runtime (single WS attempt with short timeout)
-    try {
-      const testWs = new WebSocket('ws://127.0.0.1:12589');
-      const isConnected = await new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => {
-          try { testWs.close(); } catch {}
-          resolve(false);
-        }, 400);
-        testWs.onopen = () => {
-          clearTimeout(timer);
-          resolve(true);
-        };
-        testWs.onerror = () => {
-          clearTimeout(timer);
-          resolve(false);
-        };
-      });
+    // Try to connect to Hikmah Runtime — MP4 only (it receives a raw Annex-B
+    // H.264 stream; streaming VP9/GIF over it would produce another mislabeled
+    // file).
+    if (containerFormat === 'mp4') {
+      try {
+        const testWs = new WebSocket('ws://127.0.0.1:12589');
+        const isConnected = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => {
+            try { testWs.close(); } catch {}
+            resolve(false);
+          }, 400);
+          testWs.onopen = () => {
+            clearTimeout(timer);
+            resolve(true);
+          };
+          testWs.onerror = () => {
+            clearTimeout(timer);
+            resolve(false);
+          };
+        });
 
-      if (isConnected) {
-        ws = testWs;
-        ws.send(JSON.stringify({
-          action: 'START_FILE_EXPORT',
-          filename: config.filename || 'Export',
-          outputFolder: config.outputFolder || '',
-          width: outputWidth,
-          height: outputHeight,
-          fps: config.fps,
-          bitrate: config.bitrate || 12000000,
-          format: config.format
-        }));
-        useLocalRuntime = true;
-        console.log('[ExportWorker] Connected to Hikmah Local Runtime');
+        if (isConnected) {
+          ws = testWs;
+          ws.send(JSON.stringify({
+            action: 'START_FILE_EXPORT',
+            filename: config.filename || 'Export',
+            outputFolder: config.outputFolder || '',
+            width: outputWidth,
+            height: outputHeight,
+            fps: config.fps,
+            bitrate: config.bitrate || 12000000,
+            format: 'mp4'
+          }));
+          useLocalRuntime = true;
+          console.log('[ExportWorker] Connected to Hikmah Local Runtime');
+        }
+      } catch (e) {
+        console.warn('[ExportWorker] Hikmah Runtime connection fallback:', e);
       }
-    } catch (e) {
-      console.warn('[ExportWorker] Hikmah Runtime connection fallback:', e);
     }
 
-    // Direct Disk Writable / OPFS Initialization (ONLY if not using local runtime)
+    // Muxer Initialisation (skipped for GIF — frames feed the GIF encoder directly)
     let muxer: any = null;
-    if (!useLocalRuntime) {
-      if (fileHandle) {
-        outputFileHandle = fileHandle;
-      } else {
-        const root = await navigator.storage.getDirectory();
-        const fileName = `${config.filename}.${config.format}`;
-        outputFileHandle = await root.getFileHandle(fileName, { create: true });
-      }
+    if (containerFormat === 'mp4' && !useLocalRuntime) {
       writable = await outputFileHandle.createWritable();
 
       const muxerOptions: any = {
@@ -278,47 +466,105 @@ async function handleExport(
         };
       }
       muxer = new Mp4Muxer.Muxer(muxerOptions);
+    } else if (containerFormat === 'webm') {
+      const muxerOptions: any = {
+        target: new WebMMuxerImport.ArrayBufferTarget(),
+        video: {
+          // filled after encoder picks VP9 vs VP8 — placeholder V_VP9 for typing
+          codec: 'V_VP9',
+          width: outputWidth,
+          height: outputHeight,
+          frameRate: config.fps,
+        },
+        // EBML grows naturally; keep everything in memory and write once.
+      };
+      if (hasAudio) {
+        muxerOptions.audio = {
+          codec: 'A_OPUS',
+          numberOfChannels: 2,
+          sampleRate: audioData!.sampleRate || 48000,
+        };
+      }
+      // The real video codec token is set right after configure below.
+      muxer = muxerOptions; // provisional; replaced in the VP branch below
     }
 
     // Video Encoder
-    const videoEncoder = new VideoEncoder({
-      output: (chunk, meta) => {
-        if (useLocalRuntime && ws && ws.readyState === WebSocket.OPEN) {
-          const buffer = new ArrayBuffer(chunk.byteLength);
-          chunk.copyTo(buffer);
-          ws.send(buffer);
-        } else if (muxer) {
-          muxer.addVideoChunk(chunk, meta);
-        }
-      },
-      error: e => {
-        console.error('[ExportWorker] Video encoder error:', e);
-        postMessage({ type: 'ERROR', payload: { message: `Video encoder failed: ${e.message}` } });
-      }
-    });
+    let videoEncoderError: string | null = null;
+    const videoEncoder = containerFormat !== 'gif'
+      ? new VideoEncoder({
+          output: (chunk, meta) => {
+            if (useLocalRuntime && ws && ws.readyState === WebSocket.OPEN) {
+              const buffer = new ArrayBuffer(chunk.byteLength);
+              chunk.copyTo(buffer);
+              ws.send(buffer);
+            } else if (muxer) {
+              muxer.addVideoChunk(chunk, meta);
+            }
+          },
+          error: e => {
+            console.error('[ExportWorker] Video encoder error:', e);
+            // Remember it so the render loop can abort instead of exporting a
+            // file with missing (black) frames.
+            videoEncoderError = e.message;
+            postMessage({ type: 'ERROR', payload: { message: `Video encoder failed: ${e.message}` } });
+          }
+        })
+      : null;
 
-    // Configure video encoder using supported profile lookup
-    await configureVideoEncoder(
-      videoEncoder,
-      outputWidth,
-      outputHeight,
-      config.fps,
-      config.bitrate || 12000000,
-      useLocalRuntime
-    );
+    // Configure the right video codec for the container.
+    if (containerFormat === 'webm') {
+      const webmMuxerOptions = muxer; // (stashed above)
+      const webmVideoEncoder = videoEncoder!;
+      const picked = await configureWebmVideoEncoder(
+        webmVideoEncoder,
+        outputWidth,
+        outputHeight,
+        config.fps,
+        config.bitrate || 12000000
+      );
+      webmMuxerOptions.video.codec = picked;
+      muxer = new WebMMuxerImport.Muxer(webmMuxerOptions);
+    } else if (containerFormat === 'mp4') {
+      await configureVideoEncoder(
+        videoEncoder!,
+        outputWidth,
+        outputHeight,
+        config.fps,
+        config.bitrate || 12000000,
+        useLocalRuntime
+      );
+    }
 
-    // Audio Encoder
-    if (hasAudio && !useLocalRuntime && typeof AudioEncoder !== 'undefined') {
+    // Audio Encoder (skipped for GIF)
+    if (hasAudio && !useLocalRuntime && typeof AudioEncoder !== 'undefined' && containerFormat !== 'gif') {
       audioEncoder = new AudioEncoder({
         output: (chunk, meta) => muxer!.addAudioChunk(chunk, meta),
         error: e => console.error('[ExportWorker] Audio encoder error:', e)
       });
       audioEncoder.configure({
-        codec: 'mp4a.40.2',
+        codec: audioCodec,
         sampleRate: audioData!.sampleRate || 48000,
         numberOfChannels: 2,
         bitrate: 128_000,
       });
+    }
+
+    // GIF setup: baked at reduced resolution / frame rate to stay practical.
+    let gifEncoder: Gif89aEncoder | null = null;
+    let gifStride = 1;
+    let gifCanvas: OffscreenCanvas | null = null;
+    let gifCtx: OffscreenCanvasRenderingContext2D | null = null;
+    if (containerFormat === 'gif') {
+      const GIF_MAX_DIM = 480;
+      const GIF_FPS = 15;
+      const gifScale = Math.min(1, GIF_MAX_DIM / Math.max(outputWidth, outputHeight));
+      const gifW = Math.max(2, Math.floor((outputWidth * gifScale) / 2) * 2);
+      const gifH = Math.max(2, Math.floor((outputHeight * gifScale) / 2) * 2);
+      gifStride = Math.max(1, Math.round(config.fps / GIF_FPS));
+      gifEncoder = new Gif89aEncoder(gifW, gifH, true);
+      gifCanvas = new OffscreenCanvas(gifW, gifH);
+      gifCtx = gifCanvas.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
     }
 
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'rendering' } });
@@ -328,10 +574,23 @@ async function handleExport(
     // instead of shipping a silent black video.
     let renderedLayerCount = 0;
 
+    // Pixel-level verification: even when layers ARE composited, a broken GPU
+    // decode path can still yield black pixels. Sample a downscaled copy every
+    // few frames and never silently ship an all-black export again.
+    const blackMonitor = new BlackFrameMonitor();
+    let sampledFramesWithVisualLayers = 0;
+    let blackSampledFrames = 0;
+    const SAMPLE_EVERY = 10;
+
     // Render video frames
     for (let i = 0; i < totalFrames; i++) {
       if (isCancelled) {
         throw new Error('Export cancelled');
+      }
+      if (videoEncoderError) {
+        // The encoder died mid-stream; continuing would export a truncated,
+        // effectively black file. Fail loudly.
+        throw new Error(videoEncoderError);
       }
       
       const timestampSeconds = i / config.fps;
@@ -343,34 +602,53 @@ async function handleExport(
 
       // Render frame with WebGL (or 2D fallback if context lost)
       await compositor.render(layers, overlays);
-      
-      // Capture the canvas and encode it
-      const timestampMicroseconds = Math.round(i * (1_000_000 / config.fps));
-      const durationMicroseconds = Math.round(1_000_000 / config.fps);
-      const vf = new VideoFrame(canvas, { 
-        timestamp: timestampMicroseconds,
-        duration: durationMicroseconds,
-      });
-      
-      // Wait if encoder queue is getting too large to prevent QuotaExceededError.
-      // Raised from 12 to 30 to prevent starvation deadlock when multiple video
-      // tracks decode concurrently (each decoder blocks until the encoder drains,
-      // causing a multi-track export to hang indefinitely at low queue limits).
-      while (videoEncoder.encodeQueueSize > 30 && !isCancelled) {
-        await waitForEncoderDrain(videoEncoder, 50);
-      }
 
-      // Force a keyframe on the first frame and every 2 seconds
-      const keyFrame = i === 0 || i % (config.fps * 2) === 0;
-      try {
-        if (videoEncoder.state !== 'closed') {
-          videoEncoder.encode(vf, { keyFrame });
+      // Black-frame watchdog (first frame + every SAMPLE_EVERY-th after that)
+      if (i === 0 || i % SAMPLE_EVERY === 0) {
+        if (layers.some((l) => !!l.frame)) {
+          sampledFramesWithVisualLayers++;
+          const luma = blackMonitor.sample(canvas);
+          if (blackMonitor.isBlack(luma)) blackSampledFrames++;
         }
-      } catch (e: any) {
-        console.warn('[ExportWorker] Frame encode skipped:', e.message);
       }
       
-      vf.close();
+      if (gifEncoder && gifCtx && gifCanvas) {
+        // GIF path: stride-sample the composited frame, quantize, LZW-encode.
+        if (i % gifStride === 0) {
+          gifCtx.drawImage(canvas, 0, 0, gifCanvas.width, gifCanvas.height);
+          const img = gifCtx.getImageData(0, 0, gifCanvas.width, gifCanvas.height);
+          // delay in 1/100 s consistent with the stride
+          gifEncoder.addFrame({ data: img.data, delayCs: (gifStride * 100) / config.fps });
+        }
+      } else {
+        // Capture the canvas and encode it
+        const timestampMicroseconds = Math.round(i * (1_000_000 / config.fps));
+        const durationMicroseconds = Math.round(1_000_000 / config.fps);
+        const vf = new VideoFrame(canvas, { 
+          timestamp: timestampMicroseconds,
+          duration: durationMicroseconds,
+        });
+        
+        // Wait if encoder queue is getting too large to prevent QuotaExceededError.
+        // Raised from 12 to 30 to prevent starvation deadlock when multiple video
+        // tracks decode concurrently (each decoder blocks until the encoder drains,
+        // causing a multi-track export to hang indefinitely at low queue limits).
+        while (videoEncoder!.encodeQueueSize > 30 && !isCancelled) {
+          await waitForEncoderDrain(videoEncoder!, 50);
+        }
+
+        // Force a keyframe on the first frame and every 2 seconds
+        const keyFrame = i === 0 || i % (config.fps * 2) === 0;
+        try {
+          if (videoEncoder!.state !== 'closed') {
+            videoEncoder!.encode(vf, { keyFrame });
+          }
+        } catch (e: any) {
+          console.warn('[ExportWorker] Frame encode skipped:', e.message);
+        }
+        
+        vf.close();
+      }
       
       // Cleanup frames for this tick
       for (const layer of layers) {
@@ -379,7 +657,8 @@ async function handleExport(
         }
       }
 
-      const progress = ((i + 1) / totalFrames) * (hasAudio ? 70 : 90);
+      const totalWork = hasAudio ? 70 : 90;
+      const progress = ((i + 1) / totalFrames) * totalWork;
       
       if (i % 5 === 0 || i === totalFrames - 1) {
         postMessage({ 
@@ -400,31 +679,50 @@ async function handleExport(
       });
     }
 
+    // Hard-stop: if visual layers existed but EVERY sampled composited frame
+    // was solid black, the output is definitely a black video. Fail the export
+    // with an actionable error instead of silently shipping a dead file.
+    if (sampledFramesWithVisualLayers > 0 && blackSampledFrames === sampledFramesWithVisualLayers) {
+      throw new Error(
+        'Export produced only black frames although video layers were decoded. ' +
+        'This usually means the browser could not draw the decoded video (GPU/driver or codec issue). ' +
+        'Try updating your browser, disabling hardware acceleration, or re-importing the media as H.264 MP4.'
+      );
+    }
+    if (blackSampledFrames > 0) {
+      postMessage({
+        type: 'WARNING',
+        payload: {
+          message: `${blackSampledFrames} sampled frames rendered solid black — part of the export may be black (usually a hardware-decoding issue on specific files).`,
+        },
+      });
+    }
+    
     // Process Audio Encoding if audio is present
     if (hasAudio && audioEncoder && audioData) {
       postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'encoding' } });
       
-      const numFrames = 1024; // AAC strictly requires fixed 1024 frames per AudioData chunk
+      const framesPerChunk = 1024; // AAC strictly requires fixed 1024 frames per AudioData chunk
       const totalSamples = audioData.length;
       const ch0 = audioData.channels[0];
       const ch1 = audioData.channels[1] || ch0;
       const sampleRate = audioData.sampleRate || 48000;
       
-      for (let offset = 0; offset < totalSamples; offset += numFrames) {
+      for (let offset = 0; offset < totalSamples; offset += framesPerChunk) {
         const remaining = totalSamples - offset;
-        const frameCount = Math.min(numFrames, remaining);
+        const frameCount = Math.min(framesPerChunk, remaining);
         
         // Zero-padded buffer to exactly 1024 samples per channel for AAC encoder compliance
-        const planarData = new Float32Array(numFrames * 2);
+        const planarData = new Float32Array(framesPerChunk * 2);
         planarData.set(ch0.subarray(offset, offset + frameCount), 0);
-        planarData.set(ch1.subarray(offset, offset + frameCount), numFrames);
+        planarData.set(ch1.subarray(offset, offset + frameCount), framesPerChunk);
         
         const timestampUs = Math.round((offset / sampleRate) * 1_000_000);
         
         const audioChunk = new AudioData({
           format: 'f32-planar',
           sampleRate: sampleRate,
-          numberOfFrames: numFrames,
+          numberOfFrames: framesPerChunk,
           numberOfChannels: 2,
           timestamp: timestampUs,
           data: planarData,
@@ -436,12 +734,14 @@ async function handleExport(
     }
     
     // Flush the encoders to finish writing all frames
-    await Promise.all([
-      videoEncoder.flush(),
-      audioEncoder ? audioEncoder.flush() : Promise.resolve(),
-    ]);
-    
-    videoEncoder.close();
+    if (videoEncoder) {
+      await videoEncoder.flush();
+    }
+    if (audioEncoder) {
+      await audioEncoder.flush();
+    }
+
+    if (videoEncoder) videoEncoder.close();
     if (audioEncoder) audioEncoder.close();
 
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'muxing' } });
@@ -459,22 +759,34 @@ async function handleExport(
       return;
     }
 
-    // Finalize MP4 Muxer
-    if (muxer) {
-      muxer.finalize();
-    }
-
-    // Finalize OPFS stream
-    if (writable) {
+    // Finalize per-container payloads
+    if (gifEncoder) {
+      const gifBytes = gifEncoder.finish();
+      writable = await outputFileHandle.createWritable();
+      await writable.write({ type: 'write', position: 0, data: gifBytes } as any);
       await writable.close();
       writable = null;
+    } else if (containerFormat === 'webm' && muxer) {
+      muxer.finalize();
+      const { buffer } = muxer.target as WebMMuxerImport.ArrayBufferTarget;
+      writable = await outputFileHandle.createWritable();
+      await writable.write({ type: 'write', position: 0, data: new Uint8Array(buffer) } as any);
+      await writable.close();
+      writable = null;
+    } else if (muxer) {
+      // MP4: chunks already streamed into the writable via the muxer target
+      muxer.finalize();
+      if (writable) {
+        await writable.close();
+        writable = null;
+      }
     }
     
     compositor.dispose();
     scheduler.dispose();
     framePool.clear();
 
-    const finalFileName = outputFileHandle ? outputFileHandle.name : `${config.filename}.${config.format}`;
+    const finalFileName = outputFileHandle ? outputFileHandle.name : outFileName;
     let finalFileSize = 0;
     try {
       if (outputFileHandle) {
