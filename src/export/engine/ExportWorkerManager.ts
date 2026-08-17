@@ -114,12 +114,11 @@ export class ExportWorkerManager {
 
     // Collect all pre-fetched ArrayBuffers from media items and transfer them
     // to the worker to avoid cross-thread blob URL access failures.
-    const mediaBuffers: Record<string, ArrayBuffer> = {};
+    const mediaBuffers: Record<string, any> = {};
     for (const m of (serializedTimeline.media || [])) {
-      if (m._arrayBuffer) {
-        mediaBuffers[m.id] = m._arrayBuffer;
-        transferables.push(m._arrayBuffer);
-        delete m._arrayBuffer; // Don't try to JSON-clone the ArrayBuffer
+      if (m._fileBlob) {
+        mediaBuffers[m.id] = m._fileBlob;
+        delete m._fileBlob;
       }
     }
 
@@ -260,9 +259,8 @@ export class ExportWorkerManager {
             : fileBlob;
           if (result.transcoded) URL.revokeObjectURL(normalizedUrl);
 
-          // Convert to ArrayBuffer for transfer to worker
-          const arrayBuffer = await (finalBlob as Blob).arrayBuffer();
-          m._arrayBuffer = arrayBuffer;
+          // Pass the Blob directly to the worker! Blobs are zero-copy StructuredCloneable.
+          m._fileBlob = finalBlob;
         } catch (e: any) {
           URL.revokeObjectURL(normalizedUrl);
           this.options.callbacks.onWarning?.(

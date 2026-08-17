@@ -103,6 +103,17 @@ export class FrameScheduler {
       }
     }
 
+    // Convert Blobs to ArrayBuffers ONCE per mediaId to save memory!
+    // If a 1GB file is used across 5 clips, they all share this ONE ArrayBuffer.
+    if (this.mediaBuffers) {
+      for (const mediaId of Object.keys(this.mediaBuffers)) {
+        const blobOrBuffer = this.mediaBuffers[mediaId];
+        if (blobOrBuffer instanceof Blob) {
+          this.mediaBuffers[mediaId] = await blobOrBuffer.arrayBuffer();
+        }
+      }
+    }
+
     for (const track of this.timeline.tracks || []) {
       if (track.type === 'video') {
         for (const clip of track.clips || []) {

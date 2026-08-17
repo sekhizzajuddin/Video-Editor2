@@ -84,15 +84,7 @@ export class AssetDecoder {
   async load(preBuffer?: ArrayBuffer): Promise<void> {
     let buffer: ArrayBuffer;
     if (preBuffer) {
-      // Use the pre-fetched buffer passed from the main thread.
-      // Blob URLs cannot be fetched from inside a Web Worker, so we always
-      // prefer a pre-fetched buffer when one is available.
-      //
-      // IMPORTANT: slice() to create an independent copy! Multiple decoders may
-      // share the same preBuffer (when clips reference the same mediaId).
-      // MP4Box.appendBuffer() stores and mutates the buffer (e.g. sets
-      // fileStart), so concurrent use of the same object causes parse failures.
-      buffer = preBuffer.slice(0);
+      buffer = preBuffer;
     } else {
       try {
         const response = await fetch(this.url);
@@ -157,7 +149,6 @@ export class AssetDecoder {
       codec,
       codedWidth: width,
       codedHeight: height,
-      hardwareAcceleration: 'prefer-software',
     };
     if (description) {
       this.decoderConfig.description = description;
@@ -287,12 +278,11 @@ export class AssetDecoder {
         if (!this.decoder) return null;
       }
 
-      // Throttle decoder input queue to prevent hardware decoder crashes.
-      // Keep retries low (8×20ms = 160ms max) so a backed-up decoder doesn't
-      // burn hundreds of ms per sample across a multi-layer export.
-      let queueRetries = 8;
-      while (this.decoder.decodeQueueSize >= 15 && queueRetries > 0) {
-        await this.waitForDequeue(this.decoder, 20);
+      // STRICT throttle: hardware decoders (especially NVDEC/MF on Windows) hang if fed too many frames
+      // concurrently across multiple instances. Limit to 3 frames per decoder to prevent GPU starvation.
+      let queueRetries = 50;
+      while (this.decoder.decodeQueueSize >= 3 && queueRetries > 0) {
+        await this.waitForDequeue(this.decoder, 10);
         queueRetries--;
       }
 
