@@ -133,7 +133,7 @@ export class WysiwygExportEngine {
     // Pre-load all required video elements invisibly
     const loadPromises: Promise<void>[] = [];
     for (const track of store.tracks) {
-      if (track.type !== 'video' || track.hidden || track.muted) continue;
+      if (track.type !== 'video' || track.hidden) continue;
       for (const clip of track.clips || []) {
         const mediaId = clip.mediaId || clip.id;
         const url = mediaLibraryMap.get(mediaId) || (clip as any).url;
