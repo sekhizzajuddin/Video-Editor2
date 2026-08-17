@@ -158,7 +158,7 @@ export class FrameScheduler {
   }
 
   async initializeDecoders() {
-    const visualClipMap = new Map<string, any>();
+    const visualMediaMap = new Map<string, any>();
     const mediaMap = new Map<string, any>();
     for (const m of (this.timeline.media || [])) {
       if (m?.id) mediaMap.set(m.id, m);
@@ -166,9 +166,9 @@ export class FrameScheduler {
     for (const track of (this.timeline.tracks || [])) {
       if (track.type === 'video') {
         for (const clip of (track.clips || [])) {
-          if (clip.mediaId || clip.url) {
+          if (clip.mediaId) {
             const media = mediaMap.get(clip.mediaId) || { id: clip.mediaId, url: clip.url, name: clip.name };
-            visualClipMap.set(clip.id, media);
+            visualMediaMap.set(clip.mediaId, media);
           }
         }
       }
@@ -176,10 +176,10 @@ export class FrameScheduler {
 
     const loadPromises: Promise<void>[] = [];
 
-    for (const [clipId, media] of visualClipMap.entries()) {
-      if (!this.mediaDecoders.has(clipId)) {
+    for (const [mediaId, media] of visualMediaMap.entries()) {
+      if (!this.mediaDecoders.has(mediaId)) {
         const url = media?.url || '';
-        const preBuffer = this.mediaBuffers[media.id] || this.mediaBuffers[clipId];
+        const preBuffer = this.mediaBuffers[mediaId];
         const mediaName: string = media?.name || '';
         const isImage =
           media?.type === 'image' ||
@@ -187,13 +187,13 @@ export class FrameScheduler {
 
         if (isImage) {
           const source = new StillImageSource(url);
-          this.mediaDecoders.set(clipId, source);
+          this.mediaDecoders.set(mediaId, source);
           loadPromises.push(source.load(preBuffer));
           continue;
         }
 
         const decoder = new AssetDecoder(url);
-        this.mediaDecoders.set(clipId, decoder);
+        this.mediaDecoders.set(mediaId, decoder);
         loadPromises.push(
           decoder.load(preBuffer).then(async () => {
             if (decoder.ready) return;
@@ -201,11 +201,11 @@ export class FrameScheduler {
             await fallback.load(preBuffer);
             if (fallback.ready) {
               decoder.dispose();
-              this.mediaDecoders.set(clipId, fallback);
+              this.mediaDecoders.set(mediaId, fallback);
             } else {
               fallback.dispose();
               this.warnings.push(
-                `"${mediaName || media.id}" could not be decoded for export` +
+                `"${mediaName || mediaId}" could not be decoded for export` +
                 (decoder.loadError ? ` (${decoder.loadError})` : '') +
                 '. Its frames will be missing from the output.'
               );
@@ -297,10 +297,11 @@ export class FrameScheduler {
             right: getAnimatedExportValue(clip.crop.right || 0, t, st, clip.animations?.['crop.right']),
           } : undefined;
 
-          if (track.type === 'video' && (clip.mediaId || clip.url || clip.id)) {
-            const lookupId = clip.id;
+          if (track.type === 'video' && (clip.mediaId || clip.id)) {
+            const lookupId = clip.mediaId || clip.id;
             const decoder =
               this.mediaDecoders.get(lookupId) ||
+              this.mediaDecoders.get(clip.mediaId) ||
               (this as any)._decodersCompat?.get(lookupId);
             if (!decoder) {
               // No decoder for this clip — skip (test may have no mediaId)
