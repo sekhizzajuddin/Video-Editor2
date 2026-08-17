@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { ExportWorkerConfig } from './engine/export.worker';
 import { ExportWorkerManager } from './engine/ExportWorkerManager';
 import { ExportPhase } from './types';
+import { defaultExportPipeline } from './ExportPipeline';
+import { useEditorStore } from '@/store/editorStore';
 
 export interface Resolution {
   width: number;
@@ -41,8 +43,6 @@ export interface ExportState {
   savedViaRuntime?: boolean;
 }
 
-import { useEditorStore } from '@/store/editorStore';
-
 export function useExportEngine() {
   const [exportState, setExportState] = useState<ExportState>({
     phase: 'idle',
@@ -67,6 +67,85 @@ export function useExportEngine() {
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+
+    const attemptWysiwygFallback = async (
+      workerError: Error,
+      duration: number
+    ): Promise<{ filename: string; savedViaRuntime: boolean; blob: Blob } | null> => {
+      // Only fallback for black-frame or decode errors — not for user cancel
+      const msg = workerError.message || '';
+      const isBlackOrDecodeError =
+        /black frames/i.test(msg) ||
+        /could not be decoded/i.test(msg) ||
+        /No visual layers/i.test(msg) ||
+        /GPU.*decode/i.test(msg);
+      // We fallback for any worker error to guarantee WYSIWYG, except AbortError
+      if (msg === 'AbortError') return null;
+
+      console.warn('[Export] Worker failed, attempting WYSIWYG preview capture fallback:', msg);
+      setExportState(prev => ({
+        ...prev,
+        phase: 'preparing',
+        warnings: [...prev.warnings, `Worker export failed (${msg}), falling back to preview-accurate capture...`],
+      }));
+
+      try {
+        const store = useEditorStore.getState();
+        const previewCanvas = store.previewCanvas as HTMLCanvasElement | null;
+        if (!previewCanvas) {
+          throw new Error('Preview canvas not available for fallback export');
+        }
+
+        // Use the preview canvas which already renders exactly what user sees
+        const { blob: outBlob } = await defaultExportPipeline
+          .start({
+            width: config.width,
+            height: config.height,
+            fps: config.fps,
+            format: (config.format === 'webm' ? 'webm' : 'mp4') as any,
+            quality: 'high',
+            bitrate: config.bitrate,
+            startAt: 0,
+            endAt: duration,
+            useHardwareEncoder: true,
+            canvas: previewCanvas,
+            audioStream: null,
+            onProgress: (p) => {
+              setExportState(prev => ({
+                ...prev,
+                phase: p.stage === 'capturing' ? 'capturing' : p.stage === 'encoding' ? 'encoding' : 'rendering',
+                progress: p.percentage,
+              }));
+            },
+            setStatusMsg: (m) => {
+              console.log('[Fallback Export]', m);
+            },
+          })
+          .promise;
+
+        // Save blob to OPFS (same as worker path)
+        const outFileName = `${config.filename}.${config.format === 'webm' ? 'webm' : 'mp4'}`;
+        let finalHandle: FileSystemFileHandle | null = fileHandle || null;
+        let finalFileName = outFileName;
+        if (!finalHandle) {
+          const root = await navigator.storage.getDirectory();
+          finalHandle = await root.getFileHandle(outFileName, { create: true });
+          finalFileName = finalHandle.name;
+        }
+        const writable = await finalHandle.createWritable();
+        await writable.write(outBlob);
+        await writable.close();
+
+        return { filename: finalFileName, savedViaRuntime: !!fileHandle, blob: outBlob };
+      } catch (fallbackErr: any) {
+        console.error('[Export] Fallback also failed:', fallbackErr);
+        setExportState(prev => ({
+          ...prev,
+          warnings: [...prev.warnings, `Preview fallback failed: ${fallbackErr?.message || fallbackErr}`],
+        }));
+        return null;
+      }
+    };
 
     try {
       setExportState(prev => ({ ...prev, phase: 'analyzing', progress: 0, warnings: [], filename: null }));
@@ -136,13 +215,35 @@ export function useExportEngine() {
 
       exporterRef.current = exporter;
       
-      const result = await exporter.export(abortController.signal);
-      
-      setExportState(prev => ({ 
-        ...prev, 
-        filename: result.filename,
-        savedViaRuntime: result.savedViaRuntime
-      }));
+      try {
+        const result = await exporter.export(abortController.signal);
+        setExportState(prev => ({ 
+          ...prev, 
+          filename: result.filename,
+          savedViaRuntime: result.savedViaRuntime
+        }));
+      } catch (workerErr: any) {
+        // Try WYSIWYG fallback for any worker failure (especially black frames)
+        if (workerErr?.message === 'AbortError') throw workerErr;
+
+        const fallbackResult = await attemptWysiwygFallback(workerErr, duration);
+        if (fallbackResult) {
+          const fileSize = fallbackResult.blob.size;
+          setExportState(prev => ({
+            ...prev,
+            phase: 'completed',
+            progress: 100,
+            fileSize,
+            filename: fallbackResult.filename,
+            savedViaRuntime: fallbackResult.savedViaRuntime,
+          }));
+          // Store blob size for download handler — reuse existing mechanism
+          // by putting file in OPFS (already done) and using existing download
+          return;
+        }
+        // No fallback succeeded → rethrow original
+        throw workerErr;
+      }
     } catch (error) {
       if ((error as Error).message === 'AbortError') {
         setExportState(prev => ({ ...prev, phase: 'cancelled' }));

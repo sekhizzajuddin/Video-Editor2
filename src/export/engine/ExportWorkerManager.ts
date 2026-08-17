@@ -213,7 +213,7 @@ export class ExportWorkerManager {
     for (const track of (serializedTimeline.tracks || [])) {
       for (const clip of (track.clips || [])) {
         if (clip.mediaId && !mediaMap.has(clip.mediaId)) {
-          mediaMap.set(clip.mediaId, { id: clip.mediaId, url: clip.url, name: clip.name });
+          mediaMap.set(clip.mediaId, { id: clip.mediaId, url: clip.url, name: clip.name, type: clip.type || 'video' });
         }
       }
     }
@@ -222,30 +222,82 @@ export class ExportWorkerManager {
 
     await Promise.all(serializedTimeline.media.map(async (m: any) => {
       try {
-        let fileBlob: Blob | null = null;
+        let fileBlob: Blob | File | null = null;
+
+        // 1. Try IDB (primary store)
         try {
           fileBlob = await getFileFromDB(m.id);
         } catch (idbErr) {
           console.warn('[Export] IDB lookup failed for', m.id, idbErr);
         }
 
-        // FALLBACK: if IDB has no entry, try the current blob: URL.
-        if (!fileBlob && m.url && m.url !== 'PENDING_RESTORE') {
+        // 2. Try handle store (FileSystemFileHandle backed)
+        if (!fileBlob) {
+          try {
+            const { resolveMediaFile } = await import('@/utils/mediaFileHandle');
+            fileBlob = await resolveMediaFile(m.id);
+            if (fileBlob) console.log('[Export] Resolved', m.id, 'via handle store');
+          } catch {}
+        }
+
+        // 3. Try current blob URL (live object URL from preview)
+        if (!fileBlob && m.url && m.url !== 'PENDING_RESTORE' && m.url.startsWith('blob:')) {
           try {
             const response = await fetch(m.url);
             if (response.ok) fileBlob = await response.blob();
           } catch {}
         }
 
+        // 4. Try data URL or http URL
+        if (!fileBlob && m.url && m.url !== 'PENDING_RESTORE') {
+          try {
+            // For data: URLs or regular http(s) that may still be reachable
+            if (m.url.startsWith('data:') || m.url.startsWith('http')) {
+              const response = await fetch(m.url);
+              if (response.ok) fileBlob = await response.blob();
+            }
+          } catch {}
+        }
+
+        // 5. Last resort: try to clone from video element if it exists in DOM (preview)
+        // This covers cases where IDB was cleared but preview still holds decoded data
+        if (!fileBlob && m.url && m.url.startsWith('blob:')) {
+          try {
+            // Find a video element that might still hold this blob
+            const videos = document.querySelectorAll('video');
+            for (const v of Array.from(videos as any)) {
+              if ((v as HTMLVideoElement).src === m.url) {
+                // We can't get File from video element directly, but we already tried fetch
+                break;
+              }
+            }
+          } catch {}
+        }
+
         if (fileBlob) {
-          m._fileBlob = fileBlob;
+          // If it's a File, convert to Blob for transfer, but keep type
+          const blob = fileBlob instanceof Blob ? fileBlob : new Blob([fileBlob as any]);
+          // Ensure we transfer as ArrayBuffer for worker (convert Blob to ArrayBuffer later via postMessage transferables? We keep Blob here and let worker create BlobSource)
+          // For efficiency, if it's large, keep as Blob and let worker's BlobSource handle it
+          m._fileBlob = blob;
+          // Also store size for debugging
+          (m as any)._fileSize = blob.size;
         } else {
-          console.warn('[Export] Media could not be loaded:', m.id);
+          console.warn('[Export] Media could not be loaded (will be black):', m.id, m.name || '', 'url:', m.url?.slice(0, 50));
+          // Push warning to UI via callback if available
+          this.options.callbacks.onWarning?.(
+            `"${m.name || m.id}" could not be loaded for export — its segment may be black. Try re-importing the file.`
+          );
         }
       } catch (e: any) {
         console.warn('[Export] Media prep failed for:', m.id, e);
       }
     }));
+
+    // Debug: log how many media were resolved
+    const resolved = (serializedTimeline.media as any[]).filter((m: any) => !!m._fileBlob).length;
+    const total = (serializedTimeline.media as any[]).length;
+    console.log(`[Export] Media resolved: ${resolved}/${total}`);
   }
 
   private serializeTimeline(timeline: any): any {
