@@ -223,6 +223,15 @@ export class AssetDecoder {
    * 5. Purge frames more than 1 second behind to bound memory usage
    */
   async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
+    // Hard timeout: never block the export worker more than 2s per frame.
+    // A stuck hardware decoder (Chrome/Edge on Windows with NV12 frames) can
+    // cause waitForDequeue / waitForFrame to cascade indefinitely. Promise.race
+    // guarantees we always return within the deadline.
+    const deadline = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+    return Promise.race([this._getFrameAtImpl(timestampMicroseconds), deadline]);
+  }
+
+  private async _getFrameAtImpl(timestampMicroseconds: number): Promise<VideoFrame | null> {
     if (this.samples.length === 0 || !this.decoder) return null;
 
     // 1. Purge old frames to bound memory, BUT never purge the currently active frame!
@@ -259,11 +268,11 @@ export class AssetDecoder {
       }
 
       // Throttle decoder input queue to prevent hardware decoder crashes.
-      // `dequeue` fires as the decoder drains, so we wait on that rather than
-      // burning 5ms timer ticks.
-      let queueRetries = 20;
+      // Keep retries low (8×20ms = 160ms max) so a backed-up decoder doesn't
+      // burn hundreds of ms per sample across a multi-layer export.
+      let queueRetries = 8;
       while (this.decoder.decodeQueueSize >= 15 && queueRetries > 0) {
-        await this.waitForDequeue(this.decoder, 25);
+        await this.waitForDequeue(this.decoder, 20);
         queueRetries--;
       }
 
@@ -286,15 +295,10 @@ export class AssetDecoder {
     // DO NOT use decoder.flush() mid-stream! On many hardware decoders (especially Chrome/Edge),
     // calling flush() before the end of the stream resets the reference frame buffer (GOP),
     // causing subsequent P-frames to fail decoding, crashing the decoder, and triggering an infinite re-init loop!
-    //
-    // PERF (export stutter fix): this used to poll with `setTimeout(10)`. Nested
-    // setTimeout in a worker is clamped (and 10ms is coarse regardless), so a frame
-    // that was ready after 1ms still cost a full 10ms tick — and with several tracks
-    // that penalty was paid per clip per frame. We now have the decoder's `output`
-    // callback resolve a waiter the instant the needed frame arrives, and only fall
-    // back to a timer for the overall timeout.
     if (fedNewSamples && this.decoder && this.decoder.state === 'configured') {
-      await this.waitForFrame(timestampMicroseconds, 1000);
+      // 400ms is enough for hardware decoders to drain a GOP; the outer 2s deadline
+      // in getFrameAt catches any decoder that never responds.
+      await this.waitForFrame(timestampMicroseconds, 400);
     }
 
     if (this.decodedQueue.length === 0) return null;
