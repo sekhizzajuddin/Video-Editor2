@@ -92,6 +92,12 @@ export class Compositor {
   private ctx: OffscreenCanvasRenderingContext2D;
   private aspectRatio: string;
 
+  // WebGL-based VideoFrame converter — handles NV12/YUV→RGBA on the GPU.
+  private glCanvas: OffscreenCanvas | null = null;
+  private gl: WebGL2RenderingContext | null = null;
+  private glProgram: WebGLProgram | null = null;
+  private glTexture: WebGLTexture | null = null;
+
   constructor(canvas: OffscreenCanvas, aspectRatio: string = '16:9') {
     this.canvas = canvas;
     this.aspectRatio = aspectRatio;
@@ -116,6 +122,123 @@ export class Compositor {
       viewW = Math.round(480 * (4 / 3));
     }
     return { viewW, viewH };
+  }
+
+  /**
+   * Lazily initialise a WebGL2 context used solely to convert VideoFrame
+   * pixels (which may be in NV12 / I420 on Windows hardware decoders) into
+   * an RGBA ImageBitmap that the 2D compositing canvas can draw.
+   */
+  private initWebGLConverter(): boolean {
+    if (this.gl) return true;            // already initialised
+    try {
+      this.glCanvas = new OffscreenCanvas(1, 1);
+      const gl = this.glCanvas.getContext('webgl2', {
+        alpha: true,
+        premultipliedAlpha: false,
+        preserveDrawingBuffer: true,
+      }) as WebGL2RenderingContext | null;
+      if (!gl) return false;
+
+      // ---- Vertex shader: fullscreen triangle from gl_VertexID ----
+      const vsSrc = `#version 300 es
+      void main() {
+        // Generates a triangle that covers [-1,1] clip space.
+        float x = float((gl_VertexID & 1) << 2) - 1.0;
+        float y = float((gl_VertexID & 2) << 1) - 1.0;
+        gl_Position = vec4(x, y, 0.0, 1.0);
+      }`;
+
+      // ---- Fragment shader: sample texture at screen UV ----
+      const fsSrc = `#version 300 es
+      precision mediump float;
+      uniform sampler2D u_tex;
+      out vec4 outColor;
+      void main() {
+        vec2 uv = gl_FragCoord.xy / vec2(textureSize(u_tex, 0));
+        // Flip Y — framebuffer origin is bottom-left, video origin is top-left.
+        uv.y = 1.0 - uv.y;
+        outColor = texture(u_tex, uv);
+      }`;
+
+      const compile = (type: number, src: string): WebGLShader | null => {
+        const s = gl.createShader(type);
+        if (!s) return null;
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+          console.warn('[Compositor] Shader compile error:', gl.getShaderInfoLog(s));
+          gl.deleteShader(s);
+          return null;
+        }
+        return s;
+      };
+
+      const vs = compile(gl.VERTEX_SHADER, vsSrc);
+      const fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+      if (!vs || !fs) return false;
+
+      const prog = gl.createProgram()!;
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.warn('[Compositor] Program link error:', gl.getProgramInfoLog(prog));
+        return false;
+      }
+      // Shaders are baked into the program, safe to delete handles.
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+
+      const tex = gl.createTexture();
+      if (!tex) return false;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      this.gl = gl;
+      this.glProgram = prog;
+      this.glTexture = tex;
+      return true;
+    } catch (e) {
+      console.warn('[Compositor] WebGL converter init failed:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Convert a VideoFrame to an ImageBitmap via WebGL2.  texImage2D accepts
+   * VideoFrame as a source and performs NV12/I420/RGBA → RGBA conversion
+   * entirely on the GPU, avoiding the black-frame bug that plagues 2D-canvas
+   * drawImage / createImageBitmap on Windows hardware-decoded frames.
+   */
+  private convertFrameWebGL(frame: VideoFrame): ImageBitmap | null {
+    if (!this.initWebGLConverter()) return null;
+    const gl = this.gl!;
+    const canvas = this.glCanvas!;
+
+    const w = frame.displayWidth  || (frame as any).codedWidth  || 1920;
+    const h = frame.displayHeight || (frame as any).codedHeight || 1080;
+
+    // Resize the converter canvas to match the frame.
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width  = w;
+      canvas.height = h;
+    }
+    gl.viewport(0, 0, w, h);
+
+    // Upload the VideoFrame as a texture (GPU-side YUV→RGBA).
+    gl.bindTexture(gl.TEXTURE_2D, this.glTexture!);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame as any);
+
+    gl.useProgram(this.glProgram!);
+    gl.uniform1i(gl.getUniformLocation(this.glProgram!, 'u_tex'), 0);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    return canvas.transferToImageBitmap();
   }
 
   public async render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
@@ -218,27 +341,21 @@ export class Compositor {
         this.ctx.save();
         
         // Convert VideoFrame → RGBA ImageBitmap for reliable rendering.
-        // Hardware-decoded NV12/YUV frames (Windows, Android) render as solid black
-        // when passed directly to a 2D canvas drawImage or createImageBitmap without
-        // explicit colorspace conversion. VideoFrame.copyTo({ format:'RGBA' }) forces
-        // the GPU→CPU YUV→RGBA conversion which then putImageData renders correctly.
+        // Hardware-decoded NV12/YUV frames (Windows, Android) render as solid
+        // black when passed directly to a 2D canvas in a Web Worker.  WebGL's
+        // texImage2D handles the YUV→RGBA conversion natively on the GPU.
         let drawable: CanvasImageSource = layer.frame;
-        const frameW = layer.frame.displayWidth || (layer.frame as any).codedWidth || vw;
-        const frameH = layer.frame.displayHeight || (layer.frame as any).codedHeight || vh;
         try {
-          if (typeof layer.frame.copyTo === 'function' && frameW > 0 && frameH > 0) {
-            const rgbaData = new Uint8ClampedArray(frameW * frameH * 4);
-            await layer.frame.copyTo(rgbaData, { format: 'RGBA' });
-            const imageData = new ImageData(rgbaData, frameW, frameH);
-            const tmpCanvas = new OffscreenCanvas(frameW, frameH);
-            const tmpCtx = tmpCanvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
-            tmpCtx.putImageData(imageData, 0, 0);
-            drawable = tmpCanvas.transferToImageBitmap();
+          // Primary: WebGL GPU conversion (synchronous, most reliable)
+          const webglBitmap = this.convertFrameWebGL(layer.frame);
+          if (webglBitmap) {
+            drawable = webglBitmap;
           } else if (typeof createImageBitmap !== 'undefined') {
+            // Fallback 1: createImageBitmap — works when frames are already RGBA
             drawable = await createImageBitmap(layer.frame);
           }
         } catch (e) {
-          // Fall back to raw VideoFrame — may render black on some platforms but won't crash
+          // Fallback 2: raw VideoFrame — may render black but won't crash
           console.warn('[Compositor] Frame conversion failed, using raw VideoFrame:', e);
           drawable = layer.frame;
         }
@@ -505,6 +622,16 @@ export class Compositor {
   }
 
   dispose() {
-    // 2D context doesn't require explicit GL resource disposal
+    if (this.gl) {
+      if (this.glTexture)  this.gl.deleteTexture(this.glTexture);
+      if (this.glProgram)  this.gl.deleteProgram(this.glProgram);
+      // Lose the WebGL context explicitly so the GPU resources are freed.
+      const ext = this.gl.getExtension('WEBGL_lose_context');
+      if (ext) ext.loseContext();
+    }
+    this.gl = null;
+    this.glProgram = null;
+    this.glTexture = null;
+    this.glCanvas = null;
   }
 }

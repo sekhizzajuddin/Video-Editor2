@@ -87,7 +87,12 @@ export class AssetDecoder {
       // Use the pre-fetched buffer passed from the main thread.
       // Blob URLs cannot be fetched from inside a Web Worker, so we always
       // prefer a pre-fetched buffer when one is available.
-      buffer = preBuffer;
+      //
+      // IMPORTANT: slice() to create an independent copy! Multiple decoders may
+      // share the same preBuffer (when clips reference the same mediaId).
+      // MP4Box.appendBuffer() stores and mutates the buffer (e.g. sets
+      // fileStart), so concurrent use of the same object causes parse failures.
+      buffer = preBuffer.slice(0);
     } else {
       try {
         const response = await fetch(this.url);
