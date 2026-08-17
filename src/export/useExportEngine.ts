@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { WysiwygExportEngine, WysiwygExportConfig } from './engine/WysiwygExportEngine';
+import { ExportWorkerManager } from './engine/ExportWorkerManager';
+import { ExportWorkerConfig } from './engine/export.worker';
 import { ExportPhase } from './types';
 import { useEditorStore } from '@/store/editorStore';
 
@@ -58,12 +59,12 @@ export function useExportEngine() {
 
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const exportedBlobRef = useRef<Blob | null>(null);
-  const engineRef = useRef<WysiwygExportEngine | null>(null);
+  const engineRef = useRef<ExportWorkerManager | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const startExport = useCallback(async (config: WysiwygExportConfig, fileHandle?: FileSystemFileHandle | null) => {
+  const startExport = useCallback(async (config: ExportWorkerConfig, fileHandle?: FileSystemFileHandle | null) => {
     if (engineRef.current) {
-      engineRef.current.cancel();
+      engineRef.current.dispose();
       engineRef.current = null;
     }
 
@@ -98,9 +99,11 @@ export function useExportEngine() {
         filename: null,
       });
 
-      const engine = new WysiwygExportEngine(
+      const engine = new ExportWorkerManager({
+        timeline: store,
         config,
-        {
+        fileHandle,
+        callbacks: {
           onProgress: (progress, currentFrame, eta) => {
             setExportState(prev => ({
               ...prev,
@@ -112,27 +115,16 @@ export function useExportEngine() {
           onPhaseChange: (phase) => {
             setExportState(prev => ({ ...prev, phase }));
           },
-          onPreviewFrame: (canvas, currentFrame, totalFrames, currentTime) => {
-            setPreviewCanvas(canvas);
-            setExportState(prev => ({
-              ...prev,
-              currentFrame,
-              totalFrames,
-              currentTime,
-            }));
-          },
-          onComplete: (fileSize, filename, blob) => {
-            exportedBlobRef.current = blob;
+          onComplete: (fileSize) => {
             setExportState(prev => ({
               ...prev,
               phase: 'completed',
               progress: 100,
               fileSize,
-              filename,
             }));
           },
           onError: (error) => {
-            console.error('[ExportEngine] Export failed:', error);
+            console.error('[ExportWorkerManager] Export failed:', error);
             setExportState(prev => ({
               ...prev,
               phase: 'error',
@@ -140,25 +132,22 @@ export function useExportEngine() {
             }));
           },
           onWarning: (message) => {
-            console.warn('[ExportEngine] Warning:', message);
+            console.warn('[ExportWorkerManager] Warning:', message);
             setExportState(prev => ({
               ...prev,
               warnings: prev.warnings.includes(message) ? prev.warnings : [...prev.warnings, message],
             }));
           },
-        },
-        fileHandle
-      );
+        }
+      });
 
       engineRef.current = engine;
       const result = await engine.export(abortController.signal);
 
-      exportedBlobRef.current = result.blob;
       setExportState(prev => ({
         ...prev,
         phase: 'completed',
         progress: 100,
-        fileSize: result.blob.size,
         filename: result.filename,
         savedViaRuntime: result.savedViaRuntime,
       }));
@@ -177,26 +166,19 @@ export function useExportEngine() {
 
   const cancelExport = useCallback(() => {
     abortControllerRef.current?.abort();
-    engineRef.current?.cancel();
+    engineRef.current?.dispose();
     setExportState(prev => ({ ...prev, phase: 'cancelled' }));
   }, []);
 
-  const downloadFile = useCallback(() => {
-    if (exportedBlobRef.current) {
-      const url = URL.createObjectURL(exportedBlobRef.current);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = exportState.filename || 'export.mp4';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+  const downloadFile = useCallback(async () => {
+    if (exportState.filename && !exportState.savedViaRuntime) {
+      engineRef.current?.download(exportState.filename);
     }
-  }, [exportState.filename]);
+  }, [exportState.filename, exportState.savedViaRuntime]);
 
   useEffect(() => {
     return () => {
-      engineRef.current?.cancel();
+      engineRef.current?.dispose();
     };
   }, []);
 
