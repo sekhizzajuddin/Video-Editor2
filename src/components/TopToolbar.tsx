@@ -523,7 +523,7 @@ export function TopToolbar() {
       <input
         ref={projectFileInputRef}
         type="file"
-        accept=".procut"
+        accept=".procut,.json"
         onChange={handleOpenProjectFile}
         className="hidden"
       />

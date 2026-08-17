@@ -217,14 +217,30 @@ export class Compositor {
         // 6. Draw the frame, applying source metadata rotation
         this.ctx.save();
         
-        // Convert VideoFrame to ImageBitmap to fix blank rendering on 2D contexts for YUV frames
+        // Convert VideoFrame → RGBA ImageBitmap for reliable rendering.
+        // Hardware-decoded NV12/YUV frames (Windows, Android) render as solid black
+        // when passed directly to a 2D canvas drawImage or createImageBitmap without
+        // explicit colorspace conversion. VideoFrame.copyTo({ format:'RGBA' }) forces
+        // the GPU→CPU YUV→RGBA conversion which then putImageData renders correctly.
         let drawable: CanvasImageSource = layer.frame;
+        const frameW = layer.frame.displayWidth || (layer.frame as any).codedWidth || vw;
+        const frameH = layer.frame.displayHeight || (layer.frame as any).codedHeight || vh;
         try {
-          if (typeof createImageBitmap !== 'undefined') {
+          if (typeof layer.frame.copyTo === 'function' && frameW > 0 && frameH > 0) {
+            const rgbaData = new Uint8ClampedArray(frameW * frameH * 4);
+            await layer.frame.copyTo(rgbaData, { format: 'RGBA' });
+            const imageData = new ImageData(rgbaData, frameW, frameH);
+            const tmpCanvas = new OffscreenCanvas(frameW, frameH);
+            const tmpCtx = tmpCanvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
+            tmpCtx.putImageData(imageData, 0, 0);
+            drawable = tmpCanvas.transferToImageBitmap();
+          } else if (typeof createImageBitmap !== 'undefined') {
             drawable = await createImageBitmap(layer.frame);
           }
         } catch (e) {
-          console.warn('Failed to create ImageBitmap from frame', e);
+          // Fall back to raw VideoFrame — may render black on some platforms but won't crash
+          console.warn('[Compositor] Frame conversion failed, using raw VideoFrame:', e);
+          drawable = layer.frame;
         }
         
         if (layer.chromaKey && layer.chromaKey.enabled) {

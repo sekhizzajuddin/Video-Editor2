@@ -76,11 +76,15 @@ export const WelcomeScreen: React.FC = () => {
 
   const handleOpenProcutFile = async (project: any) => {
     await resetProject(false);
+    const { loadProjectData } = await import('@/utils/fileSystemAccess');
+    loadProjectData(project.data);
+    
+    // Set project info AFTER loadProjectData so that older JSON files without a projectId
+    // don't overwrite it back to 'default', which would prevent the Welcome Screen from closing.
     setProjectInfo(project.id, project.name);
     useEditorStore.setState({ projectFileHandle: project.handle });
     setActiveProject(project.id);
-    const { loadProjectData } = await import('@/utils/fileSystemAccess');
-    loadProjectData(project.data);
+    
     window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Project loaded! Please re-import local media files to relink them.', type: 'success' }}));
   };
 

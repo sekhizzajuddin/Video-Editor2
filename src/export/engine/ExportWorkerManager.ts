@@ -2,6 +2,7 @@ import { ExportWorkerConfig } from './export.worker';
 import { ExportPhase } from '../types';
 import { AudioMixer } from './AudioMixer';
 import { normalizeVideoForExport } from './VideoNormalizer';
+import { getFileFromDB } from '@/utils/projectPersistence';
 
 export interface ExporterCallbacks {
   onProgress: (progress: number, currentFrame: number, eta: number) => void;
@@ -111,6 +112,17 @@ export class ExportWorkerManager {
       console.warn('Audio pre-mix failed on main thread:', err);
     }
 
+    // Collect all pre-fetched ArrayBuffers from media items and transfer them
+    // to the worker to avoid cross-thread blob URL access failures.
+    const mediaBuffers: Record<string, ArrayBuffer> = {};
+    for (const m of (serializedTimeline.media || [])) {
+      if (m._arrayBuffer) {
+        mediaBuffers[m.id] = m._arrayBuffer;
+        transferables.push(m._arrayBuffer);
+        delete m._arrayBuffer; // Don't try to JSON-clone the ArrayBuffer
+      }
+    }
+
     // Transfer timeline data, audio PCM, and optional fileHandle to worker
     this.worker.postMessage({
       type: 'START_EXPORT',
@@ -119,6 +131,7 @@ export class ExportWorkerManager {
         config: this.options.config,
         audioData: audioPayload,
         fileHandle: this.options.fileHandle || null,
+        mediaBuffers,
       }
     }, transferables);
 
@@ -196,20 +209,65 @@ export class ExportWorkerManager {
   private async normalizeTimelineMedia(serializedTimeline: any): Promise<void> {
     const media: any[] = serializedTimeline.media || [];
     const videoItems = media.filter((m) => {
-      if (!m?.url) return false;
+      if (!m?.id) return false;
       if (m.type === 'video') return true;
-      // Some imports lack a type; sniff by extension, defaulting to video-ish names.
       const name = String(m.name || '');
       return /\.(mp4|mov|m4v|webm|mkv|ogv|ogg|avi)$/i.test(name);
     });
 
     await Promise.all(videoItems.map(async (m) => {
       try {
-        const result = await normalizeVideoForExport(m.url, m.name);
-        if (result.warning) {
-          this.options.callbacks.onWarning?.(result.warning);
-        } else if (result.transcoded) {
-          m.url = result.url;
+        // PRIMARY PATH: Load the raw File directly from IndexedDB.
+        // This is the most reliable source — files are always saved to IDB
+        // on import and on project re-link. Blob URLs can be revoked,
+        // dead after page reload, or inaccessible from inside a worker.
+        let fileBlob: Blob | null = null;
+        try {
+          fileBlob = await getFileFromDB(m.id);
+        } catch (idbErr) {
+          console.warn('[Export] IDB lookup failed for', m.id, idbErr);
+        }
+
+        // FALLBACK: if IDB has no entry, try the current blob: URL.
+        if (!fileBlob && m.url && m.url !== 'PENDING_RESTORE') {
+          try {
+            const response = await fetch(m.url);
+            if (response.ok) fileBlob = await response.blob();
+          } catch {
+            // blob URL may have been revoked — handled below
+          }
+        }
+
+        if (!fileBlob) {
+          this.options.callbacks.onWarning?.(
+            `"${m.name || m.id}" media could not be loaded for export — please re-import the file. Its frames will be missing from the output.`
+          );
+          return;
+        }
+
+        // Normalize (transcode WebM/MKV → MP4 if needed)
+        const normalizedUrl = URL.createObjectURL(fileBlob);
+        try {
+          const result = await normalizeVideoForExport(normalizedUrl, m.name);
+          if (result.warning) {
+            this.options.callbacks.onWarning?.(result.warning);
+            URL.revokeObjectURL(normalizedUrl);
+            return;
+          }
+          // result.url may be a new transcoded URL, or the same normalizedUrl
+          const finalBlob = result.transcoded
+            ? await fetch(result.url).then(r => r.blob())
+            : fileBlob;
+          if (result.transcoded) URL.revokeObjectURL(normalizedUrl);
+
+          // Convert to ArrayBuffer for transfer to worker
+          const arrayBuffer = await (finalBlob as Blob).arrayBuffer();
+          m._arrayBuffer = arrayBuffer;
+        } catch (e: any) {
+          URL.revokeObjectURL(normalizedUrl);
+          this.options.callbacks.onWarning?.(
+            `"${m.name || m.id}" could not be prepared for export: ${e?.message || e}`
+          );
         }
       } catch (e: any) {
         this.options.callbacks.onWarning?.(

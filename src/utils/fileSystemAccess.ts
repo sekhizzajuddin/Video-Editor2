@@ -63,7 +63,7 @@ export function loadProjectData(data: any) {
     historyIndex: 0,
     projectFileHandle: data._handle || null,
     projectName: data.projectName || 'Untitled Project',
-    projectId: data.projectId || 'default',
+    projectId: data.projectId && data.projectId !== 'default' ? data.projectId : crypto.randomUUID(),
   });
 
   useEditorStore.getState().recalcTotalDuration();
@@ -81,14 +81,14 @@ export async function getProcutFilesInDirectory(): Promise<any[]> {
   const projects = [];
   
   for await (const entry of dirHandle.values()) {
-    if (entry.kind === 'file' && entry.name.endsWith('.procut')) {
+    if (entry.kind === 'file' && (entry.name.endsWith('.procut') || entry.name.endsWith('.json'))) {
       try {
         const file = await entry.getFile();
         const text = await file.text();
         const data = JSON.parse(text);
         projects.push({
           id: data.projectId || entry.name,
-          name: data.projectName || entry.name.replace('.procut', ''),
+          name: data.projectName || entry.name.replace('.procut', '').replace('.json', ''),
           lastModified: file.lastModified,
           handle: entry,
           data: data
@@ -182,7 +182,7 @@ export async function openProjectFile(): Promise<any> {
       const [handle] = await (window as any).showOpenFilePicker({
         types: [{
           description: 'ProCut Project File',
-          accept: { 'application/x-procut': ['.procut'] },
+          accept: { 'application/x-procut': ['.procut', '.json'] },
         }],
         multiple: false
       });
