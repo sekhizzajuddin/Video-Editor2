@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run src"
+    "test": "vitest run src",
+    "postinstall": "node scripts/patch-mediabunny.js"
   },
   "dependencies": {
     "@ffmpeg/core": "^0.12.6",
