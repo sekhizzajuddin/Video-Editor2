@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { X, Download, AlertCircle, FolderOpen, Film } from 'lucide-react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { X, Download, AlertCircle, FolderOpen, Film, Eye, Sparkles } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
@@ -13,6 +13,55 @@ function generateFilename(projectName: string): string {
   const date = now.toISOString().slice(0, 10); // YYYY-MM-DD
   const time = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
   return `${safeName}_${date}_${time}`;
+}
+
+function LiveExportPreview({
+  sourceCanvas,
+  aspectRatio,
+}: {
+  sourceCanvas: HTMLCanvasElement | null;
+  aspectRatio: string;
+}) {
+  const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!sourceCanvas || !displayCanvasRef.current) return;
+    const ctx = displayCanvasRef.current.getContext('2d');
+    if (!ctx) return;
+    const disp = displayCanvasRef.current;
+    ctx.clearRect(0, 0, disp.width, disp.height);
+    ctx.drawImage(sourceCanvas, 0, 0, disp.width, disp.height);
+  }, [sourceCanvas]);
+
+  const aspectClass =
+    aspectRatio === '9:16'
+      ? 'w-[120px] h-[213px]'
+      : aspectRatio === '1:1'
+        ? 'w-[160px] h-[160px]'
+        : 'w-[240px] h-[135px]';
+
+  return (
+    <div className="flex flex-col items-center justify-center p-3 bg-[#1e1e1e] rounded-lg border border-[#3e3e3e]">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-400 mb-2">
+        <Eye className="w-3.5 h-3.5" />
+        <span>Live Export Preview</span>
+        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse ml-1" />
+      </div>
+      <div className={`relative bg-black rounded overflow-hidden shadow-2xl border border-[#333] flex items-center justify-center ${aspectClass}`}>
+        <canvas
+          ref={displayCanvasRef}
+          width={sourceCanvas ? sourceCanvas.width : 640}
+          height={sourceCanvas ? sourceCanvas.height : 360}
+          className="w-full h-full object-contain"
+        />
+        {!sourceCanvas && (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-[#606060]">
+            Rendering frame...
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function ExportModal() {
@@ -32,7 +81,6 @@ export function ExportModal() {
   }, [aspectRatio]);
 
   const [selectedResolution, setSelectedResolution] = useState<Resolution>(initialResolution);
-  const [quality, setQuality] = useState<'low' | 'medium' | 'high' | 'ultra'>('high');
   const [format, setFormat] = useState<'mp4' | 'webm' | 'gif' | 'prores' | 'wav'>('mp4');
   const [fps, setFps] = useState<number>(30);
   const [filename, setFilename] = useState('');
@@ -44,13 +92,12 @@ export function ExportModal() {
     if (showExportModal) {
       setSelectedResolution(initialResolution);
       setFilename(generateFilename(projectName));
-      // Refresh saved folder
       const savedFolder = localStorage.getItem('exportOutputFolder');
       if (savedFolder) setOutputFolder(savedFolder);
     }
   }, [showExportModal, initialResolution, projectName]);
 
-  const { exportState, startExport, cancelExport, downloadFile } = useExportEngine();
+  const { exportState, previewCanvas, startExport, cancelExport, downloadFile } = useExportEngine();
 
   const handleBrowseFolder = useCallback(async () => {
     setIsBrowsing(true);
@@ -62,7 +109,7 @@ export function ExportModal() {
         localStorage.setItem('exportOutputFolder', data.path);
       }
     } catch (e) {
-      console.warn('Folder picker unavailable (runtime not running?):', e);
+      console.warn('Folder picker unavailable:', e);
     } finally {
       setIsBrowsing(false);
     }
@@ -71,10 +118,6 @@ export function ExportModal() {
   const handleExport = useCallback(async () => {
     const exportFilename = filename.trim() || generateFilename(projectName);
 
-    // The save dialog's extension/MIME must match what the worker actually
-    // writes, otherwise players that trust the extension show a black screen.
-    // (ProRes can't be encoded in-browser — the worker produces MP4 instead,
-    // so even the picker advertises .mp4 for it.)
     const PICKER_TYPES: Record<string, { description: string; accept: Record<string, string[]>; ext: string }> = {
       mp4:    { description: 'MP4 Video',     accept: { 'video/mp4': ['.mp4'] },        ext: 'mp4' },
       webm:   { description: 'WebM Video',    accept: { 'video/webm': ['.webm'] },      ext: 'webm' },
@@ -85,7 +128,6 @@ export function ExportModal() {
     const pickerCfg = PICKER_TYPES[format] || PICKER_TYPES.mp4;
 
     let fileHandle: FileSystemFileHandle | null = null;
-    // Standalone browser direct save dialog (OpenReel Video style)
     if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
       try {
         fileHandle = await (window as any).showSaveFilePicker({
@@ -93,7 +135,7 @@ export function ExportModal() {
           types: [pickerCfg]
         });
       } catch (err: any) {
-        if (err.name === 'AbortError') return; // User cancelled save picker
+        if (err.name === 'AbortError') return;
       }
     }
 
@@ -118,18 +160,18 @@ export function ExportModal() {
     const labels: Record<ExportPhase, string> = {
       idle: 'Ready',
       analyzing: 'Analyzing timeline...',
-      preparing: 'Preparing assets...',
-      capturing: 'Capturing frames...',
-      rendering: 'Rendering frames...',
+      preparing: 'Preparing assets & decoder...',
+      capturing: 'Rendering frames...',
+      rendering: 'Rendering frames (WYSIWYG)...',
       encoding: 'Encoding video...',
-      muxing: 'Combining audio & video...',
-      finalizing: 'Finalizing...',
+      muxing: 'Mixing audio & muxing...',
+      finalizing: 'Finalizing MP4...',
       completed: 'Export complete!',
       complete: 'Export complete!',
       cancelled: 'Cancelled',
       error: 'Error occurred',
     };
-    return labels[phase] || 'Unknown';
+    return labels[phase] || 'Processing...';
   };
 
   const formatTime = (seconds: number): string => {
@@ -146,7 +188,6 @@ export function ExportModal() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // Truncate long folder paths for display
   const displayFolder = outputFolder
     ? (outputFolder.length > 40 ? '...' + outputFolder.slice(-37) : outputFolder)
     : 'Desktop (default)';
@@ -158,10 +199,10 @@ export function ExportModal() {
         <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
           <div className="flex items-center gap-2">
             <Download className="w-5 h-5 text-amber-400" />
-            <h2 className="text-sm font-semibold text-white">Export Video</h2>
+            <h2 className="text-sm font-semibold text-white">Export Video (WYSIWYG)</h2>
           </div>
           <button
-            onClick={() => exportState.phase === 'rendering' ? cancelExport() : setShowExportModal(false)}
+            onClick={() => isWorking ? cancelExport() : setShowExportModal(false)}
             className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors"
           >
             <X className="w-4 h-4" />
@@ -169,6 +210,14 @@ export function ExportModal() {
         </div>
 
         <div className="p-4 space-y-3">
+          {/* Live Preview Window during Export */}
+          {isWorking && (
+            <LiveExportPreview
+              sourceCanvas={previewCanvas}
+              aspectRatio={aspectRatio}
+            />
+          )}
+
           {/* Filename Input */}
           <div>
             <label className="text-xs text-[#a0a0a0] block mb-1.5">Filename</label>
@@ -274,26 +323,13 @@ export function ExportModal() {
               </div>
               <div className="w-full bg-[#1a1a1a] rounded-full h-2.5 overflow-hidden relative">
                 <div 
-                  className="bg-amber-500 h-2.5 rounded-full transition-all duration-500 ease-out" 
-                  style={{ width: `${Math.max(exportState.progress, exportState.phase === 'preparing' ? 5 : exportState.phase === 'analyzing' ? 2 : 0)}%` }}
+                  className="bg-amber-500 h-2.5 rounded-full transition-all duration-300 ease-out" 
+                  style={{ width: `${Math.max(exportState.progress, 2)}%` }}
                 />
-                {(exportState.phase === 'rendering' || exportState.phase === 'encoding' || exportState.phase === 'muxing') && (
-                  <div 
-                    className="absolute inset-0 rounded-full"
-                    style={{
-                      background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 1.5s infinite',
-                      clipPath: `inset(0 ${100 - exportState.progress}% 0 0 round 9999px)`
-                    }}
-                  />
-                )}
               </div>
               <div className="flex justify-between text-[10px] text-[#a0a0a0]">
-                {exportState.phase === 'rendering' ? (
+                {exportState.totalFrames > 0 && (
                   <span>Frame {exportState.currentFrame} / {exportState.totalFrames}</span>
-                ) : (
-                  <span className="capitalize">{exportState.phase}...</span>
                 )}
                 {exportState.estimatedTimeRemaining > 0 && (
                   <span>ETA: {formatTime(exportState.estimatedTimeRemaining)}</span>
@@ -325,7 +361,6 @@ export function ExportModal() {
                </div>
             </div>
           )}
-
         </div>
 
         {/* Action Buttons */}
@@ -341,11 +376,9 @@ export function ExportModal() {
               <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors">
                 Close
               </button>
-              {!exportState.savedViaRuntime && (
-                <button onClick={downloadFile} className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs rounded font-medium transition-colors">
-                  ⬇ Download ({formatFileSize(exportState.fileSize)})
-                </button>
-              )}
+              <button onClick={downloadFile} className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs rounded font-medium transition-colors">
+                ⬇ Download ({formatFileSize(exportState.fileSize)})
+              </button>
             </>
           ) : isWorking ? (
             <>
@@ -361,7 +394,8 @@ export function ExportModal() {
               <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors">
                 Cancel
               </button>
-              <button onClick={handleExport} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded font-medium transition-colors">
+              <button onClick={handleExport} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded font-medium transition-colors flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
                 Start Export
               </button>
             </>

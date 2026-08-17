@@ -1,8 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ExportWorkerConfig } from './engine/export.worker';
-import { ExportWorkerManager } from './engine/ExportWorkerManager';
+import { WysiwygExportEngine, WysiwygExportConfig } from './engine/WysiwygExportEngine';
 import { ExportPhase } from './types';
-import { defaultExportPipeline } from './ExportPipeline';
 import { useEditorStore } from '@/store/editorStore';
 
 export interface Resolution {
@@ -35,6 +33,7 @@ export interface ExportState {
   progress: number;
   currentFrame: number;
   totalFrames: number;
+  currentTime: number;
   fps: number;
   estimatedTimeRemaining: number;
   fileSize: number;
@@ -49,6 +48,7 @@ export function useExportEngine() {
     progress: 0,
     currentFrame: 0,
     totalFrames: 0,
+    currentTime: 0,
     fps: 30,
     estimatedTimeRemaining: 0,
     fileSize: 0,
@@ -56,104 +56,26 @@ export function useExportEngine() {
     filename: null,
   });
 
-  const exporterRef = useRef<ExportWorkerManager | null>(null);
+  const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
+  const exportedBlobRef = useRef<Blob | null>(null);
+  const engineRef = useRef<WysiwygExportEngine | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const startExport = useCallback(async (config: ExportWorkerConfig, fileHandle?: FileSystemFileHandle | null) => {
-    if (exporterRef.current) {
-      exporterRef.current.dispose();
-      exporterRef.current = null;
+  const startExport = useCallback(async (config: WysiwygExportConfig, fileHandle?: FileSystemFileHandle | null) => {
+    if (engineRef.current) {
+      engineRef.current.cancel();
+      engineRef.current = null;
     }
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-
-    const attemptWysiwygFallback = async (
-      workerError: Error,
-      duration: number
-    ): Promise<{ filename: string; savedViaRuntime: boolean; blob: Blob } | null> => {
-      // Only fallback for black-frame or decode errors — not for user cancel
-      const msg = workerError.message || '';
-      const isBlackOrDecodeError =
-        /black frames/i.test(msg) ||
-        /could not be decoded/i.test(msg) ||
-        /No visual layers/i.test(msg) ||
-        /GPU.*decode/i.test(msg);
-      // We fallback for any worker error to guarantee WYSIWYG, except AbortError
-      if (msg === 'AbortError') return null;
-
-      console.warn('[Export] Worker failed, attempting WYSIWYG preview capture fallback:', msg);
-      setExportState(prev => ({
-        ...prev,
-        phase: 'preparing',
-        warnings: [...prev.warnings, `Worker export failed (${msg}), falling back to preview-accurate capture...`],
-      }));
-
-      try {
-        const store = useEditorStore.getState();
-        const previewCanvas = store.previewCanvas as HTMLCanvasElement | null;
-        if (!previewCanvas) {
-          throw new Error('Preview canvas not available for fallback export');
-        }
-
-        // Use the preview canvas which already renders exactly what user sees
-        const { blob: outBlob } = await defaultExportPipeline
-          .start({
-            width: config.width,
-            height: config.height,
-            fps: config.fps,
-            format: (config.format === 'webm' ? 'webm' : 'mp4') as any,
-            quality: 'high',
-            bitrate: config.bitrate,
-            startAt: 0,
-            endAt: duration,
-            useHardwareEncoder: true,
-            canvas: previewCanvas,
-            audioStream: null,
-            onProgress: (p) => {
-              setExportState(prev => ({
-                ...prev,
-                phase: p.stage === 'capturing' ? 'capturing' : p.stage === 'encoding' ? 'encoding' : 'rendering',
-                progress: p.percentage,
-              }));
-            },
-            setStatusMsg: (m) => {
-              console.log('[Fallback Export]', m);
-            },
-          })
-          .promise;
-
-        // Save blob to OPFS (same as worker path)
-        const outFileName = `${config.filename}.${config.format === 'webm' ? 'webm' : 'mp4'}`;
-        let finalHandle: FileSystemFileHandle | null = fileHandle || null;
-        let finalFileName = outFileName;
-        if (!finalHandle) {
-          const root = await navigator.storage.getDirectory();
-          finalHandle = await root.getFileHandle(outFileName, { create: true });
-          finalFileName = finalHandle.name;
-        }
-        const writable = await finalHandle.createWritable();
-        await writable.write(outBlob);
-        await writable.close();
-
-        return { filename: finalFileName, savedViaRuntime: !!fileHandle, blob: outBlob };
-      } catch (fallbackErr: any) {
-        console.error('[Export] Fallback also failed:', fallbackErr);
-        setExportState(prev => ({
-          ...prev,
-          warnings: [...prev.warnings, `Preview fallback failed: ${fallbackErr?.message || fallbackErr}`],
-        }));
-        return null;
-      }
-    };
+    exportedBlobRef.current = null;
 
     try {
-      setExportState(prev => ({ ...prev, phase: 'analyzing', progress: 0, warnings: [], filename: null }));
-      
-      const timeline = useEditorStore.getState();
-      let duration = (timeline as any).totalDuration || (timeline as any).duration || 0;
-      if (!duration && timeline.tracks) {
-        for (const track of timeline.tracks) {
+      const store = useEditorStore.getState();
+      let duration = (store as any).totalDuration || (store as any).duration || 0;
+      if (!duration && store.tracks) {
+        for (const track of store.tracks) {
           for (const clip of track.clips || []) {
             const end = (clip.startTime || 0) + (clip.duration || 0);
             if (end > duration) duration = end;
@@ -162,23 +84,26 @@ export function useExportEngine() {
       }
       duration = Math.max(0.1, duration);
       const totalFrames = Math.ceil(duration * config.fps);
-      
-      setExportState(prev => ({ 
-        ...prev, 
-        totalFrames,
-        fps: config.fps,
-        phase: 'preparing' 
-      }));
 
-      const exporter = new ExportWorkerManager({
-        timeline,
+      setExportState({
+        phase: 'preparing',
+        progress: 0,
+        currentFrame: 0,
+        totalFrames,
+        currentTime: 0,
+        fps: config.fps,
+        estimatedTimeRemaining: 0,
+        fileSize: 0,
+        warnings: [],
+        filename: null,
+      });
+
+      const engine = new WysiwygExportEngine(
         config,
-        fileHandle,
-        callbacks: {
+        {
           onProgress: (progress, currentFrame, eta) => {
             setExportState(prev => ({
               ...prev,
-              phase: 'rendering',
               progress,
               currentFrame,
               estimatedTimeRemaining: eta,
@@ -187,71 +112,64 @@ export function useExportEngine() {
           onPhaseChange: (phase) => {
             setExportState(prev => ({ ...prev, phase }));
           },
-          onComplete: (fileSize) => {
-            setExportState(prev => ({ 
-              ...prev, 
+          onPreviewFrame: (canvas, currentFrame, totalFrames, currentTime) => {
+            setPreviewCanvas(canvas);
+            setExportState(prev => ({
+              ...prev,
+              currentFrame,
+              totalFrames,
+              currentTime,
+            }));
+          },
+          onComplete: (fileSize, filename, blob) => {
+            exportedBlobRef.current = blob;
+            setExportState(prev => ({
+              ...prev,
               phase: 'completed',
               progress: 100,
-              fileSize 
+              fileSize,
+              filename,
             }));
           },
           onError: (error) => {
-            console.error('Export error:', error);
-            setExportState(prev => ({ 
-              ...prev, 
+            console.error('[ExportEngine] Export failed:', error);
+            setExportState(prev => ({
+              ...prev,
               phase: 'error',
-              warnings: [...prev.warnings, error.message]
+              warnings: [...prev.warnings, error.message || String(error)],
             }));
           },
           onWarning: (message) => {
-            console.warn('Export warning:', message);
+            console.warn('[ExportEngine] Warning:', message);
             setExportState(prev => ({
               ...prev,
-              warnings: prev.warnings.includes(message) ? prev.warnings : [...prev.warnings, message]
+              warnings: prev.warnings.includes(message) ? prev.warnings : [...prev.warnings, message],
             }));
           },
-        }
-      });
+        },
+        fileHandle
+      );
 
-      exporterRef.current = exporter;
-      
-      try {
-        const result = await exporter.export(abortController.signal);
-        setExportState(prev => ({ 
-          ...prev, 
-          filename: result.filename,
-          savedViaRuntime: result.savedViaRuntime
-        }));
-      } catch (workerErr: any) {
-        // Try WYSIWYG fallback for any worker failure (especially black frames)
-        if (workerErr?.message === 'AbortError') throw workerErr;
+      engineRef.current = engine;
+      const result = await engine.export(abortController.signal);
 
-        const fallbackResult = await attemptWysiwygFallback(workerErr, duration);
-        if (fallbackResult) {
-          const fileSize = fallbackResult.blob.size;
-          setExportState(prev => ({
-            ...prev,
-            phase: 'completed',
-            progress: 100,
-            fileSize,
-            filename: fallbackResult.filename,
-            savedViaRuntime: fallbackResult.savedViaRuntime,
-          }));
-          // Store blob size for download handler — reuse existing mechanism
-          // by putting file in OPFS (already done) and using existing download
-          return;
-        }
-        // No fallback succeeded → rethrow original
-        throw workerErr;
-      }
-    } catch (error) {
-      if ((error as Error).message === 'AbortError') {
+      exportedBlobRef.current = result.blob;
+      setExportState(prev => ({
+        ...prev,
+        phase: 'completed',
+        progress: 100,
+        fileSize: result.blob.size,
+        filename: result.filename,
+        savedViaRuntime: result.savedViaRuntime,
+      }));
+    } catch (error: any) {
+      if (error?.message === 'AbortError' || abortController.signal.aborted) {
         setExportState(prev => ({ ...prev, phase: 'cancelled' }));
       } else {
-        setExportState(prev => ({ 
-          ...prev, 
+        setExportState(prev => ({
+          ...prev,
           phase: 'error',
-          warnings: [...prev.warnings, (error as Error).message]
+          warnings: [...prev.warnings, error?.message || 'Export error occurred'],
         }));
       }
     }
@@ -259,23 +177,32 @@ export function useExportEngine() {
 
   const cancelExport = useCallback(() => {
     abortControllerRef.current?.abort();
+    engineRef.current?.cancel();
     setExportState(prev => ({ ...prev, phase: 'cancelled' }));
   }, []);
 
   const downloadFile = useCallback(() => {
-    if (exporterRef.current && exportState.filename) {
-      exporterRef.current.download(exportState.filename);
+    if (exportedBlobRef.current) {
+      const url = URL.createObjectURL(exportedBlobRef.current);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = exportState.filename || 'export.mp4';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
   }, [exportState.filename]);
-  
+
   useEffect(() => {
     return () => {
-      exporterRef.current?.dispose();
+      engineRef.current?.cancel();
     };
   }, []);
 
   return {
     exportState,
+    previewCanvas,
     startExport,
     cancelExport,
     downloadFile,

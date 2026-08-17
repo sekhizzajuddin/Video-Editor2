@@ -1684,3 +1684,5 @@ export async function getLiveAudioStream(): Promise<MediaStream | null> {
   if (!master || master.getAudioTracks().length === 0) return null;
   return master.clone();
 }
+
+export { globalVideoMap };
