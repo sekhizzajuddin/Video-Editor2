@@ -18,9 +18,11 @@ function generateFilename(projectName: string): string {
 function LiveExportPreview({
   sourceCanvas,
   aspectRatio,
+  blobUrl,
 }: {
   sourceCanvas: HTMLCanvasElement | null;
   aspectRatio: string;
+  blobUrl?: string | null;
 }) {
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -54,10 +56,19 @@ function LiveExportPreview({
           height={sourceCanvas ? sourceCanvas.height : 360}
           className="w-full h-full object-contain"
         />
-        {!sourceCanvas && (
+        {!sourceCanvas && !blobUrl && (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-[#606060]">
             Rendering frame...
           </div>
+        )}
+        {blobUrl && (
+          <video 
+            src={blobUrl} 
+            controls 
+            autoPlay 
+            loop 
+            className="w-full h-full object-contain absolute inset-0 z-10" 
+          />
         )}
       </div>
     </div>
@@ -97,7 +108,21 @@ export function ExportModal() {
     }
   }, [showExportModal, initialResolution, projectName]);
 
-  const { exportState, previewCanvas, startExport, cancelExport, downloadFile } = useExportEngine();
+  const { exportState, previewCanvas, exportedBlob, startExport, cancelExport, downloadFile } = useExportEngine();
+
+  const previewBlobUrl = useMemo(() => {
+    if (exportState.phase === 'completed' && exportedBlob) {
+      return URL.createObjectURL(exportedBlob);
+    }
+    return null;
+  }, [exportState.phase, exportedBlob]);
+
+  // Revoke object URL when modal closes or unmounts
+  useEffect(() => {
+    return () => {
+      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+    };
+  }, [previewBlobUrl]);
 
   const handleBrowseFolder = useCallback(async () => {
     setIsBrowsing(true);
@@ -197,28 +222,23 @@ export function ExportModal() {
       <div className="bg-[#2d2d2d] rounded-lg shadow-2xl w-full max-w-lg overflow-hidden border border-[#3e3e3e]">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
-          <div className="flex items-center gap-2">
-            <Download className="w-5 h-5 text-amber-400" />
-            <h2 className="text-sm font-semibold text-white">Export Video (WYSIWYG)</h2>
-          </div>
-          <button
-            onClick={() => isWorking ? cancelExport() : setShowExportModal(false)}
-            className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors"
-          >
+          <h2 className="text-sm font-semibold text-white">Export Project</h2>
+          <button onClick={() => setShowExportModal(false)} className="text-[#a0a0a0] hover:text-white transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-4 space-y-3">
-          {/* Live Preview Window during Export */}
-          {isWorking && (
-            <LiveExportPreview
-              sourceCanvas={previewCanvas}
-              aspectRatio={aspectRatio}
+        <div className="p-4 space-y-5">
+          {/* Live Preview */}
+          {(isWorking || exportState.phase === 'completed') && (
+            <LiveExportPreview 
+              sourceCanvas={previewCanvas} 
+              aspectRatio={aspectRatio} 
+              blobUrl={previewBlobUrl} 
             />
           )}
 
-          {/* Filename Input */}
+          {/* Quick Info & Location */}
           <div>
             <label className="text-xs text-[#a0a0a0] block mb-1.5">Filename</label>
             <div className="flex gap-2 items-center">

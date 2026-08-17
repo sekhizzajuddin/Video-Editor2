@@ -318,10 +318,8 @@ export class WysiwygExportEngine {
 
         this.callbacks.onProgress(progress, i + 1, eta);
 
-        // Yield macro-task every 3 frames to keep browser UI and Live Preview interactive
-        if (i % 3 === 0) {
-          await new Promise((r) => setTimeout(r, 0));
-        }
+        // Yield via requestAnimationFrame to keep the React UI buttery smooth at 60fps
+        await new Promise(requestAnimationFrame);
       }
 
       await videoEncoder.flush();

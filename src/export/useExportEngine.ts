@@ -200,9 +200,12 @@ export function useExportEngine() {
     };
   }, []);
 
+  const exportedBlob = exportedBlobRef.current;
+
   return {
     exportState,
     previewCanvas,
+    exportedBlob,
     startExport,
     cancelExport,
     downloadFile,
