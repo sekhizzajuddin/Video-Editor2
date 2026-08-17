@@ -157,6 +157,7 @@ export class AssetDecoder {
       codec,
       codedWidth: width,
       codedHeight: height,
+      hardwareAcceleration: 'prefer-software',
     };
     if (description) {
       this.decoderConfig.description = description;
@@ -229,16 +230,25 @@ export class AssetDecoder {
    */
   async getFrameAt(timestampMicroseconds: number): Promise<VideoFrame | null> {
     // Hard timeout: never block the export worker more than 10s per frame.
-    // A stuck hardware decoder (Chrome/Edge on Windows with NV12 frames) can
-    // cause waitForDequeue / waitForFrame to cascade indefinitely. Promise.race
-    // guarantees we always return within the deadline.
+    let timedOut = false;
     const deadline = new Promise<null>((resolve) => {
       setTimeout(() => {
         console.warn('[AssetDecoder] getFrameAt TIMEOUT for target CTS', timestampMicroseconds);
+        timedOut = true;
         resolve(null);
       }, 10000);
     });
-    return Promise.race([this._getFrameAtImpl(timestampMicroseconds), deadline]);
+
+    const getFramePromise = this._getFrameAtImpl(timestampMicroseconds).then(frame => {
+      if (timedOut && frame) {
+        // If we already returned null due to timeout, this frame is an orphan.
+        try { frame.close(); } catch {}
+        return null;
+      }
+      return frame;
+    });
+
+    return Promise.race([getFramePromise, deadline]);
   }
 
   private async _getFrameAtImpl(timestampMicroseconds: number): Promise<VideoFrame | null> {
