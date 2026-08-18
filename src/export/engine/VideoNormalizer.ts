@@ -33,8 +33,12 @@ export interface VideoInspection {
   needsNormalization: boolean;
 }
 
-export function needsVideoNormalization(isoBmff: boolean, codec: string | null): boolean {
-  return !isoBmff || codec === 'hevc';
+export function needsVideoNormalization(isoBmff: boolean, _codec: string | null): boolean {
+  // Mediabunny can demux ISO-BMFF HEVC directly. HEVC is intentionally not
+  // normalized here: the export worker selects Chrome's hardware decoder for
+  // HEVC while using software decoding for AVC/VP8/VP9. This hybrid path avoids
+  // the very slow frame-by-frame HEVC-to-H.264 preparation pass.
+  return !isoBmff;
 }
 
 /** Inspect both the container and its primary video codec. MP4 does not imply
@@ -50,8 +54,6 @@ export async function inspectVideoBlob(blob: Blob): Promise<VideoInspection> {
     return {
       codec,
       isoBmff,
-      // HEVC often previews through an OS-backed HTMLVideoElement but cannot
-      // be instantiated by WebCodecs in an export worker. Normalize it first.
       needsNormalization: needsVideoNormalization(isoBmff, codec),
     };
   } catch {

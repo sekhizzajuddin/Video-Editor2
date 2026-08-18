@@ -43,8 +43,9 @@ describe('isIsoBmff', () => {
     expect(isIsoBmff(new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74]))).toBe(false);
   });
 
-  it('normalizes HEVC even when it is already inside MP4/MOV', () => {
-    expect(needsVideoNormalization(true, 'hevc')).toBe(true);
+  it('keeps MP4/MOV HEVC for the worker hybrid hardware decoder', () => {
+    expect(needsVideoNormalization(true, 'hevc')).toBe(false);
     expect(needsVideoNormalization(true, 'avc')).toBe(false);
+    expect(needsVideoNormalization(false, 'hevc')).toBe(true);
   });
 });

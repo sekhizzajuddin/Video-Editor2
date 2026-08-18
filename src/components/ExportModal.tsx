@@ -294,6 +294,11 @@ export function ExportModal() {
             </div>
           </div>
 
+          <div className="flex items-center gap-1.5 text-[10px] text-[#707070]">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500/80" />
+            Hybrid decoding: HEVC/H.265 uses hardware; H.264, VP8 and VP9 use software
+          </div>
+
           {/* Progress Display */}
           {isWorking && (
             <div className="bg-[#252525] rounded p-4 border border-[#3e3e3e] space-y-3">

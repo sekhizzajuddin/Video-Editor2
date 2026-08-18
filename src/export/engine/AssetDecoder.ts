@@ -23,6 +23,8 @@ export class AssetDecoder {
   public rotation = 0;
   public ready = false;
   public loadError: string | null = null;
+  public codec: string | null = null;
+  public decoderMode: 'hardware' | 'software' = 'software';
 
   private url: string;
   private input: any = null;
@@ -69,6 +71,16 @@ export class AssetDecoder {
         return;
       }
 
+      try {
+        this.codec = await videoTrack.getCodec();
+      } catch {
+        this.codec = null;
+      }
+      // Hybrid decode policy: HEVC/H.265 relies on the OS/GPU media stack in
+      // Chrome; common web codecs use software to avoid exhausting hardware
+      // decoder sessions in projects containing many clips.
+      this.decoderMode = this.codec === 'hevc' ? 'hardware' : 'software';
+
       let originalRotation = 0;
       try {
         originalRotation = typeof (videoTrack as any).getRotation === 'function'
@@ -80,16 +92,14 @@ export class AssetDecoder {
 
       this.sink = new CanvasSink(videoTrack, {
         decoderOptions: {
-          // Projects with many source files can exhaust Chrome's hardware
-          // decoder-session limit. Keep decoding on CPU while the final H.264
-          // encoder remains hardware accelerated.
-          hardwareAcceleration: 'prefer-software',
+          hardwareAcceleration: this.decoderMode === 'hardware' ? 'prefer-hardware' : 'prefer-software',
           optimizeForLatency: true,
         },
         poolSize: 8,
       });
       this.disposed = false;
       this.ready = true;
+      console.log(`[AssetDecoder] ${this.codec || 'unknown'} → ${this.decoderMode} decode`);
       this.resetIterator();
     } catch (error: any) {
       this.loadError = `Media initialization failed: ${error?.message || error}`;
