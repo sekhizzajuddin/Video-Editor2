@@ -1,6 +1,7 @@
 import path from "path"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
+import { VitePWA } from "vite-plugin-pwa"
 import { exec } from "child_process"
 import fs from "fs"
 import WebSocket from "ws"
@@ -292,7 +293,56 @@ export default defineConfig({
     'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''),
     'import.meta.env.VITE_GROQ_API_KEY': JSON.stringify(process.env.VITE_GROQ_API_KEY || process.env.GROQ_API_KEY || ''),
   },
-  plugins: [react(), audioSeparatorPlugin()],
+  plugins: [react(), audioSeparatorPlugin(), VitePWA({
+    // ───────────────────────────────────────────────────────────────────────
+    // Offline-first PWA (mobile/tablet + desktop share the same service worker).
+    // registerType/manifest are handled manually below; see src/main.tsx.
+    // ───────────────────────────────────────────────────────────────────────
+    registerType: 'autoUpdate',
+    injectRegister: false,           // manual registration via virtual:pwa-register (main.tsx)
+    includeAssets: ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'],
+    manifest: false,                 // our own public/manifest.json is used
+    workbox: {
+      // Precache every hashed build asset (JS/CSS/WASM/fonts) at install time so
+      // the whole editor — including export + AI (onnx/ffmpeg wasm) — runs offline
+      // after the first online visit. The legacy unused /ffmpeg copy is ignored.
+      globPatterns: ['**/*.{js,mjs,css,html,json,png,svg,ico,webp,woff,woff2,wasm}'],
+      globIgnores: ['ffmpeg/**'],
+      maximumFileSizeToCacheInBytes: 64 * 1024 * 1024,
+      cleanupOutdatedCaches: true,
+      skipWaiting: true,
+      clientsClaim: true,
+      // SPA: serve the cached shell when a navigation can't reach the network.
+      navigateFallback: '/index.html',
+      navigateFallbackDenylist: [/^\/api\//, /^\/cf-api\//, /^\/separated\//, /^\/ffmpeg\//],
+      // CDN resources the app needs at runtime (Google Fonts, ffmpeg.wasm core,
+      // mediapipe/onnx fallback CDNs) — cached on first use so export/AI/text
+      // styling keep working with no connection.
+      runtimeCaching: [
+        {
+          urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+          handler: 'CacheFirst',
+          options: { cacheName: 'procut-fonts-css', expiration: { maxEntries: 10, maxAgeSeconds: 31536000 } },
+        },
+        {
+          urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+          handler: 'CacheFirst',
+          options: { cacheName: 'procut-fonts', cacheableResponse: { statuses: [0, 200] }, expiration: { maxEntries: 60, maxAgeSeconds: 31536000 } },
+        },
+        {
+          urlPattern: /^https:\/\/unpkg\.com\/@ffmpeg\/.*/i,
+          handler: 'CacheFirst',
+          options: { cacheName: 'procut-ffmpeg', cacheableResponse: { statuses: [0, 200] }, expiration: { maxEntries: 20, maxAgeSeconds: 31536000 } },
+        },
+        {
+          urlPattern: /^https:\/\/(cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)\/.*/i,
+          handler: 'CacheFirst',
+          options: { cacheName: 'procut-cdn', cacheableResponse: { statuses: [0, 200] }, expiration: { maxEntries: 60, maxAgeSeconds: 31536000 } },
+        },
+      ],
+    },
+    devOptions: { enabled: false },
+  })],
   server: {
     port: 3000,
     // Allow proxied preview hosts (e.g. sandboxed *.e2b.app) to reach the dev
@@ -312,6 +362,8 @@ export default defineConfig({
     },
   },
   preview: {
+    host: true,
+    allowedHosts: true,
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "credentialless",

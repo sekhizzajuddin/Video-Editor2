@@ -1,3 +1,12 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// [MOBILE SYNC] Desktop feature — it has a MOBILE counterpart.
+// Rule: if an update changes LOGIC, changes ARCHITECTURE, or FIXES A BUG, apply
+// the same change to the mobile file(s) below. SKIP if the update is UI-only.
+// Mobile counterpart:
+//   src/mobile/components/MobileTopBar.tsx
+//   src/mobile/components/MobileToolRail.tsx
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { 
   Menu,
   X,
