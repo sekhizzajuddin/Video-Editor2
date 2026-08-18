@@ -20,6 +20,7 @@ const TeleprompterModal = React.lazy(() => import('@/components/TeleprompterModa
 const WelcomeScreen = React.lazy(() => import('@/components/WelcomeScreen').then(m => ({ default: m.WelcomeScreen })));
 const AiCopilot = React.lazy(() => import('@/components/AiCopilot').then(m => ({ default: m.AiCopilot })));
 const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRatioConflictModal').then(m => ({ default: m.AspectRatioConflictModal })));
+const HelpModal = React.lazy(() => import('@/components/HelpModal').then(m => ({ default: m.HelpModal })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -435,12 +436,6 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  useEffect(() => {
-    const handleToggleCopilot = () => setShowCopilot(p => !p);
-    window.addEventListener('toggle-copilot', handleToggleCopilot);
-    return () => window.removeEventListener('toggle-copilot', handleToggleCopilot);
-  }, []);
-
   // Load project on mount is removed since WelcomeScreen handles it
 
   // Restore custom fonts from localStorage on startup
@@ -457,11 +452,33 @@ function App() {
     hydrateKeysFromServer().catch(() => {/* handled internally */});
   }, []);
 
-  // Listen for the global toggle-copilot event (e.g. from TopToolbar)
+  // Single listener for the global toggle-copilot event (TopToolbar + FAB).
+  // Previously this hook was registered TWICE, so one click toggled open then
+  // immediately closed — the chat appeared not to open at all.
   useEffect(() => {
-    const handleToggleCopilot = () => setShowCopilot(prev => !prev);
+    const handleToggleCopilot = (e: Event) => {
+      const detail = (e as CustomEvent<{ open?: boolean }>).detail;
+      if (detail && typeof detail.open === 'boolean') {
+        setShowCopilot(detail.open);
+      } else {
+        setShowCopilot((prev) => !prev);
+      }
+    };
+    const handleOpenCopilot = () => setShowCopilot(true);
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault();
+        setShowCopilot((prev) => !prev);
+      }
+    };
     window.addEventListener('toggle-copilot', handleToggleCopilot);
-    return () => window.removeEventListener('toggle-copilot', handleToggleCopilot);
+    window.addEventListener('open-copilot', handleOpenCopilot);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('toggle-copilot', handleToggleCopilot);
+      window.removeEventListener('open-copilot', handleOpenCopilot);
+      window.removeEventListener('keydown', handleKey);
+    };
   }, []);
 
   // Periodic Autosave Versioning (every 2 minutes)
@@ -735,12 +752,48 @@ function App() {
         </Suspense>
       )}
       {showCopilot && (
-        <ErrorBoundary fallback={<div />} key="ai-copilot">
-          <Suspense fallback={null}>
+        <ErrorBoundary
+          fallback={
+            <div className="fixed bottom-16 right-4 z-50 w-80 rounded-xl border border-red-500/40 bg-zinc-950 p-4 text-sm text-red-200 shadow-2xl">
+              AI Copilot crashed while opening. Check the console, then retry.
+              <button
+                type="button"
+                className="mt-3 block rounded bg-red-600 px-3 py-1.5 text-xs text-white"
+                onClick={() => setShowCopilot(false)}
+              >
+                Close
+              </button>
+            </div>
+          }
+          key="ai-copilot"
+        >
+          <Suspense
+            fallback={
+              <div className="fixed bottom-16 right-4 z-50 flex h-[600px] w-96 items-center justify-center rounded-2xl border border-white/10 bg-background/95 text-sm text-zinc-400 shadow-2xl">
+                Opening AI Copilot…
+              </div>
+            }
+          >
             <AiCopilot onClose={() => setShowCopilot(false)} />
           </Suspense>
         </ErrorBoundary>
       )}
+
+      {!showCopilot && (
+        <button
+          type="button"
+          onClick={() => setShowCopilot(true)}
+          title="Open AI Copilot (Ctrl+/)"
+          aria-label="Open AI Copilot"
+          className="fixed bottom-5 right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-900/50 ring-2 ring-white/10 transition hover:scale-105 hover:from-purple-500 hover:to-indigo-500"
+        >
+          <Sparkles className="h-5 w-5 text-amber-200" />
+        </button>
+      )}
+
+      <Suspense fallback={null}>
+        <HelpModal />
+      </Suspense>
       <Toaster />
     </div>
   );

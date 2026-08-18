@@ -46,6 +46,7 @@ import {
   type ColorSignature,
   type MaskFrameResult,
   computeMaskForFrame,
+
   buildColorSignature,
 } from './motionMask';
 

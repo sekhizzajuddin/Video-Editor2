@@ -41,6 +41,7 @@ export class RateLimiter {
 
   recordCall(): void {
     this.callTimestamps.push(Date.now());
+    this.notifyListeners(this.getStatus(), 'call_recorded');
   }
 
   async waitForSlot(): Promise<void> {
