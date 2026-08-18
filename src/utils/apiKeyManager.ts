@@ -15,9 +15,35 @@ import { useEditorStore } from '@/store/editorStore';
 let _hydrationDone = false;
 let _hydrationPromise: Promise<void> | null = null;
 
+// ─── Safe storage access ──────────────────────────────────────────────────────
+// sessionStorage is a browser-only API. The key getters below also run in Node
+// (vitest, SSR) where accessing it throws a ReferenceError, so all reads/writes
+// go through these guards and degrade to a no-op instead of crashing.
+
+function safeSessionGet(key: string): string | null {
+  try {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeSessionSet(key: string, value: string): void {
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, value);
+  } catch {
+    // Storage unavailable (SSR/tests/private mode) — nothing to do.
+  }
+}
+
 export function hydrateKeysFromServer(): Promise<void> {
   if (_hydrationDone) return Promise.resolve();
   if (_hydrationPromise) return _hydrationPromise;
+  if (typeof fetch === 'undefined') {
+    // Non-browser runtime without fetch — skip hydration entirely.
+    _hydrationDone = true;
+    return Promise.resolve();
+  }
 
   _hydrationPromise = fetch('/api/keys')
     .then((res) => {
@@ -25,10 +51,10 @@ export function hydrateKeysFromServer(): Promise<void> {
       return res.json();
     })
     .then((data: Record<string, string>) => {
-      if (data.geminiApiKey)     sessionStorage.setItem('procut_gemini_key',     data.geminiApiKey);
-      if (data.groqApiKey)       sessionStorage.setItem('procut_groq_key',       data.groqApiKey);
-      if (data.huggingFaceApiKey) sessionStorage.setItem('procut_huggingface_key', data.huggingFaceApiKey);
-      if (data.elevenLabsApiKey)  sessionStorage.setItem('procut_elevenlabs_key', data.elevenLabsApiKey);
+      if (data.geminiApiKey)      safeSessionSet('procut_gemini_key',      data.geminiApiKey);
+      if (data.groqApiKey)        safeSessionSet('procut_groq_key',        data.groqApiKey);
+      if (data.huggingFaceApiKey) safeSessionSet('procut_huggingface_key', data.huggingFaceApiKey);
+      if (data.elevenLabsApiKey)  safeSessionSet('procut_elevenlabs_key',  data.elevenLabsApiKey);
       _hydrationDone = true;
       console.info('[apiKeyManager] Keys hydrated from /api/keys');
     })
@@ -76,7 +102,7 @@ export function getEnvHuggingFaceKey(): string {
  */
 export function getEnvElevenLabsKey(): string {
   // @ts-ignore
-  return import.meta.env.VITE_ELEVENLABS_API_KEY || import.meta.env.ELEVENLABS_API_KEY || sessionStorage.getItem('procut_elevenlabs_key') || '';
+  return import.meta.env.VITE_ELEVENLABS_API_KEY || import.meta.env.ELEVENLABS_API_KEY || safeSessionGet('procut_elevenlabs_key') || '';
 }
 
 

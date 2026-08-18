@@ -1,10 +1,31 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini } from './aiClient';
 
 describe('aiClient tests', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+
+    // aiClient resolves API keys via fetchWithKeyFailover, which reads
+    // import.meta.env first and falls back to sessionStorage (browser-only).
+    // Stub both so the key-resolution path is deterministic in the Node test
+    // environment and the mocked global fetch is actually reached.
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-gemini-key');
+    vi.stubEnv('VITE_GROQ_API_KEY', 'test-groq-key');
+    vi.stubGlobal('sessionStorage', {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
+      key: vi.fn(() => null),
+      length: 0,
+    });
   });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
 
   describe('analyzeStoryboardWithGemini', () => {
     it('successfully parses raw JSON responses from Gemini', async () => {
