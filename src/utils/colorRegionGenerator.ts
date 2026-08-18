@@ -50,8 +50,8 @@ import {
   computeMaskForFrame,
   featherMask,
   maskBounds,
+  buildColorSignature,
 } from './motionMask';
-import { cornersToRect, normalizeRegionToFrame } from './frameSpace';
 
 // Re-export localContrast from motionMask for use in this module
 // It's defined as a private function in motionMask, so we need to import it differently
@@ -338,7 +338,7 @@ export function computeConstrainedMask(
     searchRadius,
     spreadLimit: signature.patchRadius > 0 ? settings.spreadLimit : undefined,
     useTexture: true,
-    scale_hint: signature.patchArea > 0 ? undefined : 1,
+    scaleHint: signature.patchArea > 0 ? undefined : 1,
   });
 
   // Apply temporal coherence check
