@@ -281,8 +281,8 @@ interface EditorActions {
   setMasterAudioStream: (stream: MediaStream | null) => void;
 
   // Clipboard
-  copyClip: (type?: 'clip' | 'style' | 'whole') => void;
-  pasteClip: (type?: 'clip' | 'style' | 'whole') => void;
+  copyClip: (type?: 'clip' | 'style' | 'whole' | 'style-only' | 'style-with-position') => void;
+  pasteClip: (type?: 'clip' | 'style' | 'whole' | 'style-only' | 'style-with-position') => void;
   clearClipboard: () => void;
   cutClip: () => void;
   duplicateClip: () => void;
@@ -3734,15 +3734,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     
     const actualPasteType = pasteType || clipData.type;
 
-    if (actualPasteType === 'style') {
+    if (actualPasteType === 'style' || actualPasteType === 'style-only' || actualPasteType === 'style-with-position') {
       // Paste Style: Apply properties of the first copied clip to all currently selected clips
       const sourceStyle = clipData.clips[0] as any;
       const targetIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
       if (targetIds.length === 0) return;
       
       targetIds.forEach(id => {
-        get().updateClip(id, {
-          transform: { ...sourceStyle.transform },
+        const updates: any = {
           opacity: sourceStyle.opacity,
           effects: [...sourceStyle.effects],
           colorFilters: sourceStyle.colorFilters ? { ...sourceStyle.colorFilters } : undefined,
@@ -3750,7 +3749,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           fxSettings: sourceStyle.fxSettings ? { ...sourceStyle.fxSettings } : undefined,
           audioSettings: sourceStyle.audioSettings ? { ...sourceStyle.audioSettings } : undefined,
           mask: sourceStyle.mask ? { ...sourceStyle.mask } : undefined,
+        };
+        
+        // Only include transform if pasting style with position
+        if (actualPasteType === 'style-with-position') {
+          updates.transform = { ...sourceStyle.transform };
+        }
+        
+        // Remove undefined keys
+        Object.keys(updates).forEach(key => {
+          if (updates[key] === undefined) delete updates[key];
         });
+        
+        get().updateClip(id, updates);
       });
       return;
     }

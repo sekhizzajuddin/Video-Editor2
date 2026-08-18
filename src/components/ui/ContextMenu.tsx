@@ -50,7 +50,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={menuRef}
       role="menu"
-      className="fixed z-[200] min-w-[200px] bg-[#1e1e1e] border border-[#3e3e3e] rounded-md shadow-2xl py-1 text-xs"
+      className="fixed z-[200] min-w-[200px] max-h-[80vh] overflow-y-auto bg-[#1e1e1e] border border-[#3e3e3e] rounded-md shadow-2xl py-1 text-xs [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       style={{ left: adjustedX, top: adjustedY }}
     >
       {items.map((item, idx) => {

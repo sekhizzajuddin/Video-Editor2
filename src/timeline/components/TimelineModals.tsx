@@ -184,7 +184,7 @@ export function TimelineModals({
       {/* ── Context Menu ──────────────────────────────────────────────── */}
       {contextMenu && (
         <div
-          className="timeline-context-menu fixed z-[9999] bg-[#2a2a2a] border border-[#444] rounded shadow-2xl overflow-hidden min-w-[160px] py-1"
+          className="timeline-context-menu fixed z-[9999] bg-[#2a2a2a] border border-[#444] rounded shadow-2xl max-h-[80vh] overflow-y-auto min-w-[160px] py-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
           style={{
             left: `${Math.min(contextMenu.x, window.innerWidth - 160)}px`,
             top: `${Math.min(contextMenu.y, window.innerHeight - (contextMenu.clipId === '' ? 100 : 380))}px`,
@@ -353,26 +353,41 @@ export function TimelineModals({
                     Split at Playhead
                   </button>
                   <div className="h-px bg-[#3e3e3e] my-1" />
-                  <button
-                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-                    onClick={() => {
-                      useEditorStore.getState().copyClip('clip' as const);
-                      setContextMenu(null);
-                    }}
-                  >
-                    <Copy className="w-3.5 h-3.5 text-blue-400" />
-                    Copy Clip (Base)
-                  </button>
-                  <button
-                    className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-                    onClick={() => {
-                      useEditorStore.getState().copyClip('style' as const);
-                      setContextMenu(null);
-                    }}
-                  >
-                    <Palette className="w-3.5 h-3.5 text-purple-400" />
-                    Copy Style
-                  </button>
+                  {contextMenu.mediaType === 'text' ? (
+                    <>
+                      <button
+                        className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                        onClick={() => {
+                          useEditorStore.getState().copyClip('style-only' as any);
+                          setContextMenu(null);
+                        }}
+                      >
+                        <Palette className="w-3.5 h-3.5 text-purple-400" />
+                        Copy Style Only
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                        onClick={() => {
+                          useEditorStore.getState().copyClip('style-with-position' as any);
+                          setContextMenu(null);
+                        }}
+                      >
+                        <Box className="w-3.5 h-3.5 text-cyan-400" />
+                        Copy Style with Position
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                      onClick={() => {
+                        useEditorStore.getState().copyClip('style' as const);
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Palette className="w-3.5 h-3.5 text-purple-400" />
+                      Copy Style
+                    </button>
+                  )}
                   <button
                     className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                     onClick={() => {
@@ -456,6 +471,27 @@ export function TimelineModals({
                         {clip.disabled ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Volume2 className="w-3.5 h-3.5 text-amber-400" />}
                         {clip.disabled ? 'Unmute Clip' : 'Mute Clip'}
                       </button>
+                    ) : null;
+                  })()}
+                  {(() => {
+                    const state = useEditorStore.getState();
+                    const hasStyleToPaste = state.clipboardData?.type === 'style' || 
+                                            state.clipboardData?.type === 'style-only' || 
+                                            state.clipboardData?.type === 'style-with-position';
+                    return hasStyleToPaste ? (
+                      <>
+                        <div className="h-px bg-[#3e3e3e] my-1" />
+                        <button
+                          className="w-full text-left px-3 py-2 text-xs text-purple-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                          onClick={() => {
+                            useEditorStore.getState().pasteClip('style');
+                            setContextMenu(null);
+                          }}
+                        >
+                          <Palette className="w-3.5 h-3.5" />
+                          Paste Style
+                        </button>
+                      </>
                     ) : null;
                   })()}
                   <div className="h-px bg-[#3e3e3e] my-1" />
