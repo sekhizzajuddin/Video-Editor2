@@ -20,7 +20,8 @@ import { getMediaTimeForClip } from '@/utils/speedRamp';
 
 import { applyLutToCanvas } from '@/utils/lutParser';
 import { applyAiBackgroundSmart, applySubjectNeonOutlineFlash } from '@/utils/aiBackgroundIntegrated';
-import { applyObjectRemoval } from '@/utils/objectRemoval';
+import { applyObjectRemoval, clearObjectRemovalCache } from '@/utils/objectRemoval';
+import { getWebGPUObjectRemovalEngine } from '@/utils/webgpu/WebGPUObjectRemoval';
 import { drawSubscribeAnimation } from '@/utils/socialAnimations';
 import {
   getCachedImage,
@@ -1399,20 +1400,67 @@ export async function renderCanvasEngine({
                   animSoft
                 );
               }
-              // Object Removal
+              // Object Removal (WebGPU-accelerated with Canvas2D fallback)
               if (clip.objectRemoval?.enabled) {
-                applyObjectRemoval(
-                  oCtx,
-                  offCanvas.width,
-                  offCanvas.height,
-                  clip.objectRemoval,
-                  currentTime,
-                  clip.startTime,
-                  offCanvas,
-                  clip.animations,
-                  isPlaying,
-                  clip.id
-                );
+                const webgpuEngine = getWebGPUObjectRemovalEngine();
+                
+                // Try WebGPU acceleration first for better performance
+                if (webgpuEngine.isAvailable()) {
+                  try {
+                    const resultCanvas = await webgpuEngine.processFrame(
+                      offCanvas,
+                      clip.objectRemoval,
+                      offCanvas.width,
+                      offCanvas.height
+                    );
+                    
+                    if (resultCanvas) {
+                      oCtx.drawImage(resultCanvas, 0, 0);
+                    } else {
+                      // Fallback to Canvas2D if WebGPU processing fails
+                      applyObjectRemoval(
+                        oCtx,
+                        offCanvas.width,
+                        offCanvas.height,
+                        clip.objectRemoval,
+                        currentTime,
+                        clip.startTime,
+                        offCanvas,
+                        clip.animations,
+                        isPlaying,
+                        clip.id
+                      );
+                    }
+                  } catch (err) {
+                    console.warn('[Object Removal] WebGPU processing failed, falling back to Canvas2D:', err);
+                    applyObjectRemoval(
+                      oCtx,
+                      offCanvas.width,
+                      offCanvas.height,
+                      clip.objectRemoval,
+                      currentTime,
+                      clip.startTime,
+                      offCanvas,
+                      clip.animations,
+                      isPlaying,
+                      clip.id
+                    );
+                  }
+                } else {
+                  // Use Canvas2D implementation
+                  applyObjectRemoval(
+                    oCtx,
+                    offCanvas.width,
+                    offCanvas.height,
+                    clip.objectRemoval,
+                    currentTime,
+                    clip.startTime,
+                    offCanvas,
+                    clip.animations,
+                    isPlaying,
+                    clip.id
+                  );
+                }
               }
               if (filters.shadows || filters.midtones || filters.highlights) {
                 applyColorGradingWheelsOnData(
