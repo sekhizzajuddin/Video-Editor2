@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isIsoBmff } from './VideoNormalizer';
+import { isIsoBmff, needsVideoNormalization } from './VideoNormalizer';
 
 /**
  * Container sniffing is what decides whether a media file goes straight to the
@@ -41,5 +41,11 @@ describe('isIsoBmff', () => {
 
   it('rejects buffers that are too short', () => {
     expect(isIsoBmff(new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74]))).toBe(false);
+  });
+
+  it('keeps MP4/MOV HEVC for the worker hybrid hardware decoder', () => {
+    expect(needsVideoNormalization(true, 'hevc')).toBe(false);
+    expect(needsVideoNormalization(true, 'avc')).toBe(false);
+    expect(needsVideoNormalization(false, 'hevc')).toBe(true);
   });
 });

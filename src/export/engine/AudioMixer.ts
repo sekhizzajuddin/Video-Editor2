@@ -1,5 +1,3 @@
-import type { TimelineClip } from '@/types';
-
 export class AudioMixer {
   private sampleRate = 48000;
 
@@ -28,9 +26,9 @@ export class AudioMixer {
         if (track.type === 'video' || track.type === 'audio') {
           for (const clip of track.clips) {
             const media = mediaMap.get(clip.mediaId);
-            if (media?.url && !clip.audioSettings?.muted) { 
+            if ((media?.url || media?._fileBlob) && !clip.audioSettings?.muted) {
               // Store track volume on the clip temporarily for mixing
-              audioClips.push({ ...clip, _url: media.url, _trackVolume: track.volume });
+              audioClips.push({ ...clip, _url: media.url, _blob: media._audioBlob || media._fileBlob, _trackVolume: track.volume });
             }
           }
         }
@@ -42,8 +40,9 @@ export class AudioMixer {
 
       const decodePromises = audioClips.map(async (clip) => {
         try {
-          const response = await fetch(clip._url);
-          const arrayBuffer = await response.arrayBuffer();
+          const arrayBuffer = clip._blob instanceof Blob
+            ? await clip._blob.arrayBuffer()
+            : await (await fetch(clip._url)).arrayBuffer();
           const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
           
           const source = ctx.createBufferSource();
@@ -68,10 +67,38 @@ export class AudioMixer {
           // Minimum floor to avoid -infinity issues
           volume = totalDb <= -40 ? 0 : Math.pow(10, totalDb / 20);
           const gainNode = ctx.createGain();
-          gainNode.gain.value = volume;
-          
-          source.connect(gainNode);
-          gainNode.connect(ctx.destination);
+          const clipStart = Math.max(0, clip.startTime || 0);
+          const clipDuration = Math.max(0.001, clip.duration || audioBuffer.duration);
+          const fadeIn = Math.min(clipDuration, Math.max(0, clip.audioSettings?.fadeIn || 0));
+          const fadeOut = Math.min(clipDuration, Math.max(0, clip.audioSettings?.fadeOut || 0));
+          gainNode.gain.setValueAtTime(fadeIn > 0 ? 0 : volume, clipStart);
+          if (fadeIn > 0) gainNode.gain.linearRampToValueAtTime(volume, clipStart + fadeIn);
+          if (fadeOut > 0) {
+            gainNode.gain.setValueAtTime(volume, Math.max(clipStart, clipStart + clipDuration - fadeOut));
+            gainNode.gain.linearRampToValueAtTime(0, clipStart + clipDuration);
+          }
+
+          // Preserve clip pan and basic bass/treble edits in the final mix.
+          const bass = ctx.createBiquadFilter();
+          bass.type = 'lowshelf';
+          bass.frequency.value = 200;
+          bass.gain.value = clip.audioSettings?.bass || 0;
+          const treble = ctx.createBiquadFilter();
+          treble.type = 'highshelf';
+          treble.frequency.value = 3000;
+          treble.gain.value = clip.audioSettings?.treble || 0;
+          const panner = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+          if (panner) panner.pan.value = Math.max(-1, Math.min(1, (clip.audioSettings?.pan || 0) / 100));
+
+          source.connect(bass);
+          bass.connect(treble);
+          treble.connect(gainNode);
+          if (panner) {
+            gainNode.connect(panner);
+            panner.connect(ctx.destination);
+          } else {
+            gainNode.connect(ctx.destination);
+          }
           
           // start(when, offset, duration)
           // offset is the time in the source buffer

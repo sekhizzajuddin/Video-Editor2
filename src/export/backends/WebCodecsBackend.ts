@@ -2,6 +2,7 @@ import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { EncoderBackend, EncoderBackendType, ExportOptions } from '../types';
 import { streamCapturedFrames } from '../frameCapture';
 import { streamAudioChunks } from '../audioChunks';
+import { h264CodecCandidates } from '../quality';
 
 export class WebCodecsBackend implements EncoderBackend {
   readonly type: EncoderBackendType = 'webcodecs';
@@ -35,14 +36,7 @@ export class WebCodecsBackend implements EncoderBackend {
   }
 
   private async getSupportedCodec(width: number, height: number, bitrate: number, fps: number): Promise<string> {
-    const candidates = [
-      'avc1.640034', // High Profile Level 5.2 (4K & High FPS)
-      'avc1.640028', // High Profile Level 4.0 (1080p high quality)
-      'avc1.4d002a', // Main Profile Level 4.2
-      'avc1.4d0028', // Main Profile Level 4.0
-      'avc1.42001f', // Baseline Profile Level 3.1
-      'avc1.42E01F', // Baseline Profile Level 3.1 (Alternate)
-    ];
+    const candidates = h264CodecCandidates(width, height, fps);
 
     for (const codec of candidates) {
       try {
@@ -60,7 +54,7 @@ export class WebCodecsBackend implements EncoderBackend {
         // try next candidate
       }
     }
-    return (width > 1920 || height > 1080) ? 'avc1.640034' : 'avc1.42E01F';
+    throw new Error(`H.264 is not supported at ${width}x${height} ${fps}fps`);
   }
 
   async export(opts: ExportOptions): Promise<Blob> {
@@ -111,7 +105,9 @@ export class WebCodecsBackend implements EncoderBackend {
       height: opts.height,
       bitrate,
       framerate: opts.fps,
-      latencyMode: 'quality',
+      latencyMode: 'realtime',
+      bitrateMode: 'variable',
+      hardwareAcceleration: 'prefer-hardware',
       avc: { format: 'avc' },
     });
 

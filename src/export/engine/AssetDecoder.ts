@@ -5,19 +5,38 @@ import {
   CanvasSink,
 } from 'mediabunny';
 
+type WrappedCanvas = {
+  canvas: CanvasImageSource;
+  timestamp: number;
+  duration: number;
+};
+
+/**
+ * Sequential, software-preferred export decoder.
+ *
+ * Calling CanvasSink.getCanvas() for every exported frame creates a sparse seek
+ * pipeline repeatedly. This decoder keeps a sequential canvas iterator alive,
+ * so source packets are decoded once instead of seeking back to a keyframe for
+ * each output frame.
+ */
 export class AssetDecoder {
-  public rotation: number = 0;
-  public ready: boolean = false;
+  public rotation = 0;
+  public ready = false;
   public loadError: string | null = null;
+  public codec: string | null = null;
+  public decoderMode: 'hardware' | 'software' = 'software';
 
   private url: string;
   private input: any = null;
   private sink: InstanceType<typeof CanvasSink> | null = null;
-  private reusableCanvas: OffscreenCanvas | null = null;
-  private reusableCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private iterator: AsyncIterator<any> | null = null;
+  private current: WrappedCanvas | null = null;
+  private lookahead: WrappedCanvas | null = null;
+  private lastRequestedTime = -1;
   private decodeTail: Promise<any> = Promise.resolve();
+  private disposed = false;
 
-  constructor(url: string) {
+  constructor(url: string, _legacyOptions?: unknown) {
     this.url = url;
   }
 
@@ -25,20 +44,14 @@ export class AssetDecoder {
     try {
       let source: any;
       if (preBuffer) {
-        const blob = preBuffer instanceof Blob ? preBuffer : new Blob([preBuffer]);
-        source = new BlobSource(blob);
+        source = new BlobSource(preBuffer instanceof Blob ? preBuffer : new Blob([preBuffer]));
       } else {
-        const resp = await fetch(this.url);
-        if (!resp.ok) throw new Error(`fetch failed (${resp.status})`);
-        const blob = await resp.blob();
-        source = new BlobSource(blob);
+        const response = await fetch(this.url);
+        if (!response.ok) throw new Error(`fetch failed (${response.status})`);
+        source = new BlobSource(await response.blob());
       }
 
-      this.input = new Input({
-        source,
-        formats: ALL_FORMATS,
-      });
-
+      this.input = new Input({ source, formats: ALL_FORMATS });
       const videoTrack = await this.input.getPrimaryVideoTrack();
       if (!videoTrack) {
         this.loadError = 'No video track found in media';
@@ -49,11 +62,8 @@ export class AssetDecoder {
       let canDecode = true;
       try {
         canDecode = await videoTrack.canDecode();
-      } catch (e) {
-        // In test environments VideoDecoder.isConfigSupported may be missing;
-        // mediabunny throws but decoding can still proceed with our stubs.
-        console.warn('[AssetDecoder] canDecode check threw, assuming decodable:', e);
-        canDecode = true;
+      } catch (error) {
+        console.warn('[AssetDecoder] canDecode check threw, attempting decode:', error);
       }
       if (!canDecode) {
         this.loadError = 'Codec not supported by browser WebCodecs';
@@ -61,81 +71,121 @@ export class AssetDecoder {
         return;
       }
 
-      // CanvasSink by default respects the file's rotation metadata and yields
-      // already-rotated canvases (display dimensions). Therefore we MUST NOT
-      // apply the rotation again in the compositor — otherwise we double-rotate
-      // and get wrong orientation. Store 0 as the compositor-facing rotation.
-      // Keep original for debugging but export sees 0.
+      try {
+        this.codec = await videoTrack.getCodec();
+      } catch {
+        this.codec = null;
+      }
+      // Hybrid decode policy: HEVC/H.265 relies on the OS/GPU media stack in
+      // Chrome; common web codecs use software to avoid exhausting hardware
+      // decoder sessions in projects containing many clips.
+      this.decoderMode = this.codec === 'hevc' ? 'hardware' : 'software';
+
       let originalRotation = 0;
       try {
-        if (typeof (videoTrack as any).getRotation === 'function') {
-          originalRotation = await (videoTrack as any).getRotation();
-        } else {
-          originalRotation = (videoTrack as any).rotation || 0;
-        }
+        originalRotation = typeof (videoTrack as any).getRotation === 'function'
+          ? await (videoTrack as any).getRotation()
+          : (videoTrack as any).rotation || 0;
       } catch {}
-      this.rotation = 0; // compositor sees already-rotated canvas
-      // Debug: keep original rotation in a non-enumerable for logging if needed
+      this.rotation = 0; // CanvasSink applies file rotation metadata.
       (this as any)._originalRotation = originalRotation;
-      this.sink = new CanvasSink(videoTrack, { poolSize: 2 });
+
+      this.sink = new CanvasSink(videoTrack, {
+        decoderOptions: {
+          hardwareAcceleration: this.decoderMode === 'hardware' ? 'prefer-hardware' : 'prefer-software',
+          optimizeForLatency: true,
+        },
+        poolSize: 8,
+      });
+      this.disposed = false;
       this.ready = true;
-    } catch (e: any) {
-      this.loadError = `Media initialization failed: ${e?.message || e}`;
+      console.log(`[AssetDecoder] ${this.codec || 'unknown'} → ${this.decoderMode} decode`);
+      this.resetIterator();
+    } catch (error: any) {
+      this.loadError = `Media initialization failed: ${error?.message || error}`;
       console.warn('[AssetDecoder]', this.loadError, this.url);
       this.dispose();
     }
   }
 
+  private resetIterator(): void {
+    try { this.iterator?.return?.(); } catch {}
+    this.iterator = this.sink && typeof (this.sink as any).canvases === 'function'
+      ? (this.sink as any).canvases(0)[Symbol.asyncIterator]()
+      : null;
+    this.current = null;
+    this.lookahead = null;
+    this.lastRequestedTime = -1;
+  }
+
+  private async decodeSequential(timestampSeconds: number): Promise<CanvasImageSource | null> {
+    if (!this.iterator) {
+      const wrapped = await this.sink!.getCanvas(timestampSeconds);
+      return wrapped?.canvas || null;
+    }
+
+    // A media item may be reused later with a source-time reset. Restart only
+    // for genuine backwards movement; normal forward playback never seeks.
+    if (this.lastRequestedTime >= 0 && timestampSeconds + 0.0005 < this.lastRequestedTime) {
+      this.resetIterator();
+    }
+    this.lastRequestedTime = timestampSeconds;
+
+    while (!this.disposed) {
+      if (!this.lookahead) {
+        const next = await this.iterator.next();
+        if (next.done || !next.value) break;
+        this.lookahead = next.value as WrappedCanvas;
+      }
+
+      // Keep the latest source frame whose presentation time is <= requested
+      // time. Retaining one lookahead frame avoids consuming too far.
+      if (this.lookahead.timestamp <= timestampSeconds + 0.0005) {
+        this.current = this.lookahead;
+        this.lookahead = null;
+        continue;
+      }
+      break;
+    }
+
+    return this.current?.canvas || null;
+  }
+
   async getFrameAt(timestampMicroseconds: number): Promise<CanvasImageSource | null> {
-    if (!this.sink || !this.ready) return this.reusableCanvas || null;
+    if (!this.sink || !this.ready || this.disposed) return null;
     const timestampSeconds = Math.max(0, timestampMicroseconds / 1_000_000);
 
-    const framePromise = this.decodeTail.then(async () => {
-      try {
-        const wrapped = await this.sink!.getCanvas(timestampSeconds);
-        if (wrapped && wrapped.canvas) {
-          const w = wrapped.canvas.width;
-          const h = wrapped.canvas.height;
-          if (!this.reusableCanvas || this.reusableCanvas.width !== w || this.reusableCanvas.height !== h) {
-            this.reusableCanvas = new OffscreenCanvas(w, h);
-            this.reusableCtx = this.reusableCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
-          }
-
-          this.reusableCtx!.clearRect(0, 0, w, h);
-          this.reusableCtx!.drawImage(wrapped.canvas, 0, 0);
-        }
-        return this.reusableCanvas || null;
-      } catch (err: any) {
-        // In case of decoder seek glitch at clip boundary, reuse the last stable frame
-        return this.reusableCanvas || null;
-      }
-    });
-
-    this.decodeTail = framePromise.then(
-      () => undefined,
-      () => undefined,
-    );
-    return framePromise;
+    // Serialize accesses because transition overlap can request the same source
+    // twice in one output frame.
+    const framePromise = this.decodeTail.then(() => this.decodeSequential(timestampSeconds));
+    this.decodeTail = framePromise.then(() => undefined, () => undefined);
+    try {
+      return await framePromise;
+    } catch (error: any) {
+      this.loadError = `Video decoding failed: ${error?.message || error}`;
+      return null;
+    }
   }
 
   dispose(): void {
+    this.disposed = true;
+    try { this.iterator?.return?.(); } catch {}
+    this.iterator = null;
+    this.current = null;
+    this.lookahead = null;
+
     if (this.input) {
       try {
         const disposable = this.input as any;
-        if (typeof disposable.dispose === 'function') {
-          disposable.dispose();
-        } else {
-          const symDispose = (Symbol as any).dispose;
-          if (symDispose && typeof disposable[symDispose] === 'function') {
-            disposable[symDispose]();
-          }
+        if (typeof disposable.dispose === 'function') disposable.dispose();
+        else {
+          const symbolDispose = (Symbol as any).dispose;
+          if (symbolDispose && typeof disposable[symbolDispose] === 'function') disposable[symbolDispose]();
         }
       } catch {}
       this.input = null;
     }
     this.sink = null;
-    this.reusableCanvas = null;
-    this.reusableCtx = null;
     this.ready = false;
   }
 }

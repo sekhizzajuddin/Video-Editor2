@@ -113,6 +113,20 @@ export interface RenderLayer {
     left: number;
     right: number;
   };
+  flipH?: boolean;
+  flipV?: boolean;
+  colorFilters?: {
+    exposure: number;
+    contrast: number;
+    saturation: number;
+    blur: number;
+    temperature: number;
+    tint: number;
+    fadedFilm: number;
+    vignette: number;
+  };
+  mask?: any;
+  effects?: string[];
   zIndex: number;
   sourceRotation?: number;
   blendMode?: GlobalCompositeOperation;
@@ -296,6 +310,25 @@ export class FrameScheduler {
             left: getAnimatedExportValue(clip.crop.left || 0, t, st, clip.animations?.['crop.left']),
             right: getAnimatedExportValue(clip.crop.right || 0, t, st, clip.animations?.['crop.right']),
           } : undefined;
+          const cf = clip.colorFilters;
+          const colorFilters = cf ? {
+            exposure: getAnimatedExportValue(cf.exposure ?? 0, t, st, clip.animations?.['color.exposure']),
+            contrast: getAnimatedExportValue(cf.contrast ?? 100, t, st, clip.animations?.['color.contrast']),
+            saturation: getAnimatedExportValue(cf.saturation ?? 100, t, st, clip.animations?.['color.saturation']),
+            blur: getAnimatedExportValue(cf.blur ?? 0, t, st, clip.animations?.['color.blur']),
+            temperature: getAnimatedExportValue(cf.temperature ?? 0, t, st, clip.animations?.['color.temperature']),
+            tint: getAnimatedExportValue(cf.tint ?? 0, t, st, clip.animations?.['color.tint']),
+            fadedFilm: getAnimatedExportValue(cf.fadedFilm ?? 0, t, st, clip.animations?.['color.fadedFilm']),
+            vignette: getAnimatedExportValue(cf.vignette ?? 0, t, st, clip.animations?.['color.vignette']),
+          } : undefined;
+          const visualSettings = {
+            crop,
+            flipH: !!clip.transform?.flipH,
+            flipV: !!clip.transform?.flipV,
+            colorFilters,
+            mask: clip.mask,
+            effects: Array.isArray(clip.effects) ? clip.effects : undefined,
+          };
 
           if (track.type === 'video' && (clip.mediaId || clip.id)) {
             const lookupId = clip.mediaId || clip.id;
@@ -325,7 +358,7 @@ export class FrameScheduler {
                             opacity,
                             chromaKey: clip.chromaKey,
                             transform,
-                            crop,
+                            ...visualSettings,
                             zIndex,
                             order: layerOrder,
                             transitionGeometry,
@@ -360,7 +393,7 @@ export class FrameScheduler {
                       opacity,
                       chromaKey: clip.chromaKey,
                       transform,
-                      crop,
+                      ...visualSettings,
                       zIndex,
                       order: layerOrder,
                       transitionGeometry,
@@ -379,7 +412,7 @@ export class FrameScheduler {
               textData: clip,
               opacity,
               transform,
-              crop,
+              ...visualSettings,
               zIndex,
               order: layerOrder,
               transitionGeometry,
