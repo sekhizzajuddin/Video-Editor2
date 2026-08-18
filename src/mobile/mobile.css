@@ -1,0 +1,128 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   [DESKTOP SYNC] Mobile feature — it has a DESKTOP counterpart.
+   Rule: if an update changes LOGIC, changes ARCHITECTURE, or FIXES A BUG, apply
+   the same change to the desktop file(s) below. SKIP if the update is UI-only.
+   Desktop counterpart:
+     src/App.css
+     src/index.css
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile / Tablet editor styles (CapCut / KineMaster inspired)
+   Kept entirely separate from the desktop App.css — the desktop UI is untouched.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.mobile-app {
+  /* iPhone-style safe area handling */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  height: 100dvh;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mobile-app input,
+.mobile-app textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Hide scrollbars on the horizontal media/timeline rails but keep scrolling */
+.mobile-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.mobile-no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Bottom sheet spring animation */
+@keyframes mobile-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.mobile-sheet-enter {
+  animation: mobile-sheet-in 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes mobile-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.mobile-fade-enter {
+  animation: mobile-fade-in 0.2s ease-out;
+}
+
+@keyframes mobile-pop-in {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.mobile-pop-enter {
+  animation: mobile-pop-in 0.18s ease-out;
+}
+
+/* Drag handle pill used on sheets */
+.mobile-grabber {
+  position: relative;
+}
+.mobile-grabber::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Clip block touch feedback */
+.mobile-clip:active {
+  filter: brightness(1.2);
+}
+
+.mobile-playhead {
+  will-change: transform;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Preview canvas adaptation
+   The desktop PreviewCanvas ships its own wide header toolbar. On mobile that
+   toolbar is redundant (the MobileTopBar already exposes aspect ratio, undo/redo
+   and export), so we hide it and keep only the render surface + transport bar.
+   ───────────────────────────────────────────────────────────────────────────── */
+.mobile-preview > div > div:first-child {
+  display: none;
+}
+
+/* Make the desktop transport bar a bit friendlier on touch screens. */
+.mobile-preview input[type='range'] {
+  touch-action: pan-y;
+}
+
+/* Keep canvas gestures from hijacking page scroll. */
+.mobile-preview canvas {
+  touch-action: none;
+}

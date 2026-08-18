@@ -1,3 +1,13 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// [MOBILE SYNC] Desktop feature — it has a MOBILE counterpart.
+// Rule: if an update changes LOGIC, changes ARCHITECTURE, or FIXES A BUG, apply
+// the same change to the mobile file(s) below. SKIP if the update is UI-only.
+// Mobile counterpart:
+//   src/mobile/App.tsx
+//   src/mobile/components/MobileTopBar.tsx
+//   src/mobile/components/MobileToolRail.tsx
+// ─────────────────────────────────────────────────────────────────────────────
+
 import React, { useEffect, useCallback, useRef, useState, Suspense } from 'react';
 import { Music, MousePointer2, ArrowRightToLine, ArrowLeftToLine, ArrowLeftRight, Timer, Scissors, Hand, ZoomIn, Undo2, Redo2, Sparkles, SlidersHorizontal, MoveHorizontal } from 'lucide-react';
 import type { EditorTool } from '@/types';
@@ -7,8 +17,9 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { HelpTooltipManager } from '@/components/HelpTooltipManager';
 import { FileHandlerInitializer } from '@/components/FileHandlerInitializer';
 import { hydrateKeysFromServer } from '@/utils/apiKeyManager';
+import { useDeviceType } from '@/hooks/useDeviceType';
 
-
+const MobileApp = React.lazy(() => import('@/mobile/App').then(m => ({ default: m.MobileApp })));
 const MediaPanel = React.lazy(() => import('@/components/MediaPanel').then(m => ({ default: m.MediaPanel })));
 const ScopesPanel = React.lazy(() => import('@/components/ScopesPanel').then(m => ({ default: m.ScopesPanel })));
 const PropertiesPanel = React.lazy(() => import('@/components/PropertiesPanel').then(m => ({ default: m.PropertiesPanel })));
@@ -46,7 +57,7 @@ function getActionForKey(pressed: string, customShortcuts: Record<string, string
   return lastInvertedMap[pressed.toLowerCase()];
 }
 
-function App() {
+function DesktopApp() {
   const {
     togglePlayback,
     activeTool,
@@ -797,6 +808,25 @@ function App() {
       <Toaster />
     </div>
   );
+}
+
+/**
+ * Root router — the ONLY device-aware piece. It reads the PC / Mobile / Tablet
+ * identifier and mounts either the desktop editor or the mobile (touch-first)
+ * editor. The desktop UI itself is untouched.
+ */
+function App() {
+  const device = useDeviceType();
+
+  if (device === 'mobile' || device === 'tablet') {
+    return (
+      <Suspense fallback={<div className="h-screen w-screen bg-[#0a0a0a]" />}>
+        <MobileApp />
+      </Suspense>
+    );
+  }
+
+  return <DesktopApp />;
 }
 
 export default App;

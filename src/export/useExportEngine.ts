@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// [SHARED CORE] Used by BOTH the desktop editor (src/App.tsx → DesktopApp) and
+// the mobile editor (src/mobile/App.tsx → MobileApp). There is NO separate mobile
+// copy — edit ONCE here. LOGIC / ARCHITECTURE / BUGFIX changes automatically apply
+// to both UIs. UI-only changes belong in the individual UI layer instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ExportWorkerConfig } from './engine/export.worker';
 import { ExportWorkerManager } from './engine/ExportWorkerManager';

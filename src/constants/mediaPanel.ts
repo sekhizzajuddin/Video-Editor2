@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// [SHARED CORE] Used by BOTH the desktop editor (src/App.tsx → DesktopApp) and
+// the mobile editor (src/mobile/App.tsx → MobileApp). There is NO separate mobile
+// copy — edit ONCE here. LOGIC / ARCHITECTURE / BUGFIX changes automatically apply
+// to both UIs. UI-only changes belong in the individual UI layer instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { Waves } from 'lucide-react';
 import React from 'react';
 import { Film, Sun, Tv2, Radio, Monitor, Flame, ScanLine, Hexagon, FlipHorizontal, ZoomIn, Aperture, Eye, Focus, Grid3X3, Droplets, CloudSnow, CloudRain, Star, Sparkles, Wind, Leaf, Heart, Code2, Clapperboard, Zap, Activity } from 'lucide-react';

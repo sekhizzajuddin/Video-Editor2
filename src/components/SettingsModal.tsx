@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// [SHARED CORE] Used by BOTH the desktop editor (src/App.tsx → DesktopApp) and
+// the mobile editor (src/mobile/App.tsx → MobileApp). There is NO separate mobile
+// copy — edit ONCE here. LOGIC / ARCHITECTURE / BUGFIX changes automatically apply
+// to both UIs. UI-only changes belong in the individual UI layer instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw, History, Trash2, Heart } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback, useEffect } from 'react';
