@@ -507,10 +507,6 @@ export async function trackWithOpticalFlow(
     enableSmoothing: options.enableSmoothing ?? true,
     kalmanProcessNoise: options.kalmanProcessNoise ?? 0.01,
     kalmanMeasurementNoise: options.kalmanMeasurementNoise ?? 0.1,
-    onProgress: options.onProgress,
-    shouldCancel: options.shouldCancel,
-    clipTransform: options.clipTransform,
-    aspectRatio: options.aspectRatio,
   };
 
   const fps = 30; // Track at higher FPS for better accuracy
@@ -519,7 +515,7 @@ export async function trackWithOpticalFlow(
 
   // Setup canvas in FRAME space
   const store = useEditorStore.getState();
-  const aspectRatio = opts.aspectRatio || store.aspectRatio || '16:9';
+  const aspectRatio = options.aspectRatio || store.aspectRatio || '16:9';
   const { W, H } = getFrameSize(aspectRatio);
 
   const canvas = document.createElement('canvas');
@@ -533,7 +529,7 @@ export async function trackWithOpticalFlow(
     videoEl.videoHeight || 1080,
     W,
     H,
-    opts.clipTransform
+    options.clipTransform
   );
 
   const paintFrame = () => {
@@ -648,7 +644,7 @@ export async function trackWithOpticalFlow(
 
   // Track frame by frame
   for (let step = 1; step <= numSteps; step++) {
-    if (opts.shouldCancel?.()) break;
+    if (options.shouldCancel?.()) break;
 
     const relativeTime = step * frameInterval;
     const targetTime = startTime + relativeTime;
@@ -809,7 +805,7 @@ export async function trackWithOpticalFlow(
     prevPyramid = currPyramid;
     prevTime = relativeTime;
 
-    opts.onProgress?.(step / numSteps);
+    options.onProgress?.(step / numSteps);
   }
 
   return results;
