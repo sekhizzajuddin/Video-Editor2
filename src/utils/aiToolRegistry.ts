@@ -215,6 +215,176 @@ export const aiToolRegistry = [
       },
       required: ["fromClipId", "toClipId", "type"]
     }
+  },
+  {
+    name: "inspectPreview",
+    description: "Capture the program monitor at the current playhead and analyze it with the vision model. Use when the user asks what you see, how it looks, framing, color, or after visual edits.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "What to look for in the frame." },
+        time: { type: "number", description: "Optional timeline time in seconds. Defaults to playhead." }
+      }
+    }
+  },
+  {
+    name: "addTrack",
+    description: "Creates a new timeline track.",
+    parameters: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["video", "audio", "text", "fx", "adjustment"], description: "Track type." }
+      },
+      required: ["type"]
+    }
+  },
+  {
+    name: "addMarker",
+    description: "Adds a marker on the timeline.",
+    parameters: {
+      type: "object",
+      properties: {
+        time: { type: "number", description: "Time in seconds. Defaults to playhead." },
+        name: { type: "string", description: "Marker label." },
+        color: { type: "string", description: "CSS color, e.g. #fbbf24." }
+      }
+    }
+  },
+  {
+    name: "setInOut",
+    description: "Sets the in and/or out points for export/playback range.",
+    parameters: {
+      type: "object",
+      properties: {
+        inPoint: { type: "number", description: "In point seconds, or null to clear." },
+        outPoint: { type: "number", description: "Out point seconds, or null to clear." }
+      }
+    }
+  },
+  {
+    name: "moveClip",
+    description: "Moves a clip to a new start time and optionally another track.",
+    parameters: {
+      type: "object",
+      properties: {
+        clipId: { type: "string" },
+        startTime: { type: "number" },
+        trackId: { type: "string" }
+      },
+      required: ["clipId", "startTime"]
+    }
+  },
+  {
+    name: "selectClip",
+    description: "Selects one or more clips.",
+    parameters: {
+      type: "object",
+      properties: {
+        clipId: { type: "string" },
+        clipIds: { type: "array", items: { type: "string" } }
+      }
+    }
+  },
+  {
+    name: "duplicateClip",
+    description: "Duplicates the target clip immediately after it.",
+    parameters: {
+      type: "object",
+      properties: { clipId: { type: "string" } },
+      required: ["clipId"]
+    }
+  },
+  {
+    name: "muteTrack",
+    description: "Mutes or unmutes a track.",
+    parameters: {
+      type: "object",
+      properties: {
+        trackId: { type: "string" },
+        muted: { type: "boolean", description: "Defaults to true (mute)." }
+      },
+      required: ["trackId"]
+    }
+  },
+  {
+    name: "setTrackVolume",
+    description: "Sets a track's mixer volume (0-1).",
+    parameters: {
+      type: "object",
+      properties: {
+        trackId: { type: "string" },
+        volume: { type: "number", description: "0 to 1." }
+      },
+      required: ["trackId", "volume"]
+    }
+  },
+  {
+    name: "setAspectRatio",
+    description: "Changes the project canvas aspect ratio. Use reframeProject if clips should be scaled to fill.",
+    parameters: {
+      type: "object",
+      properties: {
+        ratio: { type: "string", enum: ["16:9", "9:16", "1:1", "4:3"] },
+        reframe: { type: "boolean", description: "If true, also scale clips to fill the new ratio." }
+      },
+      required: ["ratio"]
+    }
+  },
+  {
+    name: "reframeProject",
+    description: "Smart-reframe the whole project to a new aspect ratio (scales clips to fill).",
+    parameters: {
+      type: "object",
+      properties: {
+        ratio: { type: "string", enum: ["16:9", "9:16", "1:1", "4:3"] }
+      },
+      required: ["ratio"]
+    }
+  },
+  {
+    name: "zoomTimeline",
+    description: "Zooms the timeline view in or out.",
+    parameters: {
+      type: "object",
+      properties: {
+        direction: { type: "string", enum: ["in", "out", "fit"] }
+      },
+      required: ["direction"]
+    }
+  },
+  {
+    name: "setPlaybackSpeed",
+    description: "Sets preview playback speed.",
+    parameters: {
+      type: "object",
+      properties: { speed: { type: "number", description: "e.g. 0.5, 1, 1.5, 2" } },
+      required: ["speed"]
+    }
+  },
+  {
+    name: "openExport",
+    description: "Opens the export dialog so the user can render the video.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "openSettings",
+    description: "Opens the Settings modal (API keys, shortcuts, performance).",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "openHelp",
+    description: "Opens the in-app help documentation.",
+    parameters: {
+      type: "object",
+      properties: {
+        section: { type: "string", description: "Optional section id: media-panel, timeline, properties, preview, audio-mixer, export, toolbar." }
+      }
+    }
+  },
+  {
+    name: "listFeatures",
+    description: "Returns a compact list of ProCut features the agent can operate.",
+    parameters: { type: "object", properties: {} }
   }
 ];
 
@@ -430,11 +600,133 @@ export const executeAITool = (name: string, args: any, context?: { currentTime?:
       return { success: true, message: `Text "${args.text?.slice(0, 20) || 'Text'}" added at ${args.startTime || store.currentTime}s` };
     }
     case 'addTransition': {
-      // Store-level transition integration; for now mark as success
+      const fromId = args.fromClipId;
+      const toId = args.toClipId;
+      const from = store.tracks.flatMap((t: any) => t.clips || []).find((c: any) => c.id === fromId);
+      if (!from) return { success: false, error: 'fromClipId not found' };
+      const duration = typeof args.duration === 'number' ? args.duration : 0.5;
+      const transition = {
+        id: 'tr_' + Date.now().toString(36),
+        name: String(args.type || 'dissolve'),
+        type: args.type || 'dissolve',
+        duration,
+        params: {},
+      };
+      store.updateClip(fromId, { transitionOut: transition });
+      if (toId) {
+        store.updateClip(toId, { transitionIn: { ...transition, id: transition.id + '_in' } });
+      }
+      store.saveSnapshot?.('Add Transition');
       return {
         success: true,
-        message: `Transition "${args.type}" added between clips`,
-        result: { transitionType: args.type, duration: args.duration },
+        message: `Transition "${args.type}" added (${duration}s)`,
+        result: { transitionType: args.type, duration },
+      };
+    }
+    case 'inspectPreview': {
+      return {
+        success: true,
+        message: 'Preview inspection requested',
+        result: {
+          __inspectPreview: true,
+          question: args?.question || 'Describe the current frame and suggest concrete edits.',
+          time: typeof args?.time === 'number' ? args.time : store.currentTime,
+        },
+      };
+    }
+    case 'addTrack': {
+      const type = args.type || 'video';
+      store.addTrack(type);
+      return { success: true, message: `Added ${type} track` };
+    }
+    case 'addMarker': {
+      const time = typeof args.time === 'number' ? args.time : store.currentTime;
+      store.addMarker(time, args.name, args.color);
+      return { success: true, message: `Marker added at ${Number(time).toFixed(2)}s` };
+    }
+    case 'setInOut': {
+      if (args.inPoint !== undefined) store.setInPoint(args.inPoint);
+      if (args.outPoint !== undefined) store.setOutPoint(args.outPoint);
+      return { success: true, message: `In/out set (in=${store.inPoint}, out=${store.outPoint})` };
+    }
+    case 'moveClip': {
+      const ok = store.moveClip(args.clipId, args.startTime, args.trackId, true);
+      store.saveSnapshot?.('Move Clip');
+      return ok
+        ? { success: true, message: `Moved clip to ${args.startTime}s` }
+        : { success: false, error: 'Could not move clip (locked track or missing id)' };
+    }
+    case 'selectClip': {
+      const ids = Array.isArray(args.clipIds) ? args.clipIds : args.clipId ? [args.clipId] : [];
+      if (ids.length === 0) return { success: false, error: 'No clipId provided' };
+      store.selectClips(ids);
+      return { success: true, message: `Selected ${ids.length} clip(s)` };
+    }
+    case 'duplicateClip': {
+      store.selectClips([args.clipId]);
+      store.duplicateClip();
+      return { success: true, message: `Duplicated clip ${args.clipId}` };
+    }
+    case 'muteTrack': {
+      const track = store.tracks.find((t: any) => t.id === args.trackId);
+      if (!track) return { success: false, error: 'Track not found' };
+      const shouldMute = args.muted !== undefined ? !!args.muted : true;
+      if (!!track.muted !== shouldMute) store.toggleTrackMute(args.trackId);
+      return { success: true, message: `${shouldMute ? 'Muted' : 'Unmuted'} track ${track.name}` };
+    }
+    case 'setTrackVolume': {
+      store.setTrackVolume(args.trackId, Math.max(0, Math.min(1, Number(args.volume))));
+      return { success: true, message: `Track volume set to ${args.volume}` };
+    }
+    case 'setAspectRatio': {
+      if (args.reframe) store.reframeProject(args.ratio);
+      else store.setAspectRatio(args.ratio);
+      return { success: true, message: `Aspect ratio set to ${args.ratio}` };
+    }
+    case 'reframeProject': {
+      store.reframeProject(args.ratio);
+      return { success: true, message: `Project reframed to ${args.ratio}` };
+    }
+    case 'zoomTimeline': {
+      if (args.direction === 'in') store.zoomIn();
+      else if (args.direction === 'out') store.zoomOut();
+      else {
+        const width = typeof document !== 'undefined'
+          ? (document.querySelector('.timeline-track-workspace') as HTMLElement | null)?.clientWidth || 800
+          : 800;
+        const dur = store.totalDuration || 1;
+        store.setZoomLevel(Math.max(20, Math.min(400, (width - 150) / dur)));
+      }
+      return { success: true, message: `Timeline zoom ${args.direction}` };
+    }
+    case 'setPlaybackSpeed': {
+      store.setPlaybackSpeed(Number(args.speed) || 1);
+      return { success: true, message: `Playback speed ${args.speed}x` };
+    }
+    case 'openExport': {
+      store.setShowExportModal(true);
+      return { success: true, message: 'Opened export dialog' };
+    }
+    case 'openSettings': {
+      store.setShowSettingsModal(true);
+      return { success: true, message: 'Opened settings' };
+    }
+    case 'openHelp': {
+      store.setShowHelpMenu(true, args.section || 'timeline');
+      return { success: true, message: 'Opened help' };
+    }
+    case 'listFeatures': {
+      return {
+        success: true,
+        message: 'ProCut feature index returned',
+        result: {
+          surfaces: ['media', 'timeline', 'preview', 'properties', 'mixer', 'export', 'copilot'],
+          edit: ['split', 'ripple', 'trim', 'move', 'keyframes', 'transitions', 'pip', 'markers'],
+          color: ['temperature', 'tint', 'exposure', 'contrast', 'saturation', 'lut', 'curves'],
+          audio: ['volume', 'fade', 'eq', 'ducking', 'vocal-separation', 'mixer'],
+          text: ['titles', 'captions', 'kinetic', 'presets'],
+          fx: ['glitch', 'film', 'particles', 'chroma', 'mask', 'object-removal', 'ai-background'],
+        },
       };
     }
     case 'applyAnimationExpression': {

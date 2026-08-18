@@ -10,6 +10,8 @@ import {
   pickPlan,
   buildSystemHint,
 } from './SemanticsDisambiguator';
+import { groqChat } from './groqChat';
+import { getCatalogOrFallback } from './groqModelCatalog';
 
 export interface PlanGenerationContext {
   userMessage: string;
@@ -30,7 +32,6 @@ export interface PlanGenerationConfig {
 }
 
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
-const BASE_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 const SYSTEM_PROMPT = `You are an expert video-editing automation planner.
 
@@ -119,43 +120,22 @@ export class AIPlanGenerator {
     }
 
     const userPrompt = this.buildUserPrompt(ctx);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
-
     try {
-      const response = await fetch(BASE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${ctx.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: ctx.model ?? DEFAULT_MODEL,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: this.config.temperature,
-          max_tokens: this.config.maxOutputTokens,
-          // Groq accepts these JSON-mode params for `openai-compatible` chat:
-          //   - response_format: { type: 'json_object' }
-          //   - structured outputs via json_schema (Llama 3.3 70B supports this).
-          response_format: { type: 'json_object' },
-          stream: false,
-        }),
-        signal: controller.signal,
+      const catalog = getCatalogOrFallback();
+      const result = await groqChat({
+        purpose: 'reasoning',
+        model: ctx.model ?? catalog.reasoning ?? DEFAULT_MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: this.config.temperature,
+        maxTokens: this.config.maxOutputTokens,
+        json: true,
+        timeoutMs: 25000,
       });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        return this.fallbackPlan(ctx, `API ${response.status}`);
-      }
-
-      const data = await response.json();
-      const content = data?.choices?.[0]?.message?.content ?? '';
-      return this.parseJsonPlan(content, ctx);
+      return this.parseJsonPlan(result.content ?? '', ctx);
     } catch (err: any) {
-      clearTimeout(timeout);
       return this.fallbackPlan(ctx, err?.message ?? 'unknown');
     }
   }

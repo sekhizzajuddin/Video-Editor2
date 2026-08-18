@@ -43,6 +43,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
     runSelfTest,
     abortSelfTest,
     streamingText,
+    agentModels,
   } = useAiCopilot();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stats = getTrainingStats();
@@ -196,8 +197,8 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-white/5">
         <div className="flex items-center gap-2 text-primary">
           <Sparkles className="w-5 h-5" aria-hidden="true" />
-          <h3 className="font-semibold tracking-tight">AI Copilot</h3>
-          <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-2" aria-label="Pro tier">Pro</span>
+          <h3 className="font-semibold tracking-tight">AI Agent</h3>
+          <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-2" aria-label="Agent mode">Agent</span>
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -328,8 +329,13 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
           <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 space-y-4">
             <Bot className="w-12 h-12 text-zinc-700" />
             <div>
-              <p className="font-medium text-zinc-300">How can I help you edit?</p>
-              <p className="text-sm mt-1">Try "Add a cinematic zoom to the selected clip" or "Split the clip here"</p>
+              <p className="font-medium text-zinc-300">I can actually edit this project.</p>
+              <p className="text-sm mt-1">Try “Add a cinematic title”, “Look at the preview”, or “Warm up the selected clip”.</p>
+              {agentModels && (
+                <p className="mt-3 text-[10px] text-zinc-600">
+                  Reasoning: {agentModels.reasoning.split('/').pop()} · Vision: {agentModels.vision.split('/').pop()} · Key: {agentModels.keySource}
+                </p>
+              )}
             </div>
             {stats.totalInteractions > 0 && (
               <div className="mt-4 text-xs text-zinc-600">

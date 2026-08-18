@@ -147,17 +147,9 @@ export class EditSubAgent implements SubAgent {
     description: 'Handles timeline edits: split, delete, trim, keyframes.',
   };
 
-  preconditionCheck(args: any, context: ConversationContext) {
-    if (args?.clipId) {
-      const exists = context.selectedClipIds.includes(args.clipId)
-        || (context as any).allClipIds?.includes?.(args.clipId);
-      if (!exists && !(context as any).allowUnknownIds) {
-        return {
-          canProceed: false,
-          reason: `Clip "${args.clipId}" not found and not selected`,
-        };
-      }
-    }
+  preconditionCheck(_args: any, _context: ConversationContext) {
+    // Clip existence is validated at execute time so agent plans that
+    // target IDs from getEditorState are not rejected early.
     return { canProceed: true };
   }
 

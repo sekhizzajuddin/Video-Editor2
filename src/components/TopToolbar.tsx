@@ -479,8 +479,13 @@ export function TopToolbar() {
         </button>
 
         <button
-          onClick={() => window.dispatchEvent(new CustomEvent('toggle-copilot'))}
-          title="AI Copilot"
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('toggle-copilot', { detail: {} }));
+          }}
+          title="AI Copilot (Ctrl+/)"
           className="px-3 py-1.5 bg-gradient-to-r from-purple-600/90 to-indigo-600/90 hover:from-purple-500 hover:to-indigo-500 text-white border border-purple-400/50 text-xs rounded-full flex items-center gap-1.5 transition-all font-semibold shadow-md shadow-purple-900/40"
         >
           <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />

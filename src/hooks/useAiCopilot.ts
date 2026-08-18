@@ -1,5 +1,9 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { getGroqKey } from '../utils/aiClient';
+import { ensureGroqReady, groqTranscribe, hasAnyGroqKey, getPreferredGroqKey } from '../utils/ai-copilot/groqChat';
+import { runAgentLoop } from '../utils/ai-copilot/AgentLoop';
+import { buildHelpMessage } from '../utils/ai-copilot/systemKnowledge';
+import { getCatalogOrFallback } from '../utils/ai-copilot/groqModelCatalog';
 
 import { useEditorStore } from '../store/editorStore';
 import { aiToolRegistry, executeAITool, requiresConfirmation } from '../utils/aiToolRegistry';
@@ -47,6 +51,12 @@ function snapshotContext(store: any): ConversationContext {
     },
     recentActions: memoryStore.getRecentActions(5).map((a) => a.rawPrompt),
     userIntent: undefined,
+    mediaLibrary: (store.mediaLibrary ?? []).map((m: any) => ({
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      duration: m.duration,
+    })),
   };
 }
 
@@ -109,6 +119,10 @@ export const useAiCopilot = () => {
     fullText: string;
     phase: 'phase-1' | 'phase-2' | 'phase-3';
   } | null>(null);
+  const [agentModels, setAgentModels] = useState(() => {
+    const c = getCatalogOrFallback();
+    return { reasoning: c.reasoning, vision: c.vision, keySource: getPreferredGroqKey().source };
+  });
   const [selfTestState, setSelfTestState] = useState<{
     isRunning: boolean;
     report: AISelfTestReport | null;
@@ -138,6 +152,7 @@ export const useAiCopilot = () => {
   const lastMessageTime = useRef(0);
   const isMountedRef = useRef(true);
   const resolvedTextRef = useRef<string>('');
+  const chatHydratedRef = useRef(false);
   const RATE_LIMIT_MS = 1000;
 
   // Subscribe to rate limiter events
@@ -151,6 +166,32 @@ export const useAiCopilot = () => {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('procut_ai_chat_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) setMessages(parsed.slice(-40));
+      }
+    } catch { /* ignore */ }
+    requestAnimationFrame(() => { chatHydratedRef.current = true; });
+    ensureGroqReady().then((cat) => {
+      if (!isMountedRef.current) return;
+      setAgentModels({
+        reasoning: cat.reasoning,
+        vision: cat.vision,
+        keySource: getPreferredGroqKey().source,
+      });
+    }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!chatHydratedRef.current) return;
+    try {
+      localStorage.setItem('procut_ai_chat_v1', JSON.stringify(messages.slice(-40)));
+    } catch { /* ignore */ }
+  }, [messages]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -667,7 +708,7 @@ export const useAiCopilot = () => {
         break;
       }
       case 'GET_HELP':
-        responseContent = `🤖 **AI Copilot Capabilities**\n\n**Local (0 RPM):**\n• Play/pause/stop/seek\n• Undo/redo\n• Get project info (duration, clips count)\n• Self-test\n\n**AI-Assisted:**\n• Color grading & LUTs\n• Editing (split/trim/delete)\n• Effects & transitions\n• Audio adjustments\n• Text & captions\n• Export\n\nTry: "play", "add text 'Hello'", "test everything"`;
+        responseContent = buildHelpMessage();
         break;
       case 'SAVE_PROJECT':
         // Trigger save flow - just message for now
@@ -853,296 +894,119 @@ export const useAiCopilot = () => {
       return;
     }
 
-    // FIX: Use getGroqKey() — the canonical fallback chain (env → sessionStorage → settings).
-    // Vercel env vars are NOT prefixed with VITE_, so import.meta.env.VITE_GROQ_API_KEY
-    // is always undefined in the deployed bundle. getGroqKey() reads sessionStorage which
-    // is hydrated by the /api/keys fetch in App.tsx.
-    // @ts-ignore
-    const groqKey = getGroqKey();
-    if (!groqKey) {
+    await ensureGroqReady().catch(() => undefined);
+    if (!hasAnyGroqKey()) {
       if (isMountedRef.current) {
         setMessages(prev => [...prev,
           { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
-          { id: (Date.now() + 1).toString(), role: 'assistant', content: 'Please configure your Groq API key in the settings to use the AI Copilot.', timestamp: Date.now() }
+          { id: (Date.now() + 1).toString(), role: 'assistant', content: 'No Groq key found. I first look for VITE_GROQ_API_KEY (Vercel / env), then your Settings key. Add one to continue.', timestamp: Date.now() }
         ]);
       }
       return;
     }
 
-    // Phase 2: When NLU marks this as workflow OR simple but multi-step, use executor
-    const isWorkflow = 'complexity' in localIntent && (localIntent as any).complexity === 'workflow';
-    const userWantsExecutor = isWorkflow || text.toLowerCase().includes('first do') || text.toLowerCase().includes('then ');
-
-    if (userWantsExecutor) {
-      return executeViaExecutor(resolvedText, groqKey, text);
-    }
-
-    // BUG #7: Legacy single-shot path kept for simple AI queries that don't
-    // need multi-step planning. Mutex: isProcessing is checked at top of
-    // sendMessage, so this branch is entry-safe. Below: emit user msg ONCE.
-
-    const newUserMsg: ChatMessage = { 
-      id: Date.now().toString(), 
-      role: 'user', 
+    const newUserMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
       content: text,
       timestamp: Date.now()
     };
     if (isMountedRef.current) {
       setMessages(prev => [...prev, newUserMsg]);
       setIsProcessing(true);
+      setWorkflowProgress({
+        planId: 'agent',
+        totalSteps: 0,
+        currentStepIndex: 0,
+        currentStepLabel: 'Agent planning…',
+        phase: 'planning',
+        iteration: 0,
+        succeeded: 0,
+        failed: 0,
+        steps: [],
+      });
     }
 
-    const capturedContext = { ...conversationContextRef.current };
-    const controller = new AbortController();
-    const API_TIMEOUT_MS = 30000;
-    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-
-    // Phase 1: Record API call in rate limiter
-    globalRateLimiter.recordCall();
-
+    const abort = new AbortController();
     try {
-      const { intent, confidence, entities } = await trainingModule.analyzeIntent(
-        text,
-        conversationContextRef.current
-      );
+      const history = [...messages, newUserMsg]
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .slice(-8)
+        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
-      let thinkingTrace: ThinkingTrace | undefined;
-      
-      if (thinkingMode) {
-        thinkingTrace = await trainingModule.generateThinkingTrace(
-          intent,
-          conversationContextRef.current,
-          aiToolRegistry
-        );
-      }
-
-      const timelineContext = editorStore.tracks.map(t => ({
-        id: t.id,
-        name: t.name,
-        type: t.type,
-        clips: t.clips.map(c => ({
-          id: c.id,
-          startTime: c.startTime.toFixed(2),
-          duration: c.duration.toFixed(2),
-          mediaName: editorStore.mediaLibrary.find(m => m.id === c.mediaId)?.name || 'Unknown'
-        }))
-      }));
-
-      const mediaLibraryContext = editorStore.mediaLibrary.map(m => ({
-        id: m.id,
-        name: m.name,
-        type: m.type,
-        duration: m.duration
-      }));
-
-      const systemPrompt = `You are a professional Video Editor AI Assistant with advanced reasoning capabilities.
-
-CURRENT PROJECT CONTEXT:
-- Project: "${editorStore.projectName}"
-- Timeline Duration: ${editorStore.totalDuration.toFixed(2)}s
-- Current Playhead: ${editorStore.currentTime.toFixed(2)}s
-- Selected Clips: ${editorStore.selectedClipIds.length > 0 ? editorStore.selectedClipIds.join(', ') : 'None'}
-- Total Tracks: ${editorStore.tracks.length}
-- Total Clips: ${timelineContext.reduce((sum, t) => sum + t.clips.length, 0)}
-
-TIMELINE STATE:
-\`\`\`json
-${JSON.stringify(timelineContext, null, 2)}
-\`\`\`
-
-MEDIA LIBRARY:
-\`\`\`json
-${JSON.stringify(mediaLibraryContext, null, 2)}
-\`\`\`
-
-INTENT ANALYSIS (from AI Training Module):
-- Detected Intent: ${intent}
-- Confidence: ${(confidence * 100).toFixed(0)}%
-- Entities: ${entities.map(e => `${e.type}:${e.value || e.raw}`).join(', ') || 'None'}
-
-${thinkingTrace ? `THINKING TRACE:
-Analysis: ${thinkingTrace.analysis}
-Plan: ${thinkingTrace.plan}
-Reasoning: ${thinkingTrace.reasoning}
-Confidence Score: ${(thinkingTrace.confidence * 100).toFixed(0)}%
-` : ''}
-
-INSTRUCTIONS:
-1. Use the provided tools to manipulate the timeline
-2. ALWAYS validate your tool arguments before calling
-3. If confidence < 0.7, ask for clarification before executing
-4. Target selected clips first, then fall back to clips at playhead position
-5. Execute tools and report results with status
-6. Learn from feedback to improve future responses
-
-AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
-
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${groqKey}`
+      const result = await runAgentLoop(resolvedText, {
+        history,
+        signal: abort.signal,
+        requestConfirmation: (toolName, args, description) =>
+          requestConfirmation(`step_${Date.now()}`, toolName, args, description),
+        onProgress: (progress) => {
+          if (!isMountedRef.current) return;
+          setWorkflowProgress({
+            planId: 'agent',
+            totalSteps: progress.toolEvents.length,
+            currentStepIndex: Math.max(0, progress.toolEvents.length - 1),
+            currentStepLabel: progress.label,
+            phase: progress.phase === 'looking' ? 'observing' : progress.phase === 'acting' ? 'executing' : progress.phase === 'done' ? 'completed' : 'planning',
+            iteration: progress.turn,
+            succeeded: progress.toolEvents.filter((t) => t.status === 'success').length,
+            failed: progress.toolEvents.filter((t) => t.status === 'failed').length,
+            steps: progress.toolEvents.map((t, i) => ({
+              id: `evt_${i}`,
+              toolName: t.name,
+              args: t.args || {},
+              status: t.status === 'success' ? 'success' : t.status === 'failed' ? 'failed' : 'running',
+              error: t.error,
+              userFriendlyLabel: t.name,
+            })),
+          });
         },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: text }
-          ],
-          tools: aiToolRegistry.map(tool => ({
-            type: 'function',
-            function: tool
-          })),
-          tool_choice: 'auto',
-          temperature: 0.3,
-          max_tokens: 2000
-        }),
-        signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        // Phase 1: 429 Rate Limit Detection - start 60s cooldown
-        if (response.status === 429) {
-          globalRateLimiter.startCooldown('groq_429_response');
-          throw new Error(`Rate limit hit (429). Cooling down for 60 seconds.`);
+      for (const ev of result.toolEvents) {
+        if (ev.status === 'success') {
+          memoryStore.recordAction({
+            toolName: ev.name,
+            args: ev.args,
+            rawPrompt: text,
+            intent: 'agent',
+            resultStatus: 'success',
+            userFriendlyLabel: ev.name,
+          });
         }
-        throw new Error(`API Error: ${response.status}`);
       }
-
-      const data = await response.json();
-      const choice = data.choices[0];
-      const message = choice.message;
 
       const assistantMsg: ChatMessage = {
-        id: Date.now().toString(),
+        id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: message.content || '',
+        content: result.text,
         timestamp: Date.now(),
-        thinking: thinkingTrace
+        thinking: result.thinking,
+        toolCalls: result.toolEvents.map((t) => ({
+          name: t.name,
+          args: t.args,
+          result: t.result,
+          status: t.status,
+          error: t.error,
+        })),
       };
-
-      if (message.tool_calls && message.tool_calls.length > 0) {
-        const toolCalls: ToolCall[] = [];
-        let aiResponseContent = thinkingMode 
-          ? `## Thinking Process\n${thinkingTrace?.reasoning}\n\n## Actions\n` 
-          : "I've executed the following actions:\n";
-        
-        for (const toolCall of message.tool_calls) {
-          if (toolCall.type === 'function') {
-            const funcName = toolCall.function.name;
-            let args: any;
-            
-            try {
-              args = JSON.parse(toolCall.function.arguments);
-            } catch (parseError: any) {
-              console.error('Failed to parse tool arguments:', parseError);
-              toolCalls.push({
-                name: funcName,
-                args: toolCall.function.arguments,
-                status: 'failed',
-                error: `Invalid JSON: ${parseError.message}`
-              });
-              aiResponseContent += `- ❌ ${funcName}: Failed to parse arguments\n`;
-              continue;
-            }
-            
-            const validation = trainingModule.validateToolCall(
-              funcName,
-              args,
-              conversationContextRef.current
-            );
-
-            if (!validation.valid) {
-              toolCalls.push({
-                name: funcName,
-                args,
-                status: 'failed',
-                error: validation.error
-              });
-              aiResponseContent += `- ❌ ${funcName}: Validation failed - ${validation.error}${validation.suggestion ? ` (Suggestion: ${validation.suggestion})` : ''}\n`;
-              continue;
-            }
-
-            // Phase 1: Confirmation gate for destructive operations
-            if (requiresConfirmation(funcName, args)) {
-              const desc = `${funcName} on ${JSON.stringify(args).slice(0, 80)}`;
-              const approved = await requestConfirmation(
-                `step_${Date.now()}`,
-                funcName,
-                args,
-                desc
-              );
-              if (!approved) {
-                toolCalls.push({
-                  name: funcName,
-                  args,
-                  status: 'failed',
-                  error: 'User cancelled this destructive operation',
-                });
-                aiResponseContent += `- ⛔ ${funcName}: User cancelled\n`;
-                continue;
-              }
-            }
-
-            try {
-              const result = executeAITool(funcName, args, conversationContextRef.current);
-              
-              toolCalls.push({
-                name: funcName,
-                args,
-                result: result,
-                status: result.success ? 'success' : 'failed',
-                error: result.error
-              });
-
-              if (result.success) {
-                aiResponseContent += `- ✅ ${result.message}\n`;
-                trainingModule.learnFromFeedback(assistantMsg.id, 'positive');
-              } else {
-                aiResponseContent += `- ❌ Failed: ${result.error}\n`;
-                trainingModule.learnFromFeedback(assistantMsg.id, 'negative');
-              }
-            } catch (err) {
-              toolCalls.push({
-                name: funcName,
-                args,
-                status: 'failed',
-                error: err instanceof Error ? err.message : 'Unknown error'
-              });
-              aiResponseContent += `- ❌ Error executing ${funcName}\n`;
-              trainingModule.learnFromFeedback(assistantMsg.id, 'negative');
-            }
-          }
-        }
-        
-        assistantMsg.toolCalls = toolCalls;
-        assistantMsg.content = aiResponseContent;
-      }
-
       if (isMountedRef.current) {
         setMessages(prev => [...prev, assistantMsg]);
       }
     } catch (error: any) {
-      console.error("AI Copilot Error:", error);
+      console.error('AI Copilot Agent Error:', error);
       let errorMessage = 'An error occurred while processing your request.';
-
-      if (error.message?.includes('Rate limit hit') || error.message?.includes('429')) {
+      if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
         const waitMs = globalRateLimiter.getCooldownRemainingMs();
-        const seconds = Math.ceil(waitMs / 1000);
-        errorMessage = `⏳ Rate limit reached. Cooling down — retrying in **${seconds}s**. I'll auto-retry once the limit resets.`;
-      } else if (error.name === 'AbortError') {
-        errorMessage = 'Request timed out. Please try again.';
-      } else if (error.message?.includes('401')) {
-        errorMessage = 'Invalid API key. Please check your Groq API key in Settings.';
-      } else if (error.message?.includes('network') || error.message?.includes('fetch')) {
-        errorMessage = 'Network error. Please check your internet connection.';
-      } else if (error.message?.includes('503')) {
-        errorMessage = 'AI service temporarily unavailable. Please try again later.';
+        errorMessage = `⏳ Rate limit reached. Cooling down — retry in **${Math.ceil(waitMs / 1000)}s**. Env key is tried first; Settings key is the fallback.`;
+      } else if (error.name === 'AbortError' || error.message?.includes('timed out')) {
+        errorMessage = 'Request timed out. I will try the Settings Groq key next time if the env key failed.';
+      } else if (error.message?.includes('401') || error.message?.includes('Invalid')) {
+        errorMessage = 'Invalid API key. I tried VITE_GROQ_API_KEY first, then Settings. Check both.';
+      } else if (error.message?.includes('No Groq')) {
+        errorMessage = error.message;
+      } else if (error.message) {
+        errorMessage = error.message;
       }
-
       if (isMountedRef.current) {
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
@@ -1152,9 +1016,11 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
         }]);
       }
     } finally {
-      clearTimeout(timeoutId);
       if (isMountedRef.current) {
         setIsProcessing(false);
+        setTimeout(() => {
+          if (isMountedRef.current) setWorkflowProgress(null);
+        }, 4000);
       }
     }
   };
@@ -1179,10 +1045,17 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
         }
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         if (import.meta.env.DEV) console.log("Audio captured, ready to process size:", audioBlob.size);
-        sendMessage("Transcribe and execute my voice command (Simulated)");
+        if (!audioBlob.size) return;
+        try {
+          const transcript = await groqTranscribe(audioBlob);
+          if (transcript) sendMessage(transcript);
+          else sendMessage('I could not hear a clear command. Please try again.');
+        } catch (err: any) {
+          sendMessage(`Voice transcription failed: ${err?.message || 'unknown error'}`);
+        }
       };
 
       mediaRecorder.start();
@@ -1217,6 +1090,7 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
 
   const clearChat = () => {
     setMessages([]);
+    try { localStorage.removeItem('procut_ai_chat_v1'); } catch { /* ignore */ }
     trainingModule.learnFromFeedback('system_reset', 'positive');
   };
 
@@ -1240,7 +1114,8 @@ AVAILABLE TOOLS: ${aiToolRegistry.map(t => t.name).join(', ')}`;
     rateLimitStatus,
     workflowProgress,
     abortWorkflow,
-    runAgenticWorkflow: (prompt: string) => executeViaExecutor(prompt, getGroqKey() || '', prompt),
+    runAgenticWorkflow: (prompt: string) => sendMessage(prompt),
+    agentModels,
     selfTestState,
     abortSelfTest,
     runSelfTest,
