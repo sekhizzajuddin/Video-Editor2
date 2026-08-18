@@ -1,65 +1,60 @@
+```
 # Dependencies
 node_modules/
-.pnpm-store/
 
-# Build outputs
-dist/
-build/
-.next/
-out/
-*.tsbuildinfo
+# Logs and temp files
+*.log
+*.tmp
 
-# Environment variables
+# Environment
 .env
 .env.local
-.env.*.local
+*.env.*
 
-# IDE
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# OS
-.DS_Store
-Thumbs.db
+# Build artifacts
+dist/
+build/
+*.o
+*.obj
 
-# Logs
-logs/
-*.log
-npm-debug.log*
-pnpm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+target/
+.gradle/
+
+# C/C++
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+
+# Go
+*.o
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
 # Testing
-coverage/
-.nyc_output/
+*.pytest_cache/
+.mypy_cache/
 
-# Temporary files
-*.tmp
-.cache/
-.temp/
-.docs/
-docs/
-# Project-specific
-/public/projects/
-*.openreel
-apps/cloud/
-apps/ios
-apps/android
-
-
-
-# Local files
-FEATURES_TWITTER.md
-.claude-tasks.md
-CLAUDE.md
-*-PLAN.md
-*-PLAN-*.md
-.playwright-mcp/
-.wrangler/
-
-
-mobile-mockup/
+# OS generated files
+.DS_Store
+Thumbs.db
+```

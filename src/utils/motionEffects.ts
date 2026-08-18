@@ -31,6 +31,13 @@
  *    replay.
  *  - The heavy pixel work is confined to the region's bounding box, not the whole
  *    frame, so cost scales with the size of the selection.
+ * 
+ * Integration with ColorRegionGenerator
+ * --------------------------------------
+ *  When using paint mode, the colorRegionGenerator module provides:
+ *  - Enhanced spatial constraints to prevent over-selection
+ *  - Temporal coherence tracking to avoid jumps
+ *  - Edge-aware background fill to eliminate blank areas when the patch moves
  */
 
 import type { CornerPoints } from '@/types';
@@ -44,6 +51,8 @@ import {
   pickCachedMask,
   resampleMask,
 } from './motionMask';
+import type { RegionGenerationSettings, BackgroundFillResult } from './colorRegionGenerator';
+import { generateBackgroundFill, DEFAULT_REGION_SETTINGS } from './colorRegionGenerator';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -542,10 +551,33 @@ export function applyMotionEffect(
   // frame, so vacating it would blur away the entire picture and leave only the
   // untouched subject — the opposite of what is wanted. There the displaced
   // background naturally covers its own former position.
-  const holeFill = applyOutside ? null : getScratch(`${cacheKey}_fill`, sw, sh);
+  
+  // Use edge-aware fill from colorRegionGenerator when available
+  const useEnhancedFill = isPaint && settings.colorSignature;
+  let holeFill: HTMLCanvasElement | null = null;
+  let fillResult: BackgroundFillResult | null = null;
+  
+  if (applyOutside) {
+    holeFill = null;
+  } else if (useEnhancedFill) {
+    // Use the enhanced edge-aware fill
+    fillResult = generateBackgroundFill(
+      ctx,
+      canvasW,
+      canvasH,
+      { x: sx, y: sy, w: sw, h: sh },
+      DEFAULT_REGION_SETTINGS
+    );
+    holeFill = fillResult.fillCanvas;
+  } else {
+    // Fall back to simple blurred fill
+    holeFill = getScratch(`${cacheKey}_fill`, sw, sh);
+  }
+  
   if (holeFill) {
     const hctx = holeFill.getContext('2d');
-    if (hctx) {
+    if (hctx && !fillResult) {
+      // Only do manual fill if not using enhanced fill
       hctx.setTransform(1, 0, 0, 1, 0, 0);
       hctx.clearRect(0, 0, holeFill.width, holeFill.height);
 
@@ -569,11 +601,11 @@ export function applyMotionEffect(
       hctx.globalCompositeOperation = 'destination-in';
       hctx.drawImage(matte, 0, 0);
       hctx.globalCompositeOperation = 'source-over';
-
-      ctx.save();
-      ctx.drawImage(holeFill, sx, sy, sw, sh);
-      ctx.restore();
     }
+
+    ctx.save();
+    ctx.drawImage(holeFill, sx, sy, sw, sh);
+    ctx.restore();
   }
 
   ctx.save();
