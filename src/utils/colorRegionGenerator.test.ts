@@ -123,7 +123,7 @@ describe('updateTrackingState', () => {
 
     // Multiple implausible jumps
     for (let i = 0; i < 3; i++) {
-      const result = updateTrackingState(state, { x: 300, y: 100 }, 400, (i + 1) * 0.1, settings);
+      const result = updateTrackingState(state, { x: 100 + (i + 1) * 200, y: 100 }, 400, (i + 1) * 0.1, settings);
       state = result.newState;
     }
 

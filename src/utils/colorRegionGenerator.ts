@@ -42,14 +42,11 @@
  * Everything here is deterministic and framework-free so exports match preview.
  */
 
-import type { CornerPoints } from '@/types';
 import {
   type ColorSignature,
   type MaskFrameResult,
-  rgbToYCbCr,
   computeMaskForFrame,
-  featherMask,
-  maskBounds,
+
   buildColorSignature,
 } from './motionMask';
 
