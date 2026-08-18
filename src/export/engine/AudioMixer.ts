@@ -28,7 +28,7 @@ export class AudioMixer {
             const media = mediaMap.get(clip.mediaId);
             if ((media?.url || media?._fileBlob) && !clip.audioSettings?.muted) {
               // Store track volume on the clip temporarily for mixing
-              audioClips.push({ ...clip, _url: media.url, _blob: media._fileBlob, _trackVolume: track.volume });
+              audioClips.push({ ...clip, _url: media.url, _blob: media._audioBlob || media._fileBlob, _trackVolume: track.volume });
             }
           }
         }

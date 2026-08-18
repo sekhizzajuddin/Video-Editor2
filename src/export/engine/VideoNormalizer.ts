@@ -15,6 +15,8 @@
  * timeline only — the project itself is untouched.
  */
 import * as Mp4Muxer from 'mp4-muxer';
+import { Input, ALL_FORMATS, BlobSource } from 'mediabunny';
+import { h264CodecCandidates } from '../quality';
 
 interface NormalizeResult {
   url: string;        // original or transcoded URL
@@ -22,9 +24,42 @@ interface NormalizeResult {
   warning?: string;   // set when the media could not be made exportable
 }
 
-// Cache per source URL so several clips of the same media transcode once,
-// and repeated exports reuse the work for the session.
+// Cache normalized blobs so several clips of the same media transcode once.
 const normalizedCache = new Map<string, Promise<NormalizeResult>>();
+
+export interface VideoInspection {
+  codec: string | null;
+  isoBmff: boolean;
+  needsNormalization: boolean;
+}
+
+export function needsVideoNormalization(isoBmff: boolean, codec: string | null): boolean {
+  return !isoBmff || codec === 'hevc';
+}
+
+/** Inspect both the container and its primary video codec. MP4 does not imply
+ * H.264: iPhone/camera MP4 and MOV files commonly contain HEVC/H.265. */
+export async function inspectVideoBlob(blob: Blob): Promise<VideoInspection> {
+  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+  const isoBmff = isIsoBmff(head);
+  let input: any = null;
+  try {
+    input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
+    const track = await input.getPrimaryVideoTrack();
+    const codec = track ? await track.getCodec() : null;
+    return {
+      codec,
+      isoBmff,
+      // HEVC often previews through an OS-backed HTMLVideoElement but cannot
+      // be instantiated by WebCodecs in an export worker. Normalize it first.
+      needsNormalization: needsVideoNormalization(isoBmff, codec),
+    };
+  } catch {
+    return { codec: null, isoBmff, needsNormalization: needsVideoNormalization(isoBmff, null) };
+  } finally {
+    try { input?.dispose?.(); } catch {}
+  }
+}
 
 /** ISO-BMFF sniff: bytes 4..8 must be 'ftyp'. */
 export function isIsoBmff(bytes: Uint8Array): boolean {
@@ -40,32 +75,60 @@ export function isIsoBmff(bytes: Uint8Array): boolean {
 export function normalizeVideoForExport(url: string, name?: string): Promise<NormalizeResult> {
   let pending = normalizedCache.get(url);
   if (!pending) {
-    pending = doNormalize(url, name).catch((e): NormalizeResult => ({
-      url,
-      transcoded: false,
-      warning: `"${name || 'video'}" could not be converted for export (${e?.message || e}). It may appear black in the output.`,
-    }));
+    pending = fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`fetch failed (${response.status})`);
+        return response.blob();
+      })
+      .then((blob) => doNormalizeBlob(blob, name))
+      .catch((error): NormalizeResult => ({
+        url,
+        transcoded: false,
+        warning: `"${name || 'video'}" could not be converted for export (${error?.message || error}).`,
+      }));
     normalizedCache.set(url, pending);
   }
   return pending;
 }
 
-async function doNormalize(url: string, name?: string): Promise<NormalizeResult> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`fetch failed (${response.status})`);
-  const blob = await response.blob();
-  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
-  if (isIsoBmff(head)) {
-    return { url, transcoded: false };
+/** Normalize a resolved media blob, including HEVC inside an MP4/MOV container. */
+export function normalizeVideoBlobForExport(
+  blob: Blob,
+  cacheKey: string,
+  name?: string,
+  onStatus?: (message: string) => void,
+): Promise<NormalizeResult> {
+  let pending = normalizedCache.get(cacheKey);
+  if (!pending) {
+    pending = doNormalizeBlob(blob, name, onStatus).catch((error): NormalizeResult => ({
+      url: URL.createObjectURL(blob),
+      transcoded: false,
+      warning: `"${name || 'video'}" could not be converted for export (${error?.message || error}). It may be missing from the output.`,
+    }));
+    normalizedCache.set(cacheKey, pending);
   }
+  return pending;
+}
 
-  if (typeof VideoEncoder === 'undefined') {
-    throw new Error('WebCodecs unavailable for conversion');
+async function doNormalizeBlob(blob: Blob, name?: string, onStatus?: (message: string) => void): Promise<NormalizeResult> {
+  const inspection = await inspectVideoBlob(blob);
+  const sourceUrl = URL.createObjectURL(blob);
+  if (!inspection.needsNormalization) return { url: sourceUrl, transcoded: false };
+
+  if (typeof VideoEncoder === 'undefined') throw new Error('WebCodecs unavailable for conversion');
+
+  const reason = inspection.codec === 'hevc' ? 'HEVC/H.265' : 'a non-MP4 container';
+  const status = `Preparing "${name || 'video'}": converting ${reason} to export-safe H.264…`;
+  console.log(`[VideoNormalizer] ${status}`);
+  onStatus?.(status);
+  try {
+    const outUrl = await transcodeToMp4(blob);
+    URL.revokeObjectURL(sourceUrl);
+    return { url: outUrl, transcoded: true };
+  } catch (error) {
+    URL.revokeObjectURL(sourceUrl);
+    throw error;
   }
-
-  console.log(`[VideoNormalizer] "${name || url}" is not MP4/MOV — transcoding for export...`);
-  const outUrl = await transcodeToMp4(blob);
-  return { url: outUrl, transcoded: true };
 }
 
 /**
@@ -154,15 +217,24 @@ async function transcodeToMp4(blob: Blob): Promise<string> {
 
 async function pickEncoderConfig(width: number, height: number, fps: number): Promise<VideoEncoderConfig> {
   const bitrate = Math.min(20_000_000, Math.max(4_000_000, width * height * 6));
-  const candidates = ['avc1.4d002a', 'avc1.42001f', 'avc1.640028', 'avc1.42E01E'];
-  for (const codec of candidates) {
-    const cfg: VideoEncoderConfig = { codec, width, height, bitrate, framerate: fps, avc: { format: 'avc' } };
+  for (const codec of h264CodecCandidates(width, height, fps)) {
+    const cfg: VideoEncoderConfig = {
+      codec,
+      width,
+      height,
+      bitrate,
+      framerate: fps,
+      hardwareAcceleration: 'prefer-hardware',
+      latencyMode: 'realtime',
+      bitrateMode: 'variable',
+      avc: { format: 'avc' },
+    };
     try {
       const support = await VideoEncoder.isConfigSupported(cfg);
-      if (support?.supported) return support.config || cfg;
+      if (support?.supported) return cfg;
     } catch { /* try next */ }
   }
-  return { codec: 'avc1.42001f', width, height, bitrate, framerate: fps, avc: { format: 'avc' } };
+  throw new Error(`H.264 encoding is unavailable at ${width}x${height}`);
 }
 
 function once(target: EventTarget, event: string, timeoutMs: number): Promise<void> {

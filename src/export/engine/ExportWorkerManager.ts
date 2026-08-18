@@ -1,7 +1,7 @@
 import { ExportWorkerConfig } from './export.worker';
 import { ExportPhase } from '../types';
 import { AudioMixer } from './AudioMixer';
-import { normalizeVideoForExport } from './VideoNormalizer';
+import { normalizeVideoBlobForExport } from './VideoNormalizer';
 import { getFileFromDB } from '@/utils/projectPersistence';
 
 export interface ExporterCallbacks {
@@ -120,6 +120,9 @@ export class ExportWorkerManager {
         mediaBuffers[m.id] = m._fileBlob;
         delete m._fileBlob;
       }
+      // The original HEVC blob was retained only for main-thread audio mixing;
+      // do not clone it into the worker as a second large payload.
+      delete m._audioBlob;
     }
 
     // Transfer timeline data, audio PCM, and optional fileHandle to worker
@@ -206,21 +209,35 @@ export class ExportWorkerManager {
    * only the serialized copy — never the store.
    */
   private async normalizeTimelineMedia(serializedTimeline: any): Promise<void> {
-    const mediaMap = new Map<string, any>();
-    for (const m of (serializedTimeline.media || [])) {
-      if (m?.id) mediaMap.set(m.id, m);
+    const libraryMap = new Map<string, any>();
+    for (const media of (serializedTimeline.media || [])) {
+      if (media?.id) libraryMap.set(media.id, media);
     }
+
+    // Only prepare media referenced by timeline clips. Import libraries can
+    // contain dozens of unused HEVC files; converting those would waste minutes
+    // before frame 0 without changing the export.
+    const mediaMap = new Map<string, any>();
     for (const track of (serializedTimeline.tracks || [])) {
       for (const clip of (track.clips || [])) {
-        if (clip.mediaId && !mediaMap.has(clip.mediaId)) {
-          mediaMap.set(clip.mediaId, { id: clip.mediaId, url: clip.url, name: clip.name, type: clip.type || 'video' });
-        }
+        if (!clip.mediaId || mediaMap.has(clip.mediaId)) continue;
+        mediaMap.set(
+          clip.mediaId,
+          libraryMap.get(clip.mediaId) || {
+            id: clip.mediaId,
+            url: clip.url,
+            name: clip.name,
+            type: clip.type || (track.type === 'audio' ? 'audio' : 'video'),
+          },
+        );
       }
     }
 
     serializedTimeline.media = Array.from(mediaMap.values());
 
-    await Promise.all(serializedTimeline.media.map(async (m: any) => {
+    // Process sequentially: opening many HEVC decoders/encoders together can
+    // exhaust Chrome's media session limit before export even begins.
+    for (const m of serializedTimeline.media as any[]) {
       try {
         let fileBlob: Blob | File | null = null;
 
@@ -275,13 +292,32 @@ export class ExportWorkerManager {
         }
 
         if (fileBlob) {
-          // If it's a File, convert to Blob for transfer, but keep type
-          const blob = fileBlob instanceof Blob ? fileBlob : new Blob([fileBlob as any]);
-          // Ensure we transfer as ArrayBuffer for worker (convert Blob to ArrayBuffer later via postMessage transferables? We keep Blob here and let worker create BlobSource)
-          // For efficiency, if it's large, keep as Blob and let worker's BlobSource handle it
-          m._fileBlob = blob;
-          // Also store size for debugging
-          (m as any)._fileSize = blob.size;
+          const originalBlob = fileBlob instanceof Blob ? fileBlob : new Blob([fileBlob as any]);
+          const isVideo = m.type === 'video' || originalBlob.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|hevc)$/i.test(m.name || '');
+
+          // Keep original bytes for OfflineAudioContext. A normalized H.264 proxy
+          // is video-only, while its HEVC source may still contain the audio used
+          // by the timeline mix.
+          m._audioBlob = originalBlob;
+          m._fileBlob = originalBlob;
+
+          if (isVideo) {
+            const normalized = await normalizeVideoBlobForExport(
+              originalBlob,
+              `${m.id}:${originalBlob.size}:${(fileBlob as File).lastModified || 0}`,
+              m.name || m.id,
+              (message) => this.options.callbacks.onWarning?.(message),
+            );
+            if (normalized.warning) this.options.callbacks.onWarning?.(normalized.warning);
+            if (normalized.transcoded) {
+              const normalizedResponse = await fetch(normalized.url);
+              if (!normalizedResponse.ok) throw new Error(`failed to read normalized video (${normalizedResponse.status})`);
+              m._fileBlob = await normalizedResponse.blob();
+              m._normalizedFromCodec = 'hevc-or-unsupported';
+            }
+          }
+
+          (m as any)._fileSize = m._fileBlob.size;
         } else {
           console.warn('[Export] Media could not be loaded (will be black):', m.id, m.name || '', 'url:', m.url?.slice(0, 50));
           // Push warning to UI via callback if available
@@ -291,8 +327,9 @@ export class ExportWorkerManager {
         }
       } catch (e: any) {
         console.warn('[Export] Media prep failed for:', m.id, e);
+        this.options.callbacks.onWarning?.(`"${m.name || m.id}" could not be prepared: ${e?.message || e}`);
       }
-    }));
+    }
 
     // Debug: log how many media were resolved
     const resolved = (serializedTimeline.media as any[]).filter((m: any) => !!m._fileBlob).length;
