@@ -1822,6 +1822,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
               ...clip,
               textSettings: {
                 ...(clip.textSettings as any),
+                ...(primary.textSettings as any),
                 text: u.text,
                 fontSize: u.fontSize,
               },
