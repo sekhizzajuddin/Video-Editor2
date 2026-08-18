@@ -490,7 +490,7 @@ export class WebGPUObjectRemovalEngine {
     commandEncoder.copyTextureToBuffer(
       { texture: outputTexture },
       { buffer: readBuffer, bytesPerRow: canvasWidth * 4, rowsPerImage: canvasHeight },
-      [canvasWidth, canvasHeight]
+      { width: canvasWidth, height: canvasHeight }
     );
     
     // Submit commands
