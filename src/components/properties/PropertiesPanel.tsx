@@ -415,22 +415,27 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   const [mobileSubTab, setMobileSubTab] = useState<string>('');
 
+  const currentTab = (isMobileView && mobileCategory)
+    ? (mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : (mobileCategory as any))
+    : activePropertiesTab;
+
   useEffect(() => {
     if (isMobileView && mobileCategory) {
       const normalized = mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : mobileCategory;
       setActivePropertiesTab(normalized as any);
+      setMobileSubTab('');
     }
   }, [isMobileView, mobileCategory, setActivePropertiesTab]);
 
-  const currentSubTabs = MOBILE_SUB_TABS[activePropertiesTab] || [];
+  const currentSubTabs = MOBILE_SUB_TABS[currentTab] || [];
   const effectiveSubTab = currentSubTabs.some(t => t.id === mobileSubTab)
     ? mobileSubTab
     : (currentSubTabs[0]?.id || '');
 
   const isSectionActive = (sectionId: string) => {
     if (!isMobileView) return true;
-    if (activePropertiesTab === 'mask' || activePropertiesTab === 'text') return true;
-    if (activePropertiesTab === 'speed' && (sectionId === 'ramping' || sectionId === 'presets') && effectiveSubTab === 'ramping') return true;
+    if (currentTab === 'mask' || currentTab === 'text') return true;
+    if (currentTab === 'speed' && (sectionId === 'ramping' || sectionId === 'presets') && effectiveSubTab === 'ramping') return true;
     return effectiveSubTab === sectionId;
   };
 
@@ -1550,7 +1555,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         <div className="h-full flex flex-col bg-[#121215] text-white">
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 shrink-0">
             <h3 className="text-sm font-semibold capitalize text-white">
-              {tabs.find(t => t.id === activePropertiesTab)?.label || mobileCategory || 'Properties'}
+              {tabs.find(t => t.id === currentTab)?.label || mobileCategory || 'Properties'}
             </h3>
             {onMobileClose && (
               <button
@@ -1561,7 +1566,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </button>
             )}
           </div>
-          {activePropertiesTab === 'history' ? (
+          {currentTab === 'history' ? (
             <div className="flex-1 overflow-y-auto p-4 space-y-2 mobile-no-scrollbar">
               {history.map((snap, idx) => {
                 const isActive = idx === historyIndex;
@@ -1621,7 +1626,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           })}
         </div>
 
-        {activePropertiesTab === 'history' ? (
+        {currentTab === 'history' ? (
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Header */}
             <div className="p-3 border-b border-[#3e3e3e] flex items-center justify-between shrink-0 bg-[#1e1e1e]/30">
@@ -3036,7 +3041,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 shrink-0 bg-[#121215]">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold capitalize text-white">
-                {tabs.find(t => t.id === activePropertiesTab)?.label || activePropertiesTab}
+                {tabs.find(t => t.id === currentTab)?.label || currentTab}
               </span>
               {selectedClip && (
                 <span className="text-[11px] text-white/40 truncate max-w-[150px]">
@@ -3102,7 +3107,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       </div>
 
       {/* Clip Info Header */}
-      {activePropertiesTab !== 'history' && (
+      {currentTab !== 'history' && (
         <div className="p-3 border-b border-[#3e3e3e] bg-[#2a2a2a]">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-white">
@@ -3195,7 +3200,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       {/* Properties Content */}
       <div className="flex-1 overflow-y-auto p-3">
         <SequenceProperties />
-        {activePropertiesTab === 'transform' && (() => {
+        {currentTab === 'transform' && (() => {
           // Reusing outer component scope helpers: localTime, animations, getPropVal, setPropVal, handleToggleMasterKeyframe
           const keyframeTimes = getMasterKeyframes();
           const hasMasterKeyframes = keyframeTimes.length > 0;
@@ -4417,7 +4422,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           );
         })()}
 
-        {activePropertiesTab === 'mask' && (() => {
+        {currentTab === 'mask' && (() => {
           const mask = selectedClip.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, points: [], feather: 0, invert: false, rotation: 0, roundness: 0, matteSourceClipId: '' };
           const updateMask = (updates: any) => {
             updateClip(selectedClip.id, { mask: { ...mask, ...updates } });
@@ -4536,7 +4541,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           );
         })()}
 
-        {activePropertiesTab === 'color' && (
+        {currentTab === 'color' && (
           <div className="space-y-3">
             {selectedClip && (
               <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2 flex items-center justify-between gap-2">
@@ -5010,7 +5015,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           </div>
         )}
 
-        {activePropertiesTab === 'speed' && (
+        {currentTab === 'speed' && (
           <div className="space-y-3">
             {/* Speed range input */}
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
@@ -5535,7 +5540,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           </div>
         )}
 
-        {activePropertiesTab === 'audio' && (
+        {currentTab === 'audio' && (
           <div className="space-y-3">
             {/* AI Auto Audio Ducking */}
             {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
@@ -6291,7 +6296,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         )}
 
         {/* ── Text Tab ─────────────────────────────────────────────────── */}
-        {activePropertiesTab === 'text' && selectedClip.textSettings && (
+        {currentTab === 'text' && selectedClip.textSettings && (
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Text Properties</h3>
@@ -6718,7 +6723,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         )}
 
         {/* ── AI & Effects Tab ────────────────────────────────────────────── */}
-        {activePropertiesTab === 'effects' && (
+        {currentTab === 'effects' && (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
             <h3 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -7139,7 +7144,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         {/* ── History Tab ─────────────────────────────────────────────────── */}
         
         {/* Thumbnail Designer Tab */}
-        {activePropertiesTab === 'thumbnail' && (
+        {currentTab === 'thumbnail' && (
           <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 flex flex-col gap-3">
               <h3 className="text-xs font-semibold text-white flex items-center gap-2">
@@ -7231,7 +7236,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           </div>
         )}
 
-        {activePropertiesTab === 'history' && (
+        {currentTab === 'history' && (
           <div className="flex-1 flex flex-col overflow-hidden h-full">
             {/* Header */}
             <div className="p-3 border-b border-[#3e3e3e] flex items-center justify-between shrink-0 bg-[#1e1e1e]/30">

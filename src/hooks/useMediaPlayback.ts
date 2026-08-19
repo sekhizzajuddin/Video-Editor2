@@ -149,6 +149,7 @@ const globalPlaybackResult: MediaPlaybackResult = { videoElements: globalVideoMa
 
 let primaryControllerId: number | null = null;
 let nextControllerId = 1;
+const activeControllers = new Set<number>();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -544,14 +545,19 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const videoMapRef = useRef<Map<string, HTMLVideoElement>>(globalVideoMap);
   const resultRef = useRef<MediaPlaybackResult>(globalPlaybackResult);
 
-  const [instanceId] = useState(() => {
-    const id = nextControllerId++;
-    if (isController && primaryControllerId === null) primaryControllerId = id;
-    return id;
-  });
+  const [instanceId] = useState(() => nextControllerId++);
 
-  const isPrimary = isController && (primaryControllerId === null || primaryControllerId === instanceId);
-  if (isController && primaryControllerId === null) primaryControllerId = instanceId;
+  if (isController) {
+    activeControllers.add(instanceId);
+    if (primaryControllerId === null || !activeControllers.has(primaryControllerId)) {
+      primaryControllerId = instanceId;
+    }
+  }
+
+  const isPrimary = isController && (primaryControllerId === instanceId || primaryControllerId === null || !activeControllers.has(primaryControllerId));
+  if (isController && isPrimary && primaryControllerId !== instanceId) {
+    primaryControllerId = instanceId;
+  }
 
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
@@ -1605,32 +1611,38 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // ---- Unmount cleanup ----
   useEffect(() => {
     return () => {
-      if (primaryControllerId === instanceId) {
-        primaryControllerId = null;
-        const pool = poolRef.current;
-        for (const [, entry] of pool) {
-          entry.el.pause();
-          const el = entry.el as any;
-          if (el._handleSeeked) el.removeEventListener('seeked', el._handleSeeked);
-          if (entry.type === 'video') {
-            el.removeEventListener('timeupdate', triggerRedraw);
-            el.removeEventListener('canplay', triggerRedraw);
-          }
-          if (entry.separationGraph) { try { entry.separationGraph.input.disconnect(); } catch (e) {} }
-          if (entry.pitchNode) { try { entry.pitchNode.disconnect(); } catch (e) {} }
-          if (entry.gainNode) { try { entry.gainNode.disconnect(); } catch (e) {} }
-          if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
-          if (entry.feedbackNode) { try { entry.feedbackNode.disconnect(); } catch(e) {} }
-          if (entry.delayNode) { try { entry.delayNode.disconnect(); } catch(e) {} }
-          entry.el.src = '';
-          entry.el.remove();
+      if (isController) {
+        activeControllers.delete(instanceId);
+        if (primaryControllerId === instanceId) {
+          primaryControllerId = activeControllers.size > 0 ? Array.from(activeControllers)[0] : null;
         }
-        pool.clear();
-        videoMapRef.current.clear();
-        pendingSeeksRef.current.clear();
+        // ONLY tear down the media pool if NO active controllers exist in the whole app!
+        if (activeControllers.size === 0) {
+          const pool = poolRef.current;
+          for (const [, entry] of pool) {
+            entry.el.pause();
+            const el = entry.el as any;
+            if (el._handleSeeked) el.removeEventListener('seeked', el._handleSeeked);
+            if (entry.type === 'video') {
+              el.removeEventListener('timeupdate', triggerRedraw);
+              el.removeEventListener('canplay', triggerRedraw);
+            }
+            if (entry.separationGraph) { try { entry.separationGraph.input.disconnect(); } catch (e) {} }
+            if (entry.pitchNode) { try { entry.pitchNode.disconnect(); } catch (e) {} }
+            if (entry.gainNode) { try { entry.gainNode.disconnect(); } catch (e) {} }
+            if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
+            if (entry.feedbackNode) { try { entry.feedbackNode.disconnect(); } catch(e) {} }
+            if (entry.delayNode) { try { entry.delayNode.disconnect(); } catch(e) {} }
+            entry.el.src = '';
+            entry.el.remove();
+          }
+          pool.clear();
+          videoMapRef.current.clear();
+          pendingSeeksRef.current.clear();
+        }
       }
     };
-  }, [triggerRedraw, instanceId]);
+  }, [triggerRedraw, instanceId, isController]);
 
   useEffect(() => {
     resultRef.current.videoElements = videoMapRef.current;

@@ -113,6 +113,9 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     removeTrack,
     toggleTrackLock,
     toggleTrackMute,
+    toggleTrackHidden,
+    activeTool,
+    setActiveTool,
     saveSnapshot,
     mediaLibrary,
     pipWindows,
@@ -140,6 +143,9 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
       removeTrack: s.removeTrack,
       toggleTrackLock: s.toggleTrackLock,
       toggleTrackMute: s.toggleTrackMute,
+      toggleTrackHidden: s.toggleTrackHidden,
+      activeTool: s.activeTool,
+      setActiveTool: s.setActiveTool,
       saveSnapshot: s.saveSnapshot,
       mediaLibrary: s.mediaLibrary,
       pipWindows: s.pipWindows,
@@ -263,24 +269,49 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     } else if (drag.kind === 'trim-start' && preview) {
       const clip = clipMap.get(drag.clipId);
       if (clip) {
-        updateClip(drag.clipId, {
-          startTime: preview.startTime,
-          duration: Math.max(MIN_DURATION, preview.duration),
-          trimStart: Math.max(0, preview.trimStart),
-        });
-        saveSnapshot('Trim clip');
+        if (activeTool === 'rateStretch') {
+          const originalSpeed = clip.speed || 1.0;
+          const sourceContentDuration = clip.duration * originalSpeed;
+          const newDuration = Math.max(MIN_DURATION, preview.duration);
+          const newSpeed = sourceContentDuration / newDuration;
+          updateClip(drag.clipId, {
+            startTime: preview.startTime,
+            duration: newDuration,
+            speed: newSpeed,
+          });
+          saveSnapshot('Rate stretch clip');
+        } else {
+          updateClip(drag.clipId, {
+            startTime: preview.startTime,
+            duration: Math.max(MIN_DURATION, preview.duration),
+            trimStart: Math.max(0, preview.trimStart),
+          });
+          saveSnapshot('Trim clip');
+        }
       }
     } else if (drag.kind === 'trim-end' && preview) {
       const clip = clipMap.get(drag.clipId);
       if (clip) {
-        updateClip(drag.clipId, {
-          duration: Math.max(MIN_DURATION, preview.duration),
-          trimEnd: Math.max(0, preview.trimEnd),
-        });
-        saveSnapshot('Trim clip');
+        if (activeTool === 'rateStretch') {
+          const originalSpeed = clip.speed || 1.0;
+          const sourceContentDuration = clip.duration * originalSpeed;
+          const newDuration = Math.max(MIN_DURATION, preview.duration);
+          const newSpeed = sourceContentDuration / newDuration;
+          updateClip(drag.clipId, {
+            duration: newDuration,
+            speed: newSpeed,
+          });
+          saveSnapshot('Rate stretch clip');
+        } else {
+          updateClip(drag.clipId, {
+            duration: Math.max(MIN_DURATION, preview.duration),
+            trimEnd: Math.max(0, preview.trimEnd),
+          });
+          saveSnapshot('Trim clip');
+        }
       }
     }
-  }, [preview, moveClip, saveSnapshot, updateClip, clipMap]);
+  }, [preview, moveClip, saveSnapshot, updateClip, clipMap, activeTool]);
 
   const beginScrub = useCallback(
     (e: React.PointerEvent) => {
@@ -496,6 +527,22 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
             <span>Split</span>
           </button>
           <button
+            onClick={() => {
+              const nextTool = activeTool === 'rateStretch' ? 'select' : 'rateStretch';
+              setActiveTool(nextTool);
+              toast.info(nextTool === 'rateStretch' ? 'Rate Stretch tool active' : 'Select tool active');
+            }}
+            title="Rate Stretch Tool (R)"
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] font-medium transition-colors ${
+              activeTool === 'rateStretch'
+                ? 'bg-purple-600 text-white font-semibold shadow-sm'
+                : 'bg-white/5 text-white/80 active:bg-white/15'
+            }`}
+          >
+            <Gauge className="h-3 w-3" />
+            <span>Stretch</span>
+          </button>
+          <button
             onClick={duplicateClip}
             disabled={!hasSelection}
             title="Duplicate"
@@ -593,10 +640,14 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                   onClick={() => setSelectedTrackForOptions(selectedTrackForOptions?.id === t.id ? null : t)}
                   style={{ height: trackHeight(t) }}
                   className={`flex w-full flex-col items-center justify-center gap-0.5 border-b border-white/5 transition-colors ${
-                    selectedTrackForOptions?.id === t.id ? 'bg-amber-500/20 text-amber-400' : 'text-white/60 hover:bg-white/5'
+                    selectedTrackForOptions?.id === t.id ? 'bg-amber-500/20 text-amber-400' : (t.hidden ? 'text-zinc-500 bg-black/20' : 'text-white/60 hover:bg-white/5')
                   }`}
                 >
-                  {React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-3.5 w-3.5' })}
+                  {t.hidden ? (
+                    <EyeOff className="h-3.5 w-3.5 text-zinc-500" />
+                  ) : (
+                    React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-3.5 w-3.5' })
+                  )}
                   <span className="text-[7px] leading-none uppercase font-mono">{t.type.slice(0, 3)}</span>
                 </button>
               ))}
@@ -759,6 +810,26 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
             </button>
             <button
               onClick={() => {
+                toggleTrackHidden(selectedTrackForOptions.id);
+                setSelectedTrackForOptions(null);
+                toast.success(selectedTrackForOptions.hidden ? 'Track visible' : 'Track hidden');
+              }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-white/10 text-left"
+            >
+              {selectedTrackForOptions.hidden ? (
+                <>
+                  <Eye className="h-3.5 w-3.5 text-blue-400" />
+                  <span>Show Track</span>
+                </>
+              ) : (
+                <>
+                  <EyeOff className="h-3.5 w-3.5 text-zinc-400" />
+                  <span>Hide Track</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => {
                 toggleTrackMute(selectedTrackForOptions.id);
                 setSelectedTrackForOptions(null);
               }}
@@ -781,17 +852,17 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                 toggleTrackLock(selectedTrackForOptions.id);
                 setSelectedTrackForOptions(null);
               }}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-white/10 text-left"
+              className="col-span-2 flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-white/10 text-left"
             >
               {selectedTrackForOptions.locked ? (
                 <>
                   <Unlock className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>Unlock</span>
+                  <span>Unlock Track</span>
                 </>
               ) : (
                 <>
                   <Lock className="h-3.5 w-3.5 text-amber-400" />
-                  <span>Lock</span>
+                  <span>Lock Track</span>
                 </>
               )}
             </button>
