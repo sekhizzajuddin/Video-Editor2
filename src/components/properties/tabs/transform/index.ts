@@ -1,12 +1,10 @@
-/**
- * transform/index.ts
- * 
- * Re-exports for Transform tab feature sections
- */
-
-export { SmartReframeSection } from './SmartReframeSection';
+﻿export { SmartReframeSection } from './SmartReframeSection';
 export { KeyframesSection } from './KeyframesSection';
 export { PositionSection } from './PositionSection';
 export { ScaleSection } from './ScaleSection';
 export { RotationSection } from './RotationSection';
 export { OpacitySection } from './OpacitySection';
+export { FlipSection } from './FlipSection';
+export { WarpSection } from './WarpSection';
+export { CropSection } from './CropSection';
+export { BlendSection } from './BlendSection';

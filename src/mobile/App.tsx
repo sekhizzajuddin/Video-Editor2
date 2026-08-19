@@ -115,7 +115,7 @@ export function MobileApp() {
         onClose={() => setSheet('none')}
         height="65%"
       >
-        <MobilePropertiesSheet initialTab={activePropertyTab as any} onClose={() => setSheet('none')} />
+        <MobilePropertiesSheet category={activePropertyTab as any} onClose={() => setSheet('none')} />
       </MobileBottomSheet>
 
       {/* Global handlers & modals (reused from desktop) */}
