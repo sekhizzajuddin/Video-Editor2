@@ -303,13 +303,8 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
   ],
   audio: [
     { id: 'audioVolume', label: 'Volume & Pan' },
-    { id: 'audioDucking', label: 'Auto Ducking' },
-    { id: 'soundDesign', label: 'Sound Design' },
     { id: 'audioEQ', label: 'Equalizer' },
-    { id: 'audioVocalTune', label: 'Voice Tune' },
     { id: 'audioFades', label: 'Fades' },
-    { id: 'audioEnhancements', label: 'Enhance' },
-    { id: 'aiVocalSeparation', label: 'Vocal Split' },
     { id: 'audioSpeedPitch', label: 'Speed Pitch' },
   ],
   speed: [
@@ -323,6 +318,11 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
     { id: 'text', label: 'Text & Typography' },
   ],
   effects: [
+    { id: 'audioDucking', label: 'AI Auto Ducking' },
+    { id: 'soundDesign', label: 'AI Sound Design' },
+    { id: 'aiVocalSeparation', label: 'AI Vocal Split' },
+    { id: 'audioEnhancements', label: 'AI Voice Enhance' },
+    { id: 'audioVocalTune', label: 'AI Voice Tune' },
     { id: 'kinetic', label: 'Kinetic Text' },
     { id: 'beatsync', label: 'Beat Sync' },
     { id: 'sfx', label: 'AI SFX' },
@@ -5543,7 +5543,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         {currentTab === 'audio' && (
           <div className="space-y-3">
             {/* AI Auto Audio Ducking */}
-            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
+            {!isMobileView && selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
               <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-400" />
@@ -5578,7 +5578,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             )}
             
             {/* AI Sound Designer */}
-            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
+            {!isMobileView && selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
               <div className="bg-amber-950/20 border border-amber-500/30 rounded p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-400" />
@@ -5645,7 +5645,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 )}
               </div>
             )}
-            {selectedClipIds.length > 1 && (
+            {!isMobileView && selectedClipIds.length > 1 && (
               <div className="bg-purple-950/20 border border-purple-500/30 rounded p-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-400" />
@@ -5839,7 +5839,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Vocal Tune & Character */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVocalTune') ? 'hidden' : ''}`}>
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVocalTune') || isMobileView ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioVocalTune')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6050,7 +6050,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* AI Audio Enhancements */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEnhancements') ? 'hidden' : ''}`}>
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEnhancements') || isMobileView ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioEnhancements')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6182,7 +6182,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* AI Vocal / BGM Separation */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('aiVocalSeparation') ? 'hidden' : ''}`}>
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('aiVocalSeparation') || isMobileView ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('aiVocalSeparation')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6725,13 +6725,228 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         {/* ── AI & Effects Tab ────────────────────────────────────────────── */}
         {currentTab === 'effects' && (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
-            <h3 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              AI Creative Suite & Effects
-            </h3>
+            {!isMobileView && (
+              <h3 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                AI Creative Suite & Effects
+              </h3>
+            )}
+
+            {/* AI Auto Audio Ducking (Under AI Tab) */}
+            {isSectionActive('audioDucking') && selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
+              <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs text-white font-semibold">AI Auto Audio Ducking</span>
+                </div>
+                <p className="text-[11px] text-[#90e0b0]">
+                  Analyze parallel clips for vocals using Demucs AI, and automatically generate ducking volume keyframes on this clip.
+                </p>
+
+                {isDuckingAudio ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                    <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
+                    <span className="text-[10px] text-emerald-400 font-medium">
+                      Separating and Analyzing Vocals ({duckingProgress}%)...
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleAudioDucking}
+                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Analyze & Duck Audio
+                  </button>
+                )}
+                
+                {selectedClip.animations?.['audio.volume'] && selectedClip.animations['audio.volume'].length > 0 && (
+                  <p className="text-[9px] text-emerald-400 mt-2 text-center">
+                    ✓ Volume keyframes applied.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* AI Sound Designer (Under AI Tab) */}
+            {isSectionActive('soundDesign') && selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
+              <div className="bg-amber-950/20 border border-amber-500/30 rounded p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs text-white font-semibold">AI Sound Designer</span>
+                </div>
+                <p className="text-[11px] text-[#e0c090]">
+                  Analyze scene storyboard using Gemini 2.0 Vision and suggest optimized SFX options using Groq.
+                </p>
+
+                {/* AI Provider Configuration */}
+                <div className="space-y-2 pt-1 border-t border-[#3e3e3e]/40">
+                  <div className="flex items-center gap-2">
+                     <label className="text-[10px] text-white">AI Provider:</label>
+                     <select 
+                       value={aiProvider}
+                       onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'groq')}
+                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                     >
+                       <option value="gemini">Gemini (Default)</option>
+                       <option value="groq">Groq (Llama 3 Vision)</option>
+                     </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <label className="text-[10px] text-white">Precision:</label>
+                     <select 
+                       value={soundDesignFps}
+                       onChange={(e) => setSoundDesignFps(Number(e.target.value))}
+                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                     >
+                       <option value={1}>1 FPS (Standard)</option>
+                       <option value={5}>5 FPS (High)</option>
+                       <option value={10}>10 FPS (Ultra, Millisecond precise)</option>
+                     </select>
+                  </div>
+                </div>
+
+                {isAnalyzingAudio ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                    <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
+                    <span className="text-[10px] text-amber-400 font-medium">
+                      {audioAnalyzeProgress}...
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleAiSoundDesign}
+                    className="w-full py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-amber-950/50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Generate Sound Design
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* AI Vocal / BGM Separation (Under AI Tab) */}
+            {isSectionActive('aiVocalSeparation') && selectedClip && (
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Music className="w-4 h-4 text-purple-400" />
+                  <span className="text-xs text-white font-semibold">AI Vocal / BGM Splitter</span>
+                </div>
+                <p className="text-[11px] text-[#a0a0a0]">Separate dialogue/vocals from background music track using on-device Demucs AI.</p>
+                <button
+                  onClick={handleAiSeparate}
+                  disabled={isSeparating || clipAudio.aiVocalSeparation?.isProcessed}
+                  className={`w-full py-2 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+                    isSeparating || clipAudio.aiVocalSeparation?.isProcessed
+                      ? 'bg-[#1e1e1e] text-[#606060] cursor-not-allowed'
+                      : 'bg-purple-600 hover:bg-purple-500 text-white'
+                  }`}
+                >
+                  {isSeparating ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Separating Vocals...</span>
+                    </>
+                  ) : clipAudio.aiVocalSeparation?.isProcessed ? (
+                    <span>Vocals & Music Already Separated</span>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Split Vocals & Instrumental</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* AI Audio Voice Enhance (Under AI Tab) */}
+            {isSectionActive('audioEnhancements') && selectedClip && (
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Wand2 className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs text-white font-semibold">AI Voice Enhancements</span>
+                </div>
+                <div className="space-y-2 text-xs">
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[#d0d0d0]">Reduce Background Noise</span>
+                      <span className="font-mono text-[#a0a0a0]">{clipAudio.denoise ?? 0}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={clipAudio.denoise ?? 0}
+                      onChange={(e) => handleAudioChange('denoise', Number(e.target.value))}
+                      onMouseUp={() => scheduleSaveSnapshot()}
+                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* AI Voice Tune & Character (Under AI Tab) */}
+            {isSectionActive('audioVocalTune') && selectedClip && (
+              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span className="text-xs text-white font-semibold">AI Voice Character & Pitch</span>
+                </div>
+                {/* Voice Formant */}
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-[#d0d0d0]">Voice Formant (Male &harr; Female)</span>
+                    <span className="font-mono text-[#a0a0a0]">
+                      {clipAudio.voiceFormant === 0 ? 'Default' : clipAudio.voiceFormant > 0 ? `+${clipAudio.voiceFormant}` : clipAudio.voiceFormant}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={clipAudio.voiceFormant}
+                    onChange={(e) => handleAudioChange('voiceFormant', Number(e.target.value))}
+                    onMouseUp={() => scheduleSaveSnapshot()}
+                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                  />
+                </div>
+                {/* Warmth */}
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-[#d0d0d0]">Voice Warmth</span>
+                    <span className="font-mono text-[#a0a0a0]">
+                      {(clipAudio.warmth ?? 0) === 0 ? 'Neutral' : (clipAudio.warmth ?? 0) > 0 ? `+${clipAudio.warmth}` : `${clipAudio.warmth}`}
+                    </span>
+                  </div>
+                  <input
+                    type="range" min={-100} max={100}
+                    value={clipAudio.warmth ?? 0}
+                    onChange={(e) => handleAudioChange('warmth', Number(e.target.value))}
+                    onMouseUp={() => scheduleSaveSnapshot()}
+                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                  />
+                </div>
+                {/* Compression */}
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-[#d0d0d0]">Voice Compression</span>
+                    <span className="font-mono text-[#a0a0a0]">
+                      {(clipAudio.compression ?? 0) === 0 ? 'Off' : `${clipAudio.compression}%`}
+                    </span>
+                  </div>
+                  <input
+                    type="range" min={0} max={100}
+                    value={clipAudio.compression ?? 0}
+                    onChange={(e) => handleAudioChange('compression', Number(e.target.value))}
+                    onMouseUp={() => scheduleSaveSnapshot()}
+                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* AI Kinetic Typography */}
-            {selectedClip && (
+            {isSectionActive('kinetic') && selectedClip && (
               <KineticTypographySection
                 selectedClip={selectedClip}
                 aiProvider={aiProvider}
@@ -6739,14 +6954,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             )}
 
             {/* Auto Beat Sync & Rhythm Detection */}
-            {selectedClip && (
+            {isSectionActive('beatsync') && selectedClip && (
               <BeatSyncSection
                 selectedClip={selectedClip}
               />
             )}
 
             {/* AI Sound Designer & SFX Generator */}
-            {selectedClip && (
+            {isSectionActive('sfx') && selectedClip && (
               <AISFXSection
                 selectedClip={selectedClip}
                 isAnalyzingAudio={isAnalyzingAudio}
@@ -6756,7 +6971,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             )}
 
             {/* AI Text & Motion Graphics */}
-            {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
+            {isSectionActive('designer') && selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
               <AIMotionGraphicsSection
                 aiProvider={aiProvider}
                 setAiProvider={setAiProvider}

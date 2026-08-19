@@ -116,6 +116,8 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     toggleTrackHidden,
     activeTool,
     setActiveTool,
+    selectedTransitionClipId,
+    selectTransition,
     saveSnapshot,
     mediaLibrary,
     pipWindows,
@@ -129,6 +131,8 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
       selectedClipId: s.selectedClipId,
       selectedClipIds: s.selectedClipIds,
       selectClip: s.selectClip,
+      selectedTransitionClipId: s.selectedTransitionClipId,
+      selectTransition: s.selectTransition,
       seek: s.seek,
       setIsScrubbing: s.setIsScrubbing,
       moveClip: s.moveClip,
@@ -478,14 +482,21 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     }
   };
 
-  const handleBlankPointerDown = (e: React.PointerEvent, trackId: string) => {
+  const handleBlankPointerDown = (e: React.PointerEvent, trackId?: string) => {
+    selectClip(null);
+    useEditorStore.getState().selectClips([]);
+    useEditorStore.getState().selectTransition(null);
+    useEditorStore.getState().selectTrack(null);
+
     const clickX = e.clientX;
     const clickY = e.clientY;
     const clickedTime = timeAt(clickX);
 
-    longTapTimeoutRef.current = setTimeout(() => {
-      setBlankPastePos({ trackId, time: clickedTime, x: clickX, y: clickY });
-    }, 500);
+    if (trackId) {
+      longTapTimeoutRef.current = setTimeout(() => {
+        setBlankPastePos({ trackId, time: clickedTime, x: clickX, y: clickY });
+      }, 500);
+    }
   };
 
   const handleBlankPointerUp = () => {
@@ -672,11 +683,10 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                   />
                 )}
 
-            {/* Ruler */}
+            {/* Ruler (Visual timecode display only - tapping does not scrub) */}
             <div
-              className="relative border-b border-white/10 bg-[#16161a]"
+              className="relative border-b border-white/10 bg-[#16161a] pointer-events-none select-none"
               style={{ height: RULER_H }}
-              onPointerDown={onPointerDownRuler}
             >
               {rulerTicks.map((tick) => (
                 <div key={tick.time} className="absolute bottom-0" style={{ left: tick.time * zoomLevel }}>
@@ -775,6 +785,69 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                       </div>
                     );
                   })}
+
+                  {/* Transitions Layer */}
+                  {(() => {
+                    const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+                    return sortedClips.map((clip, idx) => {
+                      if (idx === 0) return null;
+                      const prevClip = sortedClips[idx - 1];
+                      const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
+                      const isAdjacent = gap > -0.06 && gap < 0.06;
+                      const trans = clip.transitionIn || prevClip.transitionOut;
+                      const hasTransition = !!trans;
+
+                      if (!isAdjacent && !hasTransition) return null;
+
+                      const intersectionTime = clip.startTime;
+                      const centerPos = intersectionTime * zoomLevel;
+                      const transDuration = trans?.duration || 0.5;
+                      const transWidth = Math.max(24, Math.min(60, transDuration * zoomLevel));
+                      const isTransSelected = selectedTransitionClipId === clip.id;
+
+                      if (hasTransition) {
+                        return (
+                          <div
+                            key={`trans-${prevClip.id}-${clip.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              selectTransition(clip.id);
+                              toast.info(`Transition: ${trans.name || 'Effect'}`);
+                            }}
+                            className={`absolute top-1.5 bottom-1.5 z-30 flex items-center justify-center rounded-md border text-[9px] font-bold text-white shadow-lg cursor-pointer transition-transform active:scale-95 ${
+                              isTransSelected
+                                ? 'bg-purple-600 border-white ring-2 ring-purple-400'
+                                : 'bg-gradient-to-r from-purple-700 to-indigo-700 border-purple-300/80 hover:brightness-110'
+                            }`}
+                            style={{
+                              left: `${centerPos - transWidth / 2}px`,
+                              width: `${transWidth}px`,
+                            }}
+                            title={`Transition: ${trans.name}`}
+                          >
+                            <Sparkles className="h-3 w-3 text-purple-200" />
+                          </div>
+                        );
+                      }
+
+                      // Adjacent clips without transition
+                      return (
+                        <div
+                          key={`trans-slot-${prevClip.id}-${clip.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            selectClip(clip.id);
+                            toast.info('Tap Transitions on the toolbar to apply an effect here');
+                          }}
+                          className="absolute top-2.5 bottom-2.5 z-20 flex w-4 -ml-2 items-center justify-center rounded-full bg-white/20 hover:bg-purple-500 text-white/80 hover:text-white border border-white/30 backdrop-blur-sm cursor-pointer transition-all active:scale-110"
+                          style={{ left: `${centerPos}px` }}
+                          title="Add transition between clips"
+                        >
+                          <span className="text-[10px] font-black leading-none">+</span>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               );
             })}

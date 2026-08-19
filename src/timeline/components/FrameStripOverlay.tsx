@@ -49,26 +49,36 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
   if (frameStrip && frameStrip.length > 0 && media) {
     const totalDuration = media.duration || 1;
     const trimStartRatio = Math.max(0, clip.trimStart / totalDuration);
-    const visibleDuration = clip.duration * clip.speed;
+    const visibleDuration = clip.duration * (clip.speed || 1);
     const trimEndRatio = Math.min(1, (clip.trimStart + visibleDuration) / totalDuration);
 
     const startIndex = Math.max(0, Math.floor(trimStartRatio * frameStrip.length));
     const endIndex = Math.min(frameStrip.length, Math.ceil(trimEndRatio * frameStrip.length));
 
-    const visibleFrames = frameStrip.slice(startIndex, endIndex);
+    const visibleFrames = frameStrip.slice(startIndex, Math.max(startIndex + 1, endIndex));
     const renderFrames = visibleFrames.length > 0 ? visibleFrames : [frameStrip[0]];
-    const frameWidth = width / renderFrames.length;
+    
+    // Dynamically calculate how many thumbnails fit into clip width without stretching
+    const thumbWidth = Math.max(32, Math.min(80, Math.round((height || 36) * 1.5)));
+    const numThumbs = Math.max(1, Math.ceil(width / thumbWidth));
+    const singleThumbWidth = width / numThumbs;
+
+    const displayThumbs: string[] = [];
+    for (let i = 0; i < numThumbs; i++) {
+      const frameIdx = Math.floor((i / numThumbs) * renderFrames.length);
+      displayThumbs.push(renderFrames[Math.min(frameIdx, renderFrames.length - 1)]);
+    }
 
     return (
       <div className="absolute inset-0 flex overflow-hidden pointer-events-none">
-        {renderFrames.map((src, i) => (
+        {displayThumbs.map((src, i) => (
           <img
             key={i}
             src={src}
             alt=""
             draggable={false}
             className="h-full object-cover shrink-0 border-r border-white/5"
-            style={{ width: `${frameWidth}px` }}
+            style={{ width: `${singleThumbWidth}px` }}
           />
         ))}
       </div>

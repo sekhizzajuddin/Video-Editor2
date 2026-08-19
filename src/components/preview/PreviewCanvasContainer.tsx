@@ -713,6 +713,15 @@ export function PreviewCanvasContainer() {
   }, [activeTool, isSpacePressed]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    const target = e.target as HTMLElement;
+    if (target === containerRef.current || target.id === 'preview-canvas-wrapper' || target.tagName === 'CANVAS') {
+      if (activeTool !== 'hand' && activeTool !== 'zoom' && !isSpacePressed) {
+        useEditorStore.getState().selectClip(null);
+        useEditorStore.getState().selectClips([]);
+        useEditorStore.getState().selectTransition(null);
+      }
+    }
+
     if (activeTool === 'hand' || isSpacePressed) {
       isPanning.current = true;
       lastPanPos.current = { x: e.clientX, y: e.clientY };
