@@ -1,6 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// [DESKTOP SYNC] Mobile feature — it has a DESKTOP counterpart.
-// Rule: if an update changes LOGIC, changes ARCHITECTURE, or FIXES A BUG, apply
 // the same change to the desktop file(s) below. SKIP if the update is UI-only.
 // Desktop counterpart:
 //   src/store/editorStore.ts (addClip / insertTextClip / addTrack)

@@ -1,6 +1,4 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// [DESKTOP SYNC] Mobile feature — it has a DESKTOP counterpart.
-// Rule: if an update changes LOGIC, changes ARCHITECTURE, or FIXES A BUG, apply
+import { getAnimatedValue } from '@/utils/keyframes';
 // the same change to the desktop file(s) below. SKIP if the update is UI-only.
 // Desktop counterpart:
 //   src/components/properties/PropertiesPanel.tsx
@@ -25,13 +23,33 @@ import {
   Wand2,
   Music2,
   ChevronDown,
+  Music,
+  Settings2,
+  Wind,
+  Clock,
 } from 'lucide-react';
+
+import { PositionSection, ScaleSection, RotationSection, OpacitySection, SmartReframeSection, KeyframesSection } from '@/components/properties/tabs/transform';
+import { TemperatureSection, TintSection, ExposureSection, ContrastSection, SaturationSection, BlurSection, FadedFilmSection, VignetteSection, ColorGradeTransferSection } from '@/components/properties/tabs/color';
+import { CurvesEditor } from '@/components/properties/tabs/color/CurvesEditor';
+import { VolumeSection, PanSection, EQSection, AutoVoiceTuneSection, AutoDuckingSection, AISoundDesignerSection } from '@/components/properties/tabs/audio';
+import { SpeedSliderSection, PresetRampsSection, SpeedRampingSection } from '@/components/properties/tabs/speed';
+import { MaskTypeSection, MaskParametersSection, MaskEnableSection, MaskInvertSection } from '@/components/properties/tabs/mask';
+import { ChromaKeySection } from '@/components/properties/tabs/effects/ChromaKeySection';
+import { ObjectRemovalPanel } from '@/components/properties/tabs/effects/ObjectRemovalPanel';
+import { KineticTypographySection, BeatSyncSection, AISFXSection } from '@/components/properties/tabs/effects';
+import { TextContentSection, FontFamilySection, FontSizeSection, TextColorSection, TextShadowSection, TextStyleButtonsSection, TextStylePresetsSection } from '@/components/properties/tabs/text';
+
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 import type { ClipColorFilters } from '@/types';
-import { BeatSyncSection, KineticTypographySection, AISFXSection } from '@/components/properties/tabs/effects';
+
+
+
+
+
 import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundState, startClipBackgroundAnalysis } from '@/utils/aiBackground';
 
 type Tab = 'ai' | 'style' | 'color' | 'text' | 'audio' | 'speed' | 'mask';
@@ -60,7 +78,7 @@ export function MobilePropertiesSheet({ onClose, initialTab }: { onClose: () => 
     duplicateClip,
     copyClip,
     pasteClip,
-    updateClip,
+    updateClip, currentTime,
     clipboardData,
   } = useEditorStore(
     useShallow((s) => ({
@@ -73,7 +91,7 @@ export function MobilePropertiesSheet({ onClose, initialTab }: { onClose: () => 
       duplicateClip: s.duplicateClip,
       copyClip: s.copyClip,
       pasteClip: s.pasteClip,
-      updateClip: s.updateClip,
+      updateClip: s.updateClip, currentTime: s.currentTime,
       clipboardData: s.clipboardData,
     }))
   );
@@ -86,12 +104,86 @@ export function MobilePropertiesSheet({ onClose, initialTab }: { onClose: () => 
 
   const mediaType = useMemo(() => {
     if (!clip) return null;
-    return mediaLibrary.find((m) => m.id === clip.mediaId)?.type ?? null;
+    return mediaLibrary.find((m: any) => m.id === clip.mediaId)?.type ?? null;
   }, [clip, mediaLibrary]);
 
   const isText = !!clip?.textSettings;
   const isAudio = mediaType === 'audio' || !!clip?.audioSettings;
-  const [tab, setTab] = useState<Tab>(initialTab || (isText ? 'text' : isAudio ? 'audio' : 'ai'));
+  const category = initialTab || (isText ? 'text' : isAudio ? 'audio' : 'ai');
+  const [subTab, setSubTab] = useState<string>('');
+
+  const absoluteStartTime = clip?.startTime ?? 0;
+  const animations = clip?.animations || {};
+  const localTime = currentTime - absoluteStartTime;
+
+  const getPropVal = (base: number, propKey: string) => {
+    return getAnimatedValue(base, currentTime, absoluteStartTime, animations[propKey]);
+  };
+
+  const setPropVal = (propKey: string, value: number, baseUpdateObj: any) => {
+    updateClip(clip!.id, baseUpdateObj);
+  };
+
+
+  const subTabsMap: Record<string, { id: string; label: string }[]> = {
+    style: [
+      { id: 'keyframes', label: 'Keyframes' },
+      { id: 'scale', label: 'Scale' },
+      { id: 'position', label: 'Position' },
+      { id: 'rotation', label: 'Rotation' },
+      { id: 'opacity', label: 'Opacity' },
+      { id: 'flip', label: 'Flip' },
+      { id: 'perspective', label: 'Warp' },
+      { id: 'blend', label: 'Blend' },
+      { id: 'crop', label: 'Crop' },
+      { id: 'reframe', label: 'Smart Reframe' },
+    ],
+    color: [
+      { id: 'temp', label: 'Temp' },
+      { id: 'tint', label: 'Tint' },
+      { id: 'exposure', label: 'Exposure' },
+      { id: 'contrast', label: 'Contrast' },
+      { id: 'saturation', label: 'Saturation' },
+      { id: 'blur', label: 'Blur' },
+      { id: 'faded', label: 'Faded Film' },
+      { id: 'vignette', label: 'Vignette' },
+      { id: 'curves', label: 'Curves' },
+      { id: 'transfer', label: 'Color Transfer' },
+    ],
+    audio: [
+      { id: 'volume', label: 'Volume' },
+      { id: 'pan', label: 'Pan' },
+      { id: 'ducking', label: 'Ducking' },
+      { id: 'eq', label: 'EQ' },
+      { id: 'voicetune', label: 'Voice Tune' },
+      { id: 'sounddesign', label: 'Sound Design' },
+    ],
+    speed: [
+      { id: 'speed', label: 'Speed' },
+      { id: 'presets', label: 'Presets' },
+      { id: 'ramping', label: 'Speed Ramp' },
+    ],
+    mask: [
+      { id: 'mask', label: 'Mask' },
+      { id: 'chroma', label: 'Chroma Key' },
+    ],
+    text: [
+      { id: 'content', label: 'Text' },
+      { id: 'font', label: 'Font' },
+      { id: 'style', label: 'Style' },
+      { id: 'shadow', label: 'Shadow' },
+    ],
+    ai: [
+      { id: 'kinetic', label: 'Kinetic' },
+      { id: 'beatsync', label: 'Beat Sync' },
+      { id: 'sfx', label: 'SFX' },
+      { id: 'eraser', label: 'Magic Eraser' },
+      { id: 'object_removal', label: 'Object Removal' },
+    ],
+  };
+
+  const activeSubTabs = subTabsMap[category] || [];
+  const currentSubTab = subTab || (activeSubTabs[0]?.id ?? '');
 
   if (!clip) {
     return (
@@ -134,16 +226,6 @@ export function MobilePropertiesSheet({ onClose, initialTab }: { onClose: () => 
       toast.warning('Playhead is not over the clip.');
     }
   };
-
-  const tabs: { id: Tab; label: string; icon: typeof Type }[] = [
-    { id: 'ai', label: 'AI', icon: Sparkles },
-    { id: 'style', label: 'Transform', icon: SlidersHorizontal },
-    { id: 'color', label: 'Color', icon: Palette },
-    ...(isText ? [{ id: 'text' as Tab, label: 'Text', icon: Type }] : []),
-    ...(isAudio ? [{ id: 'audio' as Tab, label: 'Audio', icon: Volume2 }] : []),
-    { id: 'speed', label: 'Speed', icon: Gauge },
-    { id: 'mask', label: 'Mask', icon: Crop },
-  ];
 
   return (
     <div className="flex h-full flex-col">
@@ -190,242 +272,213 @@ export function MobilePropertiesSheet({ onClose, initialTab }: { onClose: () => 
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex shrink-0 gap-1 overflow-x-auto no-scrollbar border-b border-white/10 px-4 pb-2">
-        {tabs.map((tb) => {
-          const Icon = tb.icon;
-          return (
+      {/* Sub Tabs */}
+      {activeSubTabs.length > 0 && (
+        <div className="flex shrink-0 gap-1 overflow-x-auto no-scrollbar border-b border-white/10 px-4 pb-2">
+          {activeSubTabs.map((tb) => (
             <button
               key={tb.id}
-              onClick={() => setTab(tb.id)}
-              className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                tab === tb.id ? 'bg-amber-500 text-black font-semibold' : 'bg-white/5 text-white/70 hover:bg-white/10'
+              onClick={() => setSubTab(tb.id)}
+              className={`flex shrink-0 items-center rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                currentSubTab === tb.id ? 'bg-amber-500 text-black font-semibold' : 'bg-white/5 text-white/70 hover:bg-white/10'
               }`}
             >
-              <Icon className="h-3 w-3" />
               {tb.label}
             </button>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
 
       <div className="mobile-no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-4">
-        {tab === 'ai' && (
-          <div className="space-y-4">
-            {/* AI Kinetic Typography */}
-            <KineticTypographySection selectedClip={clip} />
 
-            {/* Auto Beat Sync */}
-            <BeatSyncSection selectedClip={clip} />
+        {category === 'ai' && currentSubTab === 'kinetic' && <KineticTypographySection selectedClip={clip} />}
+        {category === 'ai' && currentSubTab === 'beatsync' && <BeatSyncSection selectedClip={clip} />}
+        {category === 'ai' && currentSubTab === 'sfx' && <AISFXSection selectedClip={clip} />}
+        
+        {category === 'ai' && currentSubTab === 'object_removal' && <ObjectRemovalPanel selectedClip={clip} />}
+        
 
-            {/* AI Sound Designer / SFX */}
-            <AISFXSection selectedClip={clip} />
+        {category === 'style' && currentSubTab === 'scale' && <ScaleSection selectedClip={clip} localTime={localTime} absoluteStartTime={absoluteStartTime} animations={animations} collapsedSections={{}} toggleSection={() => {}} getPropVal={getPropVal} setPropVal={setPropVal} updateClip={updateClip} />}
+        {category === 'style' && currentSubTab === 'position' && <PositionSection selectedClip={clip} localTime={localTime} absoluteStartTime={absoluteStartTime} animations={animations} collapsedSections={{}} toggleSection={() => {}} getPropVal={getPropVal} setPropVal={setPropVal} updateClip={updateClip} />}
+        {category === 'style' && currentSubTab === 'rotation' && <RotationSection selectedClip={clip} localTime={localTime} absoluteStartTime={absoluteStartTime} animations={animations} collapsedSections={{}} toggleSection={() => {}} getPropVal={getPropVal} setPropVal={setPropVal} updateClip={updateClip} />}
+        {category === 'style' && currentSubTab === 'opacity' && <OpacitySection selectedClip={clip} localTime={localTime} absoluteStartTime={absoluteStartTime} animations={animations} collapsedSections={{}} toggleSection={() => {}} getPropVal={getPropVal} setPropVal={setPropVal} updateClip={updateClip} />}
+        {category === 'style' && currentSubTab === 'reframe' && <SmartReframeSection selectedClip={clip} updateClip={updateClip} />}
 
-            {/* Magic Eraser / Background Removal */}
-            <div className="bg-[#1e1e1e] rounded p-3 border border-cyan-500/30 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-semibold text-white">AI Magic Eraser</h4>
-                  <p className="text-[9px] text-[#a0a0a0]">Auto-detects and removes background</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={clip.aiBackground?.enabled || false}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
-                    const existing = clip.aiBackground ?? { enabled: false, edgeBlur: 0, modelSelection: 1 };
-                    updateClip(clip.id, { aiBackground: { ...existing, enabled } });
-                    scheduleSaveSnapshot('Toggle AI Background');
-                    if (enabled) {
-                      loadMediaPipeSegmenter().catch(() => {});
-                      loadBackgroundRemover().catch(() => {});
-                      const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId);
-                      if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {
-                        startClipBackgroundAnalysis(
-                          clip.id,
-                          mediaItem.url || '',
-                          clip.trimStart || 0,
-                          clip.duration || 5,
-                          existing.modelSelection ?? 1
-                        );
-                      }
-                    } else {
-                      cleanupClipBackgroundState(clip.id);
-                    }
-                  }}
-                  className="h-4 w-4 rounded accent-cyan-500"
-                />
-              </div>
-            </div>
-
-            {/* Timeline FX selection */}
-            {clip.fxSettings && (
-              <div className="bg-[#1e1e1e] rounded p-3 border border-rose-500/20 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-rose-400 uppercase">Timeline FX</span>
-                  <button
-                    onClick={() => updateClip(clip.id, { fxSettings: undefined })}
-                    className="text-[9px] text-rose-400 border border-rose-500/30 rounded px-1.5 py-0.5"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <select
-                  value={clip.fxSettings.type}
-                  onChange={(e) => updateClip(clip.id, { fxSettings: { ...clip.fxSettings!, type: e.target.value as any } })}
-                  className="w-full bg-[#252525] text-white text-xs border border-white/10 rounded px-2 py-1.5"
-                >
-                  <option value="subject_outline_flash">✨ Subject Outline Flash</option>
-                  <option value="rhythmic_mirror">🔄 Rhythmic Mirror Flip</option>
-                  <option value="action_zoom_pulse">💥 Action Zoom Pulse</option>
-                  <option value="action_strobe">⚡ Impact Strobe Flash</option>
-                  <option value="action_shake">📳 Action Shake & RGB Jitter</option>
-                  <option value="glitch">Glitch</option>
-                  <option value="vhs">VHS</option>
-                  <option value="old_film">Old Film</option>
-                  <option value="pixelate">Pixelate</option>
-                </select>
-              </div>
-            )}
+        {category === 'style' && currentSubTab === 'keyframes' && (
+          <div className="bg-[#1e1e1e] p-4 text-center rounded border border-[#3e3e3e]">
+            <p className="text-sm text-[#a0a0a0]">Use the diamond icon next to properties to add keyframes.</p>
           </div>
         )}
-
-        {tab === 'style' && (
-          <div className="space-y-4">
-            <Slider label="Position X" value={Math.round(t.x)} min={-1000} max={1000} step={1} onChange={(v) => setTransform({ x: v })} />
-            <Slider label="Position Y" value={Math.round(t.y)} min={-1000} max={1000} step={1} onChange={(v) => setTransform({ y: v })} />
-            <Slider label="Scale" value={Math.round(t.scale)} min={10} max={400} step={1} suffix="%" onChange={(v) => setTransform({ scale: v })} />
-            <Slider label="Rotation" value={Math.round(t.rotation)} min={-180} max={180} step={1} suffix="°" onChange={(v) => setTransform({ rotation: v })} />
-            <Slider label="Opacity" value={Math.round((clip.opacity ?? 1) * 100)} min={0} max={100} step={1} suffix="%" onChange={(v) => { updateClip(clip.id, { opacity: v / 100 }); scheduleSaveSnapshot('Opacity'); }} />
-            
-            <div className="pt-2 border-t border-white/10 space-y-2">
-              <label className="text-[11px] text-white/50 block">Blend Mode</label>
-              <select
-                value={clip.transform?.blendMode || 'source-over'}
-                onChange={(e) => setTransform({ blendMode: e.target.value as any })}
-                className="w-full bg-[#1e1e1e] text-white text-xs border border-white/10 rounded px-2 py-1.5"
-              >
-                <option value="source-over">Normal</option>
-                <option value="screen">Screen</option>
-                <option value="multiply">Multiply</option>
-                <option value="overlay">Overlay</option>
-                <option value="darken">Darken</option>
-                <option value="lighten">Lighten</option>
-                <option value="color-dodge">Color Dodge</option>
-                <option value="color-burn">Color Burn</option>
-                <option value="difference">Difference</option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {tab === 'color' && (
-          <div className="space-y-4">
-            <Slider label="Temperature" value={Math.round(color.temperature)} min={-100} max={100} step={1} onChange={(v) => setColor({ temperature: v })} />
-            <Slider label="Exposure" value={Math.round(color.exposure)} min={-100} max={100} step={1} onChange={(v) => setColor({ exposure: v })} />
-            <Slider label="Contrast" value={Math.round(color.contrast)} min={0} max={200} step={1} onChange={(v) => setColor({ contrast: v })} />
-            <Slider label="Saturation" value={Math.round(color.saturation)} min={0} max={200} step={1} onChange={(v) => setColor({ saturation: v })} />
-            <Slider label="Blur" value={Math.round(color.blur || 0)} min={0} max={20} step={1} onChange={(v) => setColor({ blur: v })} />
-            <Slider label="Vignette" value={Math.round(color.vignette || 0)} min={-100} max={100} step={1} onChange={(v) => setColor({ vignette: v })} />
-          </div>
-        )}
-
-        {tab === 'text' && isText && (
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1 block text-[11px] text-white/50">Text</label>
-              <textarea
-                value={clip.textSettings?.text ?? ''}
-                rows={2}
-                onChange={(e) => {
-                  updateClip(clip.id, { textSettings: { ...clip.textSettings!, text: e.target.value } });
-                  scheduleSaveSnapshot('Text');
-                }}
-                className="w-full resize-none rounded-lg border border-white/10 bg-white/5 p-2 text-[13px] text-white outline-none focus:border-amber-500"
-              />
-            </div>
-            <Slider label="Font size" value={clip.textSettings?.fontSize ?? 40} min={8} max={160} step={1} onChange={(v) => { updateClip(clip.id, { textSettings: { ...clip.textSettings!, fontSize: v } }); scheduleSaveSnapshot('Text'); }} />
-            <div>
-              <label className="mb-1 block text-[11px] text-white/50">Color</label>
-              <div className="flex flex-wrap gap-2">
-                {TEXT_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => { updateClip(clip.id, { textSettings: { ...clip.textSettings!, color: c } }); scheduleSaveSnapshot('Text'); }}
-                    className={`h-8 w-8 rounded-full border-2 ${clip.textSettings?.color === c ? 'border-amber-400' : 'border-white/20'}`}
-                    style={{ background: c }}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {tab === 'audio' && (
-          <div className="space-y-4">
-            <Slider label="Volume" value={Math.round(clip.audioSettings?.volume ?? 0)} min={-40} max={12} step={1} suffix="dB" onChange={(v) => setAudio({ volume: v })} />
-            <Slider label="Fade in" value={clip.audioSettings?.fadeIn ?? 0} min={0} max={5} step={0.1} suffix="s" onChange={(v) => setAudio({ fadeIn: v })} />
-            <Slider label="Fade out" value={clip.audioSettings?.fadeOut ?? 0} min={0} max={5} step={0.1} suffix="s" onChange={(v) => setAudio({ fadeOut: v })} />
-            <Slider label="Pitch" value={clip.audioSettings?.pitch ?? 0} min={-12} max={12} step={1} suffix=" st" onChange={(v) => setAudio({ pitch: v })} />
+        {category === 'style' && currentSubTab === 'flip' && (
+          <div className="flex gap-3">
             <button
-              onClick={() => setAudio({ muted: !(clip.audioSettings?.muted ?? false) })}
-              className={`w-full rounded-lg py-2 text-[12px] font-medium ${clip.audioSettings?.muted ? 'bg-rose-500/20 text-rose-300' : 'bg-white/5 text-white/80'}`}
+              onClick={() => {
+                const cur = clip.transform.flipH ?? false;
+                updateClip(clip.id, { transform: { ...clip.transform, flipH: !cur } });
+              }}
+              className={`flex-1 py-3 rounded-lg text-sm font-medium transition-colors ${
+                clip.transform.flipH ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white'
+              }`}
             >
-              {clip.audioSettings?.muted ? 'Unmute clip' : 'Mute clip'}
+              Flip Horizontal
+            </button>
+            <button
+              onClick={() => {
+                const cur = clip.transform.flipV ?? false;
+                updateClip(clip.id, { transform: { ...clip.transform, flipV: !cur } });
+              }}
+              className={`flex-1 py-3 rounded-lg text-sm font-medium transition-colors ${
+                clip.transform.flipV ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white'
+              }`}
+            >
+              Flip Vertical
             </button>
           </div>
         )}
-
-        {tab === 'speed' && (
+        {category === 'style' && currentSubTab === 'perspective' && (
           <div className="space-y-4">
-            <Slider label="Speed Multiplier" value={Math.round((clip.speed ?? 1) * 100)} min={25} max={400} step={5} suffix="%" onChange={(v) => { updateClip(clip.id, { speed: v / 100 }); scheduleSaveSnapshot('Speed'); }} />
-            <div className="flex gap-2">
-              {[0.5, 1, 1.5, 2, 4].map((s) => (
-                <button
-                  key={s}
-                  onClick={() => { updateClip(clip.id, { speed: s }); scheduleSaveSnapshot('Speed'); }}
-                  className={`flex-1 py-1.5 rounded text-xs font-semibold ${clip.speed === s ? 'bg-amber-500 text-black' : 'bg-white/10 text-white'}`}
-                >
-                  {s}x
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab === 'mask' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-white">Enable Mask</span>
+            <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
-                checked={clip.mask?.enabled || false}
+                checked={!!clip.transform.perspectivePin}
                 onChange={(e) => {
                   const enabled = e.target.checked;
-                  const existing = clip.mask ?? { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, radius: 0, feather: 0, invert: false, points: [] };
-                  updateClip(clip.id, { mask: { ...existing, enabled } });
-                  scheduleSaveSnapshot('Toggle Mask');
+                  let updates: any = { transform: { ...clip.transform, perspectivePin: enabled } };
+                  if (enabled && !clip.transform.perspectiveCorners) {
+                    const aX = clip.transform.x;
+                    const aY = clip.transform.y;
+                    const baseW = 200;
+                    const baseH = 200;
+                    updates.transform.perspectiveCorners = {
+                      x0: 427 + aX - baseW / 2, y0: 240 + aY - baseH / 2,
+                      x1: 427 + aX + baseW / 2, y1: 240 + aY - baseH / 2,
+                      x2: 427 + aX + baseW / 2, y2: 240 + aY + baseH / 2,
+                      x3: 427 + aX - baseW / 2, y3: 240 + aY + baseH / 2
+                    };
+                  }
+                  updateClip(clip.id, updates);
                 }}
-                className="h-4 w-4 rounded accent-amber-500"
+                className="w-5 h-5 rounded border-[#3e3e3e] text-amber-500 bg-[#1e1e1e]"
               />
-            </div>
-            {clip.mask?.enabled && (
-              <div className="space-y-3 pt-2">
-                <select
-                  value={clip.mask.type}
-                  onChange={(e) => updateClip(clip.id, { mask: { ...clip.mask!, type: e.target.value as any } })}
-                  className="w-full bg-[#1e1e1e] text-white text-xs border border-white/10 rounded px-2 py-1.5"
+              <span className="text-sm font-medium text-white">Enable Corner Pinning</span>
+            </label>
+            {clip.transform.perspectivePin && (
+              <div className="pt-3 border-t border-[#3e3e3e]">
+                <p className="text-xs text-[#a0a0a0] mb-3">Drag the 4 corner handles on the preview screen to adjust.</p>
+                <button
+                  onClick={() => {
+                    const newAnimations = { ...(clip.animations || {}) };
+                    for (let i = 0; i < 4; i++) {
+                      delete newAnimations[`transform.perspectiveCorners.x${i}`];
+                      delete newAnimations[`transform.perspectiveCorners.y${i}`];
+                    }
+                    const aX = clip.transform.x;
+                    const aY = clip.transform.y;
+                    const baseW = 200;
+                    const baseH = 200;
+                    updateClip(clip.id, {
+                      transform: {
+                        ...clip.transform,
+                        perspectiveCorners: {
+                          x0: 427 + aX - baseW / 2, y0: 240 + aY - baseH / 2,
+                          x1: 427 + aX + baseW / 2, y1: 240 + aY - baseH / 2,
+                          x2: 427 + aX + baseW / 2, y2: 240 + aY + baseH / 2,
+                          x3: 427 + aX - baseW / 2, y3: 240 + aY + baseH / 2
+                        }
+                      },
+                      animations: newAnimations
+                    });
+                  }}
+                  className="w-full py-2 text-xs font-medium text-amber-500 border border-amber-500/30 rounded-lg hover:bg-amber-500/10"
                 >
-                  <option value="rectangle">Rectangle</option>
-                  <option value="circle">Circle / Ellipse</option>
-                  <option value="linear">Linear Split</option>
-                  <option value="mirror">Mirror</option>
-                </select>
-                <Slider label="Feather" value={clip.mask.feather ?? 0} min={0} max={100} step={1} onChange={(v) => updateClip(clip.id, { mask: { ...clip.mask!, feather: v } })} />
+                  Reset Corners
+                </button>
               </div>
             )}
           </div>
         )}
+        {category === 'style' && currentSubTab === 'crop' && (
+          <div className="space-y-4">
+            {['left', 'right', 'top', 'bottom'].map((edge) => {
+              const currentCrop = clip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+              const propKey = `crop.${edge}`;
+              const value = getPropVal(currentCrop[edge as keyof typeof currentCrop], propKey);
+              return (
+                <div key={edge} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-white capitalize">{edge}</span>
+                    <span className="text-xs text-amber-500">{Math.round(value)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="90"
+                    value={value}
+                    onChange={(e) => {
+                      const newVal = Number(e.target.value);
+                      const proposedCrop = { ...currentCrop, [edge]: newVal };
+                      setPropVal(propKey, newVal, { crop: proposedCrop });
+                    }}
+                    className="w-full accent-amber-500"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {category === 'color' && currentSubTab === 'temp' && <TemperatureSection temperature={getPropVal(clip.colorFilters?.temperature ?? 0, 'color.temperature')} onChange={(v) => setPropVal('color.temperature', v, { colorFilters: { ...(clip.colorFilters || {}), temperature: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), temperature: 0 } as any })} />}
+
+        {category === 'color' && currentSubTab === 'tint' && <TintSection tint={getPropVal(clip.colorFilters?.tint ?? 0, 'color.tint')} onChange={(v) => setPropVal('color.tint', v, { colorFilters: { ...(clip.colorFilters || {}), tint: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), tint: 0 } as any })} />}
+        {category === 'color' && currentSubTab === 'exposure' && <ExposureSection exposure={getPropVal(clip.colorFilters?.exposure ?? 0, 'color.exposure')} onChange={(v) => setPropVal('color.exposure', v, { colorFilters: { ...(clip.colorFilters || {}), exposure: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), exposure: 0 } as any })} />}
+        {category === 'color' && currentSubTab === 'contrast' && <ContrastSection contrast={getPropVal(clip.colorFilters?.contrast ?? 100, 'color.contrast')} onChange={(v) => setPropVal('color.contrast', v, { colorFilters: { ...(clip.colorFilters || {}), contrast: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), contrast: 100 } as any })} />}
+        {category === 'color' && currentSubTab === 'saturation' && <SaturationSection saturation={getPropVal(clip.colorFilters?.saturation ?? 100, 'color.saturation')} onChange={(v) => setPropVal('color.saturation', v, { colorFilters: { ...(clip.colorFilters || {}), saturation: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), saturation: 100 } as any })} />}
+        {category === 'color' && currentSubTab === 'blur' && <BlurSection blur={getPropVal(clip.colorFilters?.blur ?? 0, 'color.blur')} onChange={(v) => setPropVal('color.blur', v, { colorFilters: { ...(clip.colorFilters || {}), blur: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), blur: 0 } as any })} />}
+        {category === 'color' && currentSubTab === 'faded' && <FadedFilmSection fadedFilm={getPropVal(clip.colorFilters?.fadedFilm ?? 0, 'color.fadedFilm')} onChange={(v) => setPropVal('color.fadedFilm', v, { colorFilters: { ...(clip.colorFilters || {}), fadedFilm: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), fadedFilm: 0 } as any })} />}
+        {category === 'color' && currentSubTab === 'vignette' && <VignetteSection vignette={getPropVal(clip.colorFilters?.vignette ?? 0, 'color.vignette')} onChange={(v) => setPropVal('color.vignette', v, { colorFilters: { ...(clip.colorFilters || {}), vignette: v } as any })} onReset={() => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), vignette: 0 } as any })} />}
+        {category === 'color' && currentSubTab === 'curves' && <CurvesEditor curves={clip.colorFilters?.curves || {}} onChange={(curves) => updateClip(clip.id, { colorFilters: { ...(clip.colorFilters || {}), curves } as any })} />}
+        {category === 'color' && currentSubTab === 'transfer' && <ColorGradeTransferSection selectedClip={clip} selectedClipIds={[clip.id]} />}
+
+        {category === 'audio' && currentSubTab === 'volume' && <VolumeSection volume={getPropVal(clip.audioSettings?.volume ?? 0, 'audio.volume')} onChange={(v) => setPropVal('audio.volume', v, { audioSettings: { pan: 0, ...(clip.audioSettings || {}), volume: v } as any })} onReset={() => updateClip(clip.id, { audioSettings: { pan: 0, ...(clip.audioSettings || {}), volume: 0 } as any })} />}
+        {category === 'audio' && currentSubTab === 'pan' && <PanSection pan={getPropVal(clip.audioSettings?.pan ?? 0, 'audio.pan')} onChange={(v) => setPropVal('audio.pan', v, { audioSettings: { volume: 0, ...(clip.audioSettings || {}), pan: v } as any })} onReset={() => updateClip(clip.id, { audioSettings: { volume: 0, ...(clip.audioSettings || {}), pan: 0 } as any })} />}
+        {category === 'audio' && currentSubTab === 'ducking' && <AutoDuckingSection selectedClip={clip} handleAudioChange={(key, val) => updateClip(clip.id, { audioSettings: { ...(clip.audioSettings || {}), [key]: val } as any })} />}
+        {category === 'audio' && currentSubTab === 'eq' && <EQSection bass={clip.audioSettings?.bass || 0} mid={clip.audioSettings?.mid || 0} treble={clip.audioSettings?.treble || 0} onBassChange={(val) => updateClip(clip.id, { audioSettings: { ...(clip.audioSettings || {}), bass: val } as any })} onMidChange={(val) => updateClip(clip.id, { audioSettings: { ...(clip.audioSettings || {}), mid: val } as any })} onTrebleChange={(val) => updateClip(clip.id, { audioSettings: { ...(clip.audioSettings || {}), treble: val } as any })} />}
+        {category === 'audio' && currentSubTab === 'voicetune' && <AutoVoiceTuneSection selectedClipIds={[clip.id]} isAnalyzingVoice={false} handleAutoVoiceTune={() => {}} />}
+        {category === 'audio' && currentSubTab === 'sounddesign' && <AISoundDesignerSection isAnalyzingAudio={false} audioAnalyzeProgress="" aiProvider="gemini" setAiProvider={() => {}} soundDesignFps={30} setSoundDesignFps={() => {}} freesoundApiKey="" setFreesoundApiKey={() => {}} handleAiSoundDesign={() => {}} />}
+
+        {category === 'speed' && currentSubTab === 'speed' && <SpeedSliderSection speed={clip.speed ?? 1} isRamped={!!clip.speedRamp} onSpeedChange={(v) => { const sourceDuration = clip.duration * (clip.speed ?? 1); updateClip(clip.id, { speed: v, duration: sourceDuration / v }, { ripple: true }); }} onReset={() => { const sourceDuration = clip.duration * (clip.speed ?? 1); updateClip(clip.id, { speed: 1, duration: sourceDuration }, { ripple: true }); }} />}
+        {category === 'speed' && currentSubTab === 'presets' && <PresetRampsSection isRamped={!!clip.speedRamp} onSpeedChange={(v) => { const sourceDuration = clip.duration * (clip.speed ?? 1); updateClip(clip.id, { speed: v, duration: sourceDuration / v }, { ripple: true }); }} />}
+        {category === 'speed' && currentSubTab === 'ramping' && <SpeedRampingSection selectedClip={clip} isRamped={!!clip.speedRamp} mediaLibrary={mediaLibrary as any} updateClip={updateClip} />}
+
+        {category === 'mask' && currentSubTab === 'mask' && (
+          <div className="space-y-4">
+             <MaskEnableSection enabled={clip.mask?.enabled ?? false} onToggle={() => updateClip(clip.id, { mask: { ...clip.mask!, enabled: !(clip.mask?.enabled ?? false) } })} />
+             {clip.mask?.enabled && (
+               <>
+                 <MaskTypeSection maskType={clip.mask.type ?? 'rectangle'} onChange={(v) => updateClip(clip.id, { mask: { ...clip.mask!, type: v as any } })} />
+                 <MaskInvertSection invert={clip.mask.invert ?? false} onToggle={() => updateClip(clip.id, { mask: { ...clip.mask!, invert: !(clip.mask?.invert ?? false) } })} />
+                 <MaskParametersSection mask={clip.mask} onChange={(prop, val) => updateClip(clip.id, { mask: { ...clip.mask!, [prop]: val } })} />
+               </>
+             )}
+          </div>
+        )}
+        {category === 'mask' && currentSubTab === 'chroma' && <ChromaKeySection selectedClip={clip} />}
+
+        {category === 'text' && isText && currentSubTab === 'content' && <TextContentSection text={clip.textSettings?.text ?? ''} onChange={(v) => updateClip(clip.id, { textSettings: { ...clip.textSettings!, text: v } })} />}
+        {category === 'text' && isText && currentSubTab === 'font' && (
+          <div className="space-y-4">
+             <FontFamilySection fontFamily={clip.textSettings?.fontFamily ?? 'Inter'} onChange={(v) => updateClip(clip.id, { textSettings: { ...clip.textSettings!, fontFamily: v } })} />
+             <FontSizeSection fontSize={clip.textSettings?.fontSize ?? 40} onChange={(v) => updateClip(clip.id, { textSettings: { ...clip.textSettings!, fontSize: v } })} />
+          </div>
+        )}
+        {category === 'text' && isText && currentSubTab === 'style' && (
+          <div className="space-y-4">
+             <TextColorSection color={clip.textSettings?.color ?? '#ffffff'} onChange={(v) => updateClip(clip.id, { textSettings: { ...clip.textSettings!, color: v } })} />
+             <TextStyleButtonsSection bold={clip.textSettings?.bold ?? false} italic={clip.textSettings?.italic ?? false} underline={clip.textSettings?.underline ?? false} onBoldToggle={() => updateClip(clip.id, { textSettings: { ...clip.textSettings!, bold: !(clip.textSettings?.bold ?? false) } })} onItalicToggle={() => updateClip(clip.id, { textSettings: { ...clip.textSettings!, italic: !(clip.textSettings?.italic ?? false) } })} onUnderlineToggle={() => updateClip(clip.id, { textSettings: { ...clip.textSettings!, underline: !(clip.textSettings?.underline ?? false) } })} />
+             <TextStylePresetsSection textSettings={clip.textSettings} clipId={clip.id} updateClip={updateClip} />
+          </div>
+        )}
+        {category === 'text' && isText && currentSubTab === 'shadow' && <TextShadowSection shadow={clip.textSettings?.shadow ?? false} onToggle={() => updateClip(clip.id, { textSettings: { ...clip.textSettings!, shadow: !(clip.textSettings?.shadow ?? false) } })} />}
+
       </div>
     </div>
   );

@@ -1,6 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// [DESKTOP SYNC] Mobile feature — it has a DESKTOP counterpart.
-// Rule: if an update changes LOGIC, changes ARCHITECTURE, or FIXES A BUG, apply
 // the same change to the desktop file(s) below. SKIP if the update is UI-only.
 // Desktop counterpart:
 //   src/App.tsx (editing tools)
@@ -276,7 +273,6 @@ export function MobileToolRail({
       <div className="flex items-center justify-start gap-1 overflow-x-auto no-scrollbar touch-pan-x py-1">
         {hasSelection ? (
           <>
-            <Tool icon={<Scissors className="h-4 w-4" />} label="Split" onClick={handleSplit} />
             <Tool icon={<Sparkles className="h-4 w-4 text-cyan-400" />} label="AI" onClick={() => onOpenProperties('ai')} />
             <Tool icon={<SlidersHorizontal className="h-4 w-4" />} label="Transform" onClick={() => onOpenProperties('style')} />
             <Tool icon={<Palette className="h-4 w-4 text-pink-400" />} label="Color" onClick={() => onOpenProperties('color')} />
@@ -284,28 +280,7 @@ export function MobileToolRail({
             <Tool icon={<Volume2 className="h-4 w-4 text-emerald-400" />} label="Audio" onClick={() => onOpenProperties('audio')} />
             <Tool icon={<Gauge className="h-4 w-4 text-blue-400" />} label="Speed" onClick={() => onOpenProperties('speed')} />
             <Tool icon={<Crop className="h-4 w-4 text-amber-400" />} label="Mask" onClick={() => onOpenProperties('mask')} />
-            <Tool
-              icon={<Copy className="h-4 w-4" />}
-              label="Copy"
-              active={showCopyMenu}
-              onClick={() => {
-                setShowCopyMenu(!showCopyMenu);
-                setShowPasteMenu(false);
-              }}
-            />
-            <Tool
-              icon={<ClipboardPaste className="h-4 w-4" />}
-              label="Paste"
-              active={showPasteMenu}
-              onClick={() => {
-                setShowPasteMenu(!showPasteMenu);
-                setShowCopyMenu(false);
-              }}
-              disabled={!(clipboardData?.clips && clipboardData.clips.length > 0)}
-            />
-            <Tool icon={<CopyPlus className="h-4 w-4" />} label="Duplicate" onClick={handleDuplicate} />
-            <Tool icon={<Trash2 className="h-4 w-4 text-rose-400" />} label="Delete" onClick={handleDelete} />
-          </>
+            </>
         ) : (
           <>
             <Tool icon={<Plus className="h-4 w-4" />} label="Media" accent onClick={onAddMedia} />

@@ -1,6 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// [DESKTOP SYNC] Mobile feature — it has a DESKTOP counterpart.
-// Rule: if an update changes LOGIC, changes ARCHITECTURE, or FIXES A BUG, apply
 // the same change to the desktop file(s) below. SKIP if the update is UI-only.
 // Desktop counterpart:
 //   src/components/Timeline.tsx
@@ -152,8 +149,26 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
   const currentTime = usePlaybackTime(20);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const tracksRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState>(null);
   const longTapTimeoutRef = useRef<any>(null);
+  const isUserScrolling = useRef(false);
+
+  useEffect(() => {
+    if (useEditorStore.getState().isPlaying && !dragRef.current && !isUserScrolling.current) {
+      if (scrollRef.current) {
+        scrollRef.current.scrollLeft = currentTime * zoomLevel;
+      }
+    }
+  }, [currentTime, zoomLevel]);
+
+  const onScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    if (isUserScrolling.current) {
+      const time = scrollRef.current.scrollLeft / zoomLevel;
+      seek(time);
+    }
+  }, [zoomLevel, seek]);
 
   const [snapLineX, setSnapLineX] = useState<number | null>(null);
   const [selectedTrackForOptions, setSelectedTrackForOptions] = useState<TimelineTrack | null>(null);
@@ -194,7 +209,7 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
 
   const timeAt = useCallback(
     (clientX: number) => {
-      const rect = contentRef.current?.getBoundingClientRect();
+      const rect = tracksRef.current?.getBoundingClientRect();
       if (!rect) return 0;
       return (clientX - rect.left) / zoomLevel;
     },
@@ -576,26 +591,39 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
           </button>
         </div>
 
-        {/* Scrollable canvas */}
-        <div
-          ref={scrollRef}
-          className="mobile-no-scrollbar flex-1 overflow-x-auto overflow-y-auto touch-pan-x relative"
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
+        <div className="relative flex-1 min-w-0 overflow-hidden">
+          {/* Stationary Playhead */}
+          <div className="absolute top-0 bottom-0 pointer-events-none z-40" style={{ left: '40%' }}>
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 h-0 w-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-amber-400" />
+            <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]" />
+          </div>
+
+          {/* Scrollable canvas */}
           <div
-            ref={contentRef}
-            className="relative"
-            style={{ width: contentWidth, minHeight: '100%' }}
+            ref={scrollRef}
+            className="mobile-no-scrollbar h-full w-full overflow-x-auto overflow-y-auto touch-pan-x touch-pan-y relative"
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onTouchStart={() => { isUserScrolling.current = true; }}
+            onTouchEnd={() => { isUserScrolling.current = false; }}
+            onScroll={onScroll}
           >
-            {/* Alignment magnetic snap guide */}
-            {snapLineX !== null && (
-              <div
-                className="absolute top-0 bottom-0 z-50 w-px bg-cyan-400 pointer-events-none shadow-[0_0_8px_cyan]"
-                style={{ left: snapLineX }}
-              />
-            )}
+            <div
+              ref={contentRef}
+              className="relative flex h-full min-w-max"
+            >
+              {/* Left Padding Spacer (40vw minus the track headers width which is 48px) */}
+              <div className="shrink-0" style={{ width: 'calc(40vw - 48px)' }} />
+
+              <div ref={tracksRef} className="relative shrink-0" style={{ width: contentWidth }}>
+                {/* Alignment magnetic snap guide */}
+                {snapLineX !== null && (
+                  <div
+                    className="absolute top-0 bottom-0 z-50 w-px bg-cyan-400 pointer-events-none shadow-[0_0_8px_cyan]"
+                    style={{ left: snapLineX }}
+                  />
+                )}
 
             {/* Ruler */}
             <div
@@ -704,19 +732,10 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
               );
             })}
 
-            {/* Playhead */}
-            <div
-              className="mobile-playhead absolute top-0 z-40"
-              style={{
-                left: playheadX - PLAYHEAD_HIT_W / 2,
-                width: PLAYHEAD_HIT_W,
-                height: '100%',
-                touchAction: 'none',
-              }}
-              onPointerDown={onPointerDownPlayhead}
-            >
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 h-0 w-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-amber-400" />
-              <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]" />
+              </div>
+              
+              {/* Right Padding Spacer */}
+              <div className="shrink-0" style={{ width: '60vw' }} />
             </div>
           </div>
         </div>
