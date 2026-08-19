@@ -3742,11 +3742,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (targetIds.length === 0) return;
       
       targetIds.forEach(id => {
+        const found = findClipDeep(get(), id);
+        const targetClip = found?.clip;
+
+        let mergedTextSettings = undefined;
+        if (sourceStyle.textSettings) {
+          mergedTextSettings = {
+            ...sourceStyle.textSettings,
+            ...(targetClip?.textSettings?.text !== undefined ? { text: targetClip.textSettings.text } : {})
+          };
+        }
+
         const updates: any = {
           opacity: sourceStyle.opacity,
-          effects: [...sourceStyle.effects],
+          effects: Array.isArray(sourceStyle.effects) ? [...sourceStyle.effects] : undefined,
           colorFilters: sourceStyle.colorFilters ? { ...sourceStyle.colorFilters } : undefined,
-          textSettings: sourceStyle.textSettings ? { ...sourceStyle.textSettings } : undefined,
+          textSettings: mergedTextSettings,
           fxSettings: sourceStyle.fxSettings ? { ...sourceStyle.fxSettings } : undefined,
           audioSettings: sourceStyle.audioSettings ? { ...sourceStyle.audioSettings } : undefined,
           mask: sourceStyle.mask ? { ...sourceStyle.mask } : undefined,

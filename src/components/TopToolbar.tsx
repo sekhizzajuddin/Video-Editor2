@@ -57,6 +57,7 @@ import {
   Download,
   FolderOpen,
   Plus,
+  Palette,
   ChevronDown,
   RotateCcw,
   ArrowLeftRight,
@@ -81,6 +82,7 @@ import { probeFile } from '@/utils/mediaProbe';
 import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
 import { setActiveProject } from '@/utils/projectPersistence';
 import { RecentProjectsModal } from './RecentProjectsModal';
+import { toast } from 'sonner';
 
 export function TopToolbar() {
   const {
@@ -382,22 +384,57 @@ export function TopToolbar() {
                 <Scissors className="w-3.5 h-3.5" /> Cut
               </button>
               <button
-                onClick={() => { copyClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                onClick={() => { copyClip('whole'); toast.success('Clip copied'); setShowEditMenu(false); }}
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
               >
-                <Plus className="w-3.5 h-3.5" /> Copy
+                <div className="flex items-center gap-2">
+                  <Plus className="w-3.5 h-3.5" /> Copy
+                </div>
+                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+C</span>
+              </button>
+              <button
+                onClick={() => { copyClip('style'); toast.success('Style copied'); setShowEditMenu(false); }}
+                className="w-full px-3 py-2 text-xs text-left text-purple-400 hover:text-purple-300 hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Palette className="w-3.5 h-3.5" /> Copy Style
+                </div>
+                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+Alt+C</span>
               </button>
               <button
                 onClick={() => { pasteClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
               >
-                <FolderOpen className="w-3.5 h-3.5" /> Paste
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="w-3.5 h-3.5" /> Paste
+                </div>
+                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+V</span>
               </button>
+              {clipboardData?.clips?.length > 0 && (
+                <button
+                  onClick={() => {
+                    const clipType = clipboardData.type;
+                    const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
+                    pasteClip(pasteType as any);
+                    toast.success('Style pasted to clip');
+                    setShowEditMenu(false);
+                  }}
+                  className="w-full px-3 py-2 text-xs text-left text-purple-400 hover:text-purple-300 hover:bg-purple-950/30 flex items-center justify-between transition-colors font-medium"
+                >
+                  <div className="flex items-center gap-2">
+                    <Palette className="w-3.5 h-3.5" /> Paste Style
+                  </div>
+                  <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+Alt+V</span>
+                </button>
+              )}
               <button
                 onClick={() => { duplicateClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
               >
-                <Plus className="w-3.5 h-3.5" /> Duplicate
+                <div className="flex items-center gap-2">
+                  <Plus className="w-3.5 h-3.5" /> Duplicate
+                </div>
+                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+D</span>
               </button>
             </div>
           )}

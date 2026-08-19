@@ -307,6 +307,8 @@ export function PropertiesPanel() {
     copyColorGrade,
     pasteColorGrade,
     applyColorGradeToAll,
+    pasteClip,
+    clipboardData,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     selectedClipId: s.selectedClipId,
@@ -317,6 +319,8 @@ export function PropertiesPanel() {
     updateClip: s.updateClip,
     removeClip: s.removeClip,
     copyClip: s.copyClip,
+    pasteClip: s.pasteClip,
+    clipboardData: s.clipboardData,
     duplicateClip: s.duplicateClip,
     splitClip: s.splitClip,
     selectedTransitionClipId: s.selectedTransitionClipId,
@@ -2940,12 +2944,34 @@ export function PropertiesPanel() {
               {selectedClip.audioSettings?.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
             </button>
             <button
-              onClick={() => copyClip()}
-              title="Copy"
+              onClick={() => { copyClip('style'); toast.success('Style copied'); }}
+              title="Copy Style"
+              className="p-1.5 bg-[#1e1e1e] rounded text-purple-400 hover:text-purple-300 hover:bg-[#2d2d2d] transition-colors"
+            >
+              <Palette className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => { copyClip('whole'); toast.success('Clip copied'); }}
+              title="Copy (Whole Clip)"
               className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
             >
               <Copy className="w-3 h-3" />
             </button>
+            {clipboardData?.clips?.length > 0 && (
+              <button
+                onClick={() => {
+                  const clipType = clipboardData.type;
+                  const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
+                  pasteClip(pasteType as any);
+                  toast.success('Style pasted to selected clip');
+                }}
+                title="Paste Style (Ctrl+Alt+V)"
+                className="p-1.5 bg-purple-950/40 border border-purple-500/40 rounded text-purple-300 hover:text-white hover:bg-purple-600/30 transition-colors flex items-center gap-1 text-[10px] font-medium"
+              >
+                <Palette className="w-3 h-3 text-purple-400" />
+                <span>Paste Style</span>
+              </button>
+            )}
             <button
               onClick={duplicateClip}
               title="Duplicate"

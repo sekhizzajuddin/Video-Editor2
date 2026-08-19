@@ -89,6 +89,8 @@ export function TimelineModals({
     updateMarker,
     removeMarker,
     updateClip,
+    pasteClip,
+    clipboardData,
   } = useEditorStore(useShallow(s => ({
     isRecordingVoiceover: s.isRecordingVoiceover,
     recordingTrackId: s.recordingTrackId,
@@ -98,6 +100,8 @@ export function TimelineModals({
     updateMarker: s.updateMarker,
     removeMarker: s.removeMarker,
     updateClip: s.updateClip,
+    pasteClip: s.pasteClip,
+    clipboardData: s.clipboardData,
   })));
 
   const handleEditMarker = (markerId: string) => {
@@ -411,6 +415,24 @@ export function TimelineModals({
                     <Box className="w-3.5 h-3.5 text-amber-400" />
                     Copy (Whole)
                   </button>
+                  {clipboardData?.clips?.length > 0 && (
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-purple-400 hover:bg-purple-950/30 flex items-center justify-between transition-colors"
+                      onClick={() => {
+                        const clipType = clipboardData.type;
+                        const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
+                        useEditorStore.getState().pasteClip(pasteType as any);
+                        toast.success('Style pasted to clip');
+                        setContextMenu(null);
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Palette className="w-3.5 h-3.5 text-purple-400" />
+                        Paste Style
+                      </div>
+                      <span className="text-[9px] text-[#6a6a6a] font-mono">Ctrl+Alt+V</span>
+                    </button>
+                  )}
                   <button
                     className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
                     onClick={() => {
@@ -484,27 +506,6 @@ export function TimelineModals({
                         {clip.disabled ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Volume2 className="w-3.5 h-3.5 text-amber-400" />}
                         {clip.disabled ? 'Unmute Clip' : 'Mute Clip'}
                       </button>
-                    ) : null;
-                  })()}
-                  {(() => {
-                    const state = useEditorStore.getState();
-                    const hasStyleToPaste = state.clipboardData?.clips?.length > 0;
-                    return hasStyleToPaste ? (
-                      <>
-                        <div className="h-px bg-[#3e3e3e] my-1" />
-                        <button
-                          className="w-full text-left px-3 py-2 text-xs text-purple-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-                          onClick={() => {
-                            const clipType = state.clipboardData?.type;
-                            const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
-                            useEditorStore.getState().pasteClip(pasteType as any);
-                            setContextMenu(null);
-                          }}
-                        >
-                          <Palette className="w-3.5 h-3.5" />
-                          Paste Style
-                        </button>
-                      </>
                     ) : null;
                   })()}
                   <div className="h-px bg-[#3e3e3e] my-1" />
