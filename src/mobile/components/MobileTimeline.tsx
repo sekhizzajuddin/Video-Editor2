@@ -560,61 +560,57 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        {/* Track rail (Left side) */}
-        <div className="w-12 shrink-0 border-r border-white/10 bg-[#16161a] flex flex-col justify-between">
-          <div>
-            <div style={{ height: RULER_H }} className="border-b border-white/10 flex items-center justify-center">
-              <span className="text-[9px] font-mono text-white/40">Track</span>
-            </div>
-            {tracks.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setSelectedTrackForOptions(selectedTrackForOptions?.id === t.id ? null : t)}
-                style={{ height: trackHeight(t) }}
-                className={`flex w-full flex-col items-center justify-center gap-0.5 border-b border-white/5 transition-colors ${
-                  selectedTrackForOptions?.id === t.id ? 'bg-amber-500/20 text-amber-400' : 'text-white/60 hover:bg-white/5'
-                }`}
-              >
-                {React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-3.5 w-3.5' })}
-                <span className="text-[7px] leading-none uppercase font-mono">{t.type.slice(0, 3)}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* "+ Add Track" Button at end of all tracks */}
-          <button
-            onClick={() => setShowAddTrackMenu(true)}
-            className="flex h-8 w-full items-center justify-center gap-1 border-t border-white/10 bg-white/5 text-[10px] font-semibold text-amber-400 hover:bg-white/10 active:bg-amber-500 active:text-black transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        {/* Stationary Playhead (Centered at 50%) */}
+        <div className="absolute top-0 bottom-0 pointer-events-none z-40" style={{ left: '50%' }}>
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 h-0 w-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-amber-400" />
+          <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[2px] bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
         </div>
 
-        <div className="relative flex-1 min-w-0 overflow-hidden">
-          {/* Stationary Playhead */}
-          <div className="absolute top-0 bottom-0 pointer-events-none z-40" style={{ left: '40%' }}>
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 h-0 w-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-amber-400" />
-            <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]" />
-          </div>
-
-          {/* Scrollable canvas */}
+        {/* Scrollable Container with synchronized vertical & horizontal scroll */}
+        <div
+          ref={scrollRef}
+          className="mobile-no-scrollbar h-full w-full overflow-x-auto overflow-y-auto touch-pan-x touch-pan-y relative"
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onTouchStart={() => { isUserScrolling.current = true; }}
+          onTouchEnd={() => { isUserScrolling.current = false; }}
+          onScroll={onScroll}
+        >
           <div
-            ref={scrollRef}
-            className="mobile-no-scrollbar h-full w-full overflow-x-auto overflow-y-auto touch-pan-x touch-pan-y relative"
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-            onTouchStart={() => { isUserScrolling.current = true; }}
-            onTouchEnd={() => { isUserScrolling.current = false; }}
-            onScroll={onScroll}
+            ref={contentRef}
+            className="relative flex min-w-max min-h-full"
           >
-            <div
-              ref={contentRef}
-              className="relative flex h-full min-w-max"
-            >
-              {/* Left Padding Spacer (40vw minus the track headers width which is 48px) */}
-              <div className="shrink-0" style={{ width: 'calc(40vw - 48px)' }} />
+            {/* Sticky Track rail on the left (scrolls vertically with tracks, pins horizontally) */}
+            <div className="sticky left-0 z-30 w-12 shrink-0 border-r border-white/10 bg-[#16161a] shadow-lg flex flex-col">
+              <div style={{ height: RULER_H }} className="border-b border-white/10 flex items-center justify-center bg-[#16161a]">
+                <span className="text-[9px] font-mono text-white/40">Track</span>
+              </div>
+              {tracks.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setSelectedTrackForOptions(selectedTrackForOptions?.id === t.id ? null : t)}
+                  style={{ height: trackHeight(t) }}
+                  className={`flex w-full flex-col items-center justify-center gap-0.5 border-b border-white/5 transition-colors ${
+                    selectedTrackForOptions?.id === t.id ? 'bg-amber-500/20 text-amber-400' : 'text-white/60 hover:bg-white/5'
+                  }`}
+                >
+                  {React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-3.5 w-3.5' })}
+                  <span className="text-[7px] leading-none uppercase font-mono">{t.type.slice(0, 3)}</span>
+                </button>
+              ))}
+              {/* "+ Add Track" Button at end of all tracks */}
+              <button
+                onClick={() => setShowAddTrackMenu(true)}
+                className="flex h-8 w-full items-center justify-center gap-1 border-t border-white/10 bg-white/5 text-[10px] font-semibold text-amber-400 hover:bg-white/10 active:bg-amber-500 active:text-black transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Left Padding Spacer: exactly (50vw - 48px) so that 0.00s sits precisely under the 50% playhead */}
+            <div className="shrink-0" style={{ width: 'calc(50vw - 48px)' }} />
 
               <div ref={tracksRef} className="relative shrink-0" style={{ width: contentWidth }}>
                 {/* Alignment magnetic snap guide */}
@@ -735,10 +731,9 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
               </div>
               
               {/* Right Padding Spacer */}
-              <div className="shrink-0" style={{ width: '60vw' }} />
+              <div className="shrink-0" style={{ width: '50vw' }} />
             </div>
           </div>
-        </div>
       </div>
 
       {/* Floating Track Options Menu */}

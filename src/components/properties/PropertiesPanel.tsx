@@ -313,16 +313,14 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
     { id: 'audioSpeedPitch', label: 'Speed Pitch' },
   ],
   speed: [
-    { id: 'speed', label: 'Speed' },
-    { id: 'presets', label: 'Presets' },
-    { id: 'ramping', label: 'Ramping' },
+    { id: 'speed', label: 'Speed Slider' },
+    { id: 'ramping', label: 'Speed Ramping' },
   ],
   mask: [
-    { id: 'enable', label: 'Mask Shape' },
-    { id: 'params', label: 'Parameters' },
+    { id: 'mask', label: 'Masking & Matte' },
   ],
   text: [
-    { id: 'content', label: 'Text & Font' },
+    { id: 'text', label: 'Text & Typography' },
   ],
   effects: [
     { id: 'kinetic', label: 'Kinetic Text' },
@@ -431,6 +429,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   const isSectionActive = (sectionId: string) => {
     if (!isMobileView) return true;
+    if (activePropertiesTab === 'mask' || activePropertiesTab === 'text') return true;
+    if (activePropertiesTab === 'speed' && (sectionId === 'ramping' || sectionId === 'presets') && effectiveSubTab === 'ramping') return true;
     return effectiveSubTab === sectionId;
   };
 
@@ -2199,7 +2199,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('blendMode') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('blendMode')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
               >
                 <span className="font-medium">Blend Mode</span>
                 <div className="flex items-center gap-2">
@@ -2573,7 +2573,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
                 onClick={() => toggleSection('chromaKey')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium flex items-center gap-2">
                   Chroma Key / Green Screen
@@ -2887,7 +2887,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
               <button
                 onClick={() => toggleSection('lumaKey')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Luma Key (Luminance)</span>
                 {collapsedSections['lumaKey'] ? (
@@ -3279,7 +3279,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('position') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('position')}
-                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                  className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
                 >
                   <span className="font-medium">Position</span>
                   <div className="flex items-center gap-2">
@@ -3427,7 +3427,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('scale') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('scale')}
-                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                  className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
                 >
                   <span className="font-medium">Scale</span>
                   <div className="flex items-center gap-2">
@@ -3532,7 +3532,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('rotation') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('rotation')}
-                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                  className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
                 >
                   <span className="font-medium">Rotation</span>
                   <div className="flex items-center gap-2">
@@ -3796,7 +3796,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('opacity') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('opacity')}
-                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                  className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
                 >
                   <span className="font-medium">Opacity</span>
                   <div className="flex items-center gap-2">
@@ -3897,381 +3897,10 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
                 )}
               </div>
-
-              {/* Opacity slider replacement helper */}
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
-                <button
-                  onClick={() => toggleSection('rotation')}
-                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
-                >
-                  <span className="font-medium">Rotation</span>
-                  <div className="flex items-center gap-2">
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                        setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                        setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                        scheduleSaveSnapshot();
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
-                      title="Reset Rotation"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
-                    </div>
-                    {collapsedSections['rotation'] ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                    )}
-                  </div>
-                </button>
-                {isSectionOpen('rotation') && (
-                  <div className="px-2.5 pb-2.5 space-y-3">
-                    {/* Rotate X */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">Rotate X (3D)</label>
-                        <KeyframeControl
-                          propertyKey="transform.rotationX"
-                          value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
-                          keyframes={animations['transform.rotationX'] || []}
-                          currentTime={localTime}
-                          clipId={selectedClip.id}
-                          onAddKeyframe={(time, val) => {
-                            const newKf = addOrUpdateKeyframe(animations['transform.rotationX'] || [], time, val, { easing: 'bezier' });
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotationX': newKf }
-                            });
-                          }}
-                          onRemoveKeyframe={(time) => {
-                            const newKf = (animations['transform.rotationX'] || []).filter(k => Math.abs(k.time - time) > 0.03);
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotationX': newKf }
-                            });
-                          }}
-                          onUpdateEasing={(time, easing) => {
-                            const newKf = (animations['transform.rotationX'] || []).map(k => 
-                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
-                            );
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotationX': newKf }
-                            });
-                          }}
-                          onJumpToNext={() => {
-                            const next = (animations['transform.rotationX'] || []).find(k => k.time > localTime + 0.05);
-                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
-                          }}
-                          onJumpToPrev={() => {
-                            const prev = [...(animations['transform.rotationX'] || [])].reverse().find(k => k.time < localTime - 0.05);
-                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
-                          }}
-                        />
-                      </div>
-                      <KeyframeMiniTimeline
-                        keyframes={animations['transform.rotationX'] || []}
-                        currentTime={localTime}
-                        duration={selectedClip.duration}
-                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
-                      />
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="range"
-                          min={-180}
-                          max={180}
-                          value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
-                          title="Double-click to reset to 0°"
-                          onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
-                          onMouseUp={() => scheduleSaveSnapshot()}
-                          onDoubleClick={() => {
-                            setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                            scheduleSaveSnapshot();
-                          }}
-                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                        />
-                        <span 
-                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                          title="Click to step 45°"
-                          onClick={() => {
-                            const cur = getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX');
-                            let next = cur + 45;
-                            if (next > 180) next = -180;
-                            setPropVal('transform.rotationX', next, { transform: { ...selectedClip.transform, rotationX: next } });
-                            scheduleSaveSnapshot();
-                          }}
-                        >
-                          {Math.round(getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'))}°
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Rotate Y */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">Rotate Y (3D)</label>
-                        <KeyframeControl
-                          propertyKey="transform.rotationY"
-                          value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
-                          keyframes={animations['transform.rotationY'] || []}
-                          currentTime={localTime}
-                          clipId={selectedClip.id}
-                          onAddKeyframe={(time, val) => {
-                            const newKf = addOrUpdateKeyframe(animations['transform.rotationY'] || [], time, val, { easing: 'bezier' });
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotationY': newKf }
-                            });
-                          }}
-                          onRemoveKeyframe={(time) => {
-                            const newKf = (animations['transform.rotationY'] || []).filter(k => Math.abs(k.time - time) > 0.03);
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotationY': newKf }
-                            });
-                          }}
-                          onUpdateEasing={(time, easing) => {
-                            const newKf = (animations['transform.rotationY'] || []).map(k => 
-                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
-                            );
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotationY': newKf }
-                            });
-                          }}
-                          onJumpToNext={() => {
-                            const next = (animations['transform.rotationY'] || []).find(k => k.time > localTime + 0.05);
-                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
-                          }}
-                          onJumpToPrev={() => {
-                            const prev = [...(animations['transform.rotationY'] || [])].reverse().find(k => k.time < localTime - 0.05);
-                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
-                          }}
-                        />
-                      </div>
-                      <KeyframeMiniTimeline
-                        keyframes={animations['transform.rotationY'] || []}
-                        currentTime={localTime}
-                        duration={selectedClip.duration}
-                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
-                      />
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="range"
-                          min={-180}
-                          max={180}
-                          value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
-                          title="Double-click to reset to 0°"
-                          onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
-                          onMouseUp={() => scheduleSaveSnapshot()}
-                          onDoubleClick={() => {
-                            setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                            scheduleSaveSnapshot();
-                          }}
-                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                        />
-                        <span 
-                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                          title="Click to step 45°"
-                          onClick={() => {
-                            const cur = getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY');
-                            let next = cur + 45;
-                            if (next > 180) next = -180;
-                            setPropVal('transform.rotationY', next, { transform: { ...selectedClip.transform, rotationY: next } });
-                            scheduleSaveSnapshot();
-                          }}
-                        >
-                          {Math.round(getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'))}°
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Rotate Z */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">Rotate Z (3D)</label>
-                        <KeyframeControl
-                          propertyKey="transform.rotation"
-                          value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
-                          keyframes={animations['transform.rotation'] || []}
-                          currentTime={localTime}
-                          clipId={selectedClip.id}
-                          onAddKeyframe={(time, val) => {
-                            const newKf = addOrUpdateKeyframe(animations['transform.rotation'] || [], time, val, { easing: 'bezier' });
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotation': newKf }
-                            });
-                          }}
-                          onRemoveKeyframe={(time) => {
-                            const newKf = (animations['transform.rotation'] || []).filter(k => Math.abs(k.time - time) > 0.03);
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotation': newKf }
-                            });
-                          }}
-                          onUpdateEasing={(time, easing) => {
-                            const newKf = (animations['transform.rotation'] || []).map(k => 
-                              Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
-                            );
-                            updateClip(selectedClip.id, {
-                              animations: { ...animations, 'transform.rotation': newKf }
-                            });
-                          }}
-                          onJumpToNext={() => {
-                            const next = (animations['transform.rotation'] || []).find(k => k.time > localTime + 0.05);
-                            if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
-                          }}
-                          onJumpToPrev={() => {
-                            const prev = [...(animations['transform.rotation'] || [])].reverse().find(k => k.time < localTime - 0.05);
-                            if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
-                          }}
-                        />
-                      </div>
-                      <KeyframeMiniTimeline
-                        keyframes={animations['transform.rotation'] || []}
-                        currentTime={localTime}
-                        duration={selectedClip.duration}
-                        onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
-                      />
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="range"
-                          min={-180}
-                          max={180}
-                          value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
-                          title="Double-click to reset to 0°"
-                          onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
-                          onMouseUp={() => scheduleSaveSnapshot()}
-                          onDoubleClick={() => {
-                            setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                            scheduleSaveSnapshot();
-                          }}
-                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                        />
-                        <span 
-                          className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                          title="Click to step 45°"
-                          onClick={() => {
-                            const cur = getPropVal(selectedClip.transform.rotation ?? 0, 'transform.rotation');
-                            let next = cur + 45;
-                            if (next > 180) next = -180;
-                            setPropVal('transform.rotation', next, { transform: { ...selectedClip.transform, rotation: next } });
-                            scheduleSaveSnapshot();
-                          }}
-                        >
-                          {Math.round(getPropVal(selectedClip.transform.rotation, 'transform.rotation'))}°
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Opacity */}
-              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('opacity') ? 'hidden' : ''}`}>
-                <button
-                  onClick={() => toggleSection('opacity')}
-                  className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
-                >
-                  <span className="font-medium">Opacity</span>
-                  <div className="flex items-center gap-2">
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPropVal('opacity', 1, { opacity: 1 });
-                        scheduleSaveSnapshot();
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
-                      title="Reset Opacity"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
-                    </div>
-                    {collapsedSections['opacity'] ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
-                    )}
-                  </div>
-                </button>
-                {isSectionOpen('opacity') && (
-                  <div className="px-2.5 pb-2.5 space-y-1.5">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] text-[#a0a0a0]">Opacity Value</span>
-                      <KeyframeControl
-                        propertyKey="opacity"
-                        value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
-                        keyframes={animations['opacity'] || []}
-                        currentTime={localTime}
-                        clipId={selectedClip.id}
-                        onAddKeyframe={(time, val) => {
-                          const newKf = addOrUpdateKeyframe(animations['opacity'] || [], time, val, { easing: 'bezier' });
-                          updateClip(selectedClip.id, {
-                            animations: { ...animations, opacity: newKf }
-                          });
-                        }}
-                        onRemoveKeyframe={(time) => {
-                          const newKf = (animations['opacity'] || []).filter(k => Math.abs(k.time - time) > 0.03);
-                          updateClip(selectedClip.id, {
-                            animations: { ...animations, opacity: newKf }
-                          });
-                        }}
-                        onUpdateEasing={(time, easing) => {
-                          const newKf = (animations['opacity'] || []).map(k => 
-                            Math.abs(k.time - time) < 0.03 ? { ...k, easing } : k
-                          );
-                          updateClip(selectedClip.id, {
-                            animations: { ...animations, opacity: newKf }
-                          });
-                        }}
-                        onJumpToNext={() => {
-                          const next = (animations['opacity'] || []).find(k => k.time > localTime + 0.05);
-                          if (next) useEditorStore.getState().seek(absoluteStartTime + next.time);
-                        }}
-                        onJumpToPrev={() => {
-                          const prev = [...(animations['opacity'] || [])].reverse().find(k => k.time < localTime - 0.05);
-                          if (prev) useEditorStore.getState().seek(absoluteStartTime + prev.time);
-                        }}
-                      />
-                    </div>
-                    <KeyframeMiniTimeline
-                      keyframes={animations['opacity'] || []}
-                      currentTime={localTime}
-                      duration={selectedClip.duration}
-                      onSeek={(t) => useEditorStore.getState().seek(absoluteStartTime + t)}
-                    />
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
-                        title="Double-click to reset to 100%"
-                        onChange={(e) => setPropVal('opacity', Number(e.target.value), { opacity: Number(e.target.value) })}
-                        onMouseUp={() => scheduleSaveSnapshot()}
-                        onDoubleClick={() => {
-                          setPropVal('opacity', 1, { opacity: 1 });
-                          scheduleSaveSnapshot();
-                        }}
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
-                      />
-                      <span 
-                        className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                        title="Click to cycle values"
-                        onClick={() => {
-                          const steps = [0, 25, 50, 75, 100];
-                          const cur = Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100);
-                          let next = steps.find(s => s > cur) ?? steps[0];
-                          setPropVal('opacity', next / 100, { opacity: next / 100 });
-                          scheduleSaveSnapshot();
-                        }}
-                      >
-                        {Math.round(getPropVal(selectedClip.opacity ?? 1, 'opacity') * 100)}%
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('flip') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('flip')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Flip / Mirror</span>
                 {collapsedSections['flip'] ? (
@@ -4318,7 +3947,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('perspective') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('perspective')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
               >
                 <span className="font-medium">Perspective Warp & Tracker</span>
                 {collapsedSections['perspective'] ? (
@@ -4543,7 +4172,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('crop') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('crop')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
               >
                 <span className="font-medium">Crop</span>
                 <div className="flex items-center gap-2">
@@ -4677,7 +4306,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
                   <button
                     onClick={() => toggleSection('kenBurns')}
-                    className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+                    className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
                   >
                     <div className="flex items-center gap-2">
                       <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
@@ -4943,7 +4572,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('colorBasic') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorBasic')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Basic Correction</span>
                 {collapsedSections['colorBasic'] ? (
@@ -5133,7 +4762,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('colorCreative') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorCreative')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Creative</span>
                 {collapsedSections['colorCreative'] ? (
@@ -5192,10 +4821,10 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* 3-Way Color Wheels */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] group">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] group ${!isSectionActive('colorWheels') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorWheels')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">3-Way Color Wheels</span>
                 <div className="flex items-center gap-2">
@@ -5264,7 +4893,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('lutGrade') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('lutGrade')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
@@ -6107,7 +5736,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVolume') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioVolume')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <div className="flex items-center gap-1.5 font-medium">
                   <Volume2 className="w-3.5 h-3.5" />
@@ -6208,7 +5837,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVocalTune') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioVocalTune')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <div className="flex items-center gap-1.5 font-medium">
                   <Sparkles className="w-3.5 h-3.5" />
@@ -6357,7 +5986,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioFades') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioFades')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Audio Fades</span>
                 {collapsedSections['audioFades'] ? (
@@ -6419,7 +6048,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEnhancements') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioEnhancements')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <div className="flex items-center gap-1.5 font-medium">
                   <Wand2 className="w-3.5 h-3.5" />
@@ -6461,7 +6090,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEQ') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioEQ')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <div className="flex items-center gap-1.5 font-medium">
                   <Sliders className="w-3.5 h-3.5" />
@@ -6551,7 +6180,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('aiVocalSeparation') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('aiVocalSeparation')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <div className="flex items-center gap-1.5 font-medium">
                   <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
@@ -6628,7 +6257,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioSpeedPitch') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioSpeedPitch')}
-                className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Speed Pitch Settings</span>
                 {collapsedSections['audioSpeedPitch'] ? (
