@@ -950,11 +950,26 @@ export async function renderCanvasEngine({
 
         if (isTextClip) {
           const tsm = clip.textSettings;
-          const fontSizeM = Number(tsm?.fontSize) || 48;
+          const fontStyleM: string[] = [];
+          if (tsm?.italic) fontStyleM.push('italic');
+          if (tsm?.bold) fontStyleM.push('bold');
+          const fwM = fontStyleM.join(' ');
+          const fsM = Number(tsm?.fontSize) || 48;
+          ctx.save();
+          ctx.font = `${fwM ? fwM + ' ' : ''}${fsM}px ${tsm?.fontFamily || 'sans-serif'}`;
           const linesM = String(tsm?.text ?? '').split('\n');
-          const longestM = linesM.reduce((m: number, l: string) => Math.max(m, l.length), 0);
-          vw = Math.max(80, longestM * fontSizeM * 0.6 + 40);
-          vh = linesM.length * (fontSizeM * 1.35) + 20;
+          let maxLM = 0;
+          for (const l of linesM) {
+            const lw = ctx.measureText(l || ' ').width;
+            if (lw > maxLM) maxLM = lw;
+          }
+          ctx.restore();
+          const bgPadXM = (tsm?.backgroundColor && tsm?.backgroundColor !== 'transparent') ? fsM * 0.5 : 0;
+          const bgPadYM = (tsm?.backgroundColor && tsm?.backgroundColor !== 'transparent') ? fsM * 0.3 : 0;
+          const strokeM = (tsm?.strokeColor && tsm?.strokeWidth) ? Number(tsm.strokeWidth) * 2 : 0;
+          const shadowM = tsm?.shadow ? (Number(tsm.shadowBlur) || 10) * 2 + 10 : 0;
+          vw = Math.max(80, Math.ceil(maxLM + bgPadXM * 2 + strokeM + shadowM + 40));
+          vh = Math.max(40, Math.ceil(linesM.length * (fsM * 1.25) + bgPadYM * 2 + strokeM + shadowM + 20));
           // Text is drawn at its natural size (no fit-to-frame downscale).
           fitScale = 1;
         } else {
@@ -1679,11 +1694,28 @@ export async function renderCanvasEngine({
       // it the same way here. A little padding keeps descenders and strokes from
       // clipping at the edges.
       const tsMeasure = clip.textSettings;
-      const measFont = Number(tsMeasure?.fontSize) || 48;
+      const fontStyleM: string[] = [];
+      if (tsMeasure?.italic) fontStyleM.push('italic');
+      if (tsMeasure?.bold) fontStyleM.push('bold');
+      const fwM = fontStyleM.join(' ');
+      const fsM = Number(tsMeasure?.fontSize) || 48;
+      ctx.save();
+      ctx.font = `${fwM ? fwM + ' ' : ''}${fsM}px ${tsMeasure?.fontFamily || 'sans-serif'}`;
       const measLines = String(tsMeasure?.text ?? '').split('\n');
-      const measLongest = measLines.reduce((m: number, l: string) => Math.max(m, l.length), 0);
-      const textBufW = Math.max(1, Math.round(Math.max(80, measLongest * measFont * 0.6 + 40)));
-      const textBufH = Math.max(1, Math.round(measLines.length * (measFont * 1.35) + 20));
+      let measuredMaxLineW = 0;
+      for (const line of measLines) {
+        const lw = ctx.measureText(line || ' ').width;
+        if (lw > measuredMaxLineW) measuredMaxLineW = lw;
+      }
+      ctx.restore();
+
+      const bgPadX = (tsMeasure?.backgroundColor && tsMeasure?.backgroundColor !== 'transparent') ? fsM * 0.5 : 0;
+      const bgPadY = (tsMeasure?.backgroundColor && tsMeasure?.backgroundColor !== 'transparent') ? fsM * 0.3 : 0;
+      const strokePad = (tsMeasure?.strokeColor && tsMeasure?.strokeWidth) ? Number(tsMeasure.strokeWidth) * 2 : 0;
+      const shadowPad = tsMeasure?.shadow ? (Number(tsMeasure.shadowBlur) || 10) * 2 + 10 : 0;
+
+      const textBufW = Math.max(80, Math.ceil(measuredMaxLineW + bgPadX * 2 + strokePad + shadowPad + 40));
+      const textBufH = Math.max(40, Math.ceil(measLines.length * (fsM * 1.25) + bgPadY * 2 + strokePad + shadowPad + 20));
 
       if (textNeedsOffscreen) {
         textBuffer = getOrCreateCanvas(
@@ -1735,18 +1767,25 @@ export async function renderCanvasEngine({
          }
       }
 
-      const metrics = ctx.measureText(textToRender);
-      const textWidth = metrics.width;
+      const lines = String(textToRender).split('\n');
       const textHeight = ts.fontSize || 48;
+      const lineHeight = textHeight * 1.25;
+      const blockHeight = lines.length * lineHeight;
+      let maxLineWidth = 0;
+      for (const line of lines) {
+        const lw = ctx.measureText(line).width;
+        if (lw > maxLineWidth) maxLineWidth = lw;
+      }
+
       const paddingX = textHeight * 0.5;
       const paddingY = textHeight * 0.3;
 
       if (ts.backgroundColor && ts.backgroundColor !== 'transparent') {
         ctx.fillStyle = ts.backgroundColor;
-        const bgX = -(textWidth / 2) - paddingX;
-        const bgY = -(textHeight / 2) - paddingY;
-        const bgW = textWidth + paddingX * 2;
-        const bgH = textHeight + paddingY * 2;
+        const bgX = -(maxLineWidth / 2) - paddingX;
+        const bgY = -(blockHeight / 2) - paddingY;
+        const bgW = maxLineWidth + paddingX * 2;
+        const bgH = blockHeight + paddingY * 2;
         const radius = Math.min(8, bgH / 4);
         
         ctx.beginPath();
@@ -1772,24 +1811,31 @@ export async function renderCanvasEngine({
         ctx.shadowColor = 'transparent';
       }
 
-      if (ts.strokeColor && ts.strokeWidth) {
-        ctx.strokeStyle = ts.strokeColor;
-        ctx.lineWidth = ts.strokeWidth;
-        ctx.strokeText(textToRender, 0, 0);
-      }
+      const firstLineY = -(blockHeight / 2) + lineHeight / 2;
+      for (let i = 0; i < lines.length; i++) {
+        const lineY = firstLineY + i * lineHeight;
+        if (ts.strokeColor && ts.strokeWidth) {
+          ctx.strokeStyle = ts.strokeColor;
+          ctx.lineWidth = ts.strokeWidth;
+          ctx.strokeText(lines[i], 0, lineY);
+        }
 
-      ctx.fillStyle = ts.color || '#ffffff';
-      ctx.fillText(textToRender, 0, 0);
+        ctx.fillStyle = ts.color || '#ffffff';
+        ctx.fillText(lines[i], 0, lineY);
 
-      if (ts.underline) {
-         ctx.shadowColor = 'transparent';
-         ctx.beginPath();
-         ctx.strokeStyle = ts.color || '#ffffff';
-         ctx.lineWidth = Math.max(1, textHeight / 15);
-         const lineY = textHeight * 0.45;
-         ctx.moveTo(-(textWidth / 2), lineY);
-         ctx.lineTo((textWidth / 2), lineY);
-         ctx.stroke();
+        if (ts.underline) {
+           const lw = ctx.measureText(lines[i]).width;
+           ctx.save();
+           ctx.shadowColor = 'transparent';
+           ctx.beginPath();
+           ctx.strokeStyle = ts.color || '#ffffff';
+           ctx.lineWidth = Math.max(1, textHeight / 15);
+           const uY = lineY + textHeight * 0.45;
+           ctx.moveTo(-(lw / 2), uY);
+           ctx.lineTo((lw / 2), uY);
+           ctx.stroke();
+           ctx.restore();
+        }
       }
 
       ctx.restore();

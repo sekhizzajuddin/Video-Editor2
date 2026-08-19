@@ -470,8 +470,8 @@ processedClips.push({
         fontSize = Math.min(54, Math.max(36, Math.floor(760 / Math.max(1, totalChars * 0.52))));
       }
       
-      const charWidth = fontSize * 0.52;
-      const spaceWidth = fontSize * 0.35;
+      const charWidth = fontSize * 0.65;
+      const spaceWidth = fontSize * 0.4;
       const lineHeight = fontSize * 1.35;
 
       const lines: { word: any; width: number }[][] = [[]];

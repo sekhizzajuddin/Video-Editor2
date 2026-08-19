@@ -202,8 +202,8 @@ export function layoutSentence(words: string[], opts: LayoutOptions = {}): Layou
   // lines from scratch, a multi-line sentence collapsed onto a single line the
   // moment the user nudged the transform.
   const maxLineWidth = isColumn ? 420 : 860;
-  const charWidth = fontSize * 0.52;
-  const spaceWidth = fontSize * 0.35;
+  const charWidth = fontSize * 0.65;
+  const spaceWidth = fontSize * 0.4;
   const lineHeight = fontSize * 1.35;
 
   const lines: Array<Array<{ text: string; width: number }>> = [[]];
@@ -350,7 +350,7 @@ export function getSentenceBounds(
   let maxY = -Infinity;
 
   for (const w of words) {
-    const halfW = (w.text.length * w.fontSize * 0.52) / 2;
+    const halfW = (w.text.length * w.fontSize * 0.65) / 2;
     const halfH = (w.fontSize * 1.35) / 2;
     minX = Math.min(minX, w.x - halfW);
     maxX = Math.max(maxX, w.x + halfW);

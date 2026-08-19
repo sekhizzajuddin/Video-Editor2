@@ -1802,10 +1802,13 @@ export function PreviewCanvasOverlay({
         const fontSize = Number(ts.fontSize) || 48;
         const text = String(ts.text || '');
         const lines = text.split('\n');
-        const estCharWidth = fontSize * 0.6;
+        const estCharWidth = fontSize * 0.75;
         const longestLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
-        vw = Math.max(80, longestLine * estCharWidth + 40);
-        vh = lines.length * (fontSize * 1.35) + 20;
+        const bgPad = (ts.backgroundColor && ts.backgroundColor !== 'transparent') ? fontSize * 0.5 * 2 : 0;
+        const strokePad = (ts.strokeColor && ts.strokeWidth) ? Number(ts.strokeWidth) * 2 : 0;
+        const shadowPad = ts.shadow ? (Number(ts.shadowBlur) || 10) * 2 + 10 : 0;
+        vw = Math.max(80, Math.ceil(longestLine * estCharWidth + bgPad + strokePad + shadowPad + 40));
+        vh = Math.max(40, Math.ceil(lines.length * (fontSize * 1.35) + bgPad + strokePad + shadowPad + 20));
       } else {
         vw = 300;
         vh = 80;
