@@ -13,7 +13,7 @@ import { MobileTopBar } from './components/MobileTopBar';
 import { MobileTimeline } from './components/MobileTimeline';
 import { MobileToolRail } from './components/MobileToolRail';
 import { MobileMediaSheet, MobileMediaTab } from './components/MobileMediaSheet';
-import { MobilePropertiesSheet } from './components/MobilePropertiesSheet';
+import { PropertiesPanel } from '@/components/properties/PropertiesPanel';
 import { MobileBottomSheet } from './components/MobileBottomSheet';
 import { MobileWelcomeScreen } from './components/MobileWelcomeScreen';
 import { PwaStatusListener } from './components/PwaStatusListener';
@@ -115,7 +115,7 @@ export function MobileApp() {
         onClose={() => setSheet('none')}
         height="65%"
       >
-        <MobilePropertiesSheet category={activePropertyTab as any} onClose={() => setSheet('none')} />
+        <PropertiesPanel isMobileView={true} mobileCategory={activePropertyTab as any} onMobileClose={() => setSheet('none')} />
       </MobileBottomSheet>
 
       {/* Global handlers & modals (reused from desktop) */}

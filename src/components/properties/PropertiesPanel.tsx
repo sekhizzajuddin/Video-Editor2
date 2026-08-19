@@ -273,7 +273,76 @@ const PRESETS_RATIOS = {
   ],
 };
 
-export function PropertiesPanel() {
+export interface PropertiesPanelProps {
+  isMobileView?: boolean;
+  mobileCategory?: string;
+  onMobileClose?: () => void;
+}
+
+
+const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
+  transform: [
+    { id: 'scale', label: 'Scale' },
+    { id: 'position', label: 'Position' },
+    { id: 'rotation', label: 'Rotation' },
+    { id: 'opacity', label: 'Opacity' },
+    { id: 'flip', label: 'Flip' },
+    { id: 'perspective', label: 'Warp' },
+    { id: 'blendMode', label: 'Blend' },
+    { id: 'crop', label: 'Crop' },
+    { id: 'reframe', label: 'Smart Reframe' },
+    { id: 'keyframes', label: 'Keyframes' },
+    { id: 'kenBurns', label: 'Ken Burns' },
+    { id: 'keying', label: 'Chroma / AI' },
+  ],
+  color: [
+    { id: 'colorBasic', label: 'Basic' },
+    { id: 'colorCreative', label: 'Creative' },
+    { id: 'colorWheels', label: 'Color Wheels' },
+    { id: 'lutGrade', label: 'LUT Grade' },
+  ],
+  audio: [
+    { id: 'audioVolume', label: 'Volume & Pan' },
+    { id: 'audioDucking', label: 'Auto Ducking' },
+    { id: 'soundDesign', label: 'Sound Design' },
+    { id: 'audioEQ', label: 'Equalizer' },
+    { id: 'audioVocalTune', label: 'Voice Tune' },
+    { id: 'audioFades', label: 'Fades' },
+    { id: 'audioEnhancements', label: 'Enhance' },
+    { id: 'aiVocalSeparation', label: 'Vocal Split' },
+    { id: 'audioSpeedPitch', label: 'Speed Pitch' },
+  ],
+  speed: [
+    { id: 'speed', label: 'Speed' },
+    { id: 'presets', label: 'Presets' },
+    { id: 'ramping', label: 'Ramping' },
+  ],
+  mask: [
+    { id: 'enable', label: 'Mask Shape' },
+    { id: 'params', label: 'Parameters' },
+  ],
+  text: [
+    { id: 'content', label: 'Text & Font' },
+  ],
+  effects: [
+    { id: 'kinetic', label: 'Kinetic Text' },
+    { id: 'beatsync', label: 'Beat Sync' },
+    { id: 'sfx', label: 'AI SFX' },
+    { id: 'designer', label: 'Motion Graphics' },
+    { id: 'keying', label: 'Eraser & Chroma' },
+    { id: 'motion', label: 'Motion Effects' },
+    { id: 'particles', label: 'Particles' },
+  ],
+  thumbnail: [
+    { id: 'thumbnail', label: 'Thumbnail' },
+  ],
+  history: [
+    { id: 'history', label: 'History' },
+  ],
+};
+
+export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }: PropertiesPanelProps = {}) {
+
   const {
     tracks,
     selectedClipId,
@@ -345,6 +414,31 @@ export function PropertiesPanel() {
     pasteColorGrade: s.pasteColorGrade,
     applyColorGradeToAll: s.applyColorGradeToAll,
   })));
+
+  const [mobileSubTab, setMobileSubTab] = useState<string>('');
+
+  useEffect(() => {
+    if (isMobileView && mobileCategory) {
+      const normalized = mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : mobileCategory;
+      setActivePropertiesTab(normalized as any);
+    }
+  }, [isMobileView, mobileCategory, setActivePropertiesTab]);
+
+  const currentSubTabs = MOBILE_SUB_TABS[activePropertiesTab] || [];
+  const effectiveSubTab = currentSubTabs.some(t => t.id === mobileSubTab)
+    ? mobileSubTab
+    : (currentSubTabs[0]?.id || '');
+
+  const isSectionActive = (sectionId: string) => {
+    if (!isMobileView) return true;
+    return effectiveSubTab === sectionId;
+  };
+
+  const isSectionOpen = (sectionId: string) => {
+    if (isMobileView) return true;
+    return !collapsedSections[sectionId];
+  };
+
 
   // PERF: this panel is ~7k lines and re-rendering it is expensive. It used to
   // select `s.currentTime`, so it re-rendered on every playback store write and
@@ -1451,6 +1545,56 @@ export function PropertiesPanel() {
   }
 
   if (!selectedClip) {
+    if (isMobileView) {
+      return (
+        <div className="h-full flex flex-col bg-[#121215] text-white">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 shrink-0">
+            <h3 className="text-sm font-semibold capitalize text-white">
+              {tabs.find(t => t.id === activePropertiesTab)?.label || mobileCategory || 'Properties'}
+            </h3>
+            {onMobileClose && (
+              <button
+                onClick={onMobileClose}
+                className="rounded-full bg-white/5 p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {activePropertiesTab === 'history' ? (
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 mobile-no-scrollbar">
+              {history.map((snap, idx) => {
+                const isActive = idx === historyIndex;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => jumpToHistoryIndex(idx)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all border ${
+                      isActive
+                        ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-medium'
+                        : 'bg-white/5 border-transparent text-white/70 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs truncate block text-white font-medium">{snap.label || 'Action'}</span>
+                      <span className="text-[10px] text-white/40 block mt-0.5 font-mono">
+                        {idx === 0 ? 'Base State' : `Step ${idx}`}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+              <Move3D className="w-10 h-10 text-white/20 mb-3" />
+              <p className="text-sm font-medium text-white/80">No clip selected</p>
+              <p className="text-xs text-white/40 mt-1">Tap a clip on the timeline to edit its properties</p>
+            </div>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
         {/* Tabs */}
@@ -2052,7 +2196,7 @@ export function PropertiesPanel() {
   const renderBlendModeSection = () => (
     <div className="space-y-3">
             {/* Blend Mode */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('blendMode') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('blendMode')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -2077,7 +2221,7 @@ export function PropertiesPanel() {
                   )}
                 </div>
               </button>
-              {!collapsedSections['blendMode'] && (
+              {isSectionOpen('blendMode') && (
                 <div className="px-2.5 pb-2.5 space-y-3">
                   <select
                     value={selectedClip.transform.blendMode || 'source-over'}
@@ -2165,7 +2309,8 @@ export function PropertiesPanel() {
   );
 
   const renderKeyingAndAiSection = () => (
-    <div className="space-y-3">
+    <div className={`space-y-3 ${!isSectionActive('keying') ? 'hidden' : ''}`}>
+
             {/* AI Background Removal */}
             <div className="bg-[#1e1e1e] rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 p-3">
               <div className="flex items-center gap-2 mb-2">
@@ -2442,7 +2587,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['chromaKey'] && (
+              {isSectionOpen('chromaKey') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Enable Toggle */}
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -2751,7 +2896,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['lumaKey'] && (
+              {isSectionOpen('lumaKey') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Enable Luma Key */}
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -2878,15 +3023,62 @@ export function PropertiesPanel() {
                 </div>
               )}
             </div>
-            <ObjectRemovalPanel selectedClip={selectedClip} />
-            <MotionEffectsPanel selectedClip={selectedClip} videoElements={videoElements} />
+            <div className={!isSectionActive('motion') ? 'hidden' : ''}><ObjectRemovalPanel selectedClip={selectedClip} /></div>
+            <div className={!isSectionActive('motion') ? 'hidden' : ''}><MotionEffectsPanel selectedClip={selectedClip} videoElements={videoElements} /></div>
     </div>
   );
 
   return (
-    <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
-      {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
+    <div className={`h-full flex flex-col ${isMobileView ? 'bg-[#121215] text-white' : 'bg-[#252525] border-l border-[#3e3e3e]'}`}>
+      {isMobileView ? (
+        <>
+          {/* Mobile Header */}
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 shrink-0 bg-[#121215]">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold capitalize text-white">
+                {tabs.find(t => t.id === activePropertiesTab)?.label || activePropertiesTab}
+              </span>
+              {selectedClip && (
+                <span className="text-[11px] text-white/40 truncate max-w-[150px]">
+                  ({selectedClip.name || selectedTrack?.name || 'Clip'})
+                </span>
+              )}
+            </div>
+            {onMobileClose && (
+              <button
+                onClick={onMobileClose}
+                className="rounded-full bg-white/5 p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Mobile Sub-Tabs Horizontal Pill Rail */}
+          {currentSubTabs.length > 1 && (
+            <div className="border-b border-white/10 overflow-x-auto no-scrollbar touch-pan-x bg-[#17171c] shrink-0">
+              <div className="flex px-3 py-2 gap-1.5">
+                {currentSubTabs.map((st) => (
+                  <button
+                    key={st.id}
+                    onClick={() => setMobileSubTab(st.id)}
+                    className={`flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                      effectiveSubTab === st.id
+                        ? 'bg-amber-500 text-black font-semibold shadow-sm'
+                        : 'text-white/70 hover:text-white bg-white/5 active:bg-white/10'
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Tabs */}
+          <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
         {tabs.map((tab, idx) => {
           const Icon = tab.icon;
           const isActive = activePropertiesTab === tab.id;
@@ -2997,6 +3189,9 @@ export function PropertiesPanel() {
         </div>
       )}
 
+      </>
+      )}
+
       {/* Properties Content */}
       <div className="flex-1 overflow-y-auto p-3">
         <SequenceProperties />
@@ -3009,7 +3204,7 @@ export function PropertiesPanel() {
           return (
             <div className="space-y-3">
                             {/* Smart Reframe AI */}
-              <div className="bg-[#1e1e1e] p-3 rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20">
+              <div className={`bg-[#1e1e1e] p-3 rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 ${!isSectionActive('reframe') ? 'hidden' : ''}`}>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="p-1.5 bg-cyan-500/20 rounded">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect width="10" height="14" x="7" y="5" rx="2"/></svg>
@@ -3036,7 +3231,8 @@ export function PropertiesPanel() {
               </div>
 
               {/* Master Keyframes */}
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
+              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5 ${!isSectionActive('keyframes') ? 'hidden' : ''}`}>
+
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-white">Master Keyframes</span>
                   <button
@@ -3080,7 +3276,7 @@ export function PropertiesPanel() {
                 )}
               </div>
               {/* Position */}
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('position') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('position')}
                   className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -3106,7 +3302,7 @@ export function PropertiesPanel() {
                     )}
                   </div>
                 </button>
-                {!collapsedSections['position'] && (
+                {isSectionOpen('position') && (
                   <div className="px-2.5 pb-2.5 space-y-4">
                     {/* Position X */}
                     <div className="space-y-1">
@@ -3228,7 +3424,7 @@ export function PropertiesPanel() {
               </div>
 
               {/* Scale */}
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('scale') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('scale')}
                   className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -3253,7 +3449,7 @@ export function PropertiesPanel() {
                     )}
                   </div>
                 </button>
-                {!collapsedSections['scale'] && (
+                {isSectionOpen('scale') && (
                   <div className="px-2.5 pb-2.5 space-y-1.5">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] text-[#a0a0a0]">Scale Multiplier</span>
@@ -3333,7 +3529,7 @@ export function PropertiesPanel() {
               </div>
 
               {/* Rotation */}
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('rotation') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('rotation')}
                   className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -3360,7 +3556,7 @@ export function PropertiesPanel() {
                     )}
                   </div>
                 </button>
-                {!collapsedSections['rotation'] && (
+                {isSectionOpen('rotation') && (
                   <div className="px-2.5 pb-2.5 space-y-3">
                     {/* Rotate X */}
                     <div className="space-y-1">
@@ -3597,7 +3793,7 @@ export function PropertiesPanel() {
               </div>
 
               {/* Opacity */}
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('opacity') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('opacity')}
                   className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -3622,7 +3818,7 @@ export function PropertiesPanel() {
                     )}
                   </div>
                 </button>
-                {!collapsedSections['opacity'] && (
+                {isSectionOpen('opacity') && (
                   <div className="px-2.5 pb-2.5 space-y-1.5">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] text-[#a0a0a0]">Opacity Value</span>
@@ -3730,7 +3926,7 @@ export function PropertiesPanel() {
                     )}
                   </div>
                 </button>
-                {!collapsedSections['rotation'] && (
+                {isSectionOpen('rotation') && (
                   <div className="px-2.5 pb-2.5 space-y-3">
                     {/* Rotate X */}
                     <div className="space-y-1">
@@ -3967,7 +4163,7 @@ export function PropertiesPanel() {
               </div>
 
               {/* Opacity */}
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('opacity') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('opacity')}
                   className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -3992,7 +4188,7 @@ export function PropertiesPanel() {
                     )}
                   </div>
                 </button>
-                {!collapsedSections['opacity'] && (
+                {isSectionOpen('opacity') && (
                   <div className="px-2.5 pb-2.5 space-y-1.5">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] text-[#a0a0a0]">Opacity Value</span>
@@ -4084,7 +4280,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['flip'] && (
+              {isSectionOpen('flip') && (
                 <div className="px-2.5 pb-2.5 pt-1 flex items-center gap-2">
                   <button
                     onClick={() => {
@@ -4119,7 +4315,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* Perspective Warp & Motion Tracking */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('perspective') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('perspective')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -4131,7 +4327,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['perspective'] && (
+              {isSectionOpen('perspective') && (
                 <div className="px-2.5 pb-2.5 space-y-3">
                   <label className="flex items-center gap-2 cursor-pointer mt-1">
                     <input
@@ -4344,7 +4540,7 @@ export function PropertiesPanel() {
             {renderBlendModeSection()}
 
             {/* Crop */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('crop') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('crop')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
@@ -4372,7 +4568,7 @@ export function PropertiesPanel() {
                   )}
                 </div>
               </button>
-              {!collapsedSections['crop'] && (
+              {isSectionOpen('crop') && (
                 <div className="px-2.5 pb-2.5 space-y-3 mt-1">
                   {['left', 'right', 'top', 'bottom'].map((edge) => {
                     const currentCrop = selectedClip.crop || { top: 0, bottom: 0, left: 0, right: 0 };
@@ -4504,7 +4700,7 @@ export function PropertiesPanel() {
                     </div>
                   </button>
 
-                  {!collapsedSections['kenBurns'] && (
+                  {isSectionOpen('kenBurns') && (
                     <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                       {/* Start Frame */}
                       <div className="space-y-2">
@@ -4744,7 +4940,7 @@ export function PropertiesPanel() {
             )}
             
             {/* Basic Correction Section */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('colorBasic') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorBasic')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -4756,7 +4952,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['colorBasic'] && (
+              {isSectionOpen('colorBasic') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Temperature */}
                   <div className="space-y-1">
@@ -4934,7 +5130,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* Creative Section */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('colorCreative') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorCreative')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -4946,7 +5142,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['colorCreative'] && (
+              {isSectionOpen('colorCreative') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Faded Film */}
                   <div className="space-y-1">
@@ -5028,7 +5224,7 @@ export function PropertiesPanel() {
                   )}
                 </div>
               </button>
-              {!collapsedSections['colorWheels'] && (
+              {isSectionOpen('colorWheels') && (
                 <div className="px-2 pb-3 flex gap-2 border-t border-[#3e3e3e]/30 pt-2.5">
                   <ColorWheel
                     label="Shadows"
@@ -5065,7 +5261,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* LUT Color Grade */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('lutGrade') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('lutGrade')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -5083,7 +5279,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['lutGrade'] && (() => {
+              {isSectionOpen('lutGrade') && (() => {
                 const mediaLibrary = useEditorStore.getState().mediaLibrary;
                 const lutMedia = selectedClip.lut
                   ? mediaLibrary.find((m) => m.id === selectedClip.lut!.mediaId)
@@ -5908,7 +6104,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* Clip Volume & Pan */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVolume') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioVolume')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -5923,7 +6119,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['audioVolume'] && (
+              {isSectionOpen('audioVolume') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Mute toggle */}
                   <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
@@ -6009,7 +6205,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* Vocal Tune & Character */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVocalTune') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioVocalTune')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -6024,7 +6220,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['audioVocalTune'] && (
+              {isSectionOpen('audioVocalTune') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Humanize AI Voice Toggle */}
                   <div className="flex justify-between items-center text-[11px] bg-purple-950/20 p-2 rounded border border-purple-500/20">
@@ -6158,7 +6354,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* Audio Fades */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioFades') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioFades')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -6170,7 +6366,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['audioFades'] && (
+              {isSectionOpen('audioFades') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Fade In */}
                   <div className="space-y-1">
@@ -6220,7 +6416,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* AI Audio Enhancements */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEnhancements') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioEnhancements')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -6235,7 +6431,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['audioEnhancements'] && (
+              {isSectionOpen('audioEnhancements') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
@@ -6262,7 +6458,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* Equalizer (EQ) */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEQ') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioEQ')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -6277,7 +6473,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['audioEQ'] && (
+              {isSectionOpen('audioEQ') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   {/* Bass */}
                   <div className="space-y-1">
@@ -6352,7 +6548,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* AI Vocal / BGM Separation */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('aiVocalSeparation') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('aiVocalSeparation')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -6370,7 +6566,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['aiVocalSeparation'] && (
+              {isSectionOpen('aiVocalSeparation') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-2">
                     <div className="flex justify-between items-center text-[11px]">
@@ -6429,7 +6625,7 @@ export function PropertiesPanel() {
             </div>
 
             {/* Speed Pitch Settings */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioSpeedPitch') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioSpeedPitch')}
                 className="w-full flex items-center justify-between p-2.5 text-xs text-white"
@@ -6441,7 +6637,7 @@ export function PropertiesPanel() {
                   <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
                 )}
               </button>
-              {!collapsedSections['audioSpeedPitch'] && (
+              {isSectionOpen('audioSpeedPitch') && (
                 <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
                   <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
                     <div>

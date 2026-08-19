@@ -1,0 +1,7 @@
+﻿with open('src/components/properties/PropertiesPanel.tsx', 'r', encoding='utf-8') as f:
+    lines = f.readlines()
+
+for i in range(4721, 5196):
+    line = lines[i]
+    if "onClick={() => toggleSection(" in line:
+        print(f"Line {i+1}: {line.strip()}")
