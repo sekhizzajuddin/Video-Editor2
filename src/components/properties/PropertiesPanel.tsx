@@ -63,9 +63,14 @@ import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
 import { KeyframeControl, KeyframeMiniTimeline } from '@/components/KeyframeControls';
 import { SequenceProperties } from './SequenceProperties';
-import { AIMotionGraphicsSection } from './tabs/effects';
-import { ObjectRemovalPanel } from './tabs/effects/ObjectRemovalPanel';
-import { MotionEffectsPanel } from './tabs/effects/MotionEffectsPanel';
+import {
+  AIMotionGraphicsSection,
+  ObjectRemovalPanel,
+  MotionEffectsPanel,
+  KineticTypographySection,
+  AISFXSection,
+  BeatSyncSection,
+} from './tabs/effects';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
 
@@ -1072,9 +1077,9 @@ export function PropertiesPanel() {
     }
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
-    baseTabs.push({ id: 'effects', label: 'FX', icon: Wand2 });
+    baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
   } else if (selectedTrack?.type === 'fx') {
-    baseTabs.push({ id: 'effects', label: 'Effects', icon: Wand2 });
+    baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
   } else {
     // Video / Audio / Image/Text clips on other tracks: full set of tabs
@@ -1083,7 +1088,7 @@ export function PropertiesPanel() {
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
     baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
-    baseTabs.push({ id: 'effects', label: 'FX', icon: Wand2 });
+    baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
   }
 
   // Always append History tab
@@ -5151,8 +5156,6 @@ export function PropertiesPanel() {
                 );
               })()}
             </div>
-
-            {renderKeyingAndAiSection()}
           </div>
         )}
 
@@ -6863,16 +6866,38 @@ export function PropertiesPanel() {
           </div>
         )}
 
-        {/* ── Effects Tab ─────────────────────────────────────────────────── */}
+        {/* ── AI & Effects Tab ────────────────────────────────────────────── */}
         {activePropertiesTab === 'effects' && (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
-            <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Effect Settings</h3>
+            <h3 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              AI Creative Suite & Effects
+            </h3>
 
-            {/* Keying & AI Eraser (Chroma Key, Luma Key, AI Background) */}
-            {renderKeyingAndAiSection()}
-            
-            {/* Compositing & Blend Mode */}
-            {renderBlendModeSection()}
+            {/* AI Kinetic Typography */}
+            {selectedClip && (
+              <KineticTypographySection
+                selectedClip={selectedClip}
+                aiProvider={aiProvider}
+              />
+            )}
+
+            {/* Auto Beat Sync & Rhythm Detection */}
+            {selectedClip && (
+              <BeatSyncSection
+                selectedClip={selectedClip}
+              />
+            )}
+
+            {/* AI Sound Designer & SFX Generator */}
+            {selectedClip && (
+              <AISFXSection
+                selectedClip={selectedClip}
+                isAnalyzingAudio={isAnalyzingAudio}
+                audioAnalyzeProgress={audioAnalyzeProgress}
+                handleAiSoundDesign={handleAiSoundDesign}
+              />
+            )}
 
             {/* AI Text & Motion Graphics */}
             {selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && selectedTrack?.type === 'video' && (
@@ -6885,6 +6910,9 @@ export function PropertiesPanel() {
                 selectedClip={selectedClip}
               />
             )}
+
+            {/* Keying & AI Eraser (Chroma Key, Luma Key, AI Background) */}
+            {renderKeyingAndAiSection()}
 
             {/* ── Timeline FX Settings ── */}
             {selectedClip.fxSettings && (

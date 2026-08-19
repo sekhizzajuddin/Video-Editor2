@@ -15,7 +15,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { MobileTopBar } from './components/MobileTopBar';
 import { MobileTimeline } from './components/MobileTimeline';
 import { MobileToolRail } from './components/MobileToolRail';
-import { MobileMediaSheet } from './components/MobileMediaSheet';
+import { MobileMediaSheet, MobileMediaTab } from './components/MobileMediaSheet';
 import { MobilePropertiesSheet } from './components/MobilePropertiesSheet';
 import { MobileBottomSheet } from './components/MobileBottomSheet';
 import { MobileWelcomeScreen } from './components/MobileWelcomeScreen';
@@ -43,7 +43,7 @@ export function MobileApp() {
   );
 
   const [sheet, setSheet] = useState<Sheet>('none');
-  const [mediaInitialTab, setMediaInitialTab] = useState<'media' | 'audio' | 'text' | 'effects'>('media');
+  const [mediaInitialTab, setMediaInitialTab] = useState<MobileMediaTab>('media');
   const online = useOnlineStatus();
 
   // Open the properties sheet whenever a clip becomes selected.
@@ -51,7 +51,7 @@ export function MobileApp() {
     if (selectedClipId) setSheet('properties');
   }, [selectedClipId]);
 
-  const openMedia = (tab: 'media' | 'audio' | 'text' | 'effects' = 'media') => {
+  const openMedia = (tab: MobileMediaTab = 'media') => {
     setMediaInitialTab(tab);
     setSheet('media');
   };
@@ -80,19 +80,24 @@ export function MobileApp() {
           </div>
 
           {/* Timeline */}
-          <div className="h-[210px] shrink-0 border-t border-white/10">
+          <div className="h-[230px] shrink-0 border-t border-white/10">
             <MobileTimeline onSelectClip={() => setSheet('properties')} />
           </div>
 
           {/* Tool rail */}
           <MobileToolRail
             onAddMedia={() => openMedia('media')}
+            onAddTransition={() => openMedia('transitions')}
+            onAddTemplate={() => openMedia('templates')}
+            onOpenAiVoice={() => openMedia('audio')}
+            onAddPip={() => openMedia('media')}
             onAddText={() => {
               addTextClipToTimeline('Your Text');
               setSheet('properties');
             }}
             onAddAudio={() => openMedia('audio')}
             onAddEffect={() => openMedia('effects')}
+            onOpenProperties={() => setSheet('properties')}
           />
         </>
       )}
@@ -109,8 +114,8 @@ export function MobileApp() {
       <MobileBottomSheet
         open={sheet === 'properties'}
         onClose={() => setSheet('none')}
-        title="Edit"
-        height="60%"
+        title="Clip Properties"
+        height="65%"
       >
         <MobilePropertiesSheet onClose={() => setSheet('none')} />
       </MobileBottomSheet>

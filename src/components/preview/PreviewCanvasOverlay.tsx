@@ -318,18 +318,17 @@ export function PreviewCanvasOverlay({
 
   useEffect(() => {
     if (!dragState || !activeClip) return;
-    const handleMove = (e: MouseEvent) => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
       const container = document.getElementById('preview-canvas-wrapper');
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      // Uniform mapping: the canvas is object-contain and the overlay svg letterboxes,
-      // so BOTH axes share one scale factor. Using 854/width and 480/height separately
-      // made drags run at different speeds per axis whenever the preview pane was not
-      // exactly 16:9 — the root of the "buggy transform box" on every media type.
       const { scale: overlayScale } = getOverlayMapping(rect);
 
-      const dx = ((e.clientX - dragState.startX) * overlayScale) / viewport.zoom;
-      const dy = ((e.clientY - dragState.startY) * overlayScale) / viewport.zoom;
+      const clientX = 'touches' in e && e.touches[0] ? e.touches[0].clientX : (e as MouseEvent).clientX;
+      const clientY = 'touches' in e && e.touches[0] ? e.touches[0].clientY : (e as MouseEvent).clientY;
+
+      const dx = ((clientX - dragState.startX) * overlayScale) / viewport.zoom;
+      const dy = ((clientY - dragState.startY) * overlayScale) / viewport.zoom;
 
       let x = 0, y = 0, scale = 100, rotation = 0;
       if (dragState.initTransform) {
@@ -488,7 +487,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -512,7 +511,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -536,7 +535,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -560,7 +559,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -587,7 +586,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -628,8 +627,8 @@ export function PreviewCanvasOverlay({
       }
       
       if (dragState.type === 'virtualCamera') {
-        const dx = (e.clientX - dragState.startX) / (viewport.zoom * 854);
-        const dy = (e.clientY - dragState.startY) / (viewport.zoom * 480);
+        const dx = (clientX - dragState.startX) / (viewport.zoom * 854);
+        const dy = (clientY - dragState.startY) / (viewport.zoom * 480);
         const newX = dragState.initVirtualCamera!.x + dx;
         const newY = dragState.initVirtualCamera!.y + dy;
         addOrUpdateVirtualCameraKeyframe(currentTime, newX, newY);
@@ -858,7 +857,7 @@ export function PreviewCanvasOverlay({
         const cy = offsetY + H / 2 + y;
         // Undo the viewport zoom/pan too, or the angle is measured in the wrong
         // space and the clip snaps the moment the handle is grabbed.
-        const ptrAbs = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+        const ptrAbs = clientToViewportSpace(clientX, clientY, rect, viewport);
         const mx = ptrAbs.x;
         const my = ptrAbs.y;
         // Rotate by the CHANGE in pointer angle since mousedown, applied to the
@@ -939,7 +938,7 @@ export function PreviewCanvasOverlay({
         // the pointer had really moved.
         const cx = offsetX + W / 2 + x;
         const cy = offsetY + H / 2 + y;
-        const ptrAbs = clientToViewportSpace(e.clientX, e.clientY, rect, viewport);
+        const ptrAbs = clientToViewportSpace(clientX, clientY, rect, viewport);
         const mx = ptrAbs.x;
         const my = ptrAbs.y;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
@@ -1004,9 +1003,15 @@ export function PreviewCanvasOverlay({
 
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleUp);
+    window.addEventListener('touchcancel', handleUp);
     return () => {
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleUp);
+      window.removeEventListener('touchcancel', handleUp);
     };
   }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime, aspectRatio]);
 
@@ -1815,29 +1820,16 @@ export function PreviewCanvasOverlay({
   const baseW = vw * scaleToFit;
   const baseH = vh * scaleToFit;
 
-  const handleMouseDown = (e: React.MouseEvent, type: string) => {
+  const handleMouseDown = (e: React.MouseEvent | React.TouchEvent, type: string) => {
     e.stopPropagation();
     // Belt and braces: even if a transform handle is somehow still reachable
     // while a motion region is being placed, refuse to start a clip drag. The
     // region must be positionable without the shot moving underneath it.
     if (regionEditActive) return;
+    const clientX = 'touches' in e && e.touches[0] ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e && e.touches[0] ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     const mask = activeClip?.mask || { x: 50, y: 50, width: 50, height: 50, rotation: 0, feather: 0, roundness: 0 };
 
-    // ── Capture the BASE transform, not the displayed one ────────────────────
-    //
-    // aX/aY/aScale/aRot are the values actually on screen: keyframe-interpolated
-    // at the playhead, plus any per-aspect-ratio framing offset. The drag handler
-    // writes its result straight into `transform.x/y/scale/rotation`, which are the
-    // BASE values that keyframes and framing are applied ON TOP OF.
-    //
-    // Seeding the drag with the displayed value therefore promoted it to the base
-    // on the very first mousemove — so a clip carrying a motion keyframe (or any
-    // per-ratio framing) teleported the instant it was touched, by exactly the
-    // animation/framing offset at that playhead position. Nudge it and it lurched
-    // again, which is the "changes position up/down many times on click" report.
-    //
-    // Dragging a keyframed property still works: getNewAnimations() re-keys the
-    // property at the current local time, and deltas are applied to the base.
     const baseTransform = activeClip?.transform ?? { x: 0, y: 0, scale: 100, rotation: 0 };
     const hasKf = (prop: string) => !!activeClip?.animations?.[prop]?.length;
     const framing =
@@ -1845,12 +1837,8 @@ export function PreviewCanvasOverlay({
 
     setDragState({
       type,
-      startX: e.clientX,
-      startY: e.clientY,
-      // For a keyframed property the on-screen value IS the one being edited (the
-      // keyframe gets rewritten), so keep it. Otherwise seed from the base so the
-      // write is a no-op when the pointer has not moved. Framing offsets are always
-      // removed — they are a separate, additive layer.
+      startX: clientX,
+      startY: clientY,
       initTransform: {
         x: (hasKf('transform.x') ? aX : baseTransform.x ?? 0) - (framing?.x ?? 0),
         y: (hasKf('transform.y') ? aY : baseTransform.y ?? 0) - (framing?.y ?? 0),
@@ -1874,7 +1862,7 @@ export function PreviewCanvasOverlay({
         const container = document.getElementById('preview-canvas-wrapper');
         if (!container) return {};
         const r = container.getBoundingClientRect();
-        const p = clientToViewportSpace(e.clientX, e.clientY, r, viewport);
+        const p = clientToViewportSpace(clientX, clientY, r, viewport);
         const gx = Math.abs(p.x - (offsetX + W / 2 + aX));
         const gy = Math.abs(p.y - (offsetY + H / 2 + aY));
         return {
@@ -2070,12 +2058,14 @@ export function PreviewCanvasOverlay({
     useEditorStore.getState().saveSnapshot();
   };
 
-  const handleCornerMouseDown = (e: React.MouseEvent, cornerIdx: number) => {
+  const handleCornerMouseDown = (e: React.MouseEvent | React.TouchEvent, cornerIdx: number) => {
     e.stopPropagation();
+    const clientX = 'touches' in e && e.touches[0] ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e && e.touches[0] ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     setDragState({
       type: `perspective-corner-${cornerIdx}`,
-      startX: e.clientX,
-      startY: e.clientY,
+      startX: clientX,
+      startY: clientY,
       initTransform: null,
       initCrop: null,
       initCorners: { ...pc }
@@ -2598,10 +2588,12 @@ export function PreviewCanvasOverlay({
                       height={baseH}
                       fill="transparent"
                       className="pointer-events-auto cursor-move focus:outline-none focus:stroke-white focus:stroke-2"
+                      style={{ touchAction: 'none' }}
                       role="button"
                       tabIndex={0}
                       aria-label="Move clip"
                       onMouseDown={(e) => handleMouseDown(e, 'move')}
+                      onTouchStart={(e) => handleMouseDown(e, 'move')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'move')}
                     />
 
@@ -2633,20 +2625,22 @@ export function PreviewCanvasOverlay({
                       stroke="#141414"
                       strokeWidth={1.5 / viewport.zoom}
                       className="pointer-events-auto cursor-alias focus:outline-none focus:stroke-white focus:stroke-2"
+                      style={{ touchAction: 'none' }}
                       role="button"
                       tabIndex={0}
                       aria-label="Rotate clip"
                       onMouseDown={(e) => handleMouseDown(e, 'rot')}
+                      onTouchStart={(e) => handleMouseDown(e, 'rot')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'rot')}
                     >
                       <title>Rotate</title>
-                   </circle>
+                    </circle>
 
                     {/* Center crosshair (helps identify clip center for snapping) */}
                     <g className="pointer-events-none" opacity={0.65}>
                       <line x1={-6 / viewport.zoom} y1={0} x2={6 / viewport.zoom} y2={0} stroke="#fbbf24" strokeWidth={1 / viewport.zoom} />
                       <line x1={0} y1={-6 / viewport.zoom} x2={0} y2={6 / viewport.zoom} stroke="#fbbf24" strokeWidth={1 / viewport.zoom} />
-                   </g>
+                    </g>
 
                     {/* Edge mid-handles (N, S, E, W) */}
                     {[
@@ -2670,11 +2664,12 @@ export function PreviewCanvasOverlay({
                           stroke="#141414"
                           strokeWidth={1.5 / viewport.zoom}
                           className="pointer-events-auto focus:outline-none focus:stroke-white focus:stroke-2"
-                          style={{ cursor }}
+                          style={{ cursor, touchAction: 'none' }}
                           role="button"
                           tabIndex={0}
                           aria-label={`Resize edge ${dir.toUpperCase()}`}
                           onMouseDown={(e) => handleMouseDown(e, `resize-${dir}`)}
+                          onTouchStart={(e) => handleMouseDown(e, `resize-${dir}`)}
                           onKeyDown={(e) => handleHandleKeyDown(e, `resize-${dir}`)}
                         />
                       );
@@ -2696,11 +2691,15 @@ export function PreviewCanvasOverlay({
                           className="pointer-events-auto focus:outline-none focus:stroke-white focus:stroke-2"
                           style={{
                             cursor: rx === ry ? 'nwse-resize' : 'nesw-resize',
+                            touchAction: 'none',
                           }}
                           role="button"
                           tabIndex={0}
                           aria-label={`Resize handle ${rx > 0 ? 'right' : 'left'}-${ry > 0 ? 'bottom' : 'top'}`}
                           onMouseDown={(e) =>
+                            handleMouseDown(e, `resize-${rx > 0 ? 'r' : 'l'}${ry > 0 ? 'b' : 't'}`)
+                          }
+                          onTouchStart={(e) =>
                             handleMouseDown(e, `resize-${rx > 0 ? 'r' : 'l'}${ry > 0 ? 'b' : 't'}`)
                           }
                           onKeyDown={(e) =>
@@ -2709,7 +2708,7 @@ export function PreviewCanvasOverlay({
                         />
                       )),
                     )}
-                 </>
+                  </>
                 ) : (
                   <>
                     <rect
@@ -2730,10 +2729,12 @@ export function PreviewCanvasOverlay({
                       height={20/viewport.zoom}
                       fill="#3b82f6"
                       className="pointer-events-auto cursor-ew-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      style={{ touchAction: 'none' }}
                       role="button"
                       tabIndex={0}
                       aria-label="Crop Left"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-left')}
+                      onTouchStart={(e) => handleMouseDown(e, 'crop-left')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'crop-left')}
                     />
                     <rect
@@ -2743,10 +2744,12 @@ export function PreviewCanvasOverlay({
                       height={20/viewport.zoom}
                       fill="#3b82f6"
                       className="pointer-events-auto cursor-ew-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      style={{ touchAction: 'none' }}
                       role="button"
                       tabIndex={0}
                       aria-label="Crop Right"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-right')}
+                      onTouchStart={(e) => handleMouseDown(e, 'crop-right')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'crop-right')}
                     />
                     <rect
@@ -2756,10 +2759,12 @@ export function PreviewCanvasOverlay({
                       height={12/viewport.zoom}
                       fill="#3b82f6"
                       className="pointer-events-auto cursor-ns-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      style={{ touchAction: 'none' }}
                       role="button"
                       tabIndex={0}
                       aria-label="Crop Top"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-top')}
+                      onTouchStart={(e) => handleMouseDown(e, 'crop-top')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'crop-top')}
                     />
                     <rect
@@ -2769,10 +2774,12 @@ export function PreviewCanvasOverlay({
                       height={12/viewport.zoom}
                       fill="#3b82f6"
                       className="pointer-events-auto cursor-ns-resize focus:outline-none focus:stroke-white focus:stroke-2"
+                      style={{ touchAction: 'none' }}
                       role="button"
                       tabIndex={0}
                       aria-label="Crop Bottom"
                       onMouseDown={(e) => handleMouseDown(e, 'crop-bottom')}
+                      onTouchStart={(e) => handleMouseDown(e, 'crop-bottom')}
                       onKeyDown={(e) => handleHandleKeyDown(e, 'crop-bottom')}
                     />
                   </>

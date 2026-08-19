@@ -1,6 +1,7 @@
 import path from "path"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
+// @ts-ignore
 import { VitePWA } from "vite-plugin-pwa"
 import { exec } from "child_process"
 import fs from "fs"

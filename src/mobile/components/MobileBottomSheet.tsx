@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useEffect } from 'react';
+import { X } from 'lucide-react';
 
 export interface MobileBottomSheetProps {
   open: boolean;
@@ -57,11 +58,19 @@ export function MobileBottomSheet({
         className="absolute inset-x-0 bottom-0 mobile-sheet-enter flex flex-col overflow-hidden rounded-t-2xl border-t border-white/10 bg-[#1b1b1f] shadow-[0_-8px_40px_rgba(0,0,0,0.6)]"
         style={{ height: heightStyle, maxHeight: '100dvh' }}
       >
-        <div className="mobile-grabber h-4 shrink-0" onClick={onClose} />
+        <div className="mobile-grabber h-3 shrink-0" onClick={onClose} />
         {(title || headerRight) && (
-          <div className="flex items-center justify-between px-4 pb-2 shrink-0">
-            <h2 className="text-[15px] font-bold text-white">{title}</h2>
-            {headerRight}
+          <div className="flex items-center justify-between px-4 pb-2 shrink-0 border-b border-white/5">
+            <h2 className="text-[14px] font-semibold text-white">{title}</h2>
+            {headerRight || (
+              <button
+                onClick={onClose}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/20 active:scale-95 transition-all"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
         )}
         <div className="flex-1 min-h-0 overflow-hidden">{children}</div>

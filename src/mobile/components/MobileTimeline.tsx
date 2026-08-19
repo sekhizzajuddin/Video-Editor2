@@ -7,7 +7,7 @@
 //   src/timeline/index.ts
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   Video,
   Music,
@@ -15,22 +15,38 @@ import {
   Sparkles,
   Layers,
   Lock,
+  Unlock,
+  Volume2,
   VolumeX,
+  Eye,
+  EyeOff,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
   ZoomIn,
   ZoomOut,
+  Scissors,
+  Copy,
+  CopyPlus,
+  ClipboardPaste,
+  Gauge,
+  Plus,
 } from 'lucide-react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { formatCentisecondTime } from '@/timeline';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
+import { WaveformOverlay } from '@/timeline/components/WaveformOverlay';
+import { FrameStripOverlay } from '@/timeline/components/FrameStripOverlay';
+import { toast } from 'sonner';
 
-const RULER_H = 22;
-const TRACK_H = 44;
-const THIN_TRACK_H = 30;
-const MIN_CLIP_W = 10;
+const RULER_H = 24;
+const TRACK_H = 48;
+const THIN_TRACK_H = 36;
+const MIN_CLIP_W = 12;
 const MIN_DURATION = 0.05;
-const PLAYHEAD_HIT_W = 30;
+const PLAYHEAD_HIT_W = 32;
 
 const TRACK_ICON: Record<TimelineTrack['type'], typeof Video> = {
   video: Video,
@@ -62,7 +78,6 @@ const clipColor = (media?: MediaItem, clip?: TimelineClip): string => {
   }
 };
 
-/** Pick a ruler tick step so marks are roughly 60–90px apart. */
 function niceTickStep(zoom: number): number {
   const targetPx = 70;
   const raw = targetPx / Math.max(1, zoom);
@@ -85,13 +100,25 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     zoomOut,
     totalDuration,
     selectedClipId,
+    selectedClipIds,
     selectClip,
     seek,
     setIsScrubbing,
     moveClip,
     updateClip,
+    splitClip,
+    removeClip,
+    duplicateClip,
+    copyClip,
+    pasteClip,
+    clipboardData,
+    addTrack,
+    removeTrack,
+    toggleTrackLock,
+    toggleTrackMute,
     saveSnapshot,
     mediaLibrary,
+    pipWindows,
   } = useEditorStore(
     useShallow((s) => ({
       tracks: s.tracks,
@@ -100,13 +127,25 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
       zoomOut: s.zoomOut,
       totalDuration: s.totalDuration,
       selectedClipId: s.selectedClipId,
+      selectedClipIds: s.selectedClipIds,
       selectClip: s.selectClip,
       seek: s.seek,
       setIsScrubbing: s.setIsScrubbing,
       moveClip: s.moveClip,
       updateClip: s.updateClip,
+      splitClip: s.splitClip,
+      removeClip: s.removeClip,
+      duplicateClip: s.duplicateClip,
+      copyClip: s.copyClip,
+      pasteClip: s.pasteClip,
+      clipboardData: s.clipboardData,
+      addTrack: s.addTrack,
+      removeTrack: s.removeTrack,
+      toggleTrackLock: s.toggleTrackLock,
+      toggleTrackMute: s.toggleTrackMute,
       saveSnapshot: s.saveSnapshot,
       mediaLibrary: s.mediaLibrary,
+      pipWindows: s.pipWindows,
     }))
   );
 
@@ -114,6 +153,15 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState>(null);
+  const longTapTimeoutRef = useRef<any>(null);
+
+  const [snapLineX, setSnapLineX] = useState<number | null>(null);
+  const [selectedTrackForOptions, setSelectedTrackForOptions] = useState<TimelineTrack | null>(null);
+  const [showAddTrackMenu, setShowAddTrackMenu] = useState(false);
+  const [showTimelineCopyMenu, setShowTimelineCopyMenu] = useState(false);
+  const [showTimelinePasteMenu, setShowTimelinePasteMenu] = useState(false);
+  const [blankPastePos, setBlankPastePos] = useState<{ trackId: string; time: number; x: number; y: number } | null>(null);
+
   const [preview, setPreview] = useState<{
     clipId: string;
     startTime: number;
@@ -121,6 +169,11 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     trimStart: number;
     trimEnd: number;
   } | null>(null);
+
+  const targetId = selectedClipIds[0] || selectedClipId;
+  const hasSelection = !!targetId;
+  const targetClip = targetId ? findClipInTracks(tracks, targetId, pipWindows) : null;
+  const isText = !!targetClip?.textSettings;
 
   const mediaMap = useMemo(() => {
     const m = new Map<string, MediaItem>();
@@ -153,7 +206,7 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
       const grid = Math.max(0.05, 1 / (zoomLevel / 40));
       let best = Math.max(0, Math.round(t / grid) * grid);
       const candidates: number[] = [0];
-      const threshold = 8 / zoomLevel;
+      const threshold = 10 / zoomLevel;
       for (const track of tracks) {
         for (const c of track.clips) {
           if (c.id === excludeClipId) continue;
@@ -161,12 +214,19 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
         }
       }
       let bestDist = Math.abs(t - best);
+      let snappedToCandidate = false;
       for (const cand of candidates) {
         const d = Math.abs(t - cand);
         if (d < threshold && d < bestDist) {
           best = cand;
           bestDist = d;
+          snappedToCandidate = true;
         }
+      }
+      if (snappedToCandidate) {
+        setSnapLineX(best * zoomLevel);
+      } else {
+        setSnapLineX(null);
       }
       return best;
     },
@@ -176,6 +236,7 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
   const commitDrag = useCallback(() => {
     const drag = dragRef.current;
     setPreview(null);
+    setSnapLineX(null);
     if (!drag) return;
     dragRef.current = null;
 
@@ -216,10 +277,9 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     [seek, setIsScrubbing, timeAt]
   );
 
-  // Ruler/track background: scrub with a mouse, let touch scroll the rail.
   const onPointerDownRuler = useCallback(
     (e: React.PointerEvent) => {
-      if (e.pointerType === 'touch') return; // native horizontal scroll
+      if (e.pointerType === 'touch') return;
       beginScrub(e);
     },
     [beginScrub]
@@ -301,7 +361,6 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
         if (!clip) return;
         const speed = clip.speed || 1;
         const newStart = snapTime(t, drag.clipId);
-        // Clamp so we never reveal source before trimStart 0 or move before 0s.
         const minDelta = Math.max(-drag.startStart, -drag.startTrimStart / speed);
         const delta = Math.max(minDelta, newStart - drag.startStart);
         const newDuration = Math.max(MIN_DURATION, clip.duration - delta);
@@ -321,7 +380,6 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
         if (!clip) return;
         const speed = clip.speed || 1;
         const newEnd = snapTime(t, drag.clipId);
-        // Clamp so we never extend past the end of the source (trimEnd 0).
         const maxDelta = drag.startTrimEnd / speed;
         const delta = Math.min(maxDelta, newEnd - drag.startEnd);
         const newDuration = Math.max(MIN_DURATION, clip.duration + delta);
@@ -344,20 +402,52 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
     commitDrag();
   }, [commitDrag, setIsScrubbing]);
 
-  // Auto-follow playhead during playback.
-  const lastAutoTime = useRef(-1);
-  React.useEffect(() => {
-    const scroller = scrollRef.current;
-    if (!scroller) return;
-    if (Math.abs(currentTime - lastAutoTime.current) > 0.25) {
-      lastAutoTime.current = currentTime;
-      const px = currentTime * zoomLevel;
-      const view = scroller.clientWidth;
-      if (px < scroller.scrollLeft + view * 0.15 || px > scroller.scrollLeft + view * 0.85) {
-        scroller.scrollLeft = Math.max(0, px - view * 0.3);
+  // Track actions
+  const moveTrack = (trackId: string, direction: 'up' | 'down') => {
+    const currentTracks = [...tracks];
+    const idx = currentTracks.findIndex((t) => t.id === trackId);
+    if (idx === -1) return;
+    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= currentTracks.length) return;
+    const [removed] = currentTracks.splice(idx, 1);
+    currentTracks.splice(newIdx, 0, removed);
+    useEditorStore.setState({ tracks: currentTracks });
+    saveSnapshot(`Move track ${direction}`);
+    setSelectedTrackForOptions(null);
+  };
+
+  const handleSplit = () => {
+    const state = useEditorStore.getState();
+    const t = state.currentTime;
+    if (targetId) {
+      const c = findClipInTracks(state.tracks, targetId, state.pipWindows);
+      if (c && t > c.startTime + 0.01 && t < c.startTime + c.duration - 0.01) {
+        splitClip(targetId, t);
+        toast.success('Clip split at playhead');
+      } else {
+        toast.warning('Playhead is not over the clip.');
       }
+    } else {
+      toast.warning('Select a clip first.');
     }
-  }, [currentTime, zoomLevel]);
+  };
+
+  const handleBlankPointerDown = (e: React.PointerEvent, trackId: string) => {
+    const clickX = e.clientX;
+    const clickY = e.clientY;
+    const clickedTime = timeAt(clickX);
+
+    longTapTimeoutRef.current = setTimeout(() => {
+      setBlankPastePos({ trackId, time: clickedTime, x: clickX, y: clickY });
+    }, 500);
+  };
+
+  const handleBlankPointerUp = () => {
+    if (longTapTimeoutRef.current) {
+      clearTimeout(longTapTimeoutRef.current);
+      longTapTimeoutRef.current = null;
+    }
+  };
 
   const rulerTicks = useMemo(() => {
     const step = niceTickStep(zoomLevel);
@@ -377,49 +467,119 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
   const playheadX = currentTime * zoomLevel;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#141418]">
-      {/* Zoom rail */}
-      <div className="flex h-8 shrink-0 items-center justify-end gap-1 border-b border-white/10 px-2">
-        <button
-          onClick={zoomOut}
-          className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-white/80 active:bg-white/15"
-        >
-          <ZoomOut className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={zoomIn}
-          className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-white/80 active:bg-white/15"
-        >
-          <ZoomIn className="h-3.5 w-3.5" />
-        </button>
+    <div className="flex h-full min-h-0 flex-col bg-[#121216] select-none">
+      {/* Quick-action editing toolbar near zoom */}
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/10 bg-[#16161c] px-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleSplit}
+            disabled={!hasSelection}
+            title="Split Clip"
+            className="flex h-6 items-center gap-1 rounded bg-white/5 px-2 text-[10px] font-medium text-white/80 active:bg-white/15 disabled:opacity-30"
+          >
+            <Scissors className="h-3 w-3" />
+            <span>Split</span>
+          </button>
+          <button
+            onClick={duplicateClip}
+            disabled={!hasSelection}
+            title="Duplicate"
+            className="flex h-6 items-center gap-1 rounded bg-white/5 px-2 text-[10px] font-medium text-white/80 active:bg-white/15 disabled:opacity-30"
+          >
+            <CopyPlus className="h-3 w-3" />
+            <span>Dup</span>
+          </button>
+          <button
+            onClick={() => {
+              setShowTimelineCopyMenu(!showTimelineCopyMenu);
+              setShowTimelinePasteMenu(false);
+            }}
+            disabled={!hasSelection}
+            title="Copy"
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] font-medium transition-colors ${
+              showTimelineCopyMenu ? 'bg-amber-500 text-black font-semibold' : 'bg-white/5 text-white/80 active:bg-white/15'
+            } disabled:opacity-30`}
+          >
+            <Copy className="h-3 w-3" />
+            <span>Copy</span>
+          </button>
+          <button
+            onClick={() => {
+              setShowTimelinePasteMenu(!showTimelinePasteMenu);
+              setShowTimelineCopyMenu(false);
+            }}
+            disabled={!(clipboardData?.clips && clipboardData.clips.length > 0)}
+            title="Paste"
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] font-medium transition-colors ${
+              showTimelinePasteMenu ? 'bg-amber-500 text-black font-semibold' : 'bg-white/5 text-white/80 active:bg-white/15'
+            } disabled:opacity-30`}
+          >
+            <ClipboardPaste className="h-3 w-3" />
+            <span>Paste</span>
+          </button>
+          <button
+            onClick={() => {
+              if (targetId) removeClip(targetId);
+            }}
+            disabled={!hasSelection}
+            title="Delete"
+            className="flex h-6 items-center gap-1 rounded bg-rose-500/10 px-2 text-[10px] font-medium text-rose-400 active:bg-rose-500/20 disabled:opacity-30"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            onClick={zoomOut}
+            className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-white/80 active:bg-white/15"
+          >
+            <ZoomOut className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={zoomIn}
+            className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-white/80 active:bg-white/15"
+          >
+            <ZoomIn className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {/* Track rail */}
-        <div className="w-10 shrink-0 border-r border-white/10 bg-[#17171b]">
-          <div style={{ height: RULER_H }} className="border-b border-white/10" />
-          {tracks.map((t) => (
-            <div
-              key={t.id}
-              style={{ height: trackHeight(t) }}
-              className="flex flex-col items-center justify-center gap-0.5 border-b border-white/5 text-white/50"
-            >
-              {React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-3.5 w-3.5' })}
-              {t.locked && <Lock className="h-2.5 w-2.5 text-amber-400" />}
-              {t.muted && <VolumeX className="h-2.5 w-2.5 text-rose-400" />}
+        {/* Track rail (Left side) */}
+        <div className="w-12 shrink-0 border-r border-white/10 bg-[#16161a] flex flex-col justify-between">
+          <div>
+            <div style={{ height: RULER_H }} className="border-b border-white/10 flex items-center justify-center">
+              <span className="text-[9px] font-mono text-white/40">Track</span>
             </div>
-          ))}
-          {tracks.length === 0 && (
-            <div className="flex h-full items-center justify-center px-1 text-center text-[9px] leading-tight text-white/30">
-              No tracks
-            </div>
-          )}
+            {tracks.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setSelectedTrackForOptions(selectedTrackForOptions?.id === t.id ? null : t)}
+                style={{ height: trackHeight(t) }}
+                className={`flex w-full flex-col items-center justify-center gap-0.5 border-b border-white/5 transition-colors ${
+                  selectedTrackForOptions?.id === t.id ? 'bg-amber-500/20 text-amber-400' : 'text-white/60 hover:bg-white/5'
+                }`}
+              >
+                {React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-3.5 w-3.5' })}
+                <span className="text-[7px] leading-none uppercase font-mono">{t.type.slice(0, 3)}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* "+ Add Track" Button at end of all tracks */}
+          <button
+            onClick={() => setShowAddTrackMenu(true)}
+            className="flex h-8 w-full items-center justify-center gap-1 border-t border-white/10 bg-white/5 text-[10px] font-semibold text-amber-400 hover:bg-white/10 active:bg-amber-500 active:text-black transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
         </div>
 
         {/* Scrollable canvas */}
         <div
           ref={scrollRef}
-          className="mobile-no-scrollbar flex-1 overflow-x-auto overflow-y-hidden touch-pan-x"
+          className="mobile-no-scrollbar flex-1 overflow-x-auto overflow-y-auto touch-pan-x relative"
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
@@ -427,11 +587,19 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
           <div
             ref={contentRef}
             className="relative"
-            style={{ width: contentWidth, height: '100%' }}
+            style={{ width: contentWidth, minHeight: '100%' }}
           >
+            {/* Alignment magnetic snap guide */}
+            {snapLineX !== null && (
+              <div
+                className="absolute top-0 bottom-0 z-50 w-px bg-cyan-400 pointer-events-none shadow-[0_0_8px_cyan]"
+                style={{ left: snapLineX }}
+              />
+            )}
+
             {/* Ruler */}
             <div
-              className="relative border-b border-white/10 bg-[#17171b]"
+              className="relative border-b border-white/10 bg-[#16161a]"
               style={{ height: RULER_H }}
               onPointerDown={onPointerDownRuler}
             >
@@ -453,7 +621,8 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                   key={track.id}
                   className={`relative border-b border-white/5 ${track.locked ? 'opacity-70' : ''}`}
                   style={{ height: h }}
-                  onPointerDown={onPointerDownRuler}
+                  onPointerDown={(e) => handleBlankPointerDown(e, track.id)}
+                  onPointerUp={handleBlankPointerUp}
                 >
                   {track.clips.map((clip) => {
                     const dc = displayClip(clip);
@@ -461,7 +630,9 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                     const isSelected = selectedClipId === clip.id;
                     const left = dc.startTime * zoomLevel;
                     const width = Math.max(MIN_CLIP_W, dc.duration * zoomLevel);
-                    const thumb = media?.thumbnail || (media?.frameStrip && media.frameStrip[0]) || undefined;
+                    const isVideo = media?.type === 'video' || (!clip.textSettings && !clip.fxSettings && media?.type !== 'audio');
+                    const hasAudio = media?.type === 'audio' || isVideo;
+
                     return (
                       <div
                         key={clip.id}
@@ -476,38 +647,53 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                         }}
                         onPointerDown={(e) => onPointerDownClip(e, clip)}
                       >
-                        {thumb && (
-                          <img
-                            src={thumb}
-                            alt=""
-                            draggable={false}
-                            className="absolute inset-0 h-full w-full object-cover opacity-70"
-                          />
+                        {/* Video Frame Strip rendering */}
+                        {isVideo && media && width > 40 && (
+                          <div className="absolute inset-0 opacity-60 pointer-events-none">
+                            <FrameStripOverlay media={media} clip={dc} width={width} height={h - 8} />
+                          </div>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-b from-black/20 to-black/40" />
-                        <span className="absolute left-1 top-0.5 truncate text-[9px] font-medium leading-tight text-white drop-shadow">
+
+                        {/* Audio Waveform rendering */}
+                        {hasAudio && media && width > 30 && (
+                          <div className="absolute inset-0 opacity-70 pointer-events-none">
+                            <WaveformOverlay
+                              media={media}
+                              clipId={clip.id}
+                              width={width}
+                              height={h - 8}
+                              trimStart={dc.trimStart}
+                              clipDuration={dc.duration}
+                              speed={dc.speed}
+                              small={isVideo}
+                            />
+                          </div>
+                        )}
+
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/50 pointer-events-none" />
+                        <span className="absolute left-1 top-0.5 truncate text-[9px] font-semibold leading-tight text-white drop-shadow z-10">
                           {clip.textSettings?.text || media?.name || 'Clip'}
                         </span>
-                        <span className="absolute bottom-0.5 left-1 text-[8px] leading-none text-white/70">
+                        <span className="absolute bottom-0.5 left-1 text-[8px] leading-none text-white/80 z-10 font-mono">
                           {formatCentisecondTime(dc.duration)}
                         </span>
 
-                        {/* trim handles on selected clip */}
+                        {/* Trim handles on selected clip */}
                         {isSelected && (
                           <>
                             <div
-                              className="absolute inset-y-0 left-0 z-10 flex w-[14px] items-center justify-center bg-white/90"
+                              className="absolute inset-y-0 left-0 z-20 flex w-[14px] items-center justify-center bg-white shadow-md cursor-ew-resize"
                               style={{ touchAction: 'none' }}
                               onPointerDown={(e) => onPointerDownTrim(e, clip, 'start')}
                             >
-                              <div className="h-4 w-1 rounded-full bg-black/40" />
+                              <div className="h-4 w-1 rounded-full bg-black/50" />
                             </div>
                             <div
-                              className="absolute inset-y-0 right-0 z-10 flex w-[14px] items-center justify-center bg-white/90"
+                              className="absolute inset-y-0 right-0 z-20 flex w-[14px] items-center justify-center bg-white shadow-md cursor-ew-resize"
                               style={{ touchAction: 'none' }}
                               onPointerDown={(e) => onPointerDownTrim(e, clip, 'end')}
                             >
-                              <div className="h-4 w-1 rounded-full bg-black/40" />
+                              <div className="h-4 w-1 rounded-full bg-black/50" />
                             </div>
                           </>
                         )}
@@ -518,13 +704,7 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
               );
             })}
 
-            {tracks.length === 0 && (
-              <div className="flex h-20 items-center justify-center text-[11px] text-white/30">
-                Tap “＋ Add” to import media and start editing
-              </div>
-            )}
-
-            {/* Playhead — draggable scrub handle spanning the full canvas */}
+            {/* Playhead */}
             <div
               className="mobile-playhead absolute top-0 z-40"
               style={{
@@ -536,11 +716,220 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
               onPointerDown={onPointerDownPlayhead}
             >
               <div className="absolute top-0 left-1/2 -translate-x-1/2 h-0 w-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-amber-400" />
-              <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px bg-amber-400" />
+              <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]" />
             </div>
           </div>
         </div>
       </div>
+
+      {/* Floating Track Options Menu */}
+      {selectedTrackForOptions && (
+        <div className="absolute bottom-12 left-14 z-50 flex flex-col gap-1 rounded-xl border border-white/15 bg-[#1e1e24] p-2 shadow-2xl backdrop-blur-xl">
+          <p className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-white/40">
+            {selectedTrackForOptions.name || selectedTrackForOptions.type} Track
+          </p>
+          <div className="grid grid-cols-2 gap-1 text-[11px] text-white">
+            <button
+              onClick={() => moveTrack(selectedTrackForOptions.id, 'up')}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-white/10 text-left"
+            >
+              <ArrowUp className="h-3.5 w-3.5 text-cyan-400" />
+              <span>Move Up</span>
+            </button>
+            <button
+              onClick={() => moveTrack(selectedTrackForOptions.id, 'down')}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-white/10 text-left"
+            >
+              <ArrowDown className="h-3.5 w-3.5 text-cyan-400" />
+              <span>Move Down</span>
+            </button>
+            <button
+              onClick={() => {
+                toggleTrackMute(selectedTrackForOptions.id);
+                setSelectedTrackForOptions(null);
+              }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-white/10 text-left"
+            >
+              {selectedTrackForOptions.muted ? (
+                <>
+                  <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Unmute</span>
+                </>
+              ) : (
+                <>
+                  <VolumeX className="h-3.5 w-3.5 text-rose-400" />
+                  <span>Mute</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => {
+                toggleTrackLock(selectedTrackForOptions.id);
+                setSelectedTrackForOptions(null);
+              }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-white/10 text-left"
+            >
+              {selectedTrackForOptions.locked ? (
+                <>
+                  <Unlock className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Unlock</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Lock</span>
+                </>
+              )}
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              removeTrack(selectedTrackForOptions.id);
+              setSelectedTrackForOptions(null);
+              toast.success('Track removed');
+            }}
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-rose-500/20 px-2.5 py-1.5 text-[11px] font-semibold text-rose-300 hover:bg-rose-500/30 text-left mt-1"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>Delete Track</span>
+          </button>
+        </div>
+      )}
+
+      {/* Floating Add Track Type Popover */}
+      {showAddTrackMenu && (
+        <div className="absolute bottom-12 left-14 z-50 flex flex-col gap-1 rounded-xl border border-white/15 bg-[#1e1e24] p-2 shadow-2xl backdrop-blur-xl">
+          <p className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-white/40">Select Track Type</p>
+          <div className="flex flex-col gap-1 text-[11px] text-white">
+            <button
+              onClick={() => { addTrack('video'); setShowAddTrackMenu(false); toast.success('Added Video Track'); }}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+            >
+              <Video className="h-3.5 w-3.5 text-blue-400" />
+              <span>Video Track</span>
+            </button>
+            <button
+              onClick={() => { addTrack('audio'); setShowAddTrackMenu(false); toast.success('Added Audio Track'); }}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+            >
+              <Music className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Audio Track</span>
+            </button>
+            <button
+              onClick={() => { addTrack('text'); setShowAddTrackMenu(false); toast.success('Added Text Track'); }}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+            >
+              <Type className="h-3.5 w-3.5 text-purple-400" />
+              <span>Text Track</span>
+            </button>
+            <button
+              onClick={() => { addTrack('fx'); setShowAddTrackMenu(false); toast.success('Added FX Track'); }}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-rose-400" />
+              <span>FX / Effect Track</span>
+            </button>
+            <button
+              onClick={() => { addTrack('adjustment'); setShowAddTrackMenu(false); toast.success('Added Adjustment Track'); }}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+            >
+              <Layers className="h-3.5 w-3.5 text-amber-400" />
+              <span>Adjustment Layer Track</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Timeline Toolbar Copy Menu */}
+      {showTimelineCopyMenu && (
+        <div className="absolute top-9 left-16 z-50 flex flex-col gap-1 rounded-xl border border-white/15 bg-[#1e1e24] p-1.5 shadow-2xl backdrop-blur-xl">
+          <p className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-white/40">Copy Options</p>
+          <button
+            onClick={() => { copyClip('whole'); setShowTimelineCopyMenu(false); toast.success('Copied Whole Clip'); }}
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+          >
+            <Copy className="h-3.5 w-3.5 text-amber-400" />
+            <span>Copy Whole Clip</span>
+          </button>
+          <button
+            onClick={() => { copyClip('clip'); setShowTimelineCopyMenu(false); toast.success('Copied Base'); }}
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+          >
+            <Copy className="h-3.5 w-3.5 text-blue-400" />
+            <span>Copy Base (Timing & Core)</span>
+          </button>
+          <button
+            onClick={() => { copyClip('style'); setShowTimelineCopyMenu(false); toast.success('Copied Style'); }}
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+            <span>Copy Style (Color/FX)</span>
+          </button>
+          {isText && (
+            <>
+              <button
+                onClick={() => { copyClip('style-with-position'); setShowTimelineCopyMenu(false); toast.success('Copied Style + Position'); }}
+                className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+              >
+                <Type className="h-3.5 w-3.5 text-teal-400" />
+                <span>Text Style + Position</span>
+              </button>
+              <button
+                onClick={() => { copyClip('style-only'); setShowTimelineCopyMenu(false); toast.success('Copied Font Style'); }}
+                className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+              >
+                <Type className="h-3.5 w-3.5 text-pink-400" />
+                <span>Only Font / Typography</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Floating Timeline Toolbar Paste Menu */}
+      {showTimelinePasteMenu && (
+        <div className="absolute top-9 left-28 z-50 flex flex-col gap-1 rounded-xl border border-white/15 bg-[#1e1e24] p-1.5 shadow-2xl backdrop-blur-xl">
+          <p className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-white/40">Paste Options</p>
+          <button
+            onClick={() => { pasteClip('whole'); setShowTimelinePasteMenu(false); toast.success('Pasted Whole Clip'); }}
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5 text-amber-400" />
+            <span>Paste Whole</span>
+          </button>
+          <button
+            onClick={() => { pasteClip('clip'); setShowTimelinePasteMenu(false); toast.success('Pasted Base'); }}
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5 text-blue-400" />
+            <span>Paste Base</span>
+          </button>
+          <button
+            onClick={() => { pasteClip('style'); setShowTimelinePasteMenu(false); toast.success('Pasted Style'); }}
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white hover:bg-white/10 active:bg-amber-500 active:text-black text-left"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+            <span>Paste Style</span>
+          </button>
+        </div>
+      )}
+
+      {/* Long-tap "Paste Here" Popover */}
+      {blankPastePos && clipboardData?.clips?.length > 0 && (
+        <div className="absolute bottom-12 left-24 z-50 rounded-xl border border-white/15 bg-[#1e1e24] p-1.5 shadow-2xl backdrop-blur-xl">
+          <button
+            onClick={() => {
+              pasteClip('whole');
+              setBlankPastePos(null);
+              toast.success('Pasted here');
+            }}
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/10 active:bg-amber-500 active:text-black"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5 text-amber-400" />
+            <span>Paste Clip Here</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,33 +9,39 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
-import { Upload, Plus, Film, Image, Music, Type, Sparkles } from 'lucide-react';
+import { Upload, Plus, Film, Image, Music, Type, Sparkles, ArrowLeftRight, LayoutTemplate } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { useMediaImport } from '@/hooks/media/useMediaImport';
 import { addMediaToTimeline, addTextClipToTimeline, findFreeSlot, mid } from '@/mobile/lib/timeline';
-import { FX_EFFECTS, COLOR_CORRECTION_EFFECTS, PARTICLE_EFFECTS } from '@/constants/mediaPanel';
+import { TRANSITIONS, FX_EFFECTS, COLOR_CORRECTION_EFFECTS, PARTICLE_EFFECTS } from '@/constants/mediaPanel';
+import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import type { TimelineClip } from '@/types';
 
-type Tab = 'media' | 'audio' | 'text' | 'effects';
+export type MobileMediaTab = 'media' | 'transitions' | 'templates' | 'audio' | 'text' | 'effects';
 
-const TABS: { id: Tab; label: string; icon: typeof Plus }[] = [
+const TABS: { id: MobileMediaTab; label: string; icon: typeof Plus }[] = [
   { id: 'media', label: 'Media', icon: Film },
+  { id: 'transitions', label: 'Transitions', icon: ArrowLeftRight },
+  { id: 'templates', label: 'Templates', icon: LayoutTemplate },
   { id: 'audio', label: 'Audio', icon: Music },
   { id: 'text', label: 'Text', icon: Type },
   { id: 'effects', label: 'Effects', icon: Sparkles },
 ];
 
-export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: () => void; initialTab?: Tab }) {
-  const [tab, setTab] = useState<Tab>(initialTab);
-  const { mediaLibrary, insertTextClip, updateClip, saveSnapshot } = useEditorStore(
+export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: () => void; initialTab?: MobileMediaTab }) {
+  const [tab, setTab] = useState<MobileMediaTab>(initialTab);
+  const { mediaLibrary, insertTextClip, updateClip, saveSnapshot, tracks, selectedClipId, updateTransition } = useEditorStore(
     useShallow((s) => ({
       mediaLibrary: s.mediaLibrary,
       insertTextClip: s.insertTextClip,
       updateClip: s.updateClip,
       saveSnapshot: s.saveSnapshot,
+      tracks: s.tracks,
+      selectedClipId: s.selectedClipId,
+      updateTransition: s.updateTransition,
     }))
   );
   const { isUploading, progressText, progressPercent, fileInputRef, handleFileSelect } = useMediaImport();
@@ -113,6 +119,37 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
     onClose();
   };
 
+  const applyTransition = (tr: (typeof TRANSITIONS)[number]) => {
+    const state = useEditorStore.getState();
+    const clipId = state.selectedClipId;
+    if (!clipId) {
+      toast.warning('Select a clip on the timeline to attach transition.');
+      return;
+    }
+    updateTransition(clipId, {
+      type: tr.name.toLowerCase().replace(/\s+/g, '_') as any,
+      duration: 1.0,
+      params: { alignment: 'center', easing: 'easeInOut' },
+    });
+    saveSnapshot();
+    toast.success(`Applied transition “${tr.name}”`);
+    onClose();
+  };
+
+  const addMotionTemplate = (tmpl: any) => {
+    const state = useEditorStore.getState();
+    if (tmpl.type === 'text' && tmpl.textSettings) {
+      insertTextClip({
+        ...tmpl.textSettings,
+        text: tmpl.name,
+      });
+      toast.success(`Added template “${tmpl.name}”`);
+      onClose();
+    } else {
+      addFxEffect({ name: tmpl.name, type: tmpl.category || 'glitch' } as any);
+    }
+  };
+
   const applyColorPreset = (effect: (typeof COLOR_CORRECTION_EFFECTS)[number]) => {
     const state = useEditorStore.getState();
     const clipId = state.selectedClipId;
@@ -157,206 +194,254 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
   return (
     <div className="flex h-full flex-col">
       {/* Tab bar */}
-      <div className="flex shrink-0 gap-1 border-b border-white/10 px-3 pb-2">
+      <div className="flex shrink-0 gap-1 overflow-x-auto no-scrollbar border-b border-white/10 px-3 pb-2">
         {TABS.map((t) => {
           const Icon = t.icon;
+          const active = tab === t.id;
           return (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex flex-1 items-center justify-center gap-1 rounded-full py-1.5 text-[12px] font-medium transition ${
-                tab === t.id ? 'bg-amber-500 text-black' : 'bg-white/5 text-white/70'
+              className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
+                active ? 'bg-amber-500 text-black' : 'bg-white/5 text-white/70 hover:bg-white/10'
               }`}
             >
-              <Icon className="h-3.5 w-3.5" />
+              <Icon className="h-3 w-3" />
               {t.label}
             </button>
           );
         })}
       </div>
 
-      {/* Upload progress */}
-      {isUploading && (
-        <div className="shrink-0 px-4 py-2 text-[11px] text-amber-300">
-          {progressText} · {progressPercent}%
-          <div className="mt-1 h-1 w-full overflow-hidden rounded bg-white/10">
-            <div className="h-full bg-amber-500 transition-all" style={{ width: `${progressPercent}%` }} />
-          </div>
-        </div>
-      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFileSelect}
+      />
 
-      <div className="mobile-no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-6">
-        {/* Import buttons */}
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <button
-            onClick={() => pickFiles('video/*')}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2.5 text-[12px] font-medium text-white active:bg-white/10"
-          >
-            <Upload className="h-4 w-4 text-amber-400" /> Video
-          </button>
-          <button
-            onClick={() => pickFiles('image/*')}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2.5 text-[12px] font-medium text-white active:bg-white/10"
-          >
-            <Image className="h-4 w-4 text-emerald-400" /> Image
-          </button>
-          <button
-            onClick={() => pickFiles('audio/*')}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2.5 text-[12px] font-medium text-white active:bg-white/10"
-          >
-            <Music className="h-4 w-4 text-purple-400" /> Audio
-          </button>
-          <button
-            onClick={() => {
-              addTextClipToTimeline('Your Text');
-              onClose();
-            }}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2.5 text-[12px] font-medium text-white active:bg-white/10"
-          >
-            <Type className="h-4 w-4 text-amber-400" /> Text
-          </button>
-        </div>
-
+      {/* Body */}
+      <div className="mobile-no-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
         {tab === 'media' && (
-          <>
+          <div className="space-y-3">
+            <button
+              onClick={() => pickFiles('video/*,image/*')}
+              disabled={isUploading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/5 p-4 text-[13px] font-medium text-white active:bg-white/10 disabled:opacity-50"
+            >
+              <Upload className="h-4 w-4 text-amber-400" />
+              {isUploading ? progressText : 'Import Video / Photos'}
+            </button>
+
             {mediaItems.length === 0 ? (
-              <EmptyHint text="No media yet — import a video or image to begin." />
+              <p className="p-6 text-center text-[12px] text-white/40">
+                No imported media yet. Tap above to add videos or images.
+              </p>
             ) : (
               <div className="grid grid-cols-3 gap-2">
                 {mediaItems.map((m) => (
-                  <MediaCard key={m.id} thumb={m.thumbnail} name={m.name} duration={m.duration} icon={m.type === 'image' ? Image : Film} onClick={() => addMediaToTimeline(m)} />
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      addMediaToTimeline(m);
+                      onClose();
+                    }}
+                    className="group relative aspect-video overflow-hidden rounded-lg border border-white/10 bg-white/5 text-left active:scale-[0.98]"
+                  >
+                    {m.thumbnail ? (
+                      <img src={m.thumbnail} alt={m.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-zinc-800">
+                        {m.type === 'video' ? (
+                          <Film className="h-5 w-5 text-white/40" />
+                        ) : (
+                          <Image className="h-5 w-5 text-white/40" />
+                        )}
+                      </div>
+                    )}
+                    <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[9px] font-mono text-white">
+                      {(m.duration ?? 0).toFixed(1)}s
+                    </span>
+                    <span className="absolute left-1 top-1 truncate text-[9px] font-medium text-white drop-shadow">
+                      {m.name}
+                    </span>
+                  </button>
                 ))}
               </div>
             )}
-          </>
+          </div>
+        )}
+
+        {tab === 'transitions' && (
+          <div className="space-y-3">
+            <p className="text-[11px] text-white/50">Tap a transition to apply it to the selected clip:</p>
+            <div className="grid grid-cols-2 gap-2">
+              {TRANSITIONS.map((tr) => (
+                <button
+                  key={tr.name}
+                  onClick={() => applyTransition(tr)}
+                  className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
+                >
+                  <span className="text-[12px] font-semibold text-white">{tr.name}</span>
+                  <span className="text-[10px] text-white/50">{tr.preview}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab === 'templates' && (
+          <div className="space-y-3">
+            <p className="text-[11px] text-white/50">Motion Graphics & Particle Templates:</p>
+            <div className="grid grid-cols-2 gap-2">
+              {MOTION_TEMPLATES.map((tmpl) => (
+                <button
+                  key={tmpl.id}
+                  onClick={() => addMotionTemplate(tmpl)}
+                  className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
+                >
+                  <span className="text-[12px] font-semibold text-teal-300">{tmpl.name}</span>
+                  <span className="text-[10px] text-white/50 capitalize">{tmpl.category} template</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {tab === 'audio' && (
-          <>
+          <div className="space-y-3">
+            <button
+              onClick={() => pickFiles('audio/*')}
+              disabled={isUploading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/5 p-4 text-[13px] font-medium text-white active:bg-white/10 disabled:opacity-50"
+            >
+              <Upload className="h-4 w-4 text-emerald-400" />
+              Import Audio / Music
+            </button>
+
             {audioItems.length === 0 ? (
-              <EmptyHint text="No audio yet — tap “Audio” above to import music or voice." />
+              <p className="p-6 text-center text-[12px] text-white/40">
+                No audio files yet. Tap above to import music or sound effects.
+              </p>
             ) : (
               <div className="space-y-1.5">
                 {audioItems.map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => addMediaToTimeline(m)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-2 text-left active:bg-white/10"
+                    onClick={() => {
+                      addMediaToTimeline(m);
+                      onClose();
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
                   >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-300">
-                      <Music className="h-5 w-5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12px] font-medium text-white">{m.name}</span>
-                      <span className="text-[10px] text-white/40">{m.duration.toFixed(1)}s</span>
-                    </span>
-                    <Plus className="h-4 w-4 text-amber-400" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-medium text-white">{m.name}</p>
+                      <p className="text-[10px] text-white/40 font-mono">{(m.duration ?? 0).toFixed(1)}s</p>
+                    </div>
+                    <Plus className="h-4 w-4 text-white/60 shrink-0" />
                   </button>
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {tab === 'text' && (
-          <div className="grid grid-cols-2 gap-2">
-            {TEXT_TEMPLATES.map((tpl) => (
-              <button
-                key={tpl.name}
-                onClick={() => addTextTemplate(tpl)}
-                className="rounded-xl border border-white/10 bg-white/5 p-3 text-left active:bg-white/10"
-              >
-                <span className="block text-[12px] font-medium text-white">{tpl.name}</span>
-                <span className="block text-[10px] text-white/40">Tap to add</span>
-              </button>
-            ))}
+          <div className="space-y-3">
+            <button
+              onClick={() => {
+                addTextClipToTimeline('Your Text');
+                onClose();
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-amber-500 p-3 text-[13px] font-semibold text-black active:opacity-90"
+            >
+              <Plus className="h-4 w-4" />
+              Add Plain Text
+            </button>
+
+            <p className="text-[11px] font-medium text-white/50 pt-2">Text Style Presets</p>
+            <div className="grid grid-cols-2 gap-2">
+              {TEXT_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.name}
+                  onClick={() => addTextTemplate(tpl)}
+                  className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
+                >
+                  <span
+                    className="text-[14px] font-bold"
+                    style={{
+                      color: tpl.settings.color,
+                      fontFamily: tpl.settings.fontFamily,
+                    }}
+                  >
+                    {tpl.name}
+                  </span>
+                  <span className="text-[10px] text-white/40">{tpl.style || 'Text style'}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
         {tab === 'effects' && (
           <div className="space-y-4">
-            <SectionLabel>Motion FX</SectionLabel>
-            <div className="grid grid-cols-2 gap-2">
-              {FX_EFFECTS.map((fx) => (
-                <button key={fx.type} onClick={() => addFxEffect(fx)} className="rounded-xl border border-white/10 bg-white/5 p-3 text-left active:bg-white/10">
-                  <span className="block text-[12px] font-medium text-white">{fx.name}</span>
-                  <span className="block truncate text-[10px] text-white/40">{fx.desc}</span>
-                </button>
-              ))}
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/60">
+                Timeline Shaders & FX
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {FX_EFFECTS.map((fx) => (
+                  <button
+                    key={fx.type}
+                    onClick={() => addFxEffect(fx)}
+                    className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
+                  >
+                    <span className={`text-[12px] font-semibold ${fx.color}`}>{fx.name}</span>
+                    <span className="text-[10px] text-white/40">{fx.desc}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <SectionLabel>Color Presets</SectionLabel>
-            <div className="grid grid-cols-2 gap-2">
-              {COLOR_CORRECTION_EFFECTS.map((fx) => (
-                <button key={fx.name} onClick={() => applyColorPreset(fx)} className="rounded-xl border border-white/10 bg-white/5 p-3 text-left active:bg-white/10">
-                  <span className="block text-[12px] font-medium text-white">{fx.name}</span>
-                  <span className="block text-[10px] text-white/40">Apply to selected clip</span>
-                </button>
-              ))}
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/60">
+                Color Presets
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {COLOR_CORRECTION_EFFECTS.map((eff) => (
+                  <button
+                    key={eff.name}
+                    onClick={() => applyColorPreset(eff)}
+                    className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
+                  >
+                    <span className="text-[12px] font-semibold text-white">{eff.name}</span>
+                    <span className="text-[10px] text-white/40">Apply to selected clip</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <SectionLabel>Particles</SectionLabel>
-            <div className="grid grid-cols-2 gap-2">
-              {PARTICLE_EFFECTS.map((fx) => (
-                <button key={fx.type} onClick={() => applyParticle(fx)} className="rounded-xl border border-white/10 bg-white/5 p-3 text-left active:bg-white/10">
-                  <span className="block text-[12px] font-medium text-white">{fx.name}</span>
-                  <span className="block text-[10px] text-white/40">Apply to selected clip</span>
-                </button>
-              ))}
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/60">
+                Particle Overlays
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {PARTICLE_EFFECTS.map((p) => (
+                  <button
+                    key={p.name}
+                    onClick={() => applyParticle(p)}
+                    className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
+                  >
+                    <span className="text-[12px] font-semibold text-white">{p.name}</span>
+                    <span className="text-[10px] text-white/40">{p.desc}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
       </div>
-
-      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
     </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-[10px] font-bold uppercase tracking-wider text-white/40">{children}</p>;
-}
-
-function EmptyHint({ text }: { text: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-      <Film className="h-8 w-8 text-white/20" />
-      <p className="text-[12px] text-white/40">{text}</p>
-    </div>
-  );
-}
-
-function MediaCard({
-  thumb,
-  name,
-  duration,
-  icon: Icon,
-  onClick,
-}: {
-  thumb?: string;
-  name: string;
-  duration: number;
-  icon: typeof Film;
-  onClick: () => void;
-}) {
-  return (
-    <button onClick={onClick} className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left active:border-amber-400">
-      <div className="relative aspect-square w-full overflow-hidden bg-black/40">
-        {thumb ? (
-          <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-white/30">
-            <Icon className="h-6 w-6" />
-          </div>
-        )}
-        <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[9px] text-white">
-          {duration > 0 ? duration.toFixed(1) : ''}
-        </span>
-        <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-active:opacity-100">
-          <Plus className="h-6 w-6 text-white" />
-        </span>
-      </div>
-      <span className="block truncate px-1.5 py-1 text-[10px] text-white/80">{name}</span>
-    </button>
   );
 }

@@ -15,6 +15,7 @@ export type PropertiesTab =
   | 'audio'
   | 'text'
   | 'effects'
+  | 'ai'
   | 'thumbnail'
   | 'history';
 
