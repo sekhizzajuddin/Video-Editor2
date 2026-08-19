@@ -25,6 +25,9 @@ import {
   Mic,
   PictureInPicture2,
   Check,
+  Palette,
+  Crop,
+  Volume2,
 } from 'lucide-react';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -39,7 +42,7 @@ export interface MobileToolRailProps {
   onAddTemplate: () => void;
   onOpenAiVoice: () => void;
   onAddPip: () => void;
-  onOpenProperties: () => void;
+  onOpenProperties: (tab?: string) => void;
 }
 
 export function MobileToolRail({
@@ -273,8 +276,14 @@ export function MobileToolRail({
       <div className="flex items-center justify-start gap-1 overflow-x-auto no-scrollbar touch-pan-x py-1">
         {hasSelection ? (
           <>
-            <Tool icon={<SlidersHorizontal className="h-4 w-4" />} label="Edit" accent onClick={onOpenProperties} />
             <Tool icon={<Scissors className="h-4 w-4" />} label="Split" onClick={handleSplit} />
+            <Tool icon={<Sparkles className="h-4 w-4 text-cyan-400" />} label="AI" onClick={() => onOpenProperties('ai')} />
+            <Tool icon={<SlidersHorizontal className="h-4 w-4" />} label="Transform" onClick={() => onOpenProperties('style')} />
+            <Tool icon={<Palette className="h-4 w-4 text-pink-400" />} label="Color" onClick={() => onOpenProperties('color')} />
+            {isText && <Tool icon={<Type className="h-4 w-4 text-teal-400" />} label="Text" onClick={() => onOpenProperties('text')} />}
+            <Tool icon={<Volume2 className="h-4 w-4 text-emerald-400" />} label="Audio" onClick={() => onOpenProperties('audio')} />
+            <Tool icon={<Gauge className="h-4 w-4 text-blue-400" />} label="Speed" onClick={() => onOpenProperties('speed')} />
+            <Tool icon={<Crop className="h-4 w-4 text-amber-400" />} label="Mask" onClick={() => onOpenProperties('mask')} />
             <Tool
               icon={<Copy className="h-4 w-4" />}
               label="Copy"
@@ -295,7 +304,6 @@ export function MobileToolRail({
               disabled={!(clipboardData?.clips && clipboardData.clips.length > 0)}
             />
             <Tool icon={<CopyPlus className="h-4 w-4" />} label="Duplicate" onClick={handleDuplicate} />
-            <Tool icon={<Gauge className="h-4 w-4" />} label="Speed" onClick={onOpenProperties} />
             <Tool icon={<Trash2 className="h-4 w-4 text-rose-400" />} label="Delete" onClick={handleDelete} />
           </>
         ) : (

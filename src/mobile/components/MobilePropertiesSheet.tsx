@@ -24,6 +24,7 @@ import {
   Layers,
   Wand2,
   Music2,
+  ChevronDown,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -48,7 +49,7 @@ const DEFAULT_COLOR_FILTERS: ClipColorFilters = {
 
 const TEXT_COLORS = ['#ffffff', '#000000', '#f43f5e', '#f97316', '#facc15', '#22c55e', '#3b82f6', '#8b5cf6'];
 
-export function MobilePropertiesSheet({ onClose }: { onClose: () => void }) {
+export function MobilePropertiesSheet({ onClose, initialTab }: { onClose: () => void; initialTab?: Tab }) {
   const {
     selectedClipId,
     tracks,
@@ -90,7 +91,7 @@ export function MobilePropertiesSheet({ onClose }: { onClose: () => void }) {
 
   const isText = !!clip?.textSettings;
   const isAudio = mediaType === 'audio' || !!clip?.audioSettings;
-  const [tab, setTab] = useState<Tab>(isText ? 'text' : isAudio ? 'audio' : 'ai');
+  const [tab, setTab] = useState<Tab>(initialTab || (isText ? 'text' : isAudio ? 'audio' : 'ai'));
 
   if (!clip) {
     return (
@@ -147,12 +148,17 @@ export function MobilePropertiesSheet({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pb-2 shrink-0">
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-white">
-            {clip.textSettings?.text || mediaType || 'Clip'}
-          </p>
-          <p className="text-[10px] text-white/40">{(clip.duration ?? 0).toFixed(1)}s</p>
+      <div className="flex items-center justify-between px-4 pb-2 shrink-0 border-b border-white/5 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <button onClick={onClose} className="p-1 -ml-1 rounded hover:bg-white/10 active:bg-white/20 text-white/70">
+            <ChevronDown className="h-5 w-5" />
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-semibold text-white">
+              {clip.textSettings?.text || mediaType || 'Clip'}
+            </p>
+            <p className="text-[10px] text-white/40">{(clip.duration ?? 0).toFixed(1)}s</p>
+          </div>
         </div>
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar shrink-0 max-w-[60vw]">
           <ActionBtn icon={<Scissors className="h-4 w-4" />} label="Split" onClick={doSplit} />

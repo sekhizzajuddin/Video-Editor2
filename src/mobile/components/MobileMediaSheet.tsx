@@ -226,12 +226,12 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
         {tab === 'media' && (
           <div className="space-y-3">
             <button
-              onClick={() => pickFiles('video/*,image/*')}
+              onClick={() => pickFiles('*/*')}
               disabled={isUploading}
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/5 p-4 text-[13px] font-medium text-white active:bg-white/10 disabled:opacity-50"
             >
               <Upload className="h-4 w-4 text-amber-400" />
-              {isUploading ? progressText : 'Import Video / Photos'}
+              {isUploading ? progressText : 'Import from File Explorer'}
             </button>
 
             {mediaItems.length === 0 ? (
@@ -312,12 +312,12 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
         {tab === 'audio' && (
           <div className="space-y-3">
             <button
-              onClick={() => pickFiles('audio/*')}
+              onClick={() => pickFiles('*/*')}
               disabled={isUploading}
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/5 p-4 text-[13px] font-medium text-white active:bg-white/10 disabled:opacity-50"
             >
               <Upload className="h-4 w-4 text-emerald-400" />
-              Import Audio / Music
+              Import Audio from File Explorer
             </button>
 
             {audioItems.length === 0 ? (

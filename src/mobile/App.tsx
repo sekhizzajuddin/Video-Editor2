@@ -46,10 +46,8 @@ export function MobileApp() {
   const [mediaInitialTab, setMediaInitialTab] = useState<MobileMediaTab>('media');
   const online = useOnlineStatus();
 
-  // Open the properties sheet whenever a clip becomes selected.
-  useEffect(() => {
-    if (selectedClipId) setSheet('properties');
-  }, [selectedClipId]);
+  // Property sheet is only opened on explicit tab click in MobileToolRail
+  const [activePropertyTab, setActivePropertyTab] = useState<string | undefined>();
 
   const openMedia = (tab: MobileMediaTab = 'media') => {
     setMediaInitialTab(tab);
@@ -81,24 +79,34 @@ export function MobileApp() {
 
           {/* Timeline */}
           <div className="h-[230px] shrink-0 border-t border-white/10">
-            <MobileTimeline onSelectClip={() => setSheet('properties')} />
+            <MobileTimeline onSelectClip={() => {}} />
           </div>
 
-          {/* Tool rail */}
-          <MobileToolRail
-            onAddMedia={() => openMedia('media')}
-            onAddTransition={() => openMedia('transitions')}
-            onAddTemplate={() => openMedia('templates')}
-            onOpenAiVoice={() => openMedia('audio')}
-            onAddPip={() => openMedia('media')}
-            onAddText={() => {
-              addTextClipToTimeline('Your Text');
-              setSheet('properties');
-            }}
-            onAddAudio={() => openMedia('audio')}
-            onAddEffect={() => openMedia('effects')}
-            onOpenProperties={() => setSheet('properties')}
-          />
+          {/* Tool rail or Inline Properties */}
+          {sheet === 'properties' ? (
+            <div className="h-[250px] shrink-0 border-t border-white/10 bg-[#141418] relative z-10 pt-2 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+              <MobilePropertiesSheet initialTab={activePropertyTab as any} onClose={() => setSheet('none')} />
+            </div>
+          ) : (
+            <MobileToolRail
+              onAddMedia={() => openMedia('media')}
+              onAddTransition={() => openMedia('transitions')}
+              onAddTemplate={() => openMedia('templates')}
+              onOpenAiVoice={() => openMedia('audio')}
+              onAddPip={() => openMedia('media')}
+              onAddText={() => {
+                addTextClipToTimeline('Your Text');
+                setActivePropertyTab('text');
+                setSheet('properties');
+              }}
+              onAddAudio={() => openMedia('audio')}
+              onAddEffect={() => openMedia('effects')}
+              onOpenProperties={(tab) => {
+                if (tab) setActivePropertyTab(tab);
+                setSheet('properties');
+              }}
+            />
+          )}
         </>
       )}
 
@@ -109,15 +117,6 @@ export function MobileApp() {
         title="Add to project"
       >
         <MobileMediaSheet initialTab={mediaInitialTab} onClose={() => setSheet('none')} />
-      </MobileBottomSheet>
-
-      <MobileBottomSheet
-        open={sheet === 'properties'}
-        onClose={() => setSheet('none')}
-        title="Clip Properties"
-        height="65%"
-      >
-        <MobilePropertiesSheet onClose={() => setSheet('none')} />
       </MobileBottomSheet>
 
       {/* Global handlers & modals (reused from desktop) */}
