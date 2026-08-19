@@ -28,6 +28,9 @@ import {
   ClipboardPaste,
   Gauge,
   Plus,
+  Timer,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -89,7 +92,13 @@ type DragState =
   | { kind: 'trim-end'; clipId: string; startEnd: number; startTrimEnd: number }
   | null;
 
-export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
+export function MobileTimeline({ 
+  onSelectClip, 
+  onOpenTransitions 
+}: { 
+  onSelectClip: () => void;
+  onOpenTransitions?: () => void;
+}) {
   const {
     tracks,
     zoomLevel,
@@ -646,21 +655,34 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                 <span className="text-[9px] font-mono text-white/40">Track</span>
               </div>
               {tracks.map((t) => (
-                <button
+                <div
                   key={t.id}
-                  onClick={() => setSelectedTrackForOptions(selectedTrackForOptions?.id === t.id ? null : t)}
                   style={{ height: trackHeight(t) }}
-                  className={`flex w-full flex-col items-center justify-center gap-0.5 border-b border-white/5 transition-colors ${
+                  className={`relative flex w-full flex-col items-center justify-center gap-0.5 border-b border-white/5 transition-colors ${
                     selectedTrackForOptions?.id === t.id ? 'bg-amber-500/20 text-amber-400' : (t.hidden ? 'text-zinc-500 bg-black/20' : 'text-white/60 hover:bg-white/5')
                   }`}
                 >
-                  {t.hidden ? (
-                    <EyeOff className="h-3.5 w-3.5 text-zinc-500" />
-                  ) : (
-                    React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-3.5 w-3.5' })
-                  )}
-                  <span className="text-[7px] leading-none uppercase font-mono">{t.type.slice(0, 3)}</span>
-                </button>
+                  <button
+                    className="flex flex-col items-center justify-center w-full h-full pb-3"
+                    onClick={() => setSelectedTrackForOptions(selectedTrackForOptions?.id === t.id ? null : t)}
+                  >
+                    {t.hidden ? (
+                      <EyeOff className="h-4 w-4 text-zinc-500 mb-0.5" />
+                    ) : (
+                      React.createElement(TRACK_ICON[t.type] ?? Layers, { className: 'h-4 w-4 mb-0.5' })
+                    )}
+                    <span className="text-[7px] leading-none uppercase font-mono">{t.type.slice(0, 3)}</span>
+                  </button>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleTrackHidden(t.id);
+                    }}
+                    className="absolute bottom-1 right-1 p-1 hover:bg-white/10 rounded"
+                  >
+                    {t.hidden ? <EyeOff className="w-2.5 h-2.5 text-zinc-500" /> : <Eye className="w-2.5 h-2.5 text-white/40" />}
+                  </button>
+                </div>
               ))}
               {/* "+ Add Track" Button at end of all tracks */}
               <button
@@ -788,7 +810,7 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
 
                   {/* Transitions Layer */}
                   {(() => {
-                    const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+                    const sortedClips = [...(track.clips || [])].sort((a, b) => a.startTime - b.startTime);
                     return sortedClips.map((clip, idx) => {
                       if (idx === 0) return null;
                       const prevClip = sortedClips[idx - 1];
@@ -798,6 +820,9 @@ export function MobileTimeline({ onSelectClip }: { onSelectClip: () => void }) {
                       const hasTransition = !!trans;
 
                       if (!isAdjacent && !hasTransition) return null;
+                      
+                      // Hide transition targets if either adjacent clip is selected to allow easier trimming
+                      if (selectedClipId === clip.id || selectedClipId === prevClip.id) return null;
 
                       const intersectionTime = clip.startTime;
                       const centerPos = intersectionTime * zoomLevel;

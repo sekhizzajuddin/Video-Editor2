@@ -635,15 +635,19 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 
 
 
-      {/* ── Transitions Layer (uses memoised sortedClips) ───────────────────── */}
-      {!track.locked && sortedClips.map((clip, idx) => {
-        if (idx === 0) return null;
-        const prevClip = sortedClips[idx - 1];
-        const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
-        
-        const isEligibleForTransition = gap > -0.034 && gap < 0.034;
-        if (isEligibleForTransition) {
-          const intersectionTime = clip.startTime;
+      {/* ✂️ Transitions Layer (uses memoised sortedClips) 
+        ────────────────────────────────────────────── */}
+        {!track.locked && sortedClips.map((clip, idx) => {
+          if (idx === 0) return null;
+          const prevClip = sortedClips[idx - 1];
+          const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
+          
+          const isEligibleForTransition = gap > -0.034 && gap < 0.034;
+          if (isEligibleForTransition) {
+            // Hide transition targets if either adjacent clip is selected to allow easier trimming
+            if (selectedClipIds.includes(clip.id) || selectedClipIds.includes(prevClip.id)) return null;
+
+            const intersectionTime = clip.startTime;
           const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
           
           if (!hasTransition && !showTransitionLayer) return null;

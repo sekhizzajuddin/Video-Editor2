@@ -65,6 +65,7 @@ export function MobileToolRail({
     currentTime,
     tracks,
     pipWindows,
+    selectedTransitionClipId,
   } = useEditorStore(
     useShallow((s) => ({
       selectedClipId: s.selectedClipId,
@@ -78,6 +79,7 @@ export function MobileToolRail({
       currentTime: s.currentTime,
       tracks: s.tracks,
       pipWindows: s.pipWindows,
+      selectedTransitionClipId: s.selectedTransitionClipId,
     }))
   );
 
@@ -271,7 +273,16 @@ export function MobileToolRail({
 
       {/* Horizontal Scroll Bar */}
       <div className="flex items-center justify-start gap-1 overflow-x-auto no-scrollbar touch-pan-x py-1">
-        {hasSelection ? (
+        {selectedTransitionClipId ? (
+          <>
+            <Tool icon={<Sparkles className="h-4 w-4 text-purple-400" />} label="Transition" onClick={() => onOpenProperties('transition')} />
+            <Tool icon={<Trash2 className="h-4 w-4 text-red-400" />} label="Delete" onClick={() => {
+              useEditorStore.getState().removeTransition(selectedTransitionClipId);
+              useEditorStore.getState().selectTransition(null);
+              toast.success('Transition removed');
+            }} />
+          </>
+        ) : hasSelection ? (
           <>
             <Tool icon={<Sparkles className="h-4 w-4 text-cyan-400" />} label="AI" onClick={() => onOpenProperties('ai')} />
             <Tool icon={<SlidersHorizontal className="h-4 w-4" />} label="Transform" onClick={() => onOpenProperties('style')} />
@@ -280,7 +291,7 @@ export function MobileToolRail({
             <Tool icon={<Volume2 className="h-4 w-4 text-emerald-400" />} label="Audio" onClick={() => onOpenProperties('audio')} />
             <Tool icon={<Gauge className="h-4 w-4 text-blue-400" />} label="Speed" onClick={() => onOpenProperties('speed')} />
             <Tool icon={<Crop className="h-4 w-4 text-amber-400" />} label="Mask" onClick={() => onOpenProperties('mask')} />
-            </>
+          </>
         ) : (
           <>
             <Tool icon={<Plus className="h-4 w-4" />} label="Media" accent onClick={onAddMedia} />

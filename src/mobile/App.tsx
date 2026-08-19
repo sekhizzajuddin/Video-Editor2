@@ -76,7 +76,7 @@ export function MobileApp() {
 
           {/* Timeline */}
           <div className="h-[230px] shrink-0 border-t border-white/10">
-            <MobileTimeline onSelectClip={() => {}} />
+            <MobileTimeline onSelectClip={() => {}} onOpenTransitions={() => openMedia('transitions')} />
           </div>
 
           {/* Tool rail */}
