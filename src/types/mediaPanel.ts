@@ -13,5 +13,6 @@ export interface TransitionCardProps {
     color: string;
     preview: string;
   };
+  onClick?: () => void;
+  isMobile?: boolean;
 }
-

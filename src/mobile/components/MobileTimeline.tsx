@@ -418,41 +418,67 @@ export function MobileTimeline({
       if (drag.kind === 'trim-start') {
         const clip = clipMap.get(drag.clipId);
         if (!clip) return;
-        const speed = clip.speed || 1;
         const newStart = snapTime(t, drag.clipId);
-        const minDelta = Math.max(-drag.startStart, -drag.startTrimStart / speed);
-        const delta = Math.max(minDelta, newStart - drag.startStart);
-        const newDuration = Math.max(MIN_DURATION, clip.duration - delta);
-        const clampedStart = clip.duration - newDuration + drag.startStart;
-        setPreview({
-          clipId: clip.id,
-          startTime: clampedStart,
-          duration: newDuration,
-          trimStart: Math.max(0, drag.startTrimStart + (clampedStart - drag.startStart) * speed),
-          trimEnd: clip.trimEnd,
-        });
+        
+        if (activeTool === 'rateStretch') {
+          const originalEnd = drag.startStart + clip.duration;
+          const newDuration = Math.max(MIN_DURATION, originalEnd - newStart);
+          const clampedStart = originalEnd - newDuration;
+          setPreview({
+            clipId: clip.id,
+            startTime: clampedStart,
+            duration: newDuration,
+            trimStart: clip.trimStart,
+            trimEnd: clip.trimEnd,
+          });
+        } else {
+          const speed = clip.speed || 1;
+          const minDelta = Math.max(-drag.startStart, -drag.startTrimStart / speed);
+          const delta = Math.max(minDelta, newStart - drag.startStart);
+          const newDuration = Math.max(MIN_DURATION, clip.duration - delta);
+          const clampedStart = clip.duration - newDuration + drag.startStart;
+          setPreview({
+            clipId: clip.id,
+            startTime: clampedStart,
+            duration: newDuration,
+            trimStart: Math.max(0, drag.startTrimStart + (clampedStart - drag.startStart) * speed),
+            trimEnd: clip.trimEnd,
+          });
+        }
         return;
       }
 
       if (drag.kind === 'trim-end') {
         const clip = clipMap.get(drag.clipId);
         if (!clip) return;
-        const speed = clip.speed || 1;
         const newEnd = snapTime(t, drag.clipId);
-        const maxDelta = drag.startTrimEnd / speed;
-        const delta = Math.min(maxDelta, newEnd - drag.startEnd);
-        const newDuration = Math.max(MIN_DURATION, clip.duration + delta);
-        setPreview({
-          clipId: clip.id,
-          startTime: clip.startTime,
-          duration: newDuration,
-          trimStart: clip.trimStart,
-          trimEnd: Math.max(0, drag.startTrimEnd - delta * speed),
-        });
+        
+        if (activeTool === 'rateStretch') {
+          const newDuration = Math.max(MIN_DURATION, newEnd - clip.startTime);
+          setPreview({
+            clipId: clip.id,
+            startTime: clip.startTime,
+            duration: newDuration,
+            trimStart: clip.trimStart,
+            trimEnd: clip.trimEnd,
+          });
+        } else {
+          const speed = clip.speed || 1;
+          const maxDelta = drag.startTrimEnd / speed;
+          const delta = Math.min(maxDelta, newEnd - drag.startEnd);
+          const newDuration = Math.max(MIN_DURATION, clip.duration + delta);
+          setPreview({
+            clipId: clip.id,
+            startTime: clip.startTime,
+            duration: newDuration,
+            trimStart: clip.trimStart,
+            trimEnd: Math.max(0, drag.startTrimEnd - delta * speed),
+          });
+        }
         return;
       }
     },
-    [timeAt, clipMap, snapTime, seek]
+    [timeAt, clipMap, snapTime, seek, activeTool]
   );
 
   const onPointerUp = useCallback(() => {
@@ -694,7 +720,7 @@ export function MobileTimeline({
             </div>
 
             {/* Left Padding Spacer: exactly (50vw - 48px) so that 0.00s sits precisely under the 50% playhead */}
-            <div className="shrink-0" style={{ width: 'calc(50vw - 48px)' }} />
+            <div className="shrink-0" style={{ width: 'calc(50vw - 48px)' }} onPointerDown={handleBlankPointerDown} />
 
               <div ref={tracksRef} className="relative shrink-0" style={{ width: contentWidth }}>
                 {/* Alignment magnetic snap guide */}
@@ -880,7 +906,7 @@ export function MobileTimeline({
               </div>
               
               {/* Right Padding Spacer */}
-              <div className="shrink-0" style={{ width: '50vw' }} />
+              <div className="shrink-0" style={{ width: '50vw' }} onPointerDown={handleBlankPointerDown} />
             </div>
           </div>
       </div>

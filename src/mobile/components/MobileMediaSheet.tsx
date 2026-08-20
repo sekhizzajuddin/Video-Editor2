@@ -12,6 +12,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import { useMediaImport } from '@/hooks/media/useMediaImport';
 import { addMediaToTimeline, addTextClipToTimeline, findFreeSlot, mid } from '@/mobile/lib/timeline';
+import { TransitionCard } from '@/components/MediaPanel';
 import { TRANSITIONS, FX_EFFECTS, COLOR_CORRECTION_EFFECTS, PARTICLE_EFFECTS } from '@/constants/mediaPanel';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
@@ -300,23 +301,21 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
           </div>
         )}
 
-        {tab === 'transitions' && (
-          <div className="space-y-3">
-            <p className="text-[11px] text-white/50">Tap a transition to apply it to the selected clip:</p>
-            <div className="grid grid-cols-2 gap-2">
-              {TRANSITIONS.map((tr) => (
-                <button
-                  key={tr.name}
-                  onClick={() => applyTransition(tr)}
-                  className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
-                >
-                  <span className="text-[12px] font-semibold text-white">{tr.name}</span>
-                  <span className="text-[10px] text-white/50">{tr.preview}</span>
-                </button>
-              ))}
+          {tab === 'transitions' && (
+            <div className="space-y-3">
+              <p className="text-[11px] text-white/50">Tap a transition to apply it to the selected clip:</p>
+              <div className="grid grid-cols-2 gap-2">
+                {TRANSITIONS.map((tr) => (
+                  <TransitionCard
+                    key={tr.name}
+                    transition={tr}
+                    onClick={() => applyTransition(tr)}
+                    isMobile={true}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {tab === 'templates' && (
           <div className="space-y-3">

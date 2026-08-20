@@ -3270,9 +3270,10 @@ export function MediaPanel() {
   );
 }
 
-export const TransitionCard = React.memo(function TransitionCard({ transition }: TransitionCardProps) {
+export const TransitionCard = React.memo(function TransitionCard({ transition, onClick, isMobile }: TransitionCardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isHovered, setIsHovered] = useState(false);
+    const active = isMobile || isHovered;
   const animationRef = useRef<number | null>(null);
   // FIX H8: keep latest transition so the rAF closure doesn't go stale
   // when the parent re-renders with a new transition object.
@@ -3566,12 +3567,12 @@ export const TransitionCard = React.memo(function TransitionCard({ transition }:
       const elapsed = timestamp - start;
       const progress = (elapsed % duration) / duration;
       draw(progress);
-      if (isHovered) {
+      if (active) {
         animationRef.current = requestAnimationFrame(animate);
       }
     };
 
-    if (isHovered) {
+    if (active) {
       animationRef.current = requestAnimationFrame(animate);
     } else {
       draw(0);
@@ -3585,7 +3586,7 @@ export const TransitionCard = React.memo(function TransitionCard({ transition }:
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isHovered, transition]);
+  }, [active, transition]);
 
   return (
     <div
@@ -3596,6 +3597,7 @@ export const TransitionCard = React.memo(function TransitionCard({ transition }:
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+        onClick={onClick}
       className="flex flex-col bg-[#1a1a1a] border border-[#3e3e3e] hover:border-purple-500 rounded overflow-hidden cursor-grab transition-all duration-150 relative group"
     >
       <div className="w-full aspect-video bg-black relative">
@@ -3605,7 +3607,7 @@ export const TransitionCard = React.memo(function TransitionCard({ transition }:
           height={90}
           className="w-full h-full object-cover"
         />
-        {!isHovered && (
+        {!active && (
           <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none transition-opacity group-hover:opacity-0">
             <Sparkles className="w-5 h-5 text-purple-400/80 animate-pulse" />
           </div>
