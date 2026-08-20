@@ -104,7 +104,7 @@ function getSpeedRampMediaTime(
 }
 
 export interface RenderLayer {
-  type: 'video' | 'text' | 'image';
+  type: 'video' | 'text' | 'image' | 'adjustment';
   frame?: CanvasImageSource | VideoFrame; // For video/image
   textData?: any;     // For text
   /** Absolute timeline time (seconds) this layer is being evaluated at.
@@ -161,12 +161,17 @@ export interface RenderLayer {
   particleSettings?: any;
   lutData?: any;
   lutIntensity?: number;
-  colorWheels?: { shadows?: any; midtones?: any; highlights?: any };
+  colorWheels?: { shadows?: any; midtones?: any; highlights?: any } | null;
   curves?: any;
   rotationX?: number;
   rotationY?: number;
   perspectivePin?: boolean;
-  perspectiveCorners?: any;
+  perspectiveCorners?: {
+    topLeft?: { x: number; y: number };
+    topRight?: { x: number; y: number };
+    bottomRight?: { x: number; y: number };
+    bottomLeft?: { x: number; y: number };
+  };
   zIndex: number;
   sourceRotation?: number;
   blendMode?: GlobalCompositeOperation;
@@ -177,6 +182,31 @@ export interface RenderLayer {
     scale: number;
     rotation: number;
     clipRect?: { x: number; y: number; w: number; h: number };
+  };
+  isAdjustmentLayer?: boolean;
+  aiBackground?: {
+    enabled: boolean;
+    edgeBlur: number;
+    modelSelection?: 0 | 1 | 2;
+    choke?: number;
+    feather?: number;
+    spillSuppression?: number;
+    spillColor?: string;
+  };
+  objectRemoval?: {
+    enabled: boolean;
+    mode: 'content_aware' | 'patch_replace' | 'blur_conceal' | 'pixelate';
+    shape: 'rectangle' | 'ellipse' | 'polygon';
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number;
+    feather: number;
+    opacity: number;
+    stretchStrength?: number;
+    patchSourceX?: number;
+    patchSourceY?: number;
   };
 }
 
@@ -298,15 +328,15 @@ export class FrameScheduler {
         if (clip.aiBackground?.enabled && !warnOnce.has('aiBackground')) {
           warnOnce.add('aiBackground');
           this.warnings.push(
-            'AI background removal is not applied during export (it needs the in-browser ML runtime). ' +
-            'The clip will export with its original background.'
+            'AI background removal requires mask cache warm-up before export. ' +
+            'Please click "Prepare Export" to generate masks, or the clip will export with its original background.'
           );
         }
         if (clip.objectRemoval?.enabled && !warnOnce.has('objectRemoval')) {
           warnOnce.add('objectRemoval');
           this.warnings.push(
-            'Object removal is not applied during export (it needs WebGPU/Canvas on the main thread). ' +
-            'The clip will export without the removal effect.'
+            'Object removal requires inpaint cache warm-up before export. ' +
+            'Please click "Prepare Export" to generate inpaint masks, or the clip will export without the removal effect.'
           );
         }
       }
@@ -487,6 +517,30 @@ export class FrameScheduler {
             perspectivePin: !!clip.transform?.perspectivePin,
             perspectiveCorners: clip.transform?.perspectiveCorners,
             effects: Array.isArray(clip.effects) ? clip.effects : undefined,
+            aiBackground: clip.aiBackground?.enabled ? {
+              enabled: true,
+              edgeBlur: clip.aiBackground.edgeBlur ?? 0,
+              modelSelection: clip.aiBackground.modelSelection,
+              choke: clip.aiBackground.choke,
+              feather: clip.aiBackground.feather,
+              spillSuppression: clip.aiBackground.spillSuppression,
+              spillColor: clip.aiBackground.spillColor,
+            } : undefined,
+            objectRemoval: clip.objectRemoval?.enabled ? {
+              enabled: true,
+              mode: clip.objectRemoval.mode,
+              shape: clip.objectRemoval.shape,
+              x: getAnimatedExportValue(clip.objectRemoval.x ?? 50, t, st, clip.animations?.['objectRemoval.x']),
+              y: getAnimatedExportValue(clip.objectRemoval.y ?? 50, t, st, clip.animations?.['objectRemoval.y']),
+              width: getAnimatedExportValue(clip.objectRemoval.width ?? 20, t, st, clip.animations?.['objectRemoval.width']),
+              height: getAnimatedExportValue(clip.objectRemoval.height ?? 20, t, st, clip.animations?.['objectRemoval.height']),
+              rotation: getAnimatedExportValue(clip.objectRemoval.rotation ?? 0, t, st, clip.animations?.['objectRemoval.rotation']),
+              feather: getAnimatedExportValue(clip.objectRemoval.feather ?? 10, t, st, clip.animations?.['objectRemoval.feather']),
+              opacity: getAnimatedExportValue(clip.objectRemoval.opacity ?? 100, t, st, clip.animations?.['objectRemoval.opacity']),
+              stretchStrength: getAnimatedExportValue(clip.objectRemoval.stretchStrength ?? 80, t, st, clip.animations?.['objectRemoval.stretchStrength']),
+              patchSourceX: getAnimatedExportValue(clip.objectRemoval.patchSourceX ?? 30, t, st, clip.animations?.['objectRemoval.patchSourceX']),
+              patchSourceY: getAnimatedExportValue(clip.objectRemoval.patchSourceY ?? 30, t, st, clip.animations?.['objectRemoval.patchSourceY']),
+            } : undefined,
           };
 
           if (track.type === 'video' && (clip.mediaId || clip.id)) {
@@ -581,6 +635,22 @@ export class FrameScheduler {
               order: layerOrder,
               transitionGeometry,
               blendMode,
+            });
+          } else if (clip.isAdjustmentLayer || (clip.mediaId?.startsWith('adj_'))) {
+            // Adjustment layer — no frame decoder needed, just the color filters
+            layers.push({
+              type: 'adjustment',
+              timestampSeconds: t,
+              startTime: st,
+              clipId: clip.id,
+              opacity,
+              transform,
+              ...visualSettings,
+              zIndex,
+              order: layerOrder,
+              transitionGeometry,
+              blendMode,
+              isAdjustmentLayer: true,
             });
           }
         }

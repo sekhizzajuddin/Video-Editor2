@@ -10,17 +10,26 @@
 import type { ClipObjectRemovalSettings } from '@/types';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { detectSceneChange } from './humanDetection';
+import { getObjectRemovalSettingsHash } from './settingsHash';
 
 // Scratch canvases for offscreen compositing (reused across frames to prevent GC pauses)
-let scratchCanvas: HTMLCanvasElement | null = null;
-let scratchCtx: CanvasRenderingContext2D | null = null;
+// Support both DOM (main thread) and OffscreenCanvas (worker)
+let scratchCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+let scratchCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
 
-let tempCanvas: HTMLCanvasElement | null = null;
-let tempCtx: CanvasRenderingContext2D | null = null;
+let tempCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+let tempCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
 
-function getScratchCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+function getScratchCanvas(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } {
   if (!scratchCanvas || !scratchCtx) {
-    scratchCanvas = document.createElement('canvas');
+    // Worker-safe: use OffscreenCanvas if available, fallback to DOM canvas
+    if (typeof OffscreenCanvas !== 'undefined') {
+      scratchCanvas = new OffscreenCanvas(Math.max(width, Math.ceil(width / 256) * 256), Math.max(height, Math.ceil(height / 256) * 256));
+    } else {
+      scratchCanvas = document.createElement('canvas');
+      scratchCanvas.width = Math.max(width, Math.ceil(width / 256) * 256);
+      scratchCanvas.height = Math.max(height, Math.ceil(height / 256) * 256);
+    }
     scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true })!;
   }
   if (scratchCanvas.width < width || scratchCanvas.height < height) {
@@ -30,9 +39,16 @@ function getScratchCanvas(width: number, height: number): { canvas: HTMLCanvasEl
   return { canvas: scratchCanvas, ctx: scratchCtx! };
 }
 
-function getTempCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+function getTempCanvas(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } {
   if (!tempCanvas || !tempCtx) {
-    tempCanvas = document.createElement('canvas');
+    // Worker-safe: use OffscreenCanvas if available, fallback to DOM canvas
+    if (typeof OffscreenCanvas !== 'undefined') {
+      tempCanvas = new OffscreenCanvas(Math.max(width, Math.ceil(width / 256) * 256), Math.max(height, Math.ceil(height / 256) * 256));
+    } else {
+      tempCanvas = document.createElement('canvas');
+      tempCanvas.width = Math.max(width, Math.ceil(width / 256) * 256);
+      tempCanvas.height = Math.max(height, Math.ceil(height / 256) * 256);
+    }
     tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
   }
   if (tempCanvas.width < width || tempCanvas.height < height) {
@@ -44,7 +60,7 @@ function getTempCanvas(width: number, height: number): { canvas: HTMLCanvasEleme
 
 // Feather gradient cache to avoid regenerating radial gradients every frame
 const featherGradientCache = new Map<string, CanvasGradient>();
-const temporalInpaintCache = new Map<string, { canvas: HTMLCanvasElement; frameCount: number; settingsHash: string }>();
+const temporalInpaintCache = new Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; frameCount: number; settingsHash: string }>();
 
 /**
  * Interpolate settings from keyframes at current timeline time
@@ -574,6 +590,90 @@ export function applyObjectRemoval(
   if (interpolated.showHighlight) {
     drawHighlightOverlay(ctx, bounds, interpolated, clipWidth, clipHeight);
   }
+}
+
+/**
+ * Generate inpaint result for object removal (worker-safe version).
+ * Returns the inpainted canvas that can be cached and reused.
+ * This is extracted from applyObjectRemoval to allow caching in export worker.
+ */
+export function generateObjectRemovalInpaint(
+  clipWidth: number,
+  clipHeight: number,
+  settings: ClipObjectRemovalSettings,
+  currentTime: number,
+  clipStartTime: number,
+  sourceCanvas: HTMLCanvasElement | OffscreenCanvas | CanvasImageSource,
+  animations?: any,
+  clipId: string = '_default'
+): HTMLCanvasElement | OffscreenCanvas {
+  const resultCanvas = typeof OffscreenCanvas !== 'undefined' 
+    ? new OffscreenCanvas(clipWidth, clipHeight)
+    : document.createElement('canvas');
+  resultCanvas.width = clipWidth;
+  resultCanvas.height = clipHeight;
+  const resultCtx = resultCanvas.getContext('2d', { willReadFrequently: true })!;
+  
+  resultCtx.clearRect(0, 0, clipWidth, clipHeight);
+  
+  if (!settings || !settings.enabled) {
+    // No removal, just copy source
+    resultCtx.drawImage(sourceCanvas, 0, 0);
+    return resultCanvas;
+  }
+  
+  // Interpolate keyframes for fluid temporal motion tracking
+  const interpolated = interpolateSettings(settings, currentTime, clipStartTime, animations);
+  
+  // Calculate pixel bounding box and dimensions
+  const bounds = getPixelBounds(interpolated, clipWidth, clipHeight);
+  
+  // Skip rendering if mask is completely off-screen
+  if (
+    bounds.centerX < -bounds.w || bounds.centerX > clipWidth + bounds.w ||
+    bounds.centerY < -bounds.h || bounds.centerY > clipHeight + bounds.h
+  ) {
+    resultCtx.drawImage(sourceCanvas, 0, 0);
+    return resultCanvas;
+  }
+  
+  // Check temporal cache first
+  const settingsHash = getObjectRemovalSettingsHash(interpolated);
+  const sceneChanged = detectSceneChange(clipId + '_objr', sourceCanvas as HTMLCanvasElement);
+  
+  let cacheEntry = temporalInpaintCache.get(clipId);
+  if (!sceneChanged && cacheEntry && cacheEntry.settingsHash === settingsHash && cacheEntry.frameCount < 3) {
+    // Use cached result
+    resultCtx.drawImage(cacheEntry.canvas, 0, 0);
+    cacheEntry.frameCount++;
+    return resultCanvas;
+  }
+  
+  // Execute algorithm based on mode
+  switch (interpolated.mode) {
+    case 'content_aware':
+      applyContentAwareStretch(resultCtx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+      break;
+    case 'patch_replace':
+      applyPatchReplace(resultCtx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+      break;
+    case 'blur_conceal':
+    case 'pixelate':
+      applyBlurConceal(resultCtx, sourceCanvas, bounds, interpolated, clipWidth, clipHeight);
+      break;
+  }
+  
+  // Update cache
+  if (!cacheEntry) {
+    cacheEntry = { canvas: resultCanvas, frameCount: 0, settingsHash };
+    temporalInpaintCache.set(clipId, cacheEntry);
+  } else {
+    cacheEntry.canvas = resultCanvas;
+    cacheEntry.frameCount = 0;
+    cacheEntry.settingsHash = settingsHash;
+  }
+  
+  return resultCanvas;
 }
 
 /**
