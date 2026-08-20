@@ -454,12 +454,15 @@ export class Compositor {
           const frame = layer.frame as any;
           const sourceTimeMs = frame.sourceTime !== undefined ? (frame.sourceTime * 1000) : 0;
           
+          const dw = (drawable as any).width || (drawable as any).videoWidth || W;
+          const dh = (drawable as any).height || (drawable as any).videoHeight || H;
+
           // Create a temp canvas to apply the mask
           const tempCanvas = typeof OffscreenCanvas !== 'undefined' 
-            ? new OffscreenCanvas(drawable.width || drawable.videoWidth || W, drawable.height || drawable.videoHeight || H)
+            ? new OffscreenCanvas(dw, dh)
             : document.createElement('canvas');
-          tempCanvas.width = drawable.width || drawable.videoWidth || W;
-          tempCanvas.height = drawable.height || drawable.videoHeight || H;
+          tempCanvas.width = dw;
+          tempCanvas.height = dh;
           const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
           
           // Draw the original frame
@@ -479,8 +482,8 @@ export class Compositor {
           // We'll create a mock element with the currentTime property
           const mockElement = {
             currentTime: frame.sourceTime || 0,
-            videoWidth: drawable.width || drawable.videoWidth || W,
-            videoHeight: drawable.height || drawable.videoHeight || H,
+            videoWidth: dw,
+            videoHeight: dh,
           };
           
           // Try to apply the cached mask
@@ -511,9 +514,11 @@ export class Compositor {
           const sourceTimeMs = frame.sourceTime !== undefined ? (frame.sourceTime * 1000) : 0;
           
           try {
+            const curW = (drawable as any).width || (drawable as any).videoWidth || W;
+            const curH = (drawable as any).height || (drawable as any).videoHeight || H;
             const inpaintedCanvas = generateObjectRemovalInpaint(
-              drawable.width || drawable.videoWidth || W,
-              drawable.height || drawable.videoHeight || H,
+              curW,
+              curH,
               layer.objectRemoval,
               frame.sourceTime || 0,
               frame.clipStartTime || 0,

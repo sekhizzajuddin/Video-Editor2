@@ -66,6 +66,16 @@ async function openDB(): Promise<IDBDatabase> {
 }
 
 /**
+ * Convert an IDBRequest to a Promise
+ */
+function idbRequestToPromise<T = any>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
  * Initialize OPFS root directory
  */
 async function initOPFS(): Promise<FileSystemDirectoryHandle | null> {
@@ -264,7 +274,7 @@ export async function storeAiMask(
   const db = await openDB();
   const tx = db.transaction(METADATA_STORE, 'readwrite');
   const store = tx.objectStore(METADATA_STORE);
-  await store.put(metadata);
+  await idbRequestToPromise(store.put(metadata));
   
   // Add to memory cache
   const cacheKey = `${clipId}:${sourceTimeMs}:${settingsHash}`;
@@ -297,7 +307,7 @@ export async function getAiMask(
   const db = await openDB();
   const tx = db.transaction(METADATA_STORE, 'readonly');
   const store = tx.objectStore(METADATA_STORE);
-  const metadata = await store.get([clipId, sourceTimeMs, settingsHash]) as MaskMetadata | undefined;
+  const metadata = await idbRequestToPromise<MaskMetadata | undefined>(store.get([clipId, sourceTimeMs, settingsHash]));
   
   if (!metadata) return null;
   
@@ -330,7 +340,7 @@ export async function deleteAiMask(
   const db = await openDB();
   const tx = db.transaction(METADATA_STORE, 'readwrite');
   const store = tx.objectStore(METADATA_STORE);
-  await store.delete([clipId, sourceTimeMs, settingsHash]);
+  await idbRequestToPromise(store.delete([clipId, sourceTimeMs, settingsHash]));
   
   const filePath = getMaskFilePath(clipId, sourceTimeMs, settingsHash);
   await deleteMaskFromOPFS(filePath);
@@ -369,7 +379,7 @@ export async function clearClipMasks(clipId: string): Promise<void> {
   });
   
   for (const [cid, time, hash] of keys) {
-    await store.delete([cid, time, hash]);
+    await idbRequestToPromise(store.delete([cid, time, hash]));
     const filePath = getMaskFilePath(cid, time, hash);
     await deleteMaskFromOPFS(filePath);
   }
@@ -425,7 +435,7 @@ export async function evictOldestMasks(targetFreeBytes: number): Promise<number>
   });
   
   for (const [clipId, time, hash] of toDelete) {
-    await store.delete([clipId, time, hash]);
+    await idbRequestToPromise(store.delete([clipId, time, hash]));
     const filePath = getMaskFilePath(clipId, time, hash);
     await deleteMaskFromOPFS(filePath);
     memoryCache.delete(`${clipId}:${time}:${hash}`);

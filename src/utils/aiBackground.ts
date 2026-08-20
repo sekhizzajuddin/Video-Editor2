@@ -674,7 +674,7 @@ function getVideoCurrentTime(sourceElement: any): number {
  * Operates directly on semi-transparent edge pixels of the composited canvas.
  */
 export function applySpillSuppression(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   width: number,
   height: number,
   spillStrength: number = 0,
@@ -776,7 +776,7 @@ export function refineMaskEdges(
  * Export (isPlaying=false): Awaits segmentation for frame-accurate masks.
  */
 export function applyPreRenderedMaskIfAvailable(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   width: number,
   height: number,
   sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,
@@ -845,7 +845,7 @@ export function applyPreRenderedMaskIfAvailable(
 }
 
 export async function applyAiBackgroundMask(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   width: number,
   height: number,
   sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,
@@ -989,7 +989,7 @@ export async function applyAiBackgroundMask(
  * Subject neon outline flash effect using AI segmentation mask.
  */
 export async function applySubjectNeonOutlineFlash(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   width: number,
   height: number,
   sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,

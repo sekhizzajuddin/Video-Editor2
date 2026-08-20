@@ -117,7 +117,7 @@ function getPixelBounds(
  * Draw the removal mask path (rectangle or ellipse)
  */
 function drawMaskPath(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   cx: number,
   cy: number,
   w: number,
@@ -144,7 +144,7 @@ function drawMaskPath(
  * Draw highlight overlay for editing/placement mode
  */
 function drawHighlightOverlay(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   bounds: ReturnType<typeof getPixelBounds>,
   settings: ClipObjectRemovalSettings,
   clipWidth: number,
@@ -211,7 +211,7 @@ function drawHighlightOverlay(
  * Optimized for real-time with lighter sampling in preview mode and deep multi-pass in export mode.
  */
 function applyContentAwareStretch(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   sourceCanvas: HTMLCanvasElement | CanvasImageSource,
   bounds: ReturnType<typeof getPixelBounds>,
   settings: ClipObjectRemovalSettings,
@@ -320,7 +320,7 @@ function applyContentAwareStretch(
  * Samples from reference patch coordinates (patchSourceX, patchSourceY) and blends cleanly over target.
  */
 function applyPatchReplace(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   sourceCanvas: HTMLCanvasElement | CanvasImageSource,
   bounds: ReturnType<typeof getPixelBounds>,
   settings: ClipObjectRemovalSettings,
@@ -395,7 +395,7 @@ function applyPatchReplace(
  * ============================================
  */
 function applyBlurConceal(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   sourceCanvas: HTMLCanvasElement | CanvasImageSource,
   bounds: ReturnType<typeof getPixelBounds>,
   settings: ClipObjectRemovalSettings,
@@ -496,7 +496,7 @@ function applyBlurConceal(
  * ============================================
  */
 export function applyObjectRemoval(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   clipWidth: number,
   clipHeight: number,
   settings: ClipObjectRemovalSettings,
