@@ -165,3 +165,21 @@ canvas.preview-canvas {
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
+
+/* ── Cursor lock during timeline drag/trim/scrub ────────────────────────────
+   Force a single stable cursor for the whole interaction so the pointer does not
+   flicker between ew-resize / pointer / default as a clip's edge (and its 8px
+   resize handle) moves under a stationary pointer — especially near adjacent
+   clips where snapping clamps the edge while the pointer keeps travelling. */
+html.procut-trim-cursor,
+html.procut-trim-cursor * { cursor: ew-resize !important; }
+html.procut-grab-cursor,
+html.procut-grab-cursor * { cursor: grabbing !important; }
+html.procut-scrub-cursor,
+html.procut-scrub-cursor * { cursor: ew-resize !important; }
+
+/* Disable the clip's CSS transition while it is being dragged/trimmed so the
+   edge tracks the pointer 1:1 instead of lagging 75ms behind every frame update. */
+.procut-timeline-tracks .procut-clip-dragging {
+  transition: none !important;
+}

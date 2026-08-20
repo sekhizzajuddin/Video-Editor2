@@ -35,7 +35,7 @@ interface TimelineRulerProps {
   rulerData: RulerMarker[];
   seek: (time: number) => void;
   setMarkerContextMenu: (menu: { x: number; y: number; markerId: string } | null) => void;
-  handleRulerMouseDown: (e: React.MouseEvent) => void;
+  handleRulerPointerDown: (e: React.PointerEvent) => void;
 }
 
 export const TimelineGridLines = React.memo(function TimelineGridLines({
@@ -91,7 +91,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   rulerData,
   seek,
   setMarkerContextMenu,
-  handleRulerMouseDown,
+  handleRulerPointerDown,
 }: TimelineRulerProps) {
   // Double-click on the ruler (not on a marker) deselects any active clip/track/transition.
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -142,8 +142,8 @@ export const TimelineRuler = React.memo(function TimelineRuler({
     <div
       ref={rulerContainerRef}
       className="procut-timeline-ruler bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer select-none"
-      style={{ height: RULER_HEIGHT }}
-      onMouseDown={handleRulerMouseDown}
+      style={{ height: RULER_HEIGHT, touchAction: 'none' }}
+      onPointerDown={handleRulerPointerDown}
       onDoubleClick={handleDoubleClick}
     >
       <div

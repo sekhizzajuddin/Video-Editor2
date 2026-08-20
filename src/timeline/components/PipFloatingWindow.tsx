@@ -24,7 +24,7 @@ interface PipFloatingWindowProps {
   setHoveredTrackId: (id: string | null) => void;
   setDropPreview: (val: any) => void;
   setContextMenu: (val: any) => void;
-  handleClipMouseDown: (e: React.MouseEvent, clip: TimelineClip) => void;
+  handleClipMouseDown: (e: React.PointerEvent, clip: TimelineClip) => void;
   setHoverCutX: (val: number | null) => void;
   setHoverCutClipId: (val: string | null) => void;
 

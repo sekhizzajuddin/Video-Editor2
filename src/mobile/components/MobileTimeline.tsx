@@ -173,6 +173,10 @@ export function MobileTimeline({
   const longTapTimeoutRef = useRef<any>(null);
   const isUserScrolling = useRef(false);
   const isAutoScrolling = useRef(false);
+  // rAF throttle for playhead scrubbing — coalesces rapid pointermove events
+  // into at most one `seek()` per animation frame for buttery-smooth scrubbing.
+  const scrubRafRef = useRef<number | null>(null);
+  const latestScrubXRef = useRef<number>(0);
 
   useEffect(() => {
     if (useEditorStore.getState().isPlaying && !dragRef.current && !isUserScrolling.current) {
@@ -404,12 +408,22 @@ export function MobileTimeline({
     (e: React.PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      const t = Math.max(0, timeAt(e.clientX));
 
+      // Scrubbing is rAF-throttled: only the latest pointer position wins each
+      // frame, so we never queue up redundant `seek()` calls / store writes.
       if (drag.kind === 'scrub') {
-        seek(t);
+        latestScrubXRef.current = e.clientX;
+        if (scrubRafRef.current === null) {
+          scrubRafRef.current = requestAnimationFrame(() => {
+            scrubRafRef.current = null;
+            const t = Math.max(0, timeAt(latestScrubXRef.current));
+            seek(t);
+          });
+        }
         return;
       }
+
+      const t = Math.max(0, timeAt(e.clientX));
 
       if (drag.kind === 'move') {
         const clip = clipMap.get(drag.clipId);
@@ -487,7 +501,13 @@ export function MobileTimeline({
 
   const onPointerUp = useCallback(() => {
     const drag = dragRef.current;
-    if (drag?.kind === 'scrub') setIsScrubbing(false);
+    if (drag?.kind === 'scrub') {
+      if (scrubRafRef.current !== null) {
+        cancelAnimationFrame(scrubRafRef.current);
+        scrubRafRef.current = null;
+      }
+      setIsScrubbing(false);
+    }
     commitDrag();
   }, [commitDrag, setIsScrubbing]);
 
