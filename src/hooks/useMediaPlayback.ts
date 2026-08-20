@@ -1715,3 +1715,26 @@ export async function getLiveAudioStream(): Promise<MediaStream | null> {
   if (!master || master.getAudioTracks().length === 0) return null;
   return master.clone();
 }
+
+export function unlockiOSVideoPlay() {
+  const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  if (!isIOS) return;
+  const ctx = getMasterAudioCtx();
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+  for (const el of globalVideoMap.values()) {
+    if (el.paused) {
+      const prevMuted = el.muted;
+      el.muted = true;
+      const p = el.play();
+      if (p !== undefined) {
+        p.then(() => {
+          el.pause();
+          el.muted = prevMuted;
+        }).catch(() => {});
+      }
+    }
+  }
+}
+

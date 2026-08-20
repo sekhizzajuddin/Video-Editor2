@@ -28,6 +28,7 @@ import {
   Zap
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { unlockiOSVideoPlay } from '@/hooks/useMediaPlayback';
 import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 
 interface PreviewCanvasToolbarHeaderProps {
@@ -408,7 +409,10 @@ export function PreviewCanvasTransportControls({
           </button>
 
           <button
-            onClick={togglePlayback}
+            onClick={() => {
+              if (!isPlaying) unlockiOSVideoPlay();
+              togglePlayback();
+            }}
             title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             className={`
               flex items-center justify-center w-9 h-9 rounded-full mx-1 transition-all duration-150 active:scale-95
