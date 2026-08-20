@@ -396,7 +396,7 @@ export interface MaskAnalysisStatus {
 const MASK_CACHE_FPS = 20; // Cache key granularity: 20 keys/sec for smooth playback lookup
 const KEYFRAME_INFERENCE_FPS = 4; // Only run ONNX inference 4 times/sec — masks don't change in 250ms
                                   // 10s clip: 40 inferences instead of 200 (80% reduction!)
-const preRenderedMaskCache = new Map<string, Map<number, ImageBitmap | HTMLCanvasElement>>();
+export const preRenderedMaskCache = new Map<string, Map<number, ImageBitmap | HTMLCanvasElement>>();
 const analysisProgressMap = new Map<string, MaskAnalysisStatus>();
 const progressListeners = new Map<string, Set<(status: MaskAnalysisStatus) => void>>();
 

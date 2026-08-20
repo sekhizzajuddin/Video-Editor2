@@ -113,7 +113,7 @@
    toolbar is redundant (the MobileTopBar already exposes aspect ratio, undo/redo
    and export), so we hide it and keep only the render surface + transport bar.
    ───────────────────────────────────────────────────────────────────────────── */
-.mobile-preview > div > div:first-child {
+.mobile-preview .preview-header-toolbar {
   display: none;
 }
 

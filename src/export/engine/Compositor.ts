@@ -3,11 +3,16 @@ import { ExportWorkerConfig } from './export.worker';
 import {
   applyColorGradingWheelsOnData,
   applyFxEffect,
+  applyColorOverlays,
 } from '@/utils/canvasEffects';
 import { applyLutToCanvas } from '@/utils/lutParser';
 import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCurveActive as isCurveOn } from '@/utils/curvesEngine';
 import { applyVectorMaskToContext } from '@/utils/vectorMaskEngine';
 import { renderParticlesDeterministic } from './exportEffects';
+import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
+import { drawPerspectiveTexture, getProjectedCorners } from '@/utils/canvasEffects';
+import { generateObjectRemovalInpaint } from '@/utils/objectRemoval';
+import { applyPreRenderedMaskIfAvailable, preRenderedMaskCache } from '@/utils/aiBackground';
 
 const IDENTITY_CURVE_LUT = (() => {
   const lut = new Uint8ClampedArray(256);
@@ -294,13 +299,37 @@ export class Compositor {
     this.ctx.fillStyle = '#0a0a0a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    for (const layer of layers) {
+    // Separate adjustment layers from content layers
+    const contentLayers = layers.filter(l => l.type !== 'adjustment');
+    const adjustmentLayers = layers.filter(l => l.type === 'adjustment');
+
+    // Two-pass approach if adjustment layers exist:
+    // 1. Render all content layers to an intermediate canvas
+    // 2. Apply adjustment layer passes over the composited result
+    const needsIntermediate = adjustmentLayers.length > 0;
+    
+    let targetCtx: OffscreenCanvasRenderingContext2D = this.ctx;
+    let tempCanvas: OffscreenCanvas | null = null;
+    
+    if (needsIntermediate) {
+      tempCanvas = new OffscreenCanvas(this.canvas.width, this.canvas.height);
+      const tempCtx = tempCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
+      tempCtx.fillStyle = '#0a0a0a';
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      targetCtx = tempCtx;
+    }
+
+    // First pass: render all content layers
+    for (const layer of contentLayers) {
       if (layer.type === 'text') {
         this.renderTextLayer(layer);
         continue;
       }
+      if (layer.type === 'adjustment') {
+        continue;
+      }
       if (layer.type === 'video' && layer.frame) {
-        this.ctx.save();
+        targetCtx.save();
 
         // Clip-to-clip transition geometry (fractional, resolution-agnostic)
         const tg = layer.transitionGeometry;
@@ -308,19 +337,19 @@ export class Compositor {
           const CW = this.canvas.width;
           const CH = this.canvas.height;
           if (tg.clipRect) {
-            this.ctx.beginPath();
-            this.ctx.rect(
+            targetCtx.beginPath();
+            targetCtx.rect(
               tg.clipRect.x * CW,
               tg.clipRect.y * CH,
               tg.clipRect.w * CW,
               tg.clipRect.h * CH
             );
-            this.ctx.clip();
+            targetCtx.clip();
           }
-          this.ctx.translate(CW / 2 + tg.translateX * CW, CH / 2 + tg.translateY * CH);
-          if (tg.rotation) this.ctx.rotate(tg.rotation);
-          if (tg.scale !== 1) this.ctx.scale(tg.scale, tg.scale);
-          this.ctx.translate(-CW / 2, -CH / 2);
+          targetCtx.translate(CW / 2 + tg.translateX * CW, CH / 2 + tg.translateY * CH);
+          if (tg.rotation) targetCtx.rotate(tg.rotation);
+          if (tg.scale !== 1) targetCtx.scale(tg.scale, tg.scale);
+          targetCtx.translate(-CW / 2, -CH / 2);
         }
 
         // --------------------------------------------------------------------
@@ -385,32 +414,142 @@ export class Compositor {
         // 5. Apply global translation + rotation
         const cx = W / 2;
         const cy = H / 2;
-        this.ctx.translate(cx + tx, cy + ty);
-        this.ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
+        targetCtx.translate(cx + tx, cy + ty);
+        targetCtx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
+        
+        // Perspective pin warp: use the preview's grid-based corner warping
+        // when perspectivePin is enabled and corners are defined.
+        const hasPerspectiveWarp = layer.perspectivePin && layer.perspectiveCorners;
+        
         // 3D rotation (rotationX/Y): squash by cos(angle) to reproduce the
         // preview's perspective flattening (full corner warp would need
         // per-clip projection; this matches the preview's simulated-3D squash).
-        const rotX3d = layer.rotationX || 0;
-        const rotY3d = layer.rotationY || 0;
-        if (Math.abs(rotX3d) > 0.01 || Math.abs(rotY3d) > 0.01) {
-          const sx3d = Math.cos((rotY3d * Math.PI) / 180);
-          const sy3d = Math.cos((rotX3d * Math.PI) / 180);
-          if (Math.abs(sx3d) > 0.001 && Math.abs(sy3d) > 0.001) {
-            this.ctx.scale(sx3d, sy3d);
+        // Skip this if we're doing a full perspective warp.
+        if (!hasPerspectiveWarp) {
+          const rotX3d = layer.rotationX || 0;
+          const rotY3d = layer.rotationY || 0;
+          if (Math.abs(rotX3d) > 0.01 || Math.abs(rotY3d) > 0.01) {
+            const sx3d = Math.cos((rotY3d * Math.PI) / 180);
+            const sy3d = Math.cos((rotX3d * Math.PI) / 180);
+            if (Math.abs(sx3d) > 0.001 && Math.abs(sy3d) > 0.001) {
+              targetCtx.scale(sx3d, sy3d);
+            }
           }
         }
         if (layer.flipH || layer.flipV) {
-          this.ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
+          targetCtx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
         }
         
-        this.ctx.globalAlpha = layer.opacity ?? 1;
-        this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+        targetCtx.globalAlpha = layer.opacity ?? 1;
+        targetCtx.globalCompositeOperation = layer.blendMode || 'source-over';
 
         // 6. Resolve drawable + crop handling
-        this.ctx.save();
+        targetCtx.save();
 
         const resolved = await this.resolveDrawable(layer.frame as any);
-        const drawable: CanvasImageSource = resolved.drawable;
+        let drawable: CanvasImageSource = resolved.drawable;
+
+        // Apply AI background removal mask if enabled
+        if (layer.aiBackground?.enabled && layer.frame) {
+          const frame = layer.frame as any;
+          const sourceTimeMs = frame.sourceTime !== undefined ? (frame.sourceTime * 1000) : 0;
+          
+          // Create a temp canvas to apply the mask
+          const tempCanvas = typeof OffscreenCanvas !== 'undefined' 
+            ? new OffscreenCanvas(drawable.width || drawable.videoWidth || W, drawable.height || drawable.videoHeight || H)
+            : document.createElement('canvas');
+          tempCanvas.width = drawable.width || drawable.videoWidth || W;
+          tempCanvas.height = drawable.height || drawable.videoHeight || H;
+          const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
+          
+          // Draw the original frame
+          tempCtx.drawImage(drawable, 0, 0);
+          
+          // Apply the pre-rendered mask from cache
+          // Note: For export, we need to use the cached masks that were prepared during "Prepare Export" phase
+          // The applyPreRenderedMaskIfAvailable function looks up masks by clipId and current time
+          const clipId = frame.clipId || '_default';
+          const modelSelection = layer.aiBackground.modelSelection ?? 1;
+          const choke = layer.aiBackground.choke ?? 0;
+          const feather = layer.aiBackground.feather ?? layer.aiBackground.edgeBlur ?? 0;
+          const spillSuppression = layer.aiBackground.spillSuppression ?? 0;
+          const spillColor = layer.aiBackground.spillColor;
+          
+          // For export, we need to simulate the video time for mask lookup
+          // We'll create a mock element with the currentTime property
+          const mockElement = {
+            currentTime: frame.sourceTime || 0,
+            videoWidth: drawable.width || drawable.videoWidth || W,
+            videoHeight: drawable.height || drawable.videoHeight || H,
+          };
+          
+          // Try to apply the cached mask
+          const maskApplied = applyPreRenderedMaskIfAvailable(
+            tempCtx,
+            tempCanvas.width,
+            tempCanvas.height,
+            mockElement as any,
+            clipId,
+            false, // isPlaying = false for export
+            modelSelection,
+            choke,
+            feather,
+            spillSuppression,
+            spillColor
+          );
+          
+          if (maskApplied) {
+            drawable = tempCanvas;
+          } else {
+            console.warn('[Compositor] AI background mask not found in cache for clip', clipId, 'at time', frame.sourceTime);
+          }
+        }
+        
+        // Apply object removal inpainting if enabled
+        if (layer.objectRemoval?.enabled && layer.frame) {
+          const frame = layer.frame as any;
+          const sourceTimeMs = frame.sourceTime !== undefined ? (frame.sourceTime * 1000) : 0;
+          
+          try {
+            const inpaintedCanvas = generateObjectRemovalInpaint(
+              drawable.width || drawable.videoWidth || W,
+              drawable.height || drawable.videoHeight || H,
+              layer.objectRemoval,
+              frame.sourceTime || 0,
+              frame.clipStartTime || 0,
+              drawable,
+              frame.clip?.animations,
+              frame.clipId
+            );
+            drawable = inpaintedCanvas;
+          } catch (err) {
+            console.warn('[Compositor] Object removal failed:', err);
+          }
+        }
+
+        // If perspective warp is enabled, draw using the corner-warp grid
+        // instead of the standard transform pipeline.
+        if (hasPerspectiveWarp && layer.perspectiveCorners) {
+          const corners = layer.perspectiveCorners;
+          // Map normalized corner offsets (0-100 range from UI) to canvas coordinates
+          const tl = { x: cx + tx + (corners.topLeft?.x || 0) * exportScaleX, y: cy + ty + (corners.topLeft?.y || 0) * exportScaleY };
+          const tr = { x: cx + tx + (corners.topRight?.x || 0) * exportScaleX, y: cy + ty + (corners.topRight?.y || 0) * exportScaleY };
+          const br = { x: cx + tx + (corners.bottomRight?.x || 0) * exportScaleX, y: cy + ty + (corners.bottomRight?.y || 0) * exportScaleY };
+          const bl = { x: cx + tx + (corners.bottomLeft?.x || 0) * exportScaleX, y: cy + ty + (corners.bottomLeft?.y || 0) * exportScaleY };
+          
+          targetCtx.restore(); // Exit the transform save before applying warp
+          targetCtx.save();
+          
+          // Apply the perspective texture warp using the same 8×8 grid as preview
+          drawPerspectiveTexture(
+            targetCtx as unknown as CanvasRenderingContext2D,
+            drawable,
+            { x0: tl.x, y0: tl.y, x1: tr.x, y1: tr.y, x2: br.x, y2: br.y, x3: bl.x, y3: bl.y }
+          );
+          
+          // Skip the standard drawImage path since we've already drawn with warp
+          continue;
+        }
 
         // Fast GPU-backed color controls. Keeping these in Canvas2D's filter
         // pipeline avoids a full-resolution getImageData/putImageData roundtrip
@@ -472,21 +611,21 @@ export class Compositor {
           const maskY = dY + dH * ((mask.y ?? 50) / 100);
           const maskW = dW * ((mask.width ?? 100) / 100);
           const maskH = dH * ((mask.height ?? 100) / 100);
-          this.ctx.beginPath();
+          targetCtx.beginPath();
           if (mask.type === 'circle') {
-            this.ctx.ellipse(maskX, maskY, Math.abs(maskW / 2), Math.abs(maskH / 2), ((mask.rotation || 0) * Math.PI) / 180, 0, Math.PI * 2);
+            targetCtx.ellipse(maskX, maskY, Math.abs(maskW / 2), Math.abs(maskH / 2), ((mask.rotation || 0) * Math.PI) / 180, 0, Math.PI * 2);
           } else {
-            this.ctx.rect(maskX - maskW / 2, maskY - maskH / 2, maskW, maskH);
+            targetCtx.rect(maskX - maskW / 2, maskY - maskH / 2, maskW, maskH);
           }
           // Canvas clipping cannot invert a path portably; non-inverted masks
           // cover the overwhelming majority of editor projects.
-          if (!mask.invert && !mask.inverted) this.ctx.clip();
+          if (!mask.invert && !mask.inverted) targetCtx.clip();
         }
 
         // Vector bezier mask (mirrors preview's applyVectorMaskToContext).
         if (layer.vectorMask?.enabled) {
           applyVectorMaskToContext(
-            this.ctx as unknown as CanvasRenderingContext2D,
+            targetCtx as unknown as CanvasRenderingContext2D,
             layer.vectorMask,
             Math.round(dW),
             Math.round(dH)
@@ -569,21 +708,21 @@ export class Compositor {
                 );
               }
 
-              this.ctx.filter = 'none';
-              this.ctx.drawImage(tempCanvas, dX, dY, dW, dH);
+              targetCtx.filter = 'none';
+              targetCtx.drawImage(tempCanvas, dX, dY, dW, dH);
             } else {
-              if (srcRot !== 0) this.ctx.rotate((srcRot * Math.PI) / 180);
-              this.ctx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
+              if (srcRot !== 0) targetCtx.rotate((srcRot * Math.PI) / 180);
+              targetCtx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
             }
           } else {
             if (srcRot !== 0) {
-              this.ctx.rotate((srcRot * Math.PI) / 180);
+              targetCtx.rotate((srcRot * Math.PI) / 180);
             }
             // Use 9-arg drawImage when crop present or source dimensions differ
             if (sx !== 0 || sy !== 0 || sW !== srcFullW || sH !== srcFullH) {
-              this.ctx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
+              targetCtx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
             } else {
-              this.ctx.drawImage(drawable, dX, dY, dW, dH);
+              targetCtx.drawImage(drawable, dX, dY, dW, dH);
             }
           }
         } finally {
@@ -591,40 +730,40 @@ export class Compositor {
         }
 
         if (cf && (cf.fadedFilm !== 0 || cf.vignette !== 0)) {
-          this.ctx.save();
-          this.ctx.filter = 'none';
-          this.ctx.globalCompositeOperation = 'source-over';
+          targetCtx.save();
+          targetCtx.filter = 'none';
+          targetCtx.globalCompositeOperation = 'source-over';
           if (cf.fadedFilm > 0) {
-            this.ctx.globalAlpha = Math.min(0.35, cf.fadedFilm / 300) * (layer.opacity ?? 1);
-            this.ctx.fillStyle = '#d8cbb4';
-            this.ctx.fillRect(dX, dY, dW, dH);
+            targetCtx.globalAlpha = Math.min(0.35, cf.fadedFilm / 300) * (layer.opacity ?? 1);
+            targetCtx.fillStyle = '#d8cbb4';
+            targetCtx.fillRect(dX, dY, dW, dH);
           }
-          if (cf.vignette !== 0 && typeof this.ctx.createRadialGradient === 'function') {
-            const grad = this.ctx.createRadialGradient(0, 0, Math.min(dW, dH) * 0.15, 0, 0, Math.max(dW, dH) * 0.7);
+          if (cf.vignette !== 0 && typeof targetCtx.createRadialGradient === 'function') {
+            const grad = targetCtx.createRadialGradient(0, 0, Math.min(dW, dH) * 0.15, 0, 0, Math.max(dW, dH) * 0.7);
             const strength = Math.min(0.9, Math.abs(cf.vignette) / 100);
             grad.addColorStop(0.45, 'rgba(0,0,0,0)');
             grad.addColorStop(1, cf.vignette > 0 ? `rgba(0,0,0,${strength})` : `rgba(255,255,255,${strength})`);
-            this.ctx.globalAlpha = layer.opacity ?? 1;
-            this.ctx.fillStyle = grad;
-            this.ctx.fillRect(dX, dY, dW, dH);
+            targetCtx.globalAlpha = layer.opacity ?? 1;
+            targetCtx.fillStyle = grad;
+            targetCtx.fillRect(dX, dY, dW, dH);
           }
-          this.ctx.restore();
+          targetCtx.restore();
         }
         
-        this.ctx.restore();
-        this.ctx.restore();
-        this.ctx.globalCompositeOperation = 'source-over';
+        targetCtx.restore();
+        targetCtx.restore();
+        targetCtx.globalCompositeOperation = 'source-over';
       }
     }
 
     // Full-frame transition overlays
     for (const ov of overlays) {
       if (!ov || !(ov.alpha > 0.001)) continue;
-      this.ctx.save();
-      this.ctx.globalAlpha = Math.min(1, ov.alpha);
-      this.ctx.fillStyle = ov.color;
-      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-      this.ctx.restore();
+      targetCtx.save();
+      targetCtx.globalAlpha = Math.min(1, ov.alpha);
+      targetCtx.fillStyle = ov.color;
+      targetCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      targetCtx.restore();
     }
 
     // ── Particle effects (full-frame pass) ──────────────────────────────────
@@ -632,20 +771,43 @@ export class Compositor {
     // and are now deterministic so the exported field is stable across runs.
     const { viewW: pvW, viewH: pvH } = this.getViewSize();
     const particleScale = this.canvas.width / pvW; // all aspect ratios scale uniformly
-    for (const layer of layers) {
+    for (const layer of contentLayers) {
       if (!layer.particleSettings) continue;
       const localTime = (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0);
-      this.ctx.save();
-      this.ctx.scale(particleScale, particleScale);
+      targetCtx.save();
+      targetCtx.scale(particleScale, particleScale);
       renderParticlesDeterministic(
-        this.ctx as unknown as CanvasRenderingContext2D,
+        targetCtx as unknown as CanvasRenderingContext2D,
         layer.clipId || `clip-${layer.order ?? 0}`,
         layer.particleSettings,
         pvW,
         pvH,
         localTime
       );
-      this.ctx.restore();
+      targetCtx.restore();
+    }
+
+    // Second pass: apply adjustment layers over composited content
+    if (needsIntermediate && tempCanvas) {
+      // Blit intermediate canvas to main canvas
+      this.ctx.drawImage(tempCanvas, 0, 0);
+      
+      // Apply each adjustment layer in z-order
+      for (const adjLayer of adjustmentLayers) {
+        // Reconstruct a minimal clip object from the layer data
+        const adjClip: any = {
+          id: adjLayer.clipId || 'adj',
+          disabled: false,
+          opacity: adjLayer.opacity ?? 1,
+          colorFilters: adjLayer.colorFilters,
+        };
+        applyAdjustmentLayerPass(
+          this.ctx as unknown as CanvasRenderingContext2D,
+          adjClip,
+          this.canvas.width,
+          this.canvas.height
+        );
+      }
     }
   }
 

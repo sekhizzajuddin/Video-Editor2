@@ -76,7 +76,7 @@ export function PreviewCanvasHeaderToolbar({
   } = useEditorStore();
 
   return (
-    <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-[#2e2e2e] select-none text-xs">
+    <div role="toolbar" className="preview-header-toolbar shrink-0 flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-[#2e2e2e] select-none text-xs">
       {/* Left: Aspect Ratio & Grid */}
       <div className="flex items-center gap-2">
         <select
