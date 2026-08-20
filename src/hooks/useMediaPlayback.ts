@@ -785,11 +785,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         continue;
       }
 
-        if (info.type === 'video') {
-          const el = document.createElement('video');
-          el.preload = 'auto';
-          el.muted = false;
-          el.playsInline = true;
+          if (info.type === 'video') {
+            const el = document.createElement('video');
+            el.preload = 'auto';
+            el.muted = true; // MUST be true initially for iOS Safari to preload metadata
+            el.playsInline = true;
           const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
           if (isIOS && (media.url.startsWith('blob:') || media.url.startsWith('data:'))) {
             // iOS Safari requires omitting crossOrigin for local blobs
@@ -1509,9 +1509,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
         }
         if (entry.el.volume !== 1) entry.el.volume = 1;
-        if (entry.el.muted !== false) entry.el.muted = false;
+        const shouldUnmute = isPlaying && !globalMuted;
+        if (entry.el.muted !== !shouldUnmute) entry.el.muted = !shouldUnmute;
       } else {
-        if (entry.el.muted !== globalMuted) entry.el.muted = globalMuted;
+        const shouldUnmuteBase = isPlaying && !globalMuted;
+        if (entry.el.muted !== !shouldUnmuteBase) entry.el.muted = !shouldUnmuteBase;
         if (entry.el.volume !== finalVolume) entry.el.volume = finalVolume;
       }
     }
