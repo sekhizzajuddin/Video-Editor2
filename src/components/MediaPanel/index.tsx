@@ -3273,8 +3273,20 @@ export function MediaPanel() {
 export const TransitionCard = React.memo(function TransitionCard({ transition, onClick, isMobile }: TransitionCardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isHovered, setIsHovered] = useState(false);
-    const active = isMobile || isHovered;
+  const [isVisible, setIsVisible] = useState(!isMobile);
+  const active = isMobile ? isVisible : isHovered;
   const animationRef = useRef<number | null>(null);
+  
+  useEffect(() => {
+    if (!isMobile || !canvasRef.current) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setIsVisible(true);
+      else setIsVisible(false);
+    }, { threshold: 0.1 });
+    observer.observe(canvasRef.current);
+    return () => observer.disconnect();
+  }, [isMobile]);
+
   // FIX H8: keep latest transition so the rAF closure doesn't go stale
   // when the parent re-renders with a new transition object.
   const transitionRef = useRef(transition);

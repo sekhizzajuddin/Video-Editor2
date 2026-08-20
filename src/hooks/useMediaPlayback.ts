@@ -624,7 +624,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     if (!mediaContainer) {
       mediaContainer = document.createElement('div');
       mediaContainer.id = 'procut-media-pool';
-      mediaContainer.style.display = 'none';
+      mediaContainer.style.position = 'absolute';
+      mediaContainer.style.opacity = '0';
+      mediaContainer.style.pointerEvents = 'none';
+      mediaContainer.style.width = '1px';
+      mediaContainer.style.height = '1px';
+      mediaContainer.style.overflow = 'hidden';
       document.body.appendChild(mediaContainer);
     }
     return mediaContainer;
@@ -780,13 +785,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         continue;
       }
 
-      if (info.type === 'video') {
-        const el = document.createElement('video');
-        el.preload = 'auto';
-        el.muted = false;
-        el.playsInline = true;
-        el.crossOrigin = 'anonymous';
-        el.style.display = 'none';
+        if (info.type === 'video') {
+          const el = document.createElement('video');
+          el.preload = 'auto';
+          el.muted = false;
+          el.playsInline = true;
+          const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+          if (isIOS && (media.url.startsWith('blob:') || media.url.startsWith('data:'))) {
+            // iOS Safari requires omitting crossOrigin for local blobs
+          } else {
+            el.crossOrigin = 'anonymous';
+          }
+          el.style.position = 'absolute';
+          el.style.opacity = '0';
+          el.style.pointerEvents = 'none';
 
         const handleSeeked = () => {
           triggerRedraw();
@@ -828,13 +840,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
         pool.set(clipId, entry);
         videoMap.set(clipId, el);
-      } else {
-        const el = document.createElement('audio');
-        el.preload = 'auto';
-        el.crossOrigin = 'anonymous';
-        const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
-        el.src = media.url + hash;
-        el.style.display = 'none';
+        } else {
+          const el = document.createElement('audio');
+          el.preload = 'auto';
+          const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+          if (isIOS && (media.url.startsWith('blob:') || media.url.startsWith('data:'))) {
+            // iOS Safari requires omitting crossOrigin for local blobs
+          } else {
+            el.crossOrigin = 'anonymous';
+          }
+          const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
+          el.src = media.url + hash;
+          el.style.position = 'absolute';
+          el.style.opacity = '0';
+          el.style.pointerEvents = 'none';
 
         const handleSeeked = () => {
           if (useEditorStore.getState().isPlaying) {

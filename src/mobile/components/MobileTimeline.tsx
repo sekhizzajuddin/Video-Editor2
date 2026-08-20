@@ -172,10 +172,12 @@ export function MobileTimeline({
   const dragRef = useRef<DragState>(null);
   const longTapTimeoutRef = useRef<any>(null);
   const isUserScrolling = useRef(false);
+  const isAutoScrolling = useRef(false);
 
   useEffect(() => {
     if (useEditorStore.getState().isPlaying && !dragRef.current && !isUserScrolling.current) {
       if (scrollRef.current) {
+        isAutoScrolling.current = true;
         scrollRef.current.scrollLeft = currentTime * zoomLevel;
       }
     }
@@ -183,10 +185,12 @@ export function MobileTimeline({
 
   const onScroll = useCallback(() => {
     if (!scrollRef.current) return;
-    if (isUserScrolling.current) {
-      const time = scrollRef.current.scrollLeft / zoomLevel;
-      seek(time);
+    if (isAutoScrolling.current) {
+      isAutoScrolling.current = false;
+      return;
     }
+    const time = scrollRef.current.scrollLeft / zoomLevel;
+    seek(time);
   }, [zoomLevel, seek]);
 
   const [snapLineX, setSnapLineX] = useState<number | null>(null);
@@ -722,7 +726,14 @@ export function MobileTimeline({
             {/* Left Padding Spacer: exactly (50vw - 48px) so that 0.00s sits precisely under the 50% playhead */}
             <div className="shrink-0" style={{ width: 'calc(50vw - 48px)' }} onPointerDown={handleBlankPointerDown} />
 
-              <div ref={tracksRef} className="relative shrink-0" style={{ width: contentWidth }}>
+              <div 
+                ref={tracksRef} 
+                className="relative shrink-0 min-h-full" 
+                style={{ width: contentWidth }}
+                onPointerDown={(e) => {
+                  if (e.target === e.currentTarget) handleBlankPointerDown(e);
+                }}
+              >
                 {/* Alignment magnetic snap guide */}
                 {snapLineX !== null && (
                   <div
