@@ -118,18 +118,18 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
 
   const applyTransition = (tr: (typeof TRANSITIONS)[number]) => {
     const state = useEditorStore.getState();
-    const clipId = state.selectedClipId;
-    if (!clipId) {
-      toast.warning('Select a clip on the timeline to attach transition.');
+    const targetClipId = state.selectedTransitionClipId || state.selectedClipId;
+    if (!targetClipId) {
+      toast.warning('Select a clip or transition slot on the timeline to attach transition.');
       return;
     }
-    updateTransition(clipId, {
+    useEditorStore.getState().updateTransition(targetClipId, {
       type: tr.name.toLowerCase().replace(/\s+/g, '_') as any,
       duration: 1.0,
       params: { alignment: 'center', easing: 'easeInOut' },
     });
-    saveSnapshot();
-    toast.success(`Applied transition “${tr.name}”`);
+    useEditorStore.getState().saveSnapshot();
+    toast.success(`Applied ${tr.name} transition`);
     onClose();
   };
 

@@ -275,7 +275,7 @@ export function MobileToolRail({
       <div className="flex items-center justify-start gap-1 overflow-x-auto no-scrollbar touch-pan-x py-1">
         {selectedTransitionClipId ? (
           <>
-            <Tool icon={<Sparkles className="h-4 w-4 text-purple-400" />} label="Transition" onClick={() => onOpenProperties('transition')} />
+            <Tool icon={<Sparkles className="h-4 w-4 text-purple-400" />} label="Transition" onClick={onAddTransition} />
             <Tool icon={<Trash2 className="h-4 w-4 text-red-400" />} label="Delete" onClick={() => {
               useEditorStore.getState().removeTransition(selectedTransitionClipId);
               useEditorStore.getState().selectTransition(null);

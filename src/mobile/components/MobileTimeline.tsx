@@ -817,6 +817,7 @@ export function MobileTimeline({
                       const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
                       const isAdjacent = gap > -0.06 && gap < 0.06;
                       const trans = clip.transitionIn || prevClip.transitionOut;
+                      const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
                       const hasTransition = !!trans;
 
                       if (!isAdjacent && !hasTransition) return null;
@@ -828,7 +829,7 @@ export function MobileTimeline({
                       const centerPos = intersectionTime * zoomLevel;
                       const transDuration = trans?.duration || 0.5;
                       const transWidth = Math.max(24, Math.min(60, transDuration * zoomLevel));
-                      const isTransSelected = selectedTransitionClipId === clip.id;
+                      const isTransSelected = selectedTransitionClipId === activeClipId;
 
                       if (hasTransition) {
                         return (
@@ -836,8 +837,8 @@ export function MobileTimeline({
                             key={`trans-${prevClip.id}-${clip.id}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              selectTransition(clip.id);
-                              toast.info(`Transition: ${trans.name || 'Effect'}`);
+                              selectTransition(activeClipId);
+                              if (onOpenTransitions) onOpenTransitions();
                             }}
                             className={`absolute top-1.5 bottom-1.5 z-30 flex items-center justify-center rounded-md border text-[9px] font-bold text-white shadow-lg cursor-pointer transition-transform active:scale-95 ${
                               isTransSelected
@@ -862,7 +863,7 @@ export function MobileTimeline({
                           onClick={(e) => {
                             e.stopPropagation();
                             selectClip(clip.id);
-                            toast.info('Tap Transitions on the toolbar to apply an effect here');
+                            if (onOpenTransitions) onOpenTransitions();
                           }}
                           className="absolute top-2.5 bottom-2.5 z-20 flex w-4 -ml-2 items-center justify-center rounded-full bg-white/20 hover:bg-purple-500 text-white/80 hover:text-white border border-white/30 backdrop-blur-sm cursor-pointer transition-all active:scale-110"
                           style={{ left: `${centerPos}px` }}
