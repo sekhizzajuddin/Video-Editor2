@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
-import { Upload, Plus, Film, Image, Music, Type, Sparkles, ArrowLeftRight, LayoutTemplate } from 'lucide-react';
+import { Upload, Plus, Film, Image, Music, Type, Sparkles, ArrowLeftRight, LayoutTemplate, X } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
@@ -123,12 +123,30 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
       toast.warning('Select a clip or transition slot on the timeline to attach transition.');
       return;
     }
-    useEditorStore.getState().updateTransition(targetClipId, {
+    
+    // Find the clip to see if it already has a transitionOut (in case it was selected from there)
+    let clip = null;
+    for (const track of state.tracks) {
+      clip = track.clips.find(c => c.id === targetClipId);
+      if (clip) break;
+    }
+    
+    const newTransition = {
+      id: Math.random().toString(36).substring(2, 9),
+      name: tr.name,
       type: tr.name.toLowerCase().replace(/\s+/g, '_') as any,
       duration: 1.0,
       params: { alignment: 'center', easing: 'easeInOut' },
-    });
-    useEditorStore.getState().saveSnapshot();
+      createdAt: Date.now(),
+    };
+    
+    if (state.selectedTransitionClipId && clip?.transitionOut) {
+      useEditorStore.getState().updateClip(targetClipId, { transitionOut: newTransition });
+    } else {
+      useEditorStore.getState().updateClip(targetClipId, { transitionIn: newTransition });
+    }
+    
+    useEditorStore.getState().saveSnapshot('Apply Transition');
     toast.success(`Applied ${tr.name} transition`);
     onClose();
   };
@@ -191,24 +209,36 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
   return (
     <div className="flex h-full flex-col">
       {/* Tab bar */}
-      <div className="flex shrink-0 gap-1 overflow-x-auto no-scrollbar border-b border-white/10 px-3 pb-2">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
-                active ? 'bg-amber-500 text-black' : 'bg-white/5 text-white/70 hover:bg-white/10'
-              }`}
-            >
-              <Icon className="h-3 w-3" />
-              {t.label}
+      {tab !== 'transitions' ? (
+          <div className="flex shrink-0 gap-1 overflow-x-auto no-scrollbar border-b border-white/10 px-3 pb-2">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
+                    active ? 'bg-amber-500 text-black' : 'bg-white/5 text-white/70 hover:bg-white/10'
+                  }`}
+                >
+                  <Icon className="h-3 w-3" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 pb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-purple-400" />
+              <span className="text-sm font-semibold text-white">Select Transition</span>
+            </div>
+            <button onClick={onClose} className="rounded-full bg-white/5 p-1 text-white/50 hover:text-white hover:bg-white/10">
+              <X className="h-4 w-4" />
             </button>
-          );
-        })}
-      </div>
+          </div>
+        )}
 
       <input
         ref={fileInputRef}
