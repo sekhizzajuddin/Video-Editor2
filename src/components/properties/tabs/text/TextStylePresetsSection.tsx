@@ -1,4 +1,4 @@
-import { TEXT_TEMPLATES } from '@/utils/textTemplates';
+import { TEXT_TEMPLATES, presetToTextAnimationPatch } from '@/utils/textTemplates';
 import { toast } from 'sonner';
 
 interface TextStylePresetsSectionProps {
@@ -30,6 +30,7 @@ export function TextStylePresetsSection({ textSettings, clipId, updateClip }: Te
                   strokeColor: tmpl.settings.strokeColor || undefined,
                   strokeWidth: tmpl.settings.strokeWidth || undefined,
                   animationPreset: tmpl.settings.animationPreset || undefined,
+                  ...presetToTextAnimationPatch(tmpl.settings.animationPreset),
                 }
               });
               toast.success(`Applied style "${tmpl.name}"`);

@@ -19,6 +19,13 @@ export interface ClipFrameSource {
 /**
  * Minimal keyframe interpolation for export (linear only, no bezier).
  * Mirrors preview's getAnimatedValue for opacity/transform but runs in worker.
+ *
+ * PERF: Keyframes are authored sorted (addOrUpdateKeyframe inserts in order) and
+ * the preview engine's binary search already relies on that invariant. The old
+ * version re-sorted the array on EVERY call — O(k log k) with a fresh allocation
+ * per property per frame — which compounded across clips × properties × frames
+ * and measurably slowed export. We now binary-search the pre-sorted array, exactly
+ * like preview.
  */
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -31,19 +38,27 @@ function getAnimatedExportValue(
 ): number {
   if (!keyframes || keyframes.length === 0) return base;
   const t = currentTime - clipStart;
-  // Sort by time
-  const sorted = [...keyframes].sort((x, y) => x.time - y.time);
-  if (t <= sorted[0].time) return sorted[0].value;
-  if (t >= sorted[sorted.length - 1].time) return sorted[sorted.length - 1].value;
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const a = sorted[i];
-    const b = sorted[i + 1];
-    if (t >= a.time && t <= b.time) {
-      const segT = (t - a.time) / Math.max(0.001, b.time - a.time);
-      // Hold
-      if (a.easing === 'hold') return a.value;
-      return lerp(a.value, b.value, segT);
-    }
+  const first = keyframes[0];
+  const last = keyframes[keyframes.length - 1];
+  if (t <= first.time) return first.value;
+  if (t >= last.time) return last.value;
+
+  // Binary search for the segment containing `t` (array is pre-sorted).
+  let lo = 0;
+  let hi = keyframes.length - 1;
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1;
+    if (keyframes[mid].time <= t) lo = mid;
+    else hi = mid;
+  }
+  const a = keyframes[lo];
+  const b = keyframes[hi];
+  if (t >= a.time && t <= b.time) {
+    const span = b.time - a.time;
+    const segT = span > 0.001 ? (t - a.time) / span : 0;
+    // Hold
+    if (a.easing === 'hold' || (a as any).holdNext) return a.value;
+    return lerp(a.value, b.value, segT);
   }
   return base;
 }
@@ -92,6 +107,14 @@ export interface RenderLayer {
   type: 'video' | 'text' | 'image';
   frame?: CanvasImageSource | VideoFrame; // For video/image
   textData?: any;     // For text
+  /** Absolute timeline time (seconds) this layer is being evaluated at.
+   *  Text layers use it to drive entry/exit animation progress; video layers
+   *  use it (with `startTime`) to drive time-based FX and particles. */
+  timestampSeconds?: number;
+  /** Clip start time on the timeline, for computing local (in-clip) time. */
+  startTime?: number;
+  /** Source clip id — used as a deterministic seed for particle simulation. */
+  clipId?: string;
   opacity: number;
   chromaKey?: {
     enabled: boolean;
@@ -100,6 +123,12 @@ export interface RenderLayer {
     softness: number;
     spillSuppression: number;
     edgeFeather: number;
+  };
+  lumaKey?: {
+    enabled: boolean;
+    type: 'dark' | 'light';
+    threshold: number;
+    softness: number;
   };
   transform: {
     x: number;
@@ -126,7 +155,18 @@ export interface RenderLayer {
     vignette: number;
   };
   mask?: any;
+  vectorMask?: any;
   effects?: string[];
+  fxSettings?: any;
+  particleSettings?: any;
+  lutData?: any;
+  lutIntensity?: number;
+  colorWheels?: { shadows?: any; midtones?: any; highlights?: any };
+  curves?: any;
+  rotationX?: number;
+  rotationY?: number;
+  perspectivePin?: boolean;
+  perspectiveCorners?: any;
   zIndex: number;
   sourceRotation?: number;
   blendMode?: GlobalCompositeOperation;
@@ -164,11 +204,29 @@ export class FrameScheduler {
     this.mediaDecoders = v as any;
   }
   public warnings: string[] = [];
+  private mediaMap: Map<string, any> | null = null;
 
   constructor(timeline: any, framePool: FramePool, mediaBuffers?: Record<string, any>) {
     this.timeline = timeline;
     this.framePool = framePool;
     this.mediaBuffers = mediaBuffers || {};
+  }
+
+  /** Lazily build an id→media map (the worker timeline stores media items). */
+  private getMediaMap(): Map<string, any> {
+    if (this.mediaMap) return this.mediaMap;
+    const map = new Map<string, any>();
+    for (const m of (this.timeline.media || [])) {
+      if (m?.id) map.set(m.id, m);
+    }
+    this.mediaMap = map;
+    return map;
+  }
+
+  /** Resolve a parsed `.cube` LUT table for a LUT media id, if present. */
+  private resolveLutData(mediaId: string): any {
+    const lutMedia = this.getMediaMap().get(mediaId);
+    return lutMedia?.lutData ?? undefined;
   }
 
   async initializeDecoders() {
@@ -230,6 +288,29 @@ export class FrameScheduler {
     }
 
     await Promise.allSettled(loadPromises);
+
+    // Surface features the worker cannot render (they require the main thread's
+    // DOM + ML/WebGPU runtimes), so the user isn't surprised by a missing effect
+    // in the exported file.
+    const warnOnce = new Set<string>();
+    for (const track of (this.timeline.tracks || [])) {
+      for (const clip of (track.clips || [])) {
+        if (clip.aiBackground?.enabled && !warnOnce.has('aiBackground')) {
+          warnOnce.add('aiBackground');
+          this.warnings.push(
+            'AI background removal is not applied during export (it needs the in-browser ML runtime). ' +
+            'The clip will export with its original background.'
+          );
+        }
+        if (clip.objectRemoval?.enabled && !warnOnce.has('objectRemoval')) {
+          warnOnce.add('objectRemoval');
+          this.warnings.push(
+            'Object removal is not applied during export (it needs WebGPU/Canvas on the main thread). ' +
+            'The clip will export without the removal effect.'
+          );
+        }
+      }
+    }
   }
 
   async getLayersAtTime(timestampSeconds: number): Promise<RenderLayer[]> {
@@ -284,9 +365,17 @@ export class FrameScheduler {
           const animatedOpacity = getAnimatedExportValue(baseOpacity, t, st, clip.animations?.['opacity']);
           const withTransition = layerDraw ? animatedOpacity * layerDraw.opacity : animatedOpacity;
 
+          // Animate blend intensity (matches preview's keyframed blend control).
+          const animatedBlendIntensity = Math.max(0, Math.min(100,
+            getAnimatedExportValue(
+              clip.transform?.blendIntensity ?? 100,
+              t, st,
+              clip.animations?.['transform.blendIntensity']
+            )
+          ));
           const blendPlan = resolveBlendPlan(
             clip.transform?.blendMode,
-            clip.transform?.blendIntensity,
+            animatedBlendIntensity,
             withTransition
           );
           const opacity = blendPlan.kind === 'lerp'
@@ -321,12 +410,82 @@ export class FrameScheduler {
             fadedFilm: getAnimatedExportValue(cf.fadedFilm ?? 0, t, st, clip.animations?.['color.fadedFilm']),
             vignette: getAnimatedExportValue(cf.vignette ?? 0, t, st, clip.animations?.['color.vignette']),
           } : undefined;
+          // ── Keyed chroma / luma keying ──────────────────────────────────────
+          // The preview animates chromaKey threshold/softness/spill/feather and
+          // lumaKey threshold/softness via clip.animations. Previously the export
+          // passed the RAW clip.chromaKey and dropped lumaKey entirely, so keyed
+          // keyframes were lost and luma-keyed clips exported with their
+          // background intact. Now both are animated per-frame, matching preview.
+          const ck = clip.chromaKey;
+          const chromaKey = ck ? {
+            ...ck,
+            threshold: getAnimatedExportValue(ck.threshold ?? 0, t, st, clip.animations?.['chromaKey.threshold']),
+            softness: getAnimatedExportValue(ck.softness ?? 0, t, st, clip.animations?.['chromaKey.softness']),
+            spillSuppression: getAnimatedExportValue(ck.spillSuppression ?? 0, t, st, clip.animations?.['chromaKey.spillSuppression']),
+            edgeFeather: getAnimatedExportValue(ck.edgeFeather ?? 0, t, st, clip.animations?.['chromaKey.edgeFeather']),
+          } : undefined;
+          const lk = clip.lumaKey;
+          const lumaKey = lk ? {
+            ...lk,
+            threshold: getAnimatedExportValue(lk.threshold ?? 0, t, st, clip.animations?.['lumaKey.threshold']),
+            softness: getAnimatedExportValue(lk.softness ?? 0, t, st, clip.animations?.['lumaKey.softness']),
+          } : undefined;
+
+          // Animate the geometric mask's keyframable parameters (x/y/width/
+          // height/rotation/feather/roundness) — matches preview's
+          // applyClipMaskOffscreen.
+          const m = clip.mask;
+          const animatedMask = m ? {
+            ...m,
+            x: getAnimatedExportValue(m.x ?? 50, t, st, clip.animations?.['mask.x']),
+            y: getAnimatedExportValue(m.y ?? 50, t, st, clip.animations?.['mask.y']),
+            width: getAnimatedExportValue(m.width ?? 100, t, st, clip.animations?.['mask.width']),
+            height: getAnimatedExportValue(m.height ?? 100, t, st, clip.animations?.['mask.height']),
+            rotation: getAnimatedExportValue(m.rotation ?? 0, t, st, clip.animations?.['mask.rotation']),
+            feather: getAnimatedExportValue(m.feather ?? 0, t, st, clip.animations?.['mask.feather']),
+            roundness: getAnimatedExportValue(m.roundness ?? 0, t, st, clip.animations?.['mask.roundness']),
+          } : undefined;
+
+          // LUT color grade — resolve the LUT media's parsed table (media items
+          // are serialized alongside tracks; `table` survives JSON as a plain
+          // numeric-keyed object, which applyLutToPixel indexes fine).
+          const lutMediaId = clip.lut?.mediaId || clip.lutFilter?.mediaId;
+          const lutData = lutMediaId ? this.resolveLutData(lutMediaId) : undefined;
+          const lutIntensity = lutData !== undefined
+            ? getAnimatedExportValue(
+                clip.lut?.intensity ?? clip.lutFilter?.intensity ?? 100,
+                t, st,
+                clip.animations?.['lut.intensity'] || clip.animations?.['lutFilter.intensity']
+              )
+            : undefined;
+
+          const cw = clip.colorFilters;
+          const colorWheels = (cw?.shadows || cw?.midtones || cw?.highlights) ? {
+            shadows: cw.shadows,
+            midtones: cw.midtones,
+            highlights: cw.highlights,
+          } : undefined;
+          const curves = clip.colorFilters?.curves;
+
           const visualSettings = {
             crop,
             flipH: !!clip.transform?.flipH,
             flipV: !!clip.transform?.flipV,
             colorFilters,
-            mask: clip.mask,
+            chromaKey,
+            lumaKey,
+            mask: animatedMask,
+            vectorMask: clip.vectorMask,
+            fxSettings: clip.fxSettings,
+            particleSettings: clip.particleSettings,
+            lutData,
+            lutIntensity,
+            colorWheels,
+            curves,
+            rotationX: getAnimatedExportValue(clip.transform?.rotationX ?? 0, t, st, clip.animations?.['transform.rotationX']),
+            rotationY: getAnimatedExportValue(clip.transform?.rotationY ?? 0, t, st, clip.animations?.['transform.rotationY']),
+            perspectivePin: !!clip.transform?.perspectivePin,
+            perspectiveCorners: clip.transform?.perspectiveCorners,
             effects: Array.isArray(clip.effects) ? clip.effects : undefined,
           };
 
@@ -355,8 +514,10 @@ export class FrameScheduler {
                           layers.push({
                             type: 'video',
                             frame,
+                            timestampSeconds: t,
+                            startTime: st,
+                            clipId: clip.id,
                             opacity,
-                            chromaKey: clip.chromaKey,
                             transform,
                             ...visualSettings,
                             zIndex,
@@ -390,8 +551,10 @@ export class FrameScheduler {
                     layers.push({
                       type: 'video',
                       frame,
+                      timestampSeconds: t,
+                      startTime: st,
+                      clipId: clip.id,
                       opacity,
-                      chromaKey: clip.chromaKey,
                       transform,
                       ...visualSettings,
                       zIndex,
@@ -410,6 +573,7 @@ export class FrameScheduler {
             layers.push({
               type: 'text',
               textData: clip,
+              timestampSeconds: t,
               opacity,
               transform,
               ...visualSettings,

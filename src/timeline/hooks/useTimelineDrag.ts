@@ -423,7 +423,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   }, [dragState, trackContainerRef, scrollIntervalRef, dragMouseXRef, dragMouseYRef]);
 
   const startResize = useCallback(
-    (e: React.MouseEvent, clip: TimelineClip, edge: 'left' | 'right') => {
+    (e: React.PointerEvent, clip: TimelineClip, edge: 'left' | 'right') => {
       e.stopPropagation();
       e.preventDefault();
       let track = tracks.find((t) => t.id === clip.trackId);
@@ -502,8 +502,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   );
 
   const handleClipMouseDown = useCallback(
-    (e: React.MouseEvent, clip: TimelineClip) => {
-      if (e.button !== 0) return;
+    (e: React.PointerEvent, clip: TimelineClip) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      if (e.isPrimary === false) return;
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      } catch { /* pointer capture unsupported */ }
       let track = tracks.find((t) => t.id === clip.trackId);
       if (!track) {
         const pipWindows = useEditorStore.getState().pipWindows || {};
@@ -751,9 +755,19 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     [activeTool, selectClip, selectClips, selectTransition, selectTrack, selectedClipId, selectedClipIds, selectedTransitionClipId, selectedTrackId],
   );
 
-  const handleRulerMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button !== 0) return;
+  const handleRulerPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      // Only respond to the primary button / primary pointer. For mouse input
+      // this excludes right/middle clicks; for touch/pen `button` is 0 on down.
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      if (e.isPrimary === false) return;
+
+      // Capture the pointer so move/up events keep flowing to us even when the
+      // cursor (or finger) leaves the ruler element — this is what makes touch
+      // scrubbing on Android/iOS and Windows/Mac touchscreens work smoothly.
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      } catch { /* pointer capture unsupported — window listeners still cover us */ }
 
       // ── CRITICAL: compute the click time BEFORE setIsScrubbing(true). ──
       //
@@ -812,7 +826,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const lastScrubStateUpdateRef = useRef<number>(0);
   const latestClientXRef = useRef<number>(0);
 
-  const handleMouseMove = (e: MouseEvent) => {
+  const handlePointerMove = (e: PointerEvent) => {
     if (isScrubbing && !resizeState && !dragState && !slipState && !slideState) {
       latestClientXRef.current = e.clientX;
       if (scrubRafIdRef.current === null) {
@@ -1384,7 +1398,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     }
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = () => {
     if (scrubRafIdRef.current !== null) {
       cancelAnimationFrame(scrubRafIdRef.current);
       scrubRafIdRef.current = null;
@@ -1435,33 +1449,68 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     }
   };
 
-  handleMouseMoveRef.current = handleMouseMove;
-  handleMouseUpRef.current = handleMouseUp;
+  handleMouseMoveRef.current = handlePointerMove;
+  handleMouseUpRef.current = handlePointerUp;
 
   const isDragging = dragState !== null || resizeState !== null || isScrubbing || slipState !== null || slideState !== null;
 
+  // ── CURSOR LOCK ────────────────────────────────────────────────────────
+  // While a drag/trim/scrub is in flight, force a single stable cursor via a
+  // class on <html>. Without this the cursor flickers between `ew-resize`,
+  // `pointer` and the default arrow as the clip's edge (and its 8px resize
+  // handle) move under a stationary pointer — made worse near adjacent clips,
+  // where snapping clamps the edge while the pointer keeps travelling. This is
+  // the same technique professional NLEs use for a rock-solid trim cursor.
+  useEffect(() => {
+    if (!isDragging) return;
+    const root = document.documentElement;
+    const cls = resizeState || slipState || slideState
+      ? 'procut-trim-cursor'
+      : dragState
+        ? 'procut-grab-cursor'
+        : isScrubbing
+          ? 'procut-scrub-cursor'
+          : null;
+    if (!cls) return;
+    root.classList.add(cls);
+    return () => {
+      root.classList.remove(cls);
+    };
+  }, [isDragging, resizeState, slipState, slideState, dragState, isScrubbing]);
+
+  // ── CROSS-OS INPUT ────────────────────────────────────────────────────
+  // Pointer Events unify mouse (Windows/macOS), touch (Android/iOS), and pen
+  // into one stream, so scrubbing/dragging works identically on every OS.
+  // We intentionally do NOT require pointer capture here (it is set on the
+  // originating element) — listening on `window` guarantees we keep receiving
+  // moves even when the pointer leaves the browser window or the element.
   useEffect(() => {
     if (!isDragging) return;
 
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       handleMouseMoveRef.current?.(e);
     };
-    const onMouseUp = () => {
-      handleMouseUpRef.current?.();
+    const onPointerUp = (e: PointerEvent) => {
+      handleMouseUpRef.current?.(e);
+    };
+    const onPointerCancel = (e: PointerEvent) => {
+      handleMouseUpRef.current?.(e);
     };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
     return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
     };
   }, [isDragging, handleMouseMoveRef, handleMouseUpRef]);
 
   return {
     handleClipMouseDown,
     handleTimelineClick,
-    handleRulerMouseDown,
+    handleRulerPointerDown,
     handleSplit,
     isDragging,
   };

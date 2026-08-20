@@ -22,7 +22,7 @@ export function useTimelineScroll({
 
     // CRITICAL: Sync the ruler's scrollLeft IMMEDIATELY (synchronous, no RAF).
     // The ruler is overflow-hidden so writing scrollLeft causes no browser layout.
-    // Any delay here means handleRulerMouseDown reads a stale scrollLeft value
+    // Any delay here means handleRulerPointerDown reads a stale scrollLeft value
     // and calculates the wrong time — causing the "click at 5s → jumps to 3s" bug.
     const target = trackContainerRef.current;
     if (rulerContainerRef.current && rulerContainerRef.current.scrollLeft !== target.scrollLeft) {
@@ -81,7 +81,7 @@ export function useTimelineScroll({
   //   container.scrollLeft = value   (direct DOM write)
   // This triggers the native 'scroll' event but NOT React's onScroll, so the
   // ruler was never synced after auto-scroll during playback. The result: ruler
-  // scrollLeft stays at its old value, making handleRulerMouseDown read a stale
+  // scrollLeft stays at its old value, making handleRulerPointerDown read a stale
   // offset and produce a wrong playhead time on the next click.
   useEffect(() => {
     const el = trackContainerRef.current;

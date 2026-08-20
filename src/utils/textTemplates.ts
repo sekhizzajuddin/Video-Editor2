@@ -5,6 +5,8 @@
 // to both UIs. UI-only changes belong in the individual UI layer instead.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { ClipTextAnimation } from '@/types';
+
 export interface TextTemplatePreset {
   name: string;
   style: string;
@@ -23,6 +25,36 @@ export interface TextTemplatePreset {
     strokeWidth?: number;
     animationPreset?: string;
   };
+}
+
+/**
+ * Map a legacy `animationPreset` string to the rich `ClipTextAnimation` object
+ * that both the preview (CanvasRenderingEngine) and the export (Compositor)
+ * actually read.
+ *
+ * The style presets previously wrote only `animationPreset`, which nothing ever
+ * consumed — so "Typewriter Green" / "Bouncy Pop" applied zero animation. These
+ * presets now animate (and export) correctly via the `animation` field.
+ */
+export function presetToTextAnimation(preset?: string): ClipTextAnimation | undefined {
+  switch (preset) {
+    case 'typewriter':
+      return { in: 'typewriter', out: 'none', inDuration: 0.6, outDuration: 0.3 };
+    case 'bounce':
+      return { in: 'bounce', out: 'none', inDuration: 0.6, outDuration: 0.3 };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Returns a spreadable `{ animation }` patch ONLY when the preset maps to an
+ * animation. This lets style-preset handlers apply the animation without wiping
+ * a pre-existing `textSettings.animation` when the chosen preset has none.
+ */
+export function presetToTextAnimationPatch(preset?: string): { animation?: ClipTextAnimation } {
+  const anim = presetToTextAnimation(preset);
+  return anim ? { animation: anim } : {};
 }
 
 export const TEXT_TEMPLATES: TextTemplatePreset[] = [

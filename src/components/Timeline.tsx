@@ -315,7 +315,7 @@ export function Timeline() {
               rulerData={rulerData}
               seek={seek}
               setMarkerContextMenu={setMarkerContextMenu}
-              handleRulerMouseDown={dragHandlers.handleRulerMouseDown}
+              handleRulerPointerDown={dragHandlers.handleRulerPointerDown}
             />
 
             <div

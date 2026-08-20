@@ -34,7 +34,7 @@ interface TimelineClipRowProps {
   setDropPreview: (val: any) => void;
 
   setContextMenu: (val: any) => void;
-  handleClipMouseDown: (e: React.MouseEvent, clip: TimelineClip) => void;
+  handleClipMouseDown: (e: React.PointerEvent, clip: TimelineClip) => void;
   setHoverCutX: (val: number | null) => void;
   setHoverCutClipId: (val: string | null) => void;
   enterCompoundClip: (clipId: string) => void;
@@ -66,7 +66,7 @@ interface TimelineClipItemProps {
   clipPipWindows: PipWindow[];
   
   // Handlers
-  handleClipMouseDown: (e: React.MouseEvent, clip: TimelineClip) => void;
+  handleClipMouseDown: (e: React.PointerEvent, clip: TimelineClip) => void;
   selectClip: (id: string | null) => void;
   selectTransition: (id: string | null) => void;
   setContextMenu: (val: any) => void;
@@ -120,9 +120,9 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             ? 'ring-2 ring-purple-500 shadow-lg z-20 rate-stretch-active'
             : 'ring-2 ring-white shadow-lg z-20'
           : 'hover:brightness-110'
-      } ${trackLocked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125' : ''}`}
-      style={{ left: `${left}px`, width: `${width}px`, height: clipHeight }}
-      onMouseDown={(e) => handleClipMouseDown(e, clip)}
+      } ${trackLocked ? 'opacity-50' : ''} ${isDragging ? 'opacity-80 brightness-125 procut-clip-dragging' : ''}`}
+      style={{ left: `${left}px`, width: `${width}px`, height: clipHeight, touchAction: 'none' }}
+      onPointerDown={(e) => handleClipMouseDown(e, clip)}
       onMouseMove={(e) => {
         if (activeTool === 'split') {
           const rect = e.currentTarget.getBoundingClientRect();
@@ -255,14 +255,14 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
           <div 
             className="absolute left-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
             data-edge="left"
-            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+            onPointerDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
           >
             <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
           </div>
           <div 
             className="absolute right-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
             data-edge="right"
-            onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
+            onPointerDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
           >
             <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
           </div>

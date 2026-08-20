@@ -37,7 +37,7 @@ import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useState, useRef, useEffect, useCallback, Fragment, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
-import { TEXT_TEMPLATES } from '@/utils/textTemplates';
+import { TEXT_TEMPLATES, presetToTextAnimationPatch } from '@/utils/textTemplates';
 import { Client } from '@gradio/client';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
@@ -6338,6 +6338,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             strokeColor: tmpl.settings.strokeColor || undefined,
                             strokeWidth: tmpl.settings.strokeWidth || undefined,
                             animationPreset: tmpl.settings.animationPreset || undefined,
+                            ...presetToTextAnimationPatch(tmpl.settings.animationPreset),
                           }
                         });
                         scheduleSaveSnapshot();

@@ -1,5 +1,19 @@
 import { RenderLayer, FrameOverlay } from './FrameScheduler';
 import { ExportWorkerConfig } from './export.worker';
+import {
+  applyColorGradingWheelsOnData,
+  applyFxEffect,
+} from '@/utils/canvasEffects';
+import { applyLutToCanvas } from '@/utils/lutParser';
+import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCurveActive as isCurveOn } from '@/utils/curvesEngine';
+import { applyVectorMaskToContext } from '@/utils/vectorMaskEngine';
+import { renderParticlesDeterministic } from './exportEffects';
+
+const IDENTITY_CURVE_LUT = (() => {
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) lut[i] = i;
+  return lut;
+})();
 
 const vertexShaderSource = `#version 300 es
 layout(location = 0) in vec2 a_position;
@@ -373,6 +387,18 @@ export class Compositor {
         const cy = H / 2;
         this.ctx.translate(cx + tx, cy + ty);
         this.ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
+        // 3D rotation (rotationX/Y): squash by cos(angle) to reproduce the
+        // preview's perspective flattening (full corner warp would need
+        // per-clip projection; this matches the preview's simulated-3D squash).
+        const rotX3d = layer.rotationX || 0;
+        const rotY3d = layer.rotationY || 0;
+        if (Math.abs(rotX3d) > 0.01 || Math.abs(rotY3d) > 0.01) {
+          const sx3d = Math.cos((rotY3d * Math.PI) / 180);
+          const sy3d = Math.cos((rotX3d * Math.PI) / 180);
+          if (Math.abs(sx3d) > 0.001 && Math.abs(sy3d) > 0.001) {
+            this.ctx.scale(sx3d, sy3d);
+          }
+        }
         if (layer.flipH || layer.flipV) {
           this.ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
         }
@@ -457,20 +483,93 @@ export class Compositor {
           if (!mask.invert && !mask.inverted) this.ctx.clip();
         }
 
+        // Vector bezier mask (mirrors preview's applyVectorMaskToContext).
+        if (layer.vectorMask?.enabled) {
+          applyVectorMaskToContext(
+            this.ctx as unknown as CanvasRenderingContext2D,
+            layer.vectorMask,
+            Math.round(dW),
+            Math.round(dH)
+          );
+        }
+
+        // ── Pixel-pass effects (keying, color wheels, curves, LUT, FX) ────────
+        // Any of these requires getImageData/putImageData, so they run on a temp
+        // canvas whose pixels are then blitted once — mirroring the preview's
+        // offscreen pass ordering.
+        const hasChromaKey = !!(layer.chromaKey && layer.chromaKey.enabled);
+        const hasLumaKey = !!(layer.lumaKey && layer.lumaKey.enabled);
+        const cw = layer.colorWheels;
+        const hasWheels = !!(cw && (cw.shadows || cw.midtones || cw.highlights));
+        const curvesData = layer.curves;
+        const hasCurves = !!curvesData && (
+          isCurveOn(curvesData.rgb) || isCurveOn(curvesData.r) ||
+          isCurveOn(curvesData.g) || isCurveOn(curvesData.b) || isCurveOn(curvesData.luma)
+        );
+        const hasLut = !!(layer.lutData);
+        const hasFx = !!layer.fxSettings;
+
         try {
-          if (layer.chromaKey && layer.chromaKey.enabled) {
+          if (hasChromaKey || hasLumaKey || hasWheels || hasCurves || hasLut || hasFx) {
             const tempCanvas = new OffscreenCanvas(Math.max(1, Math.round(dW)), Math.max(1, Math.round(dH)));
-            const tempCtx = tempCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
+            const tempCtx = tempCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D | null;
             if (tempCtx) {
+              // Apply the color filters on the temp context (so keying/wheels/etc
+              // see the graded pixels), then reset before pixel passes.
+              tempCtx.filter = cssFilters.length ? cssFilters.join(' ') : 'none';
               if (srcRot !== 0) {
                 tempCtx.translate(dW / 2, dH / 2);
                 tempCtx.rotate((srcRot * Math.PI) / 180);
-                // For rotated case, source crop handling is approximate
                 tempCtx.drawImage(drawable as any, sx, sy, sW, sH, -dW / 2, -dH / 2, dW, dH);
               } else {
                 tempCtx.drawImage(drawable as any, sx, sy, sW, sH, 0, 0, dW, dH);
               }
-              this.applyChromaKey(tempCtx, tempCanvas.width, tempCanvas.height, layer.chromaKey);
+              tempCtx.filter = 'none';
+
+              if (hasChromaKey) this.applyChromaKey(tempCtx, tempCanvas.width, tempCanvas.height, layer.chromaKey!);
+              if (hasLumaKey) this.applyLumaKey(tempCtx, tempCanvas.width, tempCanvas.height, layer.lumaKey!);
+              if (hasWheels) {
+                applyColorGradingWheelsOnData(
+                  tempCtx as unknown as CanvasRenderingContext2D,
+                  tempCanvas.width, tempCanvas.height,
+                  cw!.shadows, cw!.midtones, cw!.highlights
+                );
+              }
+              if (hasCurves) {
+                const rgbLut = isCurveOn(curvesData.rgb) ? buildLUT(curvesData.rgb) : IDENTITY_CURVE_LUT;
+                const rLut = isCurveOn(curvesData.r) ? buildLUT(curvesData.r) : null;
+                const gLut = isCurveOn(curvesData.g) ? buildLUT(curvesData.g) : null;
+                const bLut = isCurveOn(curvesData.b) ? buildLUT(curvesData.b) : null;
+                const lumaLut = isCurveOn(curvesData.luma) ? buildLUT(curvesData.luma) : null;
+                try {
+                  const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                  applyCurves(imgData, rgbLut, rLut, gLut, bLut, lumaLut);
+                  tempCtx.putImageData(imgData, 0, 0);
+                } catch (e) {
+                  console.warn('[Compositor] Curves failed:', e);
+                }
+              }
+              if (hasLut) {
+                applyLutToCanvas(
+                  tempCtx as unknown as CanvasRenderingContext2D,
+                  tempCanvas.width, tempCanvas.height,
+                  layer.lutData,
+                  layer.lutIntensity ?? 100
+                );
+              }
+              if (hasFx) {
+                const localTime = Math.max(0, (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
+                applyFxEffect(
+                  tempCtx as unknown as CanvasRenderingContext2D,
+                  tempCanvas.width, tempCanvas.height,
+                  layer.fxSettings.type,
+                  layer.fxSettings.intensity ?? 100,
+                  localTime,
+                  false
+                );
+              }
+
+              this.ctx.filter = 'none';
               this.ctx.drawImage(tempCanvas, dX, dY, dW, dH);
             } else {
               if (srcRot !== 0) this.ctx.rotate((srcRot * Math.PI) / 180);
@@ -527,12 +626,134 @@ export class Compositor {
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
       this.ctx.restore();
     }
+
+    // ── Particle effects (full-frame pass) ──────────────────────────────────
+    // Mirrors the preview: particles are drawn in view space, over everything,
+    // and are now deterministic so the exported field is stable across runs.
+    const { viewW: pvW, viewH: pvH } = this.getViewSize();
+    const particleScale = this.canvas.width / pvW; // all aspect ratios scale uniformly
+    for (const layer of layers) {
+      if (!layer.particleSettings) continue;
+      const localTime = (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0);
+      this.ctx.save();
+      this.ctx.scale(particleScale, particleScale);
+      renderParticlesDeterministic(
+        this.ctx as unknown as CanvasRenderingContext2D,
+        layer.clipId || `clip-${layer.order ?? 0}`,
+        layer.particleSettings,
+        pvW,
+        pvH,
+        localTime
+      );
+      this.ctx.restore();
+    }
+  }
+
+  /**
+   * Compute the entry/exit text-animation modifiers (opacity / scale / offset)
+   * for a text clip at a given time. This mirrors the preview's text branch in
+   * CanvasRenderingEngine exactly, so text animations that are visible in the
+   * editor now also render in the exported file.
+   *
+   * NOTE: This previously did not exist in the export path at all — animated
+   * text (fade, zoom, bounce, slide, elastic, typewriter, …) rendered correctly
+   * in the preview but exported as a static, full-opacity title.
+   */
+  private computeTextAnimation(clip: any, timestampSeconds?: number) {
+    const out = { opacity: 1, scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 };
+    const anim = clip?.textSettings?.animation;
+    if (!anim) return out;
+
+    const currentTime = timestampSeconds ?? 0;
+    const startTime = clip.startTime || 0;
+    const duration = clip.duration || 0;
+    const inDuration = anim.inDuration || 0.1;
+    const outDuration = anim.outDuration || 0.1;
+    const timeSinceStart = currentTime - startTime;
+    const timeUntilEnd = startTime + duration - currentTime;
+
+    if (timeSinceStart < inDuration && timeSinceStart >= 0) {
+      const progress = inDuration > 0 ? timeSinceStart / inDuration : 1;
+      switch (anim.in) {
+        case 'fadeIn':
+          out.opacity = progress;
+          break;
+        case 'zoom':
+          out.scaleX = out.scaleY = progress;
+          out.opacity = progress;
+          break;
+        case 'bounce':
+          out.scaleX = out.scaleY = 1 - Math.cos(progress * Math.PI * 2) * (1 - progress) * 0.5;
+          break;
+        case 'slideUp':
+          out.offsetY = (1 - progress) * 100;
+          out.opacity = progress;
+          break;
+        case 'slideDown':
+          out.offsetY = -(1 - progress) * 100;
+          out.opacity = progress;
+          break;
+        case 'slideLeft':
+          out.offsetX = (1 - progress) * 100;
+          out.opacity = progress;
+          break;
+        case 'slideRight':
+          out.offsetX = -(1 - progress) * 100;
+          out.opacity = progress;
+          break;
+        case 'elastic': {
+          const p = progress;
+          out.scaleX = out.scaleY = Math.pow(2, -10 * p) * Math.sin((p * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+          break;
+        }
+        case 'scaleFlip':
+          out.scaleY = progress;
+          break;
+        case 'zoomBlur':
+          out.scaleX = out.scaleY = 1 + (1 - progress);
+          out.opacity = progress;
+          break;
+        default:
+          break;
+      }
+    } else if (timeUntilEnd < outDuration && timeUntilEnd >= 0) {
+      const progress = outDuration > 0 ? 1 - timeUntilEnd / outDuration : 1;
+      switch (anim.out) {
+        case 'fadeOut':
+          out.opacity = 1 - progress;
+          break;
+        case 'zoom':
+          out.scaleX = out.scaleY = 1 - progress;
+          out.opacity = 1 - progress;
+          break;
+        case 'slideUp':
+          out.offsetY = -(progress * 100);
+          out.opacity = 1 - progress;
+          break;
+        case 'slideDown':
+          out.offsetY = progress * 100;
+          out.opacity = 1 - progress;
+          break;
+        case 'slideLeft':
+          out.offsetX = -(progress * 100);
+          out.opacity = 1 - progress;
+          break;
+        case 'slideRight':
+          out.offsetX = progress * 100;
+          out.opacity = 1 - progress;
+          break;
+        default:
+          break;
+      }
+    }
+    return out;
   }
 
   /**
    * Draw a text/title clip. Mirrors the preview's text branch in
    * CanvasRenderingEngine (font construction, background pill, stroke, shadow,
-   * underline) scaled from the UI view space to the export resolution.
+   * underline, and now entry/exit animation) scaled from the UI view space to
+   * the export resolution.
    */
   private renderTextLayer(layer: RenderLayer) {
     const clip = layer.textData || {};
@@ -542,7 +763,19 @@ export class Compositor {
       fontFamily: 'sans-serif',
       color: '#ffffff',
     };
-    const text: string = ts.text || clip.textContent || 'Text';
+    const anim = this.computeTextAnimation(clip, layer.timestampSeconds);
+
+    let text: string = ts.text || clip.textContent || 'Text';
+    // Typewriter in-animation progressively reveals characters (mirrors preview).
+    if (ts.animation && ts.animation.in === 'typewriter' && ts.text) {
+      const inDuration = ts.animation.inDuration || 0.1;
+      const timeSinceStart = (layer.timestampSeconds ?? 0) - (clip.startTime || 0);
+      if (timeSinceStart < inDuration && timeSinceStart >= 0) {
+        const progress = inDuration > 0 ? timeSinceStart / inDuration : 1;
+        const charsToShow = Math.ceil((ts.text.length || 0) * progress);
+        text = (ts.text || '').substring(0, charsToShow);
+      }
+    }
     if (!text) return;
 
     const W = this.canvas.width;
@@ -579,7 +812,13 @@ export class Compositor {
     this.ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
     this.ctx.scale(finalScale, finalScale);
 
-    this.ctx.globalAlpha = layer.opacity;
+    // Entry/exit animation: offset + scale compose inside the already-scaled
+    // context exactly like the preview's text branch, so the exported motion
+    // matches the editor frame-for-frame.
+    this.ctx.translate(anim.offsetX, anim.offsetY);
+    this.ctx.scale(anim.scaleX, anim.scaleY);
+
+    this.ctx.globalAlpha = (layer.opacity ?? 1) * anim.opacity;
     this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
 
     const fontStyle: string[] = [];
@@ -716,6 +955,52 @@ export class Compositor {
     }
     
     ctx.putImageData(imageData, 0, 0);
+  }
+
+  /**
+   * Luma key: make pixels above/below a brightness threshold transparent.
+   * Mirrors `applyLumaKeyOnData` in the preview (canvasEffects.ts) so luma-keyed
+   * clips export identically instead of keeping their background.
+   */
+  private applyLumaKey(
+    ctx: OffscreenCanvasRenderingContext2D,
+    width: number,
+    height: number,
+    settings: { type: 'dark' | 'light'; threshold: number; softness: number }
+  ) {
+    try {
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const data = imageData.data;
+      const th = (settings.threshold / 100) * 255;
+      const soft = (settings.softness / 100) * 255;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+        if (settings.type === 'dark') {
+          if (luma < th) {
+            data[i + 3] = 0;
+          } else if (luma < th + soft && soft > 0) {
+            const factor = (luma - th) / soft;
+            data[i + 3] = Math.round(data[i + 3] * factor);
+          }
+        } else {
+          const lightTh = 255 - th;
+          if (luma > lightTh) {
+            data[i + 3] = 0;
+          } else if (luma > lightTh - soft && soft > 0) {
+            const factor = (lightTh - luma) / soft;
+            data[i + 3] = Math.round(data[i + 3] * factor);
+          }
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
+    } catch (err) {
+      console.error('[Compositor] Luma key failed:', err);
+    }
   }
 
   private rgb2yuv(r: number, g: number, b: number) {
