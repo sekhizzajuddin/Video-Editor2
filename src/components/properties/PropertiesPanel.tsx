@@ -1211,6 +1211,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     // caps the slider rather than letting the renderer clamp silently.
     const maxDuration = getMaxTransitionDuration(tracks, selectedTransitionClip.id);
 
+
     // Patch helper: merges into params (the store also merges, but doing it here
     // keeps the optimistic UI value consistent).
     const setParam = (key: string, value: any) =>
@@ -1225,10 +1226,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       { v: 'down', label: 'Down' },
     ];
 
+    // Longest transition that still fits between the two neighbouring clips.
+
+
     return (
-      <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
+      <div className={`h-full flex flex-col ${isMobileView ? 'bg-transparent text-white' : 'bg-[#252525] border-l border-[#3e3e3e]'}`}>
         {/* Header */}
-        <div className="p-4 border-b border-[#3e3e3e] flex items-center justify-between">
+        <div className={`p-4 flex items-center justify-between ${isMobileView ? 'border-b border-white/10 shrink-0' : 'border-b border-[#3e3e3e]'}`}>
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-purple-600/20 text-purple-400 rounded">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1243,15 +1247,15 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
           </div>
           <button
-            onClick={() => useEditorStore.getState().selectTransition(null)}
-            className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+            onClick={() => { if (isMobileView && onMobileClose) { onMobileClose(); } else { useEditorStore.getState().selectTransition(null); } }}
+            className={`p-1 rounded transition-colors ${isMobileView ? "bg-white/5 text-white/50 hover:text-white hover:bg-white/10" : "hover:bg-[#3e3e3e] text-[#a0a0a0] hover:text-white"}`}
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+        <div className={`flex-1 p-4 space-y-4 overflow-y-auto ${isMobileView ? "mobile-no-scrollbar" : ""}`}>
           {/* Effect type */}
           <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
             <label className="text-xs text-white font-medium block">Effect</label>
@@ -1435,7 +1439,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   if (selectedSubtitle) {
     return (
-      <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
+      <div className={`h-full flex flex-col ${isMobileView ? "bg-transparent text-white" : "bg-[#252525] border-l border-[#3e3e3e]"}`}>
         {/* Header */}
         <div className="p-4 border-b border-[#3e3e3e] flex items-center justify-between bg-[#1e1e1e]/30 shrink-0">
           <div className="flex items-center gap-2">
@@ -1601,7 +1605,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       );
     }
     return (
-      <div className="h-full flex flex-col bg-[#252525] border-l border-[#3e3e3e]">
+      <div className={`h-full flex flex-col ${isMobileView ? "bg-transparent text-white" : "bg-[#252525] border-l border-[#3e3e3e]"}`}>
         {/* Tabs */}
         <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
           {tabs.map((tab, idx) => {

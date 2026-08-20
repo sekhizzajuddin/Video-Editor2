@@ -838,7 +838,6 @@ export function MobileTimeline({
                             onClick={(e) => {
                               e.stopPropagation();
                               selectTransition(activeClipId);
-                              if (onOpenTransitions) onOpenTransitions();
                             }}
                             className={`absolute top-1.5 bottom-1.5 z-30 flex items-center justify-center rounded-md border text-[9px] font-bold text-white shadow-lg cursor-pointer transition-transform active:scale-95 ${
                               isTransSelected
@@ -862,7 +861,7 @@ export function MobileTimeline({
                           key={`trans-slot-${prevClip.id}-${clip.id}`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            selectClip(clip.id);
+                            selectTransition(clip.id);
                             if (onOpenTransitions) onOpenTransitions();
                           }}
                           className="absolute top-2.5 bottom-2.5 z-20 flex w-4 -ml-2 items-center justify-center rounded-full bg-white/20 hover:bg-purple-500 text-white/80 hover:text-white border border-white/30 backdrop-blur-sm cursor-pointer transition-all active:scale-110"
