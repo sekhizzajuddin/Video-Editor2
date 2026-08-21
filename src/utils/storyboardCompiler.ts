@@ -1,3 +1,5 @@
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
+
 export interface StoryboardChunk {
   chunkIndex: number;
   startTime: number;
@@ -110,6 +112,10 @@ export async function compileStoryboard(
   cloneVideo.crossOrigin = 'anonymous';
   cloneVideo.muted = true;
   cloneVideo.playsInline = true;
+  // ANDROID FIX: keep the element composited while decoding (see
+  // utils/mediaPoolContainer.ts) — detached/invisible videos never produce
+  // frames on Chrome-Android, so storyboard captures would come back black.
+  attachInvisibleMediaElement(cloneVideo);
   
   // Wait for the clone to load data before seeking
   const loadPromise = new Promise<void>((resolve) => {
@@ -163,6 +169,7 @@ export async function compileStoryboard(
     // Release clone video memory
     cloneVideo.removeAttribute('src');
     cloneVideo.load();
+    cloneVideo.remove();
   }
 
   return chunks;

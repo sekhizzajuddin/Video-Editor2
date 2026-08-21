@@ -14,6 +14,7 @@
  */
 
 import { MediaItem, TimelineTrack } from '@/types';
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
 const DB_NAME = 'procut_editor_db';
 const DB_VERSION = 3; // Bumped to handle new autosaves object store
@@ -705,6 +706,9 @@ function generateVideoThumbnail(videoUrl: string, width?: number, height?: numbe
     video.crossOrigin = 'anonymous';
     video.muted = true;
     video.playsInline = true;
+    // ANDROID FIX: detached/invisible video elements are never composited on
+    // Chrome-Android, so onseeked/drawImage capture black frames there.
+    attachInvisibleMediaElement(video);
 
     const cleanup = () => {
       video.onloadedmetadata = null;
@@ -714,6 +718,7 @@ function generateVideoThumbnail(videoUrl: string, width?: number, height?: numbe
       try {
         video.load();
       } catch (_) {}
+      video.remove();
     };
 
     video.onloadedmetadata = () => {
@@ -759,6 +764,9 @@ function generateFrameStrip(videoUrl: string, duration: number, count: number): 
     video.crossOrigin = 'anonymous';
     video.muted = true;
     video.playsInline = true;
+    // ANDROID FIX: keep element composited while decoding — see
+    // utils/mediaPoolContainer.ts.
+    attachInvisibleMediaElement(video);
 
     const frames: string[] = [];
 
@@ -770,6 +778,7 @@ function generateFrameStrip(videoUrl: string, duration: number, count: number): 
       try {
         video.load();
       } catch (_) {}
+      video.remove();
     };
 
     const captureFrame = (index: number) => {

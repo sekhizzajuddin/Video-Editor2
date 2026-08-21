@@ -22,6 +22,7 @@ import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
 import { getPlaybackTime } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains } from '@/utils/transitionEngine';
+import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
 // ---------------------------------------------------------------------------
 // Global Master Audio Context
@@ -150,6 +151,59 @@ const globalPlaybackResult: MediaPlaybackResult = { videoElements: globalVideoMa
 let primaryControllerId: number | null = null;
 let nextControllerId = 1;
 const activeControllers = new Set<number>();
+
+// ---------------------------------------------------------------------------
+// Mobile / Android support helpers
+// ---------------------------------------------------------------------------
+/**
+ * True on phones and tablets (any coarse-pointer / multi-touch device).
+ * Used to scale media-pool behaviour for the constrained mobile media stack.
+ */
+export function isCoarsePointerDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  return (
+    (navigator.maxTouchPoints ?? 0) > 1 ||
+    (typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches)
+  );
+}
+
+export function isAndroidDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /android/i.test(navigator.userAgent || '');
+}
+
+export function isIOSDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
+export function isMobileDevice(): boolean {
+  return isAndroidDevice() || isIOSDevice() || isCoarsePointerDevice();
+}
+
+/**
+ * How many pooled <video> elements may hold a src at once.
+ *
+ * ANDROID FIX: phones expose only a handful of hardware video decoder
+ * instances; elements beyond that budget stay stuck at readyState 0 and can
+ * never be drawn (black preview). Two sources cover an A/V pair or a single
+ * transition on a phone; desktop GPUs get four for dense multi-track stacks.
+ *
+ * Deliberately keyed off the mobile OS (Android/iOS), NOT coarse pointers:
+ * Windows touchscreen laptops report maxTouchPoints > 0 but have full desktop
+ * decoder budgets and must not be downgraded. Resolved once per session.
+ */
+let cachedMaxLoadedVideos: number | null = null;
+export function getMaxLoadedVideos(): number {
+  if (cachedMaxLoadedVideos === null) {
+    cachedMaxLoadedVideos = isAndroidDevice() || isIOSDevice() ? 2 : 4;
+  }
+  return cachedMaxLoadedVideos;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -619,21 +673,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
   }, []);
 
-  const getMediaContainer = () => {
-    let mediaContainer = document.getElementById('procut-media-pool');
-    if (!mediaContainer) {
-      mediaContainer = document.createElement('div');
-      mediaContainer.id = 'procut-media-pool';
-      mediaContainer.style.position = 'absolute';
-      mediaContainer.style.opacity = '0';
-      mediaContainer.style.pointerEvents = 'none';
-      mediaContainer.style.width = '1px';
-      mediaContainer.style.height = '1px';
-      mediaContainer.style.overflow = 'hidden';
-      document.body.appendChild(mediaContainer);
-    }
-    return mediaContainer;
-  };
+  // ANDROID RENDERING FIX: the pool container (and every video inside it) must
+  // NOT be fully invisible — Chrome on Android never composites opacity:0 /
+  // zero-size media elements, so their decoded frames never reach drawImage()
+  // (black preview on real phones only; desktop, incl. responsive-mode
+  // emulation, is unaffected). getMediaPoolContainer implements the standard
+  // "painted but invisible" 2×2px / opacity-0.01 pattern; it is module-level
+  // and idempotent. See utils/mediaPoolContainer.ts.
 
   // ---- Eager master audio context init ----
   if (typeof window !== 'undefined') {
@@ -729,7 +775,6 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // ---- Pool management (create/remove elements) ----
   const VIDEO_PROXIMITY_WINDOW = 5;
   const AUDIO_PROXIMITY_WINDOW = 15;
-  const MAX_LOADED_VIDEOS = 4;
   const MAX_GLOBAL_FRAME_CACHE = 30;
 
   useEffect(() => {
@@ -796,9 +841,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           } else {
             el.crossOrigin = 'anonymous';
           }
-          el.style.position = 'absolute';
-          el.style.opacity = '0';
-          el.style.pointerEvents = 'none';
+          // ANDROID RENDERING FIX: styles the element "painted but invisible"
+          // and appends it to the shared composited pool container. opacity 0
+          // would make Chrome-Android treat the video as unpainted → decoder
+          // frames never reach drawImage() → black preview on phones only.
+          attachInvisibleMediaElement(el);
+          // Hidden pool videos must never hijack Android's PiP / Cast UI.
+          if ('disablePictureInPicture' in el) el.disablePictureInPicture = true;
+          if ('disableRemotePlayback' in el) el.disableRemotePlayback = true;
 
         const handleSeeked = () => {
           triggerRedraw();
@@ -812,6 +862,33 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         el.addEventListener('seeked', handleSeeked);
         el.addEventListener('timeupdate', triggerRedraw);
         el.addEventListener('canplay', triggerRedraw);
+        // Repaint as soon as the first decodable frame / metadata arrives so the
+        // paused preview shows frame 0 without waiting for a seek.
+        el.addEventListener('loadedmetadata', triggerRedraw);
+        el.addEventListener('loadeddata', triggerRedraw);
+
+        // ANDROID RECOVERY: a video load that errors or stalls (decoder
+        // contention is common on phones) must not stay black forever — the
+        // src loader only ever assigns src once, so without this retry the clip
+        // would never render. Bounded, backoff-spaced, and only while the clip
+        // is still needed.
+        let mediaRetryCount = 0;
+        const retryMediaLoad = () => {
+          if (!poolRef.current.has(clipId)) return;
+          if (!el.src || el.src === '') return;
+          if (el.readyState >= 1) return;
+          if (mediaRetryCount >= 3) return;
+          mediaRetryCount++;
+          const delay = 400 * mediaRetryCount;
+          setTimeout(() => {
+            if (!poolRef.current.has(clipId)) return;
+            if (el.readyState >= 1) return;
+            try { el.load(); } catch { /* element gone */ }
+          }, delay);
+        };
+        (el as HTMLVideoElement & { _mediaRetryLoad?: () => void })._mediaRetryLoad = retryMediaLoad;
+        el.addEventListener('error', retryMediaLoad);
+        el.addEventListener('stalled', retryMediaLoad);
 
         if ('requestVideoFrameCallback' in el) {
           const onVideoFrame = () => {
@@ -836,7 +913,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           (el as any)._onVisibilityChange = onVisibilityChange;
         }
 
-        getMediaContainer().appendChild(el);
+        // NOTE: element is already attached by attachInvisibleMediaElement() —
+        // must stay inside the painted pool container or Android stops decoding.
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
         pool.set(clipId, entry);
         videoMap.set(clipId, el);
@@ -868,7 +946,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         };
         (el as any)._handleSeeked = handleSeeked;
         el.addEventListener('seeked', handleSeeked);
-        getMediaContainer().appendChild(el);
+        getMediaPoolContainer().appendChild(el);
         el.load();
 
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'audio' };
@@ -884,6 +962,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (entry.type === 'video') {
           el.removeEventListener('timeupdate', triggerRedraw);
           el.removeEventListener('canplay', triggerRedraw);
+          el.removeEventListener('loadedmetadata', triggerRedraw);
+          el.removeEventListener('loadeddata', triggerRedraw);
+          if (el._mediaRetryLoad) {
+            el.removeEventListener('error', el._mediaRetryLoad);
+            el.removeEventListener('stalled', el._mediaRetryLoad);
+            el._mediaRetryLoad = null;
+          }
           if (el._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
             el.cancelVideoFrameCallback(el._rvfcHandle);
             el._rvfcHandle = null;
@@ -938,6 +1023,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     // Read the exact playhead position once. (The effect itself is scheduled off
     // the coarse `ctBucket`, so we must not rely on a stale rendered value here.)
     const nowTime = useEditorStore.getState().currentTime;
+    // ANDROID FIX: device-scaled decoder budget (2 on phones, 4 on desktop) —
+    // module-level getter, stable across renders. See getMaxLoadedVideos().
+    const maxLoadedVideos = getMaxLoadedVideos();
 
     // Priority-based video src loading (nearest clips get loaded first)
     const videoEntries: Array<{
@@ -977,7 +1065,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     for (const ve of videoEntries) {
       const el = ve.entry.el as HTMLVideoElement;
       const isNear = ve.dist <= getProximityWindow(ve.media);
-      const canLoad = loadedCount < MAX_LOADED_VIDEOS;
+      // ACTIVE-CLIP PRIORITY: the clip currently under the playhead must always
+      // receive a src, even when the (already mobile-reduced) decoder budget is
+      // exhausted by neighbours. Otherwise overlapping multi-track clips render
+      // black — much easier to hit on a phone where the budget is just 2.
+      const isActiveClip = nowTime >= ve.absStart && nowTime < ve.absStart + ve.clipDuration;
+      const canLoad = isActiveClip || loadedCount < maxLoadedVideos;
 
       if (isNear && canLoad) {
         const targetSrc = ve.media.url;
@@ -1718,25 +1811,45 @@ export async function getLiveAudioStream(): Promise<MediaStream | null> {
   return master.clone();
 }
 
+/**
+ * Gesture-bound media unlock for mobile browsers.
+ *
+ * Despite the legacy name this now covers Android as well as iOS. Mobile Chrome
+ * requires (a) a user gesture before any audible play(), (b) a gesture to wake
+ * the hardware decoder pipeline for freshly created <video> elements, and
+ * (c) a gesture to resume a suspended AudioContext. MobileApp / the transport
+ * Play button call this synchronously inside the tap handler. On desktop it is
+ * a no-op, preserving existing PC behaviour exactly.
+ */
 export function unlockiOSVideoPlay() {
-  const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-  if (!isIOS) return;
-  const ctx = getMasterAudioCtx();
-  if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-  }
-  for (const el of globalVideoMap.values()) {
-    if (el.paused) {
-      const prevMuted = el.muted;
-      el.muted = true;
-      const p = el.play();
-      if (p !== undefined) {
-        p.then(() => {
-          el.pause();
+  if (!isMobileDevice()) return;
+  try {
+    const ctx = getMasterAudioCtx();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    for (const el of globalVideoMap.values()) {
+      if (el.paused) {
+        const prevMuted = el.muted;
+        el.muted = true; // muted play() is gesture-safe on Android + iOS
+        const p = el.play();
+        if (p !== undefined) {
+          p.then(() => {
+            el.pause();
+            el.muted = prevMuted;
+          }).catch(() => {
+            el.muted = prevMuted;
+          });
+        } else {
           el.muted = prevMuted;
-        }).catch(() => {});
+        }
       }
     }
+  } catch {
+    // Never let an unlock attempt break the UI gesture that triggered it.
   }
 }
+
+/** Clearer alias for new call sites. Same generalized unlock. */
+export const unlockMobileMediaPlayback = unlockiOSVideoPlay;
 

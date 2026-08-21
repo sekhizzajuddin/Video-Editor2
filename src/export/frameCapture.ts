@@ -77,6 +77,14 @@ export async function* streamCapturedFrames(opts: FrameCaptureOptions): AsyncGen
   // Restore timeline position to start
   await synchronousSeek(opts.startAt);
   window.dispatchEvent(new CustomEvent('procut-frame-updated'));
+
+  // BUG FIX: nothing in the entire export stack ever cleared this flag, so
+  // after the first canvas-capture export the preview RAF loop stayed stuck in
+  // "export stepping" mode and (pre-fix) the canvas buffer stayed at the
+  // hard-coded 854×480 landscape defaults forever. Leave export mode once the
+  // frame stream is done. (promoteCanvasToExportSize also restores it, this is
+  // a belt-and-braces guard for callers that skip the util.)
+  useEditorStore.getState().setIsExporting(false);
 }
 
 function yieldToEventLoop(ms: number): Promise<void> {

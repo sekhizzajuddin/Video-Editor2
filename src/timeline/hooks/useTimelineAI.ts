@@ -7,6 +7,7 @@ import { parseTransliteratedResponse } from '../timelineUtils';
 import type { TimelineState } from './useTimelineState';
 import { toast } from 'sonner';
 import { extractWaveformFromUrl } from '@/utils/mediaProbe';
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
 interface UseTimelineAIDeps {
   timelineState: TimelineState;
@@ -250,10 +251,15 @@ Return your response ONLY as a JSON object with these two fields:
 
       if (sfxAutoCueMode === 'visual') {
         const video = document.createElement('video');
-        video.src = mediaItem.url;
         video.crossOrigin = 'anonymous';
         video.muted = true;
         video.playsInline = true;
+        video.preload = 'auto';
+        // ANDROID FIX: keep element composited while seeking/drawing frames for
+        // motion analysis — detached/invisible videos never produce frames on
+        // Chrome-Android (see utils/mediaPoolContainer.ts).
+        attachInvisibleMediaElement(video);
+        video.src = mediaItem.url;
 
         await new Promise((resolve, reject) => {
           video.onloadedmetadata = resolve;
@@ -296,6 +302,12 @@ Return your response ONLY as a JSON object with these two fields:
           prevFrameData = frameData;
           setAutoCueProgress(Math.floor((time / clipDur) * 90));
         }
+
+        // Release the analysis element — it lives in the shared media pool
+        // container, so it must clean itself up when done.
+        video.src = '';
+        video.load();
+        video.remove();
 
         if (motionDiffs.length > 0) {
           const diffValues = motionDiffs.map(m => m.diff);
