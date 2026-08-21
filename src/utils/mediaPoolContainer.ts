@@ -64,3 +64,22 @@ export function attachInvisibleMediaElement<T extends HTMLMediaElement>(el: T): 
   getMediaPoolContainer().appendChild(el);
   return el;
 }
+
+/**
+ * True when on-device media-pool diagnostics are requested via
+ * `?mediadebug=1` in the URL, `#mediadebug` in the hash, or the
+ * `procut:mediadebug` localStorage flag. Used by MediaPoolDebugOverlay to
+ * debug Android-only media failures without a debug cable.
+ */
+export function isMediaDebugEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return (
+      new URLSearchParams(window.location.search).has('mediadebug') ||
+      window.location.hash.includes('mediadebug') ||
+      window.localStorage.getItem('procut:mediadebug') === '1'
+    );
+  } catch {
+    return false;
+  }
+}

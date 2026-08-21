@@ -206,6 +206,53 @@ export function getMaxLoadedVideos(): number {
 }
 
 // ---------------------------------------------------------------------------
+// Media-source URL helpers
+// ---------------------------------------------------------------------------
+/**
+ * ANDROID FIX: Chrome/WebView on real Android devices mishandles media
+ * element srcs carrying a `#fragment` when the URL uses the `blob:`/`data:`
+ * scheme — the load can stall or fail outright (fragments are only meaningful
+ * as media-fragments for remote resources; on local blob URLs they break the
+ * fetch on Android builds), while desktop Chrome resolves them identically.
+ * This is exactly why imported clips rendered their timeline thumbnails on
+ * Android (the import probe uses the raw blob URL) yet the pooled preview
+ * video never became drawable — it was assigned `blobUrl + '#clip=<id>'`.
+ * Local schemes now get the RAW URL; per-clip uniqueness for the src-dedupe
+ * check is tracked on the element itself instead of inside the URL.
+ */
+export function mediaSrcFor(url: string, clipId: string): string {
+  if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+  return url.includes('#') ? `${url}&clip=${clipId}` : `${url}#clip=${clipId}`;
+}
+
+type TaggedMediaElement = HTMLMediaElement & { _procutClipSrcTag?: string | null };
+
+/**
+ * Assign `el.src` for a clip only when it actually changed (tracked via an
+ * element-level tag, NOT by comparing against the resolved `el.src` string).
+ * Returns true when a new src was assigned — the caller should el.load().
+ */
+export function assignClipMediaSrc(
+  el: TaggedMediaElement,
+  clipId: string,
+  url: string
+): boolean {
+  const src = mediaSrcFor(url, clipId);
+  const tag = `${clipId}|${src}`;
+  if (el._procutClipSrcTag === tag) return false;
+  el._procutClipSrcTag = tag;
+  el.src = src;
+  return true;
+}
+
+/** Fully clears a pooled element's source AND its dedupe tag. */
+export function clearClipMediaSrc(el: TaggedMediaElement): void {
+  el._procutClipSrcTag = null;
+  el.removeAttribute('src');
+  try { el.load(); } catch { /* already detached */ }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function findClipById(clipId: string): { clip: any; track: any; absStartTime: number } | null {
@@ -820,10 +867,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const existing = pool.get(clipId);
       if (existing) {
         if (existing.type === 'audio' && media.url !== 'PENDING_RESTORE') {
-          const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
-          const finalSrc = media.url + hash;
-          if (existing.el.src !== finalSrc && !existing.el.src.endsWith(finalSrc)) {
-            existing.el.src = finalSrc;
+          if (assignClipMediaSrc(existing.el as TaggedMediaElement, clipId, media.url)) {
             existing.el.load();
           }
         }
@@ -927,8 +971,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           } else {
             el.crossOrigin = 'anonymous';
           }
-          const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
-          el.src = media.url + hash;
+          // ANDROID FIX: raw URL for blob:/data: (fragment on a blob src stalls
+          // media loads on real Android devices). Dedupe is via element tag.
+          assignClipMediaSrc(el as TaggedMediaElement, clipId, media.url);
           el.style.position = 'absolute';
           el.style.opacity = '0';
           el.style.pointerEvents = 'none';
@@ -1005,10 +1050,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const media = mediaMapRef.current.get(entry.mediaId);
         if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
         const targetSrc = media.url;
-        const hash = targetSrc.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
-        const finalSrc = targetSrc + hash;
-        if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
-          el.src = finalSrc;
+        if (assignClipMediaSrc(el as TaggedMediaElement, clipId, targetSrc)) {
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
             el.currentTime = pendingTime;
@@ -1079,10 +1121,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             .then((file) => (file ? URL.createObjectURL(file) : null))
             .then((restoredUrl) => {
               if (!restoredUrl) return;
-              const hash = restoredUrl.includes('#') ? `&clip=${ve.clipId}` : `#clip=${ve.clipId}`;
-              const finalSrc = restoredUrl + hash;
-              if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
-                el.src = finalSrc;
+              if (assignClipMediaSrc(el as TaggedMediaElement, ve.clipId, restoredUrl)) {
                 el.load();
                 useEditorStore.setState((state) => ({
                   mediaLibrary: state.mediaLibrary.map((m) =>
@@ -1098,10 +1137,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             })
             .catch(() => {});
         } else {
-          const hash = targetSrc.includes('#') ? `&clip=${ve.clipId}` : `#clip=${ve.clipId}`;
-          const finalSrc = targetSrc + hash;
-          if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
-            el.src = finalSrc;
+          if (assignClipMediaSrc(el as TaggedMediaElement, ve.clipId, targetSrc)) {
             const pendingTime = pendingSeeksRef.current.get(ve.clipId);
             if (pendingTime !== undefined) {
               el.currentTime = pendingTime;
@@ -1112,9 +1148,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
         loadedCount++;
       } else {
-        if (el.src !== '') {
-          el.removeAttribute('src');
-          try { el.load(); } catch (e) {}
+        // ANDROID FIX: clear via the tag-aware helper so the dedupe state is
+        // reset alongside the src (plain removeAttribute would leave the tag
+        // claiming the src is still assigned).
+        if (el.src !== '' || (el as TaggedMediaElement)._procutClipSrcTag) {
+          clearClipMediaSrc(el as TaggedMediaElement);
         }
       }
     }
@@ -1799,6 +1837,89 @@ export async function synchronousSeek(targetTime: number): Promise<void> {
     }
   }
   if (promises.length > 0) await Promise.all(promises);
+}
+
+// ---------------------------------------------------------------------------
+// On-device media pool diagnostics (Android remote debugging)
+// ---------------------------------------------------------------------------
+export interface MediaPoolDebugEntry {
+  clipId: string;
+  type: 'video' | 'audio';
+  srcScheme: string;
+  srcLen: number;
+  tagged: boolean;
+  srcSet: boolean;
+  readyState: number;
+  videoWidth: number;
+  videoHeight: number;
+  paused: boolean;
+  muted: boolean;
+  seeking: boolean;
+  currentTime: number;
+  networkState: number;
+  error: string | null;
+  computedOpacity: string | null;
+  inDOM: boolean;
+}
+
+export interface MediaPoolDebugSnapshot {
+  device: { android: boolean; ios: boolean; coarse: boolean; maxLoadedVideos: number };
+  playing: boolean;
+  scrubbing: boolean;
+  time: number;
+  poolSize: number;
+  videoMapSize: number;
+  entries: MediaPoolDebugEntry[];
+}
+
+/**
+ * Snapshot of every pooled media element — designed to answer "why is the
+ * canvas black on this phone?" from a single screenshot when opened with
+ * `?mediadebug=1` (see MediaPoolDebugOverlay).
+ */
+export function getMediaPoolDebugSnapshot(): MediaPoolDebugSnapshot {
+  const s = useEditorStore.getState();
+  const entries: MediaPoolDebugEntry[] = [];
+  for (const [clipId, entry] of globalMediaPool) {
+    const el = entry.el;
+    const err = el.error;
+    const src = el.getAttribute('src') || '';
+    entries.push({
+      clipId,
+      type: entry.type,
+      srcScheme: src ? src.slice(0, src.indexOf(':') + 1) : '(none)',
+      srcLen: src.length,
+      tagged: !!(el as TaggedMediaElement)._procutClipSrcTag,
+      srcSet: !!el.src,
+      readyState: el.readyState,
+      videoWidth: (el as HTMLVideoElement).videoWidth || 0,
+      videoHeight: (el as HTMLVideoElement).videoHeight || 0,
+      paused: el.paused,
+      muted: el.muted,
+      seeking: el.seeking,
+      currentTime: +el.currentTime.toFixed(2),
+      networkState: el.networkState,
+      error: err ? `code=${err.code} ${err.message || ''}`.trim() : null,
+      computedOpacity: (el as HTMLVideoElement).ownerDocument
+        ? getComputedStyle(el).opacity
+        : null,
+      inDOM: document.contains(el),
+    });
+  }
+  return {
+    device: {
+      android: isAndroidDevice(),
+      ios: isIOSDevice(),
+      coarse: isCoarsePointerDevice(),
+      maxLoadedVideos: getMaxLoadedVideos(),
+    },
+    playing: s.isPlaying,
+    scrubbing: s.isScrubbing,
+    time: +getPlaybackTime().toFixed(2),
+    poolSize: globalMediaPool.size,
+    videoMapSize: globalVideoMap.size,
+    entries,
+  };
 }
 
 // ---------------------------------------------------------------------------

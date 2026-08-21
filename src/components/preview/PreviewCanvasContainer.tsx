@@ -39,6 +39,8 @@ import {
 import { setOnMaskReadyCallback } from '@/utils/aiBackground';
 import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 import { getOverlayMapping } from './previewMath';
+import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
+import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
 
 export function PreviewCanvasContainer() {
   const currentTime = useEditorStore.getState().currentTime;
@@ -143,6 +145,8 @@ export function PreviewCanvasContainer() {
   const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
   const setIsScrubbing = useEditorStore((s) => s.setIsScrubbing);
   const [adaptiveQuality, setAdaptiveQuality] = useState<'high' | 'medium' | 'low'>('high');
+  // On-device media diagnostics (Android remote debugging): ?mediadebug=1
+  const [mediaDebug] = useState(() => isMediaDebugEnabled());
   const lastScrubTimeRef = useRef<number>(0);
 
   useEffect(() => {
@@ -928,6 +932,7 @@ export function PreviewCanvasContainer() {
           videoElements={videoElements}
           containerRef={containerRef}
         />
+        {mediaDebug && <MediaPoolDebugOverlay />}
       </div>
 
       {/* Transport Controls Bar */}
