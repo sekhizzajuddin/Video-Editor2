@@ -264,8 +264,13 @@ export async function renderCanvasEngine({
   const storeState = useEditorStore.getState();
   const perfDowngraded = storeState.perfDowngraded;
   const adaptiveSlowdown = !isExporting && perfDowngraded && isPlaying;
-  const skipExpensiveFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter')));
-  const skipUltraHeavyFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half')));
+  // MOBILE PERF: on mobile, always skip expensive CPU pixel operations
+  // (getImageData/putImageData) during playback. These stall the GPU→CPU
+  // readback pipeline on TBDR mobile GPUs (Mali, Adreno, Apple GPU),
+  // causing severe frame drops. Effects still render when paused.
+  const isMobilePlaying = isPlaying && (typeof navigator !== 'undefined' && (/android/i.test(navigator.userAgent) || /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)));
+  const skipExpensiveFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || isMobilePlaying)));
+  const skipUltraHeavyFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half' || isMobilePlaying)));
 
   // PERF: build mediaMap once per render. mediaLibrary.find() per clip was
   // an O(N×M) hot loop. With 5 clips × 50 media items, that's 250 comparisons

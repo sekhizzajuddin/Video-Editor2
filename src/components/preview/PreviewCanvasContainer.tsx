@@ -41,6 +41,7 @@ import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime } from '@/utils
 import { getOverlayMapping } from './previewMath';
 import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
+import { isMobileDevice } from '@/hooks/useMediaPlayback';
 
 export function PreviewCanvasContainer() {
   const currentTime = useEditorStore.getState().currentTime;
@@ -486,9 +487,33 @@ export function PreviewCanvasContainer() {
     let isRendering = false;
     let lastTime = performance.now();
     let lastSyncTime = performance.now();
+    // MOBILE PERF: throttle render loop to 30fps on mobile devices.
+    // Modern phones fire rAF at 90–120Hz which overwhelms mobile GPUs
+    // with canvas 2D compositing. 30fps is the standard video preview
+    // rate used by CapCut/InShot/VN on mobile.
+    const isMobile = isMobileDevice();
+    const MOBILE_FRAME_BUDGET = 1000 / 30; // ~33ms per frame at 30fps
+    let lastRenderTime = 0;
 
     const tick = (now: number) => {
       rafId = requestAnimationFrame(tick);
+
+      // MOBILE PERF: skip this frame if we haven't hit the 30fps budget yet
+      if (isMobile && (now - lastRenderTime) < MOBILE_FRAME_BUDGET) {
+        // Still update time tracking so playback stays smooth
+        if (useEditorStore.getState().isPlaying) {
+          const dir = useEditorStore.getState().playbackDirection ?? 1;
+          const speed = useEditorStore.getState().playbackSpeed;
+          const dt = (now - lastTime) / 1000;
+          lastTime = now;
+          currentTimeRef.current = currentTimeRef.current + dt * speed * dir;
+          setPlaybackTime(currentTimeRef.current);
+        } else {
+          lastTime = now;
+        }
+        return;
+      }
+      lastRenderTime = now;
 
       const state = useEditorStore.getState();
       // While paused, the clock and the store agree exactly (seek/pause both flush
@@ -828,16 +853,22 @@ export function PreviewCanvasContainer() {
       : aspectRatio === '4:3'
       ? Math.round(480 * (4 / 3))
       : 854;
+  // MOBILE PERF: force half-resolution on mobile unless the user explicitly set
+  // quarter. 480p overwhelms mobile TBDR GPUs (drawImage + offscreen buffers).
+  // 240p is visually sufficient on small screens and cuts pixel throughput 4x.
+  const effectiveQuality = isMobileDevice() && settings.previewQuality === 'full'
+    ? 'half'
+    : settings.previewQuality;
   const previewWidth =
-    settings.previewQuality === 'quarter'
+    effectiveQuality === 'quarter'
       ? Math.max(1, Math.round(previewBaseWidth / 4))
-      : settings.previewQuality === 'half'
+      : effectiveQuality === 'half'
       ? Math.max(1, Math.round(previewBaseWidth / 2))
       : previewBaseWidth;
   const previewHeight =
-    settings.previewQuality === 'quarter'
+    effectiveQuality === 'quarter'
       ? 120
-      : settings.previewQuality === 'half'
+      : effectiveQuality === 'half'
       ? 240
       : 480;
 
