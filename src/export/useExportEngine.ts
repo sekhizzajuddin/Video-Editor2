@@ -10,6 +10,7 @@ import { ExportWorkerConfig } from './engine/export.worker';
 import { ExportWorkerManager } from './engine/ExportWorkerManager';
 import { ExportPhase } from './types';
 import { defaultExportPipeline } from './ExportPipeline';
+import { promoteCanvasToExportSize } from './exportCanvasSize';
 import { useEditorStore } from '@/store/editorStore';
 
 export interface Resolution {
@@ -103,8 +104,19 @@ export function useExportEngine() {
           throw new Error('Preview canvas not available for fallback export');
         }
 
+        // MOBILE EXPORT FIX: capture-based backends encode the preview canvas
+        // buffer as-is. Without promotion the buffer stays at the hard-coded
+        // 854×480 landscape defaults (setExportDimensions was never called
+        // anywhere), so e.g. a 9:16 project got letterboxed into 854×480 and
+        // then stretched/recorded at the wrong size — "over-stretched, ignoring
+        // the chosen project resolution" on phones. Promote the canvas to the
+        // actual requested export resolution and restore it afterwards.
+        const restoreCanvasSize = await promoteCanvasToExportSize(config.width, config.height);
+
         // Use the preview canvas which already renders exactly what user sees
-        const { blob: outBlob } = await defaultExportPipeline
+        let outBlob: Blob;
+        try {
+        const captureResult = await defaultExportPipeline
           .start({
             width: config.width,
             height: config.height,
@@ -129,6 +141,13 @@ export function useExportEngine() {
             },
           })
           .promise;
+        outBlob = captureResult.blob;
+        } finally {
+          // Restore preview canvas to its previous size/state regardless of
+          // capture success/failure (also resets the previously-leaked
+          // isExporting flag).
+          restoreCanvasSize();
+        }
 
         // Save blob to OPFS (same as worker path)
         const outFileName = `${config.filename}.${config.format === 'webm' ? 'webm' : 'mp4'}`;

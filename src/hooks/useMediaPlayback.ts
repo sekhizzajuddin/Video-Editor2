@@ -14,7 +14,7 @@
  * 10. Speed ramp respected in synchronousSeek
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue } from '@/utils/keyframes';
@@ -22,6 +22,7 @@ import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
 import { getPlaybackTime } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains } from '@/utils/transitionEngine';
+import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
 // ---------------------------------------------------------------------------
 // Global Master Audio Context
@@ -150,6 +151,137 @@ const globalPlaybackResult: MediaPlaybackResult = { videoElements: globalVideoMa
 let primaryControllerId: number | null = null;
 let nextControllerId = 1;
 const activeControllers = new Set<number>();
+// Listener set used to push "primary changed" notifications to all mounted
+// hook instances (React concurrent-safe).
+const controllerListeners = new Set<() => void>();
+
+function notifyControllerChange(): void {
+  for (const l of controllerListeners) {
+    try {
+      l();
+    } catch {
+      /* a broken listener must never break controller registration */
+    }
+  }
+}
+
+function registerControllerInstance(id: number): void {
+  activeControllers.add(id);
+  if (primaryControllerId === null || !activeControllers.has(primaryControllerId)) {
+    primaryControllerId = id;
+  }
+  notifyControllerChange();
+}
+
+function unregisterControllerInstance(id: number): void {
+  activeControllers.delete(id);
+  if (primaryControllerId === id) {
+    // Deterministic: the lowest surviving id becomes primary.
+    primaryControllerId =
+      activeControllers.size > 0 ? Math.min(...activeControllers) : null;
+  }
+  notifyControllerChange();
+}
+
+// ---------------------------------------------------------------------------
+// Mobile / Android support helpers
+// ---------------------------------------------------------------------------
+/**
+ * True on phones and tablets (any coarse-pointer / multi-touch device).
+ * Used to scale media-pool behaviour for the constrained mobile media stack.
+ */
+export function isCoarsePointerDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  return (
+    (navigator.maxTouchPoints ?? 0) > 1 ||
+    (typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches)
+  );
+}
+
+export function isAndroidDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /android/i.test(navigator.userAgent || '');
+}
+
+export function isIOSDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
+export function isMobileDevice(): boolean {
+  return isAndroidDevice() || isIOSDevice() || isCoarsePointerDevice();
+}
+
+/**
+ * How many pooled <video> elements may hold a src at once.
+ *
+ * ANDROID FIX: phones expose only a handful of hardware video decoder
+ * instances; elements beyond that budget stay stuck at readyState 0 and can
+ * never be drawn (black preview). Two sources cover an A/V pair or a single
+ * transition on a phone; desktop GPUs get four for dense multi-track stacks.
+ *
+ * Deliberately keyed off the mobile OS (Android/iOS), NOT coarse pointers:
+ * Windows touchscreen laptops report maxTouchPoints > 0 but have full desktop
+ * decoder budgets and must not be downgraded. Resolved once per session.
+ */
+let cachedMaxLoadedVideos: number | null = null;
+export function getMaxLoadedVideos(): number {
+  if (cachedMaxLoadedVideos === null) {
+    cachedMaxLoadedVideos = isAndroidDevice() || isIOSDevice() ? 2 : 4;
+  }
+  return cachedMaxLoadedVideos;
+}
+
+// ---------------------------------------------------------------------------
+// Media-source URL helpers
+// ---------------------------------------------------------------------------
+/**
+ * ANDROID FIX: Chrome/WebView on real Android devices mishandles media
+ * element srcs carrying a `#fragment` when the URL uses the `blob:`/`data:`
+ * scheme — the load can stall or fail outright (fragments are only meaningful
+ * as media-fragments for remote resources; on local blob URLs they break the
+ * fetch on Android builds), while desktop Chrome resolves them identically.
+ * This is exactly why imported clips rendered their timeline thumbnails on
+ * Android (the import probe uses the raw blob URL) yet the pooled preview
+ * video never became drawable — it was assigned `blobUrl + '#clip=<id>'`.
+ * Local schemes now get the RAW URL; per-clip uniqueness for the src-dedupe
+ * check is tracked on the element itself instead of inside the URL.
+ */
+export function mediaSrcFor(url: string, clipId: string): string {
+  if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+  return url.includes('#') ? `${url}&clip=${clipId}` : `${url}#clip=${clipId}`;
+}
+
+type TaggedMediaElement = HTMLMediaElement & { _procutClipSrcTag?: string | null };
+
+/**
+ * Assign `el.src` for a clip only when it actually changed (tracked via an
+ * element-level tag, NOT by comparing against the resolved `el.src` string).
+ * Returns true when a new src was assigned — the caller should el.load().
+ */
+export function assignClipMediaSrc(
+  el: TaggedMediaElement,
+  clipId: string,
+  url: string
+): boolean {
+  const src = mediaSrcFor(url, clipId);
+  const tag = `${clipId}|${src}`;
+  if (el._procutClipSrcTag === tag) return false;
+  el._procutClipSrcTag = tag;
+  el.src = src;
+  return true;
+}
+
+/** Fully clears a pooled element's source AND its dedupe tag. */
+export function clearClipMediaSrc(el: TaggedMediaElement): void {
+  el._procutClipSrcTag = null;
+  el.removeAttribute('src');
+  try { el.load(); } catch { /* already detached */ }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -547,17 +679,41 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
   const [instanceId] = useState(() => nextControllerId++);
 
-  if (isController) {
-    activeControllers.add(instanceId);
-    if (primaryControllerId === null || !activeControllers.has(primaryControllerId)) {
-      primaryControllerId = instanceId;
-    }
-  }
+  // CONCURRENT-MODE FIX (root cause of "Android shows POOL EMPTY / black
+  // preview"): controller registration used to happen here as a RENDER-phase
+  // side effect (mutating module-level sets inside the component body). Under
+  // React 18 concurrent rendering a pass can be discarded without committing —
+  // exactly what happens around the MOBILE app's React.lazy/<Suspense> boundary
+  // wrapping the PreviewCanvas (desktop mounts it eagerly, which is why PC —
+  // including responsive emulation — never reproduced this). A discarded pass
+  // still incremented nextControllerId and add()'ed a phantom instance into
+  // activeControllers, potentially claiming primaryControllerId — after which
+  // the real committed instance computed isPrimary=false FOREVER, every pooled
+  // effect early-returned, and no <video>/<audio> element was ever created.
+  //
+  // Registration now happens in an effect (committed instances only), and
+  // primacy is read through useSyncExternalStore — the canonical API for
+  // external stores — so every mounted instance re-evaluates primacy whenever
+  // the registry changes (first-registration, primary unmount, etc.).
+  const isPrimary = useSyncExternalStore(
+    (onChange) => {
+      if (!isController) return () => {};
+      controllerListeners.add(onChange);
+      return () => {
+        controllerListeners.delete(onChange);
+      };
+    },
+    () => isController && primaryControllerId === instanceId,
+    () => false
+  );
 
-  const isPrimary = isController && (primaryControllerId === instanceId || primaryControllerId === null || !activeControllers.has(primaryControllerId));
-  if (isController && isPrimary && primaryControllerId !== instanceId) {
-    primaryControllerId = instanceId;
-  }
+  useEffect(() => {
+    if (!isController) return;
+    registerControllerInstance(instanceId);
+    return () => {
+      unregisterControllerInstance(instanceId);
+    };
+  }, [isController, instanceId]);
 
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
@@ -619,21 +775,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     window.dispatchEvent(new CustomEvent('procut-frame-updated'));
   }, []);
 
-  const getMediaContainer = () => {
-    let mediaContainer = document.getElementById('procut-media-pool');
-    if (!mediaContainer) {
-      mediaContainer = document.createElement('div');
-      mediaContainer.id = 'procut-media-pool';
-      mediaContainer.style.position = 'absolute';
-      mediaContainer.style.opacity = '0';
-      mediaContainer.style.pointerEvents = 'none';
-      mediaContainer.style.width = '1px';
-      mediaContainer.style.height = '1px';
-      mediaContainer.style.overflow = 'hidden';
-      document.body.appendChild(mediaContainer);
-    }
-    return mediaContainer;
-  };
+  // ANDROID RENDERING FIX: the pool container (and every video inside it) must
+  // NOT be fully invisible — Chrome on Android never composites opacity:0 /
+  // zero-size media elements, so their decoded frames never reach drawImage()
+  // (black preview on real phones only; desktop, incl. responsive-mode
+  // emulation, is unaffected). getMediaPoolContainer implements the standard
+  // "painted but invisible" 2×2px / opacity-0.01 pattern; it is module-level
+  // and idempotent. See utils/mediaPoolContainer.ts.
 
   // ---- Eager master audio context init ----
   if (typeof window !== 'undefined') {
@@ -729,7 +877,6 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // ---- Pool management (create/remove elements) ----
   const VIDEO_PROXIMITY_WINDOW = 5;
   const AUDIO_PROXIMITY_WINDOW = 15;
-  const MAX_LOADED_VIDEOS = 4;
   const MAX_GLOBAL_FRAME_CACHE = 30;
 
   useEffect(() => {
@@ -775,10 +922,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const existing = pool.get(clipId);
       if (existing) {
         if (existing.type === 'audio' && media.url !== 'PENDING_RESTORE') {
-          const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
-          const finalSrc = media.url + hash;
-          if (existing.el.src !== finalSrc && !existing.el.src.endsWith(finalSrc)) {
-            existing.el.src = finalSrc;
+          if (assignClipMediaSrc(existing.el as TaggedMediaElement, clipId, media.url)) {
             existing.el.load();
           }
         }
@@ -796,9 +940,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           } else {
             el.crossOrigin = 'anonymous';
           }
-          el.style.position = 'absolute';
-          el.style.opacity = '0';
-          el.style.pointerEvents = 'none';
+          // ANDROID RENDERING FIX: styles the element "painted but invisible"
+          // and appends it to the shared composited pool container. opacity 0
+          // would make Chrome-Android treat the video as unpainted → decoder
+          // frames never reach drawImage() → black preview on phones only.
+          attachInvisibleMediaElement(el);
+          // Hidden pool videos must never hijack Android's PiP / Cast UI.
+          if ('disablePictureInPicture' in el) el.disablePictureInPicture = true;
+          if ('disableRemotePlayback' in el) el.disableRemotePlayback = true;
 
         const handleSeeked = () => {
           triggerRedraw();
@@ -812,6 +961,33 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         el.addEventListener('seeked', handleSeeked);
         el.addEventListener('timeupdate', triggerRedraw);
         el.addEventListener('canplay', triggerRedraw);
+        // Repaint as soon as the first decodable frame / metadata arrives so the
+        // paused preview shows frame 0 without waiting for a seek.
+        el.addEventListener('loadedmetadata', triggerRedraw);
+        el.addEventListener('loadeddata', triggerRedraw);
+
+        // ANDROID RECOVERY: a video load that errors or stalls (decoder
+        // contention is common on phones) must not stay black forever — the
+        // src loader only ever assigns src once, so without this retry the clip
+        // would never render. Bounded, backoff-spaced, and only while the clip
+        // is still needed.
+        let mediaRetryCount = 0;
+        const retryMediaLoad = () => {
+          if (!poolRef.current.has(clipId)) return;
+          if (!el.src || el.src === '') return;
+          if (el.readyState >= 1) return;
+          if (mediaRetryCount >= 3) return;
+          mediaRetryCount++;
+          const delay = 400 * mediaRetryCount;
+          setTimeout(() => {
+            if (!poolRef.current.has(clipId)) return;
+            if (el.readyState >= 1) return;
+            try { el.load(); } catch { /* element gone */ }
+          }, delay);
+        };
+        (el as HTMLVideoElement & { _mediaRetryLoad?: () => void })._mediaRetryLoad = retryMediaLoad;
+        el.addEventListener('error', retryMediaLoad);
+        el.addEventListener('stalled', retryMediaLoad);
 
         if ('requestVideoFrameCallback' in el) {
           const onVideoFrame = () => {
@@ -836,7 +1012,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           (el as any)._onVisibilityChange = onVisibilityChange;
         }
 
-        getMediaContainer().appendChild(el);
+        // NOTE: element is already attached by attachInvisibleMediaElement() —
+        // must stay inside the painted pool container or Android stops decoding.
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
         pool.set(clipId, entry);
         videoMap.set(clipId, el);
@@ -849,8 +1026,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           } else {
             el.crossOrigin = 'anonymous';
           }
-          const hash = media.url.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
-          el.src = media.url + hash;
+          // ANDROID FIX: raw URL for blob:/data: (fragment on a blob src stalls
+          // media loads on real Android devices). Dedupe is via element tag.
+          assignClipMediaSrc(el as TaggedMediaElement, clipId, media.url);
           el.style.position = 'absolute';
           el.style.opacity = '0';
           el.style.pointerEvents = 'none';
@@ -868,7 +1046,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         };
         (el as any)._handleSeeked = handleSeeked;
         el.addEventListener('seeked', handleSeeked);
-        getMediaContainer().appendChild(el);
+        getMediaPoolContainer().appendChild(el);
         el.load();
 
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'audio' };
@@ -884,6 +1062,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (entry.type === 'video') {
           el.removeEventListener('timeupdate', triggerRedraw);
           el.removeEventListener('canplay', triggerRedraw);
+          el.removeEventListener('loadedmetadata', triggerRedraw);
+          el.removeEventListener('loadeddata', triggerRedraw);
+          if (el._mediaRetryLoad) {
+            el.removeEventListener('error', el._mediaRetryLoad);
+            el.removeEventListener('stalled', el._mediaRetryLoad);
+            el._mediaRetryLoad = null;
+          }
           if (el._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
             el.cancelVideoFrameCallback(el._rvfcHandle);
             el._rvfcHandle = null;
@@ -920,10 +1105,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const media = mediaMapRef.current.get(entry.mediaId);
         if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
         const targetSrc = media.url;
-        const hash = targetSrc.includes('#') ? `&clip=${clipId}` : `#clip=${clipId}`;
-        const finalSrc = targetSrc + hash;
-        if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
-          el.src = finalSrc;
+        if (assignClipMediaSrc(el as TaggedMediaElement, clipId, targetSrc)) {
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
             el.currentTime = pendingTime;
@@ -938,6 +1120,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     // Read the exact playhead position once. (The effect itself is scheduled off
     // the coarse `ctBucket`, so we must not rely on a stale rendered value here.)
     const nowTime = useEditorStore.getState().currentTime;
+    // ANDROID FIX: device-scaled decoder budget (2 on phones, 4 on desktop) —
+    // module-level getter, stable across renders. See getMaxLoadedVideos().
+    const maxLoadedVideos = getMaxLoadedVideos();
 
     // Priority-based video src loading (nearest clips get loaded first)
     const videoEntries: Array<{
@@ -977,7 +1162,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     for (const ve of videoEntries) {
       const el = ve.entry.el as HTMLVideoElement;
       const isNear = ve.dist <= getProximityWindow(ve.media);
-      const canLoad = loadedCount < MAX_LOADED_VIDEOS;
+      // ACTIVE-CLIP PRIORITY: the clip currently under the playhead must always
+      // receive a src, even when the (already mobile-reduced) decoder budget is
+      // exhausted by neighbours. Otherwise overlapping multi-track clips render
+      // black — much easier to hit on a phone where the budget is just 2.
+      const isActiveClip = nowTime >= ve.absStart && nowTime < ve.absStart + ve.clipDuration;
+      const canLoad = isActiveClip || loadedCount < maxLoadedVideos;
 
       if (isNear && canLoad) {
         const targetSrc = ve.media.url;
@@ -986,10 +1176,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             .then((file) => (file ? URL.createObjectURL(file) : null))
             .then((restoredUrl) => {
               if (!restoredUrl) return;
-              const hash = restoredUrl.includes('#') ? `&clip=${ve.clipId}` : `#clip=${ve.clipId}`;
-              const finalSrc = restoredUrl + hash;
-              if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
-                el.src = finalSrc;
+              if (assignClipMediaSrc(el as TaggedMediaElement, ve.clipId, restoredUrl)) {
                 el.load();
                 useEditorStore.setState((state) => ({
                   mediaLibrary: state.mediaLibrary.map((m) =>
@@ -1005,10 +1192,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             })
             .catch(() => {});
         } else {
-          const hash = targetSrc.includes('#') ? `&clip=${ve.clipId}` : `#clip=${ve.clipId}`;
-          const finalSrc = targetSrc + hash;
-          if (el.src !== finalSrc && !el.src.endsWith(finalSrc)) {
-            el.src = finalSrc;
+          if (assignClipMediaSrc(el as TaggedMediaElement, ve.clipId, targetSrc)) {
             const pendingTime = pendingSeeksRef.current.get(ve.clipId);
             if (pendingTime !== undefined) {
               el.currentTime = pendingTime;
@@ -1019,9 +1203,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
         loadedCount++;
       } else {
-        if (el.src !== '') {
-          el.removeAttribute('src');
-          try { el.load(); } catch (e) {}
+        // ANDROID FIX: clear via the tag-aware helper so the dedupe state is
+        // reset alongside the src (plain removeAttribute would leave the tag
+        // claiming the src is still assigned).
+        if (el.src !== '' || (el as TaggedMediaElement)._procutClipSrcTag) {
+          clearClipMediaSrc(el as TaggedMediaElement);
         }
       }
     }
@@ -1630,13 +1816,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   }, [isPrimary, triggerRedraw]);
 
   // ---- Unmount cleanup ----
+  // Registration/primacy bookkeeping (removing this instance from
+  // activeControllers and promoting the next controller) is handled by the
+  // registration effect's cleanup, which runs FIRST on unmount because it is
+  // declared earlier. This effect only tears down the shared media pool when
+  // no controllers remain anywhere in the app.
   useEffect(() => {
     return () => {
       if (isController) {
-        activeControllers.delete(instanceId);
-        if (primaryControllerId === instanceId) {
-          primaryControllerId = activeControllers.size > 0 ? Array.from(activeControllers)[0] : null;
-        }
         // ONLY tear down the media pool if NO active controllers exist in the whole app!
         if (activeControllers.size === 0) {
           const pool = poolRef.current;
@@ -1709,6 +1896,96 @@ export async function synchronousSeek(targetTime: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// On-device media pool diagnostics (Android remote debugging)
+// ---------------------------------------------------------------------------
+export interface MediaPoolDebugEntry {
+  clipId: string;
+  type: 'video' | 'audio';
+  srcScheme: string;
+  srcLen: number;
+  tagged: boolean;
+  srcSet: boolean;
+  readyState: number;
+  videoWidth: number;
+  videoHeight: number;
+  paused: boolean;
+  muted: boolean;
+  seeking: boolean;
+  currentTime: number;
+  networkState: number;
+  error: string | null;
+  computedOpacity: string | null;
+  inDOM: boolean;
+}
+
+export interface MediaPoolDebugSnapshot {
+  device: { android: boolean; ios: boolean; coarse: boolean; maxLoadedVideos: number };
+  /** Controller registry: if primary is null/-1 or active is empty, the pool
+   * never starts — that was the root cause of the mobile "POOL EMPTY" state. */
+  registry: { primaryControllerId: number | null; activeControllers: number[] };
+  playing: boolean;
+  scrubbing: boolean;
+  time: number;
+  poolSize: number;
+  videoMapSize: number;
+  entries: MediaPoolDebugEntry[];
+}
+
+/**
+ * Snapshot of every pooled media element — designed to answer "why is the
+ * canvas black on this phone?" from a single screenshot when opened with
+ * `?mediadebug=1` (see MediaPoolDebugOverlay).
+ */
+export function getMediaPoolDebugSnapshot(): MediaPoolDebugSnapshot {
+  const s = useEditorStore.getState();
+  const entries: MediaPoolDebugEntry[] = [];
+  for (const [clipId, entry] of globalMediaPool) {
+    const el = entry.el;
+    const err = el.error;
+    const src = el.getAttribute('src') || '';
+    entries.push({
+      clipId,
+      type: entry.type,
+      srcScheme: src ? src.slice(0, src.indexOf(':') + 1) : '(none)',
+      srcLen: src.length,
+      tagged: !!(el as TaggedMediaElement)._procutClipSrcTag,
+      srcSet: !!el.src,
+      readyState: el.readyState,
+      videoWidth: (el as HTMLVideoElement).videoWidth || 0,
+      videoHeight: (el as HTMLVideoElement).videoHeight || 0,
+      paused: el.paused,
+      muted: el.muted,
+      seeking: el.seeking,
+      currentTime: +el.currentTime.toFixed(2),
+      networkState: el.networkState,
+      error: err ? `code=${err.code} ${err.message || ''}`.trim() : null,
+      computedOpacity: (el as HTMLVideoElement).ownerDocument
+        ? getComputedStyle(el).opacity
+        : null,
+      inDOM: document.contains(el),
+    });
+  }
+  return {
+    device: {
+      android: isAndroidDevice(),
+      ios: isIOSDevice(),
+      coarse: isCoarsePointerDevice(),
+      maxLoadedVideos: getMaxLoadedVideos(),
+    },
+    registry: {
+      primaryControllerId,
+      activeControllers: [...activeControllers],
+    },
+    playing: s.isPlaying,
+    scrubbing: s.isScrubbing,
+    time: +getPlaybackTime().toFixed(2),
+    poolSize: globalMediaPool.size,
+    videoMapSize: globalVideoMap.size,
+    entries,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // getLiveAudioStream
 // ---------------------------------------------------------------------------
 export async function getLiveAudioStream(): Promise<MediaStream | null> {
@@ -1718,25 +1995,45 @@ export async function getLiveAudioStream(): Promise<MediaStream | null> {
   return master.clone();
 }
 
+/**
+ * Gesture-bound media unlock for mobile browsers.
+ *
+ * Despite the legacy name this now covers Android as well as iOS. Mobile Chrome
+ * requires (a) a user gesture before any audible play(), (b) a gesture to wake
+ * the hardware decoder pipeline for freshly created <video> elements, and
+ * (c) a gesture to resume a suspended AudioContext. MobileApp / the transport
+ * Play button call this synchronously inside the tap handler. On desktop it is
+ * a no-op, preserving existing PC behaviour exactly.
+ */
 export function unlockiOSVideoPlay() {
-  const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-  if (!isIOS) return;
-  const ctx = getMasterAudioCtx();
-  if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-  }
-  for (const el of globalVideoMap.values()) {
-    if (el.paused) {
-      const prevMuted = el.muted;
-      el.muted = true;
-      const p = el.play();
-      if (p !== undefined) {
-        p.then(() => {
-          el.pause();
+  if (!isMobileDevice()) return;
+  try {
+    const ctx = getMasterAudioCtx();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    for (const el of globalVideoMap.values()) {
+      if (el.paused) {
+        const prevMuted = el.muted;
+        el.muted = true; // muted play() is gesture-safe on Android + iOS
+        const p = el.play();
+        if (p !== undefined) {
+          p.then(() => {
+            el.pause();
+            el.muted = prevMuted;
+          }).catch(() => {
+            el.muted = prevMuted;
+          });
+        } else {
           el.muted = prevMuted;
-        }).catch(() => {});
+        }
       }
     }
+  } catch {
+    // Never let an unlock attempt break the UI gesture that triggered it.
   }
 }
+
+/** Clearer alias for new call sites. Same generalized unlock. */
+export const unlockMobileMediaPlayback = unlockiOSVideoPlay;
 

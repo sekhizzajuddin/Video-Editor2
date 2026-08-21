@@ -1,6 +1,7 @@
 import { EncoderBackend, EncoderBackendType, ExportOptions } from '../types';
 import { useEditorStore } from '../../store/editorStore';
 import { getLiveAudioStream } from '../../hooks/useMediaPlayback';
+import { promoteCanvasToExportSize, CanvasSizeRestore } from '../exportCanvasSize';
 
 export class MediaRecorderBackend implements EncoderBackend {
   readonly type: EncoderBackendType = 'mediarecorder';
@@ -34,6 +35,17 @@ export class MediaRecorderBackend implements EncoderBackend {
 
     opts.setStatusMsg?.('Preparing software real-time stream capture...');
     opts.onProgress({ stage: 'preparing', percentage: 5, message: 'Setting up stream capture...' });
+
+    // MOBILE EXPORT FIX: MediaRecorder binds the recorded track to the canvas
+    // buffer size observed at captureStream() time. If the buffer is still the
+    // default 854×480 landscape export stub (or the scaled interactive preview
+    // size), the output file ignores the user-selected resolution entirely and
+    // portrait projects come out stretched into landscape. Promote the canvas
+    // to the requested export resolution BEFORE capturing, restore after stop.
+    let restoreCanvasSize: CanvasSizeRestore | null = null;
+    try {
+      restoreCanvasSize = await promoteCanvasToExportSize(opts.width, opts.height);
+    } catch { /* best effort — capture continues at current canvas size */ }
 
     // Ensure audio stream is live and cloned to avoid stale handles (Issue 1)
     const liveAudio = await getLiveAudioStream();
@@ -70,10 +82,12 @@ export class MediaRecorderBackend implements EncoderBackend {
         };
 
         this.recorder.onerror = (e: any) => {
+          restoreCanvasSize?.();
           reject(new Error(`MediaRecorder error: ${e.error || e.message || 'unknown error'}`));
         };
 
         this.recorder.onstop = () => {
+          restoreCanvasSize?.();
           if (this.cancelled) {
             reject(new Error('Export cancelled by user.'));
             return;
@@ -119,6 +133,7 @@ export class MediaRecorderBackend implements EncoderBackend {
         }, 300);
 
       } catch (err) {
+        restoreCanvasSize?.();
         reject(err);
       }
     });

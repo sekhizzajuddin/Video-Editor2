@@ -7,6 +7,7 @@
  */
 
 import type { MediaItem, MediaType } from '@/types';
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,14 @@ export async function probeVideo(
   video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
+  video.playsInline = true;
+  // ANDROID FIX: an unattached / fully invisible video element is not
+  // composited on Chrome-Android, so decodes (and thus the thumbnail
+  // drawImage below) can return black frames or stall on real phones.
+  // Attach it to the shared "painted but invisible" pool container instead.
+  attachInvisibleMediaElement(video);
 
+  try {
   // Wait for metadata
   await new Promise<void>((resolve, reject) => {
     video.onloadedmetadata = () => resolve();
@@ -103,6 +111,7 @@ export async function probeVideo(
 
   video.src = '';
   video.load();
+  video.remove();
 
   return {
     duration,
@@ -113,6 +122,10 @@ export async function probeVideo(
     waveformPeaks,
     frameRate: 30, // Browser can't easily detect — default 30fps
   };
+  } finally {
+    // Guarantee the transient probe element leaves the shared container.
+    video.remove();
+  }
 }
 
 // ── Audio probe ──────────────────────────────────────────────────────────────
@@ -266,7 +279,11 @@ export async function generateFrameStripOnDemand(
   video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
-  video.crossOrigin = 'anonymous';
+  video.playsInline = true;
+  // ANDROID FIX: keep element composited while decoding — see
+  // utils/mediaPoolContainer.ts. Unattached videos can capture black frames
+  // on Chrome-Android.
+  attachInvisibleMediaElement(video);
 
   await new Promise<void>((resolve, reject) => {
     video.onloadedmetadata = () => resolve();
@@ -283,6 +300,7 @@ export async function generateFrameStripOnDemand(
   } finally {
     video.src = '';
     video.load();
+    video.remove();
   }
   return strip;
 }

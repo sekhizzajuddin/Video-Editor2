@@ -18,6 +18,7 @@ import * as Mp4Muxer from 'mp4-muxer';
 import { Input, ALL_FORMATS, BlobSource } from 'mediabunny';
 import { h264CodecCandidates } from '../quality';
 
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 interface NormalizeResult {
   url: string;        // original or transcoded URL
   transcoded: boolean;
@@ -144,6 +145,10 @@ async function transcodeToMp4(blob: Blob): Promise<string> {
   video.muted = true;
   video.playsInline = true;
   video.preload = 'auto';
+  // ANDROID FIX: detached/invisible video elements are never composited on
+  // Chrome-Android, so seeks + drawImage() below would capture black frames.
+  // Attach to the shared "painted but invisible" pool container instead.
+  attachInvisibleMediaElement(video);
   video.src = srcUrl;
 
   try {
@@ -213,6 +218,7 @@ async function transcodeToMp4(blob: Blob): Promise<string> {
   } finally {
     video.src = '';
     video.load();
+    video.remove();
     URL.revokeObjectURL(srcUrl);
   }
 }

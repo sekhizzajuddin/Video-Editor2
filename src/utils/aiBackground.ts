@@ -27,6 +27,7 @@ import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
 import { detectHumanPresence, computeROICrop } from './humanDetection';
 import { stabilizeTemporalAlpha } from './temporalMaskEngine';
 
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 // ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
 let mediaPipeGeneralSegmenter: any = null;
 let mediaPipeLandscapeSegmenter: any = null;
@@ -472,7 +473,11 @@ export async function startClipBackgroundAnalysis(
   video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
-  video.crossOrigin = 'anonymous';
+  video.playsInline = true;
+  // ANDROID FIX: keep element composited while decoding frames for mask
+  // inference — detached/invisible videos never produce frames on
+  // Chrome-Android (see utils/mediaPoolContainer.ts).
+  attachInvisibleMediaElement(video);
 
   try {
     await loadBackgroundRemover();
@@ -655,6 +660,7 @@ export async function startClipBackgroundAnalysis(
   } finally {
     video.src = '';
     video.load();
+    video.remove();
   }
 }
 

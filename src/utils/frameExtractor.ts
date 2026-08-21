@@ -5,6 +5,8 @@
  * evenly-spaced intervals. Includes a memory cache per media ID.
  */
 
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
+
 // Cache: mediaId -> array of data URL frames
 const frameCache = new Map<string, string[]>();
 
@@ -34,7 +36,11 @@ export async function extractFrames(
   video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
-  video.crossOrigin = 'anonymous';
+  video.playsInline = true;
+  // ANDROID FIX: keep the element composited while decoding (see
+  // utils/mediaPoolContainer.ts) — detached/invisible videos can capture black
+  // frames on Chrome-Android.
+  attachInvisibleMediaElement(video);
 
   try {
     // Wait for the video to be ready
@@ -97,6 +103,7 @@ export async function extractFrames(
     // Cleanup
     video.src = '';
     video.load();
+    video.remove();
   }
 }
 
@@ -129,7 +136,11 @@ export async function extractFramesFromVideo(
   video.crossOrigin = 'anonymous';
   video.preload = 'auto';
   video.muted = true;
-  video.crossOrigin = 'anonymous';
+  video.playsInline = true;
+  // ANDROID FIX: keep the element composited while decoding (see
+  // utils/mediaPoolContainer.ts) — detached/invisible videos can capture black
+  // frames on Chrome-Android.
+  attachInvisibleMediaElement(video);
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -189,5 +200,6 @@ export async function extractFramesFromVideo(
   } finally {
     video.src = '';
     video.load();
+    video.remove();
   }
 }
