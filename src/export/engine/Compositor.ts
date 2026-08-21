@@ -792,6 +792,25 @@ export class Compositor {
       targetCtx.restore();
     }
 
+    // ── FX track effects (full-frame shader pass) ────────────────────────────
+    // FX-track clips carry `fxSettings` (Glitch, VHS, Cinematic Bars, Old Film,
+    // …) that are applied over the WHOLE composited frame, not a single clip's
+    // pixels. Each active FX layer's shader runs in z-order over the already
+    // composited content + particles, mirroring the preview's timeline-FX pass.
+    for (const layer of contentLayers) {
+      if (layer.type !== 'fx' || !layer.fxSettings) continue;
+      const localTime = Math.max(0, (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
+      applyFxEffect(
+        targetCtx as unknown as CanvasRenderingContext2D,
+        this.canvas.width,
+        this.canvas.height,
+        layer.fxSettings.type,
+        layer.fxSettings.intensity ?? 100,
+        localTime,
+        false
+      );
+    }
+
     // Second pass: apply adjustment layers over composited content
     if (needsIntermediate && tempCanvas) {
       // Blit intermediate canvas to main canvas

@@ -53,13 +53,35 @@ function getPerRatioFraming(clipId: string, aX: number, aY: number, aScale: numb
  * Returns the uniform scale plus the letterbox offsets, so callers can convert
  * both deltas and absolute positions correctly.
  */
+/**
+ * Size of the project's visible picture (the frame) for the current aspect ratio.
+ *
+ * Height is fixed at 480 and width follows, which is the convention the renderer
+ * and overlay both use. The canvas buffer and the overlay viewBox are now sized to
+ * THIS frame (not a fixed 16:9 854×480 box), so non-16:9 projects are no longer
+ * letterboxed twice — the cause of portrait/square clips rendering tiny (or
+ * seemingly "not rendering") in the portrait mobile preview.
+ */
+export function getFrameSizeWH(): { W: number; H: number } {
+  const H = 480;
+  let W = 854;
+  try {
+    const ar = useEditorStore.getState().aspectRatio;
+    if (ar === '9:16') W = Math.round(H * (9 / 16));
+    else if (ar === '1:1') W = H;
+    else if (ar === '4:3') W = Math.round(H * (4 / 3));
+  } catch {
+    /* outside store context */
+  }
+  return { W, H };
+}
+
 export function getOverlayMapping(rect: { width: number; height: number }): {
   scale: number;
   offsetX: number;
   offsetY: number;
 } {
-  const VIEW_W = 854;
-  const VIEW_H = 480;
+  const { W: VIEW_W, H: VIEW_H } = getFrameSizeWH();
   if (!rect.width || !rect.height) {
     return { scale: 1, offsetX: 0, offsetY: 0 };
   }
@@ -120,8 +142,9 @@ export function clientToViewportSpace(
 ): { x: number; y: number } {
   const raw = clientToOverlay(clientX, clientY, rect);
   const zoom = viewport.zoom || 1;
-  const cx = 854 / 2;
-  const cy = 480 / 2;
+  const { W, H } = getFrameSizeWH();
+  const cx = W / 2;
+  const cy = H / 2;
   // Inverse of: translate(totalX, totalY) scale(zoom)
   const totalX = cx + viewport.x - cx * zoom;
   const totalY = cy + viewport.y - cy * zoom;

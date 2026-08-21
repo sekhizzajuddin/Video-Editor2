@@ -104,7 +104,7 @@ function getSpeedRampMediaTime(
 }
 
 export interface RenderLayer {
-  type: 'video' | 'text' | 'image' | 'adjustment';
+  type: 'video' | 'text' | 'image' | 'adjustment' | 'fx';
   frame?: CanvasImageSource | VideoFrame; // For video/image
   textData?: any;     // For text
   /** Absolute timeline time (seconds) this layer is being evaluated at.
@@ -628,6 +628,24 @@ export class FrameScheduler {
               type: 'text',
               textData: clip,
               timestampSeconds: t,
+              opacity,
+              transform,
+              ...visualSettings,
+              zIndex,
+              order: layerOrder,
+              transitionGeometry,
+              blendMode,
+            });
+          } else if (track.type === 'fx') {
+            // FX-track clip — a full-frame timeline shader (fxSettings) and/or
+            // particle overlay (particleSettings) applied over the composited
+            // frame. No decoder needed; the Compositor runs the shader across
+            // the whole output canvas, matching the preview's timeline-FX pass.
+            layers.push({
+              type: 'fx',
+              timestampSeconds: t,
+              startTime: st,
+              clipId: clip.id,
               opacity,
               transform,
               ...visualSettings,
