@@ -934,9 +934,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             el.preload = 'auto';
             el.muted = true; // MUST be true initially for iOS Safari to preload metadata
             el.playsInline = true;
-          const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-          if (isIOS && (media.url.startsWith('blob:') || media.url.startsWith('data:'))) {
-            // iOS Safari requires omitting crossOrigin for local blobs
+          
+          if (media.url.startsWith('blob:') || media.url.startsWith('data:')) {
+            el.removeAttribute('crossOrigin');
           } else {
             el.crossOrigin = 'anonymous';
           }
@@ -1020,9 +1020,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         } else {
           const el = document.createElement('audio');
           el.preload = 'auto';
-          const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-          if (isIOS && (media.url.startsWith('blob:') || media.url.startsWith('data:'))) {
-            // iOS Safari requires omitting crossOrigin for local blobs
+          
+          if (media.url.startsWith('blob:') || media.url.startsWith('data:')) {
+            el.removeAttribute('crossOrigin');
           } else {
             el.crossOrigin = 'anonymous';
           }
@@ -1030,7 +1030,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // media loads on real Android devices). Dedupe is via element tag.
           assignClipMediaSrc(el as TaggedMediaElement, clipId, media.url);
           el.style.position = 'absolute';
-          el.style.opacity = '0';
+          el.style.opacity = '0.01';
           el.style.pointerEvents = 'none';
 
         const handleSeeked = () => {

@@ -31,19 +31,13 @@ export function getMediaPoolContainer(): HTMLDivElement {
   if (!mediaContainer) {
     mediaContainer = document.createElement('div');
     mediaContainer.id = 'procut-media-pool';
-    mediaContainer.setAttribute('aria-hidden', 'true');
-    const s = mediaContainer.style;
-    s.position = 'fixed';
-    s.top = '0';
-    s.left = '0';
-    s.width = '2px';
-    s.height = '2px';
-    s.overflow = 'hidden';
-    // 0.01 ≈ invisible but still painted — never set this back to 0:
-    // that is exactly what breaks video compositing on Android.
-    s.opacity = '0.01';
-    s.pointerEvents = 'none';
-    s.zIndex = '2147483647';
+    mediaContainer.style.position = 'absolute';
+    mediaContainer.style.opacity = '0.01';
+    mediaContainer.style.pointerEvents = 'none';
+    mediaContainer.style.width = '10px';
+    mediaContainer.style.height = '10px';
+    mediaContainer.style.zIndex = '-9999';
+    mediaContainer.style.overflow = 'hidden';
     document.body.appendChild(mediaContainer);
   }
   return mediaContainer;
