@@ -49,6 +49,10 @@ export function MediaPoolDebugOverlay() {
         {snap.poolSize} vmap={snap.videoMapSize} android={String(snap.device.android)} coarse=
         {String(snap.device.coarse)} maxLoad={snap.device.maxLoadedVideos}
       </div>
+      <div className={snap.registry.primaryControllerId === null ? 'text-red-400' : 'text-cyan-300'}>
+        ctl primary={snap.registry.primaryControllerId === null ? 'NONE!' : snap.registry.primaryControllerId} active=
+        [{snap.registry.activeControllers.join(',') || 'none'}]
+      </div>
       {snap.entries.length === 0 && <div className="text-red-400">POOL EMPTY — no elements created</div>}
       {snap.entries.map((e) => (
         <div key={e.clipId} className={e.error || e.readyState === 0 ? 'text-red-400' : undefined}>

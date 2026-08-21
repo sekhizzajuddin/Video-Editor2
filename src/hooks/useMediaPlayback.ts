@@ -14,7 +14,7 @@
  * 10. Speed ramp respected in synchronousSeek
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
 import { getAnimatedValue } from '@/utils/keyframes';
@@ -151,6 +151,37 @@ const globalPlaybackResult: MediaPlaybackResult = { videoElements: globalVideoMa
 let primaryControllerId: number | null = null;
 let nextControllerId = 1;
 const activeControllers = new Set<number>();
+// Listener set used to push "primary changed" notifications to all mounted
+// hook instances (React concurrent-safe).
+const controllerListeners = new Set<() => void>();
+
+function notifyControllerChange(): void {
+  for (const l of controllerListeners) {
+    try {
+      l();
+    } catch {
+      /* a broken listener must never break controller registration */
+    }
+  }
+}
+
+function registerControllerInstance(id: number): void {
+  activeControllers.add(id);
+  if (primaryControllerId === null || !activeControllers.has(primaryControllerId)) {
+    primaryControllerId = id;
+  }
+  notifyControllerChange();
+}
+
+function unregisterControllerInstance(id: number): void {
+  activeControllers.delete(id);
+  if (primaryControllerId === id) {
+    // Deterministic: the lowest surviving id becomes primary.
+    primaryControllerId =
+      activeControllers.size > 0 ? Math.min(...activeControllers) : null;
+  }
+  notifyControllerChange();
+}
 
 // ---------------------------------------------------------------------------
 // Mobile / Android support helpers
@@ -648,17 +679,41 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
   const [instanceId] = useState(() => nextControllerId++);
 
-  if (isController) {
-    activeControllers.add(instanceId);
-    if (primaryControllerId === null || !activeControllers.has(primaryControllerId)) {
-      primaryControllerId = instanceId;
-    }
-  }
+  // CONCURRENT-MODE FIX (root cause of "Android shows POOL EMPTY / black
+  // preview"): controller registration used to happen here as a RENDER-phase
+  // side effect (mutating module-level sets inside the component body). Under
+  // React 18 concurrent rendering a pass can be discarded without committing —
+  // exactly what happens around the MOBILE app's React.lazy/<Suspense> boundary
+  // wrapping the PreviewCanvas (desktop mounts it eagerly, which is why PC —
+  // including responsive emulation — never reproduced this). A discarded pass
+  // still incremented nextControllerId and add()'ed a phantom instance into
+  // activeControllers, potentially claiming primaryControllerId — after which
+  // the real committed instance computed isPrimary=false FOREVER, every pooled
+  // effect early-returned, and no <video>/<audio> element was ever created.
+  //
+  // Registration now happens in an effect (committed instances only), and
+  // primacy is read through useSyncExternalStore — the canonical API for
+  // external stores — so every mounted instance re-evaluates primacy whenever
+  // the registry changes (first-registration, primary unmount, etc.).
+  const isPrimary = useSyncExternalStore(
+    (onChange) => {
+      if (!isController) return () => {};
+      controllerListeners.add(onChange);
+      return () => {
+        controllerListeners.delete(onChange);
+      };
+    },
+    () => isController && primaryControllerId === instanceId,
+    () => false
+  );
 
-  const isPrimary = isController && (primaryControllerId === instanceId || primaryControllerId === null || !activeControllers.has(primaryControllerId));
-  if (isController && isPrimary && primaryControllerId !== instanceId) {
-    primaryControllerId = instanceId;
-  }
+  useEffect(() => {
+    if (!isController) return;
+    registerControllerInstance(instanceId);
+    return () => {
+      unregisterControllerInstance(instanceId);
+    };
+  }, [isController, instanceId]);
 
   const tracks = useEditorStore((s) => s.tracks);
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
@@ -1761,13 +1816,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   }, [isPrimary, triggerRedraw]);
 
   // ---- Unmount cleanup ----
+  // Registration/primacy bookkeeping (removing this instance from
+  // activeControllers and promoting the next controller) is handled by the
+  // registration effect's cleanup, which runs FIRST on unmount because it is
+  // declared earlier. This effect only tears down the shared media pool when
+  // no controllers remain anywhere in the app.
   useEffect(() => {
     return () => {
       if (isController) {
-        activeControllers.delete(instanceId);
-        if (primaryControllerId === instanceId) {
-          primaryControllerId = activeControllers.size > 0 ? Array.from(activeControllers)[0] : null;
-        }
         // ONLY tear down the media pool if NO active controllers exist in the whole app!
         if (activeControllers.size === 0) {
           const pool = poolRef.current;
@@ -1864,6 +1920,9 @@ export interface MediaPoolDebugEntry {
 
 export interface MediaPoolDebugSnapshot {
   device: { android: boolean; ios: boolean; coarse: boolean; maxLoadedVideos: number };
+  /** Controller registry: if primary is null/-1 or active is empty, the pool
+   * never starts — that was the root cause of the mobile "POOL EMPTY" state. */
+  registry: { primaryControllerId: number | null; activeControllers: number[] };
   playing: boolean;
   scrubbing: boolean;
   time: number;
@@ -1912,6 +1971,10 @@ export function getMediaPoolDebugSnapshot(): MediaPoolDebugSnapshot {
       ios: isIOSDevice(),
       coarse: isCoarsePointerDevice(),
       maxLoadedVideos: getMaxLoadedVideos(),
+    },
+    registry: {
+      primaryControllerId,
+      activeControllers: [...activeControllers],
     },
     playing: s.isPlaying,
     scrubbing: s.isScrubbing,
