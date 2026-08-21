@@ -810,12 +810,26 @@ export function PreviewCanvasContainer() {
   const handleSkipForward = () => seek(Math.min(totalDuration, currentTime + 10));
   const handleRestart = () => seek(0);
 
+  // Canvas buffer is sized to the project aspect ratio (height fixed at 480,
+  // width follows) so the rendered frame fills the buffer instead of being
+  // letterboxed inside a fixed 16:9 854×480 box. Without this, non-16:9
+  // (portrait/square) projects get letterboxed twice — once by the engine and
+  // again by `object-contain` in the portrait mobile viewport — leaving the
+  // clips so small they appear to not render at all.
+  const previewBaseWidth =
+    aspectRatio === '9:16'
+      ? Math.round(480 * (9 / 16))
+      : aspectRatio === '1:1'
+      ? 480
+      : aspectRatio === '4:3'
+      ? Math.round(480 * (4 / 3))
+      : 854;
   const previewWidth =
     settings.previewQuality === 'quarter'
-      ? 213
+      ? Math.max(1, Math.round(previewBaseWidth / 4))
       : settings.previewQuality === 'half'
-      ? 427
-      : 854;
+      ? Math.max(1, Math.round(previewBaseWidth / 2))
+      : previewBaseWidth;
   const previewHeight =
     settings.previewQuality === 'quarter'
       ? 120

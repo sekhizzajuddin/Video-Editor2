@@ -35,7 +35,6 @@ import { isKineticMediaId, getSentenceBounds } from '@/utils/kineticSync';
 import { encodeMaskRle } from '@/utils/motionMask';
 import {
   getFrameSize,
-  getFrameOffset,
   quadToRect,
   rectToQuad,
   normalizeRegionToFrame,
@@ -1033,7 +1032,6 @@ export function PreviewCanvasOverlay({
 
   /** Visible picture size for the CURRENT aspect ratio (single source of truth). */
   const frame = getFrameSize(aspectRatio);
-  const frameOff = getFrameOffset(aspectRatio);
 
   /**
    * Client (mouse) position -> FRAME space, i.e. the space region boxes and
@@ -1049,8 +1047,9 @@ export function PreviewCanvasOverlay({
     const container = document.getElementById('preview-canvas-wrapper');
     if (!container) return null;
     const rect = container.getBoundingClientRect();
-    const p = clientToViewportSpace(clientX, clientY, rect, viewport);
-    return { x: p.x - frameOff.offsetX, y: p.y - frameOff.offsetY };
+    // The overlay viewBox is now the frame itself (0,0 → W,H), so viewport-space
+    // coordinates ARE frame coordinates — no letterbox offset to subtract.
+    return clientToViewportSpace(clientX, clientY, rect, viewport);
   };
 
   const regionRect = (c: any) => {
@@ -1573,7 +1572,8 @@ export function PreviewCanvasOverlay({
     }
     let scaleToFit = 1;
     if (mediaItem?.type === 'video' || mediaItem?.type === 'image') {
-      scaleToFit = Math.min(854 / (vw || 1), 480 / (vh || 1));
+      const selFrame = getFrameSize(aspectRatio);
+      scaleToFit = Math.min(selFrame.W / (vw || 1), selFrame.H / (vh || 1));
     }
     const bW = vw * scaleToFit;
     const bH = vh * scaleToFit;
@@ -1659,8 +1659,15 @@ export function PreviewCanvasOverlay({
       targetW = 480 * (4/3);
       targetH = 480;
     }
-    
-    const absX = (currentCamPos.x * 854) + 427;
+
+    // Position the camera crop box in the PROJECT frame space (the overlay's
+    // coordinate system now matches the project aspect ratio, not a fixed 854×480).
+    let frameW = 854;
+    if (aspectRatio === '9:16') frameW = Math.round(480 * (9 / 16));
+    else if (aspectRatio === '1:1') frameW = 480;
+    else if (aspectRatio === '4:3') frameW = Math.round(480 * (4 / 3));
+
+    const absX = (currentCamPos.x * frameW) + frameW / 2;
     const absY = (currentCamPos.y * 480) + 240;
 
     return (
@@ -1705,10 +1712,11 @@ export function PreviewCanvasOverlay({
 
   if (!activeClip) {
     if (!virtualCamera.enabled) return null;
+    const noSelFrame = getFrameSize(aspectRatio);
     return (
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
-        <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox="0 0 854 480">
-          <g transform={`translate(${854 / 2 + viewport.x - 854 / 2 * viewport.zoom}, ${480 / 2 + viewport.y - 480 / 2 * viewport.zoom})`}>
+        <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" viewBox={`0 0 ${noSelFrame.W} ${noSelFrame.H}`}>
+          <g transform={`translate(${noSelFrame.W / 2 + viewport.x - noSelFrame.W / 2 * viewport.zoom}, ${noSelFrame.H / 2 + viewport.y - noSelFrame.H / 2 * viewport.zoom})`}>
             {renderVirtualCamera()}
           </g>
         </svg>
@@ -1727,8 +1735,10 @@ export function PreviewCanvasOverlay({
   }
   const W = viewW;
   const H = viewH;
-  const offsetX = (854 - viewW) / 2;
-  const offsetY = (480 - viewH) / 2;
+  // The overlay viewBox is now the frame itself (see below), so there is no
+  // internal letterbox offset — the frame sits at (0, 0).
+  const offsetX = 0;
+  const offsetY = 0;
 
   let vw = mediaItem?.width || 1920;
   let vh = mediaItem?.height || 1080;
@@ -1893,8 +1903,8 @@ export function PreviewCanvasOverlay({
     });
   };
 
-  const cx = 854 / 2;
-  const cy = 480 / 2;
+  const cx = W / 2;
+  const cy = H / 2;
   const totalX = cx + viewport.x - cx * viewport.zoom;
   const totalY = cy + viewport.y - cy * viewport.zoom;
 
@@ -2087,7 +2097,7 @@ export function PreviewCanvasOverlay({
       <div className="absolute inset-0 pointer-events-none" id="preview-canvas-wrapper-overlay">
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
-          viewBox="0 0 854 480"
+          viewBox={`0 0 ${W} ${H}`}
           role="region"
           aria-label="Interactive canvas overlay"
         >

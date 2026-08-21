@@ -59,6 +59,7 @@ import {
 let _cachedTracksRef: TimelineTrack[] | null = null;
 let _cachedVideoTracks: TimelineTrack[] = [];
 let _cachedTextTracks: TimelineTrack[] = [];
+let _cachedFxTracks: TimelineTrack[] = [];
 let _cachedVisualTracks: TimelineTrack[] = [];
 
 // ---------------------------------------------------------------------------
@@ -287,8 +288,12 @@ export async function renderCanvasEngine({
   }
   const deltaMs = Math.min(100, rawDelta);
 
-  const W_target = 854;
-  const H_target = 480;
+  // The canvas buffer is sized to match the project aspect ratio (see
+  // PreviewCanvasContainer), so use its actual dimensions as the target frame.
+  // This removes the double letterboxing that made non-16:9 (portrait/square)
+  // clips render tiny — or seemingly "not render" — in the portrait mobile view.
+  const W_target = canvas.width;
+  const H_target = canvas.height;
   const canvas_scale = canvas.width / W_target;
 
   // NOTE: The old needsWait early-return was removed because it blocked the entire
@@ -365,7 +370,7 @@ export async function renderCanvasEngine({
       }
     }
     // Shift the world opposite to the camera's movement to keep the framed region in the center crop box
-    ctx.translate(-camX * 854, -camY * 480);
+    ctx.translate(-camX * W_target, -camY * H_target);
   }
   // ---------------------------------
 
@@ -380,11 +385,13 @@ export async function renderCanvasEngine({
         return numA - numB;
       });
     _cachedTextTracks = tracks.filter((t) => t.type === 'text' && !t.hidden);
+    _cachedFxTracks = tracks.filter((t) => t.type === 'fx' && !t.hidden);
     _cachedVisualTracks = [..._cachedVideoTracks, ..._cachedTextTracks];
     _cachedTracksRef = tracks;
   }
   const videoTracks = _cachedVideoTracks;
   const visualTracks = _cachedVisualTracks;
+  const fxTracks = _cachedFxTracks;
 
   let anyClipDrawn = false;
 
@@ -880,7 +887,7 @@ export async function renderCanvasEngine({
     let corners: LocalCornerPoints | null = null;
     if (hasPerspectiveWarp) {
       if (clip.transform.perspectivePin) {
-        const pc = clip.transform.perspectiveCorners || { x0: 0, y0: 0, x1: 854, y1: 0, x2: 854, y2: 480, x3: 0, y3: 480 };
+        const pc = clip.transform.perspectiveCorners || { x0: 0, y0: 0, x1: W, y1: 0, x2: W, y2: H, x3: 0, y3: H };
         
         let trackedCorners = null;
         const trackingData = clip.transform.perspectiveTrackingData;
@@ -2119,7 +2126,7 @@ export async function renderCanvasEngine({
   }
 
   if (!skipExpensiveFX) {
-    for (const track of visualTracks) {
+    for (const track of [...visualTracks, ...fxTracks]) {
       for (const clip of track.clips) {
         if (!clip.disabled && clip.particleSettings && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration + 0.001) {
           renderParticles(ctx, clip.id, clip.particleSettings, W, H, deltaMs, particlePoolsRef.current);
@@ -2237,6 +2244,24 @@ export async function renderCanvasEngine({
   // Timecode overlay removed — timestamp is displayed in the timeline toolbar instead
 
   ctx.restore();
+
+  // ── FX track effects (full-frame shader pass) ──────────────────────────────
+  // FX-track clips are timeline shaders (Glitch, VHS, Cinematic Bars, Old Film,
+  // …) that apply over the WHOLE composited frame rather than a single clip's
+  // pixels. At this point `ctx` is back at identity transform and the composite
+  // holds the fully rendered frame, so run each active FX clip's shader across
+  // the full canvas — matching the export Compositor's full-frame FX pass.
+  if (!skipExpensiveFX) {
+    for (const track of fxTracks) {
+      for (const clip of track.clips) {
+        if (clip.disabled || !clip.fxSettings) continue;
+        if (currentTime < clip.startTime || currentTime >= clip.startTime + clip.duration + 0.001) continue;
+        const fxIntensity = clip.fxSettings.intensity ?? 100;
+        const fxRelTime = Math.max(0, currentTime - clip.startTime);
+        applyFxEffect(ctx, composite.width, composite.height, clip.fxSettings.type, fxIntensity, fxRelTime, isPlaying);
+      }
+    }
+  }
 
   const mainCtx = canvas.getContext('2d');
   if (mainCtx) {
