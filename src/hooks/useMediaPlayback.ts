@@ -1222,11 +1222,27 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     let isRunning = true;
     let lastRafTime = performance.now();
     let accumulatedDriftAudio = 0; // Integral term for audio PID
+    // MOBILE PERF: throttle media sync to 15Hz on mobile. The PLL drift
+    // adjustments modulate playbackRate by at most 10% — they don't need
+    // 60-120Hz precision. Running at native refresh rate wastes main thread
+    // time on expensive video element DOM property accesses (el.currentTime,
+    // el.playbackRate) which stall the rendering pipeline on mobile.
+    const isMobileSyncThrottle = isMobileDevice();
+    const MOBILE_SYNC_INTERVAL = 1000 / 15; // ~67ms
+    let lastSyncLoopTime = 0;
 
     const syncLoop = () => {
       if (!isRunning) return;
 
       const now = performance.now();
+
+      // MOBILE PERF: skip sync ticks on mobile to free main thread for rendering
+      if (isMobileSyncThrottle && (now - lastSyncLoopTime) < MOBILE_SYNC_INTERVAL) {
+        rafIdRef.current = requestAnimationFrame(syncLoop);
+        return;
+      }
+      lastSyncLoopTime = now;
+
       const dt = (now - lastRafTime) / 1000;
       lastRafTime = now;
 

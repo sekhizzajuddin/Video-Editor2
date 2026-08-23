@@ -487,33 +487,10 @@ export function PreviewCanvasContainer() {
     let isRendering = false;
     let lastTime = performance.now();
     let lastSyncTime = performance.now();
-    // MOBILE PERF: throttle render loop to 30fps on mobile devices.
-    // Modern phones fire rAF at 90–120Hz which overwhelms mobile GPUs
-    // with canvas 2D compositing. 30fps is the standard video preview
-    // rate used by CapCut/InShot/VN on mobile.
     const isMobile = isMobileDevice();
-    const MOBILE_FRAME_BUDGET = 1000 / 30; // ~33ms per frame at 30fps
-    let lastRenderTime = 0;
 
     const tick = (now: number) => {
       rafId = requestAnimationFrame(tick);
-
-      // MOBILE PERF: skip this frame if we haven't hit the 30fps budget yet
-      if (isMobile && (now - lastRenderTime) < MOBILE_FRAME_BUDGET) {
-        // Still update time tracking so playback stays smooth
-        if (useEditorStore.getState().isPlaying) {
-          const dir = useEditorStore.getState().playbackDirection ?? 1;
-          const speed = useEditorStore.getState().playbackSpeed;
-          const dt = (now - lastTime) / 1000;
-          lastTime = now;
-          currentTimeRef.current = currentTimeRef.current + dt * speed * dir;
-          setPlaybackTime(currentTimeRef.current);
-        } else {
-          lastTime = now;
-        }
-        return;
-      }
-      lastRenderTime = now;
 
       const state = useEditorStore.getState();
       // While paused, the clock and the store agree exactly (seek/pause both flush
