@@ -359,6 +359,9 @@ interface EditorActions {
   exitCompoundClip: () => void;
   loadProjectTemplate: (templateId: string) => Promise<void>;
   loadTemplatesFromDB: () => Promise<void>;
+
+  // Arrange Mode
+  setArrangeMode: (val: boolean) => void;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -485,6 +488,7 @@ const initialState: EditorState = {
     keyframes: { '16:9': [], '9:16': [], '1:1': [], '4:3': [] } as Record<string, any>,
   } as any,
   aspectRatioConflictData: null,
+  isArrangeMode: false,
 };
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
@@ -591,6 +595,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   setAIVideoGenerationState: (state: any) => set((prev: any) => ({ ...prev, ...state })),
   setScopeSettings: (settings: ScopeSettings) => set({ scopeSettings: settings, showScopes: settings.enabled }),
+
+  // Arrange Mode
+  setArrangeMode: (val: boolean) => set({ isArrangeMode: val }),
 
   setPerRatioFramingEnabled: (enabled: boolean) => set({ perRatioFramingEnabled: enabled }),
   setVirtualCameraEnabled: (enabled: boolean) => set((state) => ({ virtualCamera: { ...state.virtualCamera, enabled } })),

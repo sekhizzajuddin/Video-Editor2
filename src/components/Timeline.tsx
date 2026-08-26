@@ -34,7 +34,9 @@ import {
   CLIP_COLORS,
   PipFloatingWindow,
   DEFAULT_TRACK_HEIGHT,
+  ArrangeModeOverlay,
 } from '@/timeline';
+
 
 export function Timeline() {
   const {
@@ -76,6 +78,8 @@ export function Timeline() {
     pipWindows,
     activePipWindowId,
     setActivePipWindow,
+    isArrangeMode,
+    setArrangeMode,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     zoomLevel: s.zoomLevel,
@@ -115,6 +119,8 @@ export function Timeline() {
     pipWindows: s.pipWindows,
     activePipWindowId: s.activePipWindowId,
     setActivePipWindow: s.setActivePipWindow,
+    isArrangeMode: s.isArrangeMode,
+    setArrangeMode: s.setArrangeMode,
   })));
 
 
@@ -255,13 +261,16 @@ export function Timeline() {
           zoomIn={zoomIn}
           zoomOut={zoomOut}
           addTrack={addTrack}
-          showTransitionLayer={showTransitionLayer}
-          setShowTransitionLayer={setShowTransitionLayer}
+          isArrangeMode={isArrangeMode}
+          setArrangeMode={setArrangeMode}
           activeTool={activeTool}
         />
 
         {/* ── Main body ────────────────────────────────────────────────── */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* ── Arrange Mode Overlay ────────────────────────────────────── */}
+          {isArrangeMode && <ArrangeModeOverlay />}
+
           {/* ── Track headers ──────────────────────────────────────────── */}
           <div
             className="bg-[#252525] border-r border-[#3e3e3e] flex flex-col overflow-hidden shrink-0"

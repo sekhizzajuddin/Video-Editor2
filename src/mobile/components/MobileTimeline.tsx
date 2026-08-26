@@ -31,16 +31,19 @@ import {
   Timer,
   ChevronRight,
   ChevronLeft,
+  LayoutGrid,
 } from 'lucide-react';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 import { formatCentisecondTime } from '@/timeline';
+import { ArrangeModeOverlay } from '@/timeline/components/ArrangeModeOverlay';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { WaveformOverlay } from '@/timeline/components/WaveformOverlay';
 import { FrameStripOverlay } from '@/timeline/components/FrameStripOverlay';
 import { toast } from 'sonner';
+
 
 const RULER_H = 24;
 const TRACK_H = 48;
@@ -131,6 +134,8 @@ export function MobileTimeline({
     saveSnapshot,
     mediaLibrary,
     pipWindows,
+    isArrangeMode,
+    setArrangeMode,
   } = useEditorStore(
     useShallow((s) => ({
       tracks: s.tracks,
@@ -163,6 +168,8 @@ export function MobileTimeline({
       saveSnapshot: s.saveSnapshot,
       mediaLibrary: s.mediaLibrary,
       pipWindows: s.pipWindows,
+      isArrangeMode: s.isArrangeMode,
+      setArrangeMode: s.setArrangeMode,
     }))
   );
 
@@ -605,6 +612,19 @@ export function MobileTimeline({
             <Scissors className="h-3 w-3" />
             <span>Split</span>
           </button>
+          {/* Arrange Mode Button */}
+          <button
+            onClick={() => setArrangeMode(!isArrangeMode)}
+            title="Arrange clips"
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] font-medium transition-colors ${
+              isArrangeMode
+                ? 'bg-amber-500 text-black font-semibold'
+                : 'bg-white/5 text-white/80 active:bg-white/15'
+            }`}
+          >
+            <LayoutGrid className="h-3 w-3" />
+            <span>Arrange</span>
+          </button>
           <button
             onClick={() => {
               const nextTool = activeTool === 'rateStretch' ? 'select' : 'rateStretch';
@@ -687,6 +707,9 @@ export function MobileTimeline({
       </div>
 
       <div className="relative flex-1 min-h-0 overflow-hidden">
+        {/* ── Arrange Mode Overlay ───────────────────────────────────── */}
+        {isArrangeMode && <ArrangeModeOverlay />}
+
         {/* Stationary Playhead (Centered at 50%) */}
         <div className="absolute top-0 bottom-0 pointer-events-none z-40" style={{ left: '50%' }}>
           <div className="absolute top-0 left-1/2 -translate-x-1/2 h-0 w-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-amber-400" />

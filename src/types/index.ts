@@ -941,6 +941,9 @@ export interface EditorState {
 
   // Aspect Ratio Conflict Smart Handler
   aspectRatioConflictData?: AspectRatioConflictData | null;
+
+  // Arrange Mode (card-based clip rearrange view)
+  isArrangeMode: boolean;
 }
 
 export interface AspectRatioConflictData {

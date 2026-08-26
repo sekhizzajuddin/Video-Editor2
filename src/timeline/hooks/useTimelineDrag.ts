@@ -547,8 +547,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       const clickedEdge = (e.target as HTMLElement).getAttribute('data-edge');
       if (clickedEdge === 'left' || clickedEdge === 'right') {
-        startTransactionSafe();
-        startResize(e, clip, clickedEdge as 'left' | 'right');
+        // BUG FIX: Only start a resize/trim if the clip is already selected.
+        // If not yet selected, just select it — user can then click the edge again to trim.
+        const isAlreadySelected = useEditorStore.getState().selectedClipIds.includes(clip.id);
+        if (isAlreadySelected) {
+          startTransactionSafe();
+          startResize(e, clip, clickedEdge as 'left' | 'right');
+        } else {
+          selectClip(clip.id);
+        }
         return;
       }
 
@@ -557,11 +564,17 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const grabArea = 8; // pixels
 
       if (distLeft <= grabArea || distRight <= grabArea) {
-        startTransactionSafe();
-        if (distLeft <= distRight) {
-          startResize(e, clip, 'left');
+        // BUG FIX: Same guard — only trim on proximity grab if clip is selected
+        const isAlreadySelected = useEditorStore.getState().selectedClipIds.includes(clip.id);
+        if (isAlreadySelected) {
+          startTransactionSafe();
+          if (distLeft <= distRight) {
+            startResize(e, clip, 'left');
+          } else {
+            startResize(e, clip, 'right');
+          }
         } else {
-          startResize(e, clip, 'right');
+          selectClip(clip.id);
         }
         return;
       }

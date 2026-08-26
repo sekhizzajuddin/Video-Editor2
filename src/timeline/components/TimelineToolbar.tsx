@@ -1,5 +1,5 @@
 import React from 'react';
-import { ZoomIn, ZoomOut, Film, Music, Plus, Sparkles, Magnet } from 'lucide-react';
+import { ZoomIn, ZoomOut, Film, Music, Plus, Sparkles, Magnet, LayoutGrid } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { InsertOverwriteButtons } from './InsertOverwriteButtons';
 
@@ -8,8 +8,8 @@ interface TimelineToolbarProps {
   zoomIn: () => void;
   zoomOut: () => void;
   addTrack: (type: 'video' | 'audio' | 'text' | 'fx') => void;
-  showTransitionLayer: boolean;
-  setShowTransitionLayer: (show: boolean) => void;
+  isArrangeMode: boolean;
+  setArrangeMode: (val: boolean) => void;
   activeTool: string;
 }
 
@@ -18,8 +18,8 @@ export function TimelineToolbar({
   zoomIn,
   zoomOut,
   addTrack,
-  showTransitionLayer,
-  setShowTransitionLayer,
+  isArrangeMode,
+  setArrangeMode,
   activeTool,
 }: TimelineToolbarProps) {
   const settings = useEditorStore((s) => s.settings);
@@ -82,30 +82,30 @@ export function TimelineToolbar({
       </div>
 
       <div className="w-px h-4 bg-[#3e3e3e] mx-2" />
-      
+
       {/* NLE Workflow Buttons */}
       <InsertOverwriteButtons />
 
       <div className="w-px h-4 bg-[#3e3e3e] mx-2" />
 
-      {/* Transition Toggle */}
+      {/* Arrange Mode Button */}
       <button
-        onClick={() => setShowTransitionLayer(!showTransitionLayer)}
-        title={showTransitionLayer ? "Hide Transition Layer" : "Show Transition Layer"}
-        className={`px-2 py-0.5 text-[10px] rounded flex items-center gap-1 transition-colors ${
-          showTransitionLayer
-            ? 'bg-purple-600/30 text-purple-300 border border-purple-500/30 font-semibold'
+        onClick={() => setArrangeMode(!isArrangeMode)}
+        title="Arrange clips visually — drag to reorder or move across tracks"
+        className={`px-2 py-0.5 text-[10px] rounded flex items-center gap-1 transition-colors font-semibold ${
+          isArrangeMode
+            ? 'bg-amber-500/30 text-amber-300 border border-amber-500/40'
             : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
         }`}
       >
-        <Sparkles className="w-3 h-3" /> Transitions
+        <LayoutGrid className="w-3 h-3" /> Arrange
       </button>
 
       {/* Snapping Toggle */}
       <button
         onClick={() => updateSettings({ snapEnabled: !settings.snapEnabled })}
-        title={settings.snapEnabled ? "Disable Snapping (N)" : "Enable Snapping (N)"}
-        className={`px-2 py-0.5 text-[10px] rounded flex items-center gap-1 transition-colors ${
+        title={settings.snapEnabled ? 'Disable Snapping (N)' : 'Enable Snapping (N)'}
+        className={`ml-1 px-2 py-0.5 text-[10px] rounded flex items-center gap-1 transition-colors ${
           settings.snapEnabled
             ? 'bg-yellow-600/30 text-yellow-300 border border-yellow-500/30 font-semibold'
             : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
@@ -122,6 +122,12 @@ export function TimelineToolbar({
           Click a clip to split at playhead
         </span>
       )}
+      {isArrangeMode && (
+        <span className="text-[10px] text-amber-300 px-2 py-0.5 bg-amber-500/10 rounded animate-pulse">
+          Arrange Mode Active
+        </span>
+      )}
     </div>
   );
 }
+
