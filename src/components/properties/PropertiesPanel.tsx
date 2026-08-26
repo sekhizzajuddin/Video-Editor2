@@ -323,7 +323,6 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
     { id: 'aiVocalSeparation', label: 'AI Vocal Split' },
     { id: 'audioEnhancements', label: 'AI Voice Enhance' },
     { id: 'audioVocalTune', label: 'AI Voice Tune' },
-    { id: 'kinetic', label: 'Kinetic Text' },
     { id: 'beatsync', label: 'Beat Sync' },
     { id: 'sfx', label: 'AI SFX' },
     { id: 'designer', label: 'Motion Graphics' },
@@ -6950,8 +6949,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
             )}
 
-            {/* AI Kinetic Typography */}
-            {isSectionActive('kinetic') && selectedClip && (
+            {/* AI Kinetic Typography — Full Inline Config */}
+            {selectedClip && (
               <KineticTypographySection
                 selectedClip={selectedClip}
                 aiProvider={aiProvider}

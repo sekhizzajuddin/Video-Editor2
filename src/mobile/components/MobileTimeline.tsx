@@ -35,6 +35,7 @@ import {
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
+import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 import { formatCentisecondTime } from '@/timeline';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { WaveformOverlay } from '@/timeline/components/WaveformOverlay';
@@ -165,7 +166,7 @@ export function MobileTimeline({
     }))
   );
 
-  const currentTime = usePlaybackTime(20);
+  const currentTime = usePlaybackTime(30);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const tracksRef = useRef<HTMLDivElement>(null);
@@ -178,14 +179,22 @@ export function MobileTimeline({
   const scrubRafRef = useRef<number | null>(null);
   const latestScrubXRef = useRef<number>(0);
 
+  // MOBILE PERF: Drive auto-scroll directly from the React-free playback clock
+  // instead of through React state (which has re-render latency). This matches
+  // the desktop PlayheadComponents pattern for smooth ~30Hz DOM scroll updates.
   useEffect(() => {
-    if (useEditorStore.getState().isPlaying && !dragRef.current && !isUserScrolling.current) {
-      if (scrollRef.current) {
-        isAutoScrolling.current = true;
-        scrollRef.current.scrollLeft = currentTime * zoomLevel;
-      }
-    }
-  }, [currentTime, zoomLevel]);
+    let lastScrollTime = 0;
+    const unsub = subscribePlaybackTime(() => {
+      if (!useEditorStore.getState().isPlaying || dragRef.current || isUserScrolling.current) return;
+      if (!scrollRef.current) return;
+      const now = performance.now();
+      if (now - lastScrollTime < 33) return; // 30Hz throttle
+      lastScrollTime = now;
+      isAutoScrolling.current = true;
+      scrollRef.current.scrollLeft = getPlaybackTime() * zoomLevel;
+    });
+    return unsub;
+  }, [zoomLevel]);
 
   const onScroll = useCallback(() => {
     if (!scrollRef.current) return;

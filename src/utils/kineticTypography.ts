@@ -17,6 +17,7 @@ export interface KineticTypographyOptions {
   typoType?: 'word' | 'sentence' | 'hybrid';
   typoLayout?: 'row' | 'column';
   referenceScript?: string;
+  customPrompt?: string;
 }
 
 export async function generateKineticTypography(
@@ -79,6 +80,10 @@ export async function generateKineticTypography(
     ? `\n\nUSER-PROVIDED GROUND-TRUTH REFERENCE SCRIPT:\n"${options.referenceScript}"\n\nCRITICAL INSTRUCTION FOR GROUND-TRUTH REFERENCE SCRIPT:\n- The user has provided the exact ground-truth script spoken in the video/audio.\n- You MUST use the exact words, spelling, and order from this reference script for the "text" properties of the generated typography objects.\n- Align each word from the reference script to its corresponding spoken audio timestamp.\n- This corrects any phonetic transcription errors from automated speech recognition.`
     : '';
 
+  const customPromptInstruction = options.customPrompt?.trim()
+    ? `\n\nUSER CUSTOM INSTRUCTION (highest priority — follow this before generating anything):\n"${options.customPrompt.trim()}"`
+    : '';
+
   // ─── Shared high-quality prompt for typography generation ──────────────────
   const prompt = `You are a world-class Kinetic Typography Director and Motion Graphics Designer.
 I am providing audio and visual frames of a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
@@ -136,7 +141,7 @@ For each word, define:
   Cinematic: 'elastic', 'splitReveal', 'revealWipe', 'rollUp', 'scaleFlip', 'zoomBlur', 'glitch', 'letterSpacing'
 - "stylePreset": Choose from: 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
 
-Output ONLY a valid JSON array, no markdown, no explanation:
+Output ONLY a valid JSON array, no markdown, no explanation:${customPromptInstruction}
 [{"text":"Wow","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":52,"y":48,"breakAfter":false,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
   let resultJsonStr = '';

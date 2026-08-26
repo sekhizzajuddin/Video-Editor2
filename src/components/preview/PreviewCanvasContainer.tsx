@@ -573,10 +573,10 @@ export function PreviewCanvasContainer() {
           // phantom drift and wobbling playbackRate on multi-track timelines.
           setPlaybackTime(newTime);
 
-          // The store is only a low-rate mirror for React consumers. 10 Hz is
-          // plenty for timecode readouts and panel state, and it cuts the
-          // re-render load during playback by ~3x versus the old 30ms cadence.
-          if (now - lastSyncTime > 100) {
+          // Sync the store for React consumers (timeline scroll, timecode).
+          // 30 Hz (33ms) keeps the timeline playhead buttery-smooth without
+          // flooding React with 60+ re-renders/sec.
+          if (now - lastSyncTime > 33) {
             currentSeek(newTime);
             lastSyncTime = now;
           }

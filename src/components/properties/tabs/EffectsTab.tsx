@@ -1,7 +1,6 @@
 import type { TimelineClip } from '@/types';
 import {
   AIMotionGraphicsSection,
-  KineticTypographySection,
   AISFXSection,
   BeatSyncSection,
   EffectsListSection,
@@ -42,14 +41,6 @@ export function EffectsTab({
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold text-white uppercase tracking-wider">AI & Effect Settings</h3>
       </div>
-
-      {/* AI Kinetic Typography */}
-      {selectedClip && (
-        <KineticTypographySection
-          selectedClip={selectedClip}
-          aiProvider={aiProvider}
-        />
-      )}
 
       {/* Auto Beat Sync & Rhythm Detection */}
       {selectedClip && (

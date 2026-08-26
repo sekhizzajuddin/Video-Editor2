@@ -53,7 +53,6 @@ import {
   Plus,
   Globe,
   Scissors,
-  FileText,
   Wand2,
   Wrench,
 } from 'lucide-react';
@@ -83,7 +82,6 @@ const AutoVideoModal = React.lazy(() => import('../AutoVideoModal').then(m => ({
 // Timeline FX — dragged to FX tracks. type field maps to PreviewCanvas fxType.
 // Color Correction — dragged to a video/image clip to apply that preset
 // Particle Effects — dragged to a video/image/FX clip
-import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import { TRANSITIONS, FX_EFFECTS, COLOR_CORRECTION_EFFECTS, PARTICLE_EFFECTS } from "@/constants/mediaPanel";
 import { TemplatePreviewCardProps, TransitionCardProps } from "@/types/mediaPanel";
 import { formatDuration, formatSimpleTime, formatSize, getMediaColor, getMediaIcon } from "@/utils/mediaHelpers";
@@ -674,20 +672,9 @@ export function MediaPanel() {
   const [captionProgress, setCaptionProgress] = useState(0);
   const [showCaptionLanguageModal, setShowCaptionLanguageModal] = useState(false);
   const [selectedCaptionLanguages, setSelectedCaptionLanguages] = useState<string[]>(['EN']);
-  const [isGeneratingKineticTypo, setIsGeneratingKineticTypo] = useState(false);
-  const [kineticTypoProgress, setKineticTypoProgress] = useState(0);
-  const [showKineticTypoModal, setShowKineticTypoModal] = useState(false);
-  const [kineticTypoScript, setKineticTypoScript] = useState('english');
-  const [englishCasing, setEnglishCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
-  const [kineticTypoStyle, setKineticTypoStyle] = useState<string>('random');
-  const [kineticTypoAnimation, setKineticTypoAnimation] = useState<string>('random');
-  const [kineticTypoProvider, setKineticTypoProvider] = useState<'gemini' | 'groq'>('groq');
-  const [kineticTypoType, setKineticTypoType] = useState<'word' | 'sentence' | 'hybrid'>('hybrid');
-  const [kineticTypoLayout, setKineticTypoLayout] = useState<'row' | 'column'>('row');
-  const [referenceScript, setReferenceScript] = useState('');
-  const [showReferenceInput, setShowReferenceInput] = useState(false);
 
   // AI SFX Generator States
+
   const [sfxVisionProvider, setSfxVisionProvider] = useState<'gemini' | 'groq'>('gemini');
 
   const [isAnalyzingSfx, setIsAnalyzingSfx] = useState(false);
@@ -731,54 +718,6 @@ export function MediaPanel() {
       toast.error(`Auto Captions failed: ${err.message || err}`);
     } finally {
       setIsGeneratingCaptions(false);
-    }
-  };
-
-  const handleGenerateKineticTypography = async () => {
-    const { selectedClipId, tracks } = useEditorStore.getState();
-    let targetClip = findClipInTracks(tracks, selectedClipId, useEditorStore.getState().pipWindows);
-    
-    if (!targetClip) {
-      const { currentTime } = useEditorStore.getState();
-      const videoTrack = tracks.find(t => t.type === 'video');
-      if (videoTrack) {
-        targetClip = videoTrack.clips.find(c => currentTime >= c.startTime && currentTime <= c.startTime + c.duration);
-      }
-    }
-    
-    if (!targetClip) {
-      toast.error('Please select a video or audio clip on the timeline first.');
-      return;
-    }
-    
-    setIsGeneratingKineticTypo(true);
-    setKineticTypoProgress(0);
-    setShowKineticTypoModal(false);
-    
-    try {
-      const { generateKineticTypography } = await import('@/utils/kineticTypography');
-      await generateKineticTypography(
-        targetClip,
-        targetClip.trackId,
-        {
-          script: kineticTypoScript,
-          englishCasing,
-          casing: englishCasing,
-          styleSelection: kineticTypoStyle,
-          animationSelection: kineticTypoAnimation,
-          provider: kineticTypoProvider,
-          typoType: kineticTypoType,
-          typoLayout: kineticTypoLayout,
-          referenceScript: referenceScript.trim()
-        },
-        (p) => setKineticTypoProgress(p)
-      );
-      toast.success("Kinetic Typography Generated!");
-    } catch (e: any) {
-      console.error(e);
-      toast.error(`Kinetic Typography failed: ${e.message || e}`);
-    } finally {
-      setIsGeneratingKineticTypo(false);
     }
   };
 
@@ -2306,32 +2245,6 @@ export function MediaPanel() {
                     </div>
                   </div>
 
-                  {/* Kinetic Typography Trigger Section */}
-                  <div className="mt-2 p-3 bg-[#172323] border border-teal-500/20 rounded flex flex-col gap-2 shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-teal-400 animate-pulse" />
-                      <span className="text-xs font-semibold text-teal-300">Kinetic Typography AI</span>
-                    </div>
-                    <p className="text-[10px] text-teal-400/80 leading-relaxed">
-                      Automatically transcribe and animate any timeline clip word-by-word with premium style matching. Select a clip to start.
-                    </p>
-                    {isGeneratingKineticTypo ? (
-                      <div className="flex items-center justify-between py-1.5 px-3 bg-[#111a1a] border border-teal-500/20 rounded mt-1">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="w-3.5 h-3.5 text-teal-400 animate-spin" />
-                          <span className="text-[10px] text-teal-300">Generating kinetic words...</span>
-                        </div>
-                        <span className="text-xs font-bold text-teal-400 font-mono">{kineticTypoProgress.toFixed(0)}%</span>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setShowKineticTypoModal(true)}
-                        className="w-full py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded text-[11px] font-semibold transition-colors mt-1 flex items-center justify-center gap-1.5 shadow"
-                      >
-                        <Sparkles className="w-3 h-3" /> Generate Kinetic Typography
-                      </button>
-                    )}
-                  </div>
                 </div>
               );
             })() : (
@@ -2454,209 +2367,6 @@ export function MediaPanel() {
                       onClick={() => handleGenerateCaptions(selectedCaptionLanguages)}
                       disabled={selectedCaptionLanguages.length === 0}
                       className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold transition-colors disabled:opacity-50"
-                    >
-                      Generate
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Kinetic Typography Customization Modal */}
-            {showKineticTypoModal && (
-              <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 animate-fadeIn">
-                <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl p-5 w-full max-w-[380px]">
-                  <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-teal-400" />
-                    Kinetic Typography Config
-                  </h3>
-                  <p className="text-[11px] text-[#a0a0a0] mb-4 leading-normal">
-                    Generate highly stylized, word-by-word visual animations synced with speech.
-                  </p>
-                  
-                  <div className="space-y-4 mb-5">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">Select Script / Language</label>
-                      <select
-                        value={kineticTypoScript}
-                        onChange={(e) => setKineticTypoScript(e.target.value)}
-                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
-                      >
-                        <option value="english">English Script</option>
-                        <option value="roman_urdu_hindi">Roman Urdu/Hindi (English text)</option>
-                        <option value="hindi">Devanagari Hindi Script (हिंदी)</option>
-                        <option value="spanish">Spanish</option>
-                        <option value="french">French</option>
-                        <option value="german">German</option>
-                      </select>
-                    </div>
-                    
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center">
-                        AI Reasoning Provider
-                        {kineticTypoProvider === 'groq' && <span className="px-1.5 py-0.5 rounded text-[8px] bg-purple-500/20 text-purple-400 font-bold border border-purple-500/30">LLaMA 3.3 (Text)</span>}
-                        {kineticTypoProvider === 'gemini' && <span className="px-1.5 py-0.5 rounded text-[8px] bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30">Flash 2.0 (Vision)</span>}
-                      </label>
-                      <select
-                        value={kineticTypoProvider}
-                        onChange={(e) => setKineticTypoProvider(e.target.value as 'gemini'|'groq')}
-                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
-                      >
-                        <option value="groq">Groq (Faster, Advanced NLP & Timing)</option>
-                        <option value="gemini">Gemini (Analyzes Scene Video Frames)</option>
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
-                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center">
-                        Typography Type
-                        <span className="px-1.5 py-0.5 rounded text-[8px] bg-teal-500/20 text-teal-400 font-bold border border-teal-500/30 uppercase">
-                          {kineticTypoType}
-                        </span>
-                      </label>
-                      <select
-                        value={kineticTypoType}
-                        onChange={(e) => setKineticTypoType(e.target.value as 'word' | 'sentence' | 'hybrid')}
-                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full font-medium"
-                      >
-                        <option value="hybrid">Hybrid (Complete Sentence via PiP, Words Animate In)</option>
-                        <option value="word">Word by Word (Separate Clip Per Word)</option>
-                        <option value="sentence">Sentence by Sentence (Full Sentence Clips)</option>
-                      </select>
-                      <p className="text-[10px] text-[#888] leading-tight mt-0.5">
-                        {kineticTypoType === 'hybrid' && "Full sentence is displayed while words animate in at spoken timing using PiP multi-tracks without overlap."}
-                        {kineticTypoType === 'word' && "Individual word clips placed on timeline as each word is spoken."}
-                        {kineticTypoType === 'sentence' && "Complete sentence text clips added to timeline for each spoken sentence."}
-                      </p>
-                    </div>
-
-                    {(kineticTypoType === 'hybrid' || kineticTypoType === 'sentence') && (
-                      <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3 animate-fadeIn">
-                        <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center">
-                          Typography Layout
-                          <span className="px-1.5 py-0.5 rounded text-[8px] bg-indigo-500/20 text-indigo-400 font-bold border border-indigo-500/30 uppercase">
-                            {kineticTypoLayout}
-                          </span>
-                        </label>
-                        <select
-                          value={kineticTypoLayout}
-                          onChange={(e) => setKineticTypoLayout(e.target.value as 'row' | 'column')}
-                          className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
-                        >
-                          <option value="row">Row Wise (16:9 Landscape Video)</option>
-                          <option value="column">Column Wise (9:16 Short Video / Reel)</option>
-                        </select>
-                        <p className="text-[10px] text-[#888] leading-tight mt-0.5">
-                          {kineticTypoLayout === 'row' && "Line breaks are added intelligently so text does not exceed 16:9 width."}
-                          {kineticTypoLayout === 'column' && "AI adds excellent, punchy line breaks specifically optimized for vertical short videos."}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Reference Script Input (Optional Ground-Truth Text) */}
-                    <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
-                      <div className="flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={() => setShowReferenceInput(!showReferenceInput)}
-                          className="text-xs text-teal-400 hover:text-teal-300 font-semibold flex items-center gap-1.5 focus:outline-none transition-colors"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                          {showReferenceInput ? 'Hide Reference Script' : '+ Add Reference Script (Optional)'}
-                        </button>
-                        {referenceScript.trim() && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 font-mono">
-                            Script Added
-                          </span>
-                        )}
-                      </div>
-
-                      {showReferenceInput && (
-                        <div className="space-y-1.5 animate-fadeIn">
-                          <textarea
-                            value={referenceScript}
-                            onChange={(e) => setReferenceScript(e.target.value)}
-                            placeholder="Paste or type your exact ground-truth transcript/script here..."
-                            rows={3}
-                            className="w-full bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 font-mono resize-none"
-                          />
-                          <p className="text-[10px] text-[#888] leading-tight">
-                            Provides exact ground-truth words to AI. Helps if audio has strong accents or background noise so timeline text uses your exact words.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {(kineticTypoScript === 'english' || kineticTypoScript === 'roman_urdu_hindi') && (
-                      <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
-                        <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider block">Casing Constraints</label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="flex items-center gap-2 p-2 bg-[#151515] border border-[#2d2d2d] rounded cursor-pointer text-xs select-none">
-                            <input
-                              type="checkbox"
-                              checked={englishCasing === 'all_caps'}
-                              onChange={(e) => setEnglishCasing(e.target.checked ? 'all_caps' : 'none')}
-                              className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
-                            />
-                            <span className="text-white text-[10px]">ALL CAPS</span>
-                          </label>
-                          <label className="flex items-center gap-2 p-2 bg-[#151515] border border-[#2d2d2d] rounded cursor-pointer text-xs select-none">
-                            <input
-                              type="checkbox"
-                              checked={englishCasing === 'first_letter_caps'}
-                              onChange={(e) => setEnglishCasing(e.target.checked ? 'first_letter_caps' : 'none')}
-                              className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
-                            />
-                            <span className="text-white text-[10px]">First Letter Caps</span>
-                          </label>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
-                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">Style Selection</label>
-                      <select
-                        value={kineticTypoStyle}
-                        onChange={(e) => setKineticTypoStyle(e.target.value)}
-                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
-                      >
-                        <option value="random">AI / Random Style Presets</option>
-                        {TEXT_TEMPLATES.map((t) => (
-                          <option key={t.name} value={t.name}>Specific: {t.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
-                      <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">Animation Selection</label>
-                      <select
-                        value={kineticTypoAnimation}
-                        onChange={(e) => setKineticTypoAnimation(e.target.value)}
-                        className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
-                      >
-                        <option value="random">AI / Random Animations</option>
-                        <option value="zoom">Specific: Pop / Zoom</option>
-                        <option value="bounce">Specific: Bounce</option>
-                        <option value="slideUp">Specific: Slide Up</option>
-                        <option value="slideDown">Specific: Slide Down</option>
-                        <option value="slideLeft">Specific: Slide Left</option>
-                        <option value="slideRight">Specific: Slide Right</option>
-                        <option value="fadeIn">Specific: Fade In</option>
-                        <option value="typewriter">Specific: Typewriter</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2.5 pt-2 border-t border-[#2d2d2d]">
-                    <button
-                      onClick={() => setShowKineticTypoModal(false)}
-                      className="px-3.5 py-1.5 text-xs text-[#a0a0a0] hover:text-white transition-colors font-medium"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleGenerateKineticTypography}
-                      className="px-4 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded text-xs font-semibold transition-colors"
                     >
                       Generate
                     </button>
