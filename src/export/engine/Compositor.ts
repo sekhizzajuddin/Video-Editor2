@@ -111,6 +111,11 @@ export class Compositor {
   private ctx: OffscreenCanvasRenderingContext2D;
   private aspectRatio: string;
 
+  /** Non-fatal export warnings surfaced to the worker/caller. */
+  public warnings: string[] = [];
+  /** Dedup set for one-per-clip warnings. */
+  private _warnedOnce = new Set<string>();
+
   // WebGL-based VideoFrame converter — handles NV12/YUV→RGBA on the GPU.
   private glCanvas: OffscreenCanvas | null = null;
   private gl: WebGL2RenderingContext | null = null;
@@ -322,7 +327,7 @@ export class Compositor {
     // First pass: render all content layers
     for (const layer of contentLayers) {
       if (layer.type === 'text') {
-        this.renderTextLayer(layer);
+        this.renderTextLayer(layer, targetCtx);
         continue;
       }
       if (layer.type === 'adjustment') {
@@ -451,9 +456,6 @@ export class Compositor {
 
         // Apply AI background removal mask if enabled
         if (layer.aiBackground?.enabled && layer.frame) {
-          const frame = layer.frame as any;
-          const sourceTimeMs = frame.sourceTime !== undefined ? (frame.sourceTime * 1000) : 0;
-          
           const dw = (drawable as any).width || (drawable as any).videoWidth || W;
           const dh = (drawable as any).height || (drawable as any).videoHeight || H;
 
@@ -468,20 +470,19 @@ export class Compositor {
           // Draw the original frame
           tempCtx.drawImage(drawable, 0, 0);
           
-          // Apply the pre-rendered mask from cache
-          // Note: For export, we need to use the cached masks that were prepared during "Prepare Export" phase
-          // The applyPreRenderedMaskIfAvailable function looks up masks by clipId and current time
-          const clipId = frame.clipId || '_default';
+          // Use layer properties (not frame — raw VideoFrame has no clipId/sourceTime)
+          const clipId = layer.clipId || '_default';
           const modelSelection = layer.aiBackground.modelSelection ?? 1;
           const choke = layer.aiBackground.choke ?? 0;
           const feather = layer.aiBackground.feather ?? layer.aiBackground.edgeBlur ?? 0;
           const spillSuppression = layer.aiBackground.spillSuppression ?? 0;
           const spillColor = layer.aiBackground.spillColor;
           
-          // For export, we need to simulate the video time for mask lookup
-          // We'll create a mock element with the currentTime property
+          // Source media time: timeline time minus clip start
+          const sourceTime = (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0);
+          
           const mockElement = {
-            currentTime: frame.sourceTime || 0,
+            currentTime: sourceTime,
             videoWidth: dw,
             videoHeight: dh,
           };
@@ -504,27 +505,36 @@ export class Compositor {
           if (maskApplied) {
             drawable = tempCanvas;
           } else {
-            console.warn('[Compositor] AI background mask not found in cache for clip', clipId, 'at time', frame.sourceTime);
+            // Surface warning once per clip so it shows in the export UI
+            const warnKey = `aibg_${clipId}`;
+            if (!this._warnedOnce.has(warnKey)) {
+              this._warnedOnce.add(warnKey);
+              this.warnings.push(
+                `AI background removal for clip "${clipId}" requires "Prepare Export" to pre-generate masks. ` +
+                `The clip will export with its original background.`
+              );
+            }
           }
         }
         
         // Apply object removal inpainting if enabled
         if (layer.objectRemoval?.enabled && layer.frame) {
-          const frame = layer.frame as any;
-          const sourceTimeMs = frame.sourceTime !== undefined ? (frame.sourceTime * 1000) : 0;
-          
           try {
             const curW = (drawable as any).width || (drawable as any).videoWidth || W;
             const curH = (drawable as any).height || (drawable as any).videoHeight || H;
+            // Use layer properties — raw VideoFrame has no clipId/sourceTime/animations.
+            // FrameScheduler already pre-interpolated objectRemoval keyframes, so
+            // animations=undefined avoids redundant re-interpolation.
+            const sourceTime = (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0);
             const inpaintedCanvas = generateObjectRemovalInpaint(
               curW,
               curH,
               layer.objectRemoval,
-              frame.sourceTime || 0,
-              frame.clipStartTime || 0,
+              sourceTime,
+              layer.startTime || 0,
               drawable,
-              frame.clip?.animations,
-              frame.clipId
+              undefined,  // animations already pre-interpolated by FrameScheduler
+              layer.clipId || '_default'
             );
             drawable = inpaintedCanvas;
           } catch (err) {
@@ -577,7 +587,7 @@ export class Compositor {
         }
         if (effectNames.some((x) => x.includes('black') || x.includes('monochrome') || x === 'grayscale')) cssFilters.push('grayscale(100%)');
         if (effectNames.some((x) => x.includes('sepia') || x.includes('vintage'))) cssFilters.push('sepia(70%)');
-        this.ctx.filter = cssFilters.length ? cssFilters.join(' ') : 'none';
+        targetCtx.filter = cssFilters.length ? cssFilters.join(' ') : 'none';
 
         // Determine source dimensions for cropping
         const drawableAny = drawable as any;
@@ -941,7 +951,8 @@ export class Compositor {
    * underline, and now entry/exit animation) scaled from the UI view space to
    * the export resolution.
    */
-  private renderTextLayer(layer: RenderLayer) {
+  private renderTextLayer(layer: RenderLayer, renderCtx?: OffscreenCanvasRenderingContext2D) {
+    const ctx = renderCtx ?? this.ctx;
     const clip = layer.textData || {};
     const ts = clip.textSettings || {
       text: clip.text || 'Text',
@@ -970,19 +981,19 @@ export class Compositor {
     // Font sizes are authored against the preview view; scale to export size.
     const uiScale = Math.min(W / viewW, H / viewH);
 
-    this.ctx.save();
+    ctx.save();
 
     const tg = layer.transitionGeometry;
     if (tg) {
       if (tg.clipRect) {
-        this.ctx.beginPath();
-        this.ctx.rect(tg.clipRect.x * W, tg.clipRect.y * H, tg.clipRect.w * W, tg.clipRect.h * H);
-        this.ctx.clip();
+        ctx.beginPath();
+        ctx.rect(tg.clipRect.x * W, tg.clipRect.y * H, tg.clipRect.w * W, tg.clipRect.h * H);
+        ctx.clip();
       }
-      this.ctx.translate(W / 2 + tg.translateX * W, H / 2 + tg.translateY * H);
-      if (tg.rotation) this.ctx.rotate(tg.rotation);
-      if (tg.scale !== 1) this.ctx.scale(tg.scale, tg.scale);
-      this.ctx.translate(-W / 2, -H / 2);
+      ctx.translate(W / 2 + tg.translateX * W, H / 2 + tg.translateY * H);
+      if (tg.rotation) ctx.rotate(tg.rotation);
+      if (tg.scale !== 1) ctx.scale(tg.scale, tg.scale);
+      ctx.translate(-W / 2, -H / 2);
     }
 
     const exportScaleX = W / viewW;
@@ -994,27 +1005,27 @@ export class Compositor {
     if (scale <= 10 && scale > 0) scale = scale * 100; // legacy '1' scale
     const finalScale = (scale / 100) * uiScale;
 
-    this.ctx.translate(W / 2 + tx, H / 2 + ty);
-    this.ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
-    this.ctx.scale(finalScale, finalScale);
+    ctx.translate(W / 2 + tx, H / 2 + ty);
+    ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
+    ctx.scale(finalScale, finalScale);
 
     // Entry/exit animation: offset + scale compose inside the already-scaled
     // context exactly like the preview's text branch, so the exported motion
     // matches the editor frame-for-frame.
-    this.ctx.translate(anim.offsetX, anim.offsetY);
-    this.ctx.scale(anim.scaleX, anim.scaleY);
+    ctx.translate(anim.offsetX, anim.offsetY);
+    ctx.scale(anim.scaleX, anim.scaleY);
 
-    this.ctx.globalAlpha = (layer.opacity ?? 1) * anim.opacity;
-    this.ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+    ctx.globalAlpha = (layer.opacity ?? 1) * anim.opacity;
+    ctx.globalCompositeOperation = layer.blendMode || 'source-over';
 
     const fontStyle: string[] = [];
     if (ts.italic) fontStyle.push('italic');
     if (ts.bold) fontStyle.push('bold');
     const fontWeightStyle = fontStyle.join(' ');
     const fontSize = ts.fontSize || 48;
-    this.ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${fontSize}px ${ts.fontFamily || 'sans-serif'}`;
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
+    ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${fontSize}px ${ts.fontFamily || 'sans-serif'}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
 
     const lines = String(text).split('\n');
     const lineHeight = fontSize * 1.2;
@@ -1024,7 +1035,7 @@ export class Compositor {
     if (ts.backgroundColor && ts.backgroundColor !== 'transparent') {
       let maxWidth = 0;
       for (const line of lines) {
-        maxWidth = Math.max(maxWidth, this.ctx.measureText(line).width);
+        maxWidth = Math.max(maxWidth, ctx.measureText(line).width);
       }
       const paddingX = fontSize * 0.5;
       const paddingY = fontSize * 0.3;
@@ -1033,58 +1044,58 @@ export class Compositor {
       const bgW = maxWidth + paddingX * 2;
       const bgH = blockHeight + paddingY * 2;
       const radius = Math.min(8, bgH / 4);
-      this.ctx.fillStyle = ts.backgroundColor;
-      this.ctx.beginPath();
-      this.ctx.moveTo(bgX + radius, bgY);
-      this.ctx.lineTo(bgX + bgW - radius, bgY);
-      this.ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
-      this.ctx.lineTo(bgX + bgW, bgY + bgH - radius);
-      this.ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
-      this.ctx.lineTo(bgX + radius, bgY + bgH);
-      this.ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
-      this.ctx.lineTo(bgX, bgY + radius);
-      this.ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
-      this.ctx.closePath();
-      this.ctx.fill();
+      ctx.fillStyle = ts.backgroundColor;
+      ctx.beginPath();
+      ctx.moveTo(bgX + radius, bgY);
+      ctx.lineTo(bgX + bgW - radius, bgY);
+      ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
+      ctx.lineTo(bgX + bgW, bgY + bgH - radius);
+      ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
+      ctx.lineTo(bgX + radius, bgY + bgH);
+      ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
+      ctx.lineTo(bgX, bgY + radius);
+      ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
+      ctx.closePath();
+      ctx.fill();
     }
 
     if (ts.shadow) {
-      this.ctx.shadowColor = ts.shadowColor || 'rgba(0,0,0,0.8)';
-      this.ctx.shadowBlur = ts.shadowBlur !== undefined ? ts.shadowBlur : 10;
-      this.ctx.shadowOffsetX = 2;
-      this.ctx.shadowOffsetY = 2;
+      ctx.shadowColor = ts.shadowColor || 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = ts.shadowBlur !== undefined ? ts.shadowBlur : 10;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
     }
 
     const firstLineY = -(blockHeight / 2) + lineHeight / 2;
     for (let i = 0; i < lines.length; i++) {
       const lineY = firstLineY + i * lineHeight;
       if (ts.strokeColor && ts.strokeWidth) {
-        this.ctx.strokeStyle = ts.strokeColor;
-        this.ctx.lineWidth = ts.strokeWidth;
-        this.ctx.strokeText(lines[i], 0, lineY);
+        ctx.strokeStyle = ts.strokeColor;
+        ctx.lineWidth = ts.strokeWidth;
+        ctx.strokeText(lines[i], 0, lineY);
       }
-      this.ctx.fillStyle = ts.color || '#ffffff';
-      this.ctx.fillText(lines[i], 0, lineY);
+      ctx.fillStyle = ts.color || '#ffffff';
+      ctx.fillText(lines[i], 0, lineY);
 
       if (ts.underline) {
-        const lw = this.ctx.measureText(lines[i]).width;
-        this.ctx.save();
-        this.ctx.shadowColor = 'transparent';
-        this.ctx.beginPath();
-        this.ctx.strokeStyle = ts.color || '#ffffff';
-        this.ctx.lineWidth = Math.max(1, fontSize / 15);
-        this.ctx.moveTo(-lw / 2, lineY + fontSize * 0.45);
-        this.ctx.lineTo(lw / 2, lineY + fontSize * 0.45);
-        this.ctx.stroke();
-        this.ctx.restore();
+        const lw = ctx.measureText(lines[i]).width;
+        ctx.save();
+        ctx.shadowColor = 'transparent';
+        ctx.beginPath();
+        ctx.strokeStyle = ts.color || '#ffffff';
+        ctx.lineWidth = Math.max(1, fontSize / 15);
+        ctx.moveTo(-lw / 2, lineY + fontSize * 0.45);
+        ctx.lineTo(lw / 2, lineY + fontSize * 0.45);
+        ctx.stroke();
+        ctx.restore();
       }
     }
 
-    this.ctx.restore();
-    this.ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
+    ctx.globalCompositeOperation = 'source-over';
   }
 
-  private applyChromaKey(ctx: OffscreenCanvasRenderingContext2D, width: number, height: number, settings: { color: string; threshold: number; softness: number; spillSuppression: number }) {
+  private applyChromaKey(ctx: OffscreenCanvasRenderingContext2D, width: number, height: number, settings: { color: string; threshold: number; softness: number; spillSuppression: number; edgeFeather?: number }) {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
     
@@ -1138,6 +1149,13 @@ export class Compositor {
            }
         }
       }
+    }
+
+    // Edge feather: separable box blur on alpha channel (matches preview's blurAlphaChannel)
+    const edgeFeather = settings.edgeFeather ?? 0;
+    if (edgeFeather > 0) {
+      const radius = Math.max(1, Math.floor(edgeFeather));
+      this.blurAlphaChannel(imageData, radius);
     }
     
     ctx.putImageData(imageData, 0, 0);
