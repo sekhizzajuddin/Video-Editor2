@@ -42,32 +42,36 @@ interface SizeConfig {
   nameFontSize: string;
   durFontSize: string;
   gapWidth: number;
+  trackLaneMinHeight: number;
 }
 
 const SIZE_CONFIGS: Record<ThumbSize, SizeConfig> = {
   small: {
-    cardWidth: 104,
-    cardHeight: 76,
-    thumbHeight: 46,
-    nameFontSize: 'text-[9px]',
+    cardWidth: 112,
+    cardHeight: 84,
+    thumbHeight: 52,
+    nameFontSize: 'text-[10px]',
     durFontSize: 'text-[8px]',
-    gapWidth: 70,
+    gapWidth: 68,
+    trackLaneMinHeight: 108,
   },
   medium: {
-    cardWidth: 144,
-    cardHeight: 106,
-    thumbHeight: 68,
-    nameFontSize: 'text-[11px]',
+    cardWidth: 154,
+    cardHeight: 112,
+    thumbHeight: 74,
+    nameFontSize: 'text-xs',
     durFontSize: 'text-[9px]',
-    gapWidth: 90,
+    gapWidth: 84,
+    trackLaneMinHeight: 138,
   },
   large: {
-    cardWidth: 196,
-    cardHeight: 140,
-    thumbHeight: 94,
-    nameFontSize: 'text-xs',
+    cardWidth: 204,
+    cardHeight: 146,
+    thumbHeight: 100,
+    nameFontSize: 'text-sm',
     durFontSize: 'text-[10px]',
-    gapWidth: 110,
+    gapWidth: 104,
+    trackLaneMinHeight: 172,
   },
 };
 
@@ -135,8 +139,8 @@ function buildSequenceWithGaps(clips: TimelineClip[]): SequenceItem[] {
   let lastEnd = 0;
   for (let i = 0; i < sorted.length; i++) {
     const c = sorted[i];
-    // If there is a decent gap (>= 0.1s) before this clip
-    if (c.startTime - lastEnd >= 0.1) {
+    // If there is a noticeable gap (>= 0.05s) before this clip
+    if (c.startTime - lastEnd >= 0.05) {
       items.push({
         id: `gap-${i}-${lastEnd.toFixed(2)}`,
         kind: 'gap',
@@ -165,7 +169,7 @@ const GapCard = React.memo(function GapCard({
 }) {
   return (
     <div
-      className="flex-shrink-0 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/15 bg-white/[0.02] text-white/40 select-none transition-all duration-150"
+      className="flex-shrink-0 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/20 bg-white/[0.03] text-white/40 select-none transition-all duration-150 shadow-inner"
       style={{
         width: sizeConfig.gapWidth,
         height: sizeConfig.cardHeight,
@@ -173,9 +177,9 @@ const GapCard = React.memo(function GapCard({
       title={`Gap: ${duration.toFixed(2)}s`}
     >
       <Clock className="w-4 h-4 text-white/30 mb-1" />
-      <span className="text-[9px] uppercase tracking-wider font-semibold text-white/50">Gap</span>
-      <span className="text-[10px] font-mono text-amber-400/80 font-medium tabular-nums">
-        {duration.toFixed(1)}s
+      <span className="text-[9px] uppercase tracking-wider font-bold text-white/50">Gap</span>
+      <span className="text-[10px] font-mono text-amber-400/90 font-semibold tabular-nums mt-0.5">
+        +{duration.toFixed(1)}s
       </span>
     </div>
   );
@@ -189,13 +193,13 @@ const DropSlot = React.memo(function DropSlot({
 }) {
   return (
     <div
-      className="flex-shrink-0 rounded-lg border-2 border-dashed border-amber-400 bg-amber-500/20 shadow-[0_0_16px_rgba(251,191,36,0.3)] flex flex-col items-center justify-center select-none transition-all duration-200 ease-out animate-pulse"
+      className="flex-shrink-0 rounded-lg border-2 border-dashed border-amber-400 bg-amber-500/25 shadow-[0_0_20px_rgba(251,191,36,0.4)] flex flex-col items-center justify-center select-none transition-all duration-150 ease-out animate-pulse"
       style={{
         width: sizeConfig.cardWidth,
         height: sizeConfig.cardHeight,
       }}
     >
-      <span className="text-[11px] font-bold text-amber-300 tracking-wide">Place Here</span>
+      <span className="text-xs font-bold text-amber-300 tracking-wider uppercase">Place Here</span>
     </div>
   );
 });
@@ -228,26 +232,27 @@ const ClipCard = React.memo(function ClipCard({
   onPreviewPlay,
   onPreviewStop,
 }: ClipCardProps) {
-  const mediaType = media?.type ?? 'video';
+  const mediaType = media?.type ?? (trackType === 'text' ? 'text' : trackType === 'audio' ? 'audio' : 'video');
   const color = getCardColor(mediaType, trackType);
   const Icon = TRACK_ICON[mediaType] ?? Film;
+  const textContent = (clip as any).textSettings?.text;
   const name =
-    ((clip as any).textSettings?.text ?? '').slice(0, 24) ||
+    (textContent && textContent.trim().length > 0 ? textContent.slice(0, 24) : null) ||
     media?.name ||
-    'Clip';
+    (mediaType === 'text' ? 'Text Title' : 'Clip');
 
   return (
     <div
       data-card-id={clip.id}
-      className={`group relative flex-shrink-0 rounded-lg border-2 select-none transition-all duration-150 overflow-hidden cursor-grab active:cursor-grabbing ${
+      className={`group relative flex-shrink-0 rounded-lg border-2 select-none transition-all duration-150 overflow-hidden cursor-grab active:cursor-grabbing shadow-sm ${
         isSelected
           ? 'border-amber-400 shadow-[0_0_14px_rgba(251,191,36,0.6)] ring-1 ring-amber-400/50 scale-[1.02]'
-          : 'border-white/10 hover:border-white/30 hover:shadow-md'
+          : 'border-white/15 hover:border-white/35 hover:shadow-md'
       } ${isDraggingThis ? 'opacity-20 scale-95' : 'opacity-100'}`}
       style={{
         width: sizeConfig.cardWidth,
         height: sizeConfig.cardHeight,
-        background: `${color}26`,
+        background: `${color}22`,
         touchAction: 'none',
       }}
       onPointerDown={onPointerDown}
@@ -256,9 +261,9 @@ const ClipCard = React.memo(function ClipCard({
         onSelect();
       }}
     >
-      {/* Thumbnail area */}
+      {/* Thumbnail / Media Visual area */}
       <div
-        className="relative w-full overflow-hidden bg-black/40 flex items-center justify-center"
+        className="relative w-full overflow-hidden bg-black/50 flex items-center justify-center"
         style={{ height: sizeConfig.thumbHeight }}
       >
         {media?.thumbnail ? (
@@ -268,8 +273,24 @@ const ClipCard = React.memo(function ClipCard({
             draggable={false}
             className="w-full h-full object-cover pointer-events-none"
           />
+        ) : mediaType === 'text' ? (
+          <div className="w-full h-full flex flex-col items-center justify-center p-1 bg-purple-950/40">
+            <Type className="w-5 h-5 text-purple-400 mb-0.5" />
+            <span className="text-[9px] text-purple-200 font-medium truncate max-w-[90%] text-center px-1">
+              {textContent || 'Text'}
+            </span>
+          </div>
+        ) : mediaType === 'audio' ? (
+          <div className="w-full h-full flex flex-col items-center justify-center p-1 bg-emerald-950/40">
+            <Music className="w-5 h-5 text-emerald-400 mb-0.5" />
+            <span className="text-[9px] text-emerald-200 font-medium truncate max-w-[90%] text-center px-1">
+              {media?.name || 'Audio Track'}
+            </span>
+          </div>
         ) : (
-          <Icon className="w-7 h-7 text-white/30" />
+          <div className="w-full h-full flex items-center justify-center">
+            <Icon className="w-6 h-6 text-white/30" />
+          </div>
         )}
 
         {/* Play/Stop preview button */}
@@ -277,7 +298,7 @@ const ClipCard = React.memo(function ClipCard({
           <button
             className={`absolute bottom-1 right-1 rounded-full p-1.5 transition-all z-20 shadow-md ${
               isPreviewPlaying
-                ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse'
                 : 'bg-black/80 hover:bg-black text-amber-400 hover:scale-110'
             }`}
             onPointerDown={(e) => e.stopPropagation()}
@@ -297,19 +318,19 @@ const ClipCard = React.memo(function ClipCard({
         )}
       </div>
 
-      {/* Label and duration bar */}
-      <div className="px-2 py-1 flex flex-col justify-center bg-[#13131a]/90 backdrop-blur-sm border-t border-white/5">
+      {/* Label and duration footer */}
+      <div className="px-2 py-1 flex flex-col justify-center bg-[#14141e] border-t border-white/10">
         <span
           className={`font-semibold text-white/90 truncate leading-tight ${sizeConfig.nameFontSize}`}
         >
           {name}
         </span>
         <div className="flex items-center justify-between mt-0.5">
-          <span className={`text-white/40 font-mono tabular-nums ${sizeConfig.durFontSize}`}>
+          <span className={`text-white/50 font-mono tabular-nums ${sizeConfig.durFontSize}`}>
             {clip.duration.toFixed(1)}s
           </span>
           <span
-            className="text-[8px] font-bold uppercase px-1 py-0.2 rounded text-white/70"
+            className="text-[8px] font-bold uppercase px-1 rounded text-white/80"
             style={{ background: `${color}55` }}
           >
             {mediaType}
@@ -319,7 +340,7 @@ const ClipCard = React.memo(function ClipCard({
 
       {/* Drag handle */}
       <div className="absolute top-1 left-1 pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity">
-        <GripVertical className="w-3 h-3 text-white drop-shadow" />
+        <GripVertical className="w-3.5 h-3.5 text-white drop-shadow" />
       </div>
     </div>
   );
@@ -368,27 +389,27 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
   return (
     <div
       data-track-row-id={track.id}
-      className={`flex flex-col rounded-xl border transition-all duration-150 overflow-hidden shadow-sm ${
+      className={`flex-shrink-0 flex flex-col rounded-xl border transition-all duration-150 shadow-md ${
         isOverThisTrack
-          ? 'bg-[#1b1b26] border-amber-400 ring-2 ring-amber-400/40'
-          : 'bg-[#15151c] border-white/10 hover:border-white/20'
+          ? 'bg-[#1b1b28] border-amber-400 ring-2 ring-amber-400/40'
+          : 'bg-[#14141d] border-white/10 hover:border-white/20'
       } ${isFx ? 'opacity-60' : 'opacity-100'}`}
     >
       {/* Pinned Track Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#1c1c27] border-b border-white/5 select-none">
+      <div className="flex-shrink-0 flex items-center justify-between px-3.5 py-2 bg-[#1b1b26] border-b border-white/10 select-none">
         <div className="flex items-center gap-2">
-          <Icon className="w-3.5 h-3.5 text-amber-400" />
-          <span className="text-xs font-semibold text-white/90 tracking-wide">{track.name}</span>
-          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-white/5 text-white/60">
+          <Icon className="w-4 h-4 text-amber-400" />
+          <span className="text-xs font-bold text-white tracking-wide">{track.name}</span>
+          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-white/10 text-white/70 font-semibold">
             {track.type}
           </span>
-          <span className="text-[10px] text-white/40 tabular-nums font-mono">
+          <span className="text-[11px] text-white/40 tabular-nums font-mono">
             {sortedClips.length} {sortedClips.length === 1 ? 'clip' : 'clips'}
           </span>
         </div>
         {isFx && (
-          <span className="text-[9px] text-rose-400 flex items-center gap-1 font-medium">
-            <Lock className="w-2.5 h-2.5" /> FX Locked
+          <span className="text-[10px] text-rose-400 flex items-center gap-1 font-semibold">
+            <Lock className="w-3 h-3" /> FX Locked
           </span>
         )}
       </div>
@@ -396,15 +417,18 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
       {/* Linear Horizontal Scrollable Strip */}
       <div
         data-track-lane-id={track.id}
-        className="flex flex-row flex-nowrap items-center gap-2.5 p-3 overflow-x-auto overflow-y-hidden select-none min-h-[96px] mobile-no-scrollbar"
-        style={{ scrollbarWidth: 'thin' }}
+        className="flex flex-row flex-nowrap items-center gap-3 p-3 overflow-x-auto overflow-y-hidden select-none mobile-no-scrollbar"
+        style={{
+          minHeight: sizeConfig.trackLaneMinHeight,
+          scrollbarWidth: 'thin',
+        }}
       >
         {isFx ? (
-          <div className="flex items-center justify-center w-full py-4 text-xs text-white/30 italic">
+          <div className="flex items-center justify-center w-full py-4 text-xs text-white/40 italic">
             FX tracks cannot be rearranged
           </div>
         ) : sortedClips.length === 0 ? (
-          <div className="flex items-center gap-2 py-4 px-3 text-xs text-white/30 border-2 border-dashed border-white/5 rounded-lg w-full justify-center">
+          <div className="flex items-center gap-2 py-4 px-4 text-xs text-white/40 border-2 border-dashed border-white/10 rounded-lg w-full justify-center min-h-[70px]">
             {isOverThisTrack ? (
               <DropSlot sizeConfig={sizeConfig} />
             ) : (
@@ -414,7 +438,6 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
         ) : (
           <>
             {(() => {
-              // We render sequence with potential dynamic drop slot insertion
               let clipCount = 0;
               const renderedElements = [];
 
@@ -434,7 +457,7 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
                   const currentClipIndex = clipCount;
                   clipCount++;
 
-                  // If drag is hovering right before this clip slot
+                  // Drop slot indicator before this clip
                   if (isOverThisTrack && insertSlotIndex === currentClipIndex) {
                     renderedElements.push(
                       <DropSlot key={`drop-slot-${currentClipIndex}`} sizeConfig={sizeConfig} />
@@ -461,7 +484,7 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
                 }
               }
 
-              // Trailing drop slot if dropping at the end of track
+              // Trailing drop slot if dropping at the end
               if (isOverThisTrack && insertSlotIndex === clipCount) {
                 renderedElements.push(
                   <DropSlot key={`drop-slot-end-${clipCount}`} sizeConfig={sizeConfig} />
@@ -486,12 +509,12 @@ export function ArrangeModeOverlay() {
   const seek = useEditorStore((s) => s.seek);
   const pause = useEditorStore((s) => s.pause);
 
-  // Pause playback when Arrange Mode opens
+  // Pause live playback when Arrange Mode opens
   useEffect(() => {
     pause();
   }, [pause]);
 
-  // Thumbnail size control state
+  // Thumbnail size control state (defaults to medium)
   const [thumbSize, setThumbSize] = useState<ThumbSize>('medium');
   const sizeConfig = SIZE_CONFIGS[thumbSize];
 
@@ -573,29 +596,39 @@ export function ArrangeModeOverlay() {
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Global hit-test to find target track row and horizontal slot index
+  // Robust hit-test to find target track row and horizontal slot index
   const updateHitTest = useCallback(
     (clientX: number, clientY: number, mediaType: string) => {
       if (!containerRef.current) return;
       const rows = containerRef.current.querySelectorAll<HTMLElement>('[data-track-row-id]');
+      if (rows.length === 0) return;
 
-      let targetRow: HTMLElement | null = null;
+      // Find closest track row by Y distance
+      let closestRow: HTMLElement | null = null;
+      let minDistanceY = Infinity;
+
       for (const row of Array.from(rows)) {
         const rect = row.getBoundingClientRect();
         if (clientY >= rect.top && clientY <= rect.bottom) {
-          targetRow = row;
+          closestRow = row;
+          minDistanceY = 0;
           break;
+        }
+        const dist = Math.min(Math.abs(clientY - rect.top), Math.abs(clientY - rect.bottom));
+        if (dist < minDistanceY) {
+          minDistanceY = dist;
+          closestRow = row;
         }
       }
 
-      if (!targetRow) {
+      if (!closestRow) {
         setHoverTrackId(null);
         setInsertSlotIndex(null);
         if (dragRef.current) dragRef.current.destTrackId = null;
         return;
       }
 
-      const trackId = targetRow.getAttribute('data-track-row-id')!;
+      const trackId = closestRow.getAttribute('data-track-row-id')!;
       const track = draftTracks.find((t) => t.id === trackId);
 
       if (!track || track.type === 'fx' || !isCompatible(mediaType, track.type)) {
@@ -605,21 +638,39 @@ export function ArrangeModeOverlay() {
         return;
       }
 
-      // Calculate horizontal slot index within the linear strip
-      const cards = targetRow.querySelectorAll<HTMLElement>('[data-card-id]');
-      let slot = 0;
-      for (const card of Array.from(cards)) {
-        // Skip comparing against the dragged card itself if in same track
-        const cardId = card.getAttribute('data-card-id');
-        if (cardId === dragRef.current?.clipId && dragRef.current?.fromTrackId === trackId) {
-          continue;
+      // Auto-scroll horizontal lane if dragging near lane edges
+      const trackLane = closestRow.querySelector<HTMLElement>('[data-track-lane-id]');
+      if (trackLane) {
+        const laneRect = trackLane.getBoundingClientRect();
+        if (clientX < laneRect.left + 50) {
+          trackLane.scrollLeft -= 14;
+        } else if (clientX > laneRect.right - 50) {
+          trackLane.scrollLeft += 14;
         }
+      }
+
+      // Calculate horizontal slot index based on un-shifted card midpoints
+      const allCards = Array.from(closestRow.querySelectorAll<HTMLElement>('[data-card-id]'));
+      const otherCards = allCards.filter(
+        (c) => !(c.getAttribute('data-card-id') === dragRef.current?.clipId && dragRef.current?.fromTrackId === trackId)
+      );
+
+      let slot = 0;
+      for (let i = 0; i < otherCards.length; i++) {
+        const card = otherCards[i];
         const cardRect = card.getBoundingClientRect();
-        const midX = cardRect.left + cardRect.width / 2;
-        if (clientX < midX) {
+        let baseMidX = cardRect.left + cardRect.width / 2;
+
+        // If a drop slot is currently shifting this card right, compensate to measure against unshifted space
+        if (hoverTrackId === trackId && insertSlotIndex !== null && i >= insertSlotIndex) {
+          baseMidX -= (sizeConfig.cardWidth + 12);
+        }
+
+        if (clientX < baseMidX) {
+          slot = i;
           break;
         }
-        slot++;
+        slot = i + 1;
       }
 
       setHoverTrackId(trackId);
@@ -629,7 +680,7 @@ export function ArrangeModeOverlay() {
         dragRef.current.destSlotIndex = slot;
       }
     },
-    [draftTracks]
+    [draftTracks, hoverTrackId, insertSlotIndex, sizeConfig]
   );
 
   const onCardPointerDown = useCallback(
@@ -641,7 +692,7 @@ export function ArrangeModeOverlay() {
       if (srcTrack?.type === 'fx') return;
 
       const media = mediaMap.get(clip.mediaId);
-      const mediaType = media?.type ?? 'video';
+      const mediaType = media?.type ?? (srcTrack?.type === 'text' ? 'text' : srcTrack?.type === 'audio' ? 'audio' : 'video');
 
       dragRef.current = {
         clipId: clip.id,
@@ -660,7 +711,7 @@ export function ArrangeModeOverlay() {
     [draftTracks, mediaMap]
   );
 
-  // Global window pointer move & up listeners for ultra smooth dragging
+  // Global window pointer move & up listeners for fluid dragging
   useEffect(() => {
     const handleWindowPointerMove = (e: PointerEvent) => {
       const drag = dragRef.current;
@@ -677,6 +728,17 @@ export function ArrangeModeOverlay() {
 
       if (drag.moved) {
         setDragPointerPos({ x: e.clientX, y: e.clientY });
+
+        // Auto-scroll vertical container if dragging near top/bottom
+        if (containerRef.current) {
+          const cRect = containerRef.current.getBoundingClientRect();
+          if (e.clientY < cRect.top + 40) {
+            containerRef.current.scrollTop -= 12;
+          } else if (e.clientY > cRect.bottom - 40) {
+            containerRef.current.scrollTop += 12;
+          }
+        }
+
         updateHitTest(e.clientX, e.clientY, drag.mediaType);
       }
     };
@@ -694,7 +756,7 @@ export function ArrangeModeOverlay() {
       const { fromTrackId, destTrackId, destSlotIndex, clipId } = drag;
 
       setDraftTracks((prev) => {
-        const next = prev.map((t) => ({ ...t, clips: [...t.clips] }));
+        const next = prev.map((t) => ({ ...t, clips: [...(t.clips || [])] }));
         const srcTrack = next.find((t) => t.id === fromTrackId);
         const dstTrack = next.find((t) => t.id === destTrackId);
         if (!srcTrack || !dstTrack) return prev;
@@ -711,7 +773,9 @@ export function ArrangeModeOverlay() {
         dstSorted.splice(clampedSlot, 0, updatedClip);
 
         dstTrack.clips = repackTrack(dstSorted);
-        srcTrack.clips = repackTrack(srcTrack.clips);
+        if (srcTrack.id !== dstTrack.id) {
+          srcTrack.clips = repackTrack(srcTrack.clips);
+        }
 
         return next;
       });
@@ -755,34 +819,34 @@ export function ArrangeModeOverlay() {
 
   return (
     <div
-      className="absolute inset-0 z-50 bg-[#0f0f13] flex flex-col overflow-hidden text-white select-none"
+      className="absolute inset-0 z-50 bg-[#0c0c11] flex flex-col overflow-hidden text-white select-none"
       style={{ opacity: 1 }}
     >
       {/* ── Top Header Toolbar ─────────────────────────────────────────── */}
-      <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-[#181822] border-b border-white/10 shadow-md">
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-2.5 bg-[#161622] border-b border-white/10 shadow-lg">
         {/* Title & Help */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 font-bold text-xs shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-400 font-bold text-xs shadow-sm">
             <LayoutGrid className="w-4 h-4" />
             <span>Arrange Mode</span>
           </div>
-          <span className="hidden md:inline text-[11px] text-white/50">
-            Linear horizontal view • Drag cards to reorder • Gap values displayed • Select to preview
+          <span className="hidden md:inline text-xs text-white/60">
+            Drag cards to reorder • Gaps shown as cards • Select clip to preview
           </span>
         </div>
 
         {/* Center: Thumbnail Size Controls */}
-        <div className="flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded-lg border border-white/10">
-          <SlidersHorizontal className="w-3.5 h-3.5 text-white/40 mr-1" />
-          <span className="text-[10px] text-white/50 uppercase font-semibold mr-1">Size:</span>
+        <div className="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-lg border border-white/10">
+          <SlidersHorizontal className="w-3.5 h-3.5 text-white/50 mr-1" />
+          <span className="text-[10px] text-white/60 uppercase font-bold mr-1">SIZE:</span>
           {(['small', 'medium', 'large'] as ThumbSize[]).map((size) => (
             <button
               key={size}
               onClick={() => setThumbSize(size)}
-              className={`px-2.5 py-0.5 rounded text-[11px] font-medium capitalize transition-all ${
+              className={`px-3 py-0.5 rounded text-xs font-semibold capitalize transition-all ${
                 thumbSize === size
-                  ? 'bg-amber-500 text-black font-bold shadow-sm'
-                  : 'text-white/60 hover:text-white hover:bg-white/5'
+                  ? 'bg-amber-400 text-black shadow-sm'
+                  : 'text-white/70 hover:text-white hover:bg-white/10'
               }`}
             >
               {size}
@@ -794,23 +858,24 @@ export function ArrangeModeOverlay() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleCancel}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/70 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5 active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/70 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/10 active:scale-95 font-medium"
           >
             <X className="w-3.5 h-3.5" /> Cancel
           </button>
           <button
             onClick={handleDone}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs text-black font-bold bg-amber-400 hover:bg-amber-300 rounded-lg transition-all shadow-md active:scale-95"
+            className="flex items-center gap-1.5 px-4 py-1.5 text-xs text-black font-bold bg-amber-400 hover:bg-amber-300 rounded-lg transition-all shadow-md active:scale-95"
           >
-            <Check className="w-3.5 h-3.5" /> Done
+            <Check className="w-4 h-4" /> Done
           </button>
         </div>
       </div>
 
-      {/* ── Main Track Lanes Container (Vertically scrollable) ─────────── */}
+      {/* ── Main Track Lanes Container (Scrolls Vertically with Full Heights) ─── */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 flex flex-col gap-3.5 bg-[#0f0f13]"
+        className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 flex flex-col gap-3.5 bg-[#0c0c11] min-h-0"
+        style={{ scrollbarWidth: 'thin' }}
         onClick={() => setSelectedClipId(null)}
       >
         {draftTracks.map((track) => (
@@ -869,11 +934,11 @@ export function ArrangeModeOverlay() {
               <Film className="w-6 h-6 text-amber-400" />
             )}
           </div>
-          <div className="p-1.5 bg-[#181824] flex flex-col justify-center">
-            <span className={`font-semibold text-white truncate ${sizeConfig.nameFontSize}`}>
+          <div className="p-1.5 bg-[#161622] flex flex-col justify-center border-t border-white/10">
+            <span className={`font-bold text-white truncate ${sizeConfig.nameFontSize}`}>
               {draggingMedia?.name || 'Clip'}
             </span>
-            <span className={`text-amber-400/80 font-mono ${sizeConfig.durFontSize}`}>
+            <span className={`text-amber-400 font-mono font-semibold ${sizeConfig.durFontSize}`}>
               {draggingClip.duration.toFixed(1)}s
             </span>
           </div>
