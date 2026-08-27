@@ -12,8 +12,16 @@ import { getCatalogOrFallback } from './groqModelCatalog';
 import { PROCUT_SYSTEM_KNOWLEDGE, snapshotEditorForAgent, resolveTargetClipId } from './systemKnowledge';
 import { globalRateLimiter } from './RateLimiter';
 
-export const AGENT_MAX_TURNS = 5;
-export const AGENT_MAX_GROQ_CALLS = 6; // hard cap per user message (under 30 RPM)
+export const AGENT_MAX_TURNS = 4;
+export const AGENT_MAX_GROQ_CALLS = 4; // hard cap per user message (plan + reflect + optional vision + wrap-up)
+// Always leave this much of the 30 RPM budget unused so a single prompt can
+// never consume the whole limit and other features keep working.
+export const AGENT_MIN_RPM_HEADROOM = 8;
+
+function rpmHeadroomOk(reserve: number = 0): boolean {
+  const status = globalRateLimiter.getStatus();
+  return status.canMakeCall && status.remainingCalls - reserve > AGENT_MIN_RPM_HEADROOM;
+}
 
 export interface AgentToolEvent {
   name: string;
@@ -174,12 +182,23 @@ export async function runAgentLoop(userText: string, opts: AgentRunOptions = {})
     if (groqCalls >= AGENT_MAX_GROQ_CALLS) {
       break;
     }
-    if (!globalRateLimiter.canMakeCall() && globalRateLimiter.isInCooldown()) {
+    if (!globalRateLimiter.canMakeCall()) {
       toolEvents.push({
         name: 'rate_limit',
         args: {},
         status: 'failed',
         error: 'Free-tier cooldown active — wait before another Groq call.',
+      });
+      break;
+    }
+    // After the first planning turn, stop reflecting if the RPM budget is
+    // getting thin — finish the action with a local summary instead.
+    if (turn > 0 && !rpmHeadroomOk()) {
+      toolEvents.push({
+        name: 'rate_limit',
+        args: {},
+        status: 'failed',
+        error: 'RPM headroom reached — stopping extra planning turns to preserve the budget.',
       });
       break;
     }
@@ -273,7 +292,7 @@ export async function runAgentLoop(userText: string, opts: AgentRunOptions = {})
 
       if (executed.success && executed.result?.__inspectPreview) {
         emit('looking', turn + 1, 'Looking at the preview (vision)…');
-        if (groqCalls < AGENT_MAX_GROQ_CALLS) {
+        if (groqCalls < AGENT_MAX_GROQ_CALLS && rpmHeadroomOk(1)) {
           const frame = await capturePreviewJpeg(executed.result.time);
           if (frame) {
             try {
@@ -321,7 +340,8 @@ export async function runAgentLoop(userText: string, opts: AgentRunOptions = {})
   }
 
   // Final wrap-up if we still have budget and the last model turn was tools-only.
-  if (!aborted && groqCalls < AGENT_MAX_GROQ_CALLS && globalRateLimiter.canMakeCall()) {
+  // Skip it when the RPM headroom is low — a local summary costs nothing.
+  if (!aborted && groqCalls < AGENT_MAX_GROQ_CALLS && rpmHeadroomOk(1)) {
     try {
       const wrap = await groqChat({
         purpose: 'fast',

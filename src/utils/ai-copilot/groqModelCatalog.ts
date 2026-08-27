@@ -29,7 +29,10 @@ export interface GroqModelCatalog {
 
 const CACHE_KEY = 'procut_groq_model_catalog_v1';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — re-check if lineup may have changed
+const NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — don't re-hit /models after a failed discovery
 const MODELS_URL = 'https://api.groq.com/openai/v1/models';
+
+import { globalRateLimiter } from './RateLimiter';
 
 /** Conservative fallbacks if /models is unreachable. Prefer currently-documented IDs. */
 export const FALLBACK_CATALOG: GroqModelCatalog = {
@@ -221,6 +224,10 @@ export function buildCatalogFromIds(ids: string[], source: GroqModelCatalog['sou
 }
 
 async function fetchModels(apiKey: string, signal?: AbortSignal): Promise<string[]> {
+  // /models counts against Groq's per-key RPM just like chat completions —
+  // gate it through the shared limiter instead of firing unrationed.
+  await globalRateLimiter.waitForSlot();
+  globalRateLimiter.recordCall();
   const res = await fetch(MODELS_URL, {
     method: 'GET',
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -238,6 +245,12 @@ async function fetchModels(apiKey: string, signal?: AbortSignal): Promise<string
  * of returned model IDs is unchanged. Pass a key (env first). If discovery
  * fails, returns the last good cache or hardcoded fallbacks.
  */
+/**
+ * When a discovery attempt fails, remember it briefly so we don't re-fire
+ * an unrationed /models request on every chat message.
+ */
+let negativeCacheUntil = 0;
+
 export async function resolveGroqCatalog(
   apiKey: string | undefined,
   opts: { force?: boolean } = {}
@@ -247,6 +260,9 @@ export async function resolveGroqCatalog(
     return cached;
   }
   if (!apiKey) {
+    return cached ?? FALLBACK_CATALOG;
+  }
+  if (!opts.force && Date.now() < negativeCacheUntil) {
     return cached ?? FALLBACK_CATALOG;
   }
   if (inflight && !opts.force) return inflight;
@@ -271,6 +287,7 @@ export async function resolveGroqCatalog(
       return next;
     } catch (err) {
       console.warn('[groqModelCatalog] discovery failed, using cache/fallback', err);
+      negativeCacheUntil = Date.now() + NEGATIVE_CACHE_TTL_MS;
       return cached ?? FALLBACK_CATALOG;
     } finally {
       clearTimeout(timeout);
@@ -284,6 +301,7 @@ export async function resolveGroqCatalog(
 export function invalidateGroqCatalog(): void {
   memoryCache = null;
   inflight = null;
+  negativeCacheUntil = 0;
   if (typeof localStorage !== 'undefined') {
     try {
       localStorage.removeItem(CACHE_KEY);

@@ -246,7 +246,12 @@ export async function groqChat(opts: GroqChatOptions): Promise<GroqChatResult> {
             keySource: attempt.source,
             retryable: true,
           });
-      const canTryNext = i < attempts.length - 1 && lastError.retryable;
+      // Never fail over to the settings key on a 429: the rate limit is
+      // per-key and the second key fires after a 60s cooldown anyway, so the
+      // fallback only doubles the damage. Auth errors (401/403) still fail
+      // over via lastError.retryable from shouldFailover().
+      const canTryNext =
+        i < attempts.length - 1 && lastError.retryable && lastError.status !== 429;
       if (!canTryNext) throw lastError;
       console.warn(
         `[groqChat] ${attempt.source} key failed (${lastError.status ?? 'net'}). Falling back to settings key.`
