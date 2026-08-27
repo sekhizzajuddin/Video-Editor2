@@ -98,50 +98,7 @@ function isCompatible(mediaType: string, targetTrackType: string): boolean {
 }
 
 // ── Re-pack clips contiguously ────────────────────────────────────────────
-function repackTrack(clips: TimelineClip[]): TimelineClip[] {
-  const sorted = [...clips].sort((a, b) => a.startTime - b.startTime);
-  let cursor = 0;
-  return sorted.map((clip) => {
-    const updated = { ...clip, startTime: cursor };
-    cursor += clip.duration;
-    return updated;
-  });
-}
-
-// ── Track icon mapping ────────────────────────────────────────────────────
-const TRACK_ICON: Record<string, React.ElementType> = {
-  video: Film,
-  audio: Music,
-  text: Type,
-  fx: Sparkles,
-  image: ImageIcon,
-  adjustment: Sparkles,
-};
-
-function getCardColor(mediaType: string, trackType: string): string {
-  if (trackType === 'audio' || mediaType === 'audio') return '#059669';
-  if (mediaType === 'text') return '#8b5cf6';
-  if (mediaType === 'image') return '#d97706';
-  if (mediaType === 'video') return '#2563eb';
-  if (mediaType === 'fx') return '#f43f5e';
-  return '#4b5563';
-}
-
-function dispatchClipPreview(
-  payload: { clipId: string; mediaId: string; trimStart: number; duration: number; url: string } | null
-) {
-  window.dispatchEvent(new CustomEvent('procut-arrange-preview', { detail: payload }));
-}
-
-// ── Timeline items representation (clips + gaps) ─────────────────────────
-interface SequenceItem {
-  id: string;
-  kind: 'clip' | 'gap';
-  clip?: TimelineClip;
-  gapDuration?: number;
-}
-
-function buildSequenceWithGaps(clips: TimelineClip[]): SequenceItem[] {
+function buildSequenceWithGaps(clips: TimelineClip[]) {
   const sorted = [...clips].sort((a, b) => a.startTime - b.startTime);
   const items: SequenceItem[] = [];
   let lastEnd = 0;
@@ -606,16 +563,34 @@ export function ArrangeModeOverlay() {
         if (clipIdx === -1) return prev;
         const [clip] = srcTrack.clips.splice(clipIdx, 1);
 
-        const updatedClip = destTrackId !== fromTrackId ? { ...clip, trackId: destTrackId } : clip;
+        const updatedClip = destTrackId !== fromTrackId ? { ...clip, trackId: destTrackId } : { ...clip };
 
+        // Get destination clips (excluding the one we just removed if same track)
         const dstSorted = [...dstTrack.clips].sort((a, b) => a.startTime - b.startTime);
         const clampedSlot = Math.max(0, Math.min(destSlotIndex, dstSorted.length));
+        
+        // Insert into the array based on visual drop slot
         dstSorted.splice(clampedSlot, 0, updatedClip);
 
-        dstTrack.clips = repackTrack(dstSorted);
-        if (srcTrack.id !== dstTrack.id) srcTrack.clips = repackTrack(srcTrack.clips);
+        // Ripple resolve startTimes
+        let cursor = 0;
+        for (let i = 0; i < dstSorted.length; i++) {
+          const c = dstSorted[i];
+          if (i === clampedSlot) {
+            // The inserted clip snaps to the cursor
+            c.startTime = cursor;
+          } else {
+            // Existing clips preserve their gaps, but get pushed if they overlap
+            if (c.startTime < cursor) {
+              c.startTime = cursor;
+            }
+          }
+          cursor = c.startTime + c.duration;
+        }
 
-        addDebug(`SetDraftTracks: updated state.`);
+        dstTrack.clips = dstSorted;
+        
+        addDebug(`SetDraftTracks: drop applied cleanly`);
         return next;
       });
     };
