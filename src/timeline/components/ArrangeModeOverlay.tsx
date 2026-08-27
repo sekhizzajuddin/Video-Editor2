@@ -208,8 +208,9 @@ const ClipCard = React.memo(function ClipCard({
       style={{ width: sizeConfig.cardWidth, height: sizeConfig.cardHeight, background: `${color}22`, touchAction: 'none' }}
       onPointerDown={onPointerDown}
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
+      draggable={false} // Disable native HTML5 drag
     >
-      <div className="relative w-full overflow-hidden bg-black/50 flex items-center justify-center" style={{ height: sizeConfig.thumbHeight }}>
+      <div className="relative w-full overflow-hidden bg-black/50 flex items-center justify-center pointer-events-none" style={{ height: sizeConfig.thumbHeight }}>
         {media?.thumbnail ? (
           <img src={media.thumbnail} alt="" draggable={false} className="w-full h-full object-cover pointer-events-none" />
         ) : mediaType === 'text' ? (
@@ -227,7 +228,7 @@ const ClipCard = React.memo(function ClipCard({
         )}
         {isSelected && (
           <button
-            className={`absolute bottom-1 right-1 rounded-full p-1.5 z-20 shadow-md ${
+            className={`absolute bottom-1 right-1 rounded-full p-1.5 z-20 shadow-md pointer-events-auto ${
               isPreviewPlaying ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-black/80 hover:bg-black text-amber-400 hover:scale-110'
             }`}
             onPointerDown={(e) => e.stopPropagation()}
@@ -238,7 +239,7 @@ const ClipCard = React.memo(function ClipCard({
           </button>
         )}
       </div>
-      <div className="px-2 py-1 flex flex-col justify-center bg-[#14141e] border-t border-white/10">
+      <div className="px-2 py-1 flex flex-col justify-center bg-[#14141e] border-t border-white/10 pointer-events-none">
         <span className={`font-semibold text-white/90 truncate leading-tight ${sizeConfig.nameFontSize}`}>{name}</span>
         <div className="flex items-center justify-between mt-0.5">
           <span className={`text-white/50 font-mono tabular-nums ${sizeConfig.durFontSize}`}>{clip.duration.toFixed(1)}s</span>
@@ -426,7 +427,11 @@ export function ArrangeModeOverlay() {
 
   const onCardPointerDown = useCallback((e: React.PointerEvent, clip: TimelineClip, trackId: string) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+    
+    // Prevent default drag and text selection behavior, and capture pointer!
+    e.preventDefault();
     e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
 
     const currentTracks = draftTracksRef.current;
     const srcTrack = currentTracks.find((t) => t.id === trackId);
@@ -450,14 +455,11 @@ export function ArrangeModeOverlay() {
   }, [mediaMap]);
 
   // ── Hit-test: find target track and slot index ──────────────────────────
-  // This is called from onOverlayPointerMove. It reads mutable refs only,
-  // so it never causes the handler identity to change.
   const performHitTest = useCallback((clientX: number, clientY: number, mediaType: string) => {
     if (!containerRef.current || !dragRef.current) return;
     const rows = Array.from(containerRef.current.querySelectorAll<HTMLElement>('[data-track-row-id]'));
     if (rows.length === 0) return;
 
-    // Find the closest track row by vertical distance
     let closestRow: HTMLElement | null = null;
     let minDist = Infinity;
     for (const row of rows) {
@@ -511,73 +513,87 @@ export function ArrangeModeOverlay() {
     drag.destSlotIndex = slot;
     setHoverTrackId(trackId);
     setInsertSlotIndex(slot);
-  }, []); // STABLE: reads everything from refs
+  }, []);
 
-  // ── Overlay-level pointer handlers ─────────────────────────────────────
-  // These are attached directly to the overlay div, NOT via window listeners.
-  // They never change identity, so the overlay never re-subscribes.
-  const onOverlayPointerMove = useCallback((e: React.PointerEvent) => {
-    const drag = dragRef.current;
-    if (!drag) return;
+  // ── Global stable window pointer listeners ────────────────────────────────
+  // These are guaranteed to NEVER re-run or detach during a drag, because 
+  // the useEffect has an EMPTY dependency array.
+  useEffect(() => {
+    const handleWindowPointerMove = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
 
-    const dx = Math.abs(e.clientX - drag.startX);
-    const dy = Math.abs(e.clientY - drag.startY);
+      const dx = Math.abs(e.clientX - drag.startX);
+      const dy = Math.abs(e.clientY - drag.startY);
 
-    if (!drag.moved && (dx > 4 || dy > 4)) {
-      drag.moved = true;
-      setDraggingClipId(drag.clipId);
-      handlePreviewStopRef.current();
-    }
+      if (!drag.moved && (dx > 4 || dy > 4)) {
+        drag.moved = true;
+        setDraggingClipId(drag.clipId);
+        handlePreviewStopRef.current();
+      }
 
-    if (!drag.moved) return;
+      if (!drag.moved) return;
 
-    setDragPointerPos({ x: e.clientX, y: e.clientY });
+      // Prevent native dragging (like selecting text) once we are dragging our card
+      e.preventDefault();
 
-    // Auto-scroll vertical container
-    if (containerRef.current) {
-      const cr = containerRef.current.getBoundingClientRect();
-      if (e.clientY < cr.top + 40) containerRef.current.scrollTop -= 12;
-      else if (e.clientY > cr.bottom - 40) containerRef.current.scrollTop += 12;
-    }
+      setDragPointerPos({ x: e.clientX, y: e.clientY });
 
-    performHitTest(e.clientX, e.clientY, drag.mediaType);
-  }, [performHitTest]); // performHitTest is stable (empty deps)
+      // Auto-scroll vertical container
+      if (containerRef.current) {
+        const cr = containerRef.current.getBoundingClientRect();
+        if (e.clientY < cr.top + 40) containerRef.current.scrollTop -= 12;
+        else if (e.clientY > cr.bottom - 40) containerRef.current.scrollTop += 12;
+      }
 
-  const onOverlayPointerUp = useCallback((_e: React.PointerEvent) => {
-    const drag = dragRef.current;
-    dragRef.current = null;
+      performHitTest(e.clientX, e.clientY, drag.mediaType);
+    };
 
-    // Reset ALL render state
-    setDraggingClipId(null);
-    setHoverTrackId(null);
-    setInsertSlotIndex(null);
+    const handleWindowPointerUp = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      dragRef.current = null;
 
-    if (!drag || !drag.moved || !drag.destTrackId) return;
+      setDraggingClipId(null);
+      setHoverTrackId(null);
+      setInsertSlotIndex(null);
 
-    const { fromTrackId, destTrackId, destSlotIndex, clipId } = drag;
+      if (!drag || !drag.moved || !drag.destTrackId) return;
 
-    setDraftTracks((prev) => {
-      const next = prev.map((t) => ({ ...t, clips: [...(t.clips || [])] }));
-      const srcTrack = next.find((t) => t.id === fromTrackId);
-      const dstTrack = next.find((t) => t.id === destTrackId);
-      if (!srcTrack || !dstTrack) return prev;
+      const { fromTrackId, destTrackId, destSlotIndex, clipId } = drag;
 
-      const clipIdx = srcTrack.clips.findIndex((c) => c.id === clipId);
-      if (clipIdx === -1) return prev;
-      const [clip] = srcTrack.clips.splice(clipIdx, 1);
+      setDraftTracks((prev) => {
+        const next = prev.map((t) => ({ ...t, clips: [...(t.clips || [])] }));
+        const srcTrack = next.find((t) => t.id === fromTrackId);
+        const dstTrack = next.find((t) => t.id === destTrackId);
+        if (!srcTrack || !dstTrack) return prev;
 
-      const updatedClip = destTrackId !== fromTrackId ? { ...clip, trackId: destTrackId } : clip;
+        const clipIdx = srcTrack.clips.findIndex((c) => c.id === clipId);
+        if (clipIdx === -1) return prev;
+        const [clip] = srcTrack.clips.splice(clipIdx, 1);
 
-      const dstSorted = [...dstTrack.clips].sort((a, b) => a.startTime - b.startTime);
-      const clampedSlot = Math.max(0, Math.min(destSlotIndex, dstSorted.length));
-      dstSorted.splice(clampedSlot, 0, updatedClip);
+        const updatedClip = destTrackId !== fromTrackId ? { ...clip, trackId: destTrackId } : clip;
 
-      dstTrack.clips = repackTrack(dstSorted);
-      if (srcTrack.id !== dstTrack.id) srcTrack.clips = repackTrack(srcTrack.clips);
+        const dstSorted = [...dstTrack.clips].sort((a, b) => a.startTime - b.startTime);
+        const clampedSlot = Math.max(0, Math.min(destSlotIndex, dstSorted.length));
+        dstSorted.splice(clampedSlot, 0, updatedClip);
 
-      return next;
-    });
-  }, []); // STABLE: reads everything from dragRef
+        dstTrack.clips = repackTrack(dstSorted);
+        if (srcTrack.id !== dstTrack.id) srcTrack.clips = repackTrack(srcTrack.clips);
+
+        return next;
+      });
+    };
+
+    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
+    window.addEventListener('pointerup', handleWindowPointerUp);
+    window.addEventListener('pointercancel', handleWindowPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleWindowPointerMove);
+      window.removeEventListener('pointerup', handleWindowPointerUp);
+      window.removeEventListener('pointercancel', handleWindowPointerUp);
+    };
+  }, [performHitTest]); // performHitTest is stable (deps: [])
 
   // ── Actions ─────────────────────────────────────────────────────────────
   const handleDone = useCallback(() => {
@@ -608,9 +624,6 @@ export function ArrangeModeOverlay() {
     <div
       className="absolute inset-0 z-50 bg-[#0c0c11] flex flex-col overflow-hidden text-white select-none"
       style={{ opacity: 1 }}
-      onPointerMove={onOverlayPointerMove}
-      onPointerUp={onOverlayPointerUp}
-      onPointerCancel={onOverlayPointerUp}
     >
       {/* ── Top Header Toolbar ─────────────────────────────────────────── */}
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-2.5 bg-[#161622] border-b border-white/10 shadow-lg">
