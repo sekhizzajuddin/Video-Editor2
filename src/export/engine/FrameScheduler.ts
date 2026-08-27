@@ -506,7 +506,13 @@ export class FrameScheduler {
             lumaKey,
             mask: animatedMask,
             vectorMask: clip.vectorMask,
-            fxSettings: clip.fxSettings,
+            fxSettings: clip.fxSettings ? {
+              ...clip.fxSettings,
+              intensity: getAnimatedExportValue(
+                clip.fxSettings.intensity ?? 100, t, st,
+                clip.animations?.['fxSettings.intensity']
+              ),
+            } : undefined,
             particleSettings: clip.particleSettings,
             lutData,
             lutIntensity,

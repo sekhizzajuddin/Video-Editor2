@@ -809,6 +809,7 @@ export class Compositor {
     // composited content + particles, mirroring the preview's timeline-FX pass.
     for (const layer of contentLayers) {
       if (layer.type !== 'fx' || !layer.fxSettings) continue;
+      if ((layer.fxSettings.intensity ?? 100) <= 0) continue;
       const localTime = Math.max(0, (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
       applyFxEffect(
         targetCtx as unknown as CanvasRenderingContext2D,
@@ -1212,6 +1213,51 @@ export class Compositor {
     const u = -0.1687 * (r/255) - 0.3313 * (g/255) + 0.5 * (b/255) + 128.0/255.0;
     const v = 0.5 * (r/255) - 0.4187 * (g/255) - 0.0813 * (b/255) + 128.0/255.0;
     return { y, u, v };
+  }
+
+  /**
+   * Separable O(N) sliding-window box blur on the alpha channel only.
+   * Mirrors the preview's blurAlphaChannel in canvasEffects.ts so chroma-keyed
+   * clips export with the same soft feathered edges as the preview.
+   */
+  private blurAlphaChannel(imageData: ImageData, radius: number): void {
+    const { width: w, height: h, data } = imageData;
+    if (w * h === 0 || radius <= 0) return;
+    radius = Math.min(radius, Math.floor(Math.min(w, h) / 2));
+
+    const size = w * h;
+    const alpha = new Float32Array(size);
+    const temp = new Float32Array(size);
+
+    for (let i = 0; i < size; i++) alpha[i] = data[i * 4 + 3];
+
+    // Horizontal pass
+    for (let y = 0; y < h; y++) {
+      let sum = 0;
+      for (let x = 0; x <= radius; x++) sum += alpha[y * w + x];
+      for (let x = 0; x < w; x++) {
+        const left = Math.max(0, x - radius - 1);
+        const right = Math.min(w - 1, x + radius);
+        const count = right - left + 1;
+        if (x > 0) { sum -= alpha[y * w + left]; sum += alpha[y * w + right]; }
+        temp[y * w + x] = sum / count;
+      }
+    }
+
+    // Vertical pass
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let y = 0; y <= radius; y++) sum += temp[y * w + x];
+      for (let y = 0; y < h; y++) {
+        const top = Math.max(0, y - radius - 1);
+        const bottom = Math.min(h - 1, y + radius);
+        const count = bottom - top + 1;
+        if (y > 0) { sum -= temp[top * w + x]; sum += temp[bottom * w + x]; }
+        alpha[y * w + x] = sum / count;
+      }
+    }
+
+    for (let i = 0; i < size; i++) data[i * 4 + 3] = Math.floor(alpha[i]);
   }
 
   dispose() {

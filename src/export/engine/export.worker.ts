@@ -648,6 +648,12 @@ async function handleExport(
       // Render frame with WebGL (or 2D fallback if context lost)
       await compositor.render(layers, overlays);
 
+      // Surface compositor warnings (e.g. missing AI background masks) to the UI
+      for (const w of compositor.warnings) {
+        postMessage({ type: 'WARNING', payload: { message: w } });
+      }
+      compositor.warnings.length = 0;
+
       // Black-frame watchdog (first frame + every SAMPLE_EVERY-th after that)
       if (i === 0 || i % SAMPLE_EVERY === 0) {
         if (layers.some((l) => !!l.frame)) {
