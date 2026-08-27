@@ -32,6 +32,16 @@ import {
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem } from '@/types';
 
+// ── DEBUG LOGGER ─────────────────────────────────────────────────────────
+// A global array to hold debug logs, forced to re-render by a state toggle
+const DEBUG_LOGS: string[] = [];
+function addDebug(msg: string) {
+  console.log(msg);
+  DEBUG_LOGS.unshift(`[${new Date().toISOString().split('T')[1].slice(0, 8)}] ${msg}`);
+  if (DEBUG_LOGS.length > 20) DEBUG_LOGS.pop();
+  window.dispatchEvent(new CustomEvent('arrange-debug'));
+}
+
 // ── Thumbnail size presets ────────────────────────────────────────────────
 type ThumbSize = 'small' | 'medium' | 'large';
 
@@ -406,18 +416,14 @@ export function ArrangeModeOverlay() {
   }, [selectedClipId, previewingClipId, handlePreviewStop]);
 
   // ── Drag system ─────────────────────────────────────────────────────────
-  // All mutable drag state lives in refs for zero-stale-closure guarantees.
-  // React state is ONLY updated for rendering, never read back by handlers.
   const dragRef = useRef<DragInfo | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Render state (drives visual updates)
   const [draggingClipId, setDraggingClipId] = useState<string | null>(null);
   const [dragPointerPos, setDragPointerPos] = useState({ x: 0, y: 0 });
   const [hoverTrackId, setHoverTrackId] = useState<string | null>(null);
   const [insertSlotIndex, setInsertSlotIndex] = useState<number | null>(null);
 
-  // Keep refs to latest values that handlers need but shouldn't depend on
   const draftTracksRef = useRef(draftTracks);
   draftTracksRef.current = draftTracks;
   const sizeConfigRef = useRef(sizeConfig);
@@ -426,12 +432,21 @@ export function ArrangeModeOverlay() {
   handlePreviewStopRef.current = handlePreviewStop;
 
   const onCardPointerDown = useCallback((e: React.PointerEvent, clip: TimelineClip, trackId: string) => {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    addDebug(`CardPointerDown: clip ${clip.id}, pointerId ${e.pointerId}, type ${e.pointerType}`);
+    if (e.button !== 0 && e.pointerType === 'mouse') {
+      addDebug(`CardPointerDown Ignored: not main button`);
+      return;
+    }
     
-    // Prevent default drag and text selection behavior, and capture pointer!
     e.preventDefault();
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      addDebug(`SetPointerCapture Success`);
+    } catch (err: any) {
+      addDebug(`SetPointerCapture Error: ${err.message}`);
+    }
 
     const currentTracks = draftTracksRef.current;
     const srcTrack = currentTracks.find((t) => t.id === trackId);
@@ -454,7 +469,6 @@ export function ArrangeModeOverlay() {
     setDragPointerPos({ x: e.clientX, y: e.clientY });
   }, [mediaMap]);
 
-  // ── Hit-test: find target track and slot index ──────────────────────────
   const performHitTest = useCallback((clientX: number, clientY: number, mediaType: string) => {
     if (!containerRef.current || !dragRef.current) return;
     const rows = Array.from(containerRef.current.querySelectorAll<HTMLElement>('[data-track-row-id]'));
@@ -470,6 +484,7 @@ export function ArrangeModeOverlay() {
     }
 
     if (!closestRow || minDist > 60) {
+      if (dragRef.current.destTrackId !== null) addDebug(`HitTest: Missed all tracks (dist ${minDist})`);
       dragRef.current.destTrackId = null;
       setHoverTrackId(null);
       setInsertSlotIndex(null);
@@ -487,7 +502,6 @@ export function ArrangeModeOverlay() {
       return;
     }
 
-    // Auto-scroll the horizontal lane
     const trackLane = closestRow.querySelector<HTMLElement>('[data-track-lane-id]');
     if (trackLane) {
       const lr = trackLane.getBoundingClientRect();
@@ -495,7 +509,6 @@ export function ArrangeModeOverlay() {
       else if (clientX > lr.right - 50) trackLane.scrollLeft += 16;
     }
 
-    // Calculate horizontal slot index among non-dragged cards
     const allCards = Array.from(closestRow.querySelectorAll<HTMLElement>('[data-card-id]'));
     const drag = dragRef.current;
     const otherCards = allCards.filter(
@@ -509,16 +522,17 @@ export function ArrangeModeOverlay() {
       slot = i + 1;
     }
 
+    if (drag.destTrackId !== trackId || drag.destSlotIndex !== slot) {
+      // addDebug(`HitTest: over track ${trackId}, slot ${slot}`); // Too noisy
+    }
     drag.destTrackId = trackId;
     drag.destSlotIndex = slot;
     setHoverTrackId(trackId);
     setInsertSlotIndex(slot);
   }, []);
 
-  // ── Global stable window pointer listeners ────────────────────────────────
-  // These are guaranteed to NEVER re-run or detach during a drag, because 
-  // the useEffect has an EMPTY dependency array.
   useEffect(() => {
+    let moveCount = 0;
     const handleWindowPointerMove = (e: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
@@ -527,19 +541,21 @@ export function ArrangeModeOverlay() {
       const dy = Math.abs(e.clientY - drag.startY);
 
       if (!drag.moved && (dx > 4 || dy > 4)) {
+        addDebug(`PointerMove: crossed distance threshold. Dragging started.`);
         drag.moved = true;
         setDraggingClipId(drag.clipId);
         handlePreviewStopRef.current();
       }
 
       if (!drag.moved) return;
+      
+      moveCount++;
+      if (moveCount % 30 === 0) addDebug(`PointerMove: Dragging actively at (${e.clientX.toFixed(0)}, ${e.clientY.toFixed(0)})`);
 
-      // Prevent native dragging (like selecting text) once we are dragging our card
-      e.preventDefault();
+      try { e.preventDefault(); } catch(err) {}
 
       setDragPointerPos({ x: e.clientX, y: e.clientY });
 
-      // Auto-scroll vertical container
       if (containerRef.current) {
         const cr = containerRef.current.getBoundingClientRect();
         if (e.clientY < cr.top + 40) containerRef.current.scrollTop -= 12;
@@ -550,16 +566,35 @@ export function ArrangeModeOverlay() {
     };
 
     const handleWindowPointerUp = (e: PointerEvent) => {
+      addDebug(`PointerUp: Event received.`);
       const drag = dragRef.current;
       dragRef.current = null;
+
+      if (!drag) {
+        addDebug(`PointerUp: No active drag.`);
+        return;
+      }
+      if (!drag.moved) {
+        addDebug(`PointerUp: Drag canceled (did not move > 4px).`);
+        setDraggingClipId(null);
+        setHoverTrackId(null);
+        setInsertSlotIndex(null);
+        return;
+      }
+      if (!drag.destTrackId) {
+        addDebug(`PointerUp: Drag canceled (no valid destination track).`);
+        setDraggingClipId(null);
+        setHoverTrackId(null);
+        setInsertSlotIndex(null);
+        return;
+      }
+
+      addDebug(`PointerUp: Drop confirmed on track ${drag.destTrackId} at slot ${drag.destSlotIndex}`);
+      const { fromTrackId, destTrackId, destSlotIndex, clipId } = drag;
 
       setDraggingClipId(null);
       setHoverTrackId(null);
       setInsertSlotIndex(null);
-
-      if (!drag || !drag.moved || !drag.destTrackId) return;
-
-      const { fromTrackId, destTrackId, destSlotIndex, clipId } = drag;
 
       setDraftTracks((prev) => {
         const next = prev.map((t) => ({ ...t, clips: [...(t.clips || [])] }));
@@ -580,22 +615,37 @@ export function ArrangeModeOverlay() {
         dstTrack.clips = repackTrack(dstSorted);
         if (srcTrack.id !== dstTrack.id) srcTrack.clips = repackTrack(srcTrack.clips);
 
+        addDebug(`SetDraftTracks: updated state.`);
         return next;
       });
     };
 
+    const handleWindowPointerCancel = (e: PointerEvent) => {
+      addDebug(`PointerCancel: Event received.`);
+      handleWindowPointerUp(e);
+    }
+
+    addDebug(`Effect Mounted: Added window event listeners.`);
     window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
     window.addEventListener('pointerup', handleWindowPointerUp);
-    window.addEventListener('pointercancel', handleWindowPointerUp);
+    window.addEventListener('pointercancel', handleWindowPointerCancel);
 
     return () => {
+      addDebug(`Effect Cleanup: Removed window event listeners.`);
       window.removeEventListener('pointermove', handleWindowPointerMove);
       window.removeEventListener('pointerup', handleWindowPointerUp);
-      window.removeEventListener('pointercancel', handleWindowPointerUp);
+      window.removeEventListener('pointercancel', handleWindowPointerCancel);
     };
-  }, [performHitTest]); // performHitTest is stable (deps: [])
+  }, [performHitTest]);
 
-  // ── Actions ─────────────────────────────────────────────────────────────
+  // Support re-rendering the debug console
+  const [, setForceRender] = useState(0);
+  useEffect(() => {
+    const fn = () => setForceRender(v => v + 1);
+    window.addEventListener('arrange-debug', fn);
+    return () => window.removeEventListener('arrange-debug', fn);
+  }, []);
+
   const handleDone = useCallback(() => {
     handlePreviewStop();
     useEditorStore.setState({ tracks: draftTracksRef.current });
@@ -608,7 +658,6 @@ export function ArrangeModeOverlay() {
     setArrangeMode(false);
   }, [setArrangeMode, handlePreviewStop]);
 
-  // Dragged clip info for the floating proxy
   const draggingClip = useMemo(() => {
     if (!draggingClipId) return null;
     for (const t of draftTracks) {
@@ -625,6 +674,11 @@ export function ArrangeModeOverlay() {
       className="absolute inset-0 z-50 bg-[#0c0c11] flex flex-col overflow-hidden text-white select-none"
       style={{ opacity: 1 }}
     >
+      {/* ── DEBUG LOGGER OVERLAY ───────────────────────────────────────── */}
+      <div className="absolute bottom-4 left-4 z-[99999] bg-black/80 text-green-400 font-mono text-[10px] p-2 rounded pointer-events-none w-[350px] max-h-[300px] overflow-hidden flex flex-col-reverse opacity-90 border border-green-500/30">
+        {DEBUG_LOGS.map((log, i) => <div key={i}>{log}</div>)}
+      </div>
+
       {/* ── Top Header Toolbar ─────────────────────────────────────────── */}
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-2.5 bg-[#161622] border-b border-white/10 shadow-lg">
         <div className="flex items-center gap-3">
