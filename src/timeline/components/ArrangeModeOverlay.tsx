@@ -430,6 +430,7 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
                     />
                   );
                 } else if (item.kind === 'clip' && item.clip) {
+                  const clip = item.clip;
                   const currentClipIndex = clipCount;
                   clipCount++;
 
@@ -440,20 +441,20 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
                     );
                   }
 
-                  const media = mediaMap.get(item.clip.mediaId) ?? null;
+                  const media = mediaMap.get(clip.mediaId) ?? null;
                   renderedElements.push(
                     <ClipCard
-                      key={item.clip.id}
-                      clip={item.clip}
+                      key={clip.id}
+                      clip={clip}
                       media={media}
                       trackType={track.type}
-                      isSelected={selectedClipId === item.clip.id}
-                      isDraggingThis={draggingClipId === item.clip.id}
-                      isPreviewPlaying={previewingClipId === item.clip.id}
+                      isSelected={selectedClipId === clip.id}
+                      isDraggingThis={draggingClipId === clip.id}
+                      isPreviewPlaying={previewingClipId === clip.id}
                       sizeConfig={sizeConfig}
-                      onPointerDown={(e) => onCardPointerDown(e, item.clip, track.id)}
-                      onSelect={() => onSelectClip(item.clip.id)}
-                      onPreviewPlay={() => media && onPreviewPlay(item.clip, media)}
+                      onPointerDown={(e) => onCardPointerDown(e, clip, track.id)}
+                      onSelect={() => onSelectClip(clip.id)}
+                      onPreviewPlay={() => media && onPreviewPlay(clip, media)}
                       onPreviewStop={onPreviewStop}
                     />
                   );

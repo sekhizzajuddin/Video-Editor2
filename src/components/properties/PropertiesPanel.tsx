@@ -908,25 +908,94 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     storeRemoveClip(clipId);
   }, [storeRemoveClip]);
 
-  // Auto-switch properties panel tabs only when the clip selection CHANGES (not on property updates)
+  // Check if a given tab is supported by the clip & track
+  const isTabSupportedForClip = useCallback((tab: PropertiesTab, clip: any, track: any): boolean => {
+    if (!clip) return tab === 'history' || tab === 'thumbnail';
+    if (tab === 'history' || tab === 'thumbnail') return true;
+    
+    if (track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
+      return tab === 'effects' || tab === 'transform';
+    }
+    
+    if (track?.type === 'text' || clip?.textSettings) {
+      return tab === 'text' || tab === 'transform' || tab === 'color' || tab === 'effects';
+    }
+    
+    if (track?.type === 'audio' || (!clip?.textSettings && clip?.mediaId?.includes('audio'))) {
+      return tab === 'transform' || tab === 'speed' || tab === 'audio' || tab === 'effects';
+    }
+    
+    // Standard video/image clip supports: transform, mask, color, speed, audio, effects
+    return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects';
+  }, []);
+
+  const getDefaultTabForClip = useCallback((clip: any, track: any): PropertiesTab => {
+    if (track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
+      return 'effects';
+    }
+    if (track?.type === 'text' || clip?.textSettings) {
+      return 'text';
+    }
+    if (track?.type === 'audio') {
+      return 'audio';
+    }
+    return 'transform';
+  }, []);
+
+  // Remember user-selected tab and scroll positions so clicking similar clips does not reset view
+  const lastActiveClipTab = useRef<PropertiesTab>('transform');
   const lastAutoSwitchedClip = useRef<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollPositionsByTab = useRef<Partial<Record<PropertiesTab, number>>>({});
+
+  useEffect(() => {
+    if (activePropertiesTab && activePropertiesTab !== 'history') {
+      lastActiveClipTab.current = activePropertiesTab;
+    }
+  }, [activePropertiesTab]);
+
+  const handleScroll = useCallback(() => {
+    if (scrollContainerRef.current && currentTab) {
+      scrollPositionsByTab.current[currentTab as PropertiesTab] = scrollContainerRef.current.scrollTop;
+    }
+  }, [currentTab]);
+
+  // Restore scroll position when tab changes
+  useEffect(() => {
+    if (scrollContainerRef.current && currentTab) {
+      const savedScrollTop = scrollPositionsByTab.current[currentTab as PropertiesTab] ?? 0;
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = savedScrollTop;
+        }
+      });
+    }
+  }, [currentTab]);
+
+  // Auto-switch properties panel tabs only when clip selection changes and current tab is not supported
   useEffect(() => {
     if (!primarySelectedId) {
       setActivePropertiesTab('history');
       return;
     }
-    if (lastAutoSwitchedClip.current === primarySelectedId) return; // don't override manual tab changes
+    if (lastAutoSwitchedClip.current === primarySelectedId) return; // don't override manual tab changes on same clip
     lastAutoSwitchedClip.current = primarySelectedId;
-    if (selectedTrack?.type === 'fx' || selectedClip?.fxSettings || selectedClip?.particleSettings) {
-      setActivePropertiesTab('effects');
-    } else if (selectedTrack?.type === 'audio') {
-      setActivePropertiesTab('audio');
-    } else if (selectedTrack?.type === 'text' || selectedClip?.textSettings) {
-      setActivePropertiesTab('text');
-    } else {
-      setActivePropertiesTab('transform');
+
+    const targetTab = activePropertiesTab === 'history' ? lastActiveClipTab.current : activePropertiesTab;
+
+    // If the newly selected clip supports the current active tab (e.g. Color, Speed, Effects, Audio, etc.), preserve it!
+    if (targetTab && isTabSupportedForClip(targetTab, selectedClip, selectedTrack)) {
+      if (activePropertiesTab !== targetTab) {
+        setActivePropertiesTab(targetTab);
+      }
+      return;
     }
-  }, [primarySelectedId, setActivePropertiesTab]);
+
+    // Otherwise, fallback to the clip's default tab
+    const fallbackTab = getDefaultTabForClip(selectedClip, selectedTrack);
+    setActivePropertiesTab(fallbackTab);
+  }, [primarySelectedId, selectedClip, selectedTrack, activePropertiesTab, isTabSupportedForClip, getDefaultTabForClip, setActivePropertiesTab]);
+
 
 
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
@@ -3201,7 +3270,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       )}
 
       {/* Properties Content */}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-3"
+      >
         <SequenceProperties />
         {currentTab === 'transform' && (() => {
           // Reusing outer component scope helpers: localTime, animations, getPropVal, setPropVal, handleToggleMasterKeyframe
@@ -6300,7 +6373,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
         {/* ── Text Tab ─────────────────────────────────────────────────── */}
         {currentTab === 'text' && selectedClip.textSettings && (
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+          <div className="flex flex-col gap-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Text Properties</h3>
             </div>
@@ -6728,7 +6801,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
         {/* ── AI & Effects Tab ────────────────────────────────────────────── */}
         {currentTab === 'effects' && (
-          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
             {!isMobileView && (
               <h3 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -7364,7 +7437,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         
         {/* Thumbnail Designer Tab */}
         {currentTab === 'thumbnail' && (
-          <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
+          <div className="flex flex-col gap-4">
             <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 flex flex-col gap-3">
               <h3 className="text-xs font-semibold text-white flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-amber-500" />
@@ -7456,9 +7529,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         )}
 
         {currentTab === 'history' && (
-          <div className="flex-1 flex flex-col overflow-hidden h-full">
+          <div className="flex flex-col gap-3">
             {/* Header */}
-            <div className="p-3 border-b border-[#3e3e3e] flex items-center justify-between shrink-0 bg-[#1e1e1e]/30">
+            <div className="p-3 border border-[#3e3e3e] rounded bg-[#1e1e1e]/40 flex items-center justify-between shrink-0">
               <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Undo/Redo History</span>
               <span className="text-[9px] text-[#8a8a8a] bg-[#1e1e1e] border border-[#3e3e3e] rounded px-1.5 py-0.5 font-mono">
                 {history.length} Actions
@@ -7466,7 +7539,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scrollbar-thin">
+            <div className="space-y-1.5">
               {history.map((snap, idx) => {
                 const isActive = idx === historyIndex;
                 const isFuture = idx > historyIndex;

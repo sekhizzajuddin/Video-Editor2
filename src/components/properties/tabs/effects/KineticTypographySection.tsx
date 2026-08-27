@@ -149,8 +149,8 @@ export function KineticTypographySection({
       {/* ── Expanded config panel ── */}
       {isExpanded && (
         <div className="border-t border-teal-500/20">
-          {/* Scrollable config area */}
-          <div className="max-h-[70vh] overflow-y-auto p-3 space-y-4 scrollbar-thin scrollbar-thumb-teal-800 scrollbar-track-transparent">
+          {/* Full-height expanded config area */}
+          <div className="p-3 space-y-4">
 
             {/* Script / Language */}
             <div className="flex flex-col gap-1.5">
