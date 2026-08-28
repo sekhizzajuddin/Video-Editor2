@@ -686,6 +686,91 @@ export async function rasterizeSvgToCanvas(
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Strategy verification against the REAL scene
+ *
+ * The synthetic capability probe can only say what the engine does with a box.
+ * It cannot know whether *this* scene's markup survives serialization, or
+ * whether its particular animations advance. So before a render we capture the
+ * actual scene twice and compare. That turns "it renders purple" into a
+ * decision: keep the native path, escalate to baked frames, or give up on
+ * animating and at least show the finished artwork.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export interface SceneMotionProbe {
+  /** Anything at all was rasterized (the scene is not blank). */
+  rasterized: boolean;
+  /** The frames differed, i.e. the seek strategy actually advanced something. */
+  differs: boolean;
+}
+
+const PROBE_W = 320;
+const PROBE_H = 180;
+
+/** Cheap order-sensitive checksum of a pixel buffer. */
+function checksum(data: Uint8ClampedArray): number {
+  let hash = 2166136261;
+  // Sample every 4th pixel: enough to detect a moving scene, 4× cheaper.
+  for (let i = 0; i < data.length; i += 16) {
+    hash ^= data[i] + data[i + 1] * 3 + data[i + 2] * 7 + data[i + 3] * 11;
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Captures `stage` at `times` with the given strategy and reports whether the
+ * scene rasterized at all and whether the frames actually differ.
+ */
+export async function probeSceneMotion(
+  stage: SceneStage,
+  mode: SeekMode,
+  times: number[]
+): Promise<SceneMotionProbe> {
+  const empty: SceneMotionProbe = { rasterized: false, differs: false };
+  if (typeof OffscreenCanvas === 'undefined' || times.length < 2) return empty;
+
+  let canvas: OffscreenCanvas;
+  try {
+    canvas = new OffscreenCanvas(PROBE_W, PROBE_H);
+  } catch {
+    return empty;
+  }
+  const ctx = canvas.getContext('2d', { willReadFrequently: true }) as
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!ctx) return empty;
+
+  const hashes: number[] = [];
+  let ink = 0;
+
+  for (const t of times) {
+    ctx.clearRect(0, 0, PROBE_W, PROBE_H);
+    const ok = await captureSceneFrame(stage, canvas, t, mode);
+    if (!ok) return empty;
+    let data: Uint8ClampedArray;
+    try {
+      data = ctx.getImageData(0, 0, PROBE_W, PROBE_H).data;
+    } catch {
+      return empty;
+    }
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 8) ink++;
+    }
+    hashes.push(checksum(data));
+  }
+
+  if (ink === 0) return empty;
+  const differs = hashes.some((h) => h !== hashes[0]);
+  return { rasterized: true, differs };
+}
+
+/** Two sample times that exercise a scene's animation range. */
+export function sceneProbeTimes(scene: { enterAt: number; exitAt: number }): number[] {
+  const span = Math.max(0.5, scene.exitAt - scene.enterAt);
+  return [0.05, Math.max(0.4, span * 0.5)];
+}
+
 /** Seek → serialize → rasterize, in one call. */
 export async function captureSceneFrame(
   stage: SceneStage,

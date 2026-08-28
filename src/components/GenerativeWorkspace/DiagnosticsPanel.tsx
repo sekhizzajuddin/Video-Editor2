@@ -1,6 +1,21 @@
 import React, { useCallback, useState } from 'react';
-import { Bug, ChevronDown, ChevronUp, CheckCircle2, XCircle, Loader2, Wand2 } from 'lucide-react';
-import { probeCaptureCapabilities } from '@/utils/cssSceneRasterizer';
+import {
+  Bug,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Wand2,
+  Copy,
+  Check,
+} from 'lucide-react';
+import {
+  createSceneStage,
+  destroySceneStage,
+  probeCaptureCapabilities,
+  probeSceneMotion,
+} from '@/utils/cssSceneRasterizer';
 import { renderMotionGraphicToVideo } from '@/utils/motionGraphicRenderer';
 import { DEMO_SCENE_HTML } from './demoScene';
 
@@ -44,6 +59,13 @@ const INITIAL_CHECKS: Check[] = [
     detail: '',
   },
   {
+    id: 'scene',
+    label: 'Your generated scene',
+    hint: 'Rasterizes the AI scene currently loaded and checks whether it moves.',
+    state: 'idle',
+    detail: '',
+  },
+  {
     id: 'render',
     label: 'Demo scene → WebM',
     hint: 'Renders a built-in Vox-style scene and muxes it to WebM.',
@@ -55,6 +77,8 @@ const INITIAL_CHECKS: Check[] = [
 export interface DiagnosticsPanelProps {
   /** Loads the reference scene into the code editor. */
   onLoadDemo?: (html: string) => void;
+  /** The AI-generated scene currently loaded, if any (scenes[0]). */
+  sceneHtml?: string | null;
 }
 
 /**
@@ -65,11 +89,15 @@ export interface DiagnosticsPanelProps {
  * degrades, so this panel reports exactly which link in the chain is broken —
  * and proves the rest works without spending an AI call.
  */
-export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({ onLoadDemo }) => {
+export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
+  onLoadDemo,
+  sceneHtml = null,
+}) => {
   const [open, setOpen] = useState(false);
   const [checks, setChecks] = useState<Check[]>(INITIAL_CHECKS);
   const [running, setRunning] = useState(false);
   const [demoUrl, setDemoUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const patch = useCallback((id: string, next: Partial<Check>) => {
     setChecks((prev) => prev.map((c) => (c.id === id ? { ...c, ...next } : c)));
@@ -145,7 +173,38 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({ onLoadDemo }
         : 'SVG rasterization is unavailable, so animation capture is moot',
     });
 
-    // 4. End-to-end demo render
+    // 4. The user's own generated scene: does it rasterize, and does it move?
+    //    This is the discriminator between "the pipeline is broken" and "the AI
+    //    wrote markup this browser cannot rasterize".
+    if (!sceneHtml || !sceneHtml.trim()) {
+      patch('scene', { state: 'idle', detail: 'no generated scene yet' });
+    } else {
+      const stage = createSceneStage(sceneHtml, { width: 1280, height: 720, transparent: true });
+      if (!stage) {
+        patch('scene', { state: 'fail', detail: 'could not build a scene stage' });
+      } else {
+        try {
+          const css = await probeSceneMotion(stage, 'css', [0.1, 1.2]);
+          const baked = await probeSceneMotion(stage, 'js', [0.1, 1.2]);
+          const animated = stage.animated.length;
+          const ok = css.rasterized || baked.rasterized;
+          patch('scene', {
+            state: ok ? 'pass' : 'fail',
+            detail: ok
+              ? `rasterized • ${animated} animated nodes • native seek ${
+                  css.differs ? 'moves' : 'is static'
+                } • baked ${baked.differs ? 'moves' : 'is static'}`
+              : `nothing rasterized for this scene (${animated} animated nodes found)`,
+          });
+        } catch (err) {
+          patch('scene', { state: 'fail', detail: `probe threw: ${String(err)}` });
+        } finally {
+          destroySceneStage(stage);
+        }
+      }
+    }
+
+    // 5. End-to-end demo render
     try {
       const started = performance.now();
       const rendered = await renderMotionGraphicToVideo(
@@ -187,6 +246,25 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({ onLoadDemo }
 
     setRunning(false);
   }, [patch, demoUrl]);
+
+  /** Copies the full report so it can be pasted into a bug report. */
+  const copyReport = useCallback(async () => {
+    const lines = [
+      `ProCut generative pipeline report`,
+      `user agent: ${navigator.userAgent}`,
+      ...checks.map(
+        (c) => `${c.state.toUpperCase().padEnd(7)} ${c.label}${c.detail ? ` — ${c.detail}` : ''}`
+      ),
+    ];
+    const text = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      console.log(text);
+    }
+  }, [checks]);
 
   const StatusIcon: React.FC<{ state: CheckState }> = ({ state }) => {
     if (state === 'running') return <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />;
@@ -271,6 +349,16 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({ onLoadDemo }
                 Demo code
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={copyReport}
+              className="py-1.5 px-2.5 rounded-lg text-[11px] font-semibold bg-[#252525] text-[#a0a0a0] border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
+              title="Copy the full report (browser + every check) to the clipboard"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? 'Copied' : 'Copy report'}
+            </button>
           </div>
         </div>
       )}

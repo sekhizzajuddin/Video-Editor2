@@ -260,6 +260,7 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
 
           {/* Pipeline self-test (no AI call) */}
           <DiagnosticsPanel
+            sceneHtml={result?.spec?.htmlCssScenes?.[0]?.htmlCss ?? null}
             onLoadDemo={(html) => {
               setEditedHtmlCss(html);
               setShowCodeEditor(true);

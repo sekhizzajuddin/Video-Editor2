@@ -6,7 +6,7 @@ import {
   renderMotionGraphicToVideo,
 } from './motionGraphicRenderer';
 import { generateImageFromCloudflare } from './cloudflareClient';
-import { sanitizeMotionSceneHtml } from './cssSceneRasterizer';
+import { sanitizeMotionSceneHtml, probeCaptureCapabilities } from './cssSceneRasterizer';
 
 /**
  * Model candidates, tried in order. A 404 (model not available on this key /
@@ -255,11 +255,25 @@ export async function generateMotionGraphicsFromDialogue(
   onProgress('AI Designing visual scenes', 40);
 
   const style = options.style || 'mixed';
+
+  // Some engines (Safari and friends) cannot rasterize HTML inside an SVG image
+  // at all, so an htmlCssScenes design renders as a completely empty overlay —
+  // the "purple screen" failure. Ask the model for a canvas-only design instead
+  // of shipping markup we know we cannot draw.
+  let canRasterizeHtml = true;
+  try {
+    const caps = await probeCaptureCapabilities();
+    canRasterizeHtml = caps.svgOk;
+  } catch {
+    canRasterizeHtml = true;
+  }
+
   const basePrompt = buildAiMotionPrompt(
     dialogueText,
     targetDuration,
     options,
-    storyboardChunks.length > 0
+    storyboardChunks.length > 0,
+    canRasterizeHtml
   );
 
   const designParts: any[] = [];
@@ -276,7 +290,7 @@ export async function generateMotionGraphicsFromDialogue(
   }
 
   let rawSpec = await requestDesign(provider, [...designParts, { text: basePrompt }], options.signal);
-  let spec = sanitizeMotionGraphicSpec(rawSpec, targetDuration);
+  let spec = sanitizeMotionGraphicSpec(rawSpec, targetDuration, canRasterizeHtml);
   let issues = validateSceneQuality(spec, style);
 
   if (issues.length > 0) {
@@ -288,7 +302,7 @@ export async function generateMotionGraphicsFromDialogue(
         [...designParts, { text: buildCorrectionPrompt(issues, style, targetDuration, dialogueText) }],
         options.signal
       );
-      const correctedSpec = sanitizeMotionGraphicSpec(corrected, targetDuration);
+      const correctedSpec = sanitizeMotionGraphicSpec(corrected, targetDuration, canRasterizeHtml);
       const correctedIssues = validateSceneQuality(correctedSpec, style);
       if (correctedIssues.length < issues.length) {
         rawSpec = corrected;
@@ -348,7 +362,7 @@ export async function generateMotionGraphicsFromDialogue(
   }
 
   // Re-sanitize so Cloudflare substitutions are cleaned too.
-  spec = sanitizeMotionGraphicSpec(rawSpec, targetDuration);
+  spec = sanitizeMotionGraphicSpec(rawSpec, targetDuration, canRasterizeHtml);
 
   // 4. Render the motion graphic overlay video
   onProgress('Rendering vector animation video', 70);
@@ -573,7 +587,8 @@ function buildAiMotionPrompt(
   dialogueText: string,
   duration: number,
   options: GenerativeMotionOptions,
-  hasStoryboardImages: boolean
+  hasStoryboardImages: boolean,
+  canRasterizeHtml = true
 ): string {
   const d = duration.toFixed(1);
   const style = options.style || 'mixed';
@@ -615,7 +630,7 @@ The finished video is placed ON TOP of the user's footage.
   • For contrast behind text use a semi-transparent pill sized to the TEXT only.
   • Vignettes/scrims covering more than ~70% of the frame are forbidden.
 
-═══════════════════════════════════════════════════════════════════════════════
+${canRasterizeHtml ? `═══════════════════════════════════════════════════════════════════════════════
 HOW TO CODE htmlCssScenes (THE PRIMARY OUTPUT)
 ═══════════════════════════════════════════════════════════════════════════════
 Self-contained HTML/CSS/SVG with CSS @keyframes. Rules:
@@ -645,6 +660,24 @@ you must STILL deliver full htmlCssScenes vector artwork.
   • "AnimatedLineGraph" · "AnimatedCounter" · "LowerThird" · "TitleCard"
   • "ParticleBurst" · "CircleHighlight" · "VectorShape"
 
+` : `}
+
+═══════════════════════════════════════════════════════════════════════════════
+THIS BROWSER CANNOT RASTERIZE HTML/CSS SCENES (verified at runtime).
+═══════════════════════════════════════════════════════════════════════════════
+Anything you put in htmlCssScenes would render as a completely EMPTY overlay, so
+leave htmlCssScenes as an empty array and build the ENTIRE animation out of
+canvasElements, composing several components per beat:
+  • "VectorShape" — flat vector artwork (circle / rect / polygon / line). Use MANY
+    of them to build a simplified map, skyline, chart or scene.
+  • "AnimatedBarChart" / "AnimatedLineGraph" / "AnimatedCounter" — data made visible
+  • "KineticWord" / "LowerThird" / "TitleCard" — the caption layer (keep it small)
+  • "MotionArrow" / "CircleHighlight" / "ParticleBurst" — emphasis and annotation
+Give every element explicit enterAt/exitAt so the composition moves across the full
+${d} seconds, and stagger them so it reads as an animation rather than a slideshow.
+These components are now the MEAL, not a garnish.
+
+`}
 OUTPUT: ONLY a single valid JSON object (no markdown fences, no backticks, no comments):
 {
   "transcribedText": string,
@@ -656,9 +689,9 @@ OUTPUT: ONLY a single valid JSON object (no markdown fences, no backticks, no co
     { "component": "…", "enterAt": number (0 to ${d}), "exitAt": number,
       "config": object, "position": { "x": number, "y": number } }
   ],
-  "htmlCssScenes": [
+  "htmlCssScenes": ${canRasterizeHtml ? `[
     { "enterAt": number, "exitAt": number, "description": string, "htmlCss": string }
-  ]
+  ]` : '[]'}
 }`;
 }
 
@@ -786,7 +819,11 @@ function repairTruncatedJson(input: string): string {
  * Validates and clamps motion graphic timing, dimensions and element specs, and
  * sanitises every HTML scene so it cannot taint or crash the rasterizer.
  */
-export function sanitizeMotionGraphicSpec(raw: any, targetDuration: number): MotionGraphicSpec {
+export function sanitizeMotionGraphicSpec(
+  raw: any,
+  targetDuration: number,
+  canRasterizeHtml = true
+): MotionGraphicSpec {
   const duration = Math.max(0.5, Number(raw?.duration) || targetDuration || 5);
   const width = 1920;
   const height = 1080;
@@ -832,9 +869,29 @@ export function sanitizeMotionGraphicSpec(raw: any, targetDuration: number): Mot
     .filter((s: any) => s.htmlCss.trim().length > 0)
     .sort((a: any, b: any) => a.enterAt - b.enterAt);
 
+  // On engines that cannot rasterize HTML scenes, keeping them would hide the
+  // fact that nothing will ever be drawn (and would suppress the empty-result
+  // fallback). Drop them so the canvas composition carries the design.
+  const scenes = canRasterizeHtml ? htmlCssScenes : [];
+
+  // Scenes must tile the whole clip. The AI routinely returns windows that stop
+  // early (or start late), and every uncovered second renders as bare key-colour
+  // plate — which is exactly what "a purple screen with no animation" looks like
+  // once the overlay is on the timeline. Each scene now holds its finished frame
+  // from its own start until the next scene takes over, and the last one runs to
+  // the end of the clip.
+  if (scenes.length > 0) {
+    scenes[0].enterAt = 0;
+    for (let i = 0; i < scenes.length - 1; i++) {
+      const next = scenes[i + 1].enterAt;
+      if (scenes[i].exitAt < next) scenes[i].exitAt = next;
+    }
+    scenes[scenes.length - 1].exitAt = round2(duration);
+  }
+
   // Never ship an empty composition: fall back to a TitleCard built from the
   // dialogue so the overlay is visible instead of silently blank.
-  if (canvasElements.length === 0 && htmlCssScenes.length === 0) {
+  if (canvasElements.length === 0 && scenes.length === 0) {
     canvasElements.push({
       component: 'TitleCard',
       enterAt: 0,
@@ -850,7 +907,7 @@ export function sanitizeMotionGraphicSpec(raw: any, targetDuration: number): Mot
     });
   }
 
-  return { width, height, fps, duration, canvasElements, htmlCssScenes };
+  return { width, height, fps, duration, canvasElements, htmlCssScenes: scenes };
 }
 
 function clamp(value: number, min: number, max: number): number {

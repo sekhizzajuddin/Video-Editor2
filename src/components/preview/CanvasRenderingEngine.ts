@@ -145,6 +145,30 @@ const RESERVED_POOL_KEYS: ReadonlySet<string> = new Set([
   '__transition_to',
 ]);
 
+/**
+ * True for chroma keys that must never be skipped for performance.
+ *
+ * Generative overlays are rendered on a flat key plate when the browser cannot
+ * encode a real alpha channel, so until the key runs the whole frame is that
+ * colour — skipping it shows a solid block instead of a slightly-less-pretty
+ * effect. `alwaysApply` is set explicitly on new overlays; the pure-magenta
+ * colour test also catches overlays added to a timeline BEFORE that flag
+ * existed, which is why this is a colour check and not just the flag.
+ */
+const PINNED_KEY_COLORS: ReadonlySet<string> = new Set([
+  '#ff00ff',
+  '#f0f',
+  '#ff00ffff',
+  'magenta',
+]);
+
+function isPinnedChromaKey(chromaKey: any): boolean {
+  if (!chromaKey?.enabled) return false;
+  if (chromaKey.alwaysApply === true) return true;
+  const color = String(chromaKey.color || '').trim().toLowerCase();
+  return PINNED_KEY_COLORS.has(color);
+}
+
 export function getOrCreateCanvas(
   offscreenPool: Map<string, HTMLCanvasElement>,
   key: string,
@@ -1303,10 +1327,10 @@ export async function renderCanvasEngine({
           const hasCrop = cLeft > 0 || cRight > 0 || cTop > 0 || cBot > 0;
           const hasCssFilters = exposure !== 0 || contrast !== 100 || saturation !== 100 || blur > 0;
           const hasAiBg = !!clip.aiBackground?.enabled;
+          const keyPinned = isPinnedChromaKey(clip.chromaKey);
           // Keyed overlay plates opt out of the FX skip: they are meaningless
           // (a solid magenta block) without their key.
-          const hasChroma =
-            !!clip.chromaKey?.enabled && (!skipExpensiveFX || clip.chromaKey.alwaysApply === true);
+          const hasChroma = !!clip.chromaKey?.enabled && (!skipExpensiveFX || keyPinned);
           const hasLuma = !skipExpensiveFX && !!clip.lumaKey?.enabled;
           const hasObjRemoval = !skipExpensiveFX && !!clip.objectRemoval?.enabled;
           const hasColorWheels = !skipExpensiveFX && !!(filters.shadows || filters.midtones || filters.highlights);
@@ -1415,10 +1439,9 @@ export async function renderCanvasEngine({
             }
 
             // Keyed overlay plates opt out of the FX skip: without the key the
-            // clip is a solid block of colour, so `alwaysApply` keeps it on even
+            // clip is a solid block of colour, so a pinned key stays on even
             // while playing, scrubbing or in fast preview mode.
-            const allowHeavyFx =
-              !skipExpensiveFX || clip.chromaKey?.alwaysApply === true;
+            const allowHeavyFx = !skipExpensiveFX || keyPinned;
 
             if (allowHeavyFx) {
               if (clip.chromaKey?.enabled) {

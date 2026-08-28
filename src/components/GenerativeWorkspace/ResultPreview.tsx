@@ -240,20 +240,32 @@ const KeyedOverlayVideo: React.FC<KeyedOverlayProps> = ({
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
+    let failures = 0;
     const render = () => {
-      const vw = video.videoWidth;
-      const vh = video.videoHeight;
-      if (vw > 0 && vh > 0) {
-        const scale = Math.min(1, 960 / vw);
-        const w = Math.max(2, Math.round(vw * scale));
-        const h = Math.max(2, Math.round(vh * scale));
-        if (canvas.width !== w || canvas.height !== h) {
-          canvas.width = w;
-          canvas.height = h;
+      try {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (vw > 0 && vh > 0) {
+          const scale = Math.min(1, 960 / vw);
+          const w = Math.max(2, Math.round(vw * scale));
+          const h = Math.max(2, Math.round(vh * scale));
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+          }
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(video, 0, 0, w, h);
+          applyChromaKeyOnData(ctx, w, h, keyColor, 42, 16, 60, 1);
+          failures = 0;
         }
-        ctx.clearRect(0, 0, w, h);
-        ctx.drawImage(video, 0, 0, w, h);
-        applyChromaKeyOnData(ctx, w, h, keyColor, 42, 16, 60, 1);
+      } catch (err) {
+        // Never let one bad frame kill the loop: a dead rAF froze the canvas on
+        // whatever was last drawn — usually the un-keyed magenta plate.
+        failures += 1;
+        if (failures === 1) {
+          console.warn('[KeyedOverlayVideo] chroma key frame failed:', err);
+        }
+        if (failures > 30) return;
       }
       rafRef.current = requestAnimationFrame(render);
     };
@@ -581,6 +593,15 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             </span>
           )}
 
+          {video?.strategyNotes && video.strategyNotes.length > 0 && (
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded border border-amber-500/30 text-amber-300 bg-amber-500/10 flex items-center gap-1"
+              title={video.strategyNotes.join(' ')}
+            >
+              <AlertTriangle className="w-3 h-3" /> {video.strategyNotes[0]}
+            </span>
+          )}
+
           {result?.designNotes && result.designNotes.length > 0 && (
             <span
               className="text-[10px] font-mono px-2 py-0.5 rounded border border-amber-500/30 text-amber-300 bg-amber-500/10 flex items-center gap-1"
@@ -727,6 +748,21 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Loud failure: an overlay that renders as a bare plate is useless, and
+          silently shipping it is how this bug survived several rounds. */}
+      {video && video.inkCoverage === 0 && (
+        <div className="flex items-start gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/30 text-red-300 text-[11px]">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold">The overlay rendered empty.</span>{' '}
+            {video.strategyNotes.length > 0
+              ? video.strategyNotes.join(' ')
+              : 'No scene artwork made it into the video, so every frame is just the key-colour plate.'}{' '}
+            Open the HTML/CSS editor to check the scene markup.
+          </div>
+        </div>
+      )}
 
       {/* Re-Prompt Drawer */}
       {isRePromptOpen && (

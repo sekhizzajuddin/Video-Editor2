@@ -7,6 +7,8 @@ import {
   destroySceneStage,
   captureSceneFrame,
   probeCaptureCapabilities,
+  probeSceneMotion,
+  sceneProbeTimes,
 } from './cssSceneRasterizer';
 
 export interface MotionGraphicSpec {
@@ -73,6 +75,14 @@ export interface MotionGraphicVideo {
   cssAnimationSupport: boolean;
   /** Strategy actually used to bake the animation into each frame. */
   seekMode: SeekMode;
+  /** Why that strategy was chosen (empty when the first choice just worked). */
+  strategyNotes: string[];
+  /**
+   * Fraction of sampled frames that contained any artwork at all (0…1). A 0
+   * means the overlay is a bare rectangle of key colour — i.e. the scenes drew
+   * nothing — which the UI must surface instead of silently shipping it.
+   */
+  inkCoverage: number;
   /** How many opaque full-frame backdrops were removed for transparency. */
   strippedBackdrops: number;
 }
@@ -123,7 +133,46 @@ export async function renderMotionGraphicToVideo(
   const capabilities = scenes.some((s) => s.stage.hasAnimations)
     ? await probeCaptureCapabilities()
     : ({ svgOk: true, cssAnimOk: true, mode: 'css' } as const);
-  const seekMode: SeekMode = capabilities.mode;
+
+  // Then verify that choice against the real scene. The synthetic probe only
+  // knows what the engine does with a moving box; it cannot know whether this
+  // scene's markup survives serialization. Capturing the actual scene twice
+  // tells us whether the strategy animates anything, and lets us escalate
+  // instead of silently encoding a frozen (or blank) overlay.
+  let seekMode: SeekMode = capabilities.mode;
+  const strategyNotes: string[] = [];
+  const probeTarget = scenes.find((s) => s.stage.hasAnimations && s.stage.animated.length > 0);
+
+  if (probeTarget && seekMode !== 'static') {
+    const times = sceneProbeTimes(probeTarget.scene);
+    const css = await probeSceneMotion(probeTarget.stage, 'css', times);
+
+    if (!css.rasterized) {
+      // Nothing comes out of the SVG at all — don't pretend otherwise.
+      seekMode = 'static';
+      strategyNotes.push('SVG rasterization produced nothing; showing finished artwork.');
+    } else if (!css.differs) {
+      const baked = await probeSceneMotion(probeTarget.stage, 'js', times);
+      if (baked.differs) {
+        seekMode = 'js';
+        strategyNotes.push(
+          'Native CSS seek held this scene still; switched to baked keyframes.'
+        );
+      } else {
+        strategyNotes.push(
+          'Neither seek strategy advanced this scene; it may have no motion in the sampled range.'
+        );
+      }
+    }
+
+    if (seekMode === 'js' && capabilities.cssAnimOk) {
+      strategyNotes.push('Engine reported CSS animation support but this scene disagreed.');
+    }
+  }
+
+  if (strategyNotes.length > 0) {
+    console.warn('[motionGraphicRenderer] Seek strategy:', strategyNotes.join(' '));
+  }
 
   const normalized: MotionGraphicSpec = {
     width,
@@ -146,6 +195,7 @@ export async function renderMotionGraphicToVideo(
           seekMode,
           capabilities,
           strippedBackdrops,
+          strategyNotes,
         });
       } catch (encodeError: any) {
         if (options.signal?.aborted) throw encodeError;
@@ -162,6 +212,7 @@ export async function renderMotionGraphicToVideo(
       seekMode,
       capabilities,
       strippedBackdrops,
+      strategyNotes,
     });
   } finally {
     for (const item of scenes) destroySceneStage(item.stage);
@@ -174,6 +225,46 @@ export async function renderMotionGraphicToVideo(
 
 /** Per-scene cache of already rasterized *static* (animation-free) scenes. */
 type StaticSceneCache = Map<number, OffscreenCanvas | HTMLCanvasElement>;
+
+/**
+ * Counts pixels that are NOT the backing plate. Used as ground truth after the
+ * render: if no frame ever contains artwork, the overlay is a solid rectangle
+ * and something upstream (scene markup, rasterization) failed.
+ */
+function measureInk(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+  alphaMode: MotionAlphaMode,
+  keyColor: string
+): number {
+  try {
+    const step = 8; // sample every 8th pixel on both axes
+    const data = ctx.getImageData(0, 0, width, height).data;
+    let ink = 0;
+    let total = 0;
+    for (let y = 0; y < height; y += step) {
+      for (let x = 0; x < width; x += step) {
+        const i = (y * width + x) * 4;
+        total++;
+        if (alphaMode === 'alpha') {
+          if (data[i + 3] > 8) ink++;
+        } else {
+          const hex = keyColor.replace('#', '');
+          const kr = parseInt(hex.substring(0, 2), 16) || 0;
+          const kg = parseInt(hex.substring(2, 4), 16) || 0;
+          const kb = parseInt(hex.substring(4, 6), 16) || 0;
+          const d =
+            Math.abs(data[i] - kr) + Math.abs(data[i + 1] - kg) + Math.abs(data[i + 2] - kb);
+          if (d > 60) ink++;
+        }
+      }
+    }
+    return total > 0 ? ink / total : 0;
+  } catch {
+    return 1; // Unknown: don't claim the frame is blank.
+  }
+}
 
 async function paintFrame(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
@@ -288,6 +379,7 @@ async function renderWithVideoEncoder(
     seekMode: SeekMode;
     capabilities: { svgOk: boolean; cssAnimOk: boolean; mode: SeekMode };
     strippedBackdrops: number;
+    strategyNotes: string[];
   }
 ): Promise<MotionGraphicVideo> {
   const { width, height, fps, duration } = spec;
@@ -399,6 +491,8 @@ async function renderWithVideoEncoder(
   const totalFrames = Math.max(1, Math.round(duration * fps));
   const frameDurationUs = Math.round(1_000_000 / fps);
   const staticCache: StaticSceneCache = new Map();
+  let sampled = 0;
+  let inked = 0;
 
   try {
     for (let i = 0; i < totalFrames; i++) {
@@ -425,6 +519,17 @@ async function renderWithVideoEncoder(
         duration: frameDurationUs,
         alpha: hasAlpha ? 'keep' : 'discard',
       });
+
+      // Ground truth: does this frame contain artwork, or is it bare plate?
+      if (i % 12 === 0) {
+        sampled++;
+        if (
+          measureInk(ctx, width, height, alphaMode, keyColor) > 0.001 ||
+          (alphaMode === 'alpha' && scenes.length === 0)
+        ) {
+          inked++;
+        }
+      }
 
       const isKeyFrame = i % (fps * 2) === 0;
       encoder.encode(videoFrame, { keyFrame: isKeyFrame });
@@ -453,6 +558,17 @@ async function renderWithVideoEncoder(
   muxer.finalize();
   const buffer = muxer.target.buffer;
 
+  const inkCoverage = sampled > 0 ? inked / sampled : 1;
+  const notes = options.strategyNotes;
+  if (inkCoverage === 0) {
+    notes.push(
+      'No artwork was rasterized into any frame — the overlay is a bare key-colour rectangle.'
+    );
+    console.error(
+      '[motionGraphicRenderer] Render produced no artwork in any sampled frame.'
+    );
+  }
+
   return {
     blob: new Blob([buffer], { type: 'video/webm' }),
     alphaMode,
@@ -465,6 +581,8 @@ async function renderWithVideoEncoder(
     sceneCount: scenes.length,
     cssAnimationSupport: options.capabilities.cssAnimOk,
     seekMode: options.seekMode,
+    strategyNotes: options.strategyNotes,
+    inkCoverage,
     strippedBackdrops: options.strippedBackdrops,
   };
 }
@@ -481,6 +599,7 @@ async function renderWithMediaRecorder(
     seekMode: SeekMode;
     capabilities: { svgOk: boolean; cssAnimOk: boolean; mode: SeekMode };
     strippedBackdrops: number;
+    strategyNotes: string[];
   }
 ): Promise<MotionGraphicVideo> {
   const { width, height, fps, duration } = spec;
@@ -497,6 +616,8 @@ async function renderWithMediaRecorder(
     sceneCount,
     cssAnimationSupport: options.capabilities.cssAnimOk,
     seekMode: options.seekMode,
+    strategyNotes: options.strategyNotes,
+    inkCoverage: 1,
     strippedBackdrops: options.strippedBackdrops,
   });
 
@@ -592,6 +713,8 @@ async function renderWithMediaRecorder(
       sceneCount: scenes.length,
       cssAnimationSupport: options.capabilities.cssAnimOk,
       seekMode: options.seekMode,
+      strategyNotes: options.strategyNotes,
+      inkCoverage: 1,
       strippedBackdrops: options.strippedBackdrops,
     };
   } finally {
