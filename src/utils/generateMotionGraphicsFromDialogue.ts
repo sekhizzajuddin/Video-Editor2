@@ -41,8 +41,11 @@ export async function generateMotionGraphicsFromDialogue(
   let storyboardChunks: StoryboardChunk[] = [];
 
   // 1. Ingestion: Extract video storyboard frames or prepare dialogue text
+  let inlineAudioBase64: string | null = null;
+  let inlineAudioMime: string | null = null;
+
   if (clipMediaUrl) {
-    onProgress('Extracting video frames', 10);
+    onProgress('Extracting video frames and audio', 10);
     const videoEl = document.createElement('video');
     try {
       videoEl.crossOrigin = 'anonymous';
@@ -74,9 +77,31 @@ export async function generateMotionGraphicsFromDialogue(
         videoEl,
         0,
         Math.min(effectiveDuration, 30),
-        (pct) => onProgress('Extracting video frames', Math.round(10 + pct * 10)),
+        (pct) => onProgress('Extracting video frames', Math.round(10 + pct * 5)),
         1
       );
+
+      // Attempt to extract the blob directly as base64 for Gemini Audio Processing (if size is reasonable)
+      if (provider === 'gemini') {
+        onProgress('Preparing audio for Gemini', 18);
+        try {
+          const res = await fetch(clipMediaUrl);
+          const blob = await res.blob();
+          if (blob.size < 15 * 1024 * 1024) { // Max 15MB inline payload
+            const buffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i += 8192) {
+              binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 8192)));
+            }
+            inlineAudioBase64 = btoa(binary);
+            inlineAudioMime = blob.type || 'video/mp4';
+          }
+        } catch (e) {
+          console.warn('[generateMotionGraphicsFromDialogue] Audio extraction failed:', e);
+        }
+      }
+
     } catch (err) {
       console.warn('[generateMotionGraphicsFromDialogue] Frame extraction warning:', err);
     } finally {
@@ -101,6 +126,16 @@ export async function generateMotionGraphicsFromDialogue(
 
   if (provider === 'gemini') {
     const parts: any[] = [];
+    if (inlineAudioBase64 && inlineAudioMime) {
+      parts.push({
+        inlineData: {
+          mimeType: inlineAudioMime,
+          data: inlineAudioBase64,
+        },
+      });
+      parts.push({ text: "Please transcribe the audio from the provided media file and use it as the dialogue for the motion graphics. Then output the JSON as instructed." });
+    }
+    
     if (storyboardChunks.length > 0) {
       for (const chunk of storyboardChunks) {
         parts.push({
@@ -239,91 +274,63 @@ export async function generateMotionGraphicsFromDialogue(
   };
 }
 
-/**
- * Builds the comprehensive prompt for AI visual storytelling and motion graphic generation.
- */
 function buildAiMotionPrompt(
   dialogueText: string,
   duration: number,
   options: GenerativeMotionOptions,
   hasStoryboardImages: boolean
 ): string {
-  return `You are an elite Motion Graphics & Visual Storytelling Director (like Vox, Johnny Harris, Kurzgesagt, Polymatter, and Magnates Media).
+  return `You are an elite Motion Graphics & Visual Storytelling Director (like Vox, Kurzgesagt, Polymatter).
 Your task is to transform dialogue/scripts into REAL VISUAL MOTION GRAPHICS with geometric vector shapes, progressive world construction, and kinetic typography.
 
 TOTAL DURATION: ${duration.toFixed(1)} seconds
 RESOLUTION: 1920x1080 (30 FPS)
-STYLE: "${options.style}" (documentary, kurzgesagt, mrbeast, hormozi, cyberpunk, minimal)
+STYLE: "${options.style}"
 LAYOUT: "${options.layout}"
 ${options.customPrompt ? `USER INSTRUCTIONS: "${options.customPrompt}"` : ''}
 ${dialogueText ? `DIALOGUE / SCRIPT: "${dialogueText}"` : ''}
-${hasStoryboardImages ? 'NOTE: Scene video frames provided to align motion graphics with subject coordinates.' : ''}
+${hasStoryboardImages ? 'NOTE: Scene video frames provided to align motion graphics.' : ''}
 
 ══════════════════════════════════════════════════════════════════════════════════
 CORE PRINCIPLE: WHAT IS REAL MOTION GRAPHICS?
 ══════════════════════════════════════════════════════════════════════════════════
 Real motion graphics is NOT just subtitle text. It is VISUAL STORYTELLING:
-1. Deconstruct the narrative into visual metaphors, physical environment, time period, and dynamic action.
-2. Build the world using layered vector geometry:
+1. Build the world using layered vector geometry.
    - Mountains, oceans, and landscapes GROW up from the bottom with multi-shaded polygons.
    - Years, dates, and historical anchors STAMP in with distressed vintage badges and kinetic lines.
-   - Villages, huts, houses, and trees POP IN with spring bounce physics, roofs snapping on, chimney smoke particles drifting.
-   - Data & metrics COUNT UP with animated bar charts or rolling number counters.
-   - Directional arrows and focal circles POINT TO and REVEAL key narrative elements.
-
-══════════════════════════════════════════════════════════════════════════════════
-GOLD STANDARD EXAMPLE: "A village in 1970, Near the Himalaya"
-══════════════════════════════════════════════════════════════════════════════════
-For this script, a top-tier visual motion graphic produces:
-- BEAT 1 (0.0s - 2.2s): Staggered Himalayan Mountain Peaks (<polygon>) rise up from the bottom (scaleY from 0 to 1 with elastic overshoot). Slate navy shadow slope + ice blue lit slope + white snowcaps.
-- BEAT 2 (2.0s - 3.8s): "1970" in bold retro typography stamps in with an amber vintage badge and kinetic horizontal ruler lines.
-- BEAT 3 (3.2s - ${duration.toFixed(1)}s): Village huts assemble with spring physics (wooden base boxes scale up, red/amber triangle roofs snap on top, pine trees pop up, chimney smoke wisps float upwards).
+   - Villages, huts, houses POP IN with spring bounce physics, roofs snapping on, chimney smoke.
+2. DO NOT BE LAZY. Generate detailed, full-fledged visual scenes. Use dozens of SVG <polygon>, <path>, <rect>, <circle> for crisp vector artwork with dimensional shading.
+3. Synchronize the animation timing with the dialogue and duration. Use complex, staggered CSS keyframe animations (spring bounce, cubic-bezier easing) to animate every single element entering the screen sequentially.
 
 ══════════════════════════════════════════════════════════════════════════════════
 HOW TO CODE VECTOR SHAPES & ANIMATIONS IN "htmlCssScenes"
 ══════════════════════════════════════════════════════════════════════════════════
 In "htmlCssScenes", provide self-contained HTML/CSS/SVG with CSS @keyframes.
 Rules:
-1. Wrap everything in a full-screen container with transparent background:
+1. Wrap everything in a full-screen container:
    <div style="position:relative; width:1920px; height:1080px; overflow:hidden; background:transparent;">
-2. Use SVG <polygon>, <path>, <rect>, <circle> for crisp vector artwork with dimensional shading:
+2. ABSOLUTELY NO EXTERNAL ASSETS (CRITICAL SECURITY RULE):
+   - NEVER use <img src="http...">
+   - NEVER use <link rel="stylesheet">
+   - NEVER use @import for fonts.
+   - External assets will taint the canvas and crash the rendering engine. Use ONLY standard web-safe fonts (Arial, Impact, Courier New, Helvetica, sans-serif).
+3. Use SVG <polygon>, <path>, <rect>, <circle> for crisp vector artwork:
    - Mountains: <polygon points="400,1080 800,280 1200,1080" fill="#334155" />
-   - Shadow slope: <polygon points="800,280 1000,700 800,1080 400,1080" fill="#1e293b" />
-   - Snow cap: <polygon points="700,500 800,280 900,500 800,450" fill="#ffffff" />
    - Village huts: <rect x="850" y="820" width="120" height="90" fill="#78350f" rx="4" />
-   - Roof: <polygon points="830,820 910,740 990,820" fill="#b45309" />
-3. Use spring bounce & cubic-bezier easing keyframes:
-   @keyframes growUp {
-     0% { transform: scaleY(0); transform-origin: bottom; opacity: 0; }
-     70% { transform: scaleY(1.05); transform-origin: bottom; opacity: 1; }
-     100% { transform: scaleY(1); transform-origin: bottom; opacity: 1; }
-   }
-   @keyframes popSpring {
-     0% { transform: scale(0); opacity: 0; }
-     70% { transform: scale(1.12); opacity: 1; }
-     100% { transform: scale(1); opacity: 1; }
-   }
-   @keyframes floatSmoke {
-     0% { transform: translateY(0) scale(0.6); opacity: 0.8; }
-     100% { transform: translateY(-80px) scale(1.4); opacity: 0; }
-   }
+4. Use spring bounce & cubic-bezier easing keyframes:
+   @keyframes growUp { 0% { transform: scaleY(0); transform-origin: bottom; opacity: 0; } 100% { transform: scaleY(1); transform-origin: bottom; opacity: 1; } }
+   @keyframes popSpring { 0% { transform: scale(0); } 70% { transform: scale(1.12); } 100% { transform: scale(1); } }
 
 ══════════════════════════════════════════════════════════════════════════════════
 AVAILABLE CANVAS 2D COMPONENTS (CAN BE COMBINED WITH HTML SCENES):
 ══════════════════════════════════════════════════════════════════════════════════
-1. "KineticWord": { "text": string, "fontSize": 64-90, "color": "#ffe600", "animation": "spring"|"bounce"|"elastic"|"zoom"|"scaleFlip"|"glitch"|"slideUp", "position": { "x": 960, "y": 540 } }
-2. "VoiceSyncHighlight": { "words": [{ "text": string, "start": number, "end": number }], "highlightColor": "#fbbf24", "textColor": "#fff", "fontSize": 48, "position": { "x": 960, "y": 840 } }
-3. "MotionArrow": { "from": { "x": 400, "y": 600 }, "to": { "x": 900, "y": 400 }, "curve": -40, "color": "#38bdf8", "thickness": 6, "drawDuration": 0.6 }
-4. "AnimatedBarChart": { "bars": [{ "label": "1970", "value": 45 }, { "label": "2024", "value": 180 }], "title": "Population Growth", "position": { "x": 960, "y": 500 }, "width": 600, "height": 360 }
-5. "AnimatedLineGraph": { "points": [{ "x": 100, "y": 400 }, { "x": 500, "y": 200 }], "color": "#22c55e", "showDots": true, "showArea": true, "position": { "x": 960, "y": 500 } }
-6. "AnimatedCounter": { "from": 0, "to": 1970, "prefix": "", "suffix": "", "fontSize": 84, "color": "#fbbf24", "position": { "x": 960, "y": 400 } }
-7. "LowerThird": { "title": "Himalayan Foothills", "subtitle": "Circa 1970", "style": "modern", "position": { "x": 240, "y": 880 } }
-8. "ParticleBurst": { "count": 28, "colors": ["#fbbf24", "#38bdf8", "#ffffff"], "maxRadius": 200, "position": { "x": 960, "y": 540 } }
-9. "CircleHighlight": { "radius": 80, "color": "#f43f5e", "strokeWidth": 4, "pulseCount": 2, "position": { "x": 960, "y": 540 } }
+1. "KineticWord": { "text": string, "fontSize": 64-90, "color": "#ffe600", "animation": "spring"|"bounce", "position": { "x": 960, "y": 540 } }
+2. "VoiceSyncHighlight": { "words": [{ "text": string, "start": number, "end": number }], "highlightColor": "#fbbf24" }
+3. "MotionArrow": { "from": { "x": 400, "y": 600 }, "to": { "x": 900, "y": 400 } }
+4. "AnimatedBarChart": { "bars": [{ "label": "1970", "value": 45 }, { "label": "2024", "value": 180 }] }
+5. "AnimatedCounter": { "from": 0, "to": 1970, "position": { "x": 960, "y": 400 } }
 
-══════════════════════════════════════════════════════════════════════════════════
 OUTPUT FORMAT SPECIFICATION
-══════════════════════════════════════════════════════════════════════════════════
 Respond with ONLY a single valid JSON object (no markdown code blocks, no backticks, no comments):
 {
   "transcribedText": string,

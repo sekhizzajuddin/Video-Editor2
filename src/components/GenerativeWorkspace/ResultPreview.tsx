@@ -298,7 +298,18 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
         />
 
         {/* 16:9 Theater Screen Frame */}
-        <div className="relative w-full h-full max-w-[1920px] max-h-[1080px] aspect-video bg-black rounded-lg overflow-hidden border border-[#2d2d2d] shadow-2xl flex items-center justify-center">
+        <div 
+          ref={(el) => {
+            if (el) {
+              const obs = new ResizeObserver((entries) => {
+                const rect = entries[0].contentRect;
+                el.style.setProperty('--scale-factor', (rect.width / 1920).toString());
+              });
+              obs.observe(el);
+            }
+          }}
+          className="relative w-full h-full max-w-[1920px] max-h-[1080px] aspect-video bg-black rounded-lg overflow-hidden border border-[#2d2d2d] shadow-2xl flex items-center justify-center"
+        >
           {/* Layer 1: Source Video (When available and displayMode != 'motion-only') */}
           {selectedClipUrl && displayMode !== 'motion-only' && (
             <video
@@ -320,12 +331,20 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
               className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
             />
           ) : editedHtmlCss && displayMode !== 'video-only' ? (
-            <iframe
-              srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box;}html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;}</style></head><body>${editedHtmlCss}</body></html>`}
-              title="Motion Scene Overlay"
-              sandbox="allow-scripts"
-              className="absolute inset-0 w-full h-full border-none pointer-events-none z-10"
-            />
+            <div className="absolute inset-0 w-full h-full pointer-events-none z-10 flex items-center justify-center overflow-hidden">
+              <iframe
+                srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box;}html,body{margin:0;padding:0;width:1920px;height:1080px;background:transparent;color:#fff;overflow:hidden;}</style></head><body>${editedHtmlCss}</body></html>`}
+                title="Motion Scene Overlay"
+                sandbox="allow-scripts"
+                className="border-none pointer-events-none"
+                style={{
+                  width: '1920px',
+                  height: '1080px',
+                  transform: 'scale(var(--scale-factor, 1))',
+                  transformOrigin: 'center center',
+                }}
+              />
+            </div>
           ) : null}
 
           {/* Standby Empty State (No clip & No result) */}

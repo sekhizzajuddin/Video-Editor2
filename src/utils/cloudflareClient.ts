@@ -28,9 +28,18 @@ export async function generateImageFromCloudflare(
     throw new Error(`Cloudflare AI API Error: ${response.status} ${response.statusText} ${errorText}`);
   }
 
-  const blob = await response.blob();
-  if (blob.size === 0) {
+  const buffer = await response.arrayBuffer();
+  if (buffer.byteLength === 0) {
     throw new Error('Cloudflare AI API returned an empty image');
   }
-  return URL.createObjectURL(blob);
+
+  // Convert array buffer to base64 data URI to prevent canvas tainting in foreignObject
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  return `data:image/jpeg;base64,${base64}`;
 }
