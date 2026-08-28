@@ -33,11 +33,35 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
   }, []);
 
   const handleDrop = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
+    async (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
       setIsDragOver(false);
 
+      // 1. Check for MediaPanel dragging format: application/procut-media or window.__procutDraggingMediaId
+      const procutMediaId =
+        e.dataTransfer.getData('application/procut-media') ||
+        (window as any).__procutDraggingMediaId;
+
+      if (procutMediaId) {
+        try {
+          const { useEditorStore } = await import('@/store/editorStore');
+          const mediaItem = useEditorStore.getState().mediaLibrary.find((m) => m.id === procutMediaId);
+          if (mediaItem) {
+            const duration = Number(mediaItem.duration || 0);
+            if (duration > 30) {
+              toast.error('Clip must be 30 seconds or less');
+              return;
+            }
+            onClipDrop(mediaItem.url, mediaItem.name || 'Media Clip', duration);
+            return;
+          }
+        } catch (err) {
+          console.warn('[ClipDropZone] Error reading media item from store:', err);
+        }
+      }
+
+      // 2. Check for serialized JSON clip data
       const procutData = e.dataTransfer.getData('application/procut-clip-data');
       if (procutData) {
         try {

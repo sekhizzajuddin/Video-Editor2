@@ -1,16 +1,18 @@
-import { fetchWithKeyFailover, getLocalGeminiKey, getEnvGeminiKey } from './apiKeyManager';
+import { fetchWithKeyFailover } from './apiKeyManager';
 import { compileStoryboard, StoryboardChunk } from './storyboardCompiler';
 import { MotionGraphicSpec, renderMotionGraphicToVideo } from './motionGraphicRenderer';
+import { generateImageFromCloudflare } from './cloudflareClient';
 
 const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 
 export interface GenerativeMotionOptions {
   provider: 'gemini' | 'groq';
-  style: string; // 'mrbeast' | 'hormozi' | 'cyberpunk' | 'minimal' | 'custom'
+  style: string; // 'documentary' | 'kurzgesagt' | 'mrbeast' | 'hormozi' | 'cyberpunk' | 'minimal' | 'custom'
   layout: string; // 'kinetic' | 'lower_third' | 'subtitle' | 'mixed'
   customPrompt?: string;
   targetDuration?: number; // for text-to-motion mode
   dialogueText?: string; // for text-to-motion mode (no clip)
+  signal?: AbortSignal;
 }
 
 export interface GenerativeResult {
@@ -24,7 +26,8 @@ export interface GenerativeResult {
  * 1. Extracts video frames/storyboards or processes raw dialogue text.
  * 2. Prompts Gemini / Groq with available canvas and HTML/CSS component capabilities.
  * 3. Validates and sanitizes the motion graphic specification.
- * 4. Renders the complete motion graphic composition into an alpha-channel WebM video.
+ * 4. Resolves optional Cloudflare AI image assets.
+ * 5. Renders the complete motion graphic composition into an alpha-channel WebM video.
  */
 export async function generateMotionGraphicsFromDialogue(
   clipMediaUrl: string | null,
@@ -40,14 +43,18 @@ export async function generateMotionGraphicsFromDialogue(
   // 1. Ingestion: Extract video storyboard frames or prepare dialogue text
   if (clipMediaUrl) {
     onProgress('Extracting video frames', 10);
+    const videoEl = document.createElement('video');
     try {
-      const videoEl = document.createElement('video');
       videoEl.crossOrigin = 'anonymous';
       videoEl.muted = true;
       videoEl.playsInline = true;
       videoEl.src = clipMediaUrl;
 
       await new Promise<void>((resolve) => {
+        if (videoEl.readyState >= 1) {
+          resolve();
+          return;
+        }
         let done = false;
         const complete = () => {
           if (!done) {
@@ -72,6 +79,11 @@ export async function generateMotionGraphicsFromDialogue(
       );
     } catch (err) {
       console.warn('[generateMotionGraphicsFromDialogue] Frame extraction warning:', err);
+    } finally {
+      try {
+        videoEl.removeAttribute('src');
+        videoEl.load();
+      } catch {}
     }
     onProgress('Frames extracted', 20);
   } else {
@@ -81,7 +93,7 @@ export async function generateMotionGraphicsFromDialogue(
   // 2. Build structured system prompt describing canvas components & HTML/CSS capabilities
   const promptText = buildAiMotionPrompt(dialogueText, targetDuration, options, storyboardChunks.length > 0);
 
-  onProgress('AI Designing motion graphics', 40);
+  onProgress('AI Designing visual scenes', 40);
 
   // 3. Call AI API
   let rawJsonText = '';
@@ -92,8 +104,8 @@ export async function generateMotionGraphicsFromDialogue(
     if (storyboardChunks.length > 0) {
       for (const chunk of storyboardChunks) {
         parts.push({
-          inline_data: {
-            mime_type: 'image/jpeg',
+          inlineData: {
+            mimeType: 'image/jpeg',
             data: chunk.base64Image,
           },
         });
@@ -106,6 +118,7 @@ export async function generateMotionGraphicsFromDialogue(
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: options.signal,
         body: JSON.stringify({
           contents: [{ role: 'user', parts }],
           generationConfig: {
@@ -131,6 +144,7 @@ export async function generateMotionGraphicsFromDialogue(
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: options.signal,
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           messages: [
@@ -159,7 +173,7 @@ export async function generateMotionGraphicsFromDialogue(
     rawJsonText = data.choices?.[0]?.message?.content || '';
   }
 
-  onProgress('Validating design specification', 60);
+  onProgress('Validating design specification', 55);
 
   // 4. Parse & sanitize JSON output
   const rawSpec = parseJsonSafely(rawJsonText);
@@ -167,10 +181,44 @@ export async function generateMotionGraphicsFromDialogue(
     transcribedText = rawSpec.transcribedText;
   }
 
+  // 5. Optional Cloudflare AI image generation if imageAssets are requested
+  if (Array.isArray(rawSpec.imageAssets) && rawSpec.imageAssets.length > 0) {
+    onProgress('Generating AI image assets (Cloudflare)', 60);
+    try {
+      const { useEditorStore } = await import('@/store/editorStore');
+      const state = useEditorStore.getState();
+      const accountId = state.cloudflareAccountId || (import.meta as any).env?.VITE_CLOUDFLARE_ACCOUNT_ID;
+      const apiToken = state.cloudflareApiToken || (import.meta as any).env?.VITE_CLOUDFLARE_API_TOKEN;
+
+      if (accountId && apiToken) {
+        for (const asset of rawSpec.imageAssets) {
+          if (asset.prompt && asset.id) {
+            try {
+              const imageUrl = await generateImageFromCloudflare(asset.prompt, accountId, apiToken);
+              // Replace placeholder ID in HTML/CSS scenes
+              if (Array.isArray(rawSpec.htmlCssScenes)) {
+                for (const scene of rawSpec.htmlCssScenes) {
+                  if (typeof scene.htmlCss === 'string') {
+                    scene.htmlCss = scene.htmlCss.replaceAll(`{{IMAGE_${asset.id}}}`, imageUrl);
+                    scene.htmlCss = scene.htmlCss.replaceAll(asset.id, imageUrl);
+                  }
+                }
+              }
+            } catch (cfErr) {
+              console.warn('[generateMotionGraphicsFromDialogue] Cloudflare image generation warning:', cfErr);
+            }
+          }
+        }
+      }
+    } catch (cfLoadErr) {
+      console.warn('[generateMotionGraphicsFromDialogue] Cloudflare assets lookup error:', cfLoadErr);
+    }
+  }
+
   const spec = sanitizeMotionGraphicSpec(rawSpec, targetDuration);
 
-  // 5. Render Motion Graphic Video
-  onProgress('Rendering motion graphics video', 70);
+  // 6. Render Motion Graphic Video
+  onProgress('Rendering vector animation video', 70);
 
   let webmBlob: Blob | null = null;
   try {
@@ -192,7 +240,7 @@ export async function generateMotionGraphicsFromDialogue(
 }
 
 /**
- * Builds the comprehensive prompt for AI motion graphic generation.
+ * Builds the comprehensive prompt for AI visual storytelling and motion graphic generation.
  */
 function buildAiMotionPrompt(
   dialogueText: string,
@@ -200,138 +248,85 @@ function buildAiMotionPrompt(
   options: GenerativeMotionOptions,
   hasStoryboardImages: boolean
 ): string {
-  return `You are an elite Hollywood & YouTube Motion Graphics Art Director and Technical Animator.
-Generate a high-impact, professional Motion Graphic design specification for a ${duration.toFixed(1)} second video sequence at 1920x1080 resolution (30 FPS).
+  return `You are an elite Motion Graphics & Visual Storytelling Director (like Vox, Johnny Harris, Kurzgesagt, Polymatter, and Magnates Media).
+Your task is to transform dialogue/scripts into REAL VISUAL MOTION GRAPHICS with geometric vector shapes, progressive world construction, and kinetic typography.
 
-STYLE: "${options.style}" (e.g. mrbeast: explosive high energy, bold yellow/cyan/red accents, chunky strokes, elastic/bounce; hormozi: bold yellow/green badges, word-by-word voice sync highlight, high contrast stats; cyberpunk: neon cyan/magenta, glitch, tech HUD grids, glowing outlines; minimal: sleek clean typography, smooth cubic ease, elegant slate/gold/white).
-LAYOUT: "${options.layout}" (kinetic, lower_third, subtitle, or mixed).
-${options.customPrompt ? `CUSTOM INSTRUCTIONS: ${options.customPrompt}` : ''}
+TOTAL DURATION: ${duration.toFixed(1)} seconds
+RESOLUTION: 1920x1080 (30 FPS)
+STYLE: "${options.style}" (documentary, kurzgesagt, mrbeast, hormozi, cyberpunk, minimal)
+LAYOUT: "${options.layout}"
+${options.customPrompt ? `USER INSTRUCTIONS: "${options.customPrompt}"` : ''}
 ${dialogueText ? `DIALOGUE / SCRIPT: "${dialogueText}"` : ''}
-${hasStoryboardImages ? 'NOTE: Visual video frames from the scene are provided as images to align motion graphics with visual subjects.' : ''}
+${hasStoryboardImages ? 'NOTE: Scene video frames provided to align motion graphics with subject coordinates.' : ''}
 
-AVAILABLE CANVAS 2D COMPONENTS:
-1. "KineticWord": High impact animated typography.
-   Config: {
-     "text": string,
-     "fontSize": number (e.g. 54-84),
-     "fontFamily": string,
-     "color": string (e.g. "#ffe600", "#ffffff"),
-     "animation": "spring" | "bounce" | "elastic" | "zoom" | "zoomBlur" | "slideUp" | "slideDown" | "slideLeft" | "slideRight" | "scaleFlip" | "glitch" | "fadeIn",
-     "stroke": { "color": string, "width": number },
-     "shadow": { "color": string, "blur": number, "offsetX"?: number, "offsetY"?: number },
-     "glow": { "color": string, "blur": number },
-     "position": { "x": number, "y": number }
+══════════════════════════════════════════════════════════════════════════════════
+CORE PRINCIPLE: WHAT IS REAL MOTION GRAPHICS?
+══════════════════════════════════════════════════════════════════════════════════
+Real motion graphics is NOT just subtitle text. It is VISUAL STORYTELLING:
+1. Deconstruct the narrative into visual metaphors, physical environment, time period, and dynamic action.
+2. Build the world using layered vector geometry:
+   - Mountains, oceans, and landscapes GROW up from the bottom with multi-shaded polygons.
+   - Years, dates, and historical anchors STAMP in with distressed vintage badges and kinetic lines.
+   - Villages, huts, houses, and trees POP IN with spring bounce physics, roofs snapping on, chimney smoke particles drifting.
+   - Data & metrics COUNT UP with animated bar charts or rolling number counters.
+   - Directional arrows and focal circles POINT TO and REVEAL key narrative elements.
+
+══════════════════════════════════════════════════════════════════════════════════
+GOLD STANDARD EXAMPLE: "A village in 1970, Near the Himalaya"
+══════════════════════════════════════════════════════════════════════════════════
+For this script, a top-tier visual motion graphic produces:
+- BEAT 1 (0.0s - 2.2s): Staggered Himalayan Mountain Peaks (<polygon>) rise up from the bottom (scaleY from 0 to 1 with elastic overshoot). Slate navy shadow slope + ice blue lit slope + white snowcaps.
+- BEAT 2 (2.0s - 3.8s): "1970" in bold retro typography stamps in with an amber vintage badge and kinetic horizontal ruler lines.
+- BEAT 3 (3.2s - ${duration.toFixed(1)}s): Village huts assemble with spring physics (wooden base boxes scale up, red/amber triangle roofs snap on top, pine trees pop up, chimney smoke wisps float upwards).
+
+══════════════════════════════════════════════════════════════════════════════════
+HOW TO CODE VECTOR SHAPES & ANIMATIONS IN "htmlCssScenes"
+══════════════════════════════════════════════════════════════════════════════════
+In "htmlCssScenes", provide self-contained HTML/CSS/SVG with CSS @keyframes.
+Rules:
+1. Wrap everything in a full-screen container with transparent background:
+   <div style="position:relative; width:1920px; height:1080px; overflow:hidden; background:transparent;">
+2. Use SVG <polygon>, <path>, <rect>, <circle> for crisp vector artwork with dimensional shading:
+   - Mountains: <polygon points="400,1080 800,280 1200,1080" fill="#334155" />
+   - Shadow slope: <polygon points="800,280 1000,700 800,1080 400,1080" fill="#1e293b" />
+   - Snow cap: <polygon points="700,500 800,280 900,500 800,450" fill="#ffffff" />
+   - Village huts: <rect x="850" y="820" width="120" height="90" fill="#78350f" rx="4" />
+   - Roof: <polygon points="830,820 910,740 990,820" fill="#b45309" />
+3. Use spring bounce & cubic-bezier easing keyframes:
+   @keyframes growUp {
+     0% { transform: scaleY(0); transform-origin: bottom; opacity: 0; }
+     70% { transform: scaleY(1.05); transform-origin: bottom; opacity: 1; }
+     100% { transform: scaleY(1); transform-origin: bottom; opacity: 1; }
+   }
+   @keyframes popSpring {
+     0% { transform: scale(0); opacity: 0; }
+     70% { transform: scale(1.12); opacity: 1; }
+     100% { transform: scale(1); opacity: 1; }
+   }
+   @keyframes floatSmoke {
+     0% { transform: translateY(0) scale(0.6); opacity: 0.8; }
+     100% { transform: translateY(-80px) scale(1.4); opacity: 0; }
    }
 
-2. "VoiceSyncHighlight": Dynamic word-by-word karaoke style text highlighter.
-   Config: {
-     "words": Array<{ "text": string, "start": number (seconds from element enterAt), "end": number (seconds from element enterAt) }>,
-     "highlightColor": string,
-     "textColor": string,
-     "dimColor": string,
-     "fontSize": number (e.g. 36-48),
-     "position": { "x": number, "y": number }
-   }
+══════════════════════════════════════════════════════════════════════════════════
+AVAILABLE CANVAS 2D COMPONENTS (CAN BE COMBINED WITH HTML SCENES):
+══════════════════════════════════════════════════════════════════════════════════
+1. "KineticWord": { "text": string, "fontSize": 64-90, "color": "#ffe600", "animation": "spring"|"bounce"|"elastic"|"zoom"|"scaleFlip"|"glitch"|"slideUp", "position": { "x": 960, "y": 540 } }
+2. "VoiceSyncHighlight": { "words": [{ "text": string, "start": number, "end": number }], "highlightColor": "#fbbf24", "textColor": "#fff", "fontSize": 48, "position": { "x": 960, "y": 840 } }
+3. "MotionArrow": { "from": { "x": 400, "y": 600 }, "to": { "x": 900, "y": 400 }, "curve": -40, "color": "#38bdf8", "thickness": 6, "drawDuration": 0.6 }
+4. "AnimatedBarChart": { "bars": [{ "label": "1970", "value": 45 }, { "label": "2024", "value": 180 }], "title": "Population Growth", "position": { "x": 960, "y": 500 }, "width": 600, "height": 360 }
+5. "AnimatedLineGraph": { "points": [{ "x": 100, "y": 400 }, { "x": 500, "y": 200 }], "color": "#22c55e", "showDots": true, "showArea": true, "position": { "x": 960, "y": 500 } }
+6. "AnimatedCounter": { "from": 0, "to": 1970, "prefix": "", "suffix": "", "fontSize": 84, "color": "#fbbf24", "position": { "x": 960, "y": 400 } }
+7. "LowerThird": { "title": "Himalayan Foothills", "subtitle": "Circa 1970", "style": "modern", "position": { "x": 240, "y": 880 } }
+8. "ParticleBurst": { "count": 28, "colors": ["#fbbf24", "#38bdf8", "#ffffff"], "maxRadius": 200, "position": { "x": 960, "y": 540 } }
+9. "CircleHighlight": { "radius": 80, "color": "#f43f5e", "strokeWidth": 4, "pulseCount": 2, "position": { "x": 960, "y": 540 } }
 
-3. "MotionArrow": Dynamic animated bezier arrow pointing to key areas.
-   Config: {
-     "from": { "x": number, "y": number },
-     "to": { "x": number, "y": number },
-     "curve": number (e.g. -50 to 50),
-     "color": string,
-     "thickness": number,
-     "headSize": number,
-     "drawDuration": number,
-     "glow": boolean
-   }
-
-4. "AnimatedBarChart": Animated comparative bar chart.
-   Config: {
-     "bars": Array<{ "label": string, "value": number, "color"?: string }>,
-     "maxValue": number,
-     "width": number,
-     "height": number,
-     "position": { "x": number, "y": number },
-     "barColor": string,
-     "textColor": string
-   }
-
-5. "AnimatedLineGraph": Animated upward/downward graph trend.
-   Config: {
-     "points": Array<{ "x": number, "y": number, "label"?: string }>,
-     "width": number,
-     "height": number,
-     "color": string,
-     "lineWidth": number,
-     "showDots": boolean,
-     "showArea": boolean,
-     "position": { "x": number, "y": number }
-   }
-
-6. "AnimatedCounter": Rolling metric counter ($ or numbers).
-   Config: {
-     "from": number,
-     "to": number,
-     "prefix": string,
-     "suffix": string,
-     "decimals": number,
-     "fontSize": number,
-     "color": string,
-     "position": { "x": number, "y": number }
-   }
-
-7. "LowerThird": Sleek lower third banner for names/titles/topics.
-   Config: {
-     "title": string,
-     "subtitle"?: string,
-     "titleColor"?: string,
-     "subtitleColor"?: string,
-     "accentColor"?: string,
-     "bgColor"?: string,
-     "style"?: "modern" | "minimal" | "bold" | "gradient",
-     "position": { "x": number, "y": number }
-   }
-
-8. "TitleCard": Bold title presentation card.
-   Config: {
-     "title": string,
-     "subtitle"?: string,
-     "tag"?: string,
-     "titleColor"?: string,
-     "subtitleColor"?: string,
-     "accentColor"?: string,
-     "position": { "x": number, "y": number }
-   }
-
-9. "ParticleBurst": Particle celebration or impact explosion.
-   Config: {
-     "count": number,
-     "colors": string[],
-     "maxRadius": number,
-     "speed": number,
-     "position": { "x": number, "y": number }
-   }
-
-10. "CircleHighlight": Pulsing target ring around key screen point.
-    Config: {
-      "radius": number,
-      "color": string,
-      "strokeWidth": number,
-      "pulseCount": number,
-      "glow": boolean,
-      "position": { "x": number, "y": number }
-    }
-
-HTML/CSS SCENES ("htmlCssScenes"):
-You can also generate rich, standalone HTML/CSS/SVG scenes with CSS @keyframes.
-- The htmlCss string should be a self-contained snippet with <style> tags and HTML elements.
-- Always use transparent background or transparent wrappers unless a dark overlay is intended.
-- Set animations to match the scene's duration (exitAt - enterAt).
-
-OUTPUT FORMAT:
-You MUST respond with a single valid JSON object adhering exactly to this TypeScript schema:
+══════════════════════════════════════════════════════════════════════════════════
+OUTPUT FORMAT SPECIFICATION
+══════════════════════════════════════════════════════════════════════════════════
+Respond with ONLY a single valid JSON object (no markdown code blocks, no backticks, no comments):
 {
-  "transcribedText": string (transcription of dialogue or refined script),
+  "transcribedText": string,
   "width": 1920,
   "height": 1080,
   "fps": 30,
@@ -353,9 +348,7 @@ You MUST respond with a single valid JSON object adhering exactly to this TypeSc
       "htmlCss": string
     }
   ]
-}
-
-Ensure all elements have precise timing spanning 0 to ${duration.toFixed(1)}s. Do not output markdown fences or explanatory text outside the JSON.`;
+}`;
 }
 
 /**
@@ -457,3 +450,4 @@ function sanitizeMotionGraphicSpec(raw: any, targetDuration: number): MotionGrap
     htmlCssScenes,
   };
 }
+

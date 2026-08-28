@@ -92,6 +92,17 @@ export function useGenerativeWorkspace() {
           layout,
           provider,
           customPrompt: promptToUse,
+          signal: controller.signal,
+        };
+
+        const mapToStepId = (rawStep: string): GenerativeStep => {
+          const l = (rawStep || '').toLowerCase();
+          if (l.includes('extract') || l.includes('frame')) return 'extracting';
+          if (l.includes('transcrib')) return 'transcribing';
+          if (l.includes('design') || l.includes('ai') || l.includes('validat')) return 'designing';
+          if (l.includes('render') || l.includes('draw')) return 'rendering';
+          if (l.includes('encod') || l.includes('mux')) return 'encoding';
+          return 'designing';
         };
 
         const genResult = await generateMotionGraphicsFromDialogue(
@@ -99,7 +110,7 @@ export function useGenerativeWorkspace() {
           mode === 'clip' ? selectedClipDuration || 15 : targetDuration,
           genOptions,
           (currentStep: string, currentProgress: number) => {
-            setStep(currentStep as GenerativeStep);
+            setStep(mapToStepId(currentStep));
             setProgress(currentProgress);
             setProgressMessage(currentStep);
           }
@@ -175,7 +186,8 @@ export function useGenerativeWorkspace() {
 
       const updatedTracks = useEditorStore.getState().tracks;
       const videoTracks = updatedTracks.filter((t) => t.type === 'video');
-      const targetTrack = videoTracks[videoTracks.length - 1] || updatedTracks[updatedTracks.length - 1];
+      // The newly added track is prepended at tracks[0]
+      const targetTrack = videoTracks[0] || updatedTracks[0];
 
       if (targetTrack) {
         const clipId = `clip_${Date.now()}`;
@@ -187,7 +199,7 @@ export function useGenerativeWorkspace() {
           duration: finalDuration,
           trimStart: 0,
           trimEnd: 0,
-          transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+          transform: { x: 0, y: 0, scale: 100, rotation: 0 },
           opacity: 1,
           speed: 1,
           effects: [],

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sliders, Sparkles, Cpu, Clock, Palette, LayoutGrid } from 'lucide-react';
+import { Sliders, Sparkles, Clock, Palette, LayoutGrid } from 'lucide-react';
 
 export interface MotionStyleControlsProps {
   style: string;
@@ -16,12 +16,14 @@ export interface MotionStyleControlsProps {
 }
 
 const STYLE_OPTIONS = [
+  { value: 'documentary', label: 'Documentary (Vox / Johnny Harris)' },
+  { value: 'kurzgesagt', label: 'Vector Explainer (Kurzgesagt)' },
+  { value: 'mrbeast', label: 'MrBeast Hype (Bold Pop)' },
+  { value: 'hormozi', label: 'Alex Hormozi (Snap Badges)' },
+  { value: 'cyberpunk', label: 'Neon Cyberpunk (HUD Grid)' },
+  { value: 'minimal', label: 'Minimal Clean (Swiss Typo)' },
+  { value: 'editorial', label: 'Vintage Newspaper / Paper Cutout' },
   { value: 'mixed', label: 'Mixed (AI Decides)' },
-  { value: 'mrbeast', label: 'MrBeast Hype' },
-  { value: 'hormozi', label: 'Alex Hormozi' },
-  { value: 'cyberpunk', label: 'Neon Cyberpunk' },
-  { value: 'minimal', label: 'Minimal Clean' },
-  { value: 'editorial', label: 'News/Editorial' },
 ];
 
 const LAYOUT_OPTIONS = [

@@ -96,38 +96,57 @@ async function renderWithVideoEncoder(
 ): Promise<Blob> {
   const { width, height, fps, duration, canvasElements } = spec;
 
-  // Test VP9 configuration support with alpha
-  let hasAlpha = true;
-  const alphaConfig: VideoEncoderConfig = {
-    codec: 'vp09.00.10.08',
-    width,
-    height,
-    bitrate: 4_000_000,
-    alpha: 'keep',
-  };
+  // Test VP9 configuration support with alpha across common level strings
+  let hasAlpha = false;
+  let selectedCodec = 'vp09.00.41.08';
+  const candidateCodecs = ['vp09.00.41.08', 'vp09.00.40.08', 'vp09.00.10.08'];
 
-  try {
-    const support = await VideoEncoder.isConfigSupported(alphaConfig);
-    if (!support.supported) {
-      hasAlpha = false;
+  for (const codec of candidateCodecs) {
+    try {
+      const support = await VideoEncoder.isConfigSupported({
+        codec,
+        width,
+        height,
+        bitrate: 4_000_000,
+        alpha: 'keep',
+      });
+      if (support.supported) {
+        selectedCodec = codec;
+        hasAlpha = true;
+        break;
+      }
+    } catch {}
+  }
+
+  // If alpha wasn't supported with any candidate, test without alpha
+  if (!hasAlpha) {
+    for (const codec of candidateCodecs) {
+      try {
+        const support = await VideoEncoder.isConfigSupported({
+          codec,
+          width,
+          height,
+          bitrate: 4_000_000,
+        });
+        if (support.supported) {
+          selectedCodec = codec;
+          break;
+        }
+      } catch {}
     }
-  } catch {
-    hasAlpha = false;
   }
 
   const activeConfig: VideoEncoderConfig = {
-    codec: 'vp09.00.10.08',
+    codec: selectedCodec,
     width,
     height,
     bitrate: 4_000_000,
     ...(hasAlpha ? { alpha: 'keep' } : {}),
   };
 
-  if (!hasAlpha) {
-    const support = await VideoEncoder.isConfigSupported(activeConfig);
-    if (!support.supported) {
-      throw new Error('VP9 VideoEncoder configuration is not supported on this browser.');
-    }
+  const support = await VideoEncoder.isConfigSupported(activeConfig);
+  if (!support.supported) {
+    throw new Error('VP9 VideoEncoder configuration is not supported on this browser.');
   }
 
   // Create Muxer
