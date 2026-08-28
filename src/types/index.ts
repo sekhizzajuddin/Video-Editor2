@@ -522,6 +522,8 @@ export interface TimelineClip {
   opacity: number;      // 0-1
   speed: number;        // playback speed multiplier
   speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes (overrides flat speed)
+  isReversed?: boolean; // play clip backward (frame-accurate canvas seek engine)
+  freezeFrame?: number; // hold this source time (seconds) for the entire clip duration
   animations?: ClipAnimations; // timeline keyframes for properties
   expressions?: Record<string, string>; // procedural JS animation expressions
   // Effects

@@ -133,6 +133,8 @@ interface ActiveClipInfo {
   trackType: 'video' | 'audio';
   speed: number;
   speedRamp?: any[];
+  isReversed?: boolean;
+  freezeFrame?: number;
   absStartTime: number;
   trackId: string;
   trackVolume: number;
@@ -824,6 +826,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         trackType: track.type,
         speed: clip.speed ?? 1,
         speedRamp: clip.speedRamp,
+        isReversed: clip.isReversed,
+        freezeFrame: clip.freezeFrame,
         absStartTime,
         trackId: track.id,
         trackVolume: track.volume ?? 1,
@@ -1236,8 +1240,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       const now = performance.now();
 
-      // MOBILE PERF: skip sync ticks on mobile to free main thread for rendering
-      if (isMobileSyncThrottle && (now - lastSyncLoopTime) < MOBILE_SYNC_INTERVAL) {
+      // MOBILE PERF: skip sync ticks on mobile to free main thread for rendering.
+      // BUT: reversed/frozen clips need frame-by-frame seeks every tick — skip throttle if any are active.
+      const hasReversedOrFrozen = cachedActiveClipsRef.current.some((c: any) => c.isReversed || c.freezeFrame !== undefined);
+      if (isMobileSyncThrottle && !hasReversedOrFrozen && (now - lastSyncLoopTime) < MOBILE_SYNC_INTERVAL) {
         rafIdRef.current = requestAnimationFrame(syncLoop);
         return;
       }
@@ -1332,6 +1338,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           trimStart: clip.trimStart,
           speed: clip.speed,
           speedRamp: clip.speedRamp,
+          isReversed: clip.isReversed,
+          freezeFrame: clip.freezeFrame,
         }, ct)));
 
         const el = entry.el;
@@ -1405,7 +1413,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const VIDEO_PLL_THRESHOLD = 0.025;       // 25ms
           const VIDEO_MAX_PLL_ADJUST = 0.10;       // 10% dynamic playback rate modulation
 
-          if (playing && !isReversing) {
+          // REVERSE / FREEZE FRAME: browsers can't play <video> backward, so we
+          // keep the element paused and manually seek each sync tick.
+          if (clip.isReversed || clip.freezeFrame !== undefined) {
+            if (!el.paused) el.pause();
+            // Seek to target time if we're more than one frame (~16ms) off
+            if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.016) {
+              el.currentTime = mediaTime;
+            }
+          } else if (playing && !isReversing) {
             if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
               if (!el.seeking) {
                 el.currentTime = mediaTime;

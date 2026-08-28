@@ -1,4 +1,5 @@
 import { useEditorStore } from '@/store/editorStore';
+import { globalRateLimiter } from './ai-copilot/RateLimiter';
 
 // ─── Server-key Hydration ─────────────────────────────────────────────────────
 // Eagerly fetch API keys from /api/keys (Vercel serverless) at module load time.
@@ -151,15 +152,19 @@ export async function fetchWithKeyFailover(
   const executeFetch = async (keyToUse: string) => {
     const url = urlBuilder(keyToUse);
     const fetchOptions = { ...options };
-    
+
     if (provider === 'groq') {
+      // Every Groq request (chat, whisper, /models, feature calls) shares the
+      // same per-key 30 RPM budget — count them all against one limiter.
+      await globalRateLimiter.waitForSlot();
+      globalRateLimiter.recordCall();
       const existingHeaders = (fetchOptions.headers as Record<string, string>) || {};
       fetchOptions.headers = {
         ...existingHeaders,
         'Authorization': `Bearer ${keyToUse}`
       };
     }
-    
+
     return await fetch(url, fetchOptions);
   };
 
@@ -167,12 +172,21 @@ export async function fetchWithKeyFailover(
   if (envKey) {
     try {
       const res = await executeFetch(envKey);
-      
-      // If success or a non-rate-limit error (like 400 Bad Request), return it immediately
+
+      // Success, or a non-rate-limit error (like 400 Bad Request): return as-is.
       if (res.ok || (res.status !== 429 && res.status !== 401 && res.status !== 403)) {
         return res;
       }
-      
+
+      // A Groq 429 is per-key and a cooldown is already expensive — failing
+      // over to the settings key would fire a second request after a 60s wait
+      // and double the damage. Cool down and return the 429 instead. Auth
+      // errors (401/403) and Gemini 429s still fail over.
+      if (provider === 'groq' && res.status === 429) {
+        globalRateLimiter.startCooldown('groq_429');
+        return res;
+      }
+
       console.warn(`[${provider.toUpperCase()}] Env key returned status ${res.status}. Attempting fallback...`);
       firstError = res; // Save the response so we can return it if fallback also fails
     } catch (err) {

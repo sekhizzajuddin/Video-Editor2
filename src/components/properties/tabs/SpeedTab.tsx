@@ -1,3 +1,5 @@
+import { useEditorStore } from '@/store/editorStore';
+import { getMediaTimeForClip } from '@/utils/speedRamp';
 import type { TimelineClip } from '@/types';
 import {
   SpeedSliderSection,
@@ -22,13 +24,43 @@ export function SpeedTab({ selectedClip, mediaLibrary, isRamped, updateClip }: S
     }, { ripple: true });
   };
 
+  const handleToggleReverse = () => {
+    updateClip(selectedClip.id, {
+      isReversed: !selectedClip.isReversed,
+      // Clear freeze frame when toggling reverse
+      freezeFrame: undefined,
+    });
+  };
+
+  const handleFreezeFrame = () => {
+    const currentTime = useEditorStore.getState().currentTime;
+    const mediaTime = getMediaTimeForClip({
+      id: selectedClip.id,
+      startTime: selectedClip.startTime,
+      duration: selectedClip.duration,
+      trimStart: selectedClip.trimStart,
+      speed: selectedClip.speed,
+      speedRamp: selectedClip.speedRamp,
+    }, currentTime);
+    updateClip(selectedClip.id, { freezeFrame: mediaTime });
+  };
+
+  const handleClearFreeze = () => {
+    updateClip(selectedClip.id, { freezeFrame: undefined });
+  };
+
   return (
     <div className="space-y-3">
       <SpeedSliderSection
         speed={selectedClip.speed}
         isRamped={isRamped}
+        isReversed={selectedClip.isReversed}
+        freezeFrame={selectedClip.freezeFrame}
         onSpeedChange={handleSpeedChange}
         onReset={() => handleSpeedChange(1.0)}
+        onToggleReverse={handleToggleReverse}
+        onFreezeFrame={handleFreezeFrame}
+        onClearFreeze={handleClearFreeze}
       />
 
       <SpeedRampingSection

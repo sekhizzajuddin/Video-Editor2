@@ -37,6 +37,7 @@ import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
+import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { formatCentisecondTime } from '@/timeline';
 import { ArrangeModeOverlay } from '@/timeline/components/ArrangeModeOverlay';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
@@ -261,17 +262,33 @@ export function MobileTimeline({
 
   const snapTime = useCallback(
     (t: number, excludeClipId?: string) => {
-      const grid = Math.max(0.05, 1 / (zoomLevel / 40));
-      let best = Math.max(0, Math.round(t / grid) * grid);
-      const candidates: number[] = [0];
-      const threshold = 10 / zoomLevel;
+      const snapEnabled = useEditorStore.getState().settings.snapEnabled;
+      if (!snapEnabled) {
+        setSnapLineX(null);
+        return Math.max(0, t);
+      }
+      
+      let best = Math.max(0, t);
+      const candidates: number[] = [0, useEditorStore.getState().currentTime]; // snap to start and playhead
+      const threshold = 10 / zoomLevel; // ~10px snap distance
       for (const track of tracks) {
         for (const c of track.clips) {
           if (c.id === excludeClipId) continue;
           candidates.push(c.startTime, c.startTime + c.duration);
         }
       }
-      let bestDist = Math.abs(t - best);
+      for (const pip of Object.values(pipWindows)) {
+        const parent = findClipInTracks(tracks, pip.parentClipId, pipWindows);
+        const pipAnchor = parent ? parent.startTime + pip.relativeStartTime : 0;
+        for (const track of pip.tracks) {
+          for (const c of track.clips) {
+            if (c.id === excludeClipId) continue;
+            candidates.push(c.startTime + pipAnchor, c.startTime + c.duration + pipAnchor);
+          }
+        }
+      }
+      
+      let bestDist = Infinity;
       let snappedToCandidate = false;
       for (const cand of candidates) {
         const d = Math.abs(t - cand);
@@ -455,9 +472,18 @@ export function MobileTimeline({
         const newStart = snapTime(t, drag.clipId);
         
         if (activeTool === 'rateStretch') {
+          const originalSpeed = clip.speed || 1.0;
+          const sourceContentDuration = clip.duration * originalSpeed;
+          
           const originalEnd = drag.startStart + clip.duration;
-          const newDuration = Math.max(MIN_DURATION, originalEnd - newStart);
+          let newDuration = Math.max(MIN_DURATION, originalEnd - newStart);
+          let newSpeed = sourceContentDuration / newDuration;
+          
+          newSpeed = Math.min(20, Math.max(0.1, newSpeed));
+          newDuration = sourceContentDuration / newSpeed;
+          
           const clampedStart = originalEnd - newDuration;
+          
           setPreview({
             clipId: clip.id,
             startTime: clampedStart,
@@ -488,7 +514,15 @@ export function MobileTimeline({
         const newEnd = snapTime(t, drag.clipId);
         
         if (activeTool === 'rateStretch') {
-          const newDuration = Math.max(MIN_DURATION, newEnd - clip.startTime);
+          const originalSpeed = clip.speed || 1.0;
+          const sourceContentDuration = clip.duration * originalSpeed;
+          
+          let newDuration = Math.max(MIN_DURATION, newEnd - clip.startTime);
+          let newSpeed = sourceContentDuration / newDuration;
+          
+          newSpeed = Math.min(20, Math.max(0.1, newSpeed));
+          newDuration = sourceContentDuration / newSpeed;
+          
           setPreview({
             clipId: clip.id,
             startTime: clip.startTime,
@@ -554,6 +588,43 @@ export function MobileTimeline({
       }
     } else {
       toast.warning('Select a clip first.');
+    }
+  };
+
+  const handleToggleReverse = () => {
+    if (!targetId) { toast.warning('Select a clip first.'); return; }
+    const clip = clipMap.get(targetId);
+    if (!clip) return;
+    updateClip(targetId, {
+      isReversed: !clip.isReversed,
+      freezeFrame: undefined,
+    });
+    toast.info(clip.isReversed ? 'Reverse removed' : 'Clip reversed ⏪');
+  };
+
+  const handleFreezeFrame = () => {
+    if (!targetId) { toast.warning('Select a clip first.'); return; }
+    const clip = clipMap.get(targetId);
+    if (!clip) return;
+    const ct = useEditorStore.getState().currentTime;
+    if (ct < clip.startTime || ct > clip.startTime + clip.duration) {
+      toast.warning('Playhead must be over the clip to freeze.');
+      return;
+    }
+    const mediaTime = getMediaTimeForClip({
+      id: clip.id,
+      startTime: clip.startTime,
+      duration: clip.duration,
+      trimStart: clip.trimStart,
+      speed: clip.speed,
+      speedRamp: clip.speedRamp,
+    }, ct);
+    if (clip.freezeFrame !== undefined) {
+      updateClip(targetId, { freezeFrame: undefined });
+      toast.info('Freeze frame removed');
+    } else {
+      updateClip(targetId, { freezeFrame: mediaTime, isReversed: undefined });
+      toast.success(`Frozen at ${mediaTime.toFixed(2)}s ❄️`);
     }
   };
 
@@ -640,6 +711,34 @@ export function MobileTimeline({
           >
             <Gauge className="h-3 w-3" />
             <span>Stretch</span>
+          </button>
+          {/* Reverse clip */}
+          <button
+            onClick={handleToggleReverse}
+            disabled={!hasSelection}
+            title="Reverse clip (play backward)"
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] font-medium transition-colors ${
+              targetClip?.isReversed
+                ? 'bg-purple-600 text-white font-semibold shadow-sm'
+                : 'bg-white/5 text-white/80 active:bg-white/15'
+            } disabled:opacity-30`}
+          >
+            <span className="text-[11px]">&#9194;</span>
+            <span>Rev</span>
+          </button>
+          {/* Freeze frame */}
+          <button
+            onClick={handleFreezeFrame}
+            disabled={!hasSelection}
+            title={targetClip?.freezeFrame !== undefined ? "Unfreeze clip" : "Freeze frame at playhead"}
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] font-medium transition-colors ${
+              targetClip?.freezeFrame !== undefined
+                ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                : 'bg-white/5 text-white/80 active:bg-white/15'
+            } disabled:opacity-30`}
+          >
+            <span className="text-[11px]">&#10052;</span>
+            <span>Freeze</span>
           </button>
           <button
             onClick={duplicateClip}

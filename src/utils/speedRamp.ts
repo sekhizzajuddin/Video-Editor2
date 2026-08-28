@@ -395,10 +395,28 @@ export function getMediaTimeAtPosition(
 }
 
 export function getMediaTimeForClip(
-  clip: { id: string; startTime: number; duration: number; trimStart: number; speed: number; speedRamp?: SpeedRampKeyframe[] },
+  clip: { id: string; startTime: number; duration: number; trimStart: number; speed: number; speedRamp?: SpeedRampKeyframe[]; isReversed?: boolean; freezeFrame?: number },
   currentTime: number
 ): number {
+  // FREEZE FRAME: ignore timeline position, always return the held frame
+  if (clip.freezeFrame !== undefined) {
+    return clip.freezeFrame;
+  }
+
   const elapsedTimeline = currentTime - clip.startTime;
+
+  if (clip.isReversed) {
+    // REVERSE: map elapsed forward time → backward media time.
+    // sourceDuration = how many seconds of source content this clip covers.
+    // At elapsed=0 → end of source content (trimStart + sourceDuration)
+    // At elapsed=duration → trimStart (beginning of source content)
+    const sourceDuration = clip.duration * clip.speed;
+    const mediaElapsed = elapsedTimeline * clip.speed;
+    // Clamp to [0, sourceDuration] to avoid seeking outside source bounds
+    const clampedElapsed = Math.max(0, Math.min(sourceDuration, mediaElapsed));
+    return clip.trimStart + sourceDuration - clampedElapsed;
+  }
+
   if (!clip.speedRamp || clip.speedRamp.length < 2) {
     return elapsedTimeline * clip.speed + clip.trimStart;
   }

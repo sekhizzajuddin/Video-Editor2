@@ -399,7 +399,8 @@ export function ArrangeModeOverlay() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [draggingClipId, setDraggingClipId] = useState<string | null>(null);
-  const [dragPointerPos, setDragPointerPos] = useState({ x: 0, y: 0 });
+  // Used to directly mutate proxy position without re-rendering the whole timeline
+  const proxyRef = useRef<HTMLDivElement>(null);
   const [hoverTrackId, setHoverTrackId] = useState<string | null>(null);
   const [insertSlotIndex, setInsertSlotIndex] = useState<number | null>(null);
 
@@ -449,7 +450,9 @@ export function ArrangeModeOverlay() {
       destTrackId: null,
       destSlotIndex: 0,
     };
-    setDragPointerPos({ x: e.clientX, y: e.clientY });
+    if (proxyRef.current) {
+      proxyRef.current.style.transform = `translate(${e.clientX - sizeConfigRef.current.cardWidth / 2}px, ${e.clientY - sizeConfigRef.current.cardHeight / 2}px) rotate(2deg) scale(1.05)`;
+    }
   }, [mediaMap]);
 
   const performHitTest = useCallback((clientX: number, clientY: number, mediaType: string) => {
@@ -536,7 +539,9 @@ export function ArrangeModeOverlay() {
 
       try { e.preventDefault(); } catch(err) {}
 
-      setDragPointerPos({ x: e.clientX, y: e.clientY });
+      if (proxyRef.current) {
+      proxyRef.current.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+    }
 
       if (containerRef.current) {
         const cr = containerRef.current.getBoundingClientRect();
@@ -703,12 +708,15 @@ export function ArrangeModeOverlay() {
       {/* ── Floating Drag Proxy ─────────────────────────────────────────── */}
       {draggingClip && (
         <div
-          className="fixed pointer-events-none z-[9999] rounded-lg shadow-2xl border-2 border-amber-400 bg-[#161622] rotate-2 scale-105 opacity-95 flex flex-col overflow-hidden"
+          ref={proxyRef}
+          className="fixed top-0 left-0 pointer-events-none z-[9999] rounded-lg shadow-2xl border-2 border-amber-400 bg-[#161622] flex flex-col overflow-hidden"
           style={{
-            left: dragPointerPos.x - sizeConfig.cardWidth / 2,
-            top: dragPointerPos.y - sizeConfig.cardHeight / 2,
             width: sizeConfig.cardWidth,
             height: sizeConfig.cardHeight,
+            transformOrigin: 'center center',
+            // Pre-apply rotation and scale to the translate
+            transform: dragRef.current ? `translate(${dragRef.current.startX - sizeConfig.cardWidth / 2}px, ${dragRef.current.startY - sizeConfig.cardHeight / 2}px) rotate(2deg) scale(1.05)` : 'none',
+            opacity: 0.95,
           }}
         >
           <div className="w-full bg-black/60 flex items-center justify-center overflow-hidden" style={{ height: sizeConfig.thumbHeight }}>

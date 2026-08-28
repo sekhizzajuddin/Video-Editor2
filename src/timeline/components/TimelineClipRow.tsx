@@ -114,7 +114,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
   return (
     <div
-      className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hover} transition-all duration-75 ${
+      className={`absolute top-1 rounded cursor-pointer group select-none ${colors.bg} border ${colors.border} ${colors.hover} ${
         isSelected
           ? activeTool === 'rateStretch'
             ? 'ring-2 ring-purple-500 shadow-lg z-20 rate-stretch-active'
