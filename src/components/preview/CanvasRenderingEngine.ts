@@ -145,6 +145,30 @@ const RESERVED_POOL_KEYS: ReadonlySet<string> = new Set([
   '__transition_to',
 ]);
 
+/**
+ * True for chroma keys that must never be skipped for performance.
+ *
+ * Generative overlays are rendered on a flat key plate when the browser cannot
+ * encode a real alpha channel, so until the key runs the whole frame is that
+ * colour — skipping it shows a solid block instead of a slightly-less-pretty
+ * effect. `alwaysApply` is set explicitly on new overlays; the pure-magenta
+ * colour test also catches overlays added to a timeline BEFORE that flag
+ * existed, which is why this is a colour check and not just the flag.
+ */
+const PINNED_KEY_COLORS: ReadonlySet<string> = new Set([
+  '#ff00ff',
+  '#f0f',
+  '#ff00ffff',
+  'magenta',
+]);
+
+function isPinnedChromaKey(chromaKey: any): boolean {
+  if (!chromaKey?.enabled) return false;
+  if (chromaKey.alwaysApply === true) return true;
+  const color = String(chromaKey.color || '').trim().toLowerCase();
+  return PINNED_KEY_COLORS.has(color);
+}
+
 export function getOrCreateCanvas(
   offscreenPool: Map<string, HTMLCanvasElement>,
   key: string,
@@ -382,12 +406,25 @@ export async function renderCanvasEngine({
   // PERF: Cache filtered+sorted track lists. filter()+sort()+spread creates 3 new arrays
   // every frame (60/s). Now only rebuilds when the `tracks` reference changes.
   if (tracks !== _cachedTracksRef) {
+    // Compositing order = timeline stacking order. Legacy projects stored
+    // integer-suffixed ids (track_v_1, track_v_2 …) and relied on numeric
+    // sorting; modern ids are uuid-based, where parsing digits produced a
+    // random (and unstable) z-order — an overlay track could end up *under*
+    // the footage it was meant to sit on. Keep the numeric rule for legacy
+    // ids and fall back to array order otherwise (last track paints on top),
+    // which is also what the export scheduler does.
+    const arrayOrder = new Map(tracks.map((t, index) => [t.id, index]));
+    const legacyNumericId = (id: string) => /_\d+$/.test(id);
+    const numericId = (id: string) => parseInt(id.replace(/\D/g, ''), 10) || 0;
+
     _cachedVideoTracks = tracks
       .filter((t) => t.type === 'video' && !t.hidden)
       .sort((a, b) => {
-        const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
-        const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
-        return numA - numB;
+        const aLegacy = legacyNumericId(a.id);
+        const bLegacy = legacyNumericId(b.id);
+        if (aLegacy && bLegacy) return numericId(a.id) - numericId(b.id);
+        if (aLegacy !== bLegacy) return aLegacy ? -1 : 1;
+        return (arrayOrder.get(a.id) ?? 0) - (arrayOrder.get(b.id) ?? 0);
       });
     _cachedTextTracks = tracks.filter((t) => t.type === 'text' && !t.hidden);
     _cachedFxTracks = tracks.filter((t) => t.type === 'fx' && !t.hidden);
@@ -1290,7 +1327,10 @@ export async function renderCanvasEngine({
           const hasCrop = cLeft > 0 || cRight > 0 || cTop > 0 || cBot > 0;
           const hasCssFilters = exposure !== 0 || contrast !== 100 || saturation !== 100 || blur > 0;
           const hasAiBg = !!clip.aiBackground?.enabled;
-          const hasChroma = !skipExpensiveFX && !!clip.chromaKey?.enabled;
+          const keyPinned = isPinnedChromaKey(clip.chromaKey);
+          // Keyed overlay plates opt out of the FX skip: they are meaningless
+          // (a solid magenta block) without their key.
+          const hasChroma = !!clip.chromaKey?.enabled && (!skipExpensiveFX || keyPinned);
           const hasLuma = !skipExpensiveFX && !!clip.lumaKey?.enabled;
           const hasObjRemoval = !skipExpensiveFX && !!clip.objectRemoval?.enabled;
           const hasColorWheels = !skipExpensiveFX && !!(filters.shadows || filters.midtones || filters.highlights);
@@ -1398,7 +1438,12 @@ export async function renderCanvasEngine({
               }
             }
 
-            if (!skipExpensiveFX) {
+            // Keyed overlay plates opt out of the FX skip: without the key the
+            // clip is a solid block of colour, so a pinned key stays on even
+            // while playing, scrubbing or in fast preview mode.
+            const allowHeavyFx = !skipExpensiveFX || keyPinned;
+
+            if (allowHeavyFx) {
               if (clip.chromaKey?.enabled) {
                 const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold'], clip.expressions?.['chromaKey.threshold']);
                 const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness'], clip.expressions?.['chromaKey.softness']);
