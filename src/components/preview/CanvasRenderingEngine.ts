@@ -1414,7 +1414,13 @@ export async function renderCanvasEngine({
               }
             }
 
-            if (!skipExpensiveFX) {
+            // Keyed overlay plates opt out of the FX skip: without the key the
+            // clip is a solid block of colour, so `alwaysApply` keeps it on even
+            // while playing, scrubbing or in fast preview mode.
+            const allowHeavyFx =
+              !skipExpensiveFX || clip.chromaKey?.alwaysApply === true;
+
+            if (allowHeavyFx) {
               if (clip.chromaKey?.enabled) {
                 const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold'], clip.expressions?.['chromaKey.threshold']);
                 const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness'], clip.expressions?.['chromaKey.softness']);
