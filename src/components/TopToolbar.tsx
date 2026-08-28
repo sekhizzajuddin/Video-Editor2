@@ -277,17 +277,19 @@ export function TopToolbar() {
           </button>
           {showLayoutMenu && (
             <div className="absolute top-full left-0 mt-1 w-40 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
-              {['Editing', 'Color', 'Audio'].map((preset) => (
+              {['Editing', 'Color', 'Audio', 'Generative'].map((preset) => (
                 <button
                   key={preset}
                   onClick={() => {
                     if (preset === 'Editing') setWorkspaceLayout({ preset: 'Editing', leftWidth: 250, rightWidth: 280, timelineHeight: 320 });
                     if (preset === 'Color') setWorkspaceLayout({ preset: 'Color', leftWidth: 200, rightWidth: 400, timelineHeight: 320 });
                     if (preset === 'Audio') setWorkspaceLayout({ preset: 'Audio', leftWidth: 200, rightWidth: 280, timelineHeight: 250 });
+                    if (preset === 'Generative') setWorkspaceLayout({ preset: 'Generative', leftWidth: 200, rightWidth: 0, timelineHeight: 250 });
                     setShowLayoutMenu(false);
                   }}
                   className={`w-full px-3 py-2 text-xs text-left hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors ${workspaceLayout?.preset === preset ? 'text-amber-400' : 'text-[#a0a0a0]'}`}
                 >
+                  {preset === 'Generative' && <Sparkles className="w-3 h-3 text-purple-400" />}
                   {preset}
                 </button>
               ))}

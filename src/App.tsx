@@ -32,6 +32,7 @@ const WelcomeScreen = React.lazy(() => import('@/components/WelcomeScreen').then
 const AiCopilot = React.lazy(() => import('@/components/AiCopilot').then(m => ({ default: m.AiCopilot })));
 const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRatioConflictModal').then(m => ({ default: m.AspectRatioConflictModal })));
 const HelpModal = React.lazy(() => import('@/components/HelpModal').then(m => ({ default: m.HelpModal })));
+const GenerativeWorkspace = React.lazy(() => import('@/components/GenerativeWorkspace').then(m => ({ default: m.GenerativeWorkspace })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -587,12 +588,20 @@ function DesktopApp() {
 
         {/* Center Panel */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Preview Canvas */}
+          {/* Preview Canvas / Generative Workspace */}
           <div className="flex-1 overflow-hidden relative">
-            <PreviewCanvas />
-            <Suspense fallback={null}>
-              <ScopesPanel />
-            </Suspense>
+            {workspaceLayout?.preset === 'Generative' ? (
+              <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e] flex items-center justify-center text-[#a0a0a0] text-sm">Loading Generative Workspace…</div>}>
+                <GenerativeWorkspace />
+              </Suspense>
+            ) : (
+              <>
+                <PreviewCanvas />
+                <Suspense fallback={null}>
+                  <ScopesPanel />
+                </Suspense>
+              </>
+            )}
           </div>
 
           {/* Timeline Resize Handle */}
@@ -725,21 +734,25 @@ function DesktopApp() {
           </div>
         </div>
 
-        {/* Right Resize Handle */}
-        <div
-          className="w-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-col-resize shrink-0 transition-colors"
-          onMouseDown={() => { isDraggingRight.current = true; }}
-        />
+        {/* Right Resize Handle + Properties Panel (hidden in Generative workspace) */}
+        {workspaceLayout?.preset !== 'Generative' && (
+          <>
+            <div
+              className="w-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-col-resize shrink-0 transition-colors"
+              onMouseDown={() => { isDraggingRight.current = true; }}
+            />
 
-        {/* Properties Panel (Right) */}
-        <div
-          className="shrink-0 overflow-hidden"
-          style={{ width: rightWidth }}
-        >
-          <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
-            <PropertiesPanel />
-          </Suspense>
-        </div>
+            {/* Properties Panel (Right) */}
+            <div
+              className="shrink-0 overflow-hidden"
+              style={{ width: rightWidth }}
+            >
+              <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
+                <PropertiesPanel />
+              </Suspense>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Modals & Global Handlers */}
