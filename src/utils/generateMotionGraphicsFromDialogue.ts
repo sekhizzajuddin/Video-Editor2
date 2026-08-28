@@ -314,9 +314,12 @@ Rules:
    - NEVER use <link rel="stylesheet">
    - NEVER use @import for fonts.
    - External assets will taint the canvas and crash the rendering engine. Use ONLY standard web-safe fonts (Arial, Impact, Courier New, Helvetica, sans-serif).
-3. Use SVG <polygon>, <path>, <rect>, <circle> for crisp vector artwork:
-   - Mountains: <polygon points="400,1080 800,280 1200,1080" fill="#334155" />
-   - Village huts: <rect x="850" y="820" width="120" height="90" fill="#78350f" rx="4" />
+3. Use SVG <polygon>, <path>, <rect>, <circle> for crisp vector artwork, BUT YOU MUST WRAP THEM IN AN <svg> TAG!
+   - Examples MUST be inside an svg:
+   <svg width="1920" height="1080" viewBox="0 0 1920 1080" style="position:absolute; top:0; left:0;">
+     <polygon points="400,1080 800,280 1200,1080" fill="#334155" />
+     <rect x="850" y="820" width="120" height="90" fill="#78350f" rx="4" />
+   </svg>
 4. Use spring bounce & cubic-bezier easing keyframes:
    @keyframes growUp { 0% { transform: scaleY(0); transform-origin: bottom; opacity: 0; } 100% { transform: scaleY(1); transform-origin: bottom; opacity: 1; } }
    @keyframes popSpring { 0% { transform: scale(0); } 70% { transform: scale(1.12); } 100% { transform: scale(1); } }
@@ -329,6 +332,7 @@ AVAILABLE CANVAS 2D COMPONENTS (CAN BE COMBINED WITH HTML SCENES):
 3. "MotionArrow": { "from": { "x": 400, "y": 600 }, "to": { "x": 900, "y": 400 } }
 4. "AnimatedBarChart": { "bars": [{ "label": "1970", "value": 45 }, { "label": "2024", "value": 180 }] }
 5. "AnimatedCounter": { "from": 0, "to": 1970, "position": { "x": 960, "y": 400 } }
+6. "VectorShape": { "animation": "popSpring"|"growUp", "startTime": 0.5, "shapes": [ { "type": "polygon", "points": "400,1080 800,280 1200,1080", "fill": "#334155", "delay": 0.2 }, { "type": "rect", "x": 850, "y": 820, "width": 120, "height": 90, "fill": "#78350f" } ] }
 
 OUTPUT FORMAT SPECIFICATION
 Respond with ONLY a single valid JSON object (no markdown code blocks, no backticks, no comments):
@@ -340,7 +344,7 @@ Respond with ONLY a single valid JSON object (no markdown code blocks, no backti
   "duration": ${duration.toFixed(1)},
   "canvasElements": [
     {
-      "component": "KineticWord" | "VoiceSyncHighlight" | "MotionArrow" | "AnimatedBarChart" | "AnimatedLineGraph" | "AnimatedCounter" | "LowerThird" | "TitleCard" | "ParticleBurst" | "CircleHighlight",
+      "component": "KineticWord" | "VoiceSyncHighlight" | "MotionArrow" | "AnimatedBarChart" | "AnimatedLineGraph" | "AnimatedCounter" | "LowerThird" | "TitleCard" | "ParticleBurst" | "CircleHighlight" | "VectorShape",
       "enterAt": number (0 to ${duration.toFixed(1)}),
       "exitAt": number (enterAt < exitAt <= ${duration.toFixed(1)}),
       "config": object,

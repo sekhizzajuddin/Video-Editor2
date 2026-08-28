@@ -8,6 +8,7 @@ import { LowerThird } from './LowerThird';
 import { TitleCard } from './TitleCard';
 import { ParticleBurst } from './ParticleBurst';
 import { CircleHighlight } from './CircleHighlight';
+import { VectorShape } from './VectorShape';
 
 export type ComponentDrawFn = (
   ctx: CanvasRenderingContext2D,
@@ -30,6 +31,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentDrawFn> = {
   TitleCard,
   ParticleBurst,
   CircleHighlight,
+  VectorShape,
 
   // camelCase
   voiceSyncHighlight: VoiceSyncHighlight,
@@ -42,6 +44,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentDrawFn> = {
   titleCard: TitleCard,
   particleBurst: ParticleBurst,
   circleHighlight: CircleHighlight,
+  vectorShape: VectorShape,
 
   // kebab-case
   'voice-sync-highlight': VoiceSyncHighlight,
@@ -54,6 +57,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentDrawFn> = {
   'title-card': TitleCard,
   'particle-burst': ParticleBurst,
   'circle-highlight': CircleHighlight,
+  'vector-shape': VectorShape,
 };
 
 /**

@@ -308,7 +308,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
               obs.observe(el);
             }
           }}
-          className="relative w-full h-full max-w-[1920px] max-h-[1080px] aspect-video bg-black rounded-lg overflow-hidden border border-[#2d2d2d] shadow-2xl flex items-center justify-center"
+          className="relative w-full h-full max-w-[1920px] max-h-[1080px] aspect-video bg-transparent rounded-lg overflow-hidden border border-[#2d2d2d] shadow-2xl flex items-center justify-center"
         >
           {/* Layer 1: Source Video (When available and displayMode != 'motion-only') */}
           {selectedClipUrl && displayMode !== 'motion-only' && (
