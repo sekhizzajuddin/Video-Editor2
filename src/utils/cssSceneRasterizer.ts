@@ -534,7 +534,59 @@ export function seekSceneStage(
     stage.seekStyle.textContent = buildKeyframeCss(stage.animated, timeSec, stage.keyframes);
     return;
   }
+  if (mode === 'static') {
+    // The engine will not play these animations, and the scene's base state is
+    // usually `opacity: 0` (that is how entrance animations are written). So
+    // evaluate the end state ourselves and force it visible, instead of shipping
+    // an empty frame.
+    stage.seekStyle.textContent = buildStaticCss(stage.animated, timeSec, stage.keyframes);
+    return;
+  }
   stage.seekStyle.textContent = buildSeekCss(stage.animated, timeSec);
+}
+
+/**
+ * Bakes the scene's finished state with our own evaluator.
+ *
+ * Used when the engine renders SVG images statically. `fill` is forced to
+ * `both` so an animation that has already finished still contributes its last
+ * frame, and any animation whose @keyframes we cannot find gets its element
+ * forced visible — a scene whose elements start at `opacity: 0` would otherwise
+ * rasterize as a completely empty frame.
+ */
+export function buildStaticCss(
+  nodes: AnimatedNode[],
+  timeSec: number,
+  keyframes: KeyframesMap
+): string {
+  const t = Number.isFinite(timeSec) ? Math.max(0, timeSec) : 0;
+  let css = '';
+
+  for (const node of nodes) {
+    const decls: Record<string, string> = {};
+    let unresolved = false;
+
+    for (const config of node.configs) {
+      const stops = keyframes[config.name] ?? keyframes[stripQuotes(config.name)];
+      if (!stops || stops.length === 0) {
+        unresolved = true;
+        continue;
+      }
+      const evaluated = evaluateAnimationAt({ ...config, fill: 'both' }, stops, t);
+      if (evaluated) Object.assign(decls, evaluated);
+    }
+
+    const body = Object.entries(decls)
+      .map(([prop, value]) => `${prop}:${value} !important`)
+      .join(';');
+
+    const selector = `[data-procut-anim="${node.id}"]${node.pseudo || ''}`;
+    css += unresolved
+      ? `${selector}{animation:none !important;opacity:1 !important;}\n`
+      : `${selector}{animation:none !important;${body}}\n`;
+  }
+
+  return css;
 }
 
 /**
@@ -555,8 +607,17 @@ export function buildKeyframeCss(
 
   for (const node of nodes) {
     const decls: Record<string, string> = {};
+    let unresolved = false;
+
     for (const config of node.configs) {
       const stops = keyframes[config.name] ?? keyframes[stripQuotes(config.name)];
+      if (!stops || stops.length === 0) {
+        // We cannot bake this animation, and the element's base state may be
+        // `opacity: 0`. Forcing it visible is the lesser evil: a slightly wrong
+        // frame beats an empty one.
+        unresolved = true;
+        continue;
+      }
       const evaluated = evaluateAnimationAt(config, stops, t);
       if (!evaluated) continue;
       // Later animations in the list win, matching CSS behaviour.
@@ -568,7 +629,9 @@ export function buildKeyframeCss(
       .join(';');
 
     const selector = `[data-procut-anim="${node.id}"]${node.pseudo || ''}`;
-    css += `${selector}{animation:none !important;${body}}\n`;
+    css += unresolved
+      ? `${selector}{animation:none !important;opacity:1 !important;}\n`
+      : `${selector}{animation:none !important;${body}}\n`;
   }
 
   return css;
@@ -705,6 +768,8 @@ export interface SceneMotionProbe {
   rasterized: boolean;
   /** The frames differed, i.e. the seek strategy actually advanced something. */
   differs: boolean;
+  /** Fraction of pixels with any ink (0…1) — lets us compare strategies. */
+  ink: number;
 }
 
 const PROBE_W = 320;
@@ -730,7 +795,7 @@ export async function probeSceneMotion(
   mode: SeekMode,
   times: number[]
 ): Promise<SceneMotionProbe> {
-  const empty: SceneMotionProbe = { rasterized: false, differs: false };
+  const empty: SceneMotionProbe = { rasterized: false, differs: false, ink: 0 };
   if (typeof OffscreenCanvas === 'undefined' || times.length < 2) return empty;
 
   let canvas: OffscreenCanvas;
@@ -763,9 +828,9 @@ export async function probeSceneMotion(
     hashes.push(checksum(data));
   }
 
-  if (ink === 0) return empty;
+  if (ink === 0) return { rasterized: false, differs: false, ink: 0 };
   const differs = hashes.some((h) => h !== hashes[0]);
-  return { rasterized: true, differs };
+  return { rasterized: true, differs, ink: ink / (PROBE_W * PROBE_H * times.length) };
 }
 
 /** Two sample times that exercise a scene's animation range. */

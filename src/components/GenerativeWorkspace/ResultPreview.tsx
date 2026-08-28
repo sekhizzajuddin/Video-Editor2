@@ -369,7 +369,10 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
   const lastVideoRef = useRef<MotionGraphicVideo | null>(null);
   if (video !== lastVideoRef.current) {
     lastVideoRef.current = video;
-    if (video && video.blob.size > 8) {
+    // When the engine cannot bake animation into the video, prefer the live CSS
+    // layer: it animates fine in an iframe, so the preview still shows motion
+    // even though the rendered file is a still frame.
+    if (video && video.blob.size > 8 && video.seekMode !== 'static') {
       setPreviewSource('rendered');
     } else if (hasLiveScenes) {
       setPreviewSource('live');
@@ -586,10 +589,10 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
 
           {video && video.seekMode === 'static' && scenes.length > 0 && (
             <span
-              className="text-[10px] font-mono px-2 py-0.5 rounded border border-red-500/30 text-red-400 bg-red-500/10 flex items-center gap-1"
-              title="This browser cannot rasterize the HTML scene into a canvas at all, so each scene shows its finished state. Run the Pipeline self-test in the left panel for details."
+              className="text-[10px] font-mono px-2 py-0.5 rounded border border-amber-500/30 text-amber-300 bg-amber-500/10 flex items-center gap-1"
+              title="This browser will not play CSS animations inside the SVG image, so each scene shows its finished artwork instead of animating. Switch the preview to Live CSS to see the motion; the timeline gets the finished frame."
             >
-              <AlertTriangle className="w-3 h-3" /> CSS frozen
+              <AlertTriangle className="w-3 h-3" /> Still frame
             </span>
           )}
 

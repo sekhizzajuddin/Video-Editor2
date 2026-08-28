@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildKeyframeCss,
+  buildStaticCss,
   buildSeekCss,
   parseCssIterationList,
   parseCssTimeList,
@@ -221,5 +222,56 @@ describe('buildKeyframeCss (engine-independent frame baking)', () => {
     const css = buildKeyframeCss([node(4)], 0.5, {});
     expect(css).toContain('animation:none !important');
     expect(css).not.toContain('transform');
+  });
+});
+
+describe('visibility safety net', () => {
+  // The classic AI entrance pattern: the element is invisible until its
+  // animation reveals it. If the reveal never runs, the frame is empty.
+  const HIDDEN = `
+  <style>
+    .box { opacity: 0; transform: translateY(40px); animation: rise .6s ease both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+  <div class="box">x</div>`;
+
+  const keyframes = parseKeyframes(HIDDEN);
+
+  const node = (id: number, name: string) => ({
+    id,
+    pseudo: '' as const,
+    delays: [0],
+    durations: [0.6],
+    iterations: [1],
+    configs: [
+      {
+        name,
+        duration: 0.6,
+        delay: 0,
+        easing: 'ease',
+        iterations: 1,
+        direction: 'normal',
+        fill: 'both',
+      },
+    ],
+  });
+
+  it('bakes the reveal so the element is visible mid-animation', () => {
+    const css = buildKeyframeCss([node(0, 'rise')], 0.3, keyframes);
+    expect(css).toContain('opacity:');
+    expect(css).not.toContain('opacity:0 !important');
+  });
+
+  it('forces unresolvable animations visible instead of shipping an empty frame', () => {
+    const css = buildKeyframeCss([node(0, 'notDefinedAnywhere')], 0.3, keyframes);
+    expect(css).toContain('animation:none !important');
+    expect(css).toContain('opacity:1 !important');
+  });
+
+  it('static mode shows the finished frame even when fill-mode is none', () => {
+    const noFill = { ...node(0, 'rise'), configs: [{ ...node(0, 'rise').configs[0], fill: 'none' }] };
+    const css = buildStaticCss([noFill], 60, keyframes);
+    expect(css).toContain('opacity:1 !important');
+    expect(css).toContain('translateY(0px)');
   });
 });

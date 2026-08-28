@@ -143,30 +143,32 @@ export async function renderMotionGraphicToVideo(
   const strategyNotes: string[] = [];
   const probeTarget = scenes.find((s) => s.stage.hasAnimations && s.stage.animated.length > 0);
 
-  if (probeTarget && seekMode !== 'static') {
+  if (probeTarget) {
     const times = sceneProbeTimes(probeTarget.scene);
-    const css = await probeSceneMotion(probeTarget.stage, 'css', times);
+    const cssProbe = await probeSceneMotion(probeTarget.stage, 'css', times);
+    const jsProbe = await probeSceneMotion(probeTarget.stage, 'js', times);
 
-    if (!css.rasterized) {
-      // Nothing comes out of the SVG at all — don't pretend otherwise.
+    if (!cssProbe.rasterized && !jsProbe.rasterized) {
+      // Nothing comes out of the SVG at all.
       seekMode = 'static';
-      strategyNotes.push('SVG rasterization produced nothing; showing finished artwork.');
-    } else if (!css.differs) {
-      const baked = await probeSceneMotion(probeTarget.stage, 'js', times);
-      if (baked.differs) {
-        seekMode = 'js';
-        strategyNotes.push(
-          'Native CSS seek held this scene still; switched to baked keyframes.'
-        );
-      } else {
-        strategyNotes.push(
-          'Neither seek strategy advanced this scene; it may have no motion in the sampled range.'
-        );
+      strategyNotes.push('SVG rasterization produced nothing for this scene.');
+    } else if (cssProbe.differs && cssProbe.ink >= jsProbe.ink * 0.8) {
+      // The engine animates it correctly — cheapest and most faithful.
+      seekMode = 'css';
+      if (capabilities.mode !== 'css') {
+        strategyNotes.push('Native CSS seek animated this scene after all.');
       }
-    }
-
-    if (seekMode === 'js' && capabilities.cssAnimOk) {
-      strategyNotes.push('Engine reported CSS animation support but this scene disagreed.');
+    } else if (jsProbe.differs) {
+      // The engine will not advance these animations (its frames were identical,
+      // usually because the scene starts at opacity 0 and only the animation
+      // reveals it). Bake the keyframes ourselves instead.
+      seekMode = 'js';
+      strategyNotes.push('Engine held this scene still; baked the keyframes frame by frame.');
+    } else {
+      // No strategy can animate it — at least show the finished artwork rather
+      // than an empty frame of key colour.
+      seekMode = 'static';
+      strategyNotes.push('No seek strategy animated this scene; showing its finished frame.');
     }
   }
 

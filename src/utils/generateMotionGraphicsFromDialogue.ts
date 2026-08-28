@@ -889,9 +889,10 @@ export function sanitizeMotionGraphicSpec(
     scenes[scenes.length - 1].exitAt = round2(duration);
   }
 
-  // Never ship an empty composition: fall back to a TitleCard built from the
-  // dialogue so the overlay is visible instead of silently blank.
-  if (canvasElements.length === 0 && scenes.length === 0) {
+  // Never ship an empty composition. A design with no drawable scene (and only a
+  // token canvas element or two) renders as a bare key-colour rectangle, so add
+  // a TitleCard built from the dialogue — something on screen beats nothing.
+  if (scenes.length === 0 && canvasElements.length <= 2) {
     canvasElements.push({
       component: 'TitleCard',
       enterAt: 0,
