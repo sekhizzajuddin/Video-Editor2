@@ -710,8 +710,8 @@ export async function rasterizeSvgToCanvas(
 
   let url: string | null = null;
   try {
-    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-    url = URL.createObjectURL(blob);
+    // Use data URI instead of Blob to prevent CORS tainting of the OffscreenCanvas
+    url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 
     const img = new Image();
     img.decoding = 'sync';
@@ -741,14 +741,6 @@ export async function rasterizeSvgToCanvas(
     return true;
   } catch {
     return false;
-  } finally {
-    if (url) {
-      try {
-        URL.revokeObjectURL(url);
-      } catch {
-        /* ignore */
-      }
-    }
   }
 }
 
