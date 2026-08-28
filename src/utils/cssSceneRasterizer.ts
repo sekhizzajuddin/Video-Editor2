@@ -598,7 +598,10 @@ export function serializeSceneStage(stage: SceneStage): string {
   }
 
   return `<svg xmlns="${SVG_NS}" width="${stage.width}" height="${stage.height}" viewBox="0 0 ${stage.width} ${stage.height}">` +
-    `<foreignObject x="0" y="0" width="100%" height="100%">` +
+    // Explicit pixel dimensions, not percentages: some engines resolve a
+    // percentage-sized foreignObject against a zero-sized box and silently
+    // render nothing at all.
+    `<foreignObject x="0" y="0" width="${stage.width}" height="${stage.height}">` +
     `<div xmlns="${XHTML_NS}" style="width:${stage.width}px;height:${stage.height}px;overflow:hidden;background:transparent;margin:0;padding:0;">` +
     `${inner}</div></foreignObject></svg>`;
 }

@@ -4,6 +4,7 @@ import type {
   GenerativeResult,
   GenerativeMotionOptions,
 } from '@/utils/generateMotionGraphicsFromDialogue';
+import { MOTION_KEY_COLOR } from '@/utils/motionGraphicRenderer';
 import type { MotionGraphicVideo } from '@/utils/motionGraphicRenderer';
 import type { MediaItem, TimelineClip, TimelineTrack } from '@/types';
 
@@ -63,6 +64,48 @@ export function useGenerativeWorkspace() {
   }, []);
 
   // Release the object URL when the workspace unmounts.
+  // Repair overlays that were applied by older builds. Those clips were added
+  // before the generated overlay carried a chroma key, so the magenta plate
+  // shows through everywhere and the engine has nothing to pin. Runs once when
+  // the workspace opens, on the dedicated overlay track only.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { useEditorStore } = await import('@/store/editorStore');
+        const track = useEditorStore
+          .getState()
+          .tracks.find((t) => t.type === 'video' && t.name === MOTION_OVERLAY_TRACK_NAME);
+        if (!track) return;
+
+        const missing = track.clips.filter((c) => !c.chromaKey?.enabled);
+        if (missing.length === 0 || cancelled) return;
+
+        for (const clip of missing) {
+          useEditorStore.getState().updateClip(clip.id, {
+            chromaKey: {
+              enabled: true,
+              color: MOTION_KEY_COLOR,
+              threshold: 42,
+              softness: 16,
+              spillSuppression: 60,
+              edgeFeather: 1,
+              alwaysApply: true,
+            },
+          });
+        }
+        console.info(
+          `[GenerativeWorkspace] Re-keyed ${missing.length} overlay clip(s) from an older build.`
+        );
+      } catch (err) {
+        console.warn('[GenerativeWorkspace] Overlay repair failed:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (videoUrlRef.current) {
