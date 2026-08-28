@@ -192,7 +192,10 @@ async function renderWithVideoEncoder(
     // a. Clear canvas to full transparency
     ctx.clearRect(0, 0, width, height);
 
-    // b. Draw active HTML/CSS scenes
+    // b. (DISABLED) Draw active HTML/CSS scenes
+    // HTML/CSS foreignObject capture is inherently unstable and easily taints the canvas.
+    // The AI has been updated to use canvasElements (VectorShape) instead.
+    /*
     for (const item of sceneContainers) {
       if (timeSec >= item.scene.enterAt && timeSec <= item.scene.exitAt) {
         const sceneLocalMs = (timeSec - item.scene.enterAt) * 1000;
@@ -200,6 +203,7 @@ async function renderWithVideoEncoder(
         await captureFrameToCanvas(item.el, canvas, width, height);
       }
     }
+    */
 
     // c. Draw active Canvas elements
     for (const element of canvasElements) {
@@ -319,7 +323,8 @@ async function renderWithMediaRecorder(
 
       ctx.clearRect(0, 0, width, height);
 
-      // Draw HTML/CSS scenes
+      // Draw HTML/CSS scenes (DISABLED - see VideoEncoder)
+      /*
       for (const item of sceneContainers) {
         if (timeSec >= item.scene.enterAt && timeSec <= item.scene.exitAt) {
           const sceneLocalMs = (timeSec - item.scene.enterAt) * 1000;
@@ -327,6 +332,7 @@ async function renderWithMediaRecorder(
           await captureFrameToCanvas(item.el, canvas, width, height);
         }
       }
+      */
 
       // Draw Canvas elements
       for (const element of canvasElements) {
