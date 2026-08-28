@@ -187,8 +187,8 @@ export async function generateMotionGraphicsFromDialogue(
     try {
       const { useEditorStore } = await import('@/store/editorStore');
       const state = useEditorStore.getState();
-      const accountId = state.cloudflareAccountId || (import.meta as any).env?.VITE_CLOUDFLARE_ACCOUNT_ID;
-      const apiToken = state.cloudflareApiToken || (import.meta as any).env?.VITE_CLOUDFLARE_API_TOKEN;
+      const accountId = state.settings?.cloudflareAccountId || (import.meta as any).env?.VITE_CLOUDFLARE_ACCOUNT_ID;
+      const apiToken = state.settings?.cloudflareApiToken || (import.meta as any).env?.VITE_CLOUDFLARE_API_TOKEN;
 
       if (accountId && apiToken) {
         for (const asset of rawSpec.imageAssets) {
