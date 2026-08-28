@@ -246,7 +246,12 @@ export function useGenerativeWorkspace() {
         { transparent, signal: controller.signal }
       );
 
-      const next: GenerativeResult = { ...result, spec, video };
+      const next: GenerativeResult = {
+        ...result,
+        spec,
+        video,
+        designNotes: result.designNotes ?? [],
+      };
       publishVideoUrl(video.blob);
       setResult(next);
       setOriginalHtmlCss(editedHtmlCss);
@@ -399,6 +404,7 @@ export function useGenerativeWorkspace() {
                 softness: 16,
                 spillSuppression: 60,
                 edgeFeather: 1,
+                alwaysApply: true,
               },
             }
           : {}),

@@ -18,6 +18,7 @@ export interface MotionStyleControlsProps {
 }
 
 const STYLE_OPTIONS = [
+  { value: 'vox', label: 'Vox Explainer (Flat Vector World)' },
   { value: 'documentary', label: 'Documentary (Vox / Johnny Harris)' },
   { value: 'kurzgesagt', label: 'Vector Explainer (Kurzgesagt)' },
   { value: 'mrbeast', label: 'MrBeast Hype (Bold Pop)' },

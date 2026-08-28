@@ -2,10 +2,11 @@ import { Muxer, ArrayBufferTarget } from 'webm-muxer';
 import { drawComponent } from './motionGraphicComponents';
 import {
   SceneStage,
+  SeekMode,
   createSceneStage,
   destroySceneStage,
   captureSceneFrame,
-  probeCssAnimationCapture,
+  probeCaptureCapabilities,
 } from './cssSceneRasterizer';
 
 export interface MotionGraphicSpec {
@@ -68,8 +69,10 @@ export interface MotionGraphicVideo {
   duration: number;
   frameCount: number;
   sceneCount: number;
-  /** False when the browser cannot rasterize seeked CSS animations. */
+  /** False when the engine cannot rasterize *animated* CSS in SVG images. */
   cssAnimationSupport: boolean;
+  /** Strategy actually used to bake the animation into each frame. */
+  seekMode: SeekMode;
   /** How many opaque full-frame backdrops were removed for transparency. */
   strippedBackdrops: number;
 }
@@ -114,9 +117,13 @@ export async function renderMotionGraphicToVideo(
     scenes.push({ scene, stage });
   }
 
-  const cssAnimationSupport = scenes.some((s) => s.stage.hasAnimations)
-    ? await probeCssAnimationCapture()
-    : true;
+  // Pick the baking strategy once: native paused-CSS when the engine animates
+  // SVG images, our own @keyframes evaluator when it only rasterizes them, and
+  // a single finished frame when it can't rasterize them at all.
+  const capabilities = scenes.some((s) => s.stage.hasAnimations)
+    ? await probeCaptureCapabilities()
+    : ({ svgOk: true, cssAnimOk: true, mode: 'css' } as const);
+  const seekMode: SeekMode = capabilities.mode;
 
   const normalized: MotionGraphicSpec = {
     width,
@@ -136,7 +143,8 @@ export async function renderMotionGraphicToVideo(
         return await renderWithVideoEncoder(normalized, scenes, onProgress, {
           ...options,
           transparent,
-          cssAnimationSupport,
+          seekMode,
+          capabilities,
           strippedBackdrops,
         });
       } catch (encodeError: any) {
@@ -151,7 +159,8 @@ export async function renderMotionGraphicToVideo(
     return await renderWithMediaRecorder(normalized, scenes, onProgress, {
       ...options,
       transparent,
-      cssAnimationSupport,
+      seekMode,
+      capabilities,
       strippedBackdrops,
     });
   } finally {
@@ -173,7 +182,7 @@ async function paintFrame(
   timeSec: number,
   alphaMode: MotionAlphaMode,
   keyColor: string,
-  cssAnimationSupport: boolean,
+  seekMode: SeekMode,
   staticCache?: StaticSceneCache
 ): Promise<void> {
   const { width, height, canvasElements } = spec;
@@ -192,13 +201,12 @@ async function paintFrame(
   for (let i = 0; i < scenes.length; i++) {
     const item = scenes[i];
     if (timeSec < item.scene.enterAt || timeSec > item.scene.exitAt) continue;
-    // Engines that rasterize SVG images in static mode cannot advance CSS
-    // animations, so seeking would freeze every frame at the (usually empty)
-    // first keyframe. In that case fall back to the scene's finished state so
-    // the overlay still shows the complete artwork instead of nothing.
-    const localTime = cssAnimationSupport
-      ? timeSec - item.scene.enterAt
-      : Math.max(1, item.scene.exitAt - item.scene.enterAt) + 60;
+    // Engines that can't rasterize the SVG at all get the scene's finished
+    // state, so the overlay shows the complete artwork instead of a blank frame.
+    const localTime =
+      seekMode === 'static'
+        ? Math.max(1, item.scene.exitAt - item.scene.enterAt) + 60
+        : timeSec - item.scene.enterAt;
 
     if (!item.stage.hasAnimations) {
       // Nothing moves: rasterize once and blit the cached bitmap every frame
@@ -206,7 +214,7 @@ async function paintFrame(
       let cached = staticCache?.get(i);
       if (!cached && typeof OffscreenCanvas !== 'undefined') {
         cached = new OffscreenCanvas(width, height);
-        await captureSceneFrame(item.stage, cached, 0);
+        await captureSceneFrame(item.stage, cached, 0, seekMode);
         staticCache?.set(i, cached);
       }
       if (cached) {
@@ -215,7 +223,12 @@ async function paintFrame(
       }
     }
 
-    await captureSceneFrame(item.stage, ctx.canvas as OffscreenCanvas | HTMLCanvasElement, localTime);
+    await captureSceneFrame(
+      item.stage,
+      ctx.canvas as OffscreenCanvas | HTMLCanvasElement,
+      localTime,
+      seekMode
+    );
   }
 
   // (c) Canvas 2D components (KineticWord, VectorShape, …).
@@ -272,7 +285,8 @@ async function renderWithVideoEncoder(
   scenes: SceneRuntime[],
   onProgress: (step: string, pct: number) => void,
   options: MotionGraphicRenderOptions & {
-    cssAnimationSupport: boolean;
+    seekMode: SeekMode;
+    capabilities: { svgOk: boolean; cssAnimOk: boolean; mode: SeekMode };
     strippedBackdrops: number;
   }
 ): Promise<MotionGraphicVideo> {
@@ -402,7 +416,7 @@ async function renderWithVideoEncoder(
         timeSec,
         alphaMode,
         keyColor,
-        options.cssAnimationSupport,
+        options.seekMode,
         staticCache
       );
 
@@ -449,7 +463,8 @@ async function renderWithVideoEncoder(
     duration,
     frameCount: totalFrames,
     sceneCount: scenes.length,
-    cssAnimationSupport: options.cssAnimationSupport,
+    cssAnimationSupport: options.capabilities.cssAnimOk,
+    seekMode: options.seekMode,
     strippedBackdrops: options.strippedBackdrops,
   };
 }
@@ -463,7 +478,8 @@ async function renderWithMediaRecorder(
   scenes: SceneRuntime[],
   onProgress: (step: string, pct: number) => void,
   options: MotionGraphicRenderOptions & {
-    cssAnimationSupport: boolean;
+    seekMode: SeekMode;
+    capabilities: { svgOk: boolean; cssAnimOk: boolean; mode: SeekMode };
     strippedBackdrops: number;
   }
 ): Promise<MotionGraphicVideo> {
@@ -479,7 +495,8 @@ async function renderWithMediaRecorder(
     duration,
     frameCount,
     sceneCount,
-    cssAnimationSupport: options.cssAnimationSupport,
+    cssAnimationSupport: options.capabilities.cssAnimOk,
+    seekMode: options.seekMode,
     strippedBackdrops: options.strippedBackdrops,
   });
 
@@ -550,7 +567,7 @@ async function renderWithMediaRecorder(
         timeSec,
         alphaMode,
         keyColor,
-        options.cssAnimationSupport,
+        options.seekMode,
         staticCache
       );
       onProgress('Rendering', Math.round(((i + 1) / totalFrames) * 100));
@@ -573,7 +590,8 @@ async function renderWithMediaRecorder(
       duration,
       frameCount: totalFrames,
       sceneCount: scenes.length,
-      cssAnimationSupport: options.cssAnimationSupport,
+      cssAnimationSupport: options.capabilities.cssAnimOk,
+      seekMode: options.seekMode,
       strippedBackdrops: options.strippedBackdrops,
     };
   } finally {

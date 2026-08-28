@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Bug, ChevronDown, ChevronUp, CheckCircle2, XCircle, Loader2, Wand2 } from 'lucide-react';
-import { probeCssAnimationCapture } from '@/utils/cssSceneRasterizer';
+import { probeCaptureCapabilities } from '@/utils/cssSceneRasterizer';
 import { renderMotionGraphicToVideo } from '@/utils/motionGraphicRenderer';
 import { DEMO_SCENE_HTML } from './demoScene';
 
@@ -26,6 +26,13 @@ const INITIAL_CHECKS: Check[] = [
     id: 'alpha',
     label: 'VP9 alpha channel',
     hint: 'Lets the overlay be transparent without chroma keying.',
+    state: 'idle',
+    detail: '',
+  },
+  {
+    id: 'svg',
+    label: 'SVG foreignObject raster',
+    hint: 'The browser can rasterize an HTML scene into a canvas at all.',
     state: 'idle',
     detail: '',
   },
@@ -112,18 +119,30 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({ onLoadDemo }
         : 'unsupported — overlays render on a magenta plate and auto chroma-key',
     });
 
-    // 3. CSS animation capture
-    let cssOk = false;
+    // 3. SVG rasterization + CSS animation capture
+    let caps: { svgOk: boolean; cssAnimOk: boolean; mode: string } = {
+      svgOk: false,
+      cssAnimOk: false,
+      mode: 'static',
+    };
     try {
-      cssOk = await probeCssAnimationCapture();
+      caps = await probeCaptureCapabilities();
     } catch {
-      cssOk = false;
+      /* leave defaults */
     }
+    patch('svg', {
+      state: caps.svgOk ? 'pass' : 'fail',
+      detail: caps.svgOk
+        ? 'HTML scenes rasterize into the canvas'
+        : 'SVG images cannot be rasterized — HTML scenes will not appear at all',
+    });
     patch('css', {
-      state: cssOk ? 'pass' : 'fail',
-      detail: cssOk
-        ? 'seeked CSS animations rasterize correctly'
-        : 'SVG images render statically here — animated scenes will be frozen',
+      state: caps.cssAnimOk ? 'pass' : 'fail',
+      detail: caps.cssAnimOk
+        ? 'seeked CSS animations rasterize correctly (native path)'
+        : caps.svgOk
+        ? 'static SVG mode → using the built-in @keyframes evaluator instead'
+        : 'SVG rasterization is unavailable, so animation capture is moot',
     });
 
     // 4. End-to-end demo render

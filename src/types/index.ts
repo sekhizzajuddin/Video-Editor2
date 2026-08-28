@@ -360,6 +360,13 @@ export interface ClipChromaKeySettings {
   softness: number;   // 0 to 100
   spillSuppression?: number; // 0 to 100
   edgeFeather?: number;      // 0 to 20
+  /**
+   * Never skip this key for performance. Set on generative overlays that were
+   * rendered on a flat key plate: without the key the clip is a solid block of
+   * colour, so dropping it during playback/scrubbing is never acceptable —
+   * unlike a greenscreen clip where skipping only shows green for a moment.
+   */
+  alwaysApply?: boolean;
   keyframes?: {
     threshold?: PropertyKeyframe[];
     softness?: PropertyKeyframe[];

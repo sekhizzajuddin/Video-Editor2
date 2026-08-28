@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { RotateCcw, Code, Eye, Terminal } from 'lucide-react';
+import { RotateCcw, Code, Eye, Terminal, X } from 'lucide-react';
 
 export interface CodeEditorProps {
   code: string;
   onChange: (code: string) => void;
   originalCode: string;
   onReset: () => void;
+  onClose?: () => void;
 }
 
 export const CodeEditor: React.FC<CodeEditorProps> = ({
@@ -13,6 +14,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   onChange,
   originalCode,
   onReset,
+  onClose,
 }) => {
   const [debouncedCode, setDebouncedCode] = useState(code);
 
@@ -36,7 +38,14 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
       padding: 0;
       width: 100%;
       height: 100%;
-      background: #000000;
+      /* Checkerboard, not black: a black stage hides the fact that the scene is
+         fully transparent and makes every scene look correct when it isn't. */
+      background-image:
+        linear-gradient(45deg, #1a1a1a 25%, transparent 25%, transparent 75%, #1a1a1a 75%),
+        linear-gradient(45deg, #1a1a1a 25%, transparent 25%, transparent 75%, #1a1a1a 75%);
+      background-size: 24px 24px;
+      background-position: 0 0, 12px 12px;
+      background-color: #121212;
       color: #ffffff;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       overflow: hidden;
@@ -55,7 +64,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const hasChanges = code !== originalCode;
 
   return (
-    <div className="flex flex-col bg-[#141414] border border-[#3e3e3e] rounded-xl overflow-hidden shadow-xl">
+    <div className="flex flex-col h-full min-h-0 bg-[#141414] border border-[#3e3e3e] rounded-xl overflow-hidden shadow-xl">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-[#1e1e1e] border-b border-[#3e3e3e]">
         <div className="flex items-center gap-2">
@@ -72,13 +81,23 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           <span className="flex items-center gap-1">
             <Terminal className="w-3.5 h-3.5 text-green-400" /> Terminal Code
           </span>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="ml-1 p-1 rounded hover:bg-[#2a2a2a] text-[#a0a0a0] hover:text-white transition-colors"
+              title="Close editor"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Split View */}
-      <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[#3e3e3e] h-80">
+      <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[#3e3e3e] flex-1 min-h-0">
         {/* Left: Live Preview Iframe */}
-        <div className="relative bg-black h-full flex flex-col">
+        <div className="relative bg-[#121212] h-full flex flex-col min-h-0">
           <div className="absolute top-2 left-2 z-10 bg-black/70 backdrop-blur px-2 py-0.5 rounded text-[10px] text-[#a0a0a0] border border-[#3e3e3e]">
             Live Canvas
           </div>
@@ -86,7 +105,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             srcDoc={previewDoc}
             title="Live Motion Preview"
             sandbox="allow-scripts"
-            className="w-full h-full border-none bg-black"
+            className="w-full flex-1 min-h-0 border-none bg-[#121212]"
           />
         </div>
 

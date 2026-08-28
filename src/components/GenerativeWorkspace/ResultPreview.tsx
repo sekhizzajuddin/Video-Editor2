@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { GenerativeResult } from '@/utils/generateMotionGraphicsFromDialogue';
 import type { HtmlCssScene, MotionGraphicVideo } from '@/utils/motionGraphicRenderer';
+import { applyChromaKeyOnData } from '@/utils/canvasEffects';
 import { CodeEditor } from './CodeEditor';
 
 export interface ResultPreviewProps {
@@ -181,6 +182,110 @@ const SceneOverlay: React.FC<SceneOverlayProps> = ({ scene, time, playing }) => 
 };
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * Keyed overlay video
+ *
+ * When the browser cannot encode a real alpha channel the overlay is rendered on
+ * a flat magenta plate. Showing that plate raw (or with `mix-blend-mode: screen`)
+ * makes the preview look purple — exactly what the timeline used to do before the
+ * chroma key was pinned on. Here we run the same chroma key routine the playback
+ * engine uses, so the preview shows what the timeline will show.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+interface KeyedOverlayProps {
+  src: string;
+  keyColor: string;
+  time: number;
+  playing: boolean;
+  muted: boolean;
+}
+
+const KeyedOverlayVideo: React.FC<KeyedOverlayProps> = ({
+  src,
+  keyColor,
+  time,
+  playing,
+  muted,
+}) => {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastSeekRef = useRef(-1);
+
+  // Keep the hidden source in sync with the transport.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (playing) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+      if (Math.abs(video.currentTime - time) > 0.05 && Math.abs(time - lastSeekRef.current) > 0.02) {
+        try {
+          video.currentTime = time;
+          lastSeekRef.current = time;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }, [playing, time]);
+
+  // Per-frame keying. The canvas is capped at 960x540: past that the JS pass
+  // costs more than the extra resolution is worth in a preview.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    const render = () => {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (vw > 0 && vh > 0) {
+        const scale = Math.min(1, 960 / vw);
+        const w = Math.max(2, Math.round(vw * scale));
+        const h = Math.max(2, Math.round(vh * scale));
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(video, 0, 0, w, h);
+        applyChromaKeyOnData(ctx, w, h, keyColor, 42, 16, 60, 1);
+      }
+      rafRef.current = requestAnimationFrame(render);
+    };
+
+    rafRef.current = requestAnimationFrame(render);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [keyColor]);
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        src={src}
+        loop
+        muted={muted}
+        playsInline
+        preload="auto"
+        className="absolute opacity-0 pointer-events-none"
+        style={{ width: 1, height: 1 }}
+      />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
+      />
+    </>
+  );
+};
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Preview Theater
  * ────────────────────────────────────────────────────────────────────────── */
 
@@ -210,11 +315,12 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(true);
   const [isRePromptOpen, setIsRePromptOpen] = useState(false);
   const [rePromptText, setRePromptText] = useState('');
-  const [sceneScale, setSceneScale] = useState(1);
+  const [stage, setStage] = useState({ w: 0, h: 0, scale: 1 });
 
   const baseVideoRef = useRef<HTMLVideoElement | null>(null);
   const motionVideoRef = useRef<HTMLVideoElement | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const clockRef = useRef<{ wall: number; t: number } | null>(null);
   const currentTimeRef = useRef(0);
@@ -260,16 +366,39 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
     if (isPlaying) setIsPlaying(false);
   }
 
-  // Measure the theater so 1920x1080 overlays can be scaled to fit.
+  // Measure the theater and size the screen to an EXACT 16:9 letterbox that fits
+  // the available space. Previously the screen was `w-full h-full aspect-video`,
+  // which is a lie: the box took the whole panel (rarely 16:9), so the base video
+  // letterboxed to fit the *height* while the CSS overlay scaled to fit the
+  // *width* — the two layers stopped lining up. One measured box fixes both.
   useEffect(() => {
-    const el = screenRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (rect && rect.width > 0) {
-        setSceneScale(Math.min(1, rect.width / 1920));
-      }
-    });
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      const style = window.getComputedStyle(el);
+      const padX = parseFloat(style.paddingLeft || '0') + parseFloat(style.paddingRight || '0');
+      const padY = parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0');
+      const availableW = Math.max(0, el.clientWidth - padX);
+      const availableH = Math.max(0, el.clientHeight - padY);
+      if (availableW <= 0 || availableH <= 0) return;
+
+      const width = Math.min(availableW, (availableH * 16) / 9);
+      const height = (width * 9) / 16;
+      setStage({
+        w: Math.round(width),
+        h: Math.round(height),
+        scale: width / 1920,
+      });
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -403,7 +532,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
     : 'Opaque';
 
   return (
-    <div className="flex-1 h-full flex flex-col bg-[#141414] border border-[#2d2d2d] rounded-xl overflow-hidden shadow-2xl">
+    <div className="flex-1 min-h-0 flex flex-col bg-[#141414] border border-[#2d2d2d] rounded-xl overflow-hidden shadow-2xl">
       {/* Top Theater Header */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-[#1e1e1e] border-b border-[#3e3e3e] gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
@@ -434,12 +563,32 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             </span>
           )}
 
-          {video && video.cssAnimationSupport === false && scenes.length > 0 && (
+          {video && video.seekMode === 'js' && scenes.length > 0 && (
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded border border-sky-500/30 text-sky-300 bg-sky-500/10 flex items-center gap-1"
+              title="This browser rasterizes SVG images in static mode, so the renderer evaluates the @keyframes itself and bakes each frame. Motion is preserved, just computed by us instead of the engine."
+            >
+              Frames baked
+            </span>
+          )}
+
+          {video && video.seekMode === 'static' && scenes.length > 0 && (
             <span
               className="text-[10px] font-mono px-2 py-0.5 rounded border border-red-500/30 text-red-400 bg-red-500/10 flex items-center gap-1"
-              title="This browser rasterizes SVG images in static mode, so CSS animations are frozen in the rendered file."
+              title="This browser cannot rasterize the HTML scene into a canvas at all, so each scene shows its finished state. Run the Pipeline self-test in the left panel for details."
             >
               <AlertTriangle className="w-3 h-3" /> CSS frozen
+            </span>
+          )}
+
+          {result?.designNotes && result.designNotes.length > 0 && (
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded border border-amber-500/30 text-amber-300 bg-amber-500/10 flex items-center gap-1"
+              title={`The AI design still fell short of the vector-density bar:\n- ${result.designNotes.join(
+                '\n- '
+              )}`}
+            >
+              <AlertTriangle className="w-3 h-3" /> Text-heavy scene
             </span>
           )}
 
@@ -605,7 +754,10 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
       )}
 
       {/* Main Viewport Screen */}
-      <div className="flex-1 min-h-0 relative flex items-center justify-center p-4 bg-[#0a0a0a] overflow-hidden select-none">
+      <div
+        ref={viewportRef}
+        className="flex-1 min-h-0 relative flex items-center justify-center p-3 sm:p-4 bg-[#0a0a0a] overflow-hidden select-none"
+      >
         {/* Transparent Checkerboard Pattern Background for Alpha Mode */}
         <div
           className="absolute inset-0 opacity-15 pointer-events-none"
@@ -617,11 +769,17 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
           }}
         />
 
-        {/* 16:9 Theater Screen Frame */}
+        {/* 16:9 Theater Screen Frame — measured, so it is a true 16:9 letterbox
+            and every layer inside it shares the same pixel box. */}
         <div
           ref={screenRef}
-          className="relative w-full h-full max-w-[1920px] max-h-[1080px] aspect-video bg-transparent rounded-lg overflow-hidden border border-[#2d2d2d] shadow-2xl flex items-center justify-center"
-          style={{ ['--scene-scale' as any]: sceneScale }}
+          className="relative bg-[#0a0a0a] rounded-lg overflow-hidden border border-[#2d2d2d] shadow-2xl flex items-center justify-center"
+          style={{
+            width: stage.w > 0 ? `${stage.w}px` : '100%',
+            height: stage.h > 0 ? `${stage.h}px` : '100%',
+            visibility: stage.w > 0 ? 'visible' : 'hidden',
+            ['--scene-scale' as any]: stage.scale,
+          }}
         >
           {/* Layer 1: Source Video */}
           {showBaseVideo && (
@@ -635,16 +793,29 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             />
           )}
 
-          {/* Layer 2a: Rendered transparent WebM overlay */}
-          {showRenderedVideo && (
+          {/* Layer 2a: Rendered overlay. When it carries a real alpha channel we
+              can play it directly; when it was rendered on a key plate we run the
+              same chroma key the timeline uses so the preview is not purple. */}
+          {showRenderedVideo && video?.alphaMode === 'key' && video.keyColor && motionVideoUrl ? (
+            <KeyedOverlayVideo
+              key={motionVideoUrl}
+              src={motionVideoUrl}
+              keyColor={video.keyColor}
+              time={currentTime}
+              playing={isPlaying}
+              muted
+            />
+          ) : null}
+
+          {showRenderedVideo && video?.alphaMode !== 'key' && motionVideoUrl ? (
             <video
               ref={motionVideoRef}
-              src={motionVideoUrl || undefined}
+              src={motionVideoUrl}
               muted
               playsInline
               className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
             />
-          )}
+          ) : null}
 
           {/* Layer 2b: Live HTML/CSS scenes, scrubbed via the Web Animations API */}
           {showLiveScenes &&
@@ -688,19 +859,22 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             </div>
           )}
         </div>
-      </div>
 
-      {/* Code Editor Panel */}
-      {showCodeEditor && (
-        <div className="border-t border-[#3e3e3e] bg-[#141414] p-3 max-h-72 overflow-y-auto">
-          <CodeEditor
-            code={editedHtmlCss}
-            onChange={setEditedHtmlCss}
-            originalCode={originalHtmlCss}
-            onReset={onResetCode}
-          />
-        </div>
-      )}
+        {/* Code editor as a floating drawer over the viewport. Docking it below
+            the stage (the old layout) squeezed the preview to a sliver whenever
+            the editor was open; floating keeps the 16:9 stage full size. */}
+        {showCodeEditor && (
+          <div className="absolute right-3 top-3 bottom-3 z-40 w-[min(58%,640px)] min-w-[380px] rounded-xl overflow-hidden shadow-2xl border border-[#3e3e3e] bg-[#141414]/95 backdrop-blur-sm flex flex-col">
+            <CodeEditor
+              code={editedHtmlCss}
+              onChange={setEditedHtmlCss}
+              originalCode={originalHtmlCss}
+              onReset={onResetCode}
+              onClose={() => setShowCodeEditor(false)}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Bottom Transport Scrubber Bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-[#1a1a1a] border-t border-[#3e3e3e] text-xs gap-4">

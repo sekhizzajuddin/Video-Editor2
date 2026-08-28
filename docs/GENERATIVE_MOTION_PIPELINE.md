@@ -132,15 +132,46 @@ remote `url()`/`@import`, event handlers and non-`data:` images before the
 markup ever reaches the DOM — external references make the SVG image fail to
 load or taint the canvas.
 
-### Capability probe + graceful degradation
+### Frame baking: engine-independent fallback (`SeekMode = 'js'`)
 
-`probeCssAnimationCapture()` renders a 64×64 box that fades `0 → 1` and captures
-it at `t≈0` and `t≈1`. If the two frames are identical the engine rasterizes SVG
-images in *static* mode (no animation support). In that case:
+Even the negative-delay trick fails on engines that rasterize SVG images with
+**no animation timeline at all** (the frame is rendered as a static document).
+For those engines `cssKeyframeEvaluator.ts` does the interpolation itself:
 
-* the UI shows a **CSS frozen** badge, and
-* the renderer seeks each scene to its **finished** state instead of `t`, so the
-  overlay shows the complete artwork rather than an empty first keyframe.
+1. `collectKeyframes(stage)` parses every `@keyframes` block in the scene
+   (brace-matched, so it is safe inside `@media` or nested rules).
+2. `buildAnimationConfigs()` expands the `animation-*` shorthand lists into one
+   config per animation (duration, delay, easing, iteration count, direction,
+   fill mode).
+3. `evaluateAnimationAt(config, stops, t)` returns the **static declarations**
+   for time `t`: it resolves the iteration index, applies the easing (named
+   presets, `cubic-bezier()`, `steps()`), and interpolates numbers, lengths,
+   percentages, angles, colours, comma/space-separated lists and transform
+   function lists with matching signatures.
+4. `buildKeyframeCss()` emits them as plain declarations plus
+   `animation: none !important`, so no engine can re-animate the baked frame.
+
+Because the result is ordinary static CSS, it survives XML serialization in
+every engine — including ones that refuse to animate SVG images.
+
+### Capability probe + three seek modes
+
+`probeCaptureCapabilities()` renders a 24×24 opaque box that slides `0 → 40px`
+over one second and captures it at `t≈0` and `t≈1`. One probe answers both
+questions:
+
+| Observation | Meaning | `SeekMode` |
+| --- | --- | --- |
+| nothing rasterizes (alpha 0 on frame 0) | SVG images unsupported | `'static'` |
+| box present at both times | static rasterization — animations are ignored | `'js'` (bake frames) |
+| box present at `t≈0`, gone at `t≈1` | native seeked CSS works | `'css'` (fast path) |
+
+The probe runs once per session and is cached. `motionGraphicRenderer` asks for
+the mode once and passes it to every `captureSceneFrame()` call. In `'static'`
+mode each scene is drawn at its **finished** state instead of `t`, so the
+overlay shows the complete artwork rather than an empty first keyframe. The
+Preview Theater surfaces the mode as a **Frames baked** (js) or **CSS frozen**
+(static) badge.
 
 ---
 
@@ -178,6 +209,12 @@ re-renders automatically when the code is dirty).
 | 12 | Only `htmlCssScenes[0]` was ever shown | Preview hardcoded the first scene | All scenes render inside their time windows |
 | 13 | Nothing happened on click in the drop zone | No click handler at all | File picker + "Media library" picker |
 | 14 | Audio-only clips / non-video drops rejected confusingly | Only `application/procut-media` and file drops were handled | Same handling, plus explicit errors and duration guards |
+| 15 | Applying to the timeline gave a **purple screen, no animation** | `skipExpensiveFX` (auto-quality, on while playing or scrubbing) disabled chroma keying, and every keyed overlay carries `chromaKey.enabled` by construction — so the magenta plate showed through during playback | New `ClipChromaKeySettings.alwaysApply`; the playback engine's `hasChroma` gate honours it, and `handleApplyToTimeline` sets it on generated overlays |
+| 16 | "Vox style" produced typography | The prompt described canvas text components first and never specified artwork density, so the model took the cheapest path (animated words) | Per-style art direction (`STYLE_ART_DIRECTION`) + a hard rule that each scene carries 12+ SVG shapes and text stays under ~25% of the frame, plus a worked reference scene |
+| 17 | The AI still ships text-only scenes | Nothing scored the response | `validateSceneQuality()` counts SVG shapes per scene; failures trigger one automatic **correction pass** that returns the validator's complaints to the model, and the better of the two designs wins |
+| 18 | Preview player misaligned / squeezed | The stage was `w-full h-full aspect-video` — a box that is rarely 16:9, so the video letterboxed to the height while the CSS overlay scaled to the width. The docked code editor (`max-h-72`) then shrank it further | The stage is measured in JS and sized to an exact 16:9 letterbox; the code editor is now a floating drawer; the control rail and the editor timeline can both be folded away |
+| 19 | Animated element + its `::before`/`::after` lost animation | `indexAnimations()` minted a fresh `data-procut-anim` id per pseudo-target and wrote them all to the **same attribute**, so all but the last seek rule targeted an id that no longer existed | One id per **element**; pseudo-elements are addressed by selector suffix |
+| 20 | Keyed overlay previewed as a purple wash | `ResultPreview` played the magenta plate raw with `mix-blend-mode: screen` | `KeyedOverlayVideo` runs the same `applyChromaKeyOnData()` the playback engine uses, on a canvas capped at 960×540 |
 
 ---
 
@@ -191,3 +228,8 @@ re-renders automatically when the code is dirty).
 * Keyframe every 2 s (`i % (fps * 2)`) for sane seeking.
 * Cost is dominated by SVG rasterization (~15–40 ms/frame at 1080p), i.e. a few
   seconds for a 10–15 s clip.
+* The `'js'` baking path adds a small per-frame cost (a few hundred style
+  declarations) but no extra rasterization, so it is close to free next to the
+  SVG draw.
+* The live keyed preview keys at most 960×540 per frame; the timeline keys at
+  full resolution through the playback engine.

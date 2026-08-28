@@ -1,5 +1,16 @@
-import React from 'react';
-import { Sparkles, Film, Type, AlertCircle, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Sparkles,
+  Film,
+  Type,
+  AlertCircle,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelBottomClose,
+  PanelBottomOpen,
+} from 'lucide-react';
+import { useEditorStore } from '@/store/editorStore';
 import { useGenerativeWorkspace } from './useGenerativeWorkspace';
 import { ClipDropZone } from './ClipDropZone';
 import { DialogueEditor } from './DialogueEditor';
@@ -57,6 +68,19 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
     handleResetCode,
   } = useGenerativeWorkspace();
 
+  // Layout: the theater needs every pixel it can get, so both the control rail
+  // and the editor timeline can be folded away while reviewing a result.
+  const [controlsOpen, setControlsOpen] = useState(true);
+  const timelineHeight = useEditorStore((s) => s.workspaceLayout.timelineHeight);
+  const setWorkspaceLayout = useEditorStore((s) => s.setWorkspaceLayout);
+  const timelineHidden = timelineHeight <= 1;
+  const toggleTimeline = () =>
+    setWorkspaceLayout({
+      ...useEditorStore.getState().workspaceLayout,
+      preset: 'Custom',
+      timelineHeight: timelineHidden ? 240 : 0,
+    });
+
   const isGenerating =
     isRendering || (step !== 'idle' && step !== 'done' && step !== 'error');
 
@@ -67,20 +91,63 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
 
   return (
     <div className={`h-full flex flex-col md:flex-row bg-[#181818] text-white overflow-hidden ${className}`}>
-      {/* Left Column: Motion Controls & Studio Configuration (w-[400px]) */}
-      <div className="w-full md:w-[400px] shrink-0 border-b md:border-b-0 md:border-r border-[#333333] bg-[#1a1a1a] flex flex-col h-full overflow-hidden">
+      {/* Left Column: Motion Controls & Studio Configuration (collapsible rail) */}
+      <div
+        className={`${
+          controlsOpen ? 'w-full md:w-[360px] xl:w-[400px]' : 'w-11'
+        } shrink-0 border-b md:border-b-0 md:border-r border-[#333333] bg-[#1a1a1a] flex flex-col h-full overflow-hidden transition-[width] duration-200`}
+      >
+        {!controlsOpen ? (
+          <button
+            type="button"
+            onClick={() => setControlsOpen(true)}
+            className="flex-1 flex flex-col items-center gap-3 py-3 text-[#808080] hover:text-white transition-colors"
+            title="Show motion controls"
+          >
+            <PanelLeftOpen className="w-4 h-4" />
+            <span
+              className="text-[11px] font-semibold tracking-wider uppercase"
+              style={{ writingMode: 'vertical-rl' }}
+            >
+              Controls
+            </span>
+          </button>
+        ) : (
+          <>
         {/* Header */}
         <div className="p-4 border-b border-[#2d2d2d] space-y-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             <span className="text-xl">🎬</span>
-            <div>
+            <div className="flex-1 min-w-0">
               <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
                 Generative Motion Graphics
                 <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
               </h2>
               <p className="text-[11px] text-[#a0a0a0]">
-                AI-powered kinetic typography & dynamic scene animator
+                AI-powered vector scene &amp; kinetic type animator
               </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleTimeline}
+                className="p-1.5 rounded hover:bg-[#2a2a2a] text-[#808080] hover:text-white transition-colors"
+                title={timelineHidden ? 'Show editor timeline' : 'Hide editor timeline (focus preview)'}
+              >
+                {timelineHidden ? (
+                  <PanelBottomOpen className="w-4 h-4" />
+                ) : (
+                  <PanelBottomClose className="w-4 h-4" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setControlsOpen(false)}
+                className="p-1.5 rounded hover:bg-[#2a2a2a] text-[#808080] hover:text-white transition-colors"
+                title="Hide motion controls (full-width preview)"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
@@ -199,10 +266,12 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
             }}
           />
         </div>
+          </>
+        )}
       </div>
 
       {/* Right Column: Full-Size Preview Theater Screen */}
-      <div className="flex-1 h-full flex flex-col overflow-hidden p-3 bg-[#111111]">
+      <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden p-2 sm:p-3 bg-[#111111]">
         <ResultPreview
           result={result}
           motionVideoUrl={motionVideoUrl}

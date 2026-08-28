@@ -1303,7 +1303,10 @@ export async function renderCanvasEngine({
           const hasCrop = cLeft > 0 || cRight > 0 || cTop > 0 || cBot > 0;
           const hasCssFilters = exposure !== 0 || contrast !== 100 || saturation !== 100 || blur > 0;
           const hasAiBg = !!clip.aiBackground?.enabled;
-          const hasChroma = !skipExpensiveFX && !!clip.chromaKey?.enabled;
+          // Keyed overlay plates opt out of the FX skip: they are meaningless
+          // (a solid magenta block) without their key.
+          const hasChroma =
+            !!clip.chromaKey?.enabled && (!skipExpensiveFX || clip.chromaKey.alwaysApply === true);
           const hasLuma = !skipExpensiveFX && !!clip.lumaKey?.enabled;
           const hasObjRemoval = !skipExpensiveFX && !!clip.objectRemoval?.enabled;
           const hasColorWheels = !skipExpensiveFX && !!(filters.shadows || filters.midtones || filters.highlights);

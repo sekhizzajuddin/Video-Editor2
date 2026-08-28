@@ -39,6 +39,14 @@
  * survives and the exported clip composites cleanly over the base video.
  */
 
+import {
+  AnimationConfig,
+  KeyframesMap,
+  buildAnimationConfigs,
+  collectKeyframes,
+  evaluateAnimationAt,
+} from './cssKeyframeEvaluator';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XHTML_NS = 'http://www.w3.org/1999/xhtml';
 
@@ -47,18 +55,21 @@ const EXTERNAL_URL_ATTRS = ['src', 'href', 'srcset', 'xlink:href', 'poster', 'da
 
 export type PseudoTarget = '' | '::before' | '::after';
 
-export interface AnimatedNode {
-  /** Unique id used by the generated seek stylesheet. */
-  id: number;
+export interface AnimatedNode extends SeekNodeTiming {
   el: Element;
-  pseudo: PseudoTarget;
-  /** Authored per-animation delay, in seconds. */
-  delays: number[];
-  /** Authored per-animation duration, in seconds. */
-  durations: number[];
-  /** Authored per-animation iteration count (Infinity for `infinite`). */
-  iterations: number[];
+  /** Fully resolved per-animation config (used by the JS evaluator path). */
+  configs: AnimationConfig[];
 }
+
+/**
+ * How a frame's animation state is baked into the serialized markup.
+ * - `css`    → negative animation-delay + paused (needs an engine that animates
+ *              SVG images; supports every CSS property).
+ * - `js`     → we evaluate @keyframes ourselves and emit static declarations
+ *              (works in every engine that can rasterize the SVG at all).
+ * - `static` → engine can't rasterize the SVG image; show the finished state.
+ */
+export type SeekMode = 'css' | 'js' | 'static';
 
 export interface SceneStageOptions {
   width: number;
@@ -77,6 +88,8 @@ export interface SceneStage {
   /** Stylesheet element we rewrite on every seek. */
   seekStyle: HTMLStyleElement | null;
   animated: AnimatedNode[];
+  /** Parsed @keyframes of this scene (drives the JS evaluator path). */
+  keyframes: KeyframesMap;
   /** True when at least one CSS animation was found in the scene. */
   hasAnimations: boolean;
   /** Number of full-frame backdrops that were neutralised. */
@@ -229,6 +242,7 @@ export function createSceneStage(
     height,
     seekStyle,
     animated,
+    keyframes: collectKeyframes(el),
     hasAnimations: animated.length > 0,
     strippedBackdrops,
     strippedExternalRefs: 0,
@@ -410,6 +424,12 @@ export function indexAnimations(stage: HTMLElement): AnimatedNode[] {
   let id = 0;
 
   for (const el of elements) {
+    // One id per ELEMENT: the pseudo-elements share it and are addressed by
+    // selector suffix (`[data-procut-anim="3"]::before`). Minting a fresh id per
+    // pseudo used to overwrite the attribute, so every rule except the last one
+    // silently targeted an id that no longer existed on the element.
+    let elementId: number | null = null;
+
     for (const pseudo of PSEUDOS) {
       let cs: CSSStyleDeclaration | null = null;
       try {
@@ -422,20 +442,33 @@ export function indexAnimations(stage: HTMLElement): AnimatedNode[] {
       const names = splitList(cs.animationName).filter((n) => n && n !== 'none');
       if (names.length === 0) continue;
 
+      if (elementId === null) {
+        elementId = id++;
+        el.setAttribute('data-procut-anim', String(elementId));
+      }
+
+      const delays = parseCssTimeList(cs.animationDelay, names.length);
+      const durations = parseCssTimeList(cs.animationDuration, names.length);
+      const iterations = parseCssIterationList(cs.animationIterationCount, names.length);
+
       nodes.push({
-        id: id++,
+        id: elementId,
         el,
         pseudo,
-        delays: parseCssTimeList(cs.animationDelay, names.length),
-        durations: parseCssTimeList(cs.animationDuration, names.length),
-        iterations: parseCssIterationList(cs.animationIterationCount, names.length),
+        delays,
+        durations,
+        iterations,
+        configs: buildAnimationConfigs({
+          names,
+          durations,
+          delays,
+          easings: splitList(cs.animationTimingFunction),
+          iterations,
+          directions: splitList(cs.animationDirection),
+          fills: splitList(cs.animationFillMode),
+        }),
       });
     }
-  }
-
-  // Only tag elements that actually need a seek rule.
-  for (const node of nodes) {
-    node.el.setAttribute('data-procut-anim', String(node.id));
   }
 
   return nodes;
@@ -491,9 +524,58 @@ export function buildSeekCss(nodes: SeekNodeTiming[], timeSec: number): string {
  * Freezes every CSS animation in the stage at `timeSec` by rewriting the seek
  * stylesheet. Safe to call every frame — it only touches one <style> node.
  */
-export function seekSceneStage(stage: SceneStage, timeSec: number): void {
+export function seekSceneStage(
+  stage: SceneStage,
+  timeSec: number,
+  mode: SeekMode = 'css'
+): void {
   if (!stage.seekStyle || stage.animated.length === 0) return;
+  if (mode === 'js') {
+    stage.seekStyle.textContent = buildKeyframeCss(stage.animated, timeSec, stage.keyframes);
+    return;
+  }
   stage.seekStyle.textContent = buildSeekCss(stage.animated, timeSec);
+}
+
+/**
+ * Evaluates the scene's @keyframes ourselves and emits the result as *static*
+ * declarations, one rule per animated element/pseudo-element.
+ *
+ * This is the browser-independent path: no engine support for animated SVG
+ * images is required, only the ability to rasterize the SVG at all. The native
+ * animation is switched off so a static engine cannot override the baked values.
+ */
+export function buildKeyframeCss(
+  nodes: AnimatedNode[],
+  timeSec: number,
+  keyframes: KeyframesMap
+): string {
+  const t = Number.isFinite(timeSec) ? Math.max(0, timeSec) : 0;
+  let css = '';
+
+  for (const node of nodes) {
+    const decls: Record<string, string> = {};
+    for (const config of node.configs) {
+      const stops = keyframes[config.name] ?? keyframes[stripQuotes(config.name)];
+      const evaluated = evaluateAnimationAt(config, stops, t);
+      if (!evaluated) continue;
+      // Later animations in the list win, matching CSS behaviour.
+      Object.assign(decls, evaluated);
+    }
+
+    const body = Object.entries(decls)
+      .map(([prop, value]) => `${prop}:${value} !important`)
+      .join(';');
+
+    const selector = `[data-procut-anim="${node.id}"]${node.pseudo || ''}`;
+    css += `${selector}{animation:none !important;${body}}\n`;
+  }
+
+  return css;
+}
+
+function stripQuotes(value: string): string {
+  return value.replace(/^['"]|['"]$/g, '');
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -608,9 +690,10 @@ export async function rasterizeSvgToCanvas(
 export async function captureSceneFrame(
   stage: SceneStage,
   canvas: OffscreenCanvas | HTMLCanvasElement,
-  timeSec: number
+  timeSec: number,
+  mode: SeekMode = 'css'
 ): Promise<boolean> {
-  seekSceneStage(stage, timeSec);
+  seekSceneStage(stage, timeSec, mode);
   const svg = serializeSceneStage(stage);
   if (!svg) return false;
   return rasterizeSvgToCanvas(svg, canvas, stage.width, stage.height);
@@ -620,41 +703,51 @@ export async function captureSceneFrame(
  * Capability probe
  * ────────────────────────────────────────────────────────────────────────── */
 
-let _cssCaptureSupport: boolean | null = null;
+export interface CaptureCapabilities {
+  /** The browser can rasterize an SVG foreignObject into a canvas at all. */
+  svgOk: boolean;
+  /** It also honours *paused, time-seeked* CSS animations while doing so. */
+  cssAnimOk: boolean;
+  /** Best baking strategy for this engine. */
+  mode: SeekMode;
+}
 
+let _captureCapabilities: CaptureCapabilities | null = null;
+
+/**
+ * Probe scene: a 24×24 box that slides 0 → 40px over one second. It stays fully
+ * opaque throughout, which lets one probe answer BOTH questions:
+ *
+ *   • is anything rasterized at all?        → alpha at (12,12) on frame 0
+ *   • did the animation advance on frame 2? → the box has moved off that pixel
+ */
 const PROBE_HTML = `
 <style>
-  @keyframes procutProbe { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes procutProbe { from { transform: translateX(0); } to { transform: translateX(40px); } }
   #probeBox {
-    position: absolute; left: 0; top: 0; width: 64px; height: 64px;
-    background: #ffffff; opacity: 0;
+    position: absolute; left: 0; top: 0; width: 24px; height: 24px;
+    background: #ffffff;
     animation: procutProbe 1s linear both;
   }
 </style>
 <div id="probeBox"></div>
 `;
 
-/**
- * Verifies once per session that this browser really rasterizes *paused,
- * time-seeked* CSS animations inside an SVG foreignObject.
- *
- * Some engines render SVG images in "secure static mode" (animations never
- * advance). When that is detected the caller can warn the user instead of
- * silently shipping a frozen clip.
- */
-export async function probeCssAnimationCapture(): Promise<boolean> {
-  if (_cssCaptureSupport !== null) return _cssCaptureSupport;
+export async function probeCaptureCapabilities(): Promise<CaptureCapabilities> {
+  if (_captureCapabilities) return _captureCapabilities;
+
+  const unsupported: CaptureCapabilities = { svgOk: false, cssAnimOk: false, mode: 'static' };
   if (typeof document === 'undefined' || typeof OffscreenCanvas === 'undefined') {
-    _cssCaptureSupport = false;
-    return false;
+    _captureCapabilities = unsupported;
+    return _captureCapabilities;
   }
 
   let stage: SceneStage | null = null;
   try {
     stage = createSceneStage(PROBE_HTML, { width: 64, height: 64, transparent: false });
     if (!stage || stage.animated.length === 0) {
-      _cssCaptureSupport = false;
-      return false;
+      _captureCapabilities = unsupported;
+      return _captureCapabilities;
     }
 
     const canvas = new OffscreenCanvas(64, 64);
@@ -662,34 +755,36 @@ export async function probeCssAnimationCapture(): Promise<boolean> {
       | OffscreenCanvasRenderingContext2D
       | null;
     if (!ctx) {
-      _cssCaptureSupport = false;
-      return false;
+      _captureCapabilities = unsupported;
+      return _captureCapabilities;
     }
 
     ctx.clearRect(0, 0, 64, 64);
-    const start = await captureSceneFrame(stage, canvas, 0.02);
-    const startData = ctx.getImageData(0, 0, 64, 64).data;
+    const startOk = await captureSceneFrame(stage, canvas, 0.02);
+    const startAlpha = ctx.getImageData(12, 12, 1, 1).data[3];
 
     ctx.clearRect(0, 0, 64, 64);
-    const end = await captureSceneFrame(stage, canvas, 0.98);
-    const endData = ctx.getImageData(0, 0, 64, 64).data;
+    const endOk = await captureSceneFrame(stage, canvas, 0.98);
+    const endAlpha = ctx.getImageData(12, 12, 1, 1).data[3];
 
-    if (!start || !end) {
-      _cssCaptureSupport = false;
-      return false;
-    }
+    const svgOk = Boolean(startOk && endOk) && startAlpha > 200;
+    const cssAnimOk = svgOk && endAlpha < 64;
 
-    const sample = (d: Uint8ClampedArray) => d[3]; // alpha of pixel (0,0)
-    const a0 = sample(startData);
-    const a1 = sample(endData);
-
-    // The probe box fades 0 → 1, so alpha must grow noticeably.
-    _cssCaptureSupport = a1 > a0 + 32;
-    return _cssCaptureSupport;
+    _captureCapabilities = { svgOk, cssAnimOk, mode: cssAnimOk ? 'css' : svgOk ? 'js' : 'static' };
+    return _captureCapabilities;
   } catch {
-    _cssCaptureSupport = false;
-    return false;
+    _captureCapabilities = unsupported;
+    return _captureCapabilities;
   } finally {
     destroySceneStage(stage);
   }
+}
+
+/**
+ * True when this engine honours paused, time-seeked CSS animations while
+ * rasterizing an SVG image (i.e. the fast, native path is usable).
+ */
+export async function probeCssAnimationCapture(): Promise<boolean> {
+  const caps = await probeCaptureCapabilities();
+  return caps.cssAnimOk;
 }

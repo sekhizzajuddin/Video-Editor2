@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildKeyframeCss,
   buildSeekCss,
   parseCssIterationList,
   parseCssTimeList,
   sanitizeMotionSceneHtml,
 } from './cssSceneRasterizer';
+import { parseKeyframes } from './cssKeyframeEvaluator';
 import {
   parseJsonSafely,
   sanitizeMotionGraphicSpec,
@@ -152,5 +154,72 @@ describe('generateMotionGraphicsFromDialogue / parsing', () => {
     expect(el.enterAt).toBe(0);
     expect(el.exitAt).toBe(10);
     expect(el.config).toEqual({ text: 'hi' });
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Frame baking ('js' seek mode)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+describe('buildKeyframeCss (engine-independent frame baking)', () => {
+  const keyframes = parseKeyframes(`
+    @keyframes slide {
+      from { transform: translateX(0px); opacity: 0; }
+      to   { transform: translateX(200px); opacity: 1; }
+    }
+  `);
+
+  const node = (id: number, over: any = {}) => ({
+    id,
+    pseudo: '',
+    delays: [0],
+    durations: [1],
+    iterations: [1],
+    configs: [
+      {
+        name: 'slide',
+        duration: 1,
+        delay: 0,
+        easing: 'linear',
+        iterations: 1,
+        direction: 'normal',
+        fill: 'both',
+      },
+    ],
+    ...over,
+  });
+
+  it('emits static declarations instead of relying on the engine to animate', () => {
+    const css = buildKeyframeCss([node(0)], 0.5, keyframes);
+    expect(css).toContain('[data-procut-anim="0"]{');
+    expect(css).toContain('animation:none !important');
+    expect(css).toContain('transform:translateX(100px) !important');
+    expect(css).toContain('opacity:0.5 !important');
+  });
+
+  it('targets pseudo-elements with the same selector suffix', () => {
+    const css = buildKeyframeCss([node(1, { pseudo: '::before' })], 0.25, keyframes);
+    expect(css).toContain('[data-procut-anim="1"]::before{');
+    expect(css).toContain('transform:translateX(50px)');
+  });
+
+  it('honours a per-node delay when baking', () => {
+    const delayed = node(2);
+    delayed.configs[0].delay = 1;
+    expect(buildKeyframeCss([delayed], 1.5, keyframes)).toContain('translateX(100px)');
+    // Before the delay with fill:both → first frame.
+    expect(buildKeyframeCss([delayed], 0.2, keyframes)).toContain('translateX(0px)');
+  });
+
+  it('wraps infinite iterations', () => {
+    const looping = node(3);
+    looping.configs[0].iterations = Infinity;
+    expect(buildKeyframeCss([looping], 2.5, keyframes)).toContain('translateX(100px)');
+  });
+
+  it('stays silent for elements with no matching keyframes', () => {
+    const css = buildKeyframeCss([node(4)], 0.5, {});
+    expect(css).toContain('animation:none !important');
+    expect(css).not.toContain('transform');
   });
 });
