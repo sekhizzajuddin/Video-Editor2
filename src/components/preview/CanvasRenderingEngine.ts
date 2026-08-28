@@ -382,12 +382,25 @@ export async function renderCanvasEngine({
   // PERF: Cache filtered+sorted track lists. filter()+sort()+spread creates 3 new arrays
   // every frame (60/s). Now only rebuilds when the `tracks` reference changes.
   if (tracks !== _cachedTracksRef) {
+    // Compositing order = timeline stacking order. Legacy projects stored
+    // integer-suffixed ids (track_v_1, track_v_2 …) and relied on numeric
+    // sorting; modern ids are uuid-based, where parsing digits produced a
+    // random (and unstable) z-order — an overlay track could end up *under*
+    // the footage it was meant to sit on. Keep the numeric rule for legacy
+    // ids and fall back to array order otherwise (last track paints on top),
+    // which is also what the export scheduler does.
+    const arrayOrder = new Map(tracks.map((t, index) => [t.id, index]));
+    const legacyNumericId = (id: string) => /_\d+$/.test(id);
+    const numericId = (id: string) => parseInt(id.replace(/\D/g, ''), 10) || 0;
+
     _cachedVideoTracks = tracks
       .filter((t) => t.type === 'video' && !t.hidden)
       .sort((a, b) => {
-        const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
-        const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
-        return numA - numB;
+        const aLegacy = legacyNumericId(a.id);
+        const bLegacy = legacyNumericId(b.id);
+        if (aLegacy && bLegacy) return numericId(a.id) - numericId(b.id);
+        if (aLegacy !== bLegacy) return aLegacy ? -1 : 1;
+        return (arrayOrder.get(a.id) ?? 0) - (arrayOrder.get(b.id) ?? 0);
       });
     _cachedTextTracks = tracks.filter((t) => t.type === 'text' && !t.hidden);
     _cachedFxTracks = tracks.filter((t) => t.type === 'fx' && !t.hidden);

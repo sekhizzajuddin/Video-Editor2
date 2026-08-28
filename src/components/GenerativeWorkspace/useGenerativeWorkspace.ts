@@ -1,7 +1,11 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
-import type { GenerativeResult, GenerativeMotionOptions } from '@/utils/generateMotionGraphicsFromDialogue';
-import type { MediaItem, TimelineClip } from '@/types';
+import type {
+  GenerativeResult,
+  GenerativeMotionOptions,
+} from '@/utils/generateMotionGraphicsFromDialogue';
+import type { MotionGraphicVideo } from '@/utils/motionGraphicRenderer';
+import type { MediaItem, TimelineClip, TimelineTrack } from '@/types';
 
 export type GenerativeMode = 'clip' | 'text';
 export type GenerativeStep =
@@ -14,6 +18,9 @@ export type GenerativeStep =
   | 'done'
   | 'error';
 
+/** Dedicated, reusable track used for generative overlays. */
+export const MOTION_OVERLAY_TRACK_NAME = 'Motion Overlay';
+
 export function useGenerativeWorkspace() {
   const [mode, setMode] = useState<GenerativeMode>('clip');
   const [selectedClipUrl, setSelectedClipUrl] = useState<string | null>(null);
@@ -25,6 +32,7 @@ export function useGenerativeWorkspace() {
   const [layout, setLayout] = useState<string>('mixed');
   const [provider, setProvider] = useState<'gemini' | 'groq'>('gemini');
   const [customPrompt, setCustomPrompt] = useState<string>('');
+  const [transparent, setTransparent] = useState<boolean>(true);
   const [step, setStep] = useState<GenerativeStep>('idle');
   const [progress, setProgress] = useState<number>(0);
   const [progressMessage, setProgressMessage] = useState<string>('');
@@ -33,8 +41,41 @@ export function useGenerativeWorkspace() {
   const [showCodeEditor, setShowCodeEditor] = useState<boolean>(false);
   const [editedHtmlCss, setEditedHtmlCss] = useState<string>('');
   const [originalHtmlCss, setOriginalHtmlCss] = useState<string>('');
+  const [isRendering, setIsRendering] = useState<boolean>(false);
+  const [motionVideoUrl, setMotionVideoUrl] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const videoUrlRef = useRef<string | null>(null);
+
+  /**
+   * Publishes a fresh object URL for a rendered overlay and releases the
+   * previous one. Called from event handlers (never from an effect) so the URL
+   * lifecycle stays tied to user actions.
+   */
+  const publishVideoUrl = useCallback((blob: Blob | null | undefined) => {
+    if (videoUrlRef.current) {
+      URL.revokeObjectURL(videoUrlRef.current);
+      videoUrlRef.current = null;
+    }
+    const url = blob && blob.size > 8 ? URL.createObjectURL(blob) : null;
+    videoUrlRef.current = url;
+    setMotionVideoUrl(url);
+  }, []);
+
+  // Release the object URL when the workspace unmounts.
+  useEffect(() => {
+    return () => {
+      if (videoUrlRef.current) {
+        URL.revokeObjectURL(videoUrlRef.current);
+        videoUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  const isDirty = useMemo(
+    () => !!editedHtmlCss && editedHtmlCss !== originalHtmlCss,
+    [editedHtmlCss, originalHtmlCss]
+  );
 
   const handleClipDrop = useCallback((url: string, name: string, duration: number): boolean => {
     if (duration > 30) {
@@ -56,6 +97,16 @@ export function useGenerativeWorkspace() {
     setSelectedClipDuration(0);
   }, []);
 
+  const mapToStepId = (rawStep: string): GenerativeStep => {
+    const l = (rawStep || '').toLowerCase();
+    if (l.includes('extract') || l.includes('frame')) return 'extracting';
+    if (l.includes('transcrib')) return 'transcribing';
+    if (l.includes('design') || l.includes('ai') || l.includes('validat')) return 'designing';
+    if (l.includes('render') || l.includes('draw')) return 'rendering';
+    if (l.includes('encod') || l.includes('mux')) return 'encoding';
+    return 'designing';
+  };
+
   const handleGenerate = useCallback(
     async (promptOverride?: string) => {
       if (mode === 'clip' && !selectedClipUrl) {
@@ -68,13 +119,12 @@ export function useGenerativeWorkspace() {
       }
 
       setError(null);
+      setResult(null);
       setStep('extracting');
       setProgress(5);
       setProgressMessage('Starting generation pipeline...');
 
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      if (abortControllerRef.current) abortControllerRef.current.abort();
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
@@ -93,16 +143,7 @@ export function useGenerativeWorkspace() {
           provider,
           customPrompt: promptToUse,
           signal: controller.signal,
-        };
-
-        const mapToStepId = (rawStep: string): GenerativeStep => {
-          const l = (rawStep || '').toLowerCase();
-          if (l.includes('extract') || l.includes('frame')) return 'extracting';
-          if (l.includes('transcrib')) return 'transcribing';
-          if (l.includes('design') || l.includes('ai') || l.includes('validat')) return 'designing';
-          if (l.includes('render') || l.includes('draw')) return 'rendering';
-          if (l.includes('encod') || l.includes('mux')) return 'encoding';
-          return 'designing';
+          transparent,
         };
 
         const genResult = await generateMotionGraphicsFromDialogue(
@@ -116,26 +157,29 @@ export function useGenerativeWorkspace() {
           }
         );
 
-        setResult(genResult);
         const sceneHtml = genResult.spec?.htmlCssScenes?.[0]?.htmlCss || '';
+        publishVideoUrl(genResult.video?.blob);
+        setResult(genResult);
         setEditedHtmlCss(sceneHtml);
         setOriginalHtmlCss(sceneHtml);
         setStep('done');
         setProgress(100);
         setProgressMessage('Generation complete');
         toast.success('Motion graphics generated successfully!');
+        return genResult;
       } catch (err: any) {
         if (err?.name === 'AbortError') {
           setStep('idle');
           setProgress(0);
           setProgressMessage('');
-          return;
+          return null;
         }
         const errMsg = err?.message || 'An error occurred during generation';
         setError(errMsg);
         setStep('error');
         setProgress(0);
         toast.error(errMsg);
+        return null;
       } finally {
         abortControllerRef.current = null;
       }
@@ -150,11 +194,124 @@ export function useGenerativeWorkspace() {
       layout,
       provider,
       customPrompt,
+      transparent,
+      publishVideoUrl,
     ]
   );
 
+  /**
+   * Re-renders the overlay video from the CURRENT (possibly hand-edited) scene
+   * code, without calling the AI again. This is what makes the code editor
+   * functional — previously edits were stored in state and then thrown away.
+   */
+  const handleRenderFromCode = useCallback(async () => {
+    if (!result?.spec) {
+      toast.error('Generate a motion graphic first');
+      return null;
+    }
+
+    const sceneCount = result.spec.htmlCssScenes?.length || 0;
+    if (sceneCount === 0) {
+      toast.error('This result has no HTML/CSS scene to re-render');
+      return null;
+    }
+
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setIsRendering(true);
+    setStep('rendering');
+    setProgress(5);
+    setProgressMessage('Rendering edited scene...');
+    setError(null);
+
+    try {
+      const { renderMotionGraphicToVideo } = await import('@/utils/motionGraphicRenderer');
+
+      const spec = {
+        ...result.spec,
+        htmlCssScenes: result.spec.htmlCssScenes.map((scene, index) =>
+          index === 0 ? { ...scene, htmlCss: editedHtmlCss } : scene
+        ),
+      };
+
+      const video = await renderMotionGraphicToVideo(
+        spec,
+        (renderStep, pct) => {
+          setStep(mapToStepId(renderStep));
+          setProgress(pct);
+          setProgressMessage(renderStep);
+        },
+        { transparent, signal: controller.signal }
+      );
+
+      const next: GenerativeResult = { ...result, spec, video };
+      publishVideoUrl(video.blob);
+      setResult(next);
+      setOriginalHtmlCss(editedHtmlCss);
+      setStep('done');
+      setProgress(100);
+      setProgressMessage('Render complete');
+      toast.success('Scene re-rendered from your code');
+      return next;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        setStep('done');
+        return null;
+      }
+      const errMsg = err?.message || 'Failed to render scene';
+      setError(errMsg);
+      setStep('error');
+      toast.error(errMsg);
+      return null;
+    } finally {
+      setIsRendering(false);
+      abortControllerRef.current = null;
+    }
+  }, [result, editedHtmlCss, transparent, publishVideoUrl]);
+
+  /** Ensures a dedicated "Motion Overlay" video track sits on TOP of the stack. */
+  const getOrCreateOverlayTrack = useCallback(async (): Promise<TimelineTrack | null> => {
+    const { useEditorStore } = await import('@/store/editorStore');
+    const state = useEditorStore.getState();
+
+    const existing = state.tracks.find(
+      (t) => t.type === 'video' && t.name === MOTION_OVERLAY_TRACK_NAME
+    );
+    if (existing) return existing;
+
+    const track: TimelineTrack = {
+      id: `track_v_motion_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name: MOTION_OVERLAY_TRACK_NAME,
+      type: 'video',
+      clips: [],
+      locked: false,
+      muted: false,
+      hidden: false,
+      volume: 1,
+      pan: 0,
+      solo: false,
+      isDynamic: true,
+    };
+
+    // Appended last: both the preview engine and the export scheduler composite
+    // tracks in array order, so the final track is painted on top.
+    useEditorStore.setState({ tracks: [...useEditorStore.getState().tracks, track] });
+    return track;
+  }, []);
+
   const handleApplyToTimeline = useCallback(async () => {
-    if (!result?.webmBlob) {
+    // Hand-edited code must be baked into the video before it hits the timeline,
+    // otherwise the overlay would silently ship the AI's original version.
+    let target = result;
+    if (isDirty && (target?.spec?.htmlCssScenes?.length || 0) > 0) {
+      const rendered = await handleRenderFromCode();
+      if (rendered) target = rendered;
+    }
+
+    const video: MotionGraphicVideo | null | undefined = target?.video;
+    if (!video?.blob || video.blob.size <= 8) {
       toast.error('No motion graphic video available to apply');
       return;
     }
@@ -164,9 +321,9 @@ export function useGenerativeWorkspace() {
       const store = useEditorStore.getState();
 
       const mediaId = `gen_motion_${Date.now()}`;
-      const blobUrl = URL.createObjectURL(result.webmBlob);
+      const blobUrl = URL.createObjectURL(video.blob);
       const finalDuration =
-        result.spec?.duration || (mode === 'clip' ? selectedClipDuration : targetDuration) || 15;
+        target?.spec?.duration || (mode === 'clip' ? selectedClipDuration : targetDuration) || 15;
       const mediaName = selectedClipName
         ? `Motion: ${selectedClipName}`
         : `Motion Graphics (${style})`;
@@ -178,42 +335,102 @@ export function useGenerativeWorkspace() {
         duration: finalDuration,
         url: blobUrl,
         createdAt: Date.now(),
+        width: video.width,
+        height: video.height,
+        frameRate: video.fps,
       };
 
-      store.addMedia(mediaItem);
-
-      store.addTrack('video');
-
-      const updatedTracks = useEditorStore.getState().tracks;
-      const videoTracks = updatedTracks.filter((t) => t.type === 'video');
-      // The newly added track is prepended at tracks[0]
-      const targetTrack = videoTracks[0] || updatedTracks[0];
-
-      if (targetTrack) {
-        const clipId = `clip_${Date.now()}`;
-        const newClip: TimelineClip = {
-          id: clipId,
-          mediaId,
-          trackId: targetTrack.id,
-          startTime: store.currentTime || 0,
-          duration: finalDuration,
-          trimStart: 0,
-          trimEnd: 0,
-          transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-          opacity: 1,
-          speed: 1,
-          effects: [],
-        };
-        store.addClip(newClip);
-        toast.success('Motion graphics added to timeline!');
-      } else {
-        toast.success('Motion graphics added to media library!');
+      // Persist the blob so the overlay survives a project reload.
+      let file: File | undefined;
+      try {
+        file = new File([video.blob], `${mediaName}.webm`, {
+          type: video.blob.type || 'video/webm',
+        });
+      } catch {
+        file = undefined;
       }
+      store.addMedia(mediaItem, file);
+
+      const track = await getOrCreateOverlayTrack();
+      if (!track) {
+        toast.error('Could not create an overlay track');
+        return;
+      }
+
+      // Align the overlay with the source clip when we can find it on the
+      // timeline; otherwise drop it at the playhead.
+      let startTime = store.currentTime || 0;
+      if (mode === 'clip' && selectedClipUrl) {
+        const sourceMedia = useEditorStore
+          .getState()
+          .mediaLibrary.find((m) => m.url === selectedClipUrl);
+        if (sourceMedia) {
+          for (const t of useEditorStore.getState().tracks) {
+            const sourceClip = (t.clips || []).find((c) => c.mediaId === sourceMedia.id);
+            if (sourceClip) {
+              startTime = sourceClip.startTime;
+              break;
+            }
+          }
+        }
+      }
+
+      const clipId = `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const newClip: TimelineClip = {
+        id: clipId,
+        mediaId,
+        trackId: track.id,
+        startTime,
+        duration: finalDuration,
+        trimStart: 0,
+        trimEnd: 0,
+        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        opacity: 1,
+        speed: 1,
+        effects: [],
+        // When the browser could not encode a real alpha channel the overlay was
+        // rendered on a key colour plate — recover transparency automatically.
+        ...(video.alphaMode === 'key' && video.keyColor
+          ? {
+              chromaKey: {
+                enabled: true,
+                color: video.keyColor,
+                threshold: 42,
+                softness: 16,
+                spillSuppression: 60,
+                edgeFeather: 1,
+              },
+            }
+          : {}),
+      };
+
+      store.addClip(newClip);
+
+      const { useEditorStore: storeRef } = await import('@/store/editorStore');
+      storeRef.getState().recalcTotalDuration?.();
+      storeRef.getState().saveSnapshot?.('Add Motion Graphics Overlay');
+
+      toast.success(
+        video.alphaMode === 'alpha'
+          ? 'Motion graphics overlay added (transparent alpha)'
+          : 'Motion graphics overlay added (auto chroma-keyed)'
+      );
     } catch (err: any) {
       console.error('Failed to apply motion graphics to timeline:', err);
       toast.error('Failed to apply to timeline: ' + (err?.message || 'Unknown error'));
     }
-  }, [result, mode, selectedClipDuration, targetDuration, selectedClipName, style]);
+  }, [
+    result,
+    isDirty,
+    handleRenderFromCode,
+    mode,
+    selectedClipDuration,
+    targetDuration,
+    selectedClipName,
+    selectedClipUrl,
+    style,
+    getOrCreateOverlayTrack,
+  ]);
 
   const handleRePrompt = useCallback(
     (newPrompt: string) => {
@@ -243,6 +460,7 @@ export function useGenerativeWorkspace() {
     setLayout('mixed');
     setProvider('gemini');
     setCustomPrompt('');
+    setTransparent(true);
     setStep('idle');
     setProgress(0);
     setProgressMessage('');
@@ -251,7 +469,9 @@ export function useGenerativeWorkspace() {
     setShowCodeEditor(false);
     setEditedHtmlCss('');
     setOriginalHtmlCss('');
-  }, []);
+    setIsRendering(false);
+    publishVideoUrl(null);
+  }, [publishVideoUrl]);
 
   return {
     mode,
@@ -274,6 +494,8 @@ export function useGenerativeWorkspace() {
     setProvider,
     customPrompt,
     setCustomPrompt,
+    transparent,
+    setTransparent,
     step,
     setStep,
     progress,
@@ -282,6 +504,7 @@ export function useGenerativeWorkspace() {
     setProgressMessage,
     result,
     setResult,
+    motionVideoUrl,
     error,
     setError,
     showCodeEditor,
@@ -289,9 +512,12 @@ export function useGenerativeWorkspace() {
     editedHtmlCss,
     setEditedHtmlCss,
     originalHtmlCss,
+    isDirty,
+    isRendering,
     handleClipDrop,
     handleRemoveClip,
     handleGenerate,
+    handleRenderFromCode,
     handleApplyToTimeline,
     handleRePrompt,
     handleResetCode,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sliders, Sparkles, Clock, Palette, LayoutGrid } from 'lucide-react';
+import { Sliders, Sparkles, Clock, Palette, LayoutGrid, Droplet } from 'lucide-react';
 
 export interface MotionStyleControlsProps {
   style: string;
@@ -13,6 +13,8 @@ export interface MotionStyleControlsProps {
   targetDuration: number;
   setTargetDuration: (val: number) => void;
   mode: 'clip' | 'text';
+  transparent: boolean;
+  setTransparent: (val: boolean) => void;
 }
 
 const STYLE_OPTIONS = [
@@ -45,6 +47,8 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
   targetDuration,
   setTargetDuration,
   mode,
+  transparent,
+  setTransparent,
 }) => {
   return (
     <div className="bg-[#252525] border border-[#3e3e3e] rounded-xl p-4 space-y-4">
@@ -121,6 +125,39 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
             ))}
           </select>
         </div>
+      </div>
+
+      {/* Transparent overlay toggle — the whole point of the overlay pipeline */}
+      <div className="pt-1 border-t border-[#3e3e3e]/60">
+        <button
+          type="button"
+          onClick={() => setTransparent(!transparent)}
+          className="w-full flex items-start gap-2.5 text-left group"
+          title="Remove full-frame backgrounds so the motion graphics composite over your footage"
+        >
+          <div
+            className={`mt-0.5 w-9 h-5 shrink-0 rounded-full p-0.5 transition-colors ${
+              transparent ? 'bg-amber-400' : 'bg-[#3e3e3e]'
+            }`}
+          >
+            <div
+              className={`w-4 h-4 rounded-full bg-black transition-transform ${
+                transparent ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 text-xs text-white font-medium">
+              <Droplet className="w-3.5 h-3.5 text-amber-400/80" />
+              Transparent background
+            </div>
+            <p className="text-[11px] text-[#808080] leading-snug mt-0.5">
+              {transparent
+                ? 'Full-frame backdrops are stripped so the animation overlays your base video.'
+                : 'Keeps the AI-designed backdrop. Turn off only if you want a self-contained plate.'}
+            </p>
+          </div>
+        </button>
       </div>
 
       {/* Target Duration Slider (only in text mode) */}

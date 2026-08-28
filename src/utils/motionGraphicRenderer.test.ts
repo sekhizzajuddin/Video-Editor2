@@ -83,12 +83,12 @@ describe('motionGraphicRenderer', () => {
     };
 
     const progressUpdates: Array<{ step: string; pct: number }> = [];
-    const blob = await renderMotionGraphicToVideo(spec, (step, pct) => {
+    const rendered = await renderMotionGraphicToVideo(spec, (step, pct) => {
       progressUpdates.push({ step, pct });
     });
 
-    expect(blob).toBeDefined();
-    expect(blob instanceof Blob).toBe(true);
+    expect(rendered).toBeDefined();
+    expect(rendered.blob instanceof Blob).toBe(true);
     expect(progressUpdates.length).toBeGreaterThan(0);
   });
 });
@@ -152,7 +152,7 @@ describe('generateMotionGraphicsFromDialogue', () => {
     expect(result.spec.duration).toBe(2);
     expect(result.spec.canvasElements.length).toBeGreaterThan(0);
     expect(result.transcribedText).toBe('Transform your videos with AI');
-    expect(result.webmBlob instanceof Blob).toBe(true);
+    expect(result.video?.blob instanceof Blob).toBe(true);
     expect(progressUpdates.some((p) => p.pct === 100)).toBe(true);
   });
 });

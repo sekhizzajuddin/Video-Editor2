@@ -1,5 +1,5 @@
-import React, { useState, useCallback, DragEvent } from 'react';
-import { Film, X, UploadCloud, Video } from 'lucide-react';
+import React, { useState, useCallback, useRef, DragEvent } from 'react';
+import { Film, X, UploadCloud, Video, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
 export interface ClipDropZoneProps {
@@ -18,6 +18,63 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
   onRemove,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [libraryItems, setLibraryItems] = useState<
+    Array<{ id: string; name: string; duration: number; url: string }>
+  >([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  /** Loads usable clips straight from the media library (no dragging needed). */
+  const openLibraryPicker = useCallback(async () => {
+    try {
+      const { useEditorStore } = await import('@/store/editorStore');
+      const items = useEditorStore
+        .getState()
+        .mediaLibrary.filter(
+          (m) => (m.type === 'video' || m.type === 'audio') && Number(m.duration || 0) <= 30
+        )
+        .map((m) => ({
+          id: m.id,
+          name: m.name || 'Media',
+          duration: Number(m.duration || 0),
+          url: m.url,
+        }));
+      setLibraryItems(items);
+      if (items.length === 0) {
+        toast.info('No clips under 30s in the media library yet — import one first.');
+      }
+    } catch (err) {
+      console.warn('[ClipDropZone] Failed to read media library:', err);
+    }
+  }, []);
+
+  const handleFilePick = useCallback(
+    (file: File | undefined) => {
+      if (!file) return;
+      if (!file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+        toast.error('Please choose a video or audio file');
+        return;
+      }
+      const objectUrl = URL.createObjectURL(file);
+      const probe = document.createElement('video');
+      probe.preload = 'metadata';
+      probe.muted = true;
+      const finish = (duration: number) => {
+        if (duration > 30) {
+          toast.error('Clip must be 30 seconds or less');
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        onClipDrop(objectUrl, file.name, duration);
+      };
+      probe.onloadedmetadata = () => finish(probe.duration || 0);
+      probe.onerror = () => {
+        toast.error('Could not read that media file');
+        URL.revokeObjectURL(objectUrl);
+      };
+      probe.src = objectUrl;
+    },
+    [onClipDrop]
+  );
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -182,13 +239,24 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`rounded-xl border border-dashed p-8 transition-all flex flex-col items-center justify-center text-center cursor-pointer ${
+      className={`rounded-xl border border-dashed p-6 transition-all flex flex-col items-center justify-center text-center ${
         isDragOver
           ? 'border-amber-400 bg-amber-400/5 scale-[0.99]'
           : 'border-[#3e3e3e] bg-[#1a1a1a] hover:border-amber-400'
       }`}
     >
-      <div className="w-12 h-12 rounded-full bg-[#252525] border border-[#3e3e3e] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/*,audio/*"
+        className="hidden"
+        onChange={(e) => {
+          handleFilePick(e.target.files?.[0]);
+          e.target.value = '';
+        }}
+      />
+
+      <div className="w-12 h-12 rounded-full bg-[#252525] border border-[#3e3e3e] flex items-center justify-center mb-3">
         {isDragOver ? (
           <UploadCloud className="w-6 h-6 text-amber-400 animate-bounce" />
         ) : (
@@ -199,9 +267,50 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
       <p className="text-sm font-medium text-white mb-1">
         Drop a clip here <span className="text-amber-400 font-semibold">(max 30s)</span>
       </p>
-      <p className="text-xs text-[#a0a0a0]">
-        or drag from Media Panel / drop video file
+      <p className="text-xs text-[#a0a0a0] mb-3">
+        or drag from Media Panel / drop a video file
       </p>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#252525] text-white border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors"
+        >
+          Browse files
+        </button>
+        <button
+          type="button"
+          onClick={openLibraryPicker}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#252525] text-[#a0a0a0] border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
+        >
+          <FolderOpen className="w-3.5 h-3.5" />
+          Media library
+        </button>
+      </div>
+
+      {libraryItems.length > 0 && (
+        <select
+          className="mt-3 w-full bg-[#121212] border border-[#3e3e3e] rounded-lg text-xs text-white px-2 py-1.5 focus:outline-none focus:border-amber-400"
+          defaultValue=""
+          onChange={(e) => {
+            const item = libraryItems.find((i) => i.id === e.target.value);
+            if (item) {
+              onClipDrop(item.url, item.name, item.duration);
+              setLibraryItems([]);
+            }
+          }}
+        >
+          <option value="" disabled>
+            Select a clip ({libraryItems.length} under 30s)
+          </option>
+          {libraryItems.map((item) => (
+            <option key={item.id} value={item.id} className="bg-[#1a1a1a] text-white">
+              {item.name} • {item.duration.toFixed(1)}s
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 };

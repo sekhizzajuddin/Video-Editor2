@@ -6,6 +6,7 @@ import { DialogueEditor } from './DialogueEditor';
 import { MotionStyleControls } from './MotionStyleControls';
 import { GenerationProgress } from './GenerationProgress';
 import { ResultPreview } from './ResultPreview';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 
 export interface GenerativeWorkspaceProps {
   className?: string;
@@ -32,26 +33,32 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
     setProvider,
     customPrompt,
     setCustomPrompt,
+    transparent,
+    setTransparent,
     step,
     progress,
     progressMessage,
     result,
+    motionVideoUrl,
     error,
     showCodeEditor,
     setShowCodeEditor,
     editedHtmlCss,
     setEditedHtmlCss,
     originalHtmlCss,
+    isDirty,
+    isRendering,
     handleClipDrop,
     handleRemoveClip,
     handleGenerate,
+    handleRenderFromCode,
     handleApplyToTimeline,
     handleRePrompt,
     handleResetCode,
   } = useGenerativeWorkspace();
 
   const isGenerating =
-    step !== 'idle' && step !== 'done' && step !== 'error';
+    isRendering || (step !== 'idle' && step !== 'done' && step !== 'error');
 
   const isGenerateDisabled =
     isGenerating ||
@@ -140,6 +147,8 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
             targetDuration={targetDuration}
             setTargetDuration={setTargetDuration}
             mode={mode}
+            transparent={transparent}
+            setTransparent={setTransparent}
           />
 
           {/* Full-width Generate Button */}
@@ -152,7 +161,7 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
             {isGenerating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-black" />
-                <span>Generating Motion Graphics...</span>
+                <span>{isRendering ? 'Rendering scene...' : 'Generating Motion Graphics...'}</span>
               </>
             ) : (
               <>
@@ -181,6 +190,14 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
               message={progressMessage}
             />
           )}
+
+          {/* Pipeline self-test (no AI call) */}
+          <DiagnosticsPanel
+            onLoadDemo={(html) => {
+              setEditedHtmlCss(html);
+              setShowCodeEditor(true);
+            }}
+          />
         </div>
       </div>
 
@@ -188,10 +205,12 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
       <div className="flex-1 h-full flex flex-col overflow-hidden p-3 bg-[#111111]">
         <ResultPreview
           result={result}
+          motionVideoUrl={motionVideoUrl}
           selectedClipUrl={selectedClipUrl}
           selectedClipName={selectedClipName}
           selectedClipDuration={selectedClipDuration}
           isGenerating={isGenerating}
+          isRendering={isRendering}
           onRePrompt={handleRePrompt}
           onApply={handleApplyToTimeline}
           showCodeEditor={showCodeEditor}
@@ -199,6 +218,8 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
           editedHtmlCss={editedHtmlCss}
           setEditedHtmlCss={setEditedHtmlCss}
           originalHtmlCss={originalHtmlCss}
+          isDirty={isDirty}
+          onRenderFromCode={handleRenderFromCode}
           onResetCode={handleResetCode}
         />
       </div>
