@@ -85,28 +85,28 @@ export function useGenerativeWorkspace() {
 
         const promptToUse = typeof promptOverride === 'string' ? promptOverride : customPrompt;
 
-        const options: GenerativeMotionOptions = {
-          mode,
-          clipUrl: selectedClipUrl,
-          clipDuration: selectedClipDuration,
+        const genOptions: GenerativeMotionOptions = {
           dialogueText: dialogueText.trim(),
           targetDuration: mode === 'clip' ? selectedClipDuration || 15 : targetDuration,
           style,
           layout,
           provider,
           customPrompt: promptToUse,
-          onProgress: (currentStep, currentProgress, message) => {
-            setStep(currentStep);
-            setProgress(currentProgress);
-            setProgressMessage(message);
-          },
-          abortSignal: controller.signal,
         };
 
-        const genResult = await generateMotionGraphicsFromDialogue(options);
+        const genResult = await generateMotionGraphicsFromDialogue(
+          mode === 'clip' ? selectedClipUrl : null,
+          mode === 'clip' ? selectedClipDuration || 15 : targetDuration,
+          genOptions,
+          (currentStep: string, currentProgress: number) => {
+            setStep(currentStep as GenerativeStep);
+            setProgress(currentProgress);
+            setProgressMessage(currentStep);
+          }
+        );
 
         setResult(genResult);
-        const sceneHtml = genResult.htmlCssScenes?.[0]?.htmlCss || '';
+        const sceneHtml = genResult.spec?.htmlCssScenes?.[0]?.htmlCss || '';
         setEditedHtmlCss(sceneHtml);
         setOriginalHtmlCss(sceneHtml);
         setStep('done');
@@ -155,7 +155,7 @@ export function useGenerativeWorkspace() {
       const mediaId = `gen_motion_${Date.now()}`;
       const blobUrl = URL.createObjectURL(result.webmBlob);
       const finalDuration =
-        result.duration || (mode === 'clip' ? selectedClipDuration : targetDuration) || 15;
+        result.spec?.duration || (mode === 'clip' ? selectedClipDuration : targetDuration) || 15;
       const mediaName = selectedClipName
         ? `Motion: ${selectedClipName}`
         : `Motion Graphics (${style})`;

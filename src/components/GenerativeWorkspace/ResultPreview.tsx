@@ -63,7 +63,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
           <h3 className="text-sm font-semibold text-white">Generated Motion Graphics</h3>
         </div>
         <span className="text-xs font-mono text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
-          {result.duration ? `${result.duration.toFixed(1)}s` : 'Ready'}
+          {result.spec?.duration ? `${result.spec.duration.toFixed(1)}s` : 'Ready'}
         </span>
       </div>
 
