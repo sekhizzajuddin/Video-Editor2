@@ -117,9 +117,13 @@ async function configureVideoEncoder(
       };
 
       try {
+        // Check if VideoEncoder.isConfigSupported is available (it may not be in some environments)
         if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
           const support = await VideoEncoder.isConfigSupported(testConfig);
           if (!support?.supported) continue;
+        } else if (typeof VideoEncoder === 'undefined') {
+          // VideoEncoder not available at all - skip this config
+          continue;
         }
         // Do not configure with support.config. Chrome may return a normalized
         // dictionary without the AVC `format`, causing Annex-B chunks to be fed
@@ -164,6 +168,7 @@ async function configureWebmVideoEncoder(
       bitrateMode: 'variable',
     };
     try {
+      // Check if VideoEncoder.isConfigSupported is available (it may not be in some environments)
       if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
         const support = await VideoEncoder.isConfigSupported(testConfig);
         if (support && support.supported) {
@@ -171,7 +176,11 @@ async function configureWebmVideoEncoder(
           console.log(`[ExportWorker] Configured WebM VideoEncoder with codec: ${codec}`);
           return muxCodec;
         }
+      } else if (typeof VideoEncoder === 'undefined') {
+        // VideoEncoder not available - skip this candidate
+        continue;
       } else {
+        // isConfigSupported not available but VideoEncoder exists - try direct config
         encoder.configure(testConfig);
         return muxCodec;
       }
@@ -425,11 +434,18 @@ async function handleExport(
       };
 
       try {
+        // Check if AudioEncoder.isConfigSupported is available (it may not be in some environments)
         if (typeof AudioEncoder !== 'undefined' && typeof AudioEncoder.isConfigSupported === 'function') {
           const support = await AudioEncoder.isConfigSupported(audioConfig);
           if (support && support.supported) {
             hasAudio = true;
           }
+        } else if (typeof AudioEncoder === 'undefined') {
+          // AudioEncoder not available - no audio encoding possible
+          hasAudio = false;
+        } else {
+          // isConfigSupported not available but AudioEncoder exists - assume support
+          hasAudio = true;
         }
       } catch {
         hasAudio = false;

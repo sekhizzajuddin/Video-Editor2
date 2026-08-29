@@ -61,9 +61,14 @@ export class AssetDecoder {
 
       let canDecode = true;
       try {
+        // Wrap canDecode in a try-catch because VideoDecoder.isConfigSupported
+        // may not be available in all environments (Node.js, older browsers)
         canDecode = await videoTrack.canDecode();
-      } catch (error) {
-        console.warn('[AssetDecoder] canDecode check threw, attempting decode:', error);
+      } catch (error: any) {
+        console.warn('[AssetDecoder] canDecode check threw, attempting decode:', error?.message || error);
+        // If canDecode throws due to missing WebCodecs API, assume support
+        // and let the actual decode attempt fail gracefully if needed
+        canDecode = true;
       }
       if (!canDecode) {
         this.loadError = 'Codec not supported by browser WebCodecs';

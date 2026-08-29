@@ -452,8 +452,17 @@ async function renderWithVideoEncoder(
     ...(hasAlpha ? { alpha: 'keep' } : {}),
   };
 
-  const support = await VideoEncoder.isConfigSupported(activeConfig);
-  if (!support.supported) {
+  // Final config validation - wrap in try-catch for environments where isConfigSupported may not exist
+  let configValid = true;
+  try {
+    if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
+      const support = await VideoEncoder.isConfigSupported(activeConfig);
+      configValid = support.supported;
+    }
+  } catch {
+    configValid = true; // Assume valid if check fails
+  }
+  if (!configValid) {
     throw new Error('VideoEncoder configuration is not supported on this browser.');
   }
 
