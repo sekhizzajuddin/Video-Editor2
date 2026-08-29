@@ -1,3 +1,4 @@
+import { getKenneyDefs } from './kenneyAssets';
 /**
  * cssSceneRasterizer
  * ─────────────────────────────────────────────────────────────────────────────
@@ -175,7 +176,18 @@ export function sanitizeMotionSceneHtml(html: string): string {
   });
 
   void stripped;
-  return template.innerHTML;
+  
+    let finalHtml = template.innerHTML;
+    const defs = getKenneyDefs();
+    if (finalHtml.includes('<svg')) {
+      finalHtml = finalHtml.replace(/<svg([^>]*)>/i, `<svg$1>
+${defs}
+`);
+    } else {
+      finalHtml = `<svg style="position:absolute;width:0;height:0;">${defs}</svg>` + finalHtml;
+    }
+    return finalHtml;
+
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

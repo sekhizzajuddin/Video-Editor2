@@ -59,6 +59,12 @@ const STYLE_ART_DIRECTION: Record<string, string> = {
   • Depth: Use Z-translation (transform: translateZ) for floating objects or heights.`,
 
   documentary: `DOCUMENTARY (Vox / Johnny Harris) — map-first vector journalism
+  • ASSET LIBRARY: You have access to hundreds of Kenney Isometric City assets!
+    Do NOT draw buildings or roads manually with polygons. Use the pre-made assets!
+    Usage: <use href="#ASSET_ID" x="100" y="200" />
+    The asset IDs follow the pattern 'buildingTiles_000' to 'buildingTiles_120', and 'cityTiles_000' to 'cityTiles_130'.
+    Examples:  (you can guess other numbers).
+    Place these assets inside an <svg> tag to build your city layout!
 • Lead with a MAP or a MAP-LIKE DIAGRAM: coastline/country outlines as <path>, city dots,
   route lines that draw themselves, region fills that pop in one by one.
 • Then build the subject on top: terrain, buildings, simple flat people, vehicles.
