@@ -686,9 +686,13 @@ export function applyChromaKeyOnData(
     const data = imgData.data;
 
     const hex = keyColorHex.replace('#', '');
-    const kr = parseInt(hex.substring(0, 2), 16) || 0;
-    const kg = parseInt(hex.substring(2, 4), 16) || 255;
-    const kb = parseInt(hex.substring(4, 6), 16) || 0;
+    const rParse = parseInt(hex.substring(0, 2), 16);
+    const gParse = parseInt(hex.substring(2, 4), 16);
+    const bParse = parseInt(hex.substring(4, 6), 16);
+
+    const kr = isNaN(rParse) ? 0 : rParse;
+    const kg = isNaN(gParse) ? 255 : gParse;
+    const kb = isNaN(bParse) ? 0 : bParse;
 
     const ku = -0.1687 * kr - 0.3313 * kg + 0.5 * kb + 128;
     const kv = 0.5 * kr - 0.4187 * kg - 0.0813 * kb + 128;
