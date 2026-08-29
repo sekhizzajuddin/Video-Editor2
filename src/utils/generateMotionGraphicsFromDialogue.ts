@@ -909,7 +909,7 @@ export function sanitizeMotionGraphicSpec(
         subtitleColor: '#ffffff',
         accentColor: '#00ffff',
       },
-      position: { x: width / 2, y: height / 2 },
+      
     });
   }
 
