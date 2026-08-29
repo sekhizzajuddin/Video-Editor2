@@ -46,17 +46,17 @@ export interface GenerativeResult {
  * it knows — big animated words — instead of building an actual scene.
  */
 const STYLE_ART_DIRECTION: Record<string, string> = {
-  vox: `VOX EXPLAINER — flat vector world-building (this is the house style)
-  • Build a miniature world you can look into: ground plane, horizon band, sky strip,
-    hills, roads, buildings, trees, vehicles, people as 4-6 shape silhouettes, map outlines.
-  • DO NOT BE LAZY. MAKE IT LOOK LIKE A HIGH-QUALITY HTML5 3D GAME using isometric or deep perspective SVG techniques! DO NOT JUST GENERATE BASIC GEOMETRICAL SHAPES. You must build a FULLY DESIGNED, PROFESSIONAL-GRADE SCENE with recognizable real-world objects made from CSS/SVG. If you generate a blank or simple abstract layout, you have failed.
-  • Flat fills, no photographic realism. Large shapes get ONE darker shade polygon for depth.
-  • Palette: one dominant + two accents on a light neutral (e.g. #0f172a / #38bdf8 / #facc15).
-  • Data is physical: values become towers, dot grids, stacked blocks, flowing paths — never bare numerals.
-  • Annotation layer: 2px leader lines + small pill labels, hand-drawn underlines and circles
-    around the thing being discussed, arrows that draw themselves.
-  • Depth: exactly 3 layers (far / mid / near), each entering with its own stagger.
-  • Camera: a slow push-in (scale the whole world group 1.00 -> 1.06 over the scene).`,
+  vox: `VOX EXPLAINER — True 3D Isometric HTML5 Game Style
+  • CRITICAL REQUIREMENT: YOU MUST WRAP THE ENTIRE SCENE IN AN ISOMETRIC GROUP. 
+    You must output: <g class="isometric-world">
+    And in CSS: .isometric-world { transform: rotateX(60deg) rotateZ(-45deg); transform-style: preserve-3d; transform-origin: center center; }
+  • ALL objects (buildings, cars, trees, mountains) MUST be constructed as 3D blocks using 3 polygons (top, left face, right face) with 3 different brightness shades (e.g., top=lightest, left=mid, right=dark).
+  • DO NOT DRAW FLAT 2D OBJECTS. A house is not a flat rectangle; it is a 3D rectangular prism.
+  • Build a miniature 3D city/world grid. Use <path> for thick roads.
+  • Do not be lazy. You must build a FULLY DESIGNED, PROFESSIONAL-GRADE SCENE with recognizable 3D objects.
+  • Data is physical: values become 3D towers, stacked cubes, floating spheres.
+  • Annotation layer: 2px leader lines, floating labels (these must NOT be inside the isometric group so they face the camera).
+  • Depth: Use Z-translation (transform: translateZ) for floating objects or heights.`,
 
   documentary: `DOCUMENTARY (Vox / Johnny Harris) — map-first vector journalism
 • Lead with a MAP or a MAP-LIKE DIAGRAM: coastline/country outlines as <path>, city dots,
