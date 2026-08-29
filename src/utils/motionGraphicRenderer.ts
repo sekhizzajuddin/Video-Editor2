@@ -457,7 +457,7 @@ async function renderWithVideoEncoder(
   try {
     if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
       const support = await VideoEncoder.isConfigSupported(activeConfig);
-      configValid = support.supported;
+      configValid = !!support.supported;
     }
   } catch {
     configValid = true; // Assume valid if check fails

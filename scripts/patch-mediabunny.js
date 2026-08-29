@@ -33,17 +33,18 @@ for (const relPath of filesToPatch) {
 
   // Fix 3: Patch VideoDecoder.isConfigSupported in canDecode method
   // This is the critical bug causing "TypeError: VideoDecoder.isConfigSupported is not a function"
-  const canDecodePattern = /async canDecode\(\)\s*\{[\s\S]*?if\s*\(\s*typeof\s+VideoDecoder\s*===\s*['"]undefined['"]\s*\)\s*\{[\s\S]*?return\s+false;[\s\S]*?\}[\s\S]*?const\s+support\s*=\s*await\s+VideoDecoder\.isConfigSupported\(decoderConfig\);[\s\S]*?return\s+support\.supported\s*===\s*true;[\s\S]*?\}/g;
-  if (canDecodePattern.test(content)) {
-    content = content.replace(canDecodePattern, `async canDecode() {
+  if (!content.includes('VideoDecoder.isConfigSupported !== \'function\'')) {
+    const canDecodePattern = /async canDecode\(\)\s*\{[\s\S]*?\}\s*(?=(async\s+determinePacketType|public\s+async\s+determinePacketType))/g;
+    if (canDecodePattern.test(content)) {
+      content = content.replace(canDecodePattern, `async canDecode() {
         try {
             const decoderConfig = await this._backing.getDecoderConfig();
             if (!decoderConfig) {
                 return false;
             }
             const codec = await this._backing.getCodec();
-            assert(codec !== null);
-            if (customVideoDecoders.some(x => x.supports(codec, decoderConfig))) {
+            if (codec === null) return false;
+            if (typeof customVideoDecoders !== 'undefined' && customVideoDecoders.some(x => x.supports(codec, decoderConfig))) {
                 return true;
             }
             if (typeof VideoDecoder === 'undefined') {
@@ -51,18 +52,18 @@ for (const relPath of filesToPatch) {
             }
             // Fallback for environments where isConfigSupported is not available
             if (typeof VideoDecoder.isConfigSupported !== 'function') {
-                Logging._warn('VideoDecoder.isConfigSupported not available, assuming support');
                 return true;
             }
             const support = await VideoDecoder.isConfigSupported(decoderConfig);
             return support.supported === true;
         }
         catch (error) {
-            Logging._error('Error during decodability check:', error);
             return false;
         }
-    }`);
-    modified = true;
+    }
+    `);
+      modified = true;
+    }
   }
 
   if (modified) {
