@@ -47,15 +47,16 @@ export interface GenerativeResult {
  */
 const STYLE_ART_DIRECTION: Record<string, string> = {
   vox: `VOX EXPLAINER — flat vector world-building (this is the house style)
-• Build a miniature world you can look into: ground plane, horizon band, sky strip,
-  hills, roads, buildings, trees, vehicles, people as 4-6 shape silhouettes, map outlines.
-• Flat fills, no photographic realism. Large shapes get ONE darker shade polygon for depth.
-• Palette: one dominant + two accents on a light neutral (e.g. #0f172a / #38bdf8 / #facc15).
-• Data is physical: values become towers, dot grids, stacked blocks, flowing paths — never bare numerals.
-• Annotation layer: 2px leader lines + small pill labels, hand-drawn underlines and circles
-  around the thing being discussed, arrows that draw themselves.
-• Depth: exactly 3 layers (far / mid / near), each entering with its own stagger.
-• Camera: a slow push-in (scale the whole world group 1.00 → 1.06 over the scene).`,
+  • Build a miniature world you can look into: ground plane, horizon band, sky strip,
+    hills, roads, buildings, trees, vehicles, people as 4-6 shape silhouettes, map outlines.
+  • DO NOT BE LAZY. DO NOT JUST GENERATE BASIC GEOMETRICAL SHAPES (like random scattered rectangles or triangles). You must build a FULLY DESIGNED, PROFESSIONAL-GRADE SCENE with recognizable real-world objects made from CSS/SVG. If you generate a blank or simple abstract layout, you have failed.
+  • Flat fills, no photographic realism. Large shapes get ONE darker shade polygon for depth.
+  • Palette: one dominant + two accents on a light neutral (e.g. #0f172a / #38bdf8 / #facc15).
+  • Data is physical: values become towers, dot grids, stacked blocks, flowing paths — never bare numerals.
+  • Annotation layer: 2px leader lines + small pill labels, hand-drawn underlines and circles
+    around the thing being discussed, arrows that draw themselves.
+  • Depth: exactly 3 layers (far / mid / near), each entering with its own stagger.
+  • Camera: a slow push-in (scale the whole world group 1.00 -> 1.06 over the scene).`,
 
   documentary: `DOCUMENTARY (Vox / Johnny Harris) — map-first vector journalism
 • Lead with a MAP or a MAP-LIKE DIAGRAM: coastline/country outlines as <path>, city dots,
@@ -302,7 +303,7 @@ export async function generateMotionGraphicsFromDialogue(
     try {
       const corrected = await requestDesign(
         provider,
-        [...designParts, { text: buildCorrectionPrompt(issues, style, targetDuration, dialogueText) }],
+        [...designParts, { text: buildCorrectionPrompt(issues, style, targetDuration, dialogueText, options.transparent !== false) }],
         options.signal
       );
       const correctedSpec = sanitizeMotionGraphicSpec(corrected, targetDuration, canRasterizeHtml);
@@ -637,7 +638,7 @@ ${canRasterizeHtml ? `═══════════════════�
 HOW TO CODE htmlCssScenes (THE PRIMARY OUTPUT)
 ═══════════════════════════════════════════════════════════════════════════════
 Self-contained HTML/CSS/SVG with CSS @keyframes. Rules:
-1. Root wrapper: <div style="position:relative;width:1920px;height:1080px;overflow:hidden;background:transparent;">
+1. Root wrapper: <div style="position:relative;width:1920px;height:1080px;overflow:hidden;background:${options.transparent !== false ? 'transparent' : '#0f172a'}">
 2. NO external assets: no <img src="http...">, no <link>, no @import, no web fonts.
    Only web-safe fonts (Arial, Helvetica, Impact, "Courier New", Georgia).
 3. Artwork MUST live inside ONE <svg width="1920" height="1080" viewBox="0 0 1920 1080"
@@ -703,7 +704,8 @@ function buildCorrectionPrompt(
   issues: string[],
   style: string,
   duration: number,
-  dialogueText: string
+  dialogueText: string,
+  transparent: boolean
 ): string {
   const d = duration.toFixed(1);
   const minimum = minimumShapeCount(style);
@@ -719,8 +721,8 @@ Rewrite the JSON from scratch and fix every issue above.
 NON-NEGOTIABLE FOR THIS RETRY (all ${d}s of it):
 1. Every scene is a drawn world inside <svg viewBox="0 0 1920 1080"> with ${minimum}+ shape
    elements (polygon/path/rect/circle/ellipse/line). No scene may be text-only.
-2. Text is a caption, not the content: at most ~25% of the frame.
-3. The stage stays TRANSPARENT — no full-frame background of any kind.
+2. Text is a caption, not the content: at most ~25% of the frame. Keep text at least 100px away from all edges to avoid being cut off.
+${transparent !== false ? '3. The stage stays TRANSPARENT — no full-frame background of any kind.' : '3. You MUST paint a solid full-frame background (e.g. <rect width=\"1920\" height=\"1080\" fill=\"#1e293b\">).'}
 4. Keep the same duration (${d}s) and the same dialogue${dialogueText ? `: "${dialogueText}"` : ''}.
 5. Stagger the entrances (spring/grow-up easings, "animation-fill-mode: both").
 

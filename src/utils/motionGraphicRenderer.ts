@@ -441,7 +441,7 @@ async function renderWithVideoEncoder(
     throw new Error('No supported VP9/VP8 VideoEncoder configuration on this browser.');
   }
 
-  const alphaMode: MotionAlphaMode = hasAlpha ? 'alpha' : 'key';
+  const alphaMode: MotionAlphaMode = hasAlpha ? 'alpha' : (options.transparent === false ? 'opaque' : 'key');
   const keyColor = options.keyColor || MOTION_KEY_COLOR;
 
   const activeConfig: VideoEncoderConfig = {
@@ -661,7 +661,7 @@ async function renderWithMediaRecorder(
 
   // MediaRecorder cannot carry an alpha channel, so the scene is baked over the
   // key colour and the caller chroma-keys it back out at composite time.
-  const alphaMode: MotionAlphaMode = 'key';
+  const alphaMode: MotionAlphaMode = options.transparent === false ? 'opaque' : 'key';
   const keyColor = options.keyColor || MOTION_KEY_COLOR;
 
   const stream = canvas.captureStream(fps);
