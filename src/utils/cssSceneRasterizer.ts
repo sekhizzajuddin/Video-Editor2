@@ -710,8 +710,9 @@ export async function rasterizeSvgToCanvas(
 
   let url: string | null = null;
   try {
-    // Use data URI instead of Blob to prevent CORS tainting of the OffscreenCanvas
-    url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    // Use base64 data URI to prevent CORS tainting and ensure reliable loading
+    const b64 = btoa(unescape(encodeURIComponent(svg)));
+    url = 'data:image/svg+xml;base64,' + b64;
 
     const img = new Image();
     img.decoding = 'sync';
