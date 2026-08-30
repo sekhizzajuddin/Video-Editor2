@@ -180,7 +180,7 @@ export function sanitizeMotionSceneHtml(html: string): string {
     let finalHtml = template.innerHTML;
     const defs = getKenneyDefs();
     if (finalHtml.includes('<svg')) {
-      finalHtml = finalHtml.replace(/<svg([^>]*)>/i, `<svg$1>
+      finalHtml = finalHtml.replace(/<svg([^>]*)>/i, `<svg$1 xmlns:xlink="http://www.w3.org/1999/xlink">
 ${defs}
 `);
     } else {
@@ -672,7 +672,7 @@ export function serializeSceneStage(stage: SceneStage): string {
     }
   }
 
-  return `<svg xmlns="${SVG_NS}" width="${stage.width}" height="${stage.height}" viewBox="0 0 ${stage.width} ${stage.height}">` +
+  return `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink" width="${stage.width}" height="${stage.height}" viewBox="0 0 ${stage.width} ${stage.height}">` +
     // Explicit pixel dimensions, not percentages: some engines resolve a
     // percentage-sized foreignObject against a zero-sized box and silently
     // render nothing at all.

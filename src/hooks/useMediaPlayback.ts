@@ -1908,12 +1908,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       } else {
         const shouldUnmuteBase = isPlaying && !globalMuted;
         if (entry.el.muted !== !shouldUnmuteBase) entry.el.muted = !shouldUnmuteBase;
-        // HTMLMediaElement.volume only accepts [0, 1]; assigning anything else
-        // throws IndexSizeError. The dB boost (linearGain > 1) is fine through
-        // a GainNode but must be clamped on the raw element. Compare against
-        // the clamped value so we don't rewrite it every tick.
-        const elVolume = Number.isFinite(finalVolume) ? Math.max(0, Math.min(1, finalVolume)) : 1;
-        if (entry.el.volume !== elVolume) entry.el.volume = elVolume;
+
       }
     }
     // PERF: keyed off `audioParamTime` (10 Hz) rather than raw `currentTime` (~33 Hz).

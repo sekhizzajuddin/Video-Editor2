@@ -328,9 +328,13 @@ async function paintFrame(
   for (const element of canvasElements) {
     if (timeSec < element.enterAt || timeSec > element.exitAt) continue;
     ctx.save();
+    
+    // Inject the root position into config so components can read it
     if (element.position) {
-      ctx.translate(element.position.x, element.position.y);
+      if (!element.config) element.config = {};
+      element.config.position = element.position;
     }
+    
     const localTime = timeSec - element.enterAt;
     const elementDuration = Math.max(0.001, element.exitAt - element.enterAt);
     try {
