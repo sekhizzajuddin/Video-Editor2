@@ -178,25 +178,39 @@ export class SpeedRampEngine {
       return this.keyframes[0].sourceTime + offset * this.keyframes[0].speed;
     }
 
+    // Time at/past the end of the ramp: extrapolate with the LAST keyframe's
+    // constant speed. (Previously this branch was unreachable — the loop below
+    // always matched the last segment and extrapolated the final easing curve,
+    // which produced wrong source times for ramped trims past the last keyframe.)
+    if (lastSeg) {
+      const lastSegEnd = lastSeg.timelineStart + this.computeSegmentTimelineDuration(lastSeg);
+      if (timelineTime >= lastSegEnd) {
+        const lastKf = this.keyframes[this.keyframes.length - 1];
+        return lastKf.sourceTime + (timelineTime - lastSegEnd) * lastKf.speed;
+      }
+    }
+
     for (const seg of this.segments) {
       const segDuration = this.computeSegmentTimelineDuration(seg);
       const segEndTime = seg.timelineStart + segDuration;
 
-      if (timelineTime <= segEndTime || seg === lastSeg) {
+      if (timelineTime <= segEndTime) {
         const localTime = timelineTime - seg.timelineStart;
-        
-        if (seg.startKf.easing === 'bezier') {
-          return this.solveSourceTimeNumerical(seg, localTime);
+
+        // Only 'linear' (and 'hold') have a matching closed-form inverse. Every
+        // other easing is integrated numerically (Gauss-Legendre), so the
+        // inverse MUST also be solved numerically — using the linear log-inverse
+        // for easeIn/easeOut/easeInOut produced wrong source times (video played
+        // at the wrong position inside eased ramp segments).
+        if (seg.startKf.easing === 'linear' || seg.startKf.easing === 'hold') {
+          return this.solveSourceTimeClosedForm(seg, localTime);
         }
         
-        return this.solveSourceTimeClosedForm(seg, localTime);
+        return this.solveSourceTimeNumerical(seg, localTime);
       }
     }
 
-    const lastKf = this.keyframes[this.keyframes.length - 1];
-    const lastSegEnd = lastSeg.timelineStart + this.computeSegmentTimelineDuration(lastSeg);
-    const offset = timelineTime - lastSegEnd;
-    return lastKf.sourceTime + offset * lastKf.speed;
+    return this.keyframes[this.keyframes.length - 1].sourceTime;
   }
 
   private solveSourceTimeClosedForm(seg: SpeedSegment, localT: number): number {
@@ -208,8 +222,14 @@ export class SpeedRampEngine {
       return seg.sourceStart + localT * v1;
     }
 
+    // Guard non-positive speeds: the closed-form exponential inverse is only
+    // valid for v1 > 0. Fall back to a constant-speed approximation instead of
+    // producing NaN / nonsense source times.
+    if (v1 <= 0 || v2 <= 0) {
+      return seg.sourceStart + localT * Math.max(0.01, v1);
+    }
+
     if (Math.abs(v1 - v2) < 1e-10) {
-      if (Math.abs(v1) < 1e-10) return seg.sourceStart;
       return seg.sourceStart + localT * v1;
     }
 
@@ -452,4 +472,22 @@ export function getRampedTrimStartForLeftResize(
   const localTimelineStart = engine.sourceToTimeline(clip.trimStart);
   const targetTimelineTime = localTimelineStart + shiftOnTimeline;
   return Math.max(0, engine.timelineToSource(targetTimelineTime));
+}
+
+// The amount of SOURCE media (seconds) covered by a clip. For a flat-speed clip
+// this is `duration * speed`; for a ramped clip it is the source span between
+// the clip's ramped start and end positions. Used by audio analysis (loudness
+// normalization, voice tuning) so a trimmed/ramped clip never analyses source
+// media that lies outside the clip.
+export function getRampedClipSourceSpan(
+  clip: { id: string; trimStart: number; duration: number; speed: number; speedRamp?: SpeedRampKeyframe[] },
+  sourceDuration: number
+): number {
+  if (!clip.speedRamp || clip.speedRamp.length < 2) {
+    return Math.max(0, clip.duration * Math.max(0.01, clip.speed ?? 1));
+  }
+  const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+  const localTimelineStart = engine.sourceToTimeline(clip.trimStart);
+  const sourceEnd = engine.timelineToSource(localTimelineStart + clip.duration);
+  return Math.max(0, Math.min(sourceDuration, sourceEnd - clip.trimStart));
 }

@@ -3,6 +3,7 @@ import { StillImageSource } from './StillImageSource';
 import { findActiveTransition, buildTransitionPlan } from '../../utils/transitionEngine';
 import { resolveBlendPlan } from '../../utils/blendCompositor';
 import { FramePool } from './memory/FramePool';
+import { getMediaTimeForClip } from '../../utils/speedRamp';
 
 /**
  * Anything that can hand the compositor a frame for a clip: a real MediaBunny
@@ -74,30 +75,24 @@ function getSpeedRampMediaTime(
   if (!ramp || ramp.length < 2) {
     return elapsed * speed + trim;
   }
-  // Lightweight engine: replicate timelineToSource linear approximation
-  // Full bezier is expensive in worker; we approximate by walking segments.
-  // This matches preview for simple ramps and prevents NaN seeking.
+  // Use the SAME engine as the preview (`getMediaTimeForClip`): the previous
+  // hand-rolled linear scan ignored the clip's trim offset and used an
+  // average-speed approximation, so exported ramped (and ramped+trimmed)
+  // clips sampled different source frames than what the preview showed.
+  // speedRamp.ts is pure math — no DOM/worker dependencies — so sharing the
+  // exact mapping costs nothing and guarantees preview/export consistency.
   try {
-    // Use same engine as preview if available via import — but to avoid
-    // heavy deps, implement quick linear scan.
-    const keys = [...ramp].sort((a: any, b: any) => a.sourceTime - b.sourceTime);
-    let timelineCursor = 0;
-    for (let i = 0; i < keys.length - 1; i++) {
-      const a = keys[i];
-      const b = keys[i + 1];
-      const deltaSource = b.sourceTime - a.sourceTime;
-      const avgSpeed = (a.speed + b.speed) / 2;
-      const segTimeline = avgSpeed > 0.001 ? deltaSource / avgSpeed : 0;
-      if (elapsed < timelineCursor + segTimeline) {
-        const local = elapsed - timelineCursor;
-        const ratio = segTimeline > 0.001 ? local / segTimeline : 0;
-        return a.sourceTime + ratio * deltaSource * (a.speed / Math.max(0.001, avgSpeed));
-      }
-      timelineCursor += segTimeline;
-    }
-    // Beyond last segment
-    const last = keys[keys.length - 1];
-    return last.sourceTime + Math.max(0, elapsed - timelineCursor) * last.speed + trim;
+    return getMediaTimeForClip(
+      {
+        id: clip.id ?? '',
+        startTime: clip.startTime,
+        duration: clip.duration,
+        trimStart: trim,
+        speed,
+        speedRamp: ramp,
+      },
+      currentTime
+    );
   } catch {
     return elapsed * speed + trim;
   }

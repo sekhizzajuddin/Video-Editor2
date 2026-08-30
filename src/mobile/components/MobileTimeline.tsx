@@ -37,7 +37,12 @@ import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
-import { getMediaTimeForClip } from '@/utils/speedRamp';
+import {
+  getMediaTimeForClip,
+  getRampedTrimStartForLeftResize,
+  getRampedTrimEndForRightResize,
+  getSpeedRampEngine,
+} from '@/utils/speedRamp';
 import { formatCentisecondTime } from '@/timeline';
 import { ArrangeModeOverlay } from '@/timeline/components/ArrangeModeOverlay';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
@@ -493,15 +498,30 @@ export function MobileTimeline({
           });
         } else {
           const speed = clip.speed || 1;
-          const minDelta = Math.max(-drag.startStart, -drag.startTrimStart / speed);
+          const isRamped = clip.speedRamp && clip.speedRamp.length >= 2;
+          const media = mediaMap.get(clip.mediaId);
+          const sourceDuration = media?.duration ?? (clip.duration * speed + clip.trimStart + clip.trimEnd);
+          // Ramp-aware max left expansion: how much timeline the clip can grow
+          // before it hits the start of the source media.
+          const maxExpandLeft = isRamped
+            ? getSpeedRampEngine(clip.id, clip.speedRamp).sourceToTimeline(clip.trimStart)
+            : clip.trimStart / speed;
+          const minDelta = Math.max(-drag.startStart, -maxExpandLeft);
           const delta = Math.max(minDelta, newStart - drag.startStart);
           const newDuration = Math.max(MIN_DURATION, clip.duration - delta);
           const clampedStart = clip.duration - newDuration + drag.startStart;
+          const shift = clampedStart - drag.startStart;
+          const newTrimStart = isRamped
+            ? getRampedTrimStartForLeftResize(
+                { ...clip, trimStart: drag.startTrimStart, speed: speed },
+                shift
+              )
+            : Math.max(0, drag.startTrimStart + shift * speed);
           setPreview({
             clipId: clip.id,
             startTime: clampedStart,
             duration: newDuration,
-            trimStart: Math.max(0, drag.startTrimStart + (clampedStart - drag.startStart) * speed),
+            trimStart: newTrimStart,
             trimEnd: clip.trimEnd,
           });
         }
@@ -532,21 +552,38 @@ export function MobileTimeline({
           });
         } else {
           const speed = clip.speed || 1;
-          const maxDelta = drag.startTrimEnd / speed;
+          const isRamped = clip.speedRamp && clip.speedRamp.length >= 2;
+          const media = mediaMap.get(clip.mediaId);
+          const sourceDuration = media?.duration ?? (clip.duration * speed + clip.trimStart + clip.trimEnd);
+          // Ramp-aware max right expansion: how much timeline the clip can grow
+          // before it hits the end of the source media.
+          const maxDelta = isRamped
+            ? (() => {
+                const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+                return engine.sourceToTimeline(sourceDuration) - engine.sourceToTimeline(sourceDuration - drag.startTrimEnd);
+              })()
+            : drag.startTrimEnd / speed;
           const delta = Math.min(maxDelta, newEnd - drag.startEnd);
           const newDuration = Math.max(MIN_DURATION, clip.duration + delta);
+          const newTrimEnd = isRamped
+            ? getRampedTrimEndForRightResize(
+                { ...clip, trimStart: clip.trimStart, speed: speed },
+                newDuration,
+                sourceDuration
+              )
+            : Math.max(0, drag.startTrimEnd - delta * speed);
           setPreview({
             clipId: clip.id,
             startTime: clip.startTime,
             duration: newDuration,
             trimStart: clip.trimStart,
-            trimEnd: Math.max(0, drag.startTrimEnd - delta * speed),
+            trimEnd: newTrimEnd,
           });
         }
         return;
       }
     },
-    [timeAt, clipMap, snapTime, seek, activeTool]
+    [timeAt, clipMap, mediaMap, snapTime, seek, activeTool]
   );
 
   const onPointerUp = useCallback(() => {

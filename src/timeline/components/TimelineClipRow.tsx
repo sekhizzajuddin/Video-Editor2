@@ -57,6 +57,10 @@ interface TimelineClipItemProps {
   zoomLevel: number;
   isSelected: boolean;
   isDragging: boolean;
+  // Trim handles are ONLY rendered on the single selected clip so neighbouring
+  // clips never show a trim cursor / grab area while another clip is being
+  // trimmed (multi-selection disables trimming entirely).
+  showTrimHandles: boolean;
   selectedTransitionClipId: string | null;
   activeTool: string;
   hoverCutClipId: string | null;
@@ -84,6 +88,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   zoomLevel,
   isSelected,
   isDragging,
+  showTrimHandles,
   selectedTransitionClipId,
   activeTool,
   hoverCutClipId,
@@ -249,8 +254,8 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         )}
       </div>
 
-      {/* ── Resize Handles (Visible on Hover) ──────────────── */}
-      {!trackLocked && (
+      {/* ── Resize Handles (only on the single selected clip) ──────────── */}
+      {showTrimHandles && !trackLocked && (
         <>
           <div 
             className="absolute left-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
@@ -598,6 +603,9 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             : defaultMedia
         );
         const isSelected = selectedClipIds.includes(clip.id);
+        // Trimming is only offered on the single selected clip — neighbouring
+        // clips (and multi-selections) never get trim handles or trim cursors.
+        const showTrimHandles = isSelected && selectedClipIds.length === 1;
         const isDragging = draggingClipId === clip.id;
 
         const hasOverlap = checkOverlapAt(track, clip.startTime, clip.duration, clip.id);
@@ -614,6 +622,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             zoomLevel={zoomLevel}
             isSelected={isSelected}
             isDragging={isDragging}
+            showTrimHandles={showTrimHandles}
             selectedTransitionClipId={selectedTransitionClipId}
             activeTool={activeTool}
             hoverCutClipId={hoverCutClipId}
