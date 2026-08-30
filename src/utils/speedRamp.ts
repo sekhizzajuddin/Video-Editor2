@@ -491,3 +491,142 @@ export function getRampedClipSourceSpan(
   const sourceEnd = engine.timelineToSource(localTimelineStart + clip.duration);
   return Math.max(0, Math.min(sourceDuration, sourceEnd - clip.trimStart));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPLIT HALF MEDIA MATH (pure — used by editorStore.splitClip)
+// -----------------------------------------------------------------------------
+// Computes everything media-related needed to split a clip at `splitTime`:
+// the two halves' trim values, the boundary source position, and the remapped
+// speed-ramp keyframes. Extracted from the store so the math is unit-testable
+// and identical for every split path (tool click, keyboard, playhead split).
+//
+// Invariants enforced (and covered by speedRamp.test.ts):
+//  1. CONTINUITY: both halves, evaluated at the split instant, must map to the
+//     SAME source position the original clip showed at that instant.
+//  2. TRIMMED RAMPS: the boundary keyframe is placed at the source position
+//     corresponding to the split point in the clip's LOCAL timeline (offset by
+//     sourceToTimeline(trimStart)) — the old code ignored trimStart and put
+//     the keyframe at the wrong source position.
+//  3. REVERSED CLIPS: media is consumed backwards, so the halves' trimStart is
+//     adjusted to keep the reversed mapping continuous (a naive split made the
+//     right half jump to the wrong source frame).
+//  4. The two halves cover exactly the original's source range: left
+//     [trimStart..splitMediaTime], right [splitMediaTime..trimStart+span].
+// ─────────────────────────────────────────────────────────────────────────────
+export interface SplitHalvesMedia {
+  leftTrimStart: number;
+  leftTrimEnd: number;
+  rightTrimStart: number;
+  splitMediaTime: number;
+  leftSpeedRamp: SpeedRampKeyframe[] | undefined;
+  rightSpeedRamp: SpeedRampKeyframe[] | undefined;
+}
+
+export function computeSplitHalvesMedia(
+  clip: {
+    id: string;
+    startTime: number;
+    duration: number;
+    trimStart?: number;
+    trimEnd?: number;
+    speed?: number;
+    speedRamp?: SpeedRampKeyframe[];
+    isReversed?: boolean;
+    freezeFrame?: number;
+  },
+  splitTime: number,
+  newKeyId: () => string = () => `kf-split-${Math.random().toString(36).slice(2, 10)}`
+): SplitHalvesMedia {
+  const trimStart = clip.trimStart ?? 0;
+  const trimEnd = clip.trimEnd ?? 0;
+  const speed = clip.speed ?? 1;
+  const relativeSplitTime = splitTime - clip.startTime;
+  const safeRel = Math.max(0.001, Math.min(relativeSplitTime, clip.duration - 0.001));
+
+  const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
+
+  // Source media position of the split point. Always through the shared engine
+  // so ramped, reversed and frozen clips split at exactly the frame the preview
+  // shows.
+  const splitMediaTime = getMediaTimeForClip(
+    {
+      id: clip.id,
+      startTime: clip.startTime,
+      duration: clip.duration,
+      trimStart,
+      speed,
+      speedRamp: clip.speedRamp,
+      isReversed: clip.isReversed,
+      freezeFrame: clip.freezeFrame,
+    },
+    splitTime
+  );
+
+  const originalMediaDuration = hasRamp
+    ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
+    : clip.duration * speed;
+
+  // Remap speed ramp keyframes for each half when a ramp exists.
+  let leftSpeedRamp: SpeedRampKeyframe[] | undefined = clip.speedRamp;
+  let rightSpeedRamp: SpeedRampKeyframe[] | undefined = clip.speedRamp;
+
+  if (hasRamp) {
+    const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+    // The engine's timeline axis starts at source 0, but a TRIMMED clip only
+    // plays from trimStart onward — offset the split point by the trimmed
+    // local start so the boundary keyframe lands at the correct source
+    // position (bug fix: previously ignored trimStart entirely).
+    const localTimelineStart = engine.sourceToTimeline(trimStart);
+    const splitSourceTime = engine.timelineToSource(localTimelineStart + safeRel);
+    const splitSpeed = engine.getSpeedAtSourceTime(splitSourceTime);
+
+    const sorted = [...clip.speedRamp!].sort((a, b) => a.sourceTime - b.sourceTime);
+
+    // Left half: keyframes in [0, splitSourceTime]
+    const leftKeys = sorted.filter((kf) => kf.sourceTime < splitSourceTime);
+    leftKeys.push({
+      id: newKeyId(),
+      sourceTime: splitSourceTime,
+      speed: splitSpeed,
+      easing: 'linear',
+    });
+    leftSpeedRamp = leftKeys;
+
+    // Right half: keyframes in [splitSourceTime, end]
+    const rightKeys = sorted.filter((kf) => kf.sourceTime > splitSourceTime);
+    rightKeys.unshift({
+      id: newKeyId(),
+      sourceTime: splitSourceTime,
+      speed: splitSpeed,
+      easing: 'linear',
+    });
+    rightSpeedRamp = rightKeys;
+  }
+
+  // REVERSED CLIPS: media is consumed BACKWARD — the left half plays
+  // [splitMediaTime … trimStart + S] and the right half continues from
+  // splitMediaTime toward trimStart. getMediaTimeForClip maps
+  //   elapsed → trimStart + sourceDuration − elapsed·speed,
+  // so the halves' trimStart must be adjusted for the mapping to stay
+  // continuous across the split point.
+  const rightSourceDuration = (clip.duration - relativeSplitTime) * speed;
+  const leftTrimStart = clip.isReversed
+    ? trimStart + (clip.duration - relativeSplitTime) * speed
+    : trimStart;
+  const rightTrimStart = clip.isReversed ? splitMediaTime - rightSourceDuration : splitMediaTime;
+
+  const leftTrimEnd = hasRamp
+    ? originalMediaDuration - splitMediaTime
+    : clip.isReversed
+      ? trimEnd
+      : trimEnd + (clip.duration - relativeSplitTime) * speed;
+
+  return {
+    leftTrimStart,
+    leftTrimEnd,
+    rightTrimStart,
+    splitMediaTime,
+    leftSpeedRamp,
+    rightSpeedRamp,
+  };
+}

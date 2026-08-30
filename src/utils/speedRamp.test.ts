@@ -21,6 +21,9 @@ import {
   getRampedClipSourceSpan,
   getRampedTrimStartForLeftResize,
   getRampedTrimEndForRightResize,
+  getSpeedRampEngine,
+  getMediaTimeForClip,
+  computeSplitHalvesMedia,
 } from './speedRamp';
 import type { SpeedRampKeyframe } from '../types';
 
@@ -194,5 +197,141 @@ describe('Keyframe drag solver (as used by the PropertiesPanel graph)', () => {
     const outEnd = solveKeyframeProgress(ramp, 2, 0.1, 0.5, 0, 0, 12);
     expect(outEnd[2].sourceTime).toBe(12);
     expect(outEnd[2].speed).toBe(0.5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPLIT HALF MEDIA MATH (computeSplitHalvesMedia)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('computeSplitHalvesMedia — clip splitting', () => {
+  function mediaAt(clip: any, t: number): number {
+    return getMediaTimeForClip(
+      {
+        id: clip.id ?? 'c',
+        startTime: clip.startTime,
+        duration: clip.duration,
+        trimStart: clip.trimStart ?? 0,
+        speed: clip.speed ?? 1,
+        speedRamp: clip.speedRamp,
+        isReversed: clip.isReversed,
+        freezeFrame: clip.freezeFrame,
+      },
+      t
+    );
+  }
+
+  const FLAT = {
+    id: 'c1',
+    startTime: 2,
+    duration: 10,
+    trimStart: 1,
+    trimEnd: 2,
+    speed: 1.5,
+  };
+
+  it('flat clip: halves are continuous at the split instant', () => {
+    const splitTime = 6;
+    const h = computeSplitHalvesMedia(FLAT as any, splitTime);
+    const orig = mediaAt(FLAT as any, splitTime);
+
+    const left = { ...FLAT, duration: 4, trimStart: h.leftTrimStart, trimEnd: h.leftTrimEnd };
+    const right = { ...FLAT, startTime: splitTime, duration: 6, trimStart: h.rightTrimStart };
+
+    expect(mediaAt(left as any, splitTime)).toBeCloseTo(orig, 6);
+    expect(mediaAt(right as any, splitTime)).toBeCloseTo(orig, 6);
+    // Non-reversed: right half starts exactly at the boundary source position.
+    expect(h.rightTrimStart).toBeCloseTo(FLAT.trimStart + 4 * FLAT.speed, 6);
+    // Left half keeps the original trimStart.
+    expect(h.leftTrimStart).toBe(FLAT.trimStart);
+    // Left trimEnd grows by the source consumed by the right half.
+    expect(h.leftTrimEnd).toBeCloseTo(FLAT.trimEnd + 6 * FLAT.speed, 6);
+    // Together the halves cover the original source span: 10 * 1.5.
+    expect(h.rightTrimStart + 6 * FLAT.speed).toBeCloseTo(FLAT.trimStart + 10 * FLAT.speed, 6);
+  });
+
+  it('trimmed ramped clip: boundary keyframe lands at the CORRECT source position (trim-aware)', () => {
+    // Ramp over source [0..12]: 0.5x then 2x. Clip trimmed to start at source 3.
+    const ramp = [K('a', 0, 0.5), K('b', 6, 0.5), K('c', 12, 2)];
+    const clip = { id: 'r1', startTime: 0, duration: 6, trimStart: 3, trimEnd: 0, speed: 1, speedRamp: ramp };
+    const engine = getSpeedRampEngine('r1', ramp);
+    const localStart = engine.sourceToTimeline(3); // timeline offset of trimStart
+    const rel = 2; // split 2s into the clip
+    const h = computeSplitHalvesMedia(clip as any, rel);
+    const splitSource = engine.timelineToSource(localStart + rel);
+
+    // The boundary keyframe must sit at the split SOURCE position — NOT at
+    // `rel` (2s), which was the old bug for trimmed ramps.
+    const leftLast = h.leftSpeedRamp![h.leftSpeedRamp!.length - 1];
+    expect(leftLast.sourceTime).toBeCloseTo(splitSource, 6);
+    expect(leftLast.sourceTime).toBeGreaterThan(rel + 1); // proves trim offset applied
+    expect(h.rightSpeedRamp![0].sourceTime).toBeCloseTo(splitSource, 6);
+    // Both halves' ramps render the same source frame at the split instant.
+    const orig = mediaAt(clip as any, rel);
+    const left = { ...clip, duration: rel, speedRamp: h.leftSpeedRamp, trimStart: h.leftTrimStart, trimEnd: h.leftTrimEnd };
+    const right = { ...clip, startTime: rel, duration: 6 - rel, speedRamp: h.rightSpeedRamp, trimStart: h.rightTrimStart };
+    expect(mediaAt(left as any, rel)).toBeCloseTo(orig, 4);
+    expect(mediaAt(right as any, rel)).toBeCloseTo(orig, 4);
+  });
+
+  it('ramped split: boundary speed equals the engine speed at the split source', () => {
+    const ramp = [K('a', 0, 0.5), K('b', 12, 2)];
+    const clip = { id: 'r2', startTime: 0, duration: 9, trimStart: 0, trimEnd: 0, speed: 1, speedRamp: ramp };
+    const h = computeSplitHalvesMedia(clip as any, 6);
+    const engine = getSpeedRampEngine('r2', ramp);
+    const splitSource = engine.timelineToSource(6);
+    expect(h.leftSpeedRamp![h.leftSpeedRamp!.length - 1].speed).toBeCloseTo(engine.getSpeedAtSourceTime(splitSource), 6);
+    expect(h.rightSpeedRamp![0].speed).toBeCloseTo(engine.getSpeedAtSourceTime(splitSource), 6);
+  });
+
+  it('reversed clip: halves stay continuous (no jump at the split point)', () => {
+    const rev = { ...FLAT, isReversed: true };
+    const splitTime = 6;
+    const h = computeSplitHalvesMedia(rev as any, splitTime);
+    const orig = mediaAt(rev as any, splitTime);
+
+    const left = { ...rev, duration: 4, trimStart: h.leftTrimStart, trimEnd: h.leftTrimEnd };
+    const right = { ...rev, startTime: splitTime, duration: 6, trimStart: h.rightTrimStart };
+
+    // The halves must show the same source frame at the split instant.
+    expect(mediaAt(left as any, splitTime)).toBeCloseTo(orig, 5);
+    expect(mediaAt(right as any, splitTime)).toBeCloseTo(orig, 5);
+    // Right half ends exactly where the original ended (trimStart).
+    expect(mediaAt(right as any, splitTime + 6)).toBeCloseTo(rev.trimStart, 5);
+    // Left half starts exactly where the original started (trimStart + S).
+    expect(mediaAt(left as any, rev.startTime)).toBeCloseTo(rev.trimStart + 10 * rev.speed, 5);
+  });
+
+  it('multiple sequential splits keep every boundary continuous (the "split many times" scenario)', () => {
+    let clip: any = { ...FLAT, id: 'm1' };
+    const splitTimes = [3.5, 5.0, 8.2, 9.0]; // successive splits of the right half
+    let nextStart = FLAT.startTime;
+    for (const rel of splitTimes) {
+      const t = FLAT.startTime + rel;
+      const h = computeSplitHalvesMedia(clip, t);
+      const left = {
+        ...clip,
+        duration: rel - (clip.startTime - FLAT.startTime),
+        trimStart: h.leftTrimStart,
+        trimEnd: h.leftTrimEnd,
+      };
+      const right = {
+        ...clip,
+        startTime: t,
+        duration: clip.duration - (rel - (clip.startTime - FLAT.startTime)),
+        trimStart: h.rightTrimStart,
+      };
+      // Left half is continuous with the pre-split clip at the split instant.
+      expect(mediaAt(left, t)).toBeCloseTo(mediaAt(clip, t), 5);
+      // Right half continues exactly where the left half ended.
+      expect(mediaAt(right, t)).toBeCloseTo(mediaAt(left, t), 5);
+      // Timeline coverage preserved: right half ends where the original ended.
+      expect(mediaAt(right, t + right.duration)).toBeCloseTo(FLAT.trimStart + 10 * FLAT.speed, 5);
+      clip = right;
+      nextStart = t;
+      void nextStart;
+    }
+    // The final chain still covers the full original source range.
+    expect(mediaAt(clip, FLAT.startTime + 10)).toBeCloseTo(FLAT.trimStart + 10 * FLAT.speed, 5);
   });
 });

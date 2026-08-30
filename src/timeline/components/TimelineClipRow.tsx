@@ -4,7 +4,7 @@ import { getKineticClipLabel, isKineticMediaId } from '@/utils/kineticSync';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem, EditorState, PipWindow } from '@/types';
 import { getTrackHeight } from '../trackGeometry';
-import { checkOverlapAt } from '../timelineUtils';
+
 import {
   CLIP_COLORS,
   DEFAULT_TRACK_HEIGHT,
@@ -586,7 +586,33 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 
 
       {/* ── Clips ──────────────────────────────────────── */}
-      {(track.clips || []).map((clip) => {
+      {(() => {
+        // PERF (many-split fix): overlapping-clip detection used to call
+        // checkOverlapAt() — an O(N) scan — for EVERY clip on the track, making
+        // a track render O(N²). Split-heavy timelines (100+ tiny segments) paid
+        // ~10k comparisons per render. One sorted sweep builds the overlapping
+        // id set in O(N log N) instead; non-overlapping split segments never
+        // even enter the set.
+        const clips = track.clips || [];
+        let overlapIds: Set<string> | null = null;
+        if (clips.length > 1) {
+          const sorted = [...clips].sort((a, b) => a.startTime - b.startTime);
+          overlapIds = new Set<string>();
+          let runEnd = -Infinity;
+          let runClips: TimelineClip[] = [];
+          for (const c of sorted) {
+            if (c.startTime < runEnd - 0.001) {
+              for (const rc of runClips) overlapIds.add(rc.id);
+              overlapIds.add(c.id);
+              runEnd = Math.max(runEnd, c.startTime + c.duration);
+              runClips.push(c);
+            } else {
+              runEnd = c.startTime + c.duration;
+              runClips = [c];
+            }
+          }
+        }
+        return (clips).map((clip) => {
         // P0 FIX: O(1) map lookup instead of O(N) .find() per clip per render
         // Kinetic-typography clips use synthetic `generator:*` mediaIds that are
         // deliberately absent from the media library, so they used to fall through
@@ -608,7 +634,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
         const showTrimHandles = isSelected && selectedClipIds.length === 1;
         const isDragging = draggingClipId === clip.id;
 
-        const hasOverlap = checkOverlapAt(track, clip.startTime, clip.duration, clip.id);
+        const hasOverlap = overlapIds ? overlapIds.has(clip.id) : false;
         // P0 FIX: O(1) map lookup instead of O(M) .filter() per clip per render
         const clipPipWindows = pipByParent.get(clip.id) ?? [];
 
@@ -640,7 +666,8 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             toggleKeyframeLineSelection={toggleKeyframeLineSelection}
           />
         );
-      })}
+        });
+      })()}
 
 
 
