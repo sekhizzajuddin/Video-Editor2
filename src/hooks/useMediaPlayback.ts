@@ -95,6 +95,12 @@ interface MediaElement {
   _rvfcHandle?: number | null;
   _rvfcRegistered?: boolean;
   _onVisibilityChange?: () => void;
+  // Shared-element bookkeeping: the registry key of the <video> element this
+  // entry uses, and the clip's time range (used to refuse sharing when two
+  // clips of one split chain are made to overlap).
+  _shareKey?: string;
+  _shareStart?: number;
+  _shareEnd?: number;
   audioCtx?: AudioContext;
   sourceNode?: MediaElementAudioSourceNode;
   pitchNode?: ScriptProcessorNode;
@@ -909,7 +915,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   useEffect(() => {
     if (!isPrimary) return;
     const ct = getPlaybackTime();
-    const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio' }>();
+    const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio'; shareKey: string; start: number; end: number }>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
 
     for (const track of sortedTracksRef.current) {
@@ -919,7 +925,19 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
           const prox = media.type === 'video' ? VIDEO_PROXIMITY_WINDOW : AUDIO_PROXIMITY_WINDOW;
           if (ct >= clip.startTime - prox && ct < clip.startTime + clip.duration + prox) {
-            neededClips.set(clip.id, { mediaId: clip.mediaId, type: media.type });
+            neededClips.set(clip.id, {
+              mediaId: clip.mediaId,
+              type: media.type,
+              // Split segments of ONE original clip share a <video> element;
+              // everything else (duplicates, same media on another track) must
+              // NOT share — they can be active simultaneously and would fight
+              // over the single element's currentTime.
+              shareKey: (clip as any).splitGroupId
+                ? `${clip.mediaId}::${(clip as any).splitGroupId}`
+                : `${clip.mediaId}::clip:${clip.id}`,
+              start: clip.startTime,
+              end: clip.startTime + clip.duration,
+            });
           }
         }
         const clipPips = Object.values(pipWindows).filter((p: any) => p.parentClipId === clip.id);
@@ -931,7 +949,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 const absStart = clip.startTime + pip.relativeStartTime + pipClip.startTime;
                 const prox = pipMedia.type === 'video' ? VIDEO_PROXIMITY_WINDOW : AUDIO_PROXIMITY_WINDOW;
                 if (ct >= absStart - prox && ct < absStart + pipClip.duration + prox) {
-                  neededClips.set(pipClip.id, { mediaId: pipClip.mediaId, type: pipMedia.type });
+                  neededClips.set(pipClip.id, {
+                    mediaId: pipClip.mediaId,
+                    type: pipMedia.type,
+                    // PiP clips never share elements — a PiP window can be open
+                    // while the parent clip is also on screen.
+                    shareKey: `${pipClip.mediaId}::clip:${pipClip.id}`,
+                    start: absStart,
+                    end: absStart + pipClip.duration,
+                  });
                 }
               }
             }
@@ -957,15 +983,31 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
 
           if (info.type === 'video') {
-            // ── SHARED ELEMENT: one <video> per media FILE ────────────────
-            // Split segments (and duplicated clips) reference the same media
-            // URL. Reuse a single element per mediaId so crossing a split
-            // boundary is a cheap seek on the SAME element instead of tearing
-            // down one element's src and el.load()'ing a fresh decoder on the
-            // next segment (which stuttered the preview on heavily-split
-            // clips). Refcounted: the element is destroyed only when the last
-            // referencing clip leaves the pool.
-            let el = mediaVideoEls.get(info.mediaId) || null;
+            // ── SHARED ELEMENT: one <video> per SPLIT CHAIN ────────────────
+            // Split segments of one original clip reference the same media and
+            // never overlap in time. Reuse a single element per split chain so
+            // crossing a split boundary is a cheap seek on the SAME element
+            // instead of tearing down one element's src and el.load()'ing a
+            // fresh decoder on the next segment (which stuttered the preview
+            // on heavily-split clips). Refcounted: the element is destroyed
+            // only when the last referencing clip leaves the pool.
+            // Duplicates / same media on two tracks get their own element
+            // (shareKey contains the clip id) so overlapping instances of the
+            // same file never fight over one element's currentTime.
+            let key = info.shareKey;
+            // If the user manually moved a split segment to OVERLAP a sibling,
+            // sharing would break both — detect the overlap and give this clip
+            // a dedicated element.
+            if (!key.includes('::clip:')) {
+              for (const [, e] of pool) {
+                if (e.type !== 'video' || e._shareKey !== key) continue;
+                if (info.start < (e._shareEnd ?? 0) - 0.001 && info.end > (e._shareStart ?? 0) + 0.001) {
+                  key = `${info.shareKey}::clip:${clipId}`;
+                  break;
+                }
+              }
+            }
+            let el = mediaVideoEls.get(key) || null;
             const elIsNew = !el;
             if (!el) {
               el = document.createElement('video');
@@ -986,9 +1028,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               // Hidden pool videos must never hijack Android's PiP / Cast UI.
               if ('disablePictureInPicture' in el) el.disablePictureInPicture = true;
               if ('disableRemotePlayback' in el) el.disableRemotePlayback = true;
-              mediaVideoEls.set(info.mediaId, el);
+              mediaVideoEls.set(key, el);
             }
-            mediaVideoRefCount.set(info.mediaId, (mediaVideoRefCount.get(info.mediaId) ?? 0) + 1);
+            mediaVideoRefCount.set(key, (mediaVideoRefCount.get(key) ?? 0) + 1);
 
         const handleSeeked = () => {
           triggerRedraw();
@@ -999,6 +1041,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         };
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
+        entry._shareKey = key;
+        entry._shareStart = info.start;
+        entry._shareEnd = info.end;
         entry._handleSeeked = handleSeeked;
         el.addEventListener('seeked', handleSeeked);
         el.addEventListener('timeupdate', triggerRedraw);
@@ -1105,21 +1150,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         entry.el.pause();
         const el = entry.el as any;
         if (entry._handleSeeked) el.removeEventListener('seeked', entry._handleSeeked);
-        if (entry.type === 'video') {
-          el.removeEventListener('timeupdate', triggerRedraw);
-          el.removeEventListener('canplay', triggerRedraw);
-          el.removeEventListener('loadedmetadata', triggerRedraw);
-          el.removeEventListener('loadeddata', triggerRedraw);
-          if (entry._mediaRetryLoad) {
-            el.removeEventListener('error', entry._mediaRetryLoad);
-            el.removeEventListener('stalled', entry._mediaRetryLoad);
-          }
-          if (entry._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
-            try { el.cancelVideoFrameCallback(entry._rvfcHandle); } catch { /* element gone */ }
-          }
-          if (entry._onVisibilityChange) {
-            document.removeEventListener('visibilitychange', entry._onVisibilityChange);
-          }
+        if (entry._mediaRetryLoad) {
+          el.removeEventListener('error', entry._mediaRetryLoad);
+          el.removeEventListener('stalled', entry._mediaRetryLoad);
         }
         if (entry.separationGraph) { try { entry.separationGraph.input.disconnect(); } catch (e) {} }
         if (entry.pitchNode) { try { entry.pitchNode.disconnect(); } catch (e) {} }
@@ -1130,15 +1163,30 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
         if (entry.type === 'video') {
           // Shared element: only tear the element down when the LAST clip
-          // referencing this media leaves the pool.
-          const remaining = (mediaVideoRefCount.get(entry.mediaId) ?? 1) - 1;
+          // referencing this split chain leaves the pool. The repaint
+          // listeners (timeupdate/canplay/rvfc/visibility) are SHARED on the
+          // element — removing them when a sibling segment is evicted would
+          // silently strip them from the segments that remain, so they are
+          // removed here at teardown only. Per-entry listeners (seeked,
+          // media-retry) were removed above.
+          const remaining = (mediaVideoRefCount.get(entry._shareKey ?? entry.mediaId) ?? 1) - 1;
           if (remaining <= 0) {
-            mediaVideoRefCount.delete(entry.mediaId);
-            mediaVideoEls.delete(entry.mediaId);
+            mediaVideoRefCount.delete(entry._shareKey ?? entry.mediaId);
+            mediaVideoEls.delete(entry._shareKey ?? entry.mediaId);
+            el.removeEventListener('timeupdate', triggerRedraw);
+            el.removeEventListener('canplay', triggerRedraw);
+            el.removeEventListener('loadedmetadata', triggerRedraw);
+            el.removeEventListener('loadeddata', triggerRedraw);
+            if (entry._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
+              try { el.cancelVideoFrameCallback(entry._rvfcHandle); } catch { /* element gone */ }
+            }
+            if (entry._onVisibilityChange) {
+              document.removeEventListener('visibilitychange', entry._onVisibilityChange);
+            }
             el.src = '';
             el.remove();
           } else {
-            mediaVideoRefCount.set(entry.mediaId, remaining);
+            mediaVideoRefCount.set(entry._shareKey ?? entry.mediaId, remaining);
           }
         } else {
           entry.el.src = '';
@@ -1162,10 +1210,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const media = mediaMapRef.current.get(entry.mediaId);
         if (!media || !media.url || media.url === 'PENDING_RESTORE') continue;
         const targetSrc = media.url;
-        // Media-level tag: the element is shared by every clip of this media
-        // (split segments), so a clip-level tag would reassign the src and
-        // restart the decoder for each segment during export.
-        if (assignClipMediaSrc(el as TaggedMediaElement, `media:${entry.mediaId}`, targetSrc)) {
+        // Element-level tag: the element is shared by every clip of this split
+        // chain, so a clip-level tag would reassign the src and restart the
+        // decoder for each segment during export.
+        if (assignClipMediaSrc(el as TaggedMediaElement, `media:${entry._shareKey ?? entry.mediaId}`, targetSrc)) {
           const pendingTime = pendingSeeksRef.current.get(clipId);
           if (pendingTime !== undefined) {
             el.currentTime = pendingTime;
@@ -1218,18 +1266,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       return 15;
     };
 
-    // ── DEDUPE BY MEDIA FILE ────────────────────────────────────────────────
-    // Split segments (and duplicated clips) share one <video> element, so they
-    // must also share ONE decoder slot. Keep the NEAREST clip per media as the
-    // representative that owns src assignment; the other segments of the same
-    // media are skipped entirely (their element already has the media's src,
-    // and the sync loop simply seeks it across segment boundaries). This is
-    // what stops repeated splits from rotating el.load() decode restarts as
-    // the playhead crosses each split point.
+    // ── DEDUPE BY SHARED ELEMENT KEY ───────────────────────────────────────
+    // Split segments share one <video> element, so they must also share ONE
+    // decoder slot. Keep the NEAREST clip per element key as the representative
+    // that owns src assignment; the other segments of the same chain are
+    // skipped entirely (their element already has the media's src, and the
+    // sync loop simply seeks it across segment boundaries). This is what stops
+    // repeated splits from rotating el.load() decode restarts as the playhead
+    // crosses each split point. Distinct element keys (duplicates, other
+    // tracks) each get their own slot.
     const mediaToEntry = new Map<string, typeof videoEntries[0]>();
     for (const ve of videoEntries) {
-      const existing = mediaToEntry.get(ve.entry.mediaId);
-      if (!existing || ve.dist < existing.dist) mediaToEntry.set(ve.entry.mediaId, ve);
+      const key = ve.entry._shareKey ?? ve.entry.mediaId;
+      const existing = mediaToEntry.get(key);
+      if (!existing || ve.dist < existing.dist) mediaToEntry.set(key, ve);
     }
     const repEntries = [...mediaToEntry.values()].sort((a, b) => a.dist - b.dist);
 
@@ -1246,10 +1296,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       if (isNear && canLoad) {
         const targetSrc = ve.media.url;
-        // Media-level src tag: every clip sharing this element dedupes against
-        // the same tag, so crossing a split boundary never reassigns the src
-        // (which would restart the decoder via el.load()).
-        const srcKey = `media:${ve.entry.mediaId}`;
+        // Element-level src tag: every clip sharing this element dedupes
+        // against the same tag, so crossing a split boundary never reassigns
+        // the src (which would restart the decoder via el.load()).
+        const srcKey = `media:${ve.entry._shareKey ?? ve.entry.mediaId}`;
         if (targetSrc === 'PENDING_RESTORE' || !targetSrc) {
           resolveMediaFile(ve.entry.mediaId)
             .then((file) => (file ? URL.createObjectURL(file) : null))

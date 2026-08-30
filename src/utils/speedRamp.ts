@@ -517,6 +517,7 @@ export interface SplitHalvesMedia {
   leftTrimStart: number;
   leftTrimEnd: number;
   rightTrimStart: number;
+  rightTrimEnd: number;
   splitMediaTime: number;
   leftSpeedRamp: SpeedRampKeyframe[] | undefined;
   rightSpeedRamp: SpeedRampKeyframe[] | undefined;
@@ -562,13 +563,14 @@ export function computeSplitHalvesMedia(
     splitTime
   );
 
-  const originalMediaDuration = hasRamp
-    ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
-    : clip.duration * speed;
-
   // Remap speed ramp keyframes for each half when a ramp exists.
   let leftSpeedRamp: SpeedRampKeyframe[] | undefined = clip.speedRamp;
   let rightSpeedRamp: SpeedRampKeyframe[] | undefined = clip.speedRamp;
+  // Source position the clip's playback ENDS at (trim-aware) — used for the
+  // left half's trimEnd so a TRIMMED ramped clip doesn't overstate how much
+  // source remains beyond the split.
+  let clipSourceEnd = trimStart + clip.duration * speed;
+  let localTimelineStart = 0;
 
   if (hasRamp) {
     const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
@@ -576,7 +578,8 @@ export function computeSplitHalvesMedia(
     // plays from trimStart onward — offset the split point by the trimmed
     // local start so the boundary keyframe lands at the correct source
     // position (bug fix: previously ignored trimStart entirely).
-    const localTimelineStart = engine.sourceToTimeline(trimStart);
+    localTimelineStart = engine.sourceToTimeline(trimStart);
+    clipSourceEnd = engine.timelineToSource(localTimelineStart + clip.duration);
     const splitSourceTime = engine.timelineToSource(localTimelineStart + safeRel);
     const splitSpeed = engine.getSpeedAtSourceTime(splitSourceTime);
 
@@ -615,16 +618,32 @@ export function computeSplitHalvesMedia(
     : trimStart;
   const rightTrimStart = clip.isReversed ? splitMediaTime - rightSourceDuration : splitMediaTime;
 
-  const leftTrimEnd = hasRamp
-    ? originalMediaDuration - splitMediaTime
-    : clip.isReversed
-      ? trimEnd
-      : trimEnd + (clip.duration - relativeSplitTime) * speed;
+  // trimEnd measures how much SOURCE remains beyond the half's coverage.
+  //   left half  covers [trimStart .. splitMediaTime]      → remaining = end − splitMediaTime
+  //   right half covers [splitMediaTime .. trimStart + S]  → remaining = original trimEnd
+  // REVERSED playback consumes source backward, so the halves' coverage is
+  // flipped:
+  //   left half  covers [splitMediaTime .. leftTrimStart]  → remaining = trimEnd + rel·s
+  //   right half covers [trimStart .. splitMediaTime]      → remaining = trimEnd + (d−rel)·s
+  // (The old code kept the original trimEnd on both reversed halves, which
+  // made expansion limits and source-span checks wrong after splitting a
+  // reversed clip.)
+  // Unified: leftTrimEnd = original trimEnd + (source the right half consumes
+  // past the split). For ramps the consumed source is (clipSourceEnd −
+  // splitMediaTime); for flat clips it is (d − rel)·s, which collapses the
+  // formula to the same expression as the trimEnd term.
+  const leftTrimEnd = clip.isReversed
+    ? trimEnd + relativeSplitTime * speed
+    : trimEnd + (clipSourceEnd - splitMediaTime);
+  const rightTrimEnd = clip.isReversed
+    ? trimEnd + (clip.duration - relativeSplitTime) * speed
+    : trimEnd;
 
   return {
     leftTrimStart,
     leftTrimEnd,
     rightTrimStart,
+    rightTrimEnd,
     splitMediaTime,
     leftSpeedRamp,
     rightSpeedRamp,

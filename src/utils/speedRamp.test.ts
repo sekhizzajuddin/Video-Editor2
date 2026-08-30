@@ -291,7 +291,7 @@ describe('computeSplitHalvesMedia — clip splitting', () => {
     const orig = mediaAt(rev as any, splitTime);
 
     const left = { ...rev, duration: 4, trimStart: h.leftTrimStart, trimEnd: h.leftTrimEnd };
-    const right = { ...rev, startTime: splitTime, duration: 6, trimStart: h.rightTrimStart };
+    const right = { ...rev, startTime: splitTime, duration: 6, trimStart: h.rightTrimStart, trimEnd: h.rightTrimEnd };
 
     // The halves must show the same source frame at the split instant.
     expect(mediaAt(left as any, splitTime)).toBeCloseTo(orig, 5);
@@ -300,6 +300,47 @@ describe('computeSplitHalvesMedia — clip splitting', () => {
     expect(mediaAt(right as any, splitTime + 6)).toBeCloseTo(rev.trimStart, 5);
     // Left half starts exactly where the original started (trimStart + S).
     expect(mediaAt(left as any, rev.startTime)).toBeCloseTo(rev.trimStart + 10 * rev.speed, 5);
+  });
+
+  it('reversed clip: halves report the CORRECT remaining-source trimEnd', () => {
+    // Original: trimStart=1, speed=1.5, duration=10 → S=15, trimEnd=2.
+    // Reversed coverage is [trimStart .. trimStart+S] played backwards.
+    const rev = { ...FLAT, isReversed: true };
+    const rel = 4;
+    const h = computeSplitHalvesMedia(rev as any, rev.startTime + rel);
+    // Left half covers source down to splitMediaTime (it plays [splitPoint →
+    // original start]); remaining after its highest source = trimEnd + rel·s.
+    expect(h.leftTrimEnd).toBeCloseTo(FLAT.trimEnd + rel * FLAT.speed, 6);
+    // Right half ends at splitMediaTime; remaining after = trimEnd + (d−rel)·s.
+    expect(h.rightTrimEnd).toBeCloseTo(FLAT.trimEnd + (10 - rel) * FLAT.speed, 6);
+    // Non-reversed keeps the original trimEnd on the right half.
+    const h2 = computeSplitHalvesMedia(FLAT as any, 6);
+    expect(h2.rightTrimEnd).toBe(FLAT.trimEnd);
+  });
+
+  it('trimmed ramped clip: left half trimEnd is trim-aware (source remaining in FILE)', () => {
+    // Ramp over source [0..12]: 0.5x then 2x. Clip trimmed to start at source 3
+    // and play 2s of TIMELINE: localStart = sourceToTimeline(3) = 6, so the
+    // clip covers timeline [6,8] = source [3,4] → its trimEnd must be 12−4 = 8
+    // for the clip to be self-consistent.
+    const ramp = [K('a', 0, 0.5), K('b', 6, 0.5), K('c', 12, 2)];
+    const clip = { id: 'r3', startTime: 0, duration: 2, trimStart: 3, trimEnd: 8, speed: 1, speedRamp: ramp };
+    const rel = 0.75;
+    const h = computeSplitHalvesMedia(clip as any, rel);
+    // clipSourceEnd = timelineToSource(6 + 2) = timelineToSource(8) = 4.
+    // splitMediaTime = timelineToSource(6 + 0.75) = 3.375.
+    // leftTrimEnd = trimEnd + (clipSourceEnd − splitMediaTime) = 8 + 0.625 = 8.625.
+    expect(h.leftTrimEnd).toBeCloseTo(8.625, 6);
+    // And the halves still render the same source frame at the split instant.
+    const orig = mediaAt(clip as any, rel);
+    const left = { ...clip, duration: rel, speedRamp: h.leftSpeedRamp, trimStart: h.leftTrimStart, trimEnd: h.leftTrimEnd };
+    const right = { ...clip, startTime: rel, duration: 2 - rel, speedRamp: h.rightSpeedRamp, trimStart: h.rightTrimStart, trimEnd: h.rightTrimEnd };
+    expect(mediaAt(left as any, rel)).toBeCloseTo(orig, 4);
+    expect(mediaAt(right as any, rel)).toBeCloseTo(orig, 4);
+    // Right half keeps the original file-remaining trimEnd.
+    expect(h.rightTrimEnd).toBe(8);
+    // Right half ends exactly at the clip's source end (4).
+    expect(mediaAt(right as any, 2)).toBeCloseTo(4, 4);
   });
 
   it('multiple sequential splits keep every boundary continuous (the "split many times" scenario)', () => {

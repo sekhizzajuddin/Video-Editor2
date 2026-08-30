@@ -2860,6 +2860,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             startTime: splitTime,
             duration: clip.duration - relativeSplitTime,
             trimStart: splitHalves.rightTrimStart,
+            trimEnd: splitHalves.rightTrimEnd,
             transitionIn: undefined, // Clear transition on the second half of the split
             speedRamp: rightSpeedRamp,
             animations: rightAnimations,
