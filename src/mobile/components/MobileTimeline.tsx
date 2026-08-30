@@ -384,10 +384,30 @@ export function MobileTimeline({
 
   const onPointerDownRuler = useCallback(
     (e: React.PointerEvent) => {
-      if (e.pointerType === 'touch') return;
+      e.stopPropagation();
+      // Deselect every clip when the user taps the ruler to jump.
+      const st = useEditorStore.getState();
+      if (st.selectedClipIds.length > 0 || st.selectedClipId) {
+        st.selectClip(null);
+      }
+      const wasPlaying = useEditorStore.getState().isPlaying;
+      if (wasPlaying) {
+        // Jump & continue: move the playhead instantly and keep playing.
+        const t = Math.max(0, timeAt(e.clientX));
+        seek(t);
+        // The mobile playhead is fixed at 50% of the viewport (time 0 sits at
+        // 50vw after the 48px rail + spacer), so scroll the tapped time
+        // directly under the playhead — otherwise playback would continue from
+        // a point that is off-screen.
+        isAutoScrolling.current = true;
+        if (scrollRef.current) {
+          scrollRef.current.scrollLeft = t * zoomLevel;
+        }
+        return;
+      }
       beginScrub(e);
     },
-    [beginScrub]
+    [beginScrub, seek, timeAt, zoomLevel]
   );
 
   const onPointerDownPlayhead = useCallback(
@@ -930,10 +950,12 @@ export function MobileTimeline({
                   />
                 )}
 
-            {/* Ruler (Visual timecode display only - tapping does not scrub) */}
+            {/* Ruler — tap to jump the playhead (also while playing: the playhead
+                instantly moves there and playback continues from that point) */}
             <div
-              className="relative border-b border-white/10 bg-[#16161a] pointer-events-none select-none"
+              className="relative border-b border-white/10 bg-[#16161a] select-none"
               style={{ height: RULER_H }}
+              onPointerDown={onPointerDownRuler}
             >
               {rulerTicks.map((tick) => (
                 <div key={tick.time} className="absolute bottom-0" style={{ left: tick.time * zoomLevel }}>

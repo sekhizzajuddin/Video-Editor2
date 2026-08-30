@@ -1279,9 +1279,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const storeTracks = store.tracks;
       const tracksChanged = storeTracks !== lastCachedStoreTracksRef.current;
       const timeWentBackward = ct < prevSyncCtRef.current - 0.5; // loop or seek-to-start
+      // During scrubbing the playhead can jump anywhere in one frame (a ruler
+      // click, a finger swipe), so never trust the boundary cache — recompute
+      // the active clip set from the exact playhead every scrub tick.
+      const timeJumpedForward = scrubbing && ct > nextClipBoundaryRef.current + 0.05;
       prevSyncCtRef.current = ct;
 
-      if (tracksChanged || ct >= nextClipBoundaryRef.current || timeWentBackward) {
+      if (tracksChanged || ct >= nextClipBoundaryRef.current || timeWentBackward || timeJumpedForward) {
         if (timeWentBackward) {
           // Reset boundary so next tick also recomputes (handles clips starting at t=0)
           nextClipBoundaryRef.current = 0;
@@ -1313,10 +1317,36 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       for (const c of clips) playingIds.add(c.clipId);
       const mediaMap = mediaMapRef.current;
 
-      // ---- 1. Scrubbing: pause everything ----
+      // ---- 1. Scrubbing: pause everything, but keep ACTIVE video elements
+      // following the scrub position so the preview updates in REAL TIME.
+      // (Previously we only paused here and returned — the video elements were
+      // never seeked until the drag ended, so the canvas kept drawing the
+      // pre-scrub frame the whole drag and only repainted after release.) ----
       if (scrubbing) {
         for (const [, entry] of pool) {
           if (!entry.el.paused) entry.el.pause();
+        }
+        for (const clip of clips) {
+          const entry = pool.get(clip.clipId);
+          if (!entry || entry.type !== 'video') continue;
+          const mediaItem = mediaMap.get(clip.mediaId);
+          const maxDuration = mediaItem ? mediaItem.duration : 10000;
+          const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+            id: clip.clipId,
+            startTime: clip.absStartTime,
+            duration: clip.clipDuration,
+            trimStart: clip.trimStart,
+            speed: clip.speed,
+            speedRamp: clip.speedRamp,
+            isReversed: clip.isReversed,
+            freezeFrame: clip.freezeFrame,
+          }, ct)));
+          const el = entry.el;
+          // Don't fight an in-flight seek — the element's 'seeked' listener
+          // triggers a canvas repaint the moment the new frame decodes.
+          if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.03) {
+            el.currentTime = mediaTime;
+          }
         }
         lastActiveClipIdsRef.current = playingIds;
         rafIdRef.current = requestAnimationFrame(syncLoop);
