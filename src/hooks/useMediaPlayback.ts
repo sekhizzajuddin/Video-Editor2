@@ -1732,7 +1732,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       } else {
         const shouldUnmuteBase = isPlaying && !globalMuted;
         if (entry.el.muted !== !shouldUnmuteBase) entry.el.muted = !shouldUnmuteBase;
-        if (entry.el.volume !== finalVolume) entry.el.volume = finalVolume;
+        const clampedVolume = Math.max(0, Math.min(1, finalVolume));
+        if (entry.el.volume !== clampedVolume) entry.el.volume = clampedVolume;
       }
     }
     // PERF: keyed off `audioParamTime` (10 Hz) rather than raw `currentTime` (~33 Hz).

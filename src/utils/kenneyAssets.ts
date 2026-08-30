@@ -7,7 +7,7 @@ export function getKenneyDefs(): string {
     // We assume Kenney isometric tiles are around 128x128 or 256x256, 
     // but SVG image will auto-scale if we don't provide width/height, 
     // or we can just use 128x128 as a safe default for <image>.
-    defs += `  <g id="${id}"><image href="${dataUri}" width="128" height="128" /></g>\n`;
+    defs += `  <g id="${id}"><image href="${dataUri}" xlink:href="${dataUri}" width="128" height="128" /></g>\n`;
   }
   defs += '</defs>';
   return defs;
