@@ -8,72 +8,40 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { 
-  Menu,
   X,
-  FileVideo,
-  Image as ImageIcon,
-  Volume2,
-  Search,
-  Check,
-  Folder,
-  Film,
-  Clock,
-  DownloadCloud,
-  PlaySquare,
-  FileAudio,
-  Settings2,
-  FileVideo2,
-  Play,
-  Zap,
-  UploadCloud,
-  Monitor,
-  Share2,
-  Music,
-  Speaker,
-  Maximize2,
-  Minimize2,
-  SkipBack,
-  SplitSquareHorizontal,
-  Layers,
-  PenTool,
-  Hash,
-  Shield,
-  Database,
-  Cpu,
-  Wifi,
-  Globe,
-  Map,
-  Compass,
-  Book,
-  Target,
-  Clapperboard,
+  FolderOpen,
+  Save,
+  FileUp,
+  Download,
+  RotateCcw,
   Undo2,
   Redo2,
   Scissors,
-  Hand,
-  MousePointer2,
-  ZoomIn,
-  Settings,
-  Download,
-  FolderOpen,
   Plus,
   Palette,
   ChevronDown,
-  RotateCcw,
-  ArrowLeftRight,
-  ArrowRightToLine,
-  ArrowLeftToLine,
-  Timer,
-  Save,
-  FileUp,
+  Clapperboard,
   Layout,
   Type,
-  MoveHorizontal,
-  SlidersHorizontal,
+  ZoomIn,
   MonitorPlay,
   Link,
   Activity,
   Sparkles,
+  Settings,
+  Search,
+  Command,
+  Film,
+  Music,
+  Image as ImageIcon,
+  Layers,
+  Video,
+  Mic,
+  Wand2,
+  Globe,
+  Clock,
+  HardDrive,
+  Share2,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import type { EditorTool } from '@/types';
@@ -86,8 +54,6 @@ import { toast } from 'sonner';
 
 export function TopToolbar() {
   const {
-    activeTool,
-    setActiveTool,
     undo,
     redo,
     historyIndex,
@@ -120,18 +86,6 @@ export function TopToolbar() {
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
-
-  const tools: { id: EditorTool; icon: any; label: string; shortcut: string }[] = [
-    { id: 'select', icon: MousePointer2, label: 'Select', shortcut: 'V' },
-    { id: 'trackSelect', icon: ArrowRightToLine, label: 'Track Select Forward', shortcut: 'A' },
-    { id: 'trackSelectBackward', icon: ArrowLeftToLine, label: 'Track Select Backward', shortcut: 'Shift+A' },
-    { id: 'ripple', icon: ArrowLeftRight, label: 'Ripple Edit', shortcut: 'B' },
-    { id: 'rateStretch', icon: Timer, label: 'Rate Stretch', shortcut: 'R' },
-    { id: 'slip', icon: SlidersHorizontal, label: 'Slip Tool', shortcut: 'Y' },
-    { id: 'slide', icon: MoveHorizontal, label: 'Slide Tool', shortcut: 'U' },
-    { id: 'split', icon: Scissors, label: 'Split', shortcut: 'C' },
-    { id: 'hand', icon: Hand, label: 'Hand', shortcut: 'H' },
-  ];
 
   const handleFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -185,7 +139,6 @@ export function TopToolbar() {
       return;
     }
 
-    // Fallback for browsers without File System Access API
     if (e && e.target && e.target.files) {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -220,7 +173,6 @@ export function TopToolbar() {
     setShowViewMenu(false);
   };
 
-  // FIX C8: Confirm before destructively resetting the project
   const handleCloseProject = async () => {
     const state = useEditorStore.getState();
     const hasContent = state.tracks.some(t => t.clips.length > 0);
@@ -230,7 +182,6 @@ export function TopToolbar() {
         'You have unsaved changes. Do you want to close this project without saving?'
       );
       if (!confirmed) {
-        // Option to save could be triggered here
         await handleSaveProjectFile();
         return;
       }
@@ -243,11 +194,11 @@ export function TopToolbar() {
     setShowFileMenu(false);
   };
 
-  // FIX H10: Close all menus when clicking outside the toolbar
   useEffect(() => {
     if (!showFileMenu && !showEditMenu && !showViewMenu && !showLayoutMenu) return;
     const handleOutsideClick = (e: MouseEvent) => {
-      if (!(e.target as Element).closest('.relative')) {
+      const target = e.target as Element;
+      if (!target.closest('#top-toolbar-root') && !target.closest('.toolbar-dropdown')) {
         setShowFileMenu(false);
         setShowEditMenu(false);
         setShowViewMenu(false);
@@ -259,40 +210,66 @@ export function TopToolbar() {
   }, [showFileMenu, showEditMenu, showViewMenu, showLayoutMenu]);
 
   return (
-    <div id="top-toolbar-root" className="h-12 bg-[#1e1e1e] border-b border-[#3e3e3e] flex items-center px-3 select-none z-50">
-      {/* Left: Logo + Menus */}
-      <div className="flex items-center gap-1">
-        <div className="flex items-center gap-2 mr-4">
-          <Clapperboard className="w-5 h-5 text-amber-400" />
-          <span className="text-sm font-semibold text-white tracking-wide">ProCut</span>
+    <div id="top-toolbar-root" className="h-[60px] bg-white/95 dark:bg-[#0f1219]/95 backdrop-blur-xl border-b border-slate-200 dark:border-[#1e242f] flex items-center px-4 select-none z-50 shadow-[0_1px_3px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_12px_rgba(0,0,0,0.3)]">
+      {/* Left: Brand + Workspace */}
+      <div className="flex items-center gap-4">
+        {/* Brand */}
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center shadow-md shadow-amber-500/20">
+            <Clapperboard className="w-4.5 h-4.5 text-white" />
+          </div>
+          <div className="flex flex-col leading-none">
+            <span className="text-[13px] font-bold tracking-tight text-slate-900 dark:text-white">ProCut</span>
+            <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 tracking-wider uppercase">Studio</span>
+          </div>
         </div>
 
-        {/* Workspace Layout Menu */}
-        <div className="relative ml-2 mr-2">
+        <div className="w-px h-6 bg-slate-200 dark:bg-[#1e242f] mx-1" />
+
+        {/* Workspace Switcher - Professional Pill */}
+        <div className="relative">
           <button
             onClick={() => { setShowLayoutMenu(!showLayoutMenu); setShowFileMenu(false); setShowEditMenu(false); setShowViewMenu(false); }}
-            className="px-3 py-1.5 text-xs text-amber-400 font-medium hover:text-amber-300 hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            className="h-8 px-3.5 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold flex items-center gap-2 shadow-sm hover:shadow-md transition-all hover:scale-[1.02] active:scale-[0.98]"
           >
-            <Layout className="w-3.5 h-3.5" /> Workspace: {workspaceLayout?.preset || 'Editing'} <ChevronDown className="w-3 h-3" />
+            <Layout className="w-3.5 h-3.5" />
+            {workspaceLayout?.preset || 'Editing'}
+            <ChevronDown className={`w-3 h-3 transition-transform ${showLayoutMenu ? 'rotate-180' : ''}`} />
           </button>
           {showLayoutMenu && (
-            <div className="absolute top-full left-0 mt-1 w-40 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
-              {['Editing', 'Color', 'Audio', 'Generative'].map((preset) => (
-                <button
-                  key={preset}
-                  onClick={() => {
-                    if (preset === 'Editing') setWorkspaceLayout({ preset: 'Editing', leftWidth: 250, rightWidth: 280, timelineHeight: 320 });
-                    if (preset === 'Color') setWorkspaceLayout({ preset: 'Color', leftWidth: 200, rightWidth: 400, timelineHeight: 320 });
-                    if (preset === 'Audio') setWorkspaceLayout({ preset: 'Audio', leftWidth: 200, rightWidth: 280, timelineHeight: 250 });
-                    if (preset === 'Generative') setWorkspaceLayout({ preset: 'Generative', leftWidth: 200, rightWidth: 0, timelineHeight: 250 });
-                    setShowLayoutMenu(false);
-                  }}
-                  className={`w-full px-3 py-2 text-xs text-left hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors ${workspaceLayout?.preset === preset ? 'text-amber-400' : 'text-[#a0a0a0]'}`}
-                >
-                  {preset === 'Generative' && <Sparkles className="w-3 h-3 text-purple-400" />}
-                  {preset}
-                </button>
-              ))}
+            <div className="toolbar-dropdown absolute top-full left-0 mt-2 w-52 bg-white dark:bg-[#151a23] border border-slate-200 dark:border-[#1e242f] rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-50 py-1.5 animate-scaleIn overflow-hidden">
+              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Workspaces</div>
+              {[
+                { id: 'Editing', label: 'Editing', icon: Film, desc: 'Standard editing' },
+                { id: 'Color', label: 'Color', icon: Palette, desc: 'Color grading' },
+                { id: 'Audio', label: 'Audio', icon: Music, desc: 'Audio mixing' },
+                { id: 'Generative', label: 'Generative', icon: Sparkles, desc: 'AI creation' },
+              ].map((preset) => {
+                const Icon = preset.icon;
+                const isActive = workspaceLayout?.preset === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    onClick={() => {
+                      if (preset.id === 'Editing') setWorkspaceLayout({ preset: 'Editing', leftWidth: 320, rightWidth: 360, timelineHeight: 320 });
+                      if (preset.id === 'Color') setWorkspaceLayout({ preset: 'Color', leftWidth: 260, rightWidth: 420, timelineHeight: 320 });
+                      if (preset.id === 'Audio') setWorkspaceLayout({ preset: 'Audio', leftWidth: 280, rightWidth: 360, timelineHeight: 280 });
+                      if (preset.id === 'Generative') setWorkspaceLayout({ preset: 'Generative', leftWidth: 280, rightWidth: 0, timelineHeight: 280 });
+                      setShowLayoutMenu(false);
+                    }}
+                    className={`w-full px-3 py-2.5 text-left flex items-center gap-3 transition-colors ${isActive ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400' : 'hover:bg-slate-50 dark:hover:bg-[#1e242f] text-slate-700 dark:text-slate-300'}`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isActive ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 dark:bg-[#1e242f] text-slate-500'}`}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold">{preset.label}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">{preset.desc}</div>
+                    </div>
+                    {isActive && <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -301,54 +278,49 @@ export function TopToolbar() {
         <div className="relative">
           <button
             onClick={() => { setShowFileMenu(!showFileMenu); setShowEditMenu(false); setShowViewMenu(false); setShowLayoutMenu(false); }}
-            className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            className={`h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${showFileMenu ? 'bg-slate-100 dark:bg-[#1e242f] text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-[#1a1f2b]'}`}
           >
-            File <ChevronDown className="w-3 h-3" />
+            File <ChevronDown className={`w-3 h-3 transition-transform ${showFileMenu ? 'rotate-180' : ''}`} />
           </button>
           {showFileMenu && (
-            <div className="absolute top-full left-0 mt-1 w-56 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
-              <button
-                onClick={() => { fileInputRef.current?.click(); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <FolderOpen className="w-3.5 h-3.5" /> Import Media
+            <div className="toolbar-dropdown absolute top-full left-0 mt-2 w-64 bg-white dark:bg-[#151a23] border border-slate-200 dark:border-[#1e242f] rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-50 py-1.5 animate-scaleIn overflow-hidden">
+              <div className="px-3 pb-1">
+                <button
+                  onClick={() => { fileInputRef.current?.click(); }}
+                  className="w-full h-9 px-3 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold flex items-center gap-2 hover:shadow-md transition-all"
+                >
+                  <FolderOpen className="w-4 h-4" /> Import Media
+                  <span className="ml-auto text-[10px] opacity-60">Ctrl+I</span>
+                </button>
+              </div>
+              <div className="h-px bg-slate-100 dark:bg-[#1e242f] my-1.5" />
+              <button onClick={handleSaveProjectFile} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-300">
+                <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-500/15 flex items-center justify-center"><Save className="w-3.5 h-3.5 text-amber-600 dark:text-amber-500" /></div>
+                <div className="flex-1"><div className="font-medium">Save Project</div><div className="text-[10px] text-slate-500">Save current work</div></div>
+                <span className="text-[10px] text-slate-400 font-mono">Ctrl+S</span>
               </button>
-              <button
-                onClick={handleSaveProjectFile}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <Save className="w-3.5 h-3.5 text-amber-400" /> Save Project
+              <button onClick={handleSaveProjectAs} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-300">
+                <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-[#1e242f] flex items-center justify-center"><HardDrive className="w-3.5 h-3.5" /></div>
+                <div className="flex-1"><div className="font-medium">Save As…</div><div className="text-[10px] text-slate-500">Create copy</div></div>
               </button>
-              <button
-                onClick={handleSaveProjectAs}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <Save className="w-3.5 h-3.5 text-amber-400 opacity-70" /> Save Project As...
+              <button onClick={(e) => handleOpenProjectFile(e as any)} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-300">
+                <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/15 flex items-center justify-center"><FileUp className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /></div>
+                <div className="flex-1"><div className="font-medium">Open Project</div><div className="text-[10px] text-slate-500">Load .procut file</div></div>
               </button>
-              <button
-                onClick={(e) => handleOpenProjectFile(e as any)}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File
+              <button onClick={() => { setShowRecentModal(true); setShowFileMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-300">
+                <div className="w-7 h-7 rounded-lg bg-violet-50 dark:bg-violet-500/15 flex items-center justify-center"><Clock className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" /></div>
+                <div className="flex-1"><div className="font-medium">Recent Projects</div><div className="text-[10px] text-slate-500">Recover autosaves</div></div>
               </button>
-              <button
-                onClick={() => { setShowRecentModal(true); setShowFileMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recovered Projects
+              <div className="h-px bg-slate-100 dark:bg-[#1e242f] my-1.5" />
+              <button onClick={() => { setShowExportModal(true); setShowFileMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-300">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 flex items-center justify-center"><Share2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /></div>
+                <div className="flex-1"><div className="font-medium">Export Video</div><div className="text-[10px] text-slate-500">Render final output</div></div>
+                <span className="text-[10px] text-slate-400 font-mono">Ctrl+E</span>
               </button>
-              <button
-                onClick={() => { setShowExportModal(true); setShowFileMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <Download className="w-3.5 h-3.5" /> Export Video
-              </button>
-              <div className="border-t border-[#3e3e3e] my-1" />
-              <button
-                onClick={handleCloseProject}
-                className="w-full px-3 py-2 text-xs text-left text-red-400 hover:text-red-300 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" /> Close Project (Home)
+              <div className="h-px bg-slate-100 dark:bg-[#1e242f] my-1.5" />
+              <button onClick={handleCloseProject} className="w-full px-3 py-2 text-xs text-left hover:bg-red-50 dark:hover:bg-red-500/10 flex items-center gap-2.5 transition-colors text-red-600 dark:text-red-400">
+                <div className="w-7 h-7 rounded-lg bg-red-50 dark:bg-red-500/15 flex items-center justify-center"><RotateCcw className="w-3.5 h-3.5" /></div>
+                <div className="flex-1"><div className="font-medium">Close Project</div><div className="text-[10px] opacity-70">Back to welcome</div></div>
               </button>
             </div>
           )}
@@ -357,86 +329,41 @@ export function TopToolbar() {
         {/* Edit Menu */}
         <div className="relative">
           <button
-            onClick={() => { setShowEditMenu(!showEditMenu); setShowFileMenu(false); setShowViewMenu(false); }}
-            className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            onClick={() => { setShowEditMenu(!showEditMenu); setShowFileMenu(false); setShowViewMenu(false); setShowLayoutMenu(false); }}
+            className={`h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${showEditMenu ? 'bg-slate-100 dark:bg-[#1e242f] text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-[#1a1f2b]'}`}
           >
-            Edit <ChevronDown className="w-3 h-3" />
+            Edit <ChevronDown className={`w-3 h-3 transition-transform ${showEditMenu ? 'rotate-180' : ''}`} />
           </button>
           {showEditMenu && (
-            <div className="absolute top-full left-0 mt-1 w-48 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
-              <button
-                onClick={() => { undo(); setShowEditMenu(false); }}
-                disabled={!canUndo}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 disabled:opacity-30 transition-colors"
-              >
-                <Undo2 className="w-3.5 h-3.5" /> Undo
+            <div className="toolbar-dropdown absolute top-full left-0 mt-2 w-64 bg-white dark:bg-[#151a23] border border-slate-200 dark:border-[#1e242f] rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-50 py-1.5 animate-scaleIn overflow-hidden">
+              <div className="flex items-center gap-1 px-2 pb-1">
+                <button onClick={() => { undo(); setShowEditMenu(false); }} disabled={!canUndo} className="flex-1 h-8 rounded-lg bg-slate-100 dark:bg-[#1e242f] hover:bg-slate-200 dark:hover:bg-[#252d3b] disabled:opacity-30 flex items-center justify-center gap-1.5 text-xs font-medium transition-colors">
+                  <Undo2 className="w-3.5 h-3.5" /> Undo
+                </button>
+                <button onClick={() => { redo(); setShowEditMenu(false); }} disabled={!canRedo} className="flex-1 h-8 rounded-lg bg-slate-100 dark:bg-[#1e242f] hover:bg-slate-200 dark:hover:bg-[#252d3b] disabled:opacity-30 flex items-center justify-center gap-1.5 text-xs font-medium transition-colors">
+                  <Redo2 className="w-3.5 h-3.5" /> Redo
+                </button>
+              </div>
+              <div className="h-px bg-slate-100 dark:bg-[#1e242f] my-1.5" />
+              <button onClick={() => { cutClip(); setShowEditMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 text-slate-700 dark:text-slate-300">
+                <Scissors className="w-4 h-4 text-slate-400" /> Cut <span className="ml-auto text-[10px] font-mono text-slate-400">Ctrl+X</span>
               </button>
-              <button
-                onClick={() => { redo(); setShowEditMenu(false); }}
-                disabled={!canRedo}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 disabled:opacity-30 transition-colors"
-              >
-                <Redo2 className="w-3.5 h-3.5" /> Redo
+              <button onClick={() => { copyClip('whole'); toast.success('Clip copied'); setShowEditMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 text-slate-700 dark:text-slate-300">
+                <Plus className="w-4 h-4 text-slate-400" /> Copy <span className="ml-auto text-[10px] font-mono text-slate-400">Ctrl+C</span>
               </button>
-              <div className="border-t border-[#3e3e3e] my-1" />
-              <button
-                onClick={() => { cutClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <Scissors className="w-3.5 h-3.5" /> Cut
+              <button onClick={() => { copyClip('style'); toast.success('Style copied'); setShowEditMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-violet-50 dark:hover:bg-violet-500/10 flex items-center gap-2.5 text-violet-600 dark:text-violet-400">
+                <Palette className="w-4 h-4" /> Copy Style <span className="ml-auto text-[10px] font-mono text-slate-400">Ctrl+Alt+C</span>
               </button>
-              <button
-                onClick={() => { copyClip('whole'); toast.success('Clip copied'); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Plus className="w-3.5 h-3.5" /> Copy
-                </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+C</span>
-              </button>
-              <button
-                onClick={() => { copyClip('style'); toast.success('Style copied'); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-purple-400 hover:text-purple-300 hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Palette className="w-3.5 h-3.5" /> Copy Style
-                </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+Alt+C</span>
-              </button>
-              <button
-                onClick={() => { pasteClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="w-3.5 h-3.5" /> Paste
-                </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+V</span>
+              <button onClick={() => { pasteClip(); setShowEditMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 text-slate-700 dark:text-slate-300">
+                <FolderOpen className="w-4 h-4 text-slate-400" /> Paste <span className="ml-auto text-[10px] font-mono text-slate-400">Ctrl+V</span>
               </button>
               {clipboardData?.clips?.length > 0 && (
-                <button
-                  onClick={() => {
-                    const clipType = clipboardData.type;
-                    const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
-                    pasteClip(pasteType as any);
-                    toast.success('Style pasted to clip');
-                    setShowEditMenu(false);
-                  }}
-                  className="w-full px-3 py-2 text-xs text-left text-purple-400 hover:text-purple-300 hover:bg-purple-950/30 flex items-center justify-between transition-colors font-medium"
-                >
-                  <div className="flex items-center gap-2">
-                    <Palette className="w-3.5 h-3.5" /> Paste Style
-                  </div>
-                  <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+Alt+V</span>
+                <button onClick={() => { const clipType = clipboardData.type; const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style'); pasteClip(pasteType as any); toast.success('Style pasted'); setShowEditMenu(false); }} className="w-full px-3 py-2 text-xs text-left bg-violet-50 dark:bg-violet-500/10 hover:bg-violet-100 dark:hover:bg-violet-500/20 flex items-center gap-2.5 text-violet-700 dark:text-violet-300 font-medium">
+                  <Palette className="w-4 h-4" /> Paste Style <span className="ml-auto text-[10px] font-mono">Ctrl+Alt+V</span>
                 </button>
               )}
-              <button
-                onClick={() => { duplicateClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Plus className="w-3.5 h-3.5" /> Duplicate
-                </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+D</span>
+              <button onClick={() => { duplicateClip(); setShowEditMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 text-slate-700 dark:text-slate-300">
+                <Layers className="w-4 h-4 text-slate-400" /> Duplicate <span className="ml-auto text-[10px] font-mono text-slate-400">Ctrl+D</span>
               </button>
             </div>
           )}
@@ -445,148 +372,101 @@ export function TopToolbar() {
         {/* View Menu */}
         <div className="relative">
           <button
-            onClick={() => { setShowViewMenu(!showViewMenu); setShowFileMenu(false); setShowEditMenu(false); }}
-            className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            onClick={() => { setShowViewMenu(!showViewMenu); setShowFileMenu(false); setShowEditMenu(false); setShowLayoutMenu(false); }}
+            className={`h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${showViewMenu ? 'bg-slate-100 dark:bg-[#1e242f] text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-[#1a1f2b]'}`}
           >
-            View <ChevronDown className="w-3 h-3" />
+            View <ChevronDown className={`w-3 h-3 transition-transform ${showViewMenu ? 'rotate-180' : ''}`} />
           </button>
           {showViewMenu && (
-            <div className="absolute top-full left-0 mt-1 w-40 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
-              <button
-                onClick={() => { useEditorStore.getState().zoomIn(); setShowViewMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <ZoomIn className="w-3.5 h-3.5" /> Zoom In
+            <div className="toolbar-dropdown absolute top-full left-0 mt-2 w-52 bg-white dark:bg-[#151a23] border border-slate-200 dark:border-[#1e242f] rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-50 py-1.5 animate-scaleIn overflow-hidden">
+              <button onClick={() => { useEditorStore.getState().zoomIn(); setShowViewMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 text-slate-700 dark:text-slate-300">
+                <ZoomIn className="w-4 h-4" /> Zoom In <span className="ml-auto text-[10px] font-mono text-slate-400">+</span>
               </button>
-              <button
-                onClick={() => { useEditorStore.getState().zoomOut(); setShowViewMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <ZoomIn className="w-3.5 h-3.5 rotate-180" /> Zoom Out
+              <button onClick={() => { useEditorStore.getState().zoomOut(); setShowViewMenu(false); }} className="w-full px-3 py-2 text-xs text-left hover:bg-slate-50 dark:hover:bg-[#1e242f] flex items-center gap-2.5 text-slate-700 dark:text-slate-300">
+                <ZoomIn className="w-4 h-4 rotate-180" /> Zoom Out <span className="ml-auto text-[10px] font-mono text-slate-400">-</span>
               </button>
-              <div className="border-t border-[#3e3e3e] my-1" />
-              <button
-                onClick={handleZoomToFit}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
-              >
-                <ZoomIn className="w-3.5 h-3.5 text-amber-400" /> Zoom to Fit
+              <div className="h-px bg-slate-100 dark:bg-[#1e242f] my-1" />
+              <button onClick={handleZoomToFit} className="w-full px-3 py-2 text-xs text-left hover:bg-amber-50 dark:hover:bg-amber-500/10 flex items-center gap-2.5 text-amber-700 dark:text-amber-400">
+                <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center"><ZoomIn className="w-3.5 h-3.5" /></div>
+                <div><div className="font-medium">Zoom to Fit</div><div className="text-[10px] opacity-70">Fit timeline</div></div>
               </button>
             </div>
           )}
         </div>
+
+        {/* Command Search Hint */}
+        <div className="hidden xl:flex items-center gap-2 ml-2 pl-3 border-l border-slate-200 dark:border-[#1e242f]">
+          <div className="h-7 px-2.5 rounded-full bg-slate-100 dark:bg-[#151a23] border border-slate-200 dark:border-[#1e242f] flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+            <Search className="w-3 h-3" />
+            <span>Search</span>
+            <div className="flex items-center gap-0.5 ml-1">
+              <kbd className="px-1 py-0.5 rounded bg-white dark:bg-[#1e242f] border border-slate-200 dark:border-[#2a303c] text-[10px] font-mono">⌘</kbd>
+              <kbd className="px-1 py-0.5 rounded bg-white dark:bg-[#1e242f] border border-slate-200 dark:border-[#2a303c] text-[10px] font-mono">K</kbd>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Center: Empty (Tools moved to Timeline header) */}
+      {/* Center: Spacer */}
       <div className="flex-1" />
 
-      {/* Right: Actions */}
-      <div className="flex items-center gap-2">
-        
-
-        
-
+      {/* Right: Actions - Professional Grouped */}
+      <div className="flex items-center gap-1.5">
         {clipboardData && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs rounded-full">
-            <span className="font-medium">
-              📋 Copied: {clipboardData.clips.length} Clip{clipboardData.clips.length !== 1 ? 's' : ''} 
-              ({clipboardData.type === 'clip' ? 'Media' : clipboardData.type === 'style' ? 'Style' : 'Whole'})
-            </span>
-            <button 
-              onClick={clearClipboard} 
-              className="p-0.5 hover:bg-amber-500/20 rounded-full transition-colors"
-              title="Clear Clipboard"
-            >
+          <div className="hidden lg:flex items-center gap-2 px-3 h-8 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs rounded-full font-medium animate-fadeIn">
+            <div className="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center">
+              <span className="text-[10px] text-white">📋</span>
+            </div>
+            {clipboardData.clips.length} copied
+            <button onClick={clearClipboard} className="w-5 h-5 rounded-full hover:bg-amber-100 dark:hover:bg-amber-500/20 flex items-center justify-center transition-colors" title="Clear">
               <X className="w-3 h-3" />
             </button>
           </div>
         )}
 
-        <button
-          onClick={() => syncSelectedClips()}
-          title="Sync Audio/Video"
-          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
-        >
-          <Link className="w-3.5 h-3.5" />
-          Sync
-        </button>
-
-        <button
-          onClick={() => setScopeSettings({ 
-            ...scopeSettings, 
-            enabled: !scopeSettings.enabled 
-          })}
-          title={scopeSettings.enabled ? "Hide Scopes" : "Show Scopes"}
-          className={`px-3 py-1.5 text-xs rounded flex items-center gap-1.5 transition-colors font-medium ${
-            scopeSettings.enabled 
-              ? 'bg-blue-600/30 text-blue-300 border border-blue-500/30' 
-              : 'bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0]'
-          }`}
-        >
-          <Activity className="w-3.5 h-3.5" />
-          Scopes
-        </button>
+        <div className="flex items-center gap-1 p-1 rounded-full bg-slate-100 dark:bg-[#151a23] border border-slate-200/60 dark:border-[#1e242f]">
+          <button onClick={() => syncSelectedClips()} title="Sync Audio/Video" className="w-8 h-8 rounded-full bg-white dark:bg-[#1e242f] border border-slate-200 dark:border-[#2a303c] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shadow-sm hover:shadow flex items-center justify-center transition-all">
+            <Link className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setScopeSettings({ ...scopeSettings, enabled: !scopeSettings.enabled })}
+            title={scopeSettings.enabled ? "Hide Scopes" : "Show Scopes"}
+            className={`w-8 h-8 rounded-full border shadow-sm flex items-center justify-center transition-all ${
+              scopeSettings.enabled ? 'bg-blue-600 border-blue-500 text-white shadow-blue-500/20' : 'bg-white dark:bg-[#1e242f] border-slate-200 dark:border-[#2a303c] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+          </button>
+          <button onClick={() => setShowTeleprompter(true)} title="Teleprompter" className="w-8 h-8 rounded-full bg-white dark:bg-[#1e242f] border border-slate-200 dark:border-[#2a303c] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shadow-sm hover:shadow flex items-center justify-center transition-all">
+            <MonitorPlay className="w-4 h-4" />
+          </button>
+        </div>
 
         <button
           type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('toggle-copilot', { detail: {} }));
-          }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.dispatchEvent(new CustomEvent('toggle-copilot', { detail: {} })); }}
           title="AI Copilot (Ctrl+/)"
-          className="px-3 py-1.5 bg-gradient-to-r from-purple-600/90 to-indigo-600/90 hover:from-purple-500 hover:to-indigo-500 text-white border border-purple-400/50 text-xs rounded-full flex items-center gap-1.5 transition-all font-semibold shadow-md shadow-purple-900/40"
+          className="h-8 px-3.5 rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-violet-500/20 hover:shadow-lg hover:shadow-violet-500/25 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-          AI Copilot
+          <Sparkles className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">AI</span>
         </button>
 
-        <button
-          onClick={() => setShowTeleprompter(true)}
-          title="Teleprompter"
-          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
-        >
-          <MonitorPlay className="w-3.5 h-3.5" />
-          Teleprompter
-        </button>
-
-        <button
-          onClick={() => setShowExportModal(true)}
-          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
-        >
+        <button onClick={() => setShowExportModal(true)} className="h-8 px-4 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-slate-900/10 dark:shadow-white/10 hover:shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]">
           <Download className="w-3.5 h-3.5" /> Export
         </button>
 
-        <button
-          onClick={() => setShowSettingsModal(true)}
-          title="Settings"
-          className="p-2 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
-        >
+        <div className="w-px h-6 bg-slate-200 dark:bg-[#1e242f] mx-1" />
+
+        <button onClick={() => setShowSettingsModal(true)} title="Settings" className="w-8 h-8 rounded-full bg-slate-100 dark:bg-[#151a23] border border-slate-200 dark:border-[#1e242f] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-[#1e242f] flex items-center justify-center transition-all shadow-sm hover:shadow">
           <Settings className="w-4 h-4" />
         </button>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept="video/*,audio/*,image/*"
-        onChange={handleFileImport}
-        className="hidden"
-      />
-      <input
-        ref={projectFileInputRef}
-        type="file"
-        accept=".procut,.json"
-        onChange={handleOpenProjectFile}
-        className="hidden"
-      />
+      <input ref={fileInputRef} type="file" multiple accept="video/*,audio/*,image/*" onChange={handleFileImport} className="hidden" />
+      <input ref={projectFileInputRef} type="file" accept=".procut,.json" onChange={handleOpenProjectFile} className="hidden" />
 
-      <RecentProjectsModal
-        isOpen={showRecentModal}
-        onClose={() => setShowRecentModal(false)}
-        onSelect={() => {}}
-      />
-
+      <RecentProjectsModal isOpen={showRecentModal} onClose={() => setShowRecentModal(false)} onSelect={() => {}} />
     </div>
   );
 }

@@ -887,7 +887,7 @@ export function PreviewCanvasContainer() {
   const activeCanvasHeight = (isExporting && exportHeight) ? exportHeight : previewHeight;
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e1e]">
+    <div className="flex flex-col h-full bg-[#0a0a0f]">
       {/* Header Toolbar */}
       <PreviewCanvasHeaderToolbar
         aspectRatio={aspectRatio}

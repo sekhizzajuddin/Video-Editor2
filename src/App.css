@@ -1,62 +1,93 @@
-/* Custom scrollbar for dark theme */
+/* Professional ProCut App Styles - Dark + Light Hybrid */
+
+/* Base scrollbar - handled in index.css, but keep for legacy */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3e3e3e;
-  border-radius: 3px;
+  background: #cbd5e1;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #2a303c;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #5e5e5e;
+  background: #94a3b8;
+  background-clip: content-box;
 }
 
-/* Firefox scrollbar */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #3e3e3e #1e1e1e;
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #3a424f;
+  background-clip: content-box;
 }
 
-/* Range input global styles */
+/* Range inputs - Professional styling */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  height: 4px;
-  background: #3e3e3e;
-  border-radius: 2px;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 9999px;
   outline: none;
+  transition: all 0.15s ease;
+}
+
+.dark input[type="range"] {
+  background: #1e293b;
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #f59e0b;
   cursor: pointer;
-  border: 2px solid white;
+  border: 3px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15), 0 0 0 1px rgba(245,158,11,0.2);
+  transition: all 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2), 0 0 0 2px rgba(245,158,11,0.3);
+}
+
+.dark input[type="range"]::-webkit-slider-thumb {
+  border-color: #1e242f;
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #f59e0b;
   cursor: pointer;
-  border: 2px solid white;
+  border: 3px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.dark input[type="range"]::-moz-range-thumb {
+  border-color: #1e242f;
 }
 
 /* Selection */
 ::selection {
-  background: rgba(245, 158, 11, 0.3);
-  color: white;
+  background: rgba(245, 158, 11, 0.25);
+  color: inherit;
 }
 
 /* Prevent text selection during drag */
@@ -70,17 +101,16 @@ canvas {
   image-rendering: -webkit-optimize-contrast;
 }
 
-/* Video preview canvas — smooth for real video frames */
 canvas.preview-canvas {
   image-rendering: auto;
 }
 
-/* Smooth transitions */
-.transition-colors {
-  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+/* Professional Transitions */
+.transition-professional {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Tooltip delay */
+/* Tooltip */
 .tooltip {
   position: relative;
 }
@@ -88,23 +118,26 @@ canvas.preview-canvas {
 .tooltip::after {
   content: attr(data-tip);
   position: absolute;
-  bottom: calc(100% + 4px);
+  bottom: calc(100% + 8px);
   left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 8px;
-  background: black;
+  transform: translateX(-50%) translateY(4px);
+  padding: 6px 10px;
+  background: #0f172a;
   color: white;
-  font-size: 10px;
-  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 .tooltip:hover::after {
   opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 /* Timeline clip frame strip */
@@ -123,26 +156,26 @@ canvas.preview-canvas {
   image-rendering: auto;
 }
 
-/* Waveform bars in timeline clips */
+/* Waveform bars */
 .clip-waveform {
   display: flex;
   align-items: center;
-  gap: 0.5px;
+  gap: 1px;
   padding: 2px;
   height: 100%;
 }
 
 .clip-waveform-bar {
   flex: 1;
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.5);
   border-radius: 1px;
   min-width: 1px;
 }
 
 /* Drag-drop overlay animation */
 @keyframes dropzone-pulse {
-  0%, 100% { border-color: rgba(245, 158, 11, 0.3); }
-  50% { border-color: rgba(245, 158, 11, 0.7); }
+  0%, 100% { border-color: rgba(245, 158, 11, 0.3); background: rgba(245,158,11,0.02); }
+  50% { border-color: rgba(245, 158, 11, 0.6); background: rgba(245,158,11,0.06); }
 }
 
 .drag-drop-zone-active {
@@ -156,21 +189,12 @@ canvas.preview-canvas {
 }
 
 .import-shimmer {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(245, 158, 11, 0.1) 50%,
-    transparent 100%
-  );
+  background: linear-gradient(90deg, transparent 0%, rgba(245, 158, 11, 0.08) 50%, transparent 100%);
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
 
-/* ── Cursor lock during timeline drag/trim/scrub ────────────────────────────
-   Force a single stable cursor for the whole interaction so the pointer does not
-   flicker between ew-resize / pointer / default as a clip's edge (and its 8px
-   resize handle) moves under a stationary pointer — especially near adjacent
-   clips where snapping clamps the edge while the pointer keeps travelling. */
+/* Cursor locks */
 html.procut-trim-cursor,
 html.procut-trim-cursor * { cursor: ew-resize !important; }
 html.procut-grab-cursor,
@@ -178,8 +202,88 @@ html.procut-grab-cursor * { cursor: grabbing !important; }
 html.procut-scrub-cursor,
 html.procut-scrub-cursor * { cursor: ew-resize !important; }
 
-/* Disable the clip's CSS transition while it is being dragged/trimmed so the
-   edge tracks the pointer 1:1 instead of lagging 75ms behind every frame update. */
 .procut-timeline-tracks .procut-clip-dragging {
   transition: none !important;
+}
+
+/* Professional Panel Shadows */
+.pro-panel-shadow-light {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.04);
+}
+
+.pro-panel-shadow-dark {
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3);
+}
+
+/* Resize Handles - Professional */
+.resize-handle-col {
+  position: relative;
+  background: #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.dark .resize-handle-col {
+  background: #1e293b;
+}
+
+.resize-handle-col:hover,
+.resize-handle-col:active {
+  background: #f59e0b;
+}
+
+.resize-handle-col::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 24px;
+  background: currentColor;
+  opacity: 0;
+  border-radius: 9999px;
+  transition: opacity 0.2s;
+}
+
+.resize-handle-col:hover::after {
+  opacity: 0.5;
+}
+
+.resize-handle-row {
+  position: relative;
+  background: #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.dark .resize-handle-row {
+  background: #1e293b;
+}
+
+.resize-handle-row:hover,
+.resize-handle-row:active {
+  background: #f59e0b;
+}
+
+/* Professional focus states */
+.pro-focus-ring {
+  outline: none;
+}
+
+.pro-focus-ring:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* Glass morphism for modals */
+.glass-modal {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.dark .glass-modal {
+  background: rgba(21, 26, 35, 0.95);
+  border-color: rgba(30, 41, 59, 0.8);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
 }
