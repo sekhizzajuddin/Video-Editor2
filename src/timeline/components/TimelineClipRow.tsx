@@ -4,7 +4,7 @@ import { getKineticClipLabel, isKineticMediaId } from '@/utils/kineticSync';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem, EditorState, PipWindow } from '@/types';
 import { getTrackHeight } from '../trackGeometry';
-import { checkOverlapAt } from '../timelineUtils';
+
 import {
   CLIP_COLORS,
   DEFAULT_TRACK_HEIGHT,
@@ -57,6 +57,10 @@ interface TimelineClipItemProps {
   zoomLevel: number;
   isSelected: boolean;
   isDragging: boolean;
+  // Trim handles are ONLY rendered on the single selected clip so neighbouring
+  // clips never show a trim cursor / grab area while another clip is being
+  // trimmed (multi-selection disables trimming entirely).
+  showTrimHandles: boolean;
   selectedTransitionClipId: string | null;
   activeTool: string;
   hoverCutClipId: string | null;
@@ -84,6 +88,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   zoomLevel,
   isSelected,
   isDragging,
+  showTrimHandles,
   selectedTransitionClipId,
   activeTool,
   hoverCutClipId,
@@ -249,8 +254,8 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         )}
       </div>
 
-      {/* ── Resize Handles (Visible on Hover) ──────────────── */}
-      {!trackLocked && (
+      {/* ── Resize Handles (only on the single selected clip) ──────────── */}
+      {showTrimHandles && !trackLocked && (
         <>
           <div 
             className="absolute left-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
@@ -581,7 +586,33 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 
 
       {/* ── Clips ──────────────────────────────────────── */}
-      {(track.clips || []).map((clip) => {
+      {(() => {
+        // PERF (many-split fix): overlapping-clip detection used to call
+        // checkOverlapAt() — an O(N) scan — for EVERY clip on the track, making
+        // a track render O(N²). Split-heavy timelines (100+ tiny segments) paid
+        // ~10k comparisons per render. One sorted sweep builds the overlapping
+        // id set in O(N log N) instead; non-overlapping split segments never
+        // even enter the set.
+        const clips = track.clips || [];
+        let overlapIds: Set<string> | null = null;
+        if (clips.length > 1) {
+          const sorted = [...clips].sort((a, b) => a.startTime - b.startTime);
+          overlapIds = new Set<string>();
+          let runEnd = -Infinity;
+          let runClips: TimelineClip[] = [];
+          for (const c of sorted) {
+            if (c.startTime < runEnd - 0.001) {
+              for (const rc of runClips) overlapIds.add(rc.id);
+              overlapIds.add(c.id);
+              runEnd = Math.max(runEnd, c.startTime + c.duration);
+              runClips.push(c);
+            } else {
+              runEnd = c.startTime + c.duration;
+              runClips = [c];
+            }
+          }
+        }
+        return (clips).map((clip) => {
         // P0 FIX: O(1) map lookup instead of O(N) .find() per clip per render
         // Kinetic-typography clips use synthetic `generator:*` mediaIds that are
         // deliberately absent from the media library, so they used to fall through
@@ -598,9 +629,12 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             : defaultMedia
         );
         const isSelected = selectedClipIds.includes(clip.id);
+        // Trimming is only offered on the single selected clip — neighbouring
+        // clips (and multi-selections) never get trim handles or trim cursors.
+        const showTrimHandles = isSelected && selectedClipIds.length === 1;
         const isDragging = draggingClipId === clip.id;
 
-        const hasOverlap = checkOverlapAt(track, clip.startTime, clip.duration, clip.id);
+        const hasOverlap = overlapIds ? overlapIds.has(clip.id) : false;
         // P0 FIX: O(1) map lookup instead of O(M) .filter() per clip per render
         const clipPipWindows = pipByParent.get(clip.id) ?? [];
 
@@ -614,6 +648,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             zoomLevel={zoomLevel}
             isSelected={isSelected}
             isDragging={isDragging}
+            showTrimHandles={showTrimHandles}
             selectedTransitionClipId={selectedTransitionClipId}
             activeTool={activeTool}
             hoverCutClipId={hoverCutClipId}
@@ -631,7 +666,8 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             toggleKeyframeLineSelection={toggleKeyframeLineSelection}
           />
         );
-      })}
+        });
+      })()}
 
 
 

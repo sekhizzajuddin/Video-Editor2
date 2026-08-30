@@ -37,7 +37,12 @@ import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
-import { getMediaTimeForClip } from '@/utils/speedRamp';
+import {
+  getMediaTimeForClip,
+  getRampedTrimStartForLeftResize,
+  getRampedTrimEndForRightResize,
+  getSpeedRampEngine,
+} from '@/utils/speedRamp';
 import { formatCentisecondTime } from '@/timeline';
 import { ArrangeModeOverlay } from '@/timeline/components/ArrangeModeOverlay';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
@@ -200,6 +205,30 @@ export function MobileTimeline({
       lastScrollTime = now;
       isAutoScrolling.current = true;
       scrollRef.current.scrollLeft = getPlaybackTime() * zoomLevel;
+    });
+    return unsub;
+  }, [zoomLevel]);
+
+  // Mobile: the playhead is fixed at 50% of the viewport, so when the user
+  // taps the ruler while playing, the timeline must scroll so the tapped
+  // point lands under the playhead — otherwise playback would continue from a
+  // time that is off-screen. We honor seeks by comparing against the last
+  // known time (the clock advances smoothly during playback, so a large jump
+  // can only be an external seek like a ruler tap).
+  const lastFollowTimeRef = useRef(0);
+  useEffect(() => {
+    lastFollowTimeRef.current = getPlaybackTime();
+    const unsub = subscribePlaybackTime(() => {
+      if (!useEditorStore.getState().isPlaying || isUserScrolling.current) return;
+      if (!scrollRef.current) return;
+      const t = getPlaybackTime();
+      if (Math.abs(t - lastFollowTimeRef.current) > 1.5) {
+        lastFollowTimeRef.current = t;
+        isAutoScrolling.current = true;
+        scrollRef.current.scrollLeft = t * zoomLevel;
+      } else {
+        lastFollowTimeRef.current = t;
+      }
     });
     return unsub;
   }, [zoomLevel]);
@@ -379,10 +408,23 @@ export function MobileTimeline({
 
   const onPointerDownRuler = useCallback(
     (e: React.PointerEvent) => {
-      if (e.pointerType === 'touch') return;
+      e.stopPropagation();
+      // Deselect every clip when the user taps the ruler to jump.
+      const st = useEditorStore.getState();
+      if (st.selectedClipIds.length > 0 || st.selectedClipId) {
+        st.selectClip(null);
+      }
+      const wasPlaying = useEditorStore.getState().isPlaying;
+      if (wasPlaying) {
+        // Jump & continue: move the playhead instantly and keep playing.
+        // The follow subscription above scrolls the tapped time under the
+        // fixed 50%-viewport playhead (instant, via the seek jump detection).
+        seek(Math.max(0, timeAt(e.clientX)));
+        return;
+      }
       beginScrub(e);
     },
-    [beginScrub]
+    [beginScrub, seek, timeAt]
   );
 
   const onPointerDownPlayhead = useCallback(
@@ -493,15 +535,30 @@ export function MobileTimeline({
           });
         } else {
           const speed = clip.speed || 1;
-          const minDelta = Math.max(-drag.startStart, -drag.startTrimStart / speed);
+          const isRamped = clip.speedRamp && clip.speedRamp.length >= 2;
+          const media = mediaMap.get(clip.mediaId);
+          const sourceDuration = media?.duration ?? (clip.duration * speed + clip.trimStart + clip.trimEnd);
+          // Ramp-aware max left expansion: how much timeline the clip can grow
+          // before it hits the start of the source media.
+          const maxExpandLeft = isRamped
+            ? getSpeedRampEngine(clip.id, clip.speedRamp).sourceToTimeline(clip.trimStart)
+            : clip.trimStart / speed;
+          const minDelta = Math.max(-drag.startStart, -maxExpandLeft);
           const delta = Math.max(minDelta, newStart - drag.startStart);
           const newDuration = Math.max(MIN_DURATION, clip.duration - delta);
           const clampedStart = clip.duration - newDuration + drag.startStart;
+          const shift = clampedStart - drag.startStart;
+          const newTrimStart = isRamped
+            ? getRampedTrimStartForLeftResize(
+                { ...clip, trimStart: drag.startTrimStart, speed: speed },
+                shift
+              )
+            : Math.max(0, drag.startTrimStart + shift * speed);
           setPreview({
             clipId: clip.id,
             startTime: clampedStart,
             duration: newDuration,
-            trimStart: Math.max(0, drag.startTrimStart + (clampedStart - drag.startStart) * speed),
+            trimStart: newTrimStart,
             trimEnd: clip.trimEnd,
           });
         }
@@ -532,21 +589,38 @@ export function MobileTimeline({
           });
         } else {
           const speed = clip.speed || 1;
-          const maxDelta = drag.startTrimEnd / speed;
+          const isRamped = clip.speedRamp && clip.speedRamp.length >= 2;
+          const media = mediaMap.get(clip.mediaId);
+          const sourceDuration = media?.duration ?? (clip.duration * speed + clip.trimStart + clip.trimEnd);
+          // Ramp-aware max right expansion: how much timeline the clip can grow
+          // before it hits the end of the source media.
+          const maxDelta = isRamped
+            ? (() => {
+                const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
+                return engine.sourceToTimeline(sourceDuration) - engine.sourceToTimeline(sourceDuration - drag.startTrimEnd);
+              })()
+            : drag.startTrimEnd / speed;
           const delta = Math.min(maxDelta, newEnd - drag.startEnd);
           const newDuration = Math.max(MIN_DURATION, clip.duration + delta);
+          const newTrimEnd = isRamped
+            ? getRampedTrimEndForRightResize(
+                { ...clip, trimStart: clip.trimStart, speed: speed },
+                newDuration,
+                sourceDuration
+              )
+            : Math.max(0, drag.startTrimEnd - delta * speed);
           setPreview({
             clipId: clip.id,
             startTime: clip.startTime,
             duration: newDuration,
             trimStart: clip.trimStart,
-            trimEnd: Math.max(0, drag.startTrimEnd - delta * speed),
+            trimEnd: newTrimEnd,
           });
         }
         return;
       }
     },
-    [timeAt, clipMap, snapTime, seek, activeTool]
+    [timeAt, clipMap, mediaMap, snapTime, seek, activeTool]
   );
 
   const onPointerUp = useCallback(() => {
@@ -893,10 +967,12 @@ export function MobileTimeline({
                   />
                 )}
 
-            {/* Ruler (Visual timecode display only - tapping does not scrub) */}
+            {/* Ruler — tap to jump the playhead (also while playing: the playhead
+                instantly moves there and playback continues from that point) */}
             <div
-              className="relative border-b border-white/10 bg-[#16161a] pointer-events-none select-none"
+              className="relative border-b border-white/10 bg-[#16161a] select-none"
               style={{ height: RULER_H }}
+              onPointerDown={onPointerDownRuler}
             >
               {rulerTicks.map((tick) => (
                 <div key={tick.time} className="absolute bottom-0" style={{ left: tick.time * zoomLevel }}>
@@ -923,6 +999,9 @@ export function MobileTimeline({
                     const dc = displayClip(clip);
                     const media = mediaMap.get(clip.mediaId);
                     const isSelected = selectedClipId === clip.id;
+                    // Trim handles only appear on the SINGLE selected clip —
+                    // multi-selections never offer trimming.
+                    const showTrimHandles = isSelected && selectedClipIds.length === 1;
                     const left = dc.startTime * zoomLevel;
                     const width = Math.max(MIN_CLIP_W, dc.duration * zoomLevel);
                     const isVideo = media?.type === 'video' || (!clip.textSettings && !clip.fxSettings && media?.type !== 'audio');
@@ -974,7 +1053,7 @@ export function MobileTimeline({
                         </span>
 
                         {/* Trim handles on selected clip */}
-                        {isSelected && (
+                        {showTrimHandles && (
                           <>
                             <div
                               className="absolute inset-y-0 left-0 z-20 flex w-[14px] items-center justify-center bg-white shadow-md cursor-ew-resize"

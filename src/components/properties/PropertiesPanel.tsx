@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
-import { useState, useRef, useEffect, useCallback, Fragment, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
 import { TEXT_TEMPLATES, presetToTextAnimationPatch } from '@/utils/textTemplates';
 import { Client } from '@gradio/client';
@@ -57,7 +57,9 @@ import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
 const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
-import { getSpeedAtPosition, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
+import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
+import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
+import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
 import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } from '@/types';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
@@ -457,6 +459,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const [showTunedToast, setShowTunedToast] = useState(false);
   const [voiceTuneResults, setVoiceTuneResults] = useState<VoiceTuneResult[]>([]);
+  const [isMatchingVocals, setIsMatchingVocals] = useState(false);
+  const [vocalMatchResults, setVocalMatchResults] = useState<VocalMatchRow[]>([]);
+  const [vocalMatchError, setVocalMatchError] = useState<string | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [trackProgress, setTrackProgress] = useState(0);
   const { videoElements } = useMediaPlayback(false);
@@ -1127,74 +1132,151 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     };
   }, [isPickingChromaColor, selectedClip?.id, storeUpdateClip]);
 
-  useEffect(() => {
-    if (draggingIndex === null || !selectedClip) return;
+  // ─────────────────────────────────────────────────────────────────────────
+  // SPEED-RAMP GRAPH INTERACTION (FIXED)
+  // -------------------------------------------------------------------------
+  // The old implementation had several bugs:
+  //  1. It listened for `mousemove`/`mouseup` on `document` and re-subscribed
+  //     the listeners on EVERY store update (selectedClip changes identity on
+  //     every ramp edit), so events got dropped mid-drag → jerky movement.
+  //  2. The graph's X axis was the RAMPED timeline: dragging one keyframe
+  //     re-mapped EVERY other keyframe (they slid around and the ramp visibly
+  //     changed at points other than the playhead / dragged point), and the
+  //     pointer→source conversion through the changing engine meant the
+  //     keyframe never stayed under the cursor — the cursor flickered between
+  //     `grab` (circle) and `crosshair` (svg) and the curve jittered.
+  //  3. Mouse events only — touch (mobile) could not drag keyframes at all.
+  //  4. A `click` fired after a drag released over the graph added an
+  //     unexpected keyframe (the "ramps other points than I dragged" bug).
+  //
+  // New implementation:
+  //  - The X axis is the clip's covered SOURCE range (trimStart..trimStart+
+  //    span), so keyframe positions are a LINEAR function of their sourceTime:
+  //    dragging a keyframe moves ONLY that keyframe, the curve updates only
+  //    between its neighbours, and the keyframe lands EXACTLY under the
+  //    pointer every frame — zero feedback, zero flicker.
+  //  - Pointer events + pointer capture on the SVG (mouse/touch/pen all work).
+  //  - Handlers read the LATEST clip straight from the store (no stale closure).
+  //  - Clicks that immediately follow a drag/click are suppressed so a drag
+  //    release can never create a stray keyframe.
+  // ─────────────────────────────────────────────────────────────────────────
+  const rampDragRef = useRef<{
+    clipId: string;
+    idx: number;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressRampClickRef = useRef(0);
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!svgRef.current) return;
-      const rect = svgRef.current.getBoundingClientRect();
-      let p = (e.clientX - rect.left) / rect.width;
-      let sY = (e.clientY - rect.top) / rect.height;
+  // Source seconds the clip actually covers on the graph's X axis.
+  const rampGraphSpan = useCallback((clip: any, mediaDuration: number) => {
+    return Math.max(0.001, mediaDuration - (clip.trimStart ?? 0) - (clip.trimEnd ?? 0));
+  }, []);
 
-      p = Math.max(0, Math.min(1, p));
-      let speed = 0.1 + (1 - sY) * 3.9;
-      speed = Math.max(0.1, Math.min(4.0, speed));
-      speed = Math.round(speed * 100) / 100;
+  const applyRampUpdate = useCallback((liveClip: any, newRamp: SpeedRampKeyframe[], mediaDuration: number) => {
+    const tempEngine = new SpeedRampEngine(newRamp);
+    const sourceEnd = mediaDuration - liveClip.trimEnd;
+    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(liveClip.trimStart);
+    updateClip(liveClip.id, {
+      speedRamp: newRamp,
+      duration: Math.max(0.1, newDuration),
+    }, { ripple: true });
+  }, [updateClip]);
 
-      const ramp = [...(selectedClip.speedRamp || [])];
-      if (ramp[draggingIndex]) {
-        const isBoundary = draggingIndex === 0 || draggingIndex === ramp.length - 1;
-        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-
-        // Convert timeline progress p to sourceTime using active engine
-        const engine = getSpeedRampEngine(selectedClip.id, selectedClip.speedRamp);
-        const localTimelineStart = engine.sourceToTimeline(selectedClip.trimStart);
-        const targetTimelineTime = localTimelineStart + p * selectedClip.duration;
-        const newSourceTime = engine.timelineToSource(targetTimelineTime);
-
-        // Clamp to neighbors to prevent out-of-order keyframes
-        const minSource = draggingIndex > 0 ? ramp[draggingIndex - 1].sourceTime + 0.05 : 0.0;
-        const maxSource = draggingIndex < ramp.length - 1 ? ramp[draggingIndex + 1].sourceTime - 0.05 : maxDuration;
-
-        ramp[draggingIndex] = {
-          ...ramp[draggingIndex],
-          sourceTime: isBoundary ? (draggingIndex === 0 ? 0.0 : maxDuration) : Math.max(minSource, Math.min(maxSource, newSourceTime)),
-          speed: speed,
-        };
-
-        // Recalculate timeline duration based on new speed ramp curve
-        const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
-        const tempEngine = new SpeedRampEngine(sortedRamp);
-        const sourceEnd = maxDuration - selectedClip.trimEnd;
-        const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-
-        updateClip(selectedClip.id, {
-          speedRamp: sortedRamp,
-          duration: Math.max(0.1, newDuration),
-        }, { ripple: true });
-      }
+  const handleRampPointerDown = (e: React.PointerEvent, idx: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const svg = svgRef.current;
+    if (svg) {
+      try { svg.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
+    }
+    rampDragRef.current = {
+      clipId: selectedClip?.id ?? '',
+      idx,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
     };
+    setDraggingIndex(idx);
+  };
 
-    const handleMouseUp = () => {
-      setDraggingIndex(null);
+  const handleRampPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const drag = rampDragRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    if (Math.abs(e.clientX - drag.startX) > 3 || Math.abs(e.clientY - drag.startY) > 3) {
+      drag.moved = true;
+    }
+
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0.001 || rect.height <= 0.001) return;
+    let p = (e.clientX - rect.left) / rect.width;
+    const sY = (e.clientY - rect.top) / rect.height;
+    p = Math.max(0, Math.min(1, p));
+    let speed = 0.1 + (1 - sY) * 3.9;
+    speed = Math.max(0.1, Math.min(4.0, speed));
+    speed = Math.round(speed * 100) / 100;
+
+    // Read the LATEST clip state — never a stale closure.
+    const state = useEditorStore.getState();
+    const live = findClipDeep(state, drag.clipId)?.clip;
+    if (!live || !live.speedRamp || live.speedRamp.length < 2) return;
+    if (drag.idx >= live.speedRamp.length) return;
+
+    const mediaItem = state.mediaLibrary.find((m) => m.id === live.mediaId);
+    const maxDuration = mediaItem ? mediaItem.duration : live.duration;
+    const span = rampGraphSpan(live, maxDuration);
+    const isBoundary = drag.idx === 0 || drag.idx === live.speedRamp.length - 1;
+
+    const newRamp = [...live.speedRamp];
+    // Linear pointer → source mapping: the keyframe follows the cursor 1:1.
+    let newSourceTime = live.trimStart + p * span;
+    if (isBoundary) {
+      // Boundary keyframes are pinned horizontally — only speed changes.
+      newSourceTime = drag.idx === 0 ? 0 : maxDuration;
+    } else {
+      // Clamp between neighbours + the clip's covered source range.
+      const lo = Math.max(live.speedRamp[drag.idx - 1].sourceTime + 0.05, live.trimStart + 0.0001);
+      const hi = Math.min(live.speedRamp[drag.idx + 1].sourceTime - 0.05, live.trimStart + span - 0.0001);
+      newSourceTime = Math.max(lo, Math.min(hi, newSourceTime));
+    }
+    newRamp[drag.idx] = { ...newRamp[drag.idx], sourceTime: newSourceTime, speed };
+    newRamp.sort((a, b) => a.sourceTime - b.sourceTime);
+
+    applyRampUpdate(live, newRamp, maxDuration);
+  };
+
+  const handleRampPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    const drag = rampDragRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    rampDragRef.current = null;
+    setDraggingIndex(null);
+    const svg = svgRef.current;
+    if (svg) {
+      try { svg.releasePointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+    }
+    // Suppress the click that follows any pointer interaction on the graph so
+    // releasing a drag (or double-clicking a keyframe away) never spawns a
+    // stray keyframe at the release point.
+    suppressRampClickRef.current = Date.now();
+    if (drag.moved) {
       scheduleSaveSnapshot();
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [draggingIndex, selectedClip, updateClip, mediaLibrary]);
+    }
+  };
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
     const target = e.target as SVGElement;
     if (target.tagName === 'circle') return;
+    if (Date.now() - suppressRampClickRef.current < 350) return;
 
     if (!svgRef.current || !selectedClip) return;
     const rect = svgRef.current.getBoundingClientRect();
+    if (rect.width <= 0.001) return;
     let p = (e.clientX - rect.left) / rect.width;
     let sY = (e.clientY - rect.top) / rect.height;
 
@@ -1203,31 +1285,29 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     speed = Math.max(0.1, Math.min(4.0, speed));
     speed = Math.round(speed * 100) / 100;
 
-    const ramp = [...(selectedClip.speedRamp || [])];
-    const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-    const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+    const state = useEditorStore.getState();
+    const live = findClipDeep(state, selectedClip.id)?.clip || selectedClip;
+    const mediaItem = state.mediaLibrary.find((m) => m.id === live.mediaId);
+    const maxDuration = mediaItem ? mediaItem.duration : live.duration;
+    const sourceEnd = maxDuration - live.trimEnd;
 
-    const engine = getSpeedRampEngine(selectedClip.id, selectedClip.speedRamp);
-    const localTimelineStart = engine.sourceToTimeline(selectedClip.trimStart);
-    const targetTimelineTime = localTimelineStart + p * selectedClip.duration;
-    const newSourceTime = engine.timelineToSource(targetTimelineTime);
+    // The graph's X axis is the clip's covered SOURCE range — the same linear
+    // mapping the drag uses — so the new keyframe lands exactly where the
+    // user clicked (no engine inversion needed).
+    const span = rampGraphSpan(live, maxDuration);
+    const newSourceTime = live.trimStart + p * span;
 
-    ramp.push({
-      id: `kf-${Date.now()}-${Math.random()}`,
-      sourceTime: newSourceTime,
-      speed,
-      easing: 'linear'
-    });
-    
+    const minSource = live.trimStart + 0.05;
+    const maxSource = sourceEnd - 0.05;
+    const clampedGuess = Math.max(minSource, Math.min(maxSource, newSourceTime));
+    if (clampedGuess <= minSource || clampedGuess >= maxSource) return;
+
+    const ramp = [...(live.speedRamp || [])];
+    const newId = `kf-${Date.now()}-${Math.random()}`;
+    ramp.push({ id: newId, sourceTime: clampedGuess, speed, easing: 'linear' });
     const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
-    const tempEngine = new SpeedRampEngine(sortedRamp);
-    const sourceEnd = maxDuration - selectedClip.trimEnd;
-    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
 
-    updateClip(selectedClip.id, { 
-      speedRamp: sortedRamp,
-      duration: Math.max(0.1, newDuration)
-    }, { ripple: true });
+    applyRampUpdate(live, sortedRamp, maxDuration);
     scheduleSaveSnapshot();
   };
 
@@ -1951,6 +2031,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     preservePitch: true,
     pitch: 0,
     voiceFormant: 0,
+    tone: 0,
+    vocalMatchEnabled: false,
     humanize: false,
     denoise: 0,
     compression: 0,
@@ -1959,6 +2041,21 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   };
 
   const clipAudio = selectedClip?.audioSettings || defaultAudioSettings;
+
+  // Blob sources live on media items at runtime but aren't part of MediaItem's
+  // public type — narrow locally.
+  const mediaHasAudioSource = (m: (typeof mediaLibrary)[number]) =>
+    !!(m.url || (m as unknown as { _fileBlob?: Blob | File | null; _audioBlob?: Blob | File | null })._fileBlob
+      || (m as unknown as { _audioBlob?: Blob | File | null })._audioBlob);
+
+  const hasEnoughAudioClips = useMemo(
+    () =>
+      tracks.flatMap((t) => t.clips).filter((c) => {
+        const m = mediaLibrary.find((x) => x.id === c.mediaId);
+        return m && mediaHasAudioSource(m);
+      }).length >= 2,
+    [tracks, mediaLibrary]
+  );
 
   const handleAudioChange = (key: keyof typeof defaultAudioSettings, val: any) => {
     if (!selectedClip) return;
@@ -2026,7 +2123,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       const startSample = Math.floor(selectedClip.trimStart * sampleRate);
       const hasRamp = selectedClip.speedRamp && selectedClip.speedRamp.length >= 2;
       const mediaDuration = hasRamp
-        ? getMediaTimeAtPosition(selectedClip.id, selectedClip.speedRamp, 1.0, selectedClip.duration)
+        ? getRampedClipSourceSpan(selectedClip, media?.duration ?? selectedClip.duration * selectedClip.speed)
         : selectedClip.duration * selectedClip.speed;
       const endSample = Math.min(
         Math.floor((selectedClip.trimStart + mediaDuration) * sampleRate),
@@ -2110,8 +2207,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             const startSample = Math.floor(clip.trimStart * sampleRate);
             const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
             const mediaDuration = hasRamp
-              ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
-              : clip.duration * clip.speed;
+              ? getRampedClipSourceSpan(clip, media?.duration ?? clip.duration * (clip.speed ?? 1))
+              : clip.duration * (clip.speed ?? 1);
             const endSample = Math.min(
               Math.floor((clip.trimStart + mediaDuration) * sampleRate),
               rawData.length
@@ -2265,6 +2362,86 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       }
     })();
   };
+
+  // ─── Vocal Tone: Auto-Match all clips to the first clip's voice ────
+  // Analyses the actual vocal fundamental frequency (wave frequency) of the
+  // first clip, then stores a per-clip semitone correction on every other
+  // clip so all voices match. Manual pitch/tone/formant settings are layered
+  // on top and never overwritten (each clip keeps its own settings — the
+  // OUTPUT is what gets unified).
+  const handleAutoMatchVocals = async () => {
+    const state = useEditorStore.getState();
+    const storeMedia = state.mediaLibrary;
+    const allAudioClips = tracks
+      .flatMap((t) => t.clips)
+      .filter((c) => {
+        const m = storeMedia.find((x) => x.id === c.mediaId);
+        return m && mediaHasAudioSource(m);
+      });
+
+    const targetClips = selectedClipIds.length >= 2
+      ? allAudioClips.filter((c) => selectedClipIds.includes(c.id))
+      : allAudioClips;
+    if (targetClips.length < 2) {
+      setVocalMatchError('Need at least 2 clips with audio on the timeline.');
+      setVocalMatchResults([]);
+      return;
+    }
+
+    setIsMatchingVocals(true);
+    setVocalMatchError(null);
+    setVocalMatchResults([]);
+    try {
+      const results = await analyzeClipsForVocalMatch(targetClips, storeMedia);
+      let applied = 0;
+      for (const r of results) {
+        if (r.status !== 'matched' && r.status !== 'reference') continue;
+        const clip = targetClips.find((c) => c.id === r.clipId);
+        if (!clip) continue;
+        const cur = clip.audioSettings || defaultAudioSettings;
+        updateClip(r.clipId, {
+          audioSettings: {
+            ...cur,
+            vocalMatchEnabled: true,
+            vocalMatchShift: r.shiftSemitones ?? undefined,
+          },
+        });
+        applied++;
+      }
+      if (applied > 0) scheduleSaveSnapshot('Auto Vocal Match');
+
+      const rows: VocalMatchRow[] = results.map((r) => {
+        const clip = targetClips.find((c) => c.id === r.clipId);
+        const media = storeMedia.find((m) => m.id === clip?.mediaId);
+        return {
+          clipId: r.clipId,
+          clipName: media?.name || clip?.id || 'Clip',
+          f0: r.f0,
+          shiftSemitones: r.shiftSemitones,
+          status: r.status,
+        };
+      });
+      setVocalMatchResults(rows);
+      if (applied === 0) {
+        setVocalMatchError('Could not detect a clear voice in any clip — try clips with clean speech.');
+      }
+    } catch (err) {
+      console.error('Auto vocal match error:', err);
+      setVocalMatchError('Vocal analysis failed — please try again.');
+    } finally {
+      setIsMatchingVocals(false);
+    }
+  };
+
+  const handleToggleVocalMatch = (enabled: boolean) => {
+    if (!selectedClip) return;
+    const current = selectedClip.audioSettings || defaultAudioSettings;
+    updateClip(selectedClip.id, {
+      audioSettings: { ...current, vocalMatchEnabled: enabled },
+    });
+    scheduleSaveSnapshot('Vocal Match Toggle');
+  };
+
   // ─── Chroma Key Helpers ─────────────────────────────────────────────
   const rgbToHex = (r: number, g: number, b: number): string => {
     return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
@@ -3197,7 +3374,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               onClick={() => {
                 const currentMuted = selectedClip.audioSettings?.muted || false;
                 const newSettings = {
-                  ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, humanize: false }),
+                  ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, tone: 0, humanize: false }),
                   muted: !currentMuted
                 };
                 storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
@@ -5179,8 +5356,17 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       preserveAspectRatio="none"
                       width="100%"
                       height="112"
-                      className="w-full h-28 cursor-crosshair select-none"
+                      className="w-full h-28 select-none"
+                      style={{
+                        touchAction: 'none',
+                        // Lock the cursor for the whole drag so it never flickers
+                        // between grab/crosshair while the keyframe re-renders.
+                        cursor: draggingIndex !== null ? 'grabbing' : 'crosshair',
+                      }}
                       onClick={handleSvgClick}
+                      onPointerMove={handleRampPointerMove}
+                      onPointerUp={handleRampPointerUp}
+                      onPointerCancel={handleRampPointerUp}
                     >
                       {/* Grid Lines */}
                       {[0.5, 1.0, 2.0, 3.0, 4.0].map((s) => {
@@ -5234,11 +5420,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         d={(() => {
                           const pts: string[] = [];
                           const ramp = selectedClip.speedRamp || [];
-                          for (let x = 0; x <= 240; x += 4) {
-                            const p = x / 240;
-                            const speed = getSpeedAtPosition(ramp, p);
+                          if (ramp.length >= 2) {
+                            const engine = getSpeedRampEngine(selectedClip.id, ramp);
+                            const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                            const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                            // Sample the covered SOURCE range linearly — the same
+                            // axis the keyframe dots use — so the curve passes
+                            // exactly through every keyframe at all times.
+                            const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
+                            for (let x = 0; x <= 240; x += 4) {
+                              const sourceTime = (selectedClip.trimStart ?? 0) + (x / 240) * span;
+                              const speed = engine.getSpeedAtSourceTime(sourceTime);
+                              const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
+                              pts.push(`${x},${y}`);
+                            }
+                          } else {
+                            const speed = ramp[0]?.speed ?? 1;
                             const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
-                            pts.push(`${x},${y}`);
+                            pts.push(`0,${y}`, `240,${y}`);
                           }
                           return `M ${pts.join(' L ')}`;
                         })()}
@@ -5255,8 +5454,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           currentTime <= selectedClip.startTime + selectedClip.duration;
                         if (!isPlayheadInClip) return null;
                         const p = (currentTime - selectedClip.startTime) / selectedClip.duration;
-                        const x = p * 240;
-                        const speed = getSpeedAtPosition(selectedClip.speedRamp, p);
+                        // Map the playhead through the same SOURCE axis as the
+                        // keyframes so the playhead dot sits exactly ON the ramp
+                        // curve at the source position currently being played.
+                        const ramp = selectedClip.speedRamp || [];
+                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                        const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
+                        const engine = getSpeedRampEngine(selectedClip.id, ramp);
+                        const localStart = engine.sourceToTimeline(selectedClip.trimStart);
+                        const sourceTime = engine.timelineToSource(localStart + p * selectedClip.duration);
+                        const x = Math.max(0, Math.min(240, ((sourceTime - (selectedClip.trimStart ?? 0)) / span) * 240));
+                        const speed = engine.getSpeedAtSourceTime(sourceTime);
                         const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
                         return (
                           <g>
@@ -5283,27 +5492,31 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                       {/* Keyframe Draggable Handles */}
                       {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
-                        const engine = getSpeedRampEngine(selectedClip.id, selectedClip.speedRamp);
-                        const localTimelineStart = engine.sourceToTimeline(selectedClip.trimStart);
-                        const kfTimelineTime = engine.sourceToTimeline(kf.sourceTime) - localTimelineStart;
-                        const progress = selectedClip.duration > 0.001 ? kfTimelineTime / selectedClip.duration : 0;
-                        const x = progress * 240;
-                        const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
+                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                        // X axis is the clip's covered SOURCE range — the same
+                        // linear mapping the drag handler uses, so the keyframe
+                        // follows the pointer 1:1 and other keyframes never move.
+                        const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
                         const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
+                        const rawX = ((kf.sourceTime - (selectedClip.trimStart ?? 0)) / span) * 240;
+                        const x = isBoundary ? (idx === 0 ? 0 : 240) : Math.max(0, Math.min(240, rawX));
+                        const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
                         return (
                           <circle
-                            key={idx}
+                            key={kf.id ?? idx}
                             cx={x}
                             cy={y}
                             r={draggingIndex === idx ? 5 : 3.5}
                             fill={draggingIndex === idx ? '#ec4899' : '#f59e0b'}
                             stroke="#fff"
                             strokeWidth={1}
-                            className="cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              setDraggingIndex(idx);
-                            }}
+                            className={draggingIndex === idx
+                              ? 'cursor-grabbing'
+                              : 'cursor-grab'
+                            }
+                            style={{ cursor: draggingIndex === idx ? 'grabbing' : 'grab' }}
+                            onPointerDown={(e) => handleRampPointerDown(e, idx)}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
                               if (isBoundary) return;
@@ -5973,6 +6186,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       />
                     </div>
                   </div>
+
+                  {/* Vocal Tone + Auto-Match */}
+                  <VocalToneSection
+                    clipAudio={clipAudio}
+                    hasEnoughClips={hasEnoughAudioClips}
+                    isMatchingVocals={isMatchingVocals}
+                    matchResults={vocalMatchResults}
+                    matchError={vocalMatchError}
+                    onToneChange={(v) => handleAudioChange('tone', v)}
+                    onToneReset={() => handleAudioReset('tone')}
+                    onToggleAutoMatch={handleToggleVocalMatch}
+                    onAutoMatch={handleAutoMatchVocals}
+                  />
 
                   {/* Formant Slider */}
                   <div className="space-y-1">

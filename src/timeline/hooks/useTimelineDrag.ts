@@ -547,10 +547,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       const clickedEdge = (e.target as HTMLElement).getAttribute('data-edge');
       if (clickedEdge === 'left' || clickedEdge === 'right') {
-        // BUG FIX: Only start a resize/trim if the clip is already selected.
-        // If not yet selected, just select it — user can then click the edge again to trim.
-        const isAlreadySelected = useEditorStore.getState().selectedClipIds.includes(clip.id);
-        if (isAlreadySelected) {
+        // Only start a resize/trim when this clip is the SINGLE selected clip —
+        // neighbouring clips and multi-selections never enter trim mode. If the
+        // clip isn't trimmed yet, just select it (handles only render on the
+        // single selected clip, so the user sees them after selecting).
+        const selectedIds = useEditorStore.getState().selectedClipIds;
+        const isTrimActive = selectedIds.length === 1 && selectedIds.includes(clip.id);
+        if (isTrimActive) {
           startTransactionSafe();
           startResize(e, clip, clickedEdge as 'left' | 'right');
         } else {
@@ -564,9 +567,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       const grabArea = 8; // pixels
 
       if (distLeft <= grabArea || distRight <= grabArea) {
-        // BUG FIX: Same guard — only trim on proximity grab if clip is selected
-        const isAlreadySelected = useEditorStore.getState().selectedClipIds.includes(clip.id);
-        if (isAlreadySelected) {
+        // Same single-selection guard for the proximity grab.
+        const selectedIds = useEditorStore.getState().selectedClipIds;
+        const isTrimActive = selectedIds.length === 1 && selectedIds.includes(clip.id);
+        if (isTrimActive) {
           startTransactionSafe();
           if (distLeft <= distRight) {
             startResize(e, clip, 'left');
@@ -811,6 +815,26 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         const currentScrollLeft = trackContainerRef.current?.scrollLeft ?? useEditorStore.getState().scrollLeft;
         const x = e.clientX - rect.left + currentScrollLeft;
         time = Math.max(0, x / zoomLevel);
+      }
+
+      // Clicking the ruler always deselects every clip — nothing should stay
+      // selected when the user jumps to a time.
+      const st = useEditorStore.getState();
+      if (st.selectedClipIds.length > 0 || st.selectedClipId) {
+        st.selectClip(null);
+      }
+
+      // RULER CLICK DURING PLAYBACK: a plain click on the ruler is a "jump &
+      // continue" — move the playhead instantly to that point and KEEP PLAYING
+      // from there (CapCut-style). Only an actual drag starts scrubbing mode.
+      const wasPlaying = st.isPlaying;
+      if (wasPlaying) {
+        seek(time);
+        setScrubTime(null);
+        window.dispatchEvent(new Event('procut-frame-updated'));
+        e.preventDefault();
+        e.stopPropagation();
+        return;
       }
 
       // NOW it's safe to set scrubbing — the auto-scroller will fire, but we
@@ -1078,8 +1102,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                 setSnapLine(snapPos);
             }
 
+            // IMPORTANT: pass the ORIGINAL trimStart to the ramped helper.
+            // `shift` is cumulative from the drag start while `clip.trimStart`
+            // is the LIVE value (already shifted by previous frames) — using it
+            // double-counted the shift and made ramped left-trims drift at 2x.
             const newTrimStart = isRamped
-              ? getRampedTrimStartForLeftResize(clip, -deltaDuration)
+              ? getRampedTrimStartForLeftResize({ ...clip, trimStart: resizeState.originalTrimStart }, -deltaDuration)
               : resizeState.originalTrimStart - deltaDuration * clip.speed;
 
             batchBufferRef.current.length = 0;
@@ -1219,8 +1247,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               ? getRampedTrimEndForRightResize(sib as any, sib.originalDuration + shift, sibSourceDuration)
               : sib.originalTrimEnd - (shift * sib.speed);
 
+            // Pass the ORIGINAL trimStart — `shift` is cumulative from the drag
+            // start, so the live (already-shifted) trimStart must not be reused.
             const newTrimStart = isRamped
-              ? getRampedTrimStartForLeftResize(clip, shift)
+              ? getRampedTrimStartForLeftResize({ ...clip, trimStart: resizeState.originalTrimStart }, shift)
               : resizeState.originalTrimStart + shift * clip.speed;
 
             batchBufferRef.current.length = 0;
@@ -1256,8 +1286,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                 setSnapLine(snapPos);
             }
 
+            // Pass the ORIGINAL trimStart — `shift` is cumulative from the drag
+            // start, so the live (already-shifted) trimStart must not be reused.
             const newTrimStart = isRamped
-              ? getRampedTrimStartForLeftResize(clip, shift)
+              ? getRampedTrimStartForLeftResize({ ...clip, trimStart: resizeState.originalTrimStart }, shift)
               : resizeState.originalTrimStart + shift * clip.speed;
 
             batchBufferRef.current.length = 0;
@@ -1308,8 +1340,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
         if (isRamped) {
           const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
-          const currentLocalTimelineStart = engine.sourceToTimeline(clip.trimStart);
-          let newLocalTimelineStart = currentLocalTimelineStart - dt;
+          // Use the ORIGINAL trimStart: `dt` is cumulative from the drag start,
+          // so the live (already-slipped) trimStart would double-count the slip.
+          const originalLocalTimelineStart = engine.sourceToTimeline(slipState.originalTrimStart);
+          let newLocalTimelineStart = originalLocalTimelineStart - dt;
           
           const minTimelineStart = 0;
           const maxTimelineEnd = engine.sourceToTimeline(sourceDuration);

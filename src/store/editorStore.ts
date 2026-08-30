@@ -22,7 +22,7 @@ import type {
   SubtitleItem,
   ScopeSettings,
 } from '@/types';
-import { getMediaTimeForClip, getMediaTimeAtPosition, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
+import { computeSplitHalvesMedia, SpeedRampEngine } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
@@ -2774,46 +2774,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           const leftId = splitMap[clip.id].left;
           const rightId = splitMap[clip.id].right;
 
-          // Remap speed ramp keyframes for each half when a ramp exists
-          let leftSpeedRamp = clip.speedRamp;
-          let rightSpeedRamp = clip.speedRamp;
-          const hasRamp = clip.speedRamp && clip.speedRamp.length >= 2;
-
-          if (hasRamp) {
-            const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
-            const splitSourceTime = engine.timelineToSource(relativeSplitTime);
-            const splitSpeed = engine.getSpeedAtSourceTime(splitSourceTime);
-
-            const sorted = [...clip.speedRamp!].sort((a, b) => a.sourceTime - b.sourceTime);
-
-            // Left half: keyframes in [0, splitSourceTime]
-            const leftKeys = sorted.filter((kf) => kf.sourceTime < splitSourceTime);
-            leftKeys.push({
-              id: generateId(),
-              sourceTime: splitSourceTime,
-              speed: splitSpeed,
-              easing: 'linear',
-            });
-            leftSpeedRamp = leftKeys;
-
-            // Right half: keyframes in [splitSourceTime, end]
-            const rightKeys = sorted.filter((kf) => kf.sourceTime > splitSourceTime);
-            rightKeys.unshift({
-              id: generateId(),
-              sourceTime: splitSourceTime,
-              speed: splitSpeed,
-              easing: 'linear',
-            });
-            rightSpeedRamp = rightKeys;
-          }
-
-          const splitMediaTime = hasRamp
-            ? getMediaTimeForClip(clip, splitTime)
-            : clip.trimStart + relativeSplitTime * clip.speed;
-
-          const originalMediaDuration = hasRamp
-            ? getMediaTimeAtPosition(clip.id, clip.speedRamp, 1.0, clip.duration)
-            : clip.duration * clip.speed;
+          // All media math for the halves (trim values, boundary source
+          // position, speed-ramp remap) lives in the pure helper — shared with
+          // the unit tests so continuity/trimmed-ramp/reversed invariants are
+          // verified on every test run.
+          const splitHalves = computeSplitHalvesMedia(clip, splitTime, generateId);
+          const leftSpeedRamp = splitHalves.leftSpeedRamp;
+          const rightSpeedRamp = splitHalves.rightSpeedRamp;
 
           // Remap keyframe animations for split
           let leftAnimations = clip.animations ? { ...clip.animations } : undefined;
@@ -2878,9 +2845,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             id: leftId,
             splitGroupId: groupId,
             duration: relativeSplitTime,
-            trimEnd: hasRamp
-              ? originalMediaDuration - splitMediaTime
-              : clip.trimEnd + (clip.duration - relativeSplitTime) * clip.speed,
+            trimStart: splitHalves.leftTrimStart,
+            trimEnd: splitHalves.leftTrimEnd,
             transitionOut: undefined, // Clear transition on the first half of the split
             speedRamp: leftSpeedRamp,
             animations: leftAnimations,
@@ -2893,7 +2859,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             splitGroupId: groupId,
             startTime: splitTime,
             duration: clip.duration - relativeSplitTime,
-            trimStart: splitMediaTime,
+            trimStart: splitHalves.rightTrimStart,
+            trimEnd: splitHalves.rightTrimEnd,
             transitionIn: undefined, // Clear transition on the second half of the split
             speedRamp: rightSpeedRamp,
             animations: rightAnimations,
@@ -3078,6 +3045,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             preservePitch: true,
             pitch: 0,
             voiceFormant: 0,
+            tone: 0,
             humanize: false,
           },
     } as import('@/types').TimelineClip;

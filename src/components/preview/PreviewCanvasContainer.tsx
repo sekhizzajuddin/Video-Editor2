@@ -498,6 +498,17 @@ export function PreviewCanvasContainer() {
       const actualTime = getPlaybackTime();
 
       if (state.isPlaying) {
+        // RULER-CLICK / SEEK DURING PLAYBACK: if something wrote a NEW position
+        // to the clock since our last frame (e.g. the user clicked the timeline
+        // ruler while playing), adopt it immediately and keep playing from there
+        // instead of overwriting it with our own accumulated advance.
+        if (Math.abs(actualTime - currentTimeRef.current) > 0.001) {
+          currentTimeRef.current = actualTime;
+          setPlaybackTime(actualTime);
+          lastTime = now;
+          framePendingRef.current = true;
+        }
+
         framePendingRef.current = true;
 
         const dir = state.playbackDirection ?? 1;

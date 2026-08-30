@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   Move3D,
@@ -28,11 +28,13 @@ export function MobilePropertiesSheet({ category, onClose }: MobilePropertiesShe
     tracks,
     currentTime,
     pipWindows,
+    mediaLibrary,
     updateClip,
   } = useEditorStore(useShallow((state) => ({
     tracks: state.tracks,
     currentTime: state.currentTime,
     pipWindows: state.pipWindows,
+    mediaLibrary: state.mediaLibrary,
     updateClip: state.updateClip,
   })));
 
@@ -80,6 +82,9 @@ export function MobilePropertiesSheet({ category, onClose }: MobilePropertiesShe
     // Speed helpers
     speed: clip.speed || 1,
     isRamped: !!clip.speedRamp,
+    mediaLibrary,
+    isReversed: !!clip.isReversed,
+    freezeFrame: clip.freezeFrame,
     onSpeedChange: (v: number) => {
        const sourceDuration = clip.duration * (clip.speed ?? 1); 
        updateClip(clip.id, { speed: v, duration: sourceDuration / v }, { ripple: true });
@@ -88,6 +93,12 @@ export function MobilePropertiesSheet({ category, onClose }: MobilePropertiesShe
        const sourceDuration = clip.duration * (clip.speed ?? 1); 
        updateClip(clip.id, { speed: 1, duration: sourceDuration }, { ripple: true });
     },
+    onToggleReverse: () => updateClip(clip.id, { isReversed: !clip.isReversed }, { ripple: true }),
+    onFreezeFrame: () => {
+      const currentTime = useEditorStore.getState().currentTime;
+      updateClip(clip.id, { freezeFrame: Math.max(0, currentTime - clip.startTime) }, { ripple: true });
+    },
+    onClearFreeze: () => updateClip(clip.id, { freezeFrame: undefined }, { ripple: true }),
     // Text helpers
     text: clip.textSettings?.text ?? '',
     fontFamily: clip.textSettings?.fontFamily ?? 'Inter',
