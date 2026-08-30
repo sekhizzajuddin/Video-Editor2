@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { useEditorStore } from '@/store/editorStore';
-import { getMediaTimeForClip, getSpeedAtPosition } from '@/utils/speedRamp';
+import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';

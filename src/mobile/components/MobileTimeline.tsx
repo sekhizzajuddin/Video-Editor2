@@ -960,6 +960,9 @@ export function MobileTimeline({
                     const dc = displayClip(clip);
                     const media = mediaMap.get(clip.mediaId);
                     const isSelected = selectedClipId === clip.id;
+                    // Trim handles only appear on the SINGLE selected clip —
+                    // multi-selections never offer trimming.
+                    const showTrimHandles = isSelected && selectedClipIds.length === 1;
                     const left = dc.startTime * zoomLevel;
                     const width = Math.max(MIN_CLIP_W, dc.duration * zoomLevel);
                     const isVideo = media?.type === 'video' || (!clip.textSettings && !clip.fxSettings && media?.type !== 'audio');
@@ -1011,7 +1014,7 @@ export function MobileTimeline({
                         </span>
 
                         {/* Trim handles on selected clip */}
-                        {isSelected && (
+                        {showTrimHandles && (
                           <>
                             <div
                               className="absolute inset-y-0 left-0 z-20 flex w-[14px] items-center justify-center bg-white shadow-md cursor-ew-resize"

@@ -1134,20 +1134,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   //  1. It listened for `mousemove`/`mouseup` on `document` and re-subscribed
   //     the listeners on EVERY store update (selectedClip changes identity on
   //     every ramp edit), so events got dropped mid-drag → jerky movement.
-  //  2. The pointer position was converted to a sourceTime through the engine
-  //     BEFORE the keyframe move, but the keyframe is re-rendered through the
-  //     engine AFTER the move — the two mappings differ, so the keyframe never
-  //     stayed under the cursor. The cursor then flickered between `grab`
-  //     (circle) and `crosshair` (svg) and the whole curve visibly jittered.
+  //  2. The graph's X axis was the RAMPED timeline: dragging one keyframe
+  //     re-mapped EVERY other keyframe (they slid around and the ramp visibly
+  //     changed at points other than the playhead / dragged point), and the
+  //     pointer→source conversion through the changing engine meant the
+  //     keyframe never stayed under the cursor — the cursor flickered between
+  //     `grab` (circle) and `crosshair` (svg) and the curve jittered.
   //  3. Mouse events only — touch (mobile) could not drag keyframes at all.
   //  4. A `click` fired after a drag released over the graph added an
   //     unexpected keyframe (the "ramps other points than I dragged" bug).
   //
   // New implementation:
+  //  - The X axis is the clip's covered SOURCE range (trimStart..trimStart+
+  //    span), so keyframe positions are a LINEAR function of their sourceTime:
+  //    dragging a keyframe moves ONLY that keyframe, the curve updates only
+  //    between its neighbours, and the keyframe lands EXACTLY under the
+  //    pointer every frame — zero feedback, zero flicker.
   //  - Pointer events + pointer capture on the SVG (mouse/touch/pen all work).
   //  - Handlers read the LATEST clip straight from the store (no stale closure).
-  //  - The keyframe's sourceTime is solved numerically so the keyframe lands
-  //    EXACTLY under the pointer after the update (no drift, no flicker).
   //  - Clicks that immediately follow a drag/click are suppressed so a drag
   //    release can never create a stray keyframe.
   // ─────────────────────────────────────────────────────────────────────────
@@ -1161,61 +1165,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   } | null>(null);
   const suppressRampClickRef = useRef(0);
 
-  // Solve the source time of keyframe `idx` so that — after the ramp is
-  // updated — the keyframe renders EXACTLY at timeline progress `targetP`
-  // (0..1 across the clip). The rendered progress of a keyframe is a monotonic
-  // function of its sourceTime, so a bisection converges reliably.
-  const solveKeyframeProgress = useCallback((
-    ramp: SpeedRampKeyframe[],
-    idx: number,
-    targetP: number,
-    speed: number,
-    trimStart: number,
-    trimEnd: number,
-    sourceDuration: number
-  ): SpeedRampKeyframe[] => {
-    const isBoundary = idx === 0 || idx === ramp.length - 1;
-    if (isBoundary) {
-      // Boundary keyframes are pinned horizontally — only speed changes.
-      const next = [...ramp];
-      next[idx] = { ...next[idx], sourceTime: idx === 0 ? 0 : sourceDuration, speed };
-      return next.sort((a, b) => a.sourceTime - b.sourceTime);
-    }
-
-    const sourceEnd = sourceDuration - trimEnd;
-    const lo = Math.max(ramp[idx - 1].sourceTime + 0.05, trimStart + 0.0001);
-    const hi = Math.min(ramp[idx + 1].sourceTime - 0.05, sourceEnd - 0.0001);
-    if (hi <= lo) {
-      const next = [...ramp];
-      next[idx] = { ...next[idx], speed };
-      return next.sort((a, b) => a.sourceTime - b.sourceTime);
-    }
-
-    const progressOf = (candidate: SpeedRampKeyframe[]): number => {
-      const eng = new SpeedRampEngine(candidate);
-      const dur = eng.sourceToTimeline(sourceEnd) - eng.sourceToTimeline(trimStart);
-      if (dur <= 0.001) return 0;
-      const kfT = eng.sourceToTimeline(candidate[idx].sourceTime) - eng.sourceToTimeline(trimStart);
-      return kfT / dur;
-    };
-
-    let low = lo;
-    let high = hi;
-    for (let iter = 0; iter < 24; iter++) {
-      const mid = (low + high) / 2;
-      const candidate = [...ramp];
-      candidate[idx] = { ...candidate[idx], sourceTime: mid, speed };
-      const p = progressOf(candidate);
-      if (Math.abs(p - targetP) < 0.0004) return candidate;
-      if (p < targetP) {
-        low = mid;
-      } else {
-        high = mid;
-      }
-    }
-    const candidate = [...ramp];
-    candidate[idx] = { ...candidate[idx], sourceTime: (low + high) / 2, speed };
-    return candidate;
+  // Source seconds the clip actually covers on the graph's X axis.
+  const rampGraphSpan = useCallback((clip: any, mediaDuration: number) => {
+    return Math.max(0.001, mediaDuration - (clip.trimStart ?? 0) - (clip.trimEnd ?? 0));
   }, []);
 
   const applyRampUpdate = useCallback((liveClip: any, newRamp: SpeedRampKeyframe[], mediaDuration: number) => {
@@ -1273,16 +1225,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
     const mediaItem = state.mediaLibrary.find((m) => m.id === live.mediaId);
     const maxDuration = mediaItem ? mediaItem.duration : live.duration;
+    const span = rampGraphSpan(live, maxDuration);
+    const isBoundary = drag.idx === 0 || drag.idx === live.speedRamp.length - 1;
 
-    const newRamp = solveKeyframeProgress(
-      live.speedRamp,
-      drag.idx,
-      p,
-      speed,
-      live.trimStart,
-      live.trimEnd,
-      maxDuration
-    );
+    const newRamp = [...live.speedRamp];
+    // Linear pointer → source mapping: the keyframe follows the cursor 1:1.
+    let newSourceTime = live.trimStart + p * span;
+    if (isBoundary) {
+      // Boundary keyframes are pinned horizontally — only speed changes.
+      newSourceTime = drag.idx === 0 ? 0 : maxDuration;
+    } else {
+      // Clamp between neighbours + the clip's covered source range.
+      const lo = Math.max(live.speedRamp[drag.idx - 1].sourceTime + 0.05, live.trimStart + 0.0001);
+      const hi = Math.min(live.speedRamp[drag.idx + 1].sourceTime - 0.05, live.trimStart + span - 0.0001);
+      newSourceTime = Math.max(lo, Math.min(hi, newSourceTime));
+    }
+    newRamp[drag.idx] = { ...newRamp[drag.idx], sourceTime: newSourceTime, speed };
+    newRamp.sort((a, b) => a.sourceTime - b.sourceTime);
+
     applyRampUpdate(live, newRamp, maxDuration);
   };
 
@@ -1326,26 +1286,23 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     const maxDuration = mediaItem ? mediaItem.duration : live.duration;
     const sourceEnd = maxDuration - live.trimEnd;
 
-    // Seed the new keyframe with a first-guess source time, then run it through
-    // the same solver as the drag so it lands exactly where the user clicked.
-    const engine = getSpeedRampEngine(live.id, live.speedRamp);
-    const localTimelineStart = engine.sourceToTimeline(live.trimStart);
-    const targetTimelineTime = localTimelineStart + p * live.duration;
-    const guessSource = engine.timelineToSource(targetTimelineTime);
+    // The graph's X axis is the clip's covered SOURCE range — the same linear
+    // mapping the drag uses — so the new keyframe lands exactly where the
+    // user clicked (no engine inversion needed).
+    const span = rampGraphSpan(live, maxDuration);
+    const newSourceTime = live.trimStart + p * span;
 
     const minSource = live.trimStart + 0.05;
     const maxSource = sourceEnd - 0.05;
-    const clampedGuess = Math.max(minSource, Math.min(maxSource, guessSource));
+    const clampedGuess = Math.max(minSource, Math.min(maxSource, newSourceTime));
     if (clampedGuess <= minSource || clampedGuess >= maxSource) return;
 
     const ramp = [...(live.speedRamp || [])];
     const newId = `kf-${Date.now()}-${Math.random()}`;
     ramp.push({ id: newId, sourceTime: clampedGuess, speed, easing: 'linear' });
     const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
-    const newIdx = sortedRamp.findIndex((k) => k.id === newId);
-    const solvedRamp = solveKeyframeProgress(sortedRamp, newIdx, p, speed, live.trimStart, live.trimEnd, maxDuration);
 
-    applyRampUpdate(live, solvedRamp, maxDuration);
+    applyRampUpdate(live, sortedRamp, maxDuration);
     scheduleSaveSnapshot();
   };
 
@@ -5361,15 +5318,16 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         d={(() => {
                           const pts: string[] = [];
                           const ramp = selectedClip.speedRamp || [];
-                          const dur = Math.max(0.001, selectedClip.duration);
                           if (ramp.length >= 2) {
                             const engine = getSpeedRampEngine(selectedClip.id, ramp);
-                            const localStart = engine.sourceToTimeline(selectedClip.trimStart);
-                            // Map through the CLIP's trimmed source range (not the
-                            // whole media) so the curve matches the keyframe dots.
+                            const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                            const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                            // Sample the covered SOURCE range linearly — the same
+                            // axis the keyframe dots use — so the curve passes
+                            // exactly through every keyframe at all times.
+                            const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
                             for (let x = 0; x <= 240; x += 4) {
-                              const p = x / 240;
-                              const sourceTime = engine.timelineToSource(localStart + p * dur);
+                              const sourceTime = (selectedClip.trimStart ?? 0) + (x / 240) * span;
                               const speed = engine.getSpeedAtSourceTime(sourceTime);
                               const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
                               pts.push(`${x},${y}`);
@@ -5394,19 +5352,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           currentTime <= selectedClip.startTime + selectedClip.duration;
                         if (!isPlayheadInClip) return null;
                         const p = (currentTime - selectedClip.startTime) / selectedClip.duration;
-                        const x = p * 240;
-                        // Same clip-range mapping as the curve so the playhead dot
-                        // sits exactly ON the ramp curve at the current playhead.
+                        // Map the playhead through the same SOURCE axis as the
+                        // keyframes so the playhead dot sits exactly ON the ramp
+                        // curve at the source position currently being played.
                         const ramp = selectedClip.speedRamp || [];
-                        let speed = 1;
-                        if (ramp.length >= 2) {
-                          const engine = getSpeedRampEngine(selectedClip.id, ramp);
-                          const localStart = engine.sourceToTimeline(selectedClip.trimStart);
-                          const sourceTime = engine.timelineToSource(localStart + p * selectedClip.duration);
-                          speed = engine.getSpeedAtSourceTime(sourceTime);
-                        } else if (ramp[0]) {
-                          speed = ramp[0].speed;
-                        }
+                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                        const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
+                        const engine = getSpeedRampEngine(selectedClip.id, ramp);
+                        const localStart = engine.sourceToTimeline(selectedClip.trimStart);
+                        const sourceTime = engine.timelineToSource(localStart + p * selectedClip.duration);
+                        const x = Math.max(0, Math.min(240, ((sourceTime - (selectedClip.trimStart ?? 0)) / span) * 240));
+                        const speed = engine.getSpeedAtSourceTime(sourceTime);
                         const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
                         return (
                           <g>
@@ -5433,23 +5390,29 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                       {/* Keyframe Draggable Handles */}
                       {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
-                        const engine = getSpeedRampEngine(selectedClip.id, selectedClip.speedRamp);
-                        const localTimelineStart = engine.sourceToTimeline(selectedClip.trimStart);
-                        const kfTimelineTime = engine.sourceToTimeline(kf.sourceTime) - localTimelineStart;
-                        const progress = selectedClip.duration > 0.001 ? kfTimelineTime / selectedClip.duration : 0;
-                        const x = progress * 240;
-                        const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
+                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
+                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
+                        // X axis is the clip's covered SOURCE range — the same
+                        // linear mapping the drag handler uses, so the keyframe
+                        // follows the pointer 1:1 and other keyframes never move.
+                        const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
                         const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
+                        const rawX = ((kf.sourceTime - (selectedClip.trimStart ?? 0)) / span) * 240;
+                        const x = isBoundary ? (idx === 0 ? 0 : 240) : Math.max(0, Math.min(240, rawX));
+                        const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
                         return (
                           <circle
-                            key={idx}
+                            key={kf.id ?? idx}
                             cx={x}
                             cy={y}
                             r={draggingIndex === idx ? 5 : 3.5}
                             fill={draggingIndex === idx ? '#ec4899' : '#f59e0b'}
                             stroke="#fff"
                             strokeWidth={1}
-                            className={draggingIndex === idx ? 'hover:scale-125 transition-transform' : 'cursor-grab hover:scale-125 transition-transform'}
+                            className={draggingIndex === idx
+                              ? 'cursor-grabbing'
+                              : 'cursor-grab'
+                            }
                             style={{ cursor: draggingIndex === idx ? 'grabbing' : 'grab' }}
                             onPointerDown={(e) => handleRampPointerDown(e, idx)}
                             onDoubleClick={(e) => {
