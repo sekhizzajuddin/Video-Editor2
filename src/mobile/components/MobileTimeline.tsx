@@ -209,6 +209,30 @@ export function MobileTimeline({
     return unsub;
   }, [zoomLevel]);
 
+  // Mobile: the playhead is fixed at 50% of the viewport, so when the user
+  // taps the ruler while playing, the timeline must scroll so the tapped
+  // point lands under the playhead — otherwise playback would continue from a
+  // time that is off-screen. We honor seeks by comparing against the last
+  // known time (the clock advances smoothly during playback, so a large jump
+  // can only be an external seek like a ruler tap).
+  const lastFollowTimeRef = useRef(0);
+  useEffect(() => {
+    lastFollowTimeRef.current = getPlaybackTime();
+    const unsub = subscribePlaybackTime(() => {
+      if (!useEditorStore.getState().isPlaying || isUserScrolling.current) return;
+      if (!scrollRef.current) return;
+      const t = getPlaybackTime();
+      if (Math.abs(t - lastFollowTimeRef.current) > 1.5) {
+        lastFollowTimeRef.current = t;
+        isAutoScrolling.current = true;
+        scrollRef.current.scrollLeft = t * zoomLevel;
+      } else {
+        lastFollowTimeRef.current = t;
+      }
+    });
+    return unsub;
+  }, [zoomLevel]);
+
   const onScroll = useCallback(() => {
     if (!scrollRef.current) return;
     if (isAutoScrolling.current) {
@@ -393,21 +417,14 @@ export function MobileTimeline({
       const wasPlaying = useEditorStore.getState().isPlaying;
       if (wasPlaying) {
         // Jump & continue: move the playhead instantly and keep playing.
-        const t = Math.max(0, timeAt(e.clientX));
-        seek(t);
-        // The mobile playhead is fixed at 50% of the viewport (time 0 sits at
-        // 50vw after the 48px rail + spacer), so scroll the tapped time
-        // directly under the playhead — otherwise playback would continue from
-        // a point that is off-screen.
-        isAutoScrolling.current = true;
-        if (scrollRef.current) {
-          scrollRef.current.scrollLeft = t * zoomLevel;
-        }
+        // The follow subscription above scrolls the tapped time under the
+        // fixed 50%-viewport playhead (instant, via the seek jump detection).
+        seek(Math.max(0, timeAt(e.clientX)));
         return;
       }
       beginScrub(e);
     },
-    [beginScrub, seek, timeAt, zoomLevel]
+    [beginScrub, seek, timeAt]
   );
 
   const onPointerDownPlayhead = useCallback(
