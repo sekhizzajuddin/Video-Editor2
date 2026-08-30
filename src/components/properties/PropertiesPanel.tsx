@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
-import { useState, useRef, useEffect, useCallback, Fragment, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
 import { TEXT_TEMPLATES, presetToTextAnimationPatch } from '@/utils/textTemplates';
 import { Client } from '@gradio/client';
@@ -58,6 +58,8 @@ const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m
 const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
 import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
+import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
+import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
 import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } from '@/types';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
@@ -457,6 +459,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const [showTunedToast, setShowTunedToast] = useState(false);
   const [voiceTuneResults, setVoiceTuneResults] = useState<VoiceTuneResult[]>([]);
+  const [isMatchingVocals, setIsMatchingVocals] = useState(false);
+  const [vocalMatchResults, setVocalMatchResults] = useState<VocalMatchRow[]>([]);
+  const [vocalMatchError, setVocalMatchError] = useState<string | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [trackProgress, setTrackProgress] = useState(0);
   const { videoElements } = useMediaPlayback(false);
@@ -2026,6 +2031,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     preservePitch: true,
     pitch: 0,
     voiceFormant: 0,
+    tone: 0,
+    vocalMatchEnabled: false,
     humanize: false,
     denoise: 0,
     compression: 0,
@@ -2034,6 +2041,21 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   };
 
   const clipAudio = selectedClip?.audioSettings || defaultAudioSettings;
+
+  // Blob sources live on media items at runtime but aren't part of MediaItem's
+  // public type — narrow locally.
+  const mediaHasAudioSource = (m: (typeof mediaLibrary)[number]) =>
+    !!(m.url || (m as unknown as { _fileBlob?: Blob | File | null; _audioBlob?: Blob | File | null })._fileBlob
+      || (m as unknown as { _audioBlob?: Blob | File | null })._audioBlob);
+
+  const hasEnoughAudioClips = useMemo(
+    () =>
+      tracks.flatMap((t) => t.clips).filter((c) => {
+        const m = mediaLibrary.find((x) => x.id === c.mediaId);
+        return m && mediaHasAudioSource(m);
+      }).length >= 2,
+    [tracks, mediaLibrary]
+  );
 
   const handleAudioChange = (key: keyof typeof defaultAudioSettings, val: any) => {
     if (!selectedClip) return;
@@ -2340,6 +2362,86 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       }
     })();
   };
+
+  // ─── Vocal Tone: Auto-Match all clips to the first clip's voice ────
+  // Analyses the actual vocal fundamental frequency (wave frequency) of the
+  // first clip, then stores a per-clip semitone correction on every other
+  // clip so all voices match. Manual pitch/tone/formant settings are layered
+  // on top and never overwritten (each clip keeps its own settings — the
+  // OUTPUT is what gets unified).
+  const handleAutoMatchVocals = async () => {
+    const state = useEditorStore.getState();
+    const storeMedia = state.mediaLibrary;
+    const allAudioClips = tracks
+      .flatMap((t) => t.clips)
+      .filter((c) => {
+        const m = storeMedia.find((x) => x.id === c.mediaId);
+        return m && mediaHasAudioSource(m);
+      });
+
+    const targetClips = selectedClipIds.length >= 2
+      ? allAudioClips.filter((c) => selectedClipIds.includes(c.id))
+      : allAudioClips;
+    if (targetClips.length < 2) {
+      setVocalMatchError('Need at least 2 clips with audio on the timeline.');
+      setVocalMatchResults([]);
+      return;
+    }
+
+    setIsMatchingVocals(true);
+    setVocalMatchError(null);
+    setVocalMatchResults([]);
+    try {
+      const results = await analyzeClipsForVocalMatch(targetClips, storeMedia);
+      let applied = 0;
+      for (const r of results) {
+        if (r.status !== 'matched' && r.status !== 'reference') continue;
+        const clip = targetClips.find((c) => c.id === r.clipId);
+        if (!clip) continue;
+        const cur = clip.audioSettings || defaultAudioSettings;
+        updateClip(r.clipId, {
+          audioSettings: {
+            ...cur,
+            vocalMatchEnabled: true,
+            vocalMatchShift: r.shiftSemitones ?? undefined,
+          },
+        });
+        applied++;
+      }
+      if (applied > 0) scheduleSaveSnapshot('Auto Vocal Match');
+
+      const rows: VocalMatchRow[] = results.map((r) => {
+        const clip = targetClips.find((c) => c.id === r.clipId);
+        const media = storeMedia.find((m) => m.id === clip?.mediaId);
+        return {
+          clipId: r.clipId,
+          clipName: media?.name || clip?.id || 'Clip',
+          f0: r.f0,
+          shiftSemitones: r.shiftSemitones,
+          status: r.status,
+        };
+      });
+      setVocalMatchResults(rows);
+      if (applied === 0) {
+        setVocalMatchError('Could not detect a clear voice in any clip — try clips with clean speech.');
+      }
+    } catch (err) {
+      console.error('Auto vocal match error:', err);
+      setVocalMatchError('Vocal analysis failed — please try again.');
+    } finally {
+      setIsMatchingVocals(false);
+    }
+  };
+
+  const handleToggleVocalMatch = (enabled: boolean) => {
+    if (!selectedClip) return;
+    const current = selectedClip.audioSettings || defaultAudioSettings;
+    updateClip(selectedClip.id, {
+      audioSettings: { ...current, vocalMatchEnabled: enabled },
+    });
+    scheduleSaveSnapshot('Vocal Match Toggle');
+  };
+
   // ─── Chroma Key Helpers ─────────────────────────────────────────────
   const rgbToHex = (r: number, g: number, b: number): string => {
     return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
@@ -3272,7 +3374,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               onClick={() => {
                 const currentMuted = selectedClip.audioSettings?.muted || false;
                 const newSettings = {
-                  ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, humanize: false }),
+                  ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, tone: 0, humanize: false }),
                   muted: !currentMuted
                 };
                 storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
@@ -6084,6 +6186,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       />
                     </div>
                   </div>
+
+                  {/* Vocal Tone + Auto-Match */}
+                  <VocalToneSection
+                    clipAudio={clipAudio}
+                    hasEnoughClips={hasEnoughAudioClips}
+                    isMatchingVocals={isMatchingVocals}
+                    matchResults={vocalMatchResults}
+                    matchError={vocalMatchError}
+                    onToneChange={(v) => handleAudioChange('tone', v)}
+                    onToneReset={() => handleAudioReset('tone')}
+                    onToggleAutoMatch={handleToggleVocalMatch}
+                    onAutoMatch={handleAutoMatchVocals}
+                  />
 
                   {/* Formant Slider */}
                   <div className="space-y-1">

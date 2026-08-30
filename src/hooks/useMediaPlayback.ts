@@ -17,6 +17,7 @@
 import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
+import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
@@ -1694,9 +1695,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const ctxTime = entry.audioCtx?.currentTime || 0;
       const rampTime = 0.08;
 
+      // Total vocal pitch: manual Pitch Shift + Vocal Tone + auto vocal-match
+      // correction (see src/utils/vocalTone.ts).
+      const totalPitchSt = effectiveVocalPitchSt(audioSettings);
+
       // Pitch / Humanize
       if (entry.pitchNode) {
-        (entry.pitchNode as any).pitch = audioSettings.pitch;
+        (entry.pitchNode as any).pitch = totalPitchSt;
         (entry.pitchNode as any).humanize = audioSettings.humanize;
       }
 
@@ -1737,8 +1742,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
 
-      // FX Routing (lazy pitch node)
-      const needsFx = Math.abs(audioSettings.pitch) > 0.01 || audioSettings.humanize;
+      // FX Routing (lazy pitch node). The total pitch includes the manual
+      // Pitch Shift + Vocal Tone + auto vocal-match correction, so the FX
+      // graph engages whenever ANY of them is non-zero.
+      const needsFx = Math.abs(totalPitchSt) > 0.01 || audioSettings.humanize;
       const audioCtxForFx = entry.audioCtx;
       if (needsFx && audioCtxForFx) {
         if (!entry.pitchNode) {
@@ -1760,7 +1767,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       // EQ & Filters
       if (entry.vocalFilter) {
-        const targetGain = audioSettings.humanize ? -5.0 : (audioSettings.voiceFormant || 0) * -0.05;
+        // Formant filter: manual Voice Formant + Vocal Tone formant + the
+        // auto-match compensation that keeps matched voices natural (the
+        // compensation is baked into effectiveVocalFormant).
+        const targetGain = audioSettings.humanize ? -5.0 : effectiveVocalFormant(audioSettings) * -0.05;
         if (Math.abs(entry.vocalFilter.gain.value - targetGain) > 0.1)
           entry.vocalFilter.gain.setTargetAtTime(targetGain, ctxTime, rampTime);
       }

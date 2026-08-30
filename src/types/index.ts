@@ -132,6 +132,15 @@ export interface ClipAudioSettings {
   preservePitch: boolean; // maintain pitch when speed changes (default true)
   pitch: number;        // -12 to 12 semitones (default 0)
   voiceFormant: number; // -100 to 100 (default 0)
+  // Vocal Tone: -100 (girl/lady tone) … 0 (original) … +100 (boy/man tone).
+  // Drives pitch AND formant together; never overwritten by auto-match.
+  tone?: number; // default 0 (original)
+  // Auto vocal-frequency matching: when enabled, vocalMatchShift semitones are
+  // layered on top of the manual pitch/tone/formant so this clip's voice
+  // matches the reference (first) clip. Stored per clip — manual settings are
+  // preserved, so per-clip values may differ while the output is unified.
+  vocalMatchEnabled?: boolean;
+  vocalMatchShift?: number; // computed correction in semitones (auto-match)
   humanize: boolean;    // one-click AI humanizer toggle (default false)
   denoise?: number;     // 0 to 100 (default 0, noise reduction intensity)
   mid?: number;         // -15 to 15 dB (default 0) — Mid-band EQ (1kHz presence)

@@ -1,3 +1,7 @@
+import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
+import { getRampedClipSourceSpan } from '@/utils/speedRamp';
+import { pitchShiftBufferRegion } from '@/utils/audio/phaseVocoder';
+
 export class AudioMixer {
   private sampleRate = 48000;
 
@@ -44,9 +48,31 @@ export class AudioMixer {
             ? await clip._blob.arrayBuffer()
             : await (await fetch(clip._url)).arrayBuffer();
           const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-          
+
+          // Apply the effective vocal pitch (manual Pitch Shift + Vocal Tone +
+          // auto vocal-match) with a phase vocoder — phase-coherent, so the
+          // exported voice stays natural (no granular/resampling artifacts).
+          // Only the clip's used source region is shifted; the region keeps
+          // its length, so all trim/start math below stays valid.
+          let buffer: import('@/utils/audio/phaseVocoder').AudioBufferLike = audioBuffer;
+          const totalPitchSt = effectiveVocalPitchSt(clip.audioSettings);
+          if (Math.abs(totalPitchSt) >= 0.01) {
+            const sourceDuration = audioBuffer.duration || 0;
+            const span = getRampedClipSourceSpan(clip, sourceDuration);
+            const startSec = clip.trimStart || 0;
+            const endSec = Math.min(sourceDuration, startSec + Math.max(0, span));
+            const shifted = pitchShiftBufferRegion(
+              (ch, len, sr) => ctx.createBuffer(ch, len, sr),
+              audioBuffer,
+              totalPitchSt,
+              startSec,
+              endSec
+            );
+            if (shifted) buffer = shifted;
+          }
+
           const source = ctx.createBufferSource();
-          source.buffer = audioBuffer;
+          source.buffer = buffer as AudioBuffer; // real AudioBuffer at runtime
           
           // Handle Speed changes
           if (clip.speed) {
@@ -87,10 +113,19 @@ export class AudioMixer {
           treble.type = 'highshelf';
           treble.frequency.value = 3000;
           treble.gain.value = clip.audioSettings?.treble || 0;
+          // Vocal formant filter — mirrors the preview's vocalFilter so the
+          // exported vocal tone (manual + tone + auto-match compensation)
+          // matches what the user hears while editing.
+          const vocal = ctx.createBiquadFilter();
+          vocal.type = 'peaking';
+          vocal.frequency.value = 1500;
+          vocal.Q.value = 1.0;
+          vocal.gain.value = effectiveVocalFormant(clip.audioSettings) * -0.05;
           const panner = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
           if (panner) panner.pan.value = Math.max(-1, Math.min(1, (clip.audioSettings?.pan || 0) / 100));
 
-          source.connect(bass);
+          source.connect(vocal);
+          vocal.connect(bass);
           bass.connect(treble);
           treble.connect(gainNode);
           if (panner) {

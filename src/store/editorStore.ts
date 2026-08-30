@@ -3045,6 +3045,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             preservePitch: true,
             pitch: 0,
             voiceFormant: 0,
+            tone: 0,
             humanize: false,
           },
     } as import('@/types').TimelineClip;
