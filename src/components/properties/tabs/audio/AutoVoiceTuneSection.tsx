@@ -7,12 +7,14 @@ interface AutoVoiceTuneSectionProps {
 }
 
 export function AutoVoiceTuneSection({ selectedClipIds, isAnalyzingVoice, handleAutoVoiceTune }: AutoVoiceTuneSectionProps) {
-  if (selectedClipIds.length < 2) return null;
+  
 
   return (
     <button
+      title={selectedClipIds.length < 2 ? "Select multiple clips (hold Shift) to match their vocals to the first selected clip" : "Match vocals to the first selected clip"}
+
       onClick={handleAutoVoiceTune}
-      disabled={isAnalyzingVoice}
+      disabled={isAnalyzingVoice || selectedClipIds.length < 2}
       className="w-full py-2 bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/30 text-teal-400 rounded text-[11px] font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
     >
       {isAnalyzingVoice ? (
@@ -21,7 +23,7 @@ export function AutoVoiceTuneSection({ selectedClipIds, isAnalyzingVoice, handle
           Analyzing voices...
         </>
       ) : (
-        'Auto Voice Tune (Multi-Select)'
+        selectedClipIds.length < 2 ? 'Auto-Match Vocals (Select 2+ Clips)' : 'Auto-Match Vocals to 1st Clip'
       )}
     </button>
   );
