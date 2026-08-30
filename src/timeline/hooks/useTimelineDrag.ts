@@ -817,6 +817,26 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         time = Math.max(0, x / zoomLevel);
       }
 
+      // Clicking the ruler always deselects every clip — nothing should stay
+      // selected when the user jumps to a time.
+      const st = useEditorStore.getState();
+      if (st.selectedClipIds.length > 0 || st.selectedClipId) {
+        st.selectClip(null);
+      }
+
+      // RULER CLICK DURING PLAYBACK: a plain click on the ruler is a "jump &
+      // continue" — move the playhead instantly to that point and KEEP PLAYING
+      // from there (CapCut-style). Only an actual drag starts scrubbing mode.
+      const wasPlaying = st.isPlaying;
+      if (wasPlaying) {
+        seek(time);
+        setScrubTime(null);
+        window.dispatchEvent(new Event('procut-frame-updated'));
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
       // NOW it's safe to set scrubbing — the auto-scroller will fire, but we
       // already have the correct time computed above.
       setIsScrubbing(true);

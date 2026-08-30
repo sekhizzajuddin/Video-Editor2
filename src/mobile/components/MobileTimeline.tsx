@@ -209,6 +209,30 @@ export function MobileTimeline({
     return unsub;
   }, [zoomLevel]);
 
+  // Mobile: the playhead is fixed at 50% of the viewport, so when the user
+  // taps the ruler while playing, the timeline must scroll so the tapped
+  // point lands under the playhead — otherwise playback would continue from a
+  // time that is off-screen. We honor seeks by comparing against the last
+  // known time (the clock advances smoothly during playback, so a large jump
+  // can only be an external seek like a ruler tap).
+  const lastFollowTimeRef = useRef(0);
+  useEffect(() => {
+    lastFollowTimeRef.current = getPlaybackTime();
+    const unsub = subscribePlaybackTime(() => {
+      if (!useEditorStore.getState().isPlaying || isUserScrolling.current) return;
+      if (!scrollRef.current) return;
+      const t = getPlaybackTime();
+      if (Math.abs(t - lastFollowTimeRef.current) > 1.5) {
+        lastFollowTimeRef.current = t;
+        isAutoScrolling.current = true;
+        scrollRef.current.scrollLeft = t * zoomLevel;
+      } else {
+        lastFollowTimeRef.current = t;
+      }
+    });
+    return unsub;
+  }, [zoomLevel]);
+
   const onScroll = useCallback(() => {
     if (!scrollRef.current) return;
     if (isAutoScrolling.current) {
@@ -384,10 +408,21 @@ export function MobileTimeline({
 
   const onPointerDownRuler = useCallback(
     (e: React.PointerEvent) => {
-      if (e.pointerType === 'touch') return;
+      e.stopPropagation();
+      // Deselect every clip when the user taps the ruler to jump.
+      const st = useEditorStore.getState();
+      if (st.selectedClipIds.length > 0 || st.selectedClipId) {
+        st.selectClip(null);
+      }
+      const wasPlaying = useEditorStore.getState().isPlaying;
+      if (wasPlaying) {
+        // Jump & continue: move the playhead instantly and keep playing.
+        seek(Math.max(0, timeAt(e.clientX)));
+        return;
+      }
       beginScrub(e);
     },
-    [beginScrub]
+    [beginScrub, seek, timeAt]
   );
 
   const onPointerDownPlayhead = useCallback(
@@ -930,10 +965,12 @@ export function MobileTimeline({
                   />
                 )}
 
-            {/* Ruler (Visual timecode display only - tapping does not scrub) */}
+            {/* Ruler — tap to jump the playhead (also while playing: the playhead
+                instantly moves there and playback continues from that point) */}
             <div
-              className="relative border-b border-white/10 bg-[#16161a] pointer-events-none select-none"
+              className="relative border-b border-white/10 bg-[#16161a] select-none"
               style={{ height: RULER_H }}
+              onPointerDown={onPointerDownRuler}
             >
               {rulerTicks.map((tick) => (
                 <div key={tick.time} className="absolute bottom-0" style={{ left: tick.time * zoomLevel }}>
