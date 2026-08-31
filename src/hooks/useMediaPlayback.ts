@@ -1545,8 +1545,35 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const justActivated = !lastActiveClipIdsRef.current.has(clip.clipId);
 
         // Lazy init audio graph
-        if (entry.type === 'audio' && !entry.sourceNode) {
-          initAudioGraph(entry);
+        if ((entry.type === 'audio' || entry.type === 'video') && !entry.sourceNode) {
+          const el = entry.el as any;
+          if (el._procutSharedAudioGraph) {
+            Object.assign(entry, el._procutSharedAudioGraph);
+          } else {
+            initAudioGraph(entry);
+            if (entry.sourceNode) {
+              el._procutSharedAudioGraph = {
+                audioCtx: entry.audioCtx,
+                feedbackInputGain: entry.feedbackInputGain,
+                feedbackNode: entry.feedbackNode,
+                pannerNode: entry.pannerNode,
+                gainNode: entry.gainNode,
+                separationGraph: entry.separationGraph,
+                sourceNode: entry.sourceNode,
+                vocalFilter: entry.vocalFilter,
+                pitchNode: entry.pitchNode,
+                compressorNode: entry.compressorNode,
+                denoiseFilter: entry.denoiseFilter,
+                bassFilter: entry.bassFilter,
+                midFilter: entry.midFilter,
+                trebleFilter: entry.trebleFilter,
+                deEsserFilter: entry.deEsserFilter,
+                warmthFilter: entry.warmthFilter,
+                delayNode: entry.delayNode,
+                delayGain: entry.delayGain,
+              };
+            }
+          }
         }
         if (playing && !entry._isGraphConnected && entry.gainNode) {
           connectAudioNode(entry);

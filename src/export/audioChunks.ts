@@ -32,8 +32,8 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
 
     for (const clip of (track.clips || [])) {
       const isMuted = clip.audioSettings?.muted || clip.disabled;
-      const volume = clip.audioSettings?.volume ?? 100;
-      if (isMuted || volume <= 0) continue;
+      const volumeDb = clip.audioSettings?.volume ?? 0;
+      if (isMuted || volumeDb <= -40) continue;
 
       // Check temporal intersection with export duration
       const clipEnd = clip.startTime + clip.duration;
@@ -53,8 +53,10 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
         
         // Calculate volume scaling
         const gainNode = offlineCtx.createGain();
-        const vol = (volume / 100) * ((store.volume ?? 100) / 100);
-        gainNode.gain.value = vol;
+        const linearGain = Math.pow(10, volumeDb / 20);
+        const storeLinearGain = store.volume ?? 1;
+        // Clamp just like in preview player to prevent clipping
+        gainNode.gain.value = Math.max(0, Math.min(1, linearGain * storeLinearGain));
         
         // Apply static speed (for speedRamps, this is just the base speed)
         source.playbackRate.value = clip.speed || 1;
