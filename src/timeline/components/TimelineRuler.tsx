@@ -170,28 +170,28 @@ export const TimelineRuler = React.memo(function TimelineRuler({
       >
         {/* Ruler ticks & labels */}
         {visibleRulerData.map((tick, i) => {
-          let height = '20%';
-          let color = '#3e3e3e';
+          let height = '5px';
+          let tickClass = 'bg-slate-300 dark:bg-slate-700/80';
           if (tick.type === 'major') {
-            height = '50%';
-            color = '#8a8a8a';
+            height = '14px';
+            tickClass = 'bg-slate-700 dark:bg-slate-300';
           } else if (tick.type === 'medium') {
-            height = '35%';
-            color = '#5a5a5a';
+            height = '9px';
+            tickClass = 'bg-slate-500 dark:bg-slate-400';
           }
 
           return (
             <div
-              key={`tick-${i}`}
-              className="absolute top-0 select-none pointer-events-none"
+              key={`tick-${i}-${tick.time}`}
+              className="absolute bottom-0 select-none pointer-events-none"
               style={{ left: `${tick.time * zoomLevel}px` }}
             >
               <div
-                className="w-px"
-                style={{ height, backgroundColor: color }}
+                className={`w-px ${tickClass}`}
+                style={{ height }}
               />
               {tick.label && (
-                <span className="absolute left-1 top-0 text-[8px] text-[#8a8a8a] select-none font-mono">
+                <span className="absolute left-1.5 -top-3.5 text-[9px] text-[var(--theme-text-muted)] font-mono font-semibold select-none leading-none whitespace-nowrap">
                   {tick.label}
                 </span>
               )}

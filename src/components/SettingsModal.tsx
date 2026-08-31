@@ -170,16 +170,16 @@ export function SettingsModal() {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center">
-      <div className="bg-[#2d2d2d] rounded-lg shadow-2xl w-[540px] max-h-[80vh] overflow-hidden border border-[#3e3e3e]">
+      <div className="bg-[var(--theme-bg-panel)] rounded-2xl shadow-2xl w-[580px] max-h-[85vh] overflow-hidden border border-[var(--theme-border)] text-[var(--theme-text-primary)]">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--theme-border)]">
           <div className="flex items-center gap-2">
-            <Settings className="w-5 h-5 text-amber-400" />
-            <h2 className="text-sm font-semibold text-white">Settings</h2>
+            <Settings className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-sm font-bold text-[var(--theme-text-primary)]">Settings</h2>
           </div>
           <button
             onClick={() => setShowSettingsModal(false)}
-            className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors"
+            className="p-1 text-[var(--theme-text-muted)] hover:text-white rounded transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -187,7 +187,7 @@ export function SettingsModal() {
 
         <div className="flex" style={{ maxHeight: 'calc(80vh - 65px)' }}>
           {/* Sidebar */}
-          <div className="w-36 border-r border-[#3e3e3e] bg-[#252525]">
+          <div className="w-36 border-r border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)]">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
@@ -196,8 +196,8 @@ export function SettingsModal() {
                   onClick={() => setActiveTab(tab.id)}
                   className={`w-full px-3 py-2.5 text-xs flex items-center gap-2 transition-colors ${
                     activeTab === tab.id
-                      ? 'text-white bg-[#3e3e3e] border-l-2 border-amber-500'
-                      : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                      ? 'text-white bg-[var(--theme-bg-card)] border-l-2 border-blue-600 dark:border-blue-400'
+                      : 'text-[var(--theme-text-muted)] hover:text-white hover:bg-[var(--theme-bg-panel)]'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -211,18 +211,18 @@ export function SettingsModal() {
           <div className="flex-1 overflow-y-auto p-4">
             {activeTab === 'general' && (
               <div className="space-y-4">
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Project Settings</h3>
+                <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Project Settings</h3>
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs text-white">Autosave</span>
-                      <p className="text-[10px] text-[#a0a0a0]">Save project automatically</p>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)]">Autosave</span>
+                      <p className="text-[10px] text-[var(--theme-text-muted)]">Save project automatically</p>
                     </div>
                     <button
                       onClick={() => updateSettings({ autosave: !settings.autosave })}
                       className={`w-9 h-5 rounded-full transition-colors relative ${
-                        settings.autosave ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                        settings.autosave ? 'bg-blue-600' : 'bg-[var(--theme-bg-card)]'
                       }`}
                     >
                       <div
@@ -236,13 +236,13 @@ export function SettingsModal() {
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs text-white">Snap to Clips</span>
-                      <p className="text-[10px] text-[#a0a0a0]">Auto-snap clips when dragging</p>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)]">Snap to Clips</span>
+                      <p className="text-[10px] text-[var(--theme-text-muted)]">Auto-snap clips when dragging</p>
                     </div>
                     <button
                       onClick={() => updateSettings({ snapEnabled: !settings.snapEnabled })}
                       className={`w-9 h-5 rounded-full transition-colors relative ${
-                        settings.snapEnabled ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                        settings.snapEnabled ? 'bg-blue-600' : 'bg-[var(--theme-bg-card)]'
                       }`}
                     >
                       <div
@@ -254,13 +254,13 @@ export function SettingsModal() {
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs text-white">Show Waveforms</span>
-                      <p className="text-[10px] text-[#a0a0a0]">Display audio waveforms on clips</p>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)]">Show Waveforms</span>
+                      <p className="text-[10px] text-[var(--theme-text-muted)]">Display audio waveforms on clips</p>
                     </div>
                     <button
                       onClick={() => updateSettings({ showWaveform: !settings.showWaveform })}
                       className={`w-9 h-5 rounded-full transition-colors relative ${
-                        settings.showWaveform ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                        settings.showWaveform ? 'bg-blue-600' : 'bg-[var(--theme-bg-card)]'
                       }`}
                     >
                       <div
@@ -271,12 +271,12 @@ export function SettingsModal() {
                   </div>
                 </div>
 
-                <div className="border-t border-[#3e3e3e] pt-4">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Default Settings</h3>
+                <div className="border-t border-[var(--theme-border)] pt-4">
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider mb-3">Default Settings</h3>
 
                   <div className="space-y-3">
                     <div>
-                      <label className="text-[10px] text-[#a0a0a0] block mb-1">Default Image Duration (seconds)</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] block mb-1">Default Image Duration (seconds)</label>
                       <input
                         type="number"
                         value={settings.defaultDuration}
@@ -290,16 +290,16 @@ export function SettingsModal() {
                         min={1}
                         max={60}
                         placeholder="1-60"
-                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                       />
                     </div>
                   </div>
                 </div>
 
                 
-                <div className="border-t border-[#3e3e3e] pt-4">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Smart Reframing</h3>
-                  <p className="text-[10px] text-[#a0a0a0] mb-3">
+                <div className="border-t border-[var(--theme-border)] pt-4">
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider mb-3">Smart Reframing</h3>
+                  <p className="text-[10px] text-[var(--theme-text-muted)] mb-3">
                     Automatically convert your project for different platforms (e.g. TikTok / Shorts). 
                     This will scale and crop all your existing video clips to fill the new aspect ratio.
                   </p>
@@ -310,7 +310,7 @@ export function SettingsModal() {
                           reframeProject('16:9');
                         }
                       }}
-                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '16:9' ? 'bg-amber-500 text-black font-semibold' : 'bg-[#252525] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white'}`}
+                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '16:9' ? 'bg-blue-600 text-black font-semibold' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'}`}
                     >
                       16:9 (Landscape)
                     </button>
@@ -320,7 +320,7 @@ export function SettingsModal() {
                           reframeProject('9:16');
                         }
                       }}
-                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '9:16' ? 'bg-amber-500 text-black font-semibold' : 'bg-[#252525] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white'}`}
+                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '9:16' ? 'bg-blue-600 text-black font-semibold' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'}`}
                     >
                       9:16 (Vertical)
                     </button>
@@ -330,16 +330,16 @@ export function SettingsModal() {
                           reframeProject('1:1');
                         }
                       }}
-                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '1:1' ? 'bg-amber-500 text-black font-semibold' : 'bg-[#252525] border border-[#3e3e3e] text-[#a0a0a0] hover:text-white'}`}
+                      className={`flex-1 py-2 rounded text-xs transition-colors ${aspectRatio === '1:1' ? 'bg-blue-600 text-black font-semibold' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'}`}
                     >
                       1:1 (Square)
                     </button>
                   </div>
                 </div>
 
-                <div className="border-t border-[#3e3e3e] pt-4">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">AI API Keys</h3>
-                  <p className="text-[10px] text-[#a0a0a0] mb-3">
+                <div className="border-t border-[var(--theme-border)] pt-4">
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider mb-3">AI API Keys</h3>
+                  <p className="text-[10px] text-[var(--theme-text-muted)] mb-3">
                     These local keys act as a fallback if the Vercel environment variables hit a rate limit (429) or connection error.
                   </p>
                   <div className="space-y-3">
@@ -350,7 +350,7 @@ export function SettingsModal() {
                         placeholder="AIzaSy..."
                         value={settings.geminiApiKey || ''}
                         onChange={(e) => updateSettings({ geminiApiKey: e.target.value })}
-                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                       />
                     </div>
                     <div>
@@ -360,7 +360,7 @@ export function SettingsModal() {
                         placeholder="gsk_..."
                         value={settings.groqApiKey || ''}
                         onChange={(e) => updateSettings({ groqApiKey: e.target.value })}
-                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                       />
                     </div>
                     <div>
@@ -370,7 +370,7 @@ export function SettingsModal() {
                         placeholder="sk_..."
                         value={settings.elevenLabsApiKey || ''}
                         onChange={(e) => updateSettings({ elevenLabsApiKey: e.target.value })}
-                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                       />
                     </div>
                     <div>
@@ -380,7 +380,7 @@ export function SettingsModal() {
                         placeholder="For AI Sound Design..."
                         value={settings.freesoundApiKey || ''}
                         onChange={(e) => updateSettings({ freesoundApiKey: e.target.value })}
-                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                       />
                     </div>
                     <div>
@@ -390,7 +390,7 @@ export function SettingsModal() {
                         placeholder="4cd6b614..."
                         value={settings.cloudflareAccountId || ''}
                         onChange={(e) => updateSettings({ cloudflareAccountId: e.target.value })}
-                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                       />
                     </div>
                     <div>
@@ -400,18 +400,18 @@ export function SettingsModal() {
                         placeholder="cfat_..."
                         value={settings.cloudflareApiToken || ''}
                         onChange={(e) => updateSettings({ cloudflareApiToken: e.target.value })}
-                        className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                       />
                     </div>
                   </div>
                 </div>
 
-                <div className="border-t border-[#3e3e3e] pt-4">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Project Actions</h3>
+                <div className="border-t border-[var(--theme-border)] pt-4">
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider mb-3">Project Actions</h3>
                   <div className="space-y-2">
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="w-full px-3 py-2 bg-[#252525] border border-[#3e3e3e] rounded text-xs text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors flex items-center gap-2"
+                      className="w-full px-3 py-2 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-[var(--theme-text-muted)] hover:text-white hover:border-blue-600 dark:border-blue-400 transition-colors flex items-center gap-2"
                     >
                       <FolderOpen className="w-3.5 h-3.5" />
                       Import Media Files
@@ -445,17 +445,17 @@ export function SettingsModal() {
                   </div>
 
                   {/* Export Settings */}
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider pt-2">Export Settings</h3>
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider pt-2">Export Settings</h3>
                   <div className="space-y-3">
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <div>
-                          <span className="text-xs text-white">Default Output Folder</span>
-                          <p className="text-[10px] text-[#a0a0a0]">Where exported videos are saved</p>
+                          <span className="text-xs font-medium text-[var(--theme-text-primary)]">Default Output Folder</span>
+                          <p className="text-[10px] text-[var(--theme-text-muted)]">Where exported videos are saved</p>
                         </div>
                       </div>
                       <div className="flex gap-2 items-center">
-                        <div className="flex-1 bg-[#1a1a1a] text-xs border border-[#3e3e3e] rounded px-3 py-2 text-[#a0a0a0] overflow-hidden text-ellipsis whitespace-nowrap" title={localStorage.getItem('exportOutputFolder') || 'Desktop (default)'}>
+                        <div className="flex-1 bg-[var(--theme-bg-subpanel)] text-xs border border-[var(--theme-border)] rounded px-3 py-2 text-[var(--theme-text-muted)] overflow-hidden text-ellipsis whitespace-nowrap" title={localStorage.getItem('exportOutputFolder') || 'Desktop (default)'}>
                           {localStorage.getItem('exportOutputFolder') || 'Desktop (default)'}
                         </div>
                         <button
@@ -474,7 +474,7 @@ export function SettingsModal() {
                               toast.error('Could not open folder picker. Make sure Hikmah Runtime is running.');
                             }
                           }}
-                          className="shrink-0 px-3 py-2 bg-[#353535] hover:bg-[#404040] text-[#a0a0a0] hover:text-white text-xs border border-[#3e3e3e] rounded transition-colors flex items-center gap-1.5"
+                          className="shrink-0 px-3 py-2 bg-[#353535] hover:bg-[#404040] text-[var(--theme-text-muted)] hover:text-white text-xs border border-[var(--theme-border)] rounded transition-colors flex items-center gap-1.5"
                         >
                           <FolderOpen className="w-3.5 h-3.5" />
                           Browse
@@ -487,7 +487,7 @@ export function SettingsModal() {
                               setShowSettingsModal(false);
                               setTimeout(() => setShowSettingsModal(true), 50);
                             }}
-                            className="shrink-0 px-2 py-2 text-[#a0a0a0] hover:text-white text-xs transition-colors"
+                            className="shrink-0 px-2 py-2 text-[var(--theme-text-muted)] hover:text-white text-xs transition-colors"
                             title="Reset to Desktop"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
@@ -502,18 +502,18 @@ export function SettingsModal() {
 
             {activeTab === 'engagement' && (
               <div className="space-y-4">
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Social Engagement</h3>
+                <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Social Engagement</h3>
                 
-                <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Heart className="w-4 h-4 text-pink-500" />
-                      <span className="text-xs text-white font-medium">Dynamic Progress Bar</span>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">Dynamic Progress Bar</span>
                     </div>
                     <button
                       onClick={() => setShowProgressBar(!showProgressBar)}
                       className={`w-9 h-5 rounded-full transition-colors relative ${
-                        showProgressBar ? 'bg-pink-500' : 'bg-[#3e3e3e]'
+                        showProgressBar ? 'bg-pink-500' : 'bg-[var(--theme-bg-card)]'
                       }`}
                     >
                       <div
@@ -522,15 +522,15 @@ export function SettingsModal() {
                       />
                     </button>
                   </div>
-                  <p className="text-[10px] text-[#a0a0a0] mb-4">
+                  <p className="text-[10px] text-[var(--theme-text-muted)] mb-4">
                     Displays a continuous progress bar during playback. Often used in YouTube Shorts and TikToks to improve viewer retention.
                   </p>
 
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-white">Bar Color</span>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)]">Bar Color</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-[#a0a0a0] font-mono">{progressBarColor.toUpperCase()}</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)] font-mono">{progressBarColor.toUpperCase()}</span>
                         <input
                           type="color"
                           value={progressBarColor}
@@ -542,7 +542,7 @@ export function SettingsModal() {
                     </div>
                     
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between text-xs text-white">
+                      <div className="flex items-center justify-between text-xs font-medium text-[var(--theme-text-primary)]">
                         <span>Bar Height</span>
                         <span className="text-pink-500">{progressBarHeight}px</span>
                       </div>
@@ -553,7 +553,7 @@ export function SettingsModal() {
                         step={1}
                         value={progressBarHeight}
                         onChange={(e) => setProgressBarHeight(Number(e.target.value))}
-                        className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-pink-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="w-full h-1 bg-[var(--theme-bg-card)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-pink-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -563,13 +563,13 @@ export function SettingsModal() {
 
             {activeTab === 'controls' && (
               <div className="space-y-4">
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Canvas Controls</h3>
+                <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Canvas Controls</h3>
                 
                 <div className="space-y-4">
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
-                    <label className="flex items-center justify-between text-xs text-white font-medium mb-3">
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
+                    <label className="flex items-center justify-between text-xs font-medium text-[var(--theme-text-primary)] font-medium mb-3">
                       Scroll Speed
-                      <span className="text-amber-500">{settings.scrollSpeed.toFixed(1)}x</span>
+                      <span className="text-blue-600 dark:text-blue-400">{settings.scrollSpeed.toFixed(1)}x</span>
                     </label>
                     <input
                       type="range"
@@ -578,17 +578,17 @@ export function SettingsModal() {
                       step={0.1}
                       value={settings.scrollSpeed}
                       onChange={(e) => updateSettings({ scrollSpeed: Number(e.target.value) })}
-                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      className="w-full h-1 bg-[var(--theme-bg-card)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:rounded-full"
                     />
-                    <p className="text-[10px] text-[#a0a0a0] mt-2">
+                    <p className="text-[10px] text-[var(--theme-text-muted)] mt-2">
                       Adjusts the timeline and track scrolling speed.
                     </p>
                   </div>
 
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
-                    <label className="flex items-center justify-between text-xs text-white font-medium mb-3">
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
+                    <label className="flex items-center justify-between text-xs font-medium text-[var(--theme-text-primary)] font-medium mb-3">
                       Gesture Zoom Sensitivity
-                      <span className="text-amber-500">{settings.gestureSensitivity.toFixed(1)}x</span>
+                      <span className="text-blue-600 dark:text-blue-400">{settings.gestureSensitivity.toFixed(1)}x</span>
                     </label>
                     <input
                       type="range"
@@ -597,9 +597,9 @@ export function SettingsModal() {
                       step={0.1}
                       value={settings.gestureSensitivity}
                       onChange={(e) => updateSettings({ gestureSensitivity: Number(e.target.value) })}
-                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      className="w-full h-1 bg-[var(--theme-bg-card)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:rounded-full"
                     />
-                    <p className="text-[10px] text-[#a0a0a0] mt-2">
+                    <p className="text-[10px] text-[var(--theme-text-muted)] mt-2">
                       Adjusts the zoom speed when using trackpad gestures or Ctrl+Scroll in the canvas.
                     </p>
                   </div>
@@ -610,7 +610,7 @@ export function SettingsModal() {
             {activeTab === 'keyboard' && (
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Keyboard Shortcuts</h3>
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Keyboard Shortcuts</h3>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
@@ -632,7 +632,7 @@ export function SettingsModal() {
                         };
                         input.click();
                       }}
-                      className="px-2.5 py-1 text-[10px] text-amber-400 hover:text-amber-300 border border-amber-900/30 hover:bg-amber-900/20 rounded transition-colors"
+                      className="px-2.5 py-1 text-[10px] text-blue-600 dark:text-blue-400 hover:text-amber-300 border border-amber-900/30 hover:bg-amber-900/20 rounded transition-colors"
                     >Import</button>
                     <button
                       onClick={() => {
@@ -648,10 +648,10 @@ export function SettingsModal() {
                         // FIX C3: release blob URL to prevent memory leak
                         setTimeout(() => URL.revokeObjectURL(url), 0);
                       }}
-                      className="px-2.5 py-1 text-[10px] text-amber-400 hover:text-amber-300 border border-amber-900/30 hover:bg-amber-900/20 rounded transition-colors"
+                      className="px-2.5 py-1 text-[10px] text-blue-600 dark:text-blue-400 hover:text-amber-300 border border-amber-900/30 hover:bg-amber-900/20 rounded transition-colors"
                     >Export</button>
                     <select
-                      className="bg-[#1e1e1e] border border-[#3e3e3e] text-[10px] text-[#a0a0a0] hover:text-white px-2 py-1 rounded focus:outline-none"
+                      className="bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-[10px] text-[var(--theme-text-muted)] hover:text-white px-2 py-1 rounded focus:outline-none"
                       onChange={(e) => {
                         if (e.target.value === 'Default') {
                           updateSettings({ keyboardShortcuts: {} });
@@ -685,13 +685,13 @@ export function SettingsModal() {
 
                 {/* Search Bar */}
                 <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                   <input
                     type="text"
                     placeholder="Search shortcuts..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#a0a0a0] focus:outline-none focus:border-amber-500"
+                    className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded pl-8 pr-3 py-1.5 text-xs font-medium text-[var(--theme-text-primary)] placeholder-[#a0a0a0] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                   />
                 </div>
 
@@ -715,7 +715,7 @@ export function SettingsModal() {
 
                       return (
                         <div key={cat} className="space-y-1.5">
-                          <p className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider px-1">{cat}</p>
+                          <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider px-1">{cat}</p>
                           <div className="space-y-0.5">
                             {catShortcuts.map((def) => {
                               const customKey = customShortcuts[def.id];
@@ -726,10 +726,10 @@ export function SettingsModal() {
                               return (
                                 <div
                                   key={def.id}
-                                  className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[#252525] border border-transparent hover:border-[#3e3e3e]/40 transition-all group"
+                                  className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[var(--theme-bg-subpanel)] border border-transparent hover:border-[var(--theme-border)]/40 transition-all group"
                                 >
                                   <div className="flex flex-col">
-                                    <span className="text-xs text-white font-medium">{def.label}</span>
+                                    <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">{def.label}</span>
                                     {isCustom && customKey === '' && (
                                       <span className="text-[9px] text-red-400">Unbound</span>
                                     )}
@@ -740,10 +740,10 @@ export function SettingsModal() {
                                       onClick={() => setRecordingActionId(isRecording ? null : def.id)}
                                       className={`px-2.5 py-1 text-[10px] font-mono border rounded min-w-[70px] text-center transition-all ${
                                         isRecording
-                                          ? 'bg-amber-500/20 border-amber-500 text-amber-400 animate-pulse'
+                                          ? 'bg-blue-600/20 border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400 animate-pulse'
                                           : currentCombo
-                                          ? 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0]'
-                                          : 'bg-[#1e1e1e] border-dashed border-red-500/40 text-red-400 hover:text-red-300'
+                                          ? 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white hover:border-[#a0a0a0]'
+                                          : 'bg-[var(--theme-bg-subpanel)] border-dashed border-red-500/40 text-red-400 hover:text-red-300'
                                       }`}
                                     >
                                       {isRecording ? 'Press...' : currentCombo || 'None'}
@@ -757,7 +757,7 @@ export function SettingsModal() {
                                           updateSettings({ keyboardShortcuts: newShortcuts });
                                         }}
                                         title="Reset to default key"
-                                        className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                        className="p-1 hover:bg-[var(--theme-bg-card)] rounded text-[var(--theme-text-muted)] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
                                       >
                                         <RotateCcw className="w-3 h-3" />
                                       </button>
@@ -776,14 +776,14 @@ export function SettingsModal() {
                 {/* Conflict Overlay Modal */}
                 {conflictDetail && (
                   <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-4 z-[110]">
-                    <div className="bg-[#2d2d2d] border border-red-500/30 rounded-lg p-4 max-w-sm w-full space-y-3 shadow-2xl">
+                    <div className="bg-[var(--theme-bg-panel)] border border-red-500/30 rounded-lg p-4 max-w-sm w-full space-y-3 shadow-2xl">
                       <div className="flex items-center gap-2 text-red-400">
                         <AlertTriangle className="w-5 h-5 shrink-0" />
                         <h4 className="text-xs font-semibold uppercase tracking-wider">Hotkey Conflict</h4>
                       </div>
                       
-                      <p className="text-xs text-[#a0a0a0] leading-relaxed">
-                        The combination <span className="font-mono text-white px-1.5 py-0.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px]">{conflictDetail.keyCombo}</span> is already bound to:
+                      <p className="text-xs text-[var(--theme-text-muted)] leading-relaxed">
+                        The combination <span className="font-mono text-white px-1.5 py-0.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-[10px]">{conflictDetail.keyCombo}</span> is already bound to:
                         <strong className="block text-white mt-1">
                           {DEFAULT_SHORTCUTS.find(s => s.id === conflictDetail.conflictingActionId)?.label}
                         </strong>
@@ -798,7 +798,7 @@ export function SettingsModal() {
                         </button>
                         <button
                           onClick={() => handleResolveConflict(false)}
-                          className="flex-1 py-1.5 text-xs font-medium text-[#a0a0a0] hover:text-white bg-[#3e3e3e] hover:bg-[#4d4d4d] rounded transition-colors"
+                          className="flex-1 py-1.5 text-xs font-medium text-[var(--theme-text-muted)] hover:text-white bg-[var(--theme-bg-card)] hover:bg-[#4d4d4d] rounded transition-colors"
                         >
                           Cancel
                         </button>
@@ -811,18 +811,18 @@ export function SettingsModal() {
 
             {activeTab === 'performance' && (
               <div className="space-y-4">
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Performance</h3>
+                <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Performance</h3>
 
                 <div className="space-y-3">
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
                     <div className="flex items-center gap-2 mb-2">
                       <Monitor className="w-4 h-4 text-blue-400" />
-                      <span className="text-xs text-white font-medium">Preview Quality</span>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">Preview Quality</span>
                     </div>
                     <select
                       value={settings.previewQuality}
                       onChange={(e) => updateSettings({ previewQuality: e.target.value as any })}
-                      className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                     >
                       <option value="full">Full (Best Quality)</option>
                       <option value="half">Half (Balanced)</option>
@@ -830,35 +830,35 @@ export function SettingsModal() {
                     </select>
                   </div>
 
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
                     <div className="flex items-center gap-2 mb-2">
                       <Monitor className="w-4 h-4 text-purple-400" />
-                      <span className="text-xs text-white font-medium">Preview Gating & Short-Circuit</span>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">Preview Gating & Short-Circuit</span>
                     </div>
                     <select
                       value={settings.previewMode || 'auto'}
                       onChange={(e) => updateSettings({ previewMode: e.target.value as any })}
-                      className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                      className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs font-medium text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-600 dark:border-blue-400"
                     >
                       <option value="auto">Auto (engine short-circuits on heavy FX)</option>
                       <option value="fast">Fast (downscale 2×, skip heavy CPU loops)</option>
                       <option value="high">High Quality (always render full FX)</option>
                     </select>
-                    <p className="text-[10px] text-[#808080] mt-1.5">
+                    <p className="text-[10px] text-[var(--theme-text-muted)] mt-1.5">
                       Controls whether high-cost CPU effects (AI background, Object removal, Chroma key) are short-circuited during active video playback to lock 60 FPS.
                     </p>
                   </div>
 
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
                         <Monitor className="w-4 h-4 text-emerald-400" />
-                        <span className="text-xs text-white font-medium">Proxy Workflow</span>
+                        <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">Proxy Workflow</span>
                       </div>
                       <button
                         onClick={() => setUseProxies(!useProxies)}
                         className={`w-9 h-5 rounded-full transition-colors relative ${
-                          useProxies ? 'bg-emerald-500' : 'bg-[#3e3e3e]'
+                          useProxies ? 'bg-emerald-500' : 'bg-[var(--theme-bg-card)]'
                         }`}
                       >
                         <div
@@ -867,15 +867,15 @@ export function SettingsModal() {
                         />
                       </button>
                     </div>
-                    <p className="text-[10px] text-[#a0a0a0]">Use low-resolution proxy files for smooth playback on heavy projects.</p>
+                    <p className="text-[10px] text-[var(--theme-text-muted)]">Use low-resolution proxy files for smooth playback on heavy projects.</p>
                   </div>
 
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
                     <div className="flex items-center gap-2 mb-2">
                       <HardDrive className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs text-white font-medium">Cache Settings</span>
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">Cache Settings</span>
                     </div>
-                    <p className="text-[10px] text-[#a0a0a0] mb-2">
+                    <p className="text-[10px] text-[var(--theme-text-muted)] mb-2">
                       Clear cached preview files to free up disk space
                     </p>
                     <button
@@ -883,32 +883,32 @@ export function SettingsModal() {
                         clearPreviewCaches();
                         toast.success('Preview image cache cleared successfully!');
                       }}
-                      className="px-3 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors"
+                      className="px-3 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-[var(--theme-text-muted)] hover:text-white hover:border-blue-600 dark:border-blue-400 transition-colors"
                     >
                       Clear Cache
                     </button>
                   </div>
 
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
                     <div className="flex items-center gap-2 mb-2">
-                      <HardDrive className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs text-white font-medium">Storage Health</span>
+                      <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">Storage Health</span>
                     </div>
-                    <p className="text-[10px] text-[#a0a0a0] mb-2">
+                    <p className="text-[10px] text-[var(--theme-text-muted)] mb-2">
                       Browser storage quota + RAM cache usage. Streams from SSD when possible.
                     </p>
                     <StorageHealthWidget />
                   </div>
 
-                  <div className="bg-[#252525] rounded p-3 border border-[#3e3e3e]">
-                    <span className="text-xs text-white font-medium">Timeline Rendering</span>
+                  <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-[var(--theme-border)]">
+                    <span className="text-xs font-medium text-[var(--theme-text-primary)] font-medium">Timeline Rendering</span>
                     <div className="mt-2 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-[#a0a0a0]">Show thumbnails</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)]">Show thumbnails</span>
                         <button
                           onClick={() => updateSettings({ showThumbnails: !settings.showThumbnails })}
                           className={`w-9 h-5 rounded-full transition-colors relative ${
-                            settings.showThumbnails ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                            settings.showThumbnails ? 'bg-blue-600' : 'bg-[var(--theme-bg-card)]'
                           }`}
                         >
                           <div
@@ -918,11 +918,11 @@ export function SettingsModal() {
                         </button>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-[#a0a0a0]">Hardware acceleration</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)]">Hardware acceleration</span>
                         <button
                           onClick={() => updateSettings({ hardwareAcceleration: !settings.hardwareAcceleration })}
                           className={`w-9 h-5 rounded-full transition-colors relative ${
-                            settings.hardwareAcceleration ? 'bg-amber-500' : 'bg-[#3e3e3e]'
+                            settings.hardwareAcceleration ? 'bg-blue-600' : 'bg-[var(--theme-bg-card)]'
                           }`}
                         >
                           <div
@@ -940,16 +940,16 @@ export function SettingsModal() {
             {activeTab === 'recovery' && (
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Project Recovery History</h3>
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Project Recovery History</h3>
                   <button
                     onClick={loadAutosaves}
-                    className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+                    className="p-1 hover:bg-[var(--theme-bg-card)] rounded text-[var(--theme-text-muted)] hover:text-white transition-colors"
                     title="Refresh autosaves list"
                   >
                     <RotateCw className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <p className="text-[10px] text-[#a0a0a0]">
+                <p className="text-[10px] text-[var(--theme-text-muted)]">
                   Periodic background snapshots of your project. Keep up to 10 versions.
                 </p>
 
@@ -962,20 +962,20 @@ export function SettingsModal() {
                     autosaves.map((as) => (
                       <div
                         key={as.timestamp}
-                        className="bg-[#252525] rounded p-2.5 border border-[#3e3e3e] flex items-center justify-between gap-3 text-xs hover:border-[#4e4e4e] transition-colors"
+                        className="bg-[var(--theme-bg-subpanel)] rounded p-2.5 border border-[var(--theme-border)] flex items-center justify-between gap-3 text-xs hover:border-[#4e4e4e] transition-colors"
                       >
                         <div className="flex flex-col gap-0.5">
-                          <span className="font-semibold text-[#d0d0d0]">
+                          <span className="font-semibold text-[var(--theme-text-primary)]">
                             {new Date(as.timestamp).toLocaleString()}
                           </span>
-                          <span className="text-[10px] text-[#808080]">
+                          <span className="text-[10px] text-[var(--theme-text-muted)]">
                             {as.tracks.reduce((acc: number, t: any) => acc + t.clips.length, 0)} clips • {as.mediaLibrary.length} media items
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             onClick={() => handleRestoreAutosave(as)}
-                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-black font-semibold text-[10px] uppercase rounded transition-colors"
+                            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-600 text-black font-semibold text-[10px] uppercase rounded transition-colors"
                           >
                             Restore
                           </button>
@@ -1054,18 +1054,18 @@ function StorageHealthWidget() {
 
   const percent = Math.min(100, report.percent);
   const color =
-    percent >= 90 ? 'bg-red-500' : percent >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+    percent >= 90 ? 'bg-red-500' : percent >= 70 ? 'bg-blue-600' : 'bg-emerald-500';
 
   return (
     <div className="space-y-2">
       <div>
-        <div className="flex justify-between text-[10px] text-[#a0a0a0] mb-1">
+        <div className="flex justify-between text-[10px] text-[var(--theme-text-muted)] mb-1">
           <span>Browser Storage</span>
           <span>
             {report.usedMB} MB / {report.quotaMB} MB
           </span>
         </div>
-        <div className="h-1.5 bg-[#1a1a1a] rounded overflow-hidden">
+        <div className="h-1.5 bg-[var(--theme-bg-subpanel)] rounded overflow-hidden">
           <div
             className={`h-full ${color} transition-all duration-300`}
             style={{ width: `${percent}%` }}
@@ -1074,15 +1074,15 @@ function StorageHealthWidget() {
         <div className="text-[9px] text-[#666] mt-0.5">{percent}% used</div>
       </div>
       <div className="grid grid-cols-2 gap-2 text-[10px]">
-        <div className="bg-[#1a1a1a] rounded px-2 py-1.5">
-          <div className="text-[#808080]">RAM Window</div>
+        <div className="bg-[var(--theme-bg-subpanel)] rounded px-2 py-1.5">
+          <div className="text-[var(--theme-text-muted)]">RAM Window</div>
           <div className="text-white">
             {report.windowCache.entries}/{report.windowCache.maxEntries}
           </div>
           <div className="text-[9px] text-[#666]">±{report.windowCache.windowSeconds}s each</div>
         </div>
-        <div className="bg-[#1a1a1a] rounded px-2 py-1.5">
-          <div className="text-[#808080]">Bitmap Cache</div>
+        <div className="bg-[var(--theme-bg-subpanel)] rounded px-2 py-1.5">
+          <div className="text-[var(--theme-text-muted)]">Bitmap Cache</div>
           <div className="text-white">{report.bitmapPixelsMB} MB</div>
           <div className="text-[9px] text-[#666]">capped at 64 MB</div>
         </div>
@@ -1093,7 +1093,7 @@ function StorageHealthWidget() {
             clearImageBitmapPool();
             toast.success('ImageBitmap cache cleared.');
           }}
-          className="px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors"
+          className="px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-[10px] text-[var(--theme-text-muted)] hover:text-white hover:border-blue-600 dark:border-blue-400 transition-colors"
         >
           Clear Bitmaps
         </button>
@@ -1102,7 +1102,7 @@ function StorageHealthWidget() {
             clearAllMediaWindows();
             toast.success('RAM windowed cache cleared.');
           }}
-          className="px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] hover:text-white hover:border-amber-500 transition-colors"
+          className="px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-[10px] text-[var(--theme-text-muted)] hover:text-white hover:border-blue-600 dark:border-blue-400 transition-colors"
         >
           Clear RAM Cache
         </button>

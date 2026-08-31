@@ -380,13 +380,7 @@ export function PreviewCanvasContainer() {
 
   useEffect(() => {
     const handleFrameUpdate = () => {
-      if (!useEditorStore.getState().isPlaying) {
-        // Set framePending directly so the RAF tick renders IMMEDIATELY.
-        // NOTE: Do NOT call requestRedraw() here — it triggers setImageRevision
-        // which causes a full React re-render of PreviewCanvasContainer, wasting
-        // 5-15ms per frame during scrubbing. framePendingRef is sufficient.
-        framePendingRef.current = true;
-      }
+      framePendingRef.current = true;
     };
     window.addEventListener('procut-frame-updated', handleFrameUpdate);
 

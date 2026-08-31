@@ -824,27 +824,18 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         st.selectClip(null);
       }
 
-      // RULER CLICK DURING PLAYBACK: a plain click on the ruler is a "jump &
-      // continue" — move the playhead instantly to that point and KEEP PLAYING
-      // from there (CapCut-style). Only an actual drag starts scrubbing mode.
       const wasPlaying = st.isPlaying;
-      if (wasPlaying) {
-        seek(time);
-        setScrubTime(null);
-        window.dispatchEvent(new Event('procut-frame-updated'));
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
+      wasPlayingOnRulerDownRef.current = wasPlaying;
+      rulerDownXRef.current = e.clientX;
 
-      // NOW it's safe to set scrubbing — the auto-scroller will fire, but we
-      // already have the correct time computed above.
-      setIsScrubbing(true);
-
-      setScrubTime(time);
-      setScrubMouseX(e.clientX);
+      // Move playhead instantly to clicked point
       seek(time);
       window.dispatchEvent(new Event('procut-frame-updated'));
+
+      // Enable scrubbing tracking so dragging works seamlessly
+      setIsScrubbing(true);
+      setScrubTime(time);
+      setScrubMouseX(e.clientX);
 
       e.preventDefault();
       e.stopPropagation();
@@ -862,9 +853,18 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const lastScrubTimeRef = useRef<number>(0);
   const lastScrubStateUpdateRef = useRef<number>(0);
   const latestClientXRef = useRef<number>(0);
+  const wasPlayingOnRulerDownRef = useRef<boolean>(false);
+  const rulerDownXRef = useRef<number>(0);
 
   const handlePointerMove = (e: PointerEvent) => {
     if (isScrubbing && !resizeState && !dragState && !slipState && !slideState) {
+      if (wasPlayingOnRulerDownRef.current && Math.abs(e.clientX - rulerDownXRef.current) > 4) {
+        // User dragged during playback — switch from "click to jump" to full scrubbing mode (pause playback)
+        if (useEditorStore.getState().isPlaying) {
+          useEditorStore.getState().pause();
+        }
+        wasPlayingOnRulerDownRef.current = false;
+      }
       latestClientXRef.current = e.clientX;
       if (scrubRafIdRef.current === null) {
           scrubRafIdRef.current = requestAnimationFrame(() => {
@@ -1464,6 +1464,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       setScrubTime(null);
       // CapCut-feel: dispatch one full-quality redraw event on release
       window.dispatchEvent(new CustomEvent('procut-scrub-finalize'));
+
+      // If user tapped ruler during playback without dragging, resume playback seamlessly from the new time
+      if (wasPlayingOnRulerDownRef.current) {
+        wasPlayingOnRulerDownRef.current = false;
+        if (!useEditorStore.getState().isPlaying) {
+          useEditorStore.getState().play();
+        }
+      }
     }
     if (dragState) {
       const draggedIds = dragState.draggedClips?.map((c) => c.id) || [];

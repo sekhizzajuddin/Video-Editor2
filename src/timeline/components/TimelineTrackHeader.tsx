@@ -90,7 +90,7 @@ export function TimelineTrackHeader({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onContextMenu={handleContextMenu}
-      className={`flex items-center px-2.5 border-b border-[var(--theme-border)] transition-colors select-none ${
+      className={`flex items-center justify-between px-2 border-b border-[var(--theme-border)] transition-colors select-none ${
         selectedTrackId === track.id
           ? 'bg-[var(--theme-bg-subpanel)] border-l-2 border-l-blue-600'
           : 'bg-[var(--theme-bg-panel)] hover:bg-black/5 dark:hover:bg-white/5 border-l-2 border-l-transparent'
@@ -98,7 +98,7 @@ export function TimelineTrackHeader({
       style={{ height: getTrackHeight(track) }}
       onClick={() => selectTrack(track.id)}
     >
-      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         <GripVertical className="w-3.5 h-3.5 text-[var(--theme-text-muted)] shrink-0 cursor-grab hover:text-[var(--theme-text-primary)]" />
         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 dark:bg-red-600 text-white truncate tracking-tight shrink-0 min-w-[20px] text-center shadow-sm leading-none">
           {track.name}
@@ -124,7 +124,7 @@ export function TimelineTrackHeader({
               useEditorStore.setState({ tracks: newTracks });
             }}
             onClick={e => e.stopPropagation()}
-            className="ml-1.5 bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[10px] text-[var(--theme-text-primary)] rounded px-1.5 py-0.5 outline-none cursor-pointer font-mono font-medium shadow-sm"
+            className="ml-1 bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[10px] text-[var(--theme-text-primary)] rounded px-1 py-0.5 outline-none cursor-pointer font-mono font-medium shadow-sm max-w-[45px]"
           >
             {Object.keys(track.subtitleVariants).map(lang => (
               <option key={lang} value={lang}>{lang}</option>
@@ -134,25 +134,15 @@ export function TimelineTrackHeader({
 
         {linkedFxTrack && (
           <span
-            className="ml-1.5 px-1.5 py-0.5 bg-rose-500/15 text-rose-500 border border-rose-500/25 rounded-md text-[8px] font-bold uppercase tracking-wider scale-90"
+            className="ml-1 px-1 py-0.5 bg-rose-500/15 text-rose-500 border border-rose-500/25 rounded text-[7px] font-bold uppercase tracking-wider scale-90"
             title={`Affected by FX track ${linkedFxTrack.name}`}
           >
-            FX Active
+            FX
           </span>
-        )}
-        
-        {track.type === 'fx' && track.linkedTrackId && (
-          <div
-            className="flex items-center gap-1 ml-1 text-amber-500 opacity-90"
-            title={`Linked to ${linkedTargetTrackName}`}
-          >
-            <Link className="w-3 h-3" />
-            <span className="text-[9px] font-mono font-medium">{linkedTargetTrackName}</span>
-          </div>
         )}
       </div>
 
-      <div className="flex items-center gap-0.5 shrink-0">
+      <div className="flex items-center gap-0.5 shrink-0 ml-auto pl-1">
         <button
           onClick={(e) => {
             e.stopPropagation();

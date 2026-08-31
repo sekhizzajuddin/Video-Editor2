@@ -189,42 +189,47 @@ export function Timeline() {
     let minorInterval = 0.1;
     let labelMedium = false;
 
-    if (zoomLevel >= 200) {
+    if (zoomLevel >= 300) {
       majorInterval = 1.0;
       mediumInterval = 0.5;
-      minorInterval = 0.1;
+      minorInterval = 0.05; // 50ms sub-bars when zoomed in
       labelMedium = false;
-    } else if (zoomLevel >= 100) {
+    } else if (zoomLevel >= 150) {
       majorInterval = 1.0;
       mediumInterval = 0.5;
-      minorInterval = 0.25;
+      minorInterval = 0.1; // 100ms sub-bars
       labelMedium = false;
-    } else if (zoomLevel >= 50) {
+    } else if (zoomLevel >= 60) {
+      majorInterval = 1.0;
+      mediumInterval = 0.5;
+      minorInterval = 0.1; // 100ms sub-bars
+      labelMedium = false;
+    } else if (zoomLevel >= 30) {
       majorInterval = 2.0;
       mediumInterval = 1.0;
       minorInterval = 0.5;
       labelMedium = false;
-    } else if (zoomLevel >= 25) {
+    } else if (zoomLevel >= 14) {
       majorInterval = 5.0;
       mediumInterval = 2.5;
       minorInterval = 1.0;
       labelMedium = false;
-    } else if (zoomLevel >= 10) {
+    } else if (zoomLevel >= 6) {
       majorInterval = 10.0;
       mediumInterval = 5.0;
       minorInterval = 2.0;
       labelMedium = false;
     } else {
       majorInterval = 30.0;
-      mediumInterval = 10.0;
+      mediumInterval = 15.0;
       minorInterval = 5.0;
       labelMedium = false;
     }
 
-    const maxTime = totalDuration + 30;
-    const minorCentis = Math.round(minorInterval * 100);
-    const mediumCentis = Math.round(mediumInterval * 100);
-    const majorCentis = Math.round(majorInterval * 100);
+    const maxTime = totalDuration + 60;
+    const minorCentis = Math.max(1, Math.round(minorInterval * 100));
+    const mediumCentis = Math.max(1, Math.round(mediumInterval * 100));
+    const majorCentis = Math.max(1, Math.round(majorInterval * 100));
     const maxCentis = Math.round(maxTime * 100);
 
     for (let c = 0; c <= maxCentis; c += minorCentis) {

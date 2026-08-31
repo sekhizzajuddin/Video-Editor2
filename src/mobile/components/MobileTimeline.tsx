@@ -420,6 +420,7 @@ export function MobileTimeline({
         // The follow subscription above scrolls the tapped time under the
         // fixed 50%-viewport playhead (instant, via the seek jump detection).
         seek(Math.max(0, timeAt(e.clientX)));
+        window.dispatchEvent(new Event('procut-frame-updated'));
         return;
       }
       beginScrub(e);

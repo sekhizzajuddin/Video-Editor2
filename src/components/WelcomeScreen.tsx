@@ -10,6 +10,8 @@ import React, { useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { listRecentProjects, ProjectMetadata, setActiveProject, deleteProjectMeta, saveProjectMeta } from '@/utils/projectPersistence';
 import { getProcutFilesInDirectory } from '@/utils/fileSystemAccess';
+import { ProCutLogo } from '@/components/ProCutLogo';
+import { Plus, FolderOpen, AlertTriangle, Trash2, Folder, Clock, Sparkles } from 'lucide-react';
 
 export const WelcomeScreen: React.FC = () => {
   const [projects, setProjects] = useState<any[]>([]);
@@ -54,7 +56,7 @@ export const WelcomeScreen: React.FC = () => {
 
   const generateDefaultName = () => {
     const date = new Date();
-    return `Project - ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+    return `Project - ${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
   const handleCreateNewProject = async (e: React.FormEvent) => {
@@ -105,42 +107,51 @@ export const WelcomeScreen: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 bg-[#1a1a1a] z-50 flex flex-col items-center justify-center p-8 text-white">
-      <div className="w-full max-w-4xl bg-[#2d2d2d] rounded-xl shadow-2xl p-8 flex flex-col gap-8 h-[80vh]">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-amber-600">ProCut Studio</h1>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-[var(--theme-text-primary)] select-none">
+      <div className="w-full max-w-4xl bg-[var(--theme-bg-panel)] rounded-2xl shadow-2xl border border-[var(--theme-border)] p-8 flex flex-col gap-6 max-h-[85vh] overflow-hidden">
+        {/* Header with ProCut Wordmark */}
+        <div className="flex items-center justify-between border-b border-[var(--theme-border)] pb-5">
+          <div className="flex items-center gap-3">
+            <ProCutLogo size="lg" />
+            <div className="h-6 w-px bg-[var(--theme-border)] mx-1" />
+            <span className="text-xs font-semibold text-[var(--theme-text-muted)] tracking-wider uppercase">Studio</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-[var(--theme-text-muted)]">
+            <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+            <span>AI-Powered Non-Linear Video Editor</span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-1 overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 overflow-hidden min-h-0">
           {/* New Project Column */}
-          <div className="flex flex-col gap-4 border-r border-[#3e3e3e] pr-8">
-            <h2 className="text-xl font-semibold mb-4 text-[#e0e0e0]">Start a New Project</h2>
+          <div className="flex flex-col gap-4 border-r border-[var(--theme-border)] pr-6 overflow-y-auto scrollbar-thin">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Start a New Project</h2>
             
             {isCreating ? (
-              <form onSubmit={handleCreateNewProject} className="flex flex-col gap-4">
+              <form onSubmit={handleCreateNewProject} className="flex flex-col gap-4 bg-[var(--theme-bg-subpanel)] p-5 rounded-xl border border-[var(--theme-border)]">
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="projectName" className="text-sm text-[#a0a0a0]">Project Name</label>
+                  <label htmlFor="projectName" className="text-xs font-semibold text-[var(--theme-text-primary)]">Project Name</label>
                   <input
                     id="projectName"
                     type="text"
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
                     placeholder={generateDefaultName()}
-                    className="bg-[#3e3e3e] border border-[#4a4a4a] rounded p-3 text-white focus:outline-none focus:border-amber-500 transition-colors"
+                    className="bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg p-2.5 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:border-blue-500 transition-colors shadow-sm"
                     autoFocus
                   />
                 </div>
-                <div className="flex gap-3 mt-4">
+                <div className="flex gap-2.5 mt-2">
                   <button 
                     type="submit"
-                    className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-3 rounded font-medium transition-colors"
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-lg font-semibold text-xs transition-colors shadow-sm"
                   >
-                    Create
+                    Create Project
                   </button>
                   <button 
                     type="button"
                     onClick={() => setIsCreating(false)}
-                    className="flex-1 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-white py-3 rounded font-medium transition-colors"
+                    className="flex-1 bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] py-2.5 rounded-lg font-medium text-xs transition-colors"
                   >
                     Cancel
                   </button>
@@ -152,68 +163,74 @@ export const WelcomeScreen: React.FC = () => {
                   setNewProjectName(generateDefaultName());
                   setIsCreating(true);
                 }}
-                className="group flex flex-col items-center justify-center gap-4 bg-[#3e3e3e]/50 hover:bg-[#3e3e3e] border-2 border-dashed border-[#4a4a4a] hover:border-amber-500 rounded-xl p-12 transition-all cursor-pointer h-64"
+                className="group flex flex-col items-center justify-center gap-3.5 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-card)] border-2 border-dashed border-[var(--theme-border)] hover:border-blue-500/60 rounded-2xl p-8 transition-all cursor-pointer h-52 shadow-sm"
               >
-                <div className="w-16 h-16 rounded-full bg-amber-600/20 group-hover:bg-amber-600/40 flex items-center justify-center transition-colors">
-                  <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
+                <div className="w-14 h-14 rounded-2xl bg-blue-500/10 group-hover:bg-blue-500/20 group-hover:scale-105 flex items-center justify-center transition-all border border-blue-500/20 shadow-sm">
+                  <Plus className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                 </div>
-                <span className="text-lg font-medium text-[#e0e0e0] group-hover:text-white">Create New Project</span>
+                <div className="text-center">
+                  <span className="text-sm font-bold text-[var(--theme-text-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Create New Project</span>
+                  <p className="text-[11px] text-[var(--theme-text-muted)] mt-0.5">Start fresh timeline with multi-track support</p>
+                </div>
               </button>
             )}
           </div>
 
           {/* Load Workspace Column */}
-          <div className="flex flex-col overflow-hidden pl-4">
-            <h2 className="text-xl font-semibold mb-4 text-[#e0e0e0]">Open Workspace Folder</h2>
+          <div className="flex flex-col overflow-hidden pl-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--theme-text-muted)] mb-3">Open Workspace Folder</h2>
             
             {!workspaceSelected ? (
               <div className="flex flex-col items-center justify-center flex-1">
                 <button 
                   onClick={handleSelectWorkspace}
-                  className="group flex flex-col items-center justify-center gap-4 bg-[#3e3e3e]/50 hover:bg-[#3e3e3e] border-2 border-dashed border-[#4a4a4a] hover:border-amber-500 rounded-xl p-8 w-full max-w-sm transition-all cursor-pointer h-48"
+                  className="group flex flex-col items-center justify-center gap-3.5 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-card)] border-2 border-dashed border-[var(--theme-border)] hover:border-purple-500/60 rounded-2xl p-8 w-full transition-all cursor-pointer h-52 shadow-sm"
                 >
-                  <div className="w-16 h-16 rounded-full bg-amber-600/20 group-hover:bg-amber-600/40 flex items-center justify-center transition-colors">
-                    <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-                    </svg>
+                  <div className="w-14 h-14 rounded-2xl bg-purple-500/10 group-hover:bg-purple-500/20 group-hover:scale-105 flex items-center justify-center transition-all border border-purple-500/20 shadow-sm">
+                    <FolderOpen className="w-7 h-7 text-purple-600 dark:text-purple-400" />
                   </div>
-                  <span className="text-lg font-medium text-[#e0e0e0] group-hover:text-white">Select Workspace Folder</span>
+                  <div className="text-center">
+                    <span className="text-sm font-bold text-[var(--theme-text-primary)] group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">Select Workspace Folder</span>
+                    <p className="text-[11px] text-[var(--theme-text-muted)] mt-0.5">Load existing .procut project files from disk</p>
+                  </div>
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col flex-1 overflow-hidden">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-amber-500 font-medium">Found {projects.length} project(s)</span>
-                  <button onClick={handleSelectWorkspace} className="text-xs text-[#a0a0a0] hover:text-white underline">Change Folder</button>
+              <div className="flex flex-col flex-1 overflow-hidden min-h-0">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-blue-600 dark:text-blue-400 font-semibold">Found ${projects.length} project(s)</span>
+                  <button onClick={handleSelectWorkspace} className="text-xs text-[var(--theme-text-muted)] hover:text-blue-500 underline">Change Folder</button>
                 </div>
                 {loading ? (
                   <div className="flex items-center justify-center flex-1">
-                    <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                    <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   </div>
                 ) : projects.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center flex-1 text-[#a0a0a0] gap-2">
-                    <svg className="w-12 h-12 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
-                    <p>No .procut files found in folder</p>
+                  <div className="flex flex-col items-center justify-center flex-1 text-[var(--theme-text-muted)] gap-2">
+                    <Folder className="w-10 h-10 opacity-30" />
+                    <p className="text-xs">No .procut files found in folder</p>
                   </div>
                 ) : (
-                  <div className="flex-1 overflow-y-auto pr-2 space-y-3 pb-4">
+                  <div className="flex-1 overflow-y-auto pr-2 space-y-2.5 pb-2 scrollbar-thin">
                     {projects.map(project => (
                       <div 
                         key={project.id}
                         onClick={() => handleOpenProcutFile(project)}
-                        className="group flex items-center justify-between bg-[#3e3e3e]/30 hover:bg-[#3e3e3e] border border-[#4a4a4a]/50 hover:border-amber-500/50 p-4 rounded-lg cursor-pointer transition-all"
+                        className="group flex items-center justify-between bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-card)] border border-[var(--theme-border)] hover:border-blue-500/50 p-3 rounded-xl cursor-pointer transition-all shadow-sm"
                       >
-                        <div className="flex flex-col gap-1">
-                          <span className="font-medium text-[#f0f0f0] group-hover:text-white truncate max-w-[200px]" title={project.name}>
-                            {project.name}
-                          </span>
-                          <span className="text-xs text-[#a0a0a0]">
-                            Last modified: {new Date(project.lastModified).toLocaleString()}
-                          </span>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
+                            <Folder className="w-4 h-4" />
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-semibold text-xs text-[var(--theme-text-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate" title={project.name}>
+                              ${project.name}
+                            </span>
+                            <span className="text-[10px] text-[var(--theme-text-muted)] flex items-center gap-1 mt-0.5 font-mono">
+                              <Clock className="w-3 h-3" />
+                              ${new Date(project.lastModified).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -224,32 +241,28 @@ export const WelcomeScreen: React.FC = () => {
 
             {/* Crashed Projects Recovery */}
             {crashedProjects.length > 0 && (
-              <div className="mt-6 border-t border-[#3e3e3e] pt-4">
-                <h3 className="text-sm font-semibold mb-3 text-red-400 flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  Recover Crashed Projects
+              <div className="mt-4 border-t border-[var(--theme-border)] pt-3.5">
+                <h3 className="text-xs font-bold mb-2 text-rose-500 flex items-center gap-1.5 uppercase tracking-wider">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Recover Crashed Projects</span>
                 </h3>
-                <div className="max-h-32 overflow-y-auto pr-2 space-y-2">
+                <div className="max-h-28 overflow-y-auto pr-1 space-y-1.5 scrollbar-thin">
                   {crashedProjects.map(project => (
                     <div 
                       key={project.id}
                       onClick={() => handleOpenProject(project.id, project.name)}
-                      className="group flex items-center justify-between bg-red-950/20 hover:bg-red-950/40 border border-red-900/30 p-2 rounded cursor-pointer transition-all"
+                      className="group flex items-center justify-between bg-rose-500/10 hover:bg-rose-500/15 border border-rose-500/25 p-2 rounded-lg cursor-pointer transition-all"
                     >
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium text-red-200 truncate max-w-[150px]">{project.name}</span>
-                        <span className="text-[10px] text-red-400/70">{new Date(project.lastModified).toLocaleString()}</span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-semibold text-rose-600 dark:text-rose-300 truncate">${project.name}</span>
+                        <span className="text-[9px] text-rose-500/70 font-mono">${new Date(project.lastModified).toLocaleString()}</span>
                       </div>
                       <button 
                         onClick={(e) => handleDeleteProject(e, project.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:text-red-200 hover:bg-red-900/50 rounded transition-all"
+                        className="opacity-0 group-hover:opacity-100 p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-500/20 rounded transition-all"
                         title="Delete Recovery Data"
                       >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   ))}

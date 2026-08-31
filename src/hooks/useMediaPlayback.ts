@@ -21,7 +21,7 @@ import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone'
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
-import { getPlaybackTime } from '@/utils/playbackClock';
+import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains } from '@/utils/transitionEngine';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
@@ -769,6 +769,24 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // only triggers a render when the bucket actually changes (~1×/s instead of 33×/s).
   const ctBucket = useTimeBucket(1, 0.25);
 
+  // Fast jump / seek trigger for immediate pool residency and proximity preloading
+  const [seekRevision, setSeekRevision] = useState(0);
+  useEffect(() => {
+    let lastTime = getPlaybackTime();
+    const unsub = subscribePlaybackTime((t) => {
+      if (Math.abs(t - lastTime) > 0.3) {
+        setSeekRevision((r) => r + 1);
+      }
+      lastTime = t;
+    });
+    const onFrameUpdate = () => setSeekRevision((r) => r + 1);
+    window.addEventListener('procut-frame-updated', onFrameUpdate);
+    return () => {
+      unsub();
+      window.removeEventListener('procut-frame-updated', onFrameUpdate);
+    };
+  }, []);
+
   // Throttled time for the reactive audio-parameter effect (see below). Exact values
   // are always read via useEditorStore.getState() inside the effect body.
   const audioParamTime = usePlaybackTime(10);
@@ -1198,7 +1216,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         pendingSeeksRef.current.delete(clipId);
       }
     }
-  }, [tracks, mediaLibrary, ctBucket, triggerRedraw, isPrimary]);
+  }, [tracks, mediaLibrary, ctBucket, seekRevision, triggerRedraw, isPrimary]);
 
   // ---- Proximity source loader ----
   useEffect(() => {
@@ -1342,7 +1360,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
     }
-  }, [ctBucket, tracks, mediaLibrary, isExporting, isPrimary]);
+  }, [ctBucket, seekRevision, tracks, mediaLibrary, isExporting, isPrimary]);
 
   // ============================================================
   // SINGLE RAF SYNC LOOP — The Heart of the Fix
@@ -1405,36 +1423,34 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // the hard seek that would reset them to t=0. Result: frozen/lagging second playback.
       const storeTracks = store.tracks;
       const tracksChanged = storeTracks !== lastCachedStoreTracksRef.current;
-      const timeWentBackward = ct < prevSyncCtRef.current - 0.5; // loop or seek-to-start
-      // During scrubbing the playhead can jump anywhere in one frame (a ruler
-      // click, a finger swipe), so never trust the boundary cache — recompute
-      // the active clip set from the exact playhead every scrub tick.
-      const timeJumpedForward = scrubbing && ct > nextClipBoundaryRef.current + 0.05;
+      // Universal jump detection: backward jump, forward jump > 0.25s, or scrub jump
+      const isJump = prevSyncCtRef.current >= 0 && (
+        Math.abs(ct - prevSyncCtRef.current) > (playing ? (Math.max(0.1, globalSpeed) * dt + 0.25) : 0.03)
+      );
+      const crossedBoundary = ct >= nextClipBoundaryRef.current || (nextClipBoundaryRef.current !== Infinity && ct < prevSyncCtRef.current);
       prevSyncCtRef.current = ct;
 
-      if (tracksChanged || ct >= nextClipBoundaryRef.current || timeWentBackward || timeJumpedForward) {
-        if (timeWentBackward) {
-          // Reset boundary so next tick also recomputes (handles clips starting at t=0)
+      if (tracksChanged || crossedBoundary || isJump) {
+        if (isJump) {
+          // Reset boundary so active clips and next boundary are fully re-evaluated at the new jump position
           nextClipBoundaryRef.current = 0;
-          // Clear lastActiveClipIds so ALL clips at the new position are treated as
-          // freshly activated, triggering hard seeks to their correct start positions.
+          // Clear lastActiveClipIds so ALL clips at the new position are treated as freshly activated,
+          // which forces hard seeks to their exact target frame and resets accumulated drift
           lastActiveClipIdsRef.current = new Set();
         }
         cachedActiveClipsRef.current = getActiveClips();
         lastCachedStoreTracksRef.current = storeTracks;
 
-        if (!timeWentBackward) {
-          // Compute next boundary: min(clip starts > ct, clip ends > ct)
-          let nextBoundary = Infinity;
-          for (const track of sortedTracksRef.current) {
-            for (const clip of track.clips) {
-              const clipEnd = clip.startTime + clip.duration;
-              if (clip.startTime > ct && clip.startTime < nextBoundary) nextBoundary = clip.startTime;
-              if (clipEnd > ct && clipEnd < nextBoundary) nextBoundary = clipEnd;
-            }
+        // Compute next boundary: min(clip starts > ct, clip ends > ct)
+        let nextBoundary = Infinity;
+        for (const track of sortedTracksRef.current) {
+          for (const clip of track.clips) {
+            const clipEnd = clip.startTime + clip.duration;
+            if (clip.startTime > ct && clip.startTime < nextBoundary) nextBoundary = clip.startTime;
+            if (clipEnd > ct && clipEnd < nextBoundary) nextBoundary = clipEnd;
           }
-          nextClipBoundaryRef.current = nextBoundary;
         }
+        nextClipBoundaryRef.current = nextBoundary;
       }
       const clips = cachedActiveClipsRef.current;
       // PERF: Reuse a persistent Set instead of `new Set(clips.map(...))` every frame.

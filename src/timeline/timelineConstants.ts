@@ -10,7 +10,7 @@ export const THIN_TRACK_HEIGHT = 32;
 export const OVER_LAYER_ROW_HEIGHT = 36;
 export const MIN_CLIP_WIDTH = 16;
 export const SNAP_THRESHOLD_PX = 8;
-export const TRACK_HEADER_WIDTH = 128;
+export const TRACK_HEADER_WIDTH = 140;
 export const RULER_HEIGHT = 28;
 export const FPS = 30;
 
