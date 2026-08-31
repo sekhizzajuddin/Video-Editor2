@@ -58,8 +58,8 @@ export function VocalToneSection({
       {/* Vocal Tone slider */}
       <div className="space-y-1">
         <div className="flex justify-between items-center text-[11px]">
-          <span className="text-[#d0d0d0]">Vocal Tone</span>
-          <span className="font-mono text-[#a0a0a0]">
+          <span className="text-[var(--theme-text-primary)]">Vocal Tone</span>
+          <span className="font-mono text-[var(--theme-text-muted)]">
             {tone === 0 ? 'Original' : `${toneLabel(tone)} · ${tone > 0 ? '+' : ''}${(tone * 0.05).toFixed(1)} st`}
           </span>
         </div>
@@ -117,12 +117,12 @@ export function VocalToneSection({
         )}
 
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] text-[#a0a0a0]">Auto-match this clip</span>
+          <span className="text-[10px] text-[var(--theme-text-muted)]">Auto-match this clip</span>
           <button
             onClick={() => onToggleAutoMatch(!autoMatchOn)}
             disabled={isMatchingVocals}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors disabled:opacity-50 ${
-              autoMatchOn ? 'bg-teal-600/30 text-teal-300 border border-teal-500/40' : 'bg-[#2d2d2d] text-[#a0a0a0] border border-[#3a3a4a]'
+              autoMatchOn ? 'bg-teal-600/30 text-teal-300 border border-teal-500/40' : 'bg-[var(--theme-bg-card)] text-[var(--theme-text-muted)] border border-[#3a3a4a]'
             }`}
           >
             {autoMatchOn ? 'ON' : 'OFF'}
@@ -143,7 +143,7 @@ export function VocalToneSection({
           <div className="max-h-28 overflow-y-auto space-y-0.5 rounded bg-[#191925] border border-[#2a2a3a] p-1.5">
             {matchResults.map((r) => (
               <div key={r.clipId} className="flex justify-between items-center text-[9px] font-mono">
-                <span className="text-[#a0a0a0] truncate max-w-[55%]">{r.clipName}</span>
+                <span className="text-[var(--theme-text-muted)] truncate max-w-[55%]">{r.clipName}</span>
                 <span className={statusColor[r.status]}>
                   {r.status === 'reference'
                     ? 'Reference'

@@ -187,37 +187,37 @@ export function Timeline() {
     let majorInterval = 1.0;
     let mediumInterval = 0.5;
     let minorInterval = 0.1;
-    let labelMedium = true;
+    let labelMedium = false;
 
-    if (zoomLevel >= 250) {
-      majorInterval = 0.5;
-      mediumInterval = 0.1;
-      minorInterval = 0.02;
-      labelMedium = true;
-    } else if (zoomLevel >= 150) {
+    if (zoomLevel >= 200) {
       majorInterval = 1.0;
       mediumInterval = 0.5;
       minorInterval = 0.1;
-      labelMedium = true;
-    } else if (zoomLevel >= 80) {
+      labelMedium = false;
+    } else if (zoomLevel >= 100) {
+      majorInterval = 1.0;
+      mediumInterval = 0.5;
+      minorInterval = 0.25;
+      labelMedium = false;
+    } else if (zoomLevel >= 50) {
       majorInterval = 2.0;
       mediumInterval = 1.0;
-      minorInterval = 0.2;
-      labelMedium = true;
-    } else if (zoomLevel >= 40) {
+      minorInterval = 0.5;
+      labelMedium = false;
+    } else if (zoomLevel >= 25) {
       majorInterval = 5.0;
       mediumInterval = 2.5;
-      minorInterval = 0.5;
-      labelMedium = true;
-    } else if (zoomLevel >= 20) {
+      minorInterval = 1.0;
+      labelMedium = false;
+    } else if (zoomLevel >= 10) {
       majorInterval = 10.0;
       mediumInterval = 5.0;
-      minorInterval = 1.0;
+      minorInterval = 2.0;
       labelMedium = false;
     } else {
       majorInterval = 30.0;
       mediumInterval = 10.0;
-      minorInterval = 2.0;
+      minorInterval = 5.0;
       labelMedium = false;
     }
 

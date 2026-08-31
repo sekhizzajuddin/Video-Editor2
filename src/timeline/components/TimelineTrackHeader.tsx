@@ -100,7 +100,9 @@ export function TimelineTrackHeader({
     >
       <div className="flex items-center gap-1.5 flex-1 min-w-0">
         <GripVertical className="w-3.5 h-3.5 text-[var(--theme-text-muted)] shrink-0 cursor-grab hover:text-[var(--theme-text-primary)]" />
-        <span className="text-[11px] text-[var(--theme-text-primary)] font-semibold truncate tracking-tight">{track.name}</span>
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 dark:bg-red-600 text-white truncate tracking-tight shrink-0 min-w-[20px] text-center shadow-sm leading-none">
+          {track.name}
+        </span>
         
         {track.subtitleVariants && Object.keys(track.subtitleVariants).length > 0 && (
           <select

@@ -1204,9 +1204,9 @@ export function MediaPanel() {
       onDragLeave={handleZoneDragLeave}
       onDrop={handleZoneDrop}
     >
-      {/* Left Icon Rail (56px) */}
-      <div className="w-14 shrink-0 bg-[var(--theme-bg-app)] border-r border-[var(--theme-border)] flex flex-col justify-between items-center py-2 z-10">
-        <div className="flex flex-col items-center gap-1 w-full">
+      {/* Left Icon Rail (56px) - Borderless Clean Aesthetic */}
+      <div className="w-14 shrink-0 bg-[var(--theme-bg-app)] border-r border-[var(--theme-border)] flex flex-col justify-between items-center py-2 z-10 select-none">
+        <div className="flex flex-col items-center w-full gap-0.5">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeMediaTab === tab.id;
@@ -1214,18 +1214,18 @@ export function MediaPanel() {
               <button
                 key={tab.id}
                 onClick={() => setActiveMediaTab(tab.id)}
-                className={`w-11 h-12 rounded-xl flex flex-col items-center justify-center gap-1 transition-all group relative ${
+                className={`w-full py-3 px-1 flex flex-col items-center justify-center gap-1.5 transition-colors group relative ${
                   isActive
-                    ? 'bg-blue-600/15 text-blue-500 font-semibold shadow-[inset_0_0_0_1px_rgba(59,130,246,0.3)]'
-                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-subpanel)]'
+                    ? 'text-blue-600 dark:text-blue-400 font-bold bg-transparent'
+                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/[0.03] dark:hover:bg-white/[0.03]'
                 }`}
                 title={tab.label}
               >
                 {isActive && (
-                  <div className="absolute left-0 top-2.5 bottom-2.5 w-1 bg-blue-500 rounded-r-full" />
+                  <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-blue-600 dark:bg-blue-400 rounded-r" />
                 )}
-                <Icon className={`w-4 h-4 transition-transform group-hover:scale-110 ${isActive ? 'text-blue-500' : ''}`} />
-                <span className="text-[9px] tracking-tight leading-none">{tab.label}</span>
+                <Icon className={`w-4 h-4 transition-transform group-hover:scale-105 ${isActive ? 'text-blue-600 dark:text-blue-400' : ''}`} />
+                <span className="text-[10px] tracking-tight leading-none">{tab.label}</span>
               </button>
             );
           })}

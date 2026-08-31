@@ -242,8 +242,8 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
   };
 
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
-      <div className="flex items-center justify-between p-2.5 border-b border-[#3e3e3e]/40">
+    <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)]">
+      <div className="flex items-center justify-between p-2.5 border-b border-[var(--theme-border)]/40">
         <span className="text-xs text-white font-medium flex items-center gap-2">
           <Activity className="w-3.5 h-3.5 text-orange-400" />
           Motion Tracked Effects
@@ -264,8 +264,8 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
       <div className="p-2.5 space-y-3">
         {effects.length === 0 && (
-          <p className="text-[10px] text-[#808080] leading-relaxed">
-            Shake, jiggle or pulse just <span className="text-[#b0b0b0]">part</span> of the frame —
+          <p className="text-[10px] text-[var(--theme-text-muted)] leading-relaxed">
+            Shake, jiggle or pulse just <span className="text-[var(--theme-text-secondary)]">part</span> of the frame —
             a hand, a face — and have it follow the subject as they move.
             Press <span className="text-orange-400">+</span> to add one, then drag the box that
             appears on the preview over the feature.
@@ -287,9 +287,9 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                     type="checkbox"
                     checked={effect.enabled}
                     onChange={(e) => patch(index, { enabled: e.target.checked })}
-                    className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-orange-500 focus:ring-0"
+                    className="rounded bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-orange-500 focus:ring-0"
                   />
-                  <span className="text-[11px] text-[#d0d0d0] font-medium">
+                  <span className="text-[11px] text-[var(--theme-text-primary)] font-medium">
                     Region {index + 1}
                   </span>
                 </label>
@@ -304,7 +304,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                     className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border transition-colors ${
                       editingIndex === index
                         ? 'bg-orange-600 border-orange-500 text-white'
-                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                        : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'
                     }`}
                     title={
                       editingIndex === index
@@ -316,7 +316,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                   </button>
                   <button
                     onClick={() => removeEffect(index)}
-                    className="p-1 rounded text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    className="p-1 rounded text-[var(--theme-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
                     title="Remove"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -326,11 +326,11 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
               {/* Motion type */}
               <div>
-                <label className="block text-[10px] text-[#a0a0a0] mb-1 font-medium">Motion</label>
+                <label className="block text-[10px] text-[var(--theme-text-muted)] mb-1 font-medium">Motion</label>
                 <select
                   value={effect.type}
                   onChange={(e) => patch(index, { type: e.target.value as MotionEffectType })}
-                  className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-orange-500 cursor-pointer"
+                  className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white focus:outline-none focus:border-orange-500 cursor-pointer"
                 >
                   {MOTION_EFFECT_INFO.map((m) => (
                     <option key={m.type} value={m.type}>{m.label}</option>
@@ -346,8 +346,8 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
               </div>
 
               {/* Selection shape: box vs painted colour */}
-              <div className="space-y-1.5 pt-1 border-t border-[#3e3e3e]/30">
-                <span className="text-[10px] text-[#a0a0a0] font-medium">Selection</span>
+              <div className="space-y-1.5 pt-1 border-t border-[var(--theme-border)]/30">
+                <span className="text-[10px] text-[var(--theme-text-muted)] font-medium">Selection</span>
                 <div className="grid grid-cols-2 gap-1">
                   {([
                     ['box', 'Box', SquareDashed],
@@ -362,7 +362,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                       className={`py-1.5 text-[10px] rounded border transition-colors flex items-center justify-center gap-1 ${
                         (effect.regionMode ?? 'box') === mode
                           ? 'bg-orange-600 border-orange-500 text-white'
-                          : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                          : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'
                       }`}
                     >
                       <Icon className="w-3 h-3" /> {label}
@@ -371,7 +371,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                 </div>
 
                 {/* Inside vs outside */}
-                <span className="text-[10px] text-[#a0a0a0] font-medium block pt-1">Apply To</span>
+                <span className="text-[10px] text-[var(--theme-text-muted)] font-medium block pt-1">Apply To</span>
                 <div className="grid grid-cols-2 gap-1">
                   {([
                     ['inside', 'Inside selection'],
@@ -383,7 +383,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                       className={`py-1.5 text-[10px] rounded border transition-colors ${
                         (effect.applyMode ?? 'inside') === mode
                           ? 'bg-orange-600 border-orange-500 text-white'
-                          : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                          : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'
                       }`}
                     >
                       {label}
@@ -399,7 +399,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
               {/* Paint controls */}
               {effect.regionMode === 'paint' && (
-                <div className="space-y-1.5 pt-1 border-t border-[#3e3e3e]/30">
+                <div className="space-y-1.5 pt-1 border-t border-[var(--theme-border)]/30">
                   <button
                     onClick={() => armPaint(paintArmed === index ? null : index)}
                     className={`w-full py-1.5 rounded text-[10px] font-medium transition-colors flex items-center justify-center gap-1.5 border ${
@@ -414,7 +414,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-[10px] text-[#a0a0a0] font-medium">Brush Size</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Brush Size</label>
                       <span className="text-[10px] text-orange-400 font-mono">{effect.brushSize ?? 40}px</span>
                     </div>
                     <input
@@ -427,7 +427,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-[10px] text-[#a0a0a0] font-medium">Colour Tolerance</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Colour Tolerance</label>
                       <span className="text-[10px] text-orange-400 font-mono">{effect.colorTolerance ?? 22}</span>
                     </div>
                     <input
@@ -443,7 +443,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-[10px] text-[#a0a0a0] font-medium">Spread Limit</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Spread Limit</label>
                       <span className="text-[10px] text-orange-400 font-mono">
                         {(effect.spreadLimit ?? 2.2) === 0
                           ? 'off'
@@ -466,7 +466,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-[10px] text-[#a0a0a0] font-medium">Mask Choke</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Mask Choke</label>
                       <span className="text-[10px] text-orange-400 font-mono">
                         {(effect.maskChoke ?? 0) > 0 ? '+' : ''}{effect.maskChoke ?? 0}px
                       </span>
@@ -483,8 +483,8 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
 
               {/* Region placement (box mode only) */}
               {(effect.regionMode ?? 'box') === 'box' && (
-              <div className="space-y-1.5 pt-1 border-t border-[#3e3e3e]/30">
-                <span className="text-[10px] text-[#a0a0a0] font-medium">Region</span>
+              <div className="space-y-1.5 pt-1 border-t border-[var(--theme-border)]/30">
+                <span className="text-[10px] text-[var(--theme-text-muted)] font-medium">Region</span>
                 <div className="grid grid-cols-2 gap-1.5">
                   {([
                     ['X', r.cx, (v: number) => cornersFrom(v, r.cy, r.w, r.h)],
@@ -508,7 +508,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
                             track: undefined,
                           });
                         }}
-                        className="w-full px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px] text-white focus:outline-none focus:border-orange-500"
+                        className="w-full px-1.5 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-[10px] text-white focus:outline-none focus:border-orange-500"
                       />
                     </div>
                   ))}
@@ -549,7 +549,7 @@ export function MotionEffectsPanel({ selectedClip, videoElements }: MotionEffect
               ] as const).map(([label, key, min, max, step, unit]) => (
                 <div key={key}>
                   <div className="flex justify-between items-center mb-1">
-                    <label className="text-[10px] text-[#a0a0a0] font-medium">{label}</label>
+                    <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">{label}</label>
                     <span className="text-[10px] text-orange-400 font-mono">
                       {(effect[key] as number) ?? 0}{unit}
                     </span>

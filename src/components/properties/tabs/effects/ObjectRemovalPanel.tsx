@@ -102,7 +102,7 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
     return (
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-[#a0a0a0] font-medium">{label}</span>
+          <span className="text-[11px] text-[var(--theme-text-muted)] font-medium">{label}</span>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-cyan-400 font-mono">
               {val.toFixed(step < 1 ? 1 : 0)}{unit}

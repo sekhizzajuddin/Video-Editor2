@@ -5,8 +5,8 @@ interface MaskEnableSectionProps {
 
 export function MaskEnableSection({ enabled, onToggle }: MaskEnableSectionProps) {
   return (
-    <div className="flex items-center justify-between p-3 bg-[#1e1e1e] rounded-md border border-[#3e3e3e]">
-      <span className="text-xs text-[#a0a0a0]">Enable Masking</span>
+    <div className="flex items-center justify-between p-3 bg-[var(--theme-bg-subpanel)] rounded-md border border-[var(--theme-border)]">
+      <span className="text-xs text-[var(--theme-text-muted)]">Enable Masking</span>
       <button
         onClick={onToggle}
         className={`w-10 h-5 rounded-full transition-colors relative ${enabled ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}

@@ -12,8 +12,8 @@ export function MaskSlider({ label, value, min, max, unit, prop, onChange }: Mas
   return (
     <div className="space-y-1">
       <div className="flex justify-between items-center text-[11px]">
-        <span className="text-[#d0d0d0]">{label}</span>
-        <span className="font-mono text-[#a0a0a0]">{value}{unit}</span>
+        <span className="text-[var(--theme-text-primary)]">{label}</span>
+        <span className="font-mono text-[var(--theme-text-muted)]">{value}{unit}</span>
       </div>
       <input
         type="range"

@@ -35,9 +35,11 @@
     --theme-border: #e2e8f0;
     --theme-border-subtle: #f1f5f9;
     --theme-border-focus: #3b82f6;
+    --theme-text-primary: #0f172a;
     --theme-text-main: #0f172a;
-    --theme-text-muted: #64748b;
-    --theme-text-dim: #94a3b8;
+    --theme-text-secondary: #334155;
+    --theme-text-muted: #475569;
+    --theme-text-dim: #64748b;
     --theme-accent-blue: #2563eb;
     --theme-accent-blue-hover: #1d4ed8;
     --theme-accent-glow: rgba(37, 99, 235, 0.25);
@@ -77,7 +79,9 @@
     --theme-border: #1e2638;
     --theme-border-subtle: #182030;
     --theme-border-focus: #3b82f6;
+    --theme-text-primary: #f8fafc;
     --theme-text-main: #f8fafc;
+    --theme-text-secondary: #cbd5e1;
     --theme-text-muted: #94a3b8;
     --theme-text-dim: #64748b;
     --theme-accent-blue: #3b82f6;

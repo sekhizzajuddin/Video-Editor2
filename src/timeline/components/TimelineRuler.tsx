@@ -39,10 +39,9 @@ interface TimelineRulerProps {
 }
 
 export const TimelineGridLines = React.memo(function TimelineGridLines({
-  rulerData,
   zoomLevel,
 }: {
-  rulerData: RulerMarker[];
+  rulerData?: RulerMarker[];
   zoomLevel: number;
 }) {
   const [scrollLeft, setScrollLeft] = useState(() => useEditorStore.getState().scrollLeft);
@@ -61,19 +60,38 @@ export const TimelineGridLines = React.memo(function TimelineGridLines({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const visibleMarkers = useMemo(() => {
-    const left = scrollLeft / zoomLevel;
-    const right = (scrollLeft + viewportWidth) / zoomLevel;
-    return rulerData.filter((m) => m.type === 'major' && m.time >= left - 1 && m.time <= right + 1);
-  }, [rulerData, scrollLeft, zoomLevel, viewportWidth]);
+  // Compute clean integer second interval based on zoomLevel (always whole seconds)
+  const secondStep = useMemo(() => {
+    if (zoomLevel >= 30) return 1; // 1 whole second per line
+    if (zoomLevel >= 15) return 2; // 2 whole seconds per line
+    if (zoomLevel >= 6) return 5;  // 5 whole seconds per line
+    if (zoomLevel >= 3) return 10; // 10 whole seconds per line
+    return 30;                     // 30 whole seconds per line
+  }, [zoomLevel]);
+
+  const visibleSecondLines = useMemo(() => {
+    const leftTime = Math.max(0, Math.floor(scrollLeft / zoomLevel));
+    const rightTime = Math.ceil((scrollLeft + viewportWidth) / zoomLevel) + 5;
+    
+    // Starting second strictly aligned with secondStep
+    const startSec = Math.floor(leftTime / secondStep) * secondStep;
+    const lines: number[] = [];
+    
+    for (let sec = startSec; sec <= rightTime; sec += secondStep) {
+      if (sec >= 0) {
+        lines.push(sec);
+      }
+    }
+    return lines;
+  }, [scrollLeft, zoomLevel, viewportWidth, secondStep]);
 
   return (
     <>
-      {visibleMarkers.map((m, i) => (
+      {visibleSecondLines.map((sec) => (
         <div
-          key={`g-${i}-${m.time}`}
-          className="absolute top-0 bottom-0 w-px bg-[#3e3e3e]/30 pointer-events-none"
-          style={{ left: `${m.time * zoomLevel}px` }}
+          key={`sec-line-${sec}`}
+          className="absolute top-0 bottom-0 w-px bg-black/[0.04] dark:bg-white/[0.04] pointer-events-none"
+          style={{ left: `${sec * zoomLevel}px` }}
         />
       ))}
     </>

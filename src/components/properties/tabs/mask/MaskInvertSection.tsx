@@ -5,8 +5,8 @@ interface MaskInvertSectionProps {
 
 export function MaskInvertSection({ invert, onToggle }: MaskInvertSectionProps) {
   return (
-    <div className="flex items-center justify-between p-3 bg-[#1e1e1e] rounded-md border border-[#3e3e3e]">
-      <span className="text-xs text-[#a0a0a0]">Invert Mask</span>
+    <div className="flex items-center justify-between p-3 bg-[var(--theme-bg-subpanel)] rounded-md border border-[var(--theme-border)]">
+      <span className="text-xs text-[var(--theme-text-muted)]">Invert Mask</span>
       <button
         onClick={onToggle}
         className={`w-10 h-5 rounded-full transition-colors relative ${invert ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}

@@ -76,14 +76,14 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
   );
 
   return (
-    <div className="bg-[#1e1e1e] rounded p-3 border border-emerald-500/20 space-y-3 mt-3">
+    <div className="bg-[var(--theme-bg-subpanel)] rounded p-3 border border-emerald-500/20 space-y-3 mt-3">
       <div className="flex items-center gap-2">
         <div className="p-1 rounded bg-emerald-500/10 text-emerald-400">
           <Wand2 className="w-3.5 h-3.5" />
         </div>
         <div>
           <p className="text-[11px] font-semibold text-white leading-tight">Color Transfer & AI Match</p>
-          <p className="text-[9px] text-[#a0a0a0]">Copy grade to other clips or match shot-to-shot reference look</p>
+          <p className="text-[9px] text-[var(--theme-text-muted)]">Copy grade to other clips or match shot-to-shot reference look</p>
         </div>
       </div>
 
@@ -92,7 +92,7 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
         <button
           type="button"
           onClick={handleCopyToAll}
-          className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-[#282828] hover:bg-[#323232] text-white text-[10px] font-medium rounded border border-[#3e3e3e] transition-colors"
+          className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-[#282828] hover:bg-[#323232] text-white text-[10px] font-medium rounded border border-[var(--theme-border)] transition-colors"
         >
           {copiedStatus === 'all' ? (
             <>
@@ -113,7 +113,7 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
           onClick={handleCopyToSelected}
           className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-[10px] font-medium rounded border transition-colors ${
             selectedClipIds.length > 1
-              ? 'bg-[#282828] hover:bg-[#323232] text-white border-[#3e3e3e]'
+              ? 'bg-[#282828] hover:bg-[#323232] text-white border-[var(--theme-border)]'
               : 'bg-[#181818] text-[#666666] border-[#282828] cursor-not-allowed'
           }`}
         >
@@ -134,12 +134,12 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
       {/* AI Shot-to-Shot Reference Match */}
       {candidateRefClips.length > 0 && (
         <div className="space-y-2 pt-2 border-t border-[#2a2a2a]">
-          <label className="text-[10px] text-[#a0a0a0] block">AI Match Color from Reference Clip</label>
+          <label className="text-[10px] text-[var(--theme-text-muted)] block">AI Match Color from Reference Clip</label>
           <div className="flex gap-2">
             <select
               value={referenceClipId}
               onChange={(e) => setReferenceClipId(e.target.value)}
-              className="flex-1 bg-[#252525] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-emerald-500"
+              className="flex-1 bg-[#252525] text-white text-[10px] border border-[var(--theme-border)] rounded px-2 py-1 focus:outline-none focus:border-emerald-500"
             >
               <option value="">Select Reference Shot...</option>
               {candidateRefClips.map((c: TimelineClip, idx: number) => (
