@@ -1634,6 +1634,35 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
 
+      // ---- 2b. Buffering detection: freeze playhead when video decoders aren't ready ----
+      // Check if any active VIDEO element is still seeking or has insufficient decoded
+      // data. When buffering is detected, the tick loop in PreviewCanvasContainer freezes
+      // the clock advance so the playhead doesn't race ahead of the decoders.
+      if (playing && !scrubbing) {
+        let anyBuffering = false;
+        for (const clip of clips) {
+          const entry = pool.get(clip.clipId);
+          if (!entry || entry.type !== 'video') continue;
+          // Reversed/freeze-frame clips are manually seeked each tick — they don't
+          // buffer in the traditional sense, so skip them.
+          if (clip.isReversed || clip.freezeFrame !== undefined) continue;
+          const el = entry.el;
+          // readyState < HAVE_CURRENT_DATA (2) means the decoder hasn't produced the
+          // frame at `currentTime` yet. `seeking` means a seek is in flight.
+          if (el.seeking || (el.readyState < 2 && el.src !== '')) {
+            anyBuffering = true;
+            break;
+          }
+        }
+        const wasBuffering = store.isBuffering;
+        if (anyBuffering !== wasBuffering) {
+          store.setIsBuffering(anyBuffering);
+        }
+      } else if (store.isBuffering) {
+        // Clear buffering when paused or scrubbing
+        store.setIsBuffering(false);
+      }
+
       // ---- 3. Pause inactive elements ----
       // SHARED ELEMENTS: several clip entries can reference the same <video>
       // (split segments of one media). An entry may leave the active set while

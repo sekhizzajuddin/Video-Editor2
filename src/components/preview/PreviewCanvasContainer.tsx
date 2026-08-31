@@ -23,6 +23,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useMediaPlayback } from '@/hooks/useMediaPlayback';
+import { Spinner } from '@/components/ui/spinner';
 import { TimelineTrack, MediaItem } from '@/types';
 import { ColorScopes } from '../ColorScopes';
 import { ThumbnailModal } from '../ThumbnailModal';
@@ -83,6 +84,7 @@ export function PreviewCanvasContainer() {
     progressBarColor,
     progressBarHeight,
     useProxies,
+    isBuffering,
   } = useEditorStore(
     useShallow((s) => ({
       isPlaying: s.isPlaying,
@@ -121,6 +123,7 @@ export function PreviewCanvasContainer() {
       progressBarColor: s.progressBarColor,
       progressBarHeight: s.progressBarHeight,
       useProxies: s.useProxies,
+      isBuffering: s.isBuffering,
     }))
   );
 
@@ -514,7 +517,13 @@ export function PreviewCanvasContainer() {
 
         let newTime = currentTimeRef.current;
 
-        if (state.isExporting) {
+        // BUFFERING FREEZE: when video decoders haven't caught up (isBuffering),
+        // freeze the clock so the playhead doesn't race ahead. Keep lastTime
+        // current so there's no time-jump when buffering clears.
+        if (state.isBuffering) {
+          lastTime = now;
+          // Don't advance newTime — stay at currentTimeRef.current
+        } else if (state.isExporting) {
           const targetFps = state.exportFps || 30;
           const frameDuration = 1000 / targetFps;
           const elapsed = now - lastTime;
@@ -946,6 +955,11 @@ export function PreviewCanvasContainer() {
           containerRef={containerRef}
         />
         {mediaDebug && <MediaPoolDebugOverlay />}
+        {isBuffering && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/10">
+            <Spinner className="w-12 h-12 text-white drop-shadow-md" />
+          </div>
+        )}
       </div>
 
       {/* Transport Controls Bar */}
