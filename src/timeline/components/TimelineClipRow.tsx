@@ -416,8 +416,8 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
           title="Overlap detected"
         />
       )}
-      {/* ── Diamond Markers for PIP Windows ────────────────────────── */}
-      {trackType === 'video' && clipPipWindows && clipPipWindows.length > 0 && (
+      {/* 🔹 Diamond Markers for PIP Windows */}
+      {clipPipWindows && clipPipWindows.length > 0 && (
         <div className="absolute -bottom-1.5 left-0 right-0 h-0 z-50 pointer-events-none">
           {clipPipWindows.map((pip, idx) => {
             if (!pip) return null;
