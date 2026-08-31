@@ -141,7 +141,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   return (
     <div
       ref={rulerContainerRef}
-      className="procut-timeline-ruler bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer select-none"
+      className="procut-timeline-ruler bg-[var(--theme-bg-subpanel)] border-b border-[var(--theme-border)] relative overflow-hidden shrink-0 cursor-pointer select-none transition-colors"
       style={{ height: RULER_HEIGHT, touchAction: 'none' }}
       onPointerDown={handleRulerPointerDown}
       onDoubleClick={handleDoubleClick}

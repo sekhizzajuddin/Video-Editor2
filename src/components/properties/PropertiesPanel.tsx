@@ -3283,7 +3283,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   );
 
   return (
-    <div className={`h-full flex flex-col ${isMobileView ? 'bg-[#121215] text-white' : 'bg-[#252525] border-l border-[#3e3e3e]'}`}>
+    <div className={`h-full flex flex-col ${isMobileView ? 'bg-[#121215] text-white' : 'bg-[var(--theme-bg-panel)] border-l border-[var(--theme-border)] text-[var(--theme-text-primary)] transition-colors'}`}>
       {isMobileView ? (
         <>
           {/* Mobile Header */}
@@ -3331,119 +3331,118 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         </>
       ) : (
         <>
-          {/* Tabs */}
-          <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
-        {tabs.map((tab, idx) => {
-          const Icon = tab.icon;
-          const isActive = activePropertiesTab === tab.id;
-          return (
-            <Fragment key={tab.id}>
-              {idx > 0 && <div className="w-px h-5 bg-[#3e3e3e] self-center shrink-0 mx-1" />}
-              <button
-                onClick={() => setActivePropertiesTab(tab.id)}
-                className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
-                  isActive
-                    ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
-                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
-            </Fragment>
-          );
-        })}
-      </div>
-
-      {/* Clip Info Header */}
-      {currentTab !== 'history' && (
-        <div className="p-3 border-b border-[#3e3e3e] bg-[#2a2a2a]">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-white">
-              {selectedTrack?.name} / Clip
-            </span>
-            <button
-              onClick={() => useEditorStore.getState().selectClip(null)}
-              className="p-1 text-[#a0a0a0] hover:text-white transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+          {/* Desktop Tabs Header */}
+          <div className="flex overflow-x-auto border-b border-[var(--theme-border)] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] p-1.5 bg-[var(--theme-bg-subpanel)]/50 gap-1 select-none">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activePropertiesTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActivePropertiesTab(tab.id)}
+                  className={`flex-1 py-2 px-1.5 text-[10px] font-semibold uppercase tracking-wider flex flex-col items-center gap-1 transition-all rounded-lg ${
+                    isActive
+                      ? 'text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-panel)] shadow-sm border border-[var(--theme-border)]'
+                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => {
-                const currentMuted = selectedClip.audioSettings?.muted || false;
-                const newSettings = {
-                  ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, tone: 0, humanize: false }),
-                  muted: !currentMuted
-                };
-                storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
-                scheduleSaveSnapshot();
-              }}
-              title={selectedClip.audioSettings?.muted ? "Unmute Clip" : "Mute Clip"}
-              className={`p-1.5 rounded transition-colors ${
-                selectedClip.audioSettings?.muted
-                  ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
-                  : 'bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
-              }`}
-            >
-              {selectedClip.audioSettings?.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-            </button>
-            <button
-              onClick={() => { copyClip('style'); toast.success('Style copied'); }}
-              title="Copy Style"
-              className="p-1.5 bg-[#1e1e1e] rounded text-purple-400 hover:text-purple-300 hover:bg-[#2d2d2d] transition-colors"
-            >
-              <Palette className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => { copyClip('whole'); toast.success('Clip copied'); }}
-              title="Copy (Whole Clip)"
-              className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
-            >
-              <Copy className="w-3 h-3" />
-            </button>
-            {clipboardData?.clips?.length > 0 && (
-              <button
-                onClick={() => {
-                  const clipType = clipboardData.type;
-                  const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
-                  pasteClip(pasteType as any);
-                  toast.success('Style pasted to selected clip');
-                }}
-                title="Paste Style (Ctrl+Alt+V)"
-                className="p-1.5 bg-purple-950/40 border border-purple-500/40 rounded text-purple-300 hover:text-white hover:bg-purple-600/30 transition-colors flex items-center gap-1 text-[10px] font-medium"
-              >
-                <Palette className="w-3 h-3 text-purple-400" />
-                <span>Paste Style</span>
-              </button>
-            )}
-            <button
-              onClick={duplicateClip}
-              title="Duplicate"
-              className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
-            >
-              <CopyPlus className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => splitClip(selectedClip.id, currentTime)}
-              title="Split at playhead"
-              className="p-1.5 bg-[#1e1e1e] rounded text-[#a0a0a0] hover:text-white transition-colors"
-            >
-              <Scissors className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => removeClip(selectedClip.id)}
-              title="Delete"
-              className="p-1.5 bg-[#1e1e1e] rounded text-red-400 hover:text-red-300 transition-colors"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-      )}
 
-      </>
+          {/* Clip Info Header */}
+          {currentTab !== 'history' && (
+            <div className="p-3 border-b border-[var(--theme-border)] bg-[var(--theme-bg-card)]">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-[var(--theme-text-primary)] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  {selectedTrack?.name || 'Track'} <span className="text-[var(--theme-text-muted)] font-normal">/ Clip Inspector</span>
+                </span>
+                <button
+                  onClick={() => useEditorStore.getState().selectClip(null)}
+                  className="p-1 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors"
+                  title="Deselect Clip"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                <button
+                  onClick={() => {
+                    const currentMuted = selectedClip.audioSettings?.muted || false;
+                    const newSettings = {
+                      ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, tone: 0, humanize: false }),
+                      muted: !currentMuted
+                    };
+                    storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
+                    scheduleSaveSnapshot();
+                  }}
+                  title={selectedClip.audioSettings?.muted ? "Unmute Clip" : "Mute Clip"}
+                  className={`p-1.5 rounded-lg border transition-all ${
+                    selectedClip.audioSettings?.muted
+                      ? 'bg-red-600/15 text-red-500 border-red-500/30'
+                      : 'bg-[var(--theme-bg-panel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30'
+                  }`}
+                >
+                  {selectedClip.audioSettings?.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+                </button>
+                <button
+                  onClick={() => { copyClip('style'); toast.success('Style copied'); }}
+                  title="Copy Style"
+                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-purple-500 hover:text-purple-400 hover:border-purple-500/40 transition-colors"
+                >
+                  <Palette className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => { copyClip('whole'); toast.success('Clip copied'); }}
+                  title="Copy (Whole Clip)"
+                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30 transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+                {clipboardData?.clips?.length > 0 && (
+                  <button
+                    onClick={() => {
+                      const clipType = clipboardData.type;
+                      const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
+                      pasteClip(pasteType as any);
+                      toast.success('Style pasted to selected clip');
+                    }}
+                    title="Paste Style (Ctrl+Alt+V)"
+                    className="px-2 py-1 bg-purple-500/15 border border-purple-500/30 rounded-lg text-purple-600 dark:text-purple-300 hover:bg-purple-500/25 transition-colors flex items-center gap-1 text-[10px] font-semibold"
+                  >
+                    <Palette className="w-3 h-3 text-purple-500" />
+                    <span>Paste Style</span>
+                  </button>
+                )}
+                <button
+                  onClick={duplicateClip}
+                  title="Duplicate"
+                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30 transition-colors"
+                >
+                  <CopyPlus className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => splitClip(selectedClip.id, currentTime)}
+                  title="Split at playhead"
+                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30 transition-colors"
+                >
+                  <Scissors className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => removeClip(selectedClip.id)}
+                  title="Delete Clip"
+                  className="p-1.5 bg-red-500/10 border border-red-500/25 rounded-lg text-red-500 hover:bg-red-500/20 transition-colors ml-auto"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Properties Content */}

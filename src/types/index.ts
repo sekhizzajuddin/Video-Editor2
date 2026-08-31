@@ -783,6 +783,7 @@ export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' |
 
 // ─── Editor Settings ──────────────────────────────────────────────────────
 export interface EditorSettings {
+  theme?: 'dark' | 'light';
   scrollSpeed: number;
   gestureSensitivity: number;
   autosave: boolean;

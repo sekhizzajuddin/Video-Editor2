@@ -25,7 +25,9 @@ import {
   Grid,
   ExternalLink,
   X,
-  Zap
+  Zap,
+  SlidersHorizontal,
+  Image as ImageIcon
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { unlockiOSVideoPlay } from '@/hooks/useMediaPlayback';
@@ -77,43 +79,46 @@ export function PreviewCanvasHeaderToolbar({
   } = useEditorStore();
 
   return (
-    <div role="toolbar" className="preview-header-toolbar shrink-0 flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-[#2e2e2e] select-none text-xs">
-      {/* Left: Aspect Ratio & Grid */}
+    <div
+      role="toolbar"
+      className="preview-header-toolbar shrink-0 flex items-center justify-between px-3 py-2 bg-[var(--theme-bg-panel)] border-b border-[var(--theme-border)] select-none text-xs transition-colors"
+    >
+      {/* Left: Aspect Ratio, Acceleration & Frame Tools */}
       <div className="flex items-center gap-2">
         <select
           value={aspectRatio}
           onChange={(e) => setAspectRatio(e.target.value as any)}
-          className="bg-[#2a2a2a] text-white border border-[#3e3e3e] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-amber-500 font-medium"
+          className="bg-[var(--theme-bg-card)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] hover:border-blue-500/40 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-blue-500 font-semibold cursor-pointer shadow-sm transition-colors"
           aria-label="Aspect Ratio"
         >
           <option value="16:9">16:9 Widescreen</option>
-          <option value="9:16">9:16 Vertical</option>
-          <option value="1:1">1:1 Square</option>
+          <option value="9:16">9:16 Vertical (Reel/Short)</option>
+          <option value="1:1">1:1 Square (Post)</option>
           <option value="4:3">4:3 Standard</option>
         </select>
 
         {typeof navigator !== 'undefined' && 'gpu' in navigator && !!navigator.gpu ? (
-          <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full" title="WebGPU Hardware Acceleration Engine Active">
-            <Zap className="w-3 h-3 text-emerald-400 fill-emerald-400" />
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full" title="WebGPU Hardware Acceleration Engine Active">
+            <Zap className="w-3 h-3 fill-emerald-500 text-emerald-500 dark:fill-emerald-400 dark:text-emerald-400" />
             WebGPU
           </span>
         ) : (
-          <span className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 bg-zinc-800/80 border border-zinc-700 px-2 py-0.5 rounded-full" title="Canvas 2D fallback renderer active">
+          <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--theme-text-muted)] bg-black/5 dark:bg-white/5 border border-[var(--theme-border)] px-2 py-0.5 rounded-full" title="Canvas 2D fallback renderer active">
             Canvas 2D
           </span>
         )}
 
         <label
-          className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-[#3e3e3e] bg-[#252525] hover:bg-[#2e2e2e] cursor-pointer text-[11px] select-none transition-colors"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:border-blue-500/40 cursor-pointer text-[11px] select-none transition-colors shadow-sm"
           title="Remember separate video canvas framing & position for each screen aspect ratio (16:9, 9:16, 1:1)"
         >
           <input
             type="checkbox"
             checked={perRatioFramingEnabled}
             onChange={(e) => setPerRatioFramingEnabled(e.target.checked)}
-            className="w-3 h-3 accent-amber-500 rounded cursor-pointer"
+            className="w-3.5 h-3.5 accent-blue-600 rounded cursor-pointer"
           />
-          <span className={perRatioFramingEnabled ? 'text-amber-400 font-medium' : 'text-[#a0a0a0]'}>
+          <span className={perRatioFramingEnabled ? 'text-blue-600 dark:text-blue-400 font-medium' : 'text-[var(--theme-text-muted)]'}>
             Remember Framing
           </span>
         </label>
@@ -121,19 +126,23 @@ export function PreviewCanvasHeaderToolbar({
         <button
           onClick={() => setShowGrid(!showGrid)}
           title="Toggle Grid Overlay"
-          className={`p-1 rounded transition-colors ${
-            showGrid ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-[#888] hover:text-white hover:bg-white/5'
+          className={`p-1.5 rounded-lg border transition-all ${
+            showGrid 
+              ? 'bg-blue-600/15 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-sm' 
+              : 'text-[var(--theme-text-muted)] border-transparent hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
           }`}
         >
           <Grid className="w-3.5 h-3.5" />
         </button>
 
-        <div className="flex items-center gap-1 border-l border-[#333] pl-2 ml-1">
+        <div className="flex items-center gap-1 border-l border-[var(--theme-border)] pl-2 ml-0.5">
           <button
             onClick={() => setVirtualCameraEnabled(!virtualCamera.enabled)}
             title={virtualCamera.enabled ? 'Disable Smart Reframe (Virtual Camera)' : 'Smart Reframe / Pan & Scan Overlay'}
-            className={`p-1 rounded transition-colors ${
-              virtualCamera.enabled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-[#888] hover:text-white hover:bg-white/5'
+            className={`p-1.5 rounded-lg border transition-all ${
+              virtualCamera.enabled 
+                ? 'bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/40 shadow-sm' 
+                : 'text-[var(--theme-text-muted)] border-transparent hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
             }`}
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -143,7 +152,7 @@ export function PreviewCanvasHeaderToolbar({
             <select
               value={virtualCamera.aspectRatio}
               onChange={(e) => setVirtualCameraAspectRatio(e.target.value as any)}
-              className="bg-[#2a2a2a] text-amber-400 border border-amber-500/40 rounded px-2 py-0.5 text-[10px] focus:outline-none font-medium ml-1"
+              className="bg-[var(--theme-bg-card)] text-indigo-600 dark:text-indigo-400 border border-indigo-500/40 rounded-lg px-2 py-0.5 text-[10px] focus:outline-none font-semibold ml-1 shadow-sm"
               aria-label="Smart Reframe Target Aspect Ratio"
             >
               <option value="16:9">16:9</option>
@@ -156,21 +165,21 @@ export function PreviewCanvasHeaderToolbar({
       </div>
 
       {/* Center: Zoom / View Status */}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-[#888] font-mono">
+      <div className="flex items-center gap-2 bg-[var(--theme-bg-card)] px-2.5 py-0.5 rounded-lg border border-[var(--theme-border)] shadow-sm">
+        <span className="text-[10px] text-[var(--theme-text-muted)] font-mono font-medium">
           {Math.round(viewportZoom * 100)}%
         </span>
         {viewportZoom !== 1 && (
           <button
             onClick={onResetZoom}
-            className="text-[10px] text-amber-400 hover:underline"
+            className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold hover:underline"
           >
-            Reset 100%
+            100%
           </button>
         )}
         <button
           onClick={onFitZoom}
-          className="text-[10px] text-[#aaa] hover:text-white hover:underline"
+          className="text-[10px] text-[var(--theme-text-primary)] hover:text-blue-500 font-medium transition-colors"
         >
           Fit
         </button>
@@ -180,30 +189,32 @@ export function PreviewCanvasHeaderToolbar({
       <div className="flex items-center gap-1.5 relative">
         <button
           onClick={onToggleScopes}
-          className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
+          className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-all flex items-center gap-1.5 ${
             showScopes
-              ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-              : 'bg-[#2a2a2a] text-[#888] border-[#3e3e3e] hover:text-white'
+              ? 'bg-blue-600/15 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-sm'
+              : 'bg-[var(--theme-bg-card)] text-[var(--theme-text-muted)] border-[var(--theme-border)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30'
           }`}
         >
+          <SlidersHorizontal className="w-3 h-3" />
           Scopes
         </button>
 
         <button
           onClick={onToggleThumbnailModal}
-          className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
+          className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-all flex items-center gap-1.5 ${
             showThumbnailModal
-              ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-              : 'bg-[#2a2a2a] text-[#888] border-[#3e3e3e] hover:text-white'
+              ? 'bg-blue-600/15 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-sm'
+              : 'bg-[var(--theme-bg-card)] text-[var(--theme-text-muted)] border-[var(--theme-border)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30'
           }`}
         >
-          Thumbnail
+          <ImageIcon className="w-3 h-3" />
+          Cover
         </button>
 
         <button
           onClick={onToggleFullscreen}
           title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Canvas'}
-          className="p-1 text-[#888] hover:text-white hover:bg-white/5 rounded transition-colors"
+          className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-lg border border-transparent hover:border-[var(--theme-border)] transition-colors"
         >
           {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
@@ -211,8 +222,10 @@ export function PreviewCanvasHeaderToolbar({
         <button
           onClick={() => setShowSettingsPanel(!showSettingsPanel)}
           title="Preview Settings"
-          className={`p-1 rounded transition-colors ${
-            showSettingsPanel ? 'text-amber-400 bg-white/10' : 'text-[#888] hover:text-white hover:bg-white/5'
+          className={`p-1.5 rounded-lg border transition-all ${
+            showSettingsPanel 
+              ? 'bg-blue-600/15 text-blue-600 dark:text-blue-400 border-blue-500/40' 
+              : 'text-[var(--theme-text-muted)] border-transparent hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
           }`}
         >
           <Settings2 className="w-3.5 h-3.5" />
@@ -220,25 +233,33 @@ export function PreviewCanvasHeaderToolbar({
 
         {/* Dropdown Settings Panel */}
         {showSettingsPanel && (
-          <div className="absolute top-full right-0 mt-2 w-72 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl overflow-hidden pointer-events-auto z-50">
-            <div className="p-3 bg-[#252525] border-b border-[#3e3e3e] flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-white">Preview Settings</h3>
-              <button onClick={() => setShowSettingsPanel(false)} className="text-[#888] hover:text-white">
+          <div className="absolute top-full right-0 mt-2 w-72 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-xl shadow-2xl overflow-hidden pointer-events-auto z-50 animate-in fade-in zoom-in-95 duration-100">
+            <div className="p-3 bg-[var(--theme-bg-subpanel)] border-b border-[var(--theme-border)] flex items-center justify-between">
+              <h3 className="text-xs font-bold text-[var(--theme-text-primary)] flex items-center gap-1.5">
+                <Settings2 className="w-3.5 h-3.5 text-blue-500" />
+                Preview Settings
+              </h3>
+              <button 
+                onClick={() => setShowSettingsPanel(false)} 
+                className="p-1 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-3 space-y-4 max-h-[60vh] overflow-y-auto scrollbar-thin">
+            <div className="p-3.5 space-y-4 max-h-[60vh] overflow-y-auto scrollbar-thin">
               <div>
-                <label className="text-[10px] text-[#a0a0a0] mb-2 block">Preview Quality</label>
-                <div className="grid grid-cols-3 gap-1">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--theme-text-muted)] mb-2 block">
+                  Playback Quality
+                </label>
+                <div className="grid grid-cols-3 gap-1.5 bg-[var(--theme-bg-card)] p-1 border border-[var(--theme-border)] rounded-lg">
                   {(['full', 'half', 'quarter'] as const).map((q) => (
                     <button
                       key={q}
                       onClick={() => updateSettings({ previewQuality: q })}
-                      className={`py-1.5 text-[10px] rounded capitalize transition-colors ${
+                      className={`py-1 text-[11px] font-medium rounded-md capitalize transition-all ${
                         settings.previewQuality === q
-                          ? 'bg-amber-500 text-white'
-                          : 'bg-[#2a2a2a] hover:bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                          ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                          : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
                       }`}
                     >
                       {q}
@@ -247,23 +268,29 @@ export function PreviewCanvasHeaderToolbar({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] text-[#a0a0a0]">Hardware Acceleration</label>
+              <div className="flex items-center justify-between pt-1">
+                <div>
+                  <label className="text-xs font-medium text-[var(--theme-text-primary)] block">Hardware Acceleration</label>
+                  <span className="text-[10px] text-[var(--theme-text-muted)]">GPU shader compositing</span>
+                </div>
                 <button
                   onClick={() => updateSettings({ hardwareAcceleration: !settings.hardwareAcceleration })}
-                  className={`w-8 h-4 rounded-full transition-colors relative ${settings.hardwareAcceleration ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
+                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${settings.hardwareAcceleration ? 'bg-blue-600' : 'bg-gray-400 dark:bg-gray-700'}`}
                 >
-                  <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${settings.hardwareAcceleration ? 'left-4' : 'left-0.5'}`} />
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${settings.hardwareAcceleration ? 'left-4.5' : 'left-0.5'}`} />
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] text-[#a0a0a0]">Safe Zones</label>
+              <div className="flex items-center justify-between pt-1 border-t border-[var(--theme-border)]">
+                <div>
+                  <label className="text-xs font-medium text-[var(--theme-text-primary)] block">Safe Zones Overlay</label>
+                  <span className="text-[10px] text-[var(--theme-text-muted)]">90% Action / 80% Title Guides</span>
+                </div>
                 <button
                   onClick={() => updateSettings({ showSafeZones: !settings.showSafeZones })}
-                  className={`w-8 h-4 rounded-full transition-colors relative ${settings.showSafeZones ? 'bg-sky-500' : 'bg-[#3e3e3e]'}`}
+                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${settings.showSafeZones ? 'bg-blue-600' : 'bg-gray-400 dark:bg-gray-700'}`}
                 >
-                  <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${settings.showSafeZones ? 'left-4' : 'left-0.5'}`} />
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${settings.showSafeZones ? 'left-4.5' : 'left-0.5'}`} />
                 </button>
               </div>
             </div>
@@ -313,14 +340,6 @@ export function PreviewCanvasTransportControls({
   const speedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 
   // Smooth time display, updated WITHOUT React renders.
-  //
-  // PERF: this used to run a rAF loop that called forceUpdate() every frame, so the
-  // transport bar re-rendered ~60x/second for the whole of playback. Rendering React
-  // on the same main thread that composites the canvas is exactly what makes
-  // multi-track playback stutter. The timecode, progress fill and scrub thumb are
-  // pure display, so we now write them straight to the DOM from the playback clock
-  // — zero renders, and the readout is genuinely per-frame smooth instead of
-  // following the throttled store value.
   const timecodeRef = useRef<HTMLSpanElement>(null);
   const progressFillRef = useRef<HTMLDivElement>(null);
   const scrubThumbRef = useRef<HTMLDivElement>(null);
@@ -336,8 +355,6 @@ export function PreviewCanvasTransportControls({
       const pct = Math.min(100, Math.max(0, (t / (totalDuration || 1)) * 100));
       if (progressFillRef.current) progressFillRef.current.style.width = `${pct}%`;
       if (scrubThumbRef.current) scrubThumbRef.current.style.left = `${pct}%`;
-      // Keep the (visually hidden) range input in sync so dragging it starts from
-      // the correct position without making it a controlled, re-rendering input.
       if (seekInputRef.current && document.activeElement !== seekInputRef.current) {
         seekInputRef.current.value = String(t);
       }
@@ -351,16 +368,16 @@ export function PreviewCanvasTransportControls({
 
   return (
     <div
-      className="shrink-0 flex flex-col bg-[#181818] border-t border-[#2e2e2e]"
+      className="shrink-0 flex flex-col bg-[var(--theme-bg-panel)] border-t border-[var(--theme-border)] transition-colors select-none"
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {/* Progress Bar */}
-      <div className="px-3 pt-2 pb-1">
+      {/* Sleek Top Progress Scrubber */}
+      <div className="px-4 pt-2.5 pb-1">
         <div className="relative h-1.5 group cursor-pointer">
-          <div className="absolute inset-0 rounded-full bg-[#333]" />
+          <div className="absolute inset-0 rounded-full bg-[var(--theme-border)] opacity-80" />
           <div
             ref={progressFillRef}
-            className="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400"
+            className="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]"
           />
           <input
             ref={seekInputRef}
@@ -375,27 +392,27 @@ export function PreviewCanvasTransportControls({
           />
           <div
             ref={scrubThumbRef}
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-amber-400 shadow-lg shadow-amber-500/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+            className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-blue-600 shadow-md shadow-blue-500/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
           />
         </div>
       </div>
 
-      {/* Controls Row */}
-      <div className="flex items-center justify-between px-3 pb-2">
-        {/* Left: Time Display */}
-        <div className="flex items-center gap-2 min-w-[90px]">
-          <span className="text-[10px] font-mono text-[#a0a0a0] tabular-nums select-text">
+      {/* Transport Controls Row */}
+      <div className="flex items-center justify-between px-4 pb-2.5 pt-0.5">
+        {/* Left: Timecode Readout */}
+        <div className="flex items-center gap-2 min-w-[110px]">
+          <span className="text-[11px] font-mono text-[var(--theme-text-primary)] font-semibold tabular-nums select-text bg-[var(--theme-bg-card)] px-2 py-0.5 rounded-md border border-[var(--theme-border)] shadow-sm">
             <span ref={timecodeRef}>00:00.00</span>
-            <span className="text-[#555]"> / {String(Math.floor(totalDuration / 60)).padStart(2, '0')}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
+            <span className="text-[var(--theme-text-muted)] font-normal"> / {String(Math.floor(totalDuration / 60)).padStart(2, '0')}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
           </span>
         </div>
 
-        {/* Center: Playback Buttons */}
-        <div className="flex items-center gap-0.5">
+        {/* Center: Main Playback Controls */}
+        <div className="flex items-center gap-1.5">
           <button
             onClick={handleRestart}
             title="Go to Start"
-            className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all active:scale-95"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
@@ -403,7 +420,7 @@ export function PreviewCanvasTransportControls({
           <button
             onClick={handleSkipBackward}
             title="Skip Back 10s"
-            className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all active:scale-95"
           >
             <SkipBack className="w-4 h-4" />
           </button>
@@ -415,10 +432,10 @@ export function PreviewCanvasTransportControls({
             }}
             title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             className={`
-              flex items-center justify-center w-9 h-9 rounded-full mx-1 transition-all duration-150 active:scale-95
+              flex items-center justify-center w-9 h-9 rounded-full mx-1 transition-all duration-200 active:scale-95 shadow-md
               ${isPlaying
-                ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-md shadow-amber-500/40'
-                : 'bg-white/10 hover:bg-white/20 text-white border border-white/10 hover:border-white/20'}
+                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/30'
+                : 'bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-600/30'}
             `}
           >
             {isPlaying
@@ -429,30 +446,29 @@ export function PreviewCanvasTransportControls({
           <button
             onClick={handleSkipForward}
             title="Skip Forward 10s"
-            className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-all active:scale-95"
           >
             <SkipForward className="w-4 h-4" />
           </button>
 
           {playbackDirection === -1 && (
-            <span className="ml-1 text-[9px] text-amber-400 font-bold px-1 py-0.5 bg-amber-500/10 rounded border border-amber-500/20">REV</span>
+            <span className="ml-1 text-[9px] text-amber-500 font-bold px-1.5 py-0.5 bg-amber-500/10 rounded-md border border-amber-500/20">REV</span>
           )}
         </div>
 
-        {/* Right: Volume & Speed */}
-        <div className="flex items-center gap-2 min-w-[90px] justify-end">
-          <div className="flex items-center gap-1 group/vol">
+        {/* Right: Volume & Speed Controls */}
+        <div className="flex items-center gap-2.5 min-w-[110px] justify-end">
+          <div className="flex items-center gap-1.5 group/vol">
             <button
               onClick={toggleMute}
               title={isMuted ? 'Unmute' : 'Mute'}
-              className="p-1 text-[#888] hover:text-white transition-colors shrink-0"
+              className="p-1 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] transition-colors shrink-0"
             >
               {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
             </button>
-            <div className="w-14 h-1.5 relative">
-              <div className="absolute inset-0 rounded-full bg-[#333]" />
+            <div className="w-16 h-1.5 relative bg-[var(--theme-border)] rounded-full overflow-hidden">
               <div
-                className="absolute top-0 left-0 h-full rounded-full bg-[#666] group-hover/vol:bg-amber-500 transition-colors"
+                className="absolute top-0 left-0 h-full rounded-full bg-blue-600 group-hover/vol:bg-blue-500 transition-colors"
                 style={volumeBarStyle}
               />
               <input
@@ -471,20 +487,20 @@ export function PreviewCanvasTransportControls({
             <button
               onClick={() => setShowSpeedMenu(!showSpeedMenu)}
               title="Playback Speed"
-              className="text-[10px] font-mono text-[#888] hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-white/5 border border-transparent hover:border-white/10"
+              className="text-[10px] font-mono text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] transition-colors px-2 py-0.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--theme-border)] shadow-sm font-semibold"
             >
               {playbackSpeed === 1 ? '1×' : `${playbackSpeed}×`}
             </button>
             {showSpeedMenu && (
-              <div className="absolute bottom-full right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl overflow-hidden z-50 pointer-events-auto">
+              <div className="absolute bottom-full right-0 mb-1 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-xl shadow-xl overflow-hidden z-50 pointer-events-auto min-w-[80px]">
                 {speedOptions.map((s) => (
                   <button
                     key={s}
                     onClick={() => { setPlaybackSpeed(s); setShowSpeedMenu(false); }}
-                    className={`block w-full text-left px-4 py-1.5 text-xs transition-colors ${
+                    className={`block w-full text-left px-3 py-1.5 text-xs transition-colors font-mono ${
                       playbackSpeed === s
-                        ? 'bg-amber-500/20 text-amber-300'
-                        : 'text-[#a0a0a0] hover:bg-[#2a2a2a] hover:text-white'
+                        ? 'bg-blue-600/15 text-blue-600 dark:text-blue-400 font-bold'
+                        : 'text-[var(--theme-text-muted)] hover:bg-black/5 dark:hover:bg-white/5 hover:text-[var(--theme-text-primary)]'
                     }`}
                   >
                     {s}×

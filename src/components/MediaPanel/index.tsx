@@ -802,19 +802,25 @@ export function MediaPanel() {
     };
   }, []);
 
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'audio' | 'image'>('all');
+
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
-    { id: 'project', label: 'Project', icon: Folder },
-    { id: 'text', label: 'Text', icon: Type },
+    { id: 'project', label: 'Media', icon: Folder },
     { id: 'audio', label: 'Audio', icon: Music },
-    { id: 'templates', label: 'Templates', icon: Clapperboard },
-    { id: 'transitions', label: 'Transitions', icon: Sparkles },
+    { id: 'text', label: 'Text', icon: Type },
     { id: 'effects', label: 'Effects', icon: Waves },
+    { id: 'transitions', label: 'Transitions', icon: Sparkles },
+    { id: 'templates', label: 'Elements', icon: Clapperboard },
   ];
 
-  const filteredMedia = useMemo(() => mediaLibrary.filter((m) =>
-    m.type !== 'text' && m.type !== 'fx' &&
-    m.name.toLowerCase().includes(searchQuery.toLowerCase())
-  ), [mediaLibrary, searchQuery]);
+  const filteredMedia = useMemo(() => mediaLibrary.filter((m) => {
+    if (m.type === 'text' || m.type === 'fx') return false;
+    if (searchQuery && !m.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (mediaTypeFilter === 'video') return m.type === 'video';
+    if (mediaTypeFilter === 'audio') return m.type === 'audio';
+    if (mediaTypeFilter === 'image') return m.type === 'image';
+    return true;
+  }), [mediaLibrary, searchQuery, mediaTypeFilter]);
 
   const handleDragStart = (e: React.DragEvent, mediaId: string) => {
     e.dataTransfer.setData('application/procut-media', mediaId);
@@ -1192,38 +1198,50 @@ export function MediaPanel() {
   return (
     <div
       data-help-id="media-panel"
-      className="h-full flex flex-col bg-[#252525] border-r border-[#3e3e3e]"
+      className="h-full flex flex-row bg-[var(--theme-bg-panel)] border-r border-[var(--theme-border)] text-[var(--theme-text-primary)] select-none overflow-hidden"
       onDragOver={handleZoneDragOver}
       onDragLeave={handleZoneDragLeave}
       onDrop={handleZoneDrop}
     >
-      {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
-        {tabs.map((tab, idx) => {
-          const Icon = tab.icon;
-          const isActive = activeMediaTab === tab.id;
-          return (
-            <Fragment key={tab.id}>
-              {idx > 0 && <div className="w-px h-5 bg-[#3e3e3e] self-center shrink-0 mx-1" />}
+      {/* Left Icon Rail (56px) */}
+      <div className="w-14 shrink-0 bg-[var(--theme-bg-app)] border-r border-[var(--theme-border)] flex flex-col justify-between items-center py-2 z-10">
+        <div className="flex flex-col items-center gap-1 w-full">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeMediaTab === tab.id;
+            return (
               <button
+                key={tab.id}
                 onClick={() => setActiveMediaTab(tab.id)}
-                className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                className={`w-11 h-12 rounded-xl flex flex-col items-center justify-center gap-1 transition-all group relative ${
                   isActive
-                    ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
-                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                    ? 'bg-blue-600/15 text-blue-500 font-semibold shadow-[inset_0_0_0_1px_rgba(59,130,246,0.3)]'
+                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-subpanel)]'
                 }`}
+                title={tab.label}
               >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
+                {isActive && (
+                  <div className="absolute left-0 top-2.5 bottom-2.5 w-1 bg-blue-500 rounded-r-full" />
+                )}
+                <Icon className={`w-4 h-4 transition-transform group-hover:scale-110 ${isActive ? 'text-blue-500' : ''}`} />
+                <span className="text-[9px] tracking-tight leading-none">{tab.label}</span>
               </button>
-            </Fragment>
-          );
-        })}
+            );
+          })}
+        </div>
+
+        {/* Bottom Status Dot */}
+        <div className="flex flex-col items-center gap-1 pt-2 border-t border-[var(--theme-border)]/50 w-full">
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[8px] font-semibold text-emerald-400">Ready</span>
+          </div>
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-hidden flex flex-col relative">
-        {/* Drag-drop overlay & Upload progress */}
+      {/* Subpanel Content (flex-1) */}
+      <div className="flex-1 min-w-0 flex flex-col h-full bg-[var(--theme-bg-panel)] overflow-hidden relative">
+        {/* Upload Progress Overlay */}
         <UploadProgressOverlay
           isDragging={isDragOver || isDragging}
           isUploading={importing || isLocalImporting || importProgressPct > 0}
@@ -1232,12 +1250,55 @@ export function MediaPanel() {
           fileName={hookCurrentFileName}
         />
 
+        {/* Subpanel Top Header */}
+        <div className="h-10 px-3 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0 bg-[var(--theme-bg-panel)]/80 backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xs font-semibold text-[var(--theme-text-primary)] tracking-wide capitalize">
+              {activeMediaTab === 'project' ? 'Media Library' : activeMediaTab === 'templates' ? 'Elements' : activeMediaTab}
+            </h2>
+            {activeMediaTab === 'project' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] border border-[var(--theme-border)] font-mono">
+                {filteredMedia.length}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            {activeMediaTab === 'project' && (
+              <div className="flex bg-[var(--theme-bg-subpanel)] rounded-lg p-0.5 border border-[var(--theme-border)]">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1 rounded-md transition-all ${
+                    viewMode === 'grid'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                  }`}
+                  title="Grid View"
+                >
+                  <Grid3X3 className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`p-1 rounded-md transition-all ${
+                    viewMode === 'list'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                  }`}
+                  title="List View"
+                >
+                  <List className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         {activeMediaTab === 'project' && (
-          <>
-            {/* Search & View Controls */}
-            <div className="p-2 border-b border-[#3e3e3e]">
-              <div className="relative mb-2">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#a0a0a0]" />
+          <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+            {/* Search & Category Filter Pills */}
+            <div className="p-2.5 space-y-2 border-b border-[var(--theme-border)] bg-[var(--theme-bg-panel)] shrink-0">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 <label htmlFor="media-search" className="sr-only">Search media</label>
                 <input
                   id="media-search"
@@ -1245,182 +1306,179 @@ export function MediaPanel() {
                   placeholder="Search media..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white placeholder-[#a0a0a0] focus:outline-none focus:border-amber-500 transition-colors"
+                  className="w-full pl-8 pr-7 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-lg text-xs text-[var(--theme-text-primary)] placeholder-[var(--theme-text-muted)] focus:outline-none focus:border-blue-500 transition-colors"
                 />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-[#a0a0a0]">
-                    {filteredMedia.length} items
-                  </span>
-                </div>
-                <div className="flex bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+
+              {/* Category Filter Pills */}
+              <div className="flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+                {(['all', 'video', 'audio', 'image'] as const).map((cat) => (
                   <button
-                    onClick={() => setViewMode('grid')}
-                    className={`p-1 rounded transition-colors ${
-                      viewMode === 'grid' ? 'bg-[#3e3e3e] text-white' : 'text-[#a0a0a0] hover:text-white'
+                    key={cat}
+                    onClick={() => setMediaTypeFilter(cat)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-medium capitalize transition-all whitespace-nowrap ${
+                      mediaTypeFilter === cat
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-card)] border border-[var(--theme-border)]'
                     }`}
                   >
-                    <Grid3X3 className="w-3 h-3" />
+                    {cat === 'all' ? 'All' : cat === 'image' ? 'Images' : cat + 's'}
                   </button>
-                  <button
-                    onClick={() => setViewMode('list')}
-                    className={`p-1 rounded transition-colors ${
-                      viewMode === 'list' ? 'bg-[#3e3e3e] text-white' : 'text-[#a0a0a0] hover:text-white'
-                    }`}
-                  >
-                    <List className="w-3 h-3" />
-                  </button>
-                </div>
+                ))}
               </div>
             </div>
 
-            {/* Media List */}
-            <div className="flex-1 overflow-y-auto">
-              {/* Import Buttons */}
-              <div className="p-2 flex gap-1.5">
+            {/* Dashed Import Dropzone Card */}
+            <div className="p-2.5 pb-1">
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-blue-500/30 hover:border-blue-500/60 rounded-xl p-3.5 bg-gradient-to-b from-blue-500/[0.04] to-transparent hover:from-blue-500/[0.08] transition-all cursor-pointer group flex flex-col items-center text-center gap-1.5"
+              >
+                <div className="w-8 h-8 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-500 group-hover:scale-110 group-hover:bg-blue-600/20 transition-all">
+                  <Upload className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-[var(--theme-text-primary)]">Import Media</p>
+                  <p className="text-[10px] text-[var(--theme-text-muted)] mt-0.5">Videos, Images, Audio</p>
+                </div>
                 <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={importing}
-                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-amber-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
-                  title="Import Video, Audio, or Image files"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
+                  className="btn-primary-gradient px-3 py-1 text-[11px] font-medium rounded-lg text-white shadow-md hover:shadow-blue-500/20 transition-all flex items-center gap-1 mt-0.5"
                 >
-                  {importing ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Upload className="w-3 h-3" />
-                  )}
-                  {importing ? 'Importing...' : 'Import Media'}
-                </button>
-                <button
-                  onClick={() => srtInputRef.current?.click()}
-                  disabled={importing}
-                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-purple-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
-                  title="Import Subtitles (.srt file)"
-                >
-                  <Type className="w-3 h-3 text-purple-400" />
-                  Import Subtitles
+                  <Plus className="w-3 h-3" />
+                  Import
                 </button>
               </div>
-              <div className="flex px-2 mt-2 gap-2">
-                <button
-                  onClick={isRecordingScreen ? stopScreenRecord : startScreenRecord}
-                  disabled={importing}
-                  className={`flex-1 py-2 border-2 ${isRecordingScreen ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-dashed border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-red-500'} rounded text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50`}
-                  title="Record Screen"
-                >
-                  {isRecordingScreen ? <Square className="w-3 h-3 text-red-400" /> : <Monitor className="w-3 h-3 text-red-400" />}
-                  {isRecordingScreen ? 'Stop' : 'Record'}
-                </button>
-                <button
-                  onClick={() => setShowAIGeneratorModal(true)}
-                  disabled={importing}
-                  className="relative flex-1 py-2 bg-gradient-to-r from-amber-600/20 to-amber-500/20 hover:from-amber-600/40 hover:to-amber-500/40 border-2 border-dashed border-amber-500/50 hover:border-amber-500 text-amber-500 hover:text-amber-400 rounded text-xs flex items-center justify-center gap-1 transition-all disabled:opacity-50 overflow-hidden"
-                  title="AI Generation"
-                >
-                  {aiVideoIsGenerating && (
-                    <div 
-                      className="absolute left-0 top-0 bottom-0 bg-amber-500/20 transition-all duration-300 ease-out z-0"
-                      style={{ width: `${aiVideoProgress}%` }}
-                    />
-                  )}
-                  <span className="relative z-10 flex items-center gap-1">
-                    {aiVideoIsGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                    {aiVideoIsGenerating ? `${Math.round(aiVideoProgress)}%` : 'AI Gen'}
-                  </span>
-                </button>
-              </div>
-              <div className="flex px-2 mt-2 gap-2">
-                <button
-                  onClick={() => setShowAutoVideoModal(true)}
-                  disabled={importing}
-                  className="flex-1 py-2 bg-gradient-to-r from-indigo-600/20 to-indigo-500/20 hover:from-indigo-600/40 hover:to-indigo-500/40 border-2 border-dashed border-indigo-500/50 hover:border-indigo-500 text-indigo-500 hover:text-indigo-400 rounded text-xs flex items-center justify-center gap-1 transition-all disabled:opacity-50 overflow-hidden"
-                  title="Auto-Faceless Video Generator"
-                >
-                  <Wand2 className="w-3 h-3" />
-                  Auto Video Gen
-                </button>
-              </div>
+            </div>
 
-              {/* Missing files warning banner */}
-              {(() => {
-                const missing = mediaLibrary.filter(
-                  (m) => m.type !== 'text' && m.type !== 'fx' && (m.url === 'PENDING_RESTORE' || !m.url)
-                );
-                if (missing.length > 0) {
-                  return (
-                    <div className="mx-2 mb-2 p-3 bg-red-950/40 border border-red-500/30 rounded flex flex-col gap-2">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-xs font-semibold text-red-200">
-                            {missing.length} Missing files in project
-                          </p>
-                          <p className="text-[10px] text-red-300/80 leading-normal mt-0.5">
-                            Some local media files are not linked to this browser session. Please re-link them.
-                          </p>
-                        </div>
+            {/* Quick Action Tools */}
+            <div className="px-2.5 py-1 grid grid-cols-3 gap-1.5">
+              <button
+                onClick={() => setShowAIGeneratorModal(true)}
+                disabled={importing}
+                className="relative py-1.5 px-2 bg-gradient-to-r from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 border border-amber-500/30 hover:border-amber-500/60 text-amber-500 rounded-lg text-[10px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-50 overflow-hidden"
+                title="AI Video Generation"
+              >
+                {aiVideoIsGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                {aiVideoIsGenerating ? `${Math.round(aiVideoProgress)}%` : 'AI Video'}
+              </button>
+              <button
+                onClick={() => setShowAutoVideoModal(true)}
+                disabled={importing}
+                className="py-1.5 px-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 hover:border-indigo-500/60 text-indigo-400 rounded-lg text-[10px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                title="Auto Faceless Video Generator"
+              >
+                <Wand2 className="w-3 h-3" />
+                Auto Vid
+              </button>
+              <button
+                onClick={isRecordingScreen ? stopScreenRecord : startScreenRecord}
+                disabled={importing}
+                className={`py-1.5 px-2 border rounded-lg text-[10px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-50 ${
+                  isRecordingScreen
+                    ? 'border-red-500 bg-red-500/20 text-red-400 animate-pulse'
+                    : 'border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-red-500/50'
+                }`}
+                title="Record Screen"
+              >
+                {isRecordingScreen ? <Square className="w-3 h-3 text-red-400" /> : <Monitor className="w-3 h-3" />}
+                {isRecordingScreen ? 'Stop' : 'Record'}
+              </button>
+            </div>
+
+            {/* Missing files warning banner */}
+            {(() => {
+              const missing = mediaLibrary.filter(
+                (m) => m.type !== 'text' && m.type !== 'fx' && (m.url === 'PENDING_RESTORE' || !m.url)
+              );
+              if (missing.length > 0) {
+                return (
+                  <div className="mx-2.5 my-1.5 p-2.5 bg-red-950/40 border border-red-500/30 rounded-xl flex flex-col gap-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-semibold text-red-200">
+                          {missing.length} Missing files in project
+                        </p>
+                        <p className="text-[10px] text-red-300/80 leading-normal mt-0.5">
+                          Some local files need re-linking for this browser session.
+                        </p>
                       </div>
-                      <button
-                        onClick={() => relinkInputRef.current?.click()}
-                        className="w-full py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-xs font-medium rounded transition-colors"
-                      >
-                        Re-link Files
-                      </button>
                     </div>
-                  );
-                }
-                return null;
-              })()}
-
-              {previewItem && (
-                <div className="mx-2 mb-2 p-2 bg-[#252525] border border-[#3e3e3e] rounded flex flex-col gap-2 relative">
-                  <div className="relative aspect-video bg-black flex items-center justify-center rounded overflow-hidden">
-                    {previewItem.type === 'video' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
-                      <video
-                        key={previewItem.id}
-                        src={previewItem.url}
-                        crossOrigin="anonymous"
-                        controls
-                        className="w-full h-full object-contain"
-                        autoPlay={false}
-                      />
-                    )}
-                    {previewItem.type === 'audio' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
-                      <div className="p-3 w-full flex flex-col items-center justify-center">
-                        <Music className="w-8 h-8 text-emerald-400 mb-2" />
-                        <audio src={previewItem.url} controls className="w-full h-8" />
-                      </div>
-                    )}
-                    {previewItem.type === 'image' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
-                      <img src={previewItem.url} crossOrigin="anonymous" className="w-full h-full object-contain" alt="" />
-                    )}
                     <button
-                      onClick={() => setPreviewItem(null)}
-                      className="absolute top-1.5 right-1.5 p-1 bg-black/60 hover:bg-black/80 rounded-full text-white/70 hover:text-white transition-colors"
-                      title="Close Preview"
+                      onClick={() => relinkInputRef.current?.click()}
+                      className="w-full py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-xs font-medium rounded-lg transition-colors"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      Re-link Files
                     </button>
                   </div>
-                  <div className="px-1 py-0.5 text-[10px] text-[#a0a0a0] truncate font-medium flex justify-between items-center">
-                    <span className="truncate flex-1 pr-2">{previewItem.name}</span>
-                    <span className="shrink-0">{formatDuration(previewItem.duration)}</span>
-                  </div>
-                </div>
-              )}
+                );
+              }
+              return null;
+            })()}
 
+            {/* Media Item In-Panel Preview */}
+            {previewItem && (
+              <div className="mx-2.5 my-1.5 p-2 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-xl flex flex-col gap-1.5 relative">
+                <div className="relative aspect-video bg-black flex items-center justify-center rounded-lg overflow-hidden">
+                  {previewItem.type === 'video' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
+                    <video
+                      key={previewItem.id}
+                      src={previewItem.url}
+                      crossOrigin="anonymous"
+                      controls
+                      className="w-full h-full object-contain"
+                      autoPlay={false}
+                    />
+                  )}
+                  {previewItem.type === 'audio' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
+                    <div className="p-3 w-full flex flex-col items-center justify-center">
+                      <Music className="w-8 h-8 text-blue-400 mb-2" />
+                      <audio src={previewItem.url} controls className="w-full h-8" />
+                    </div>
+                  )}
+                  {previewItem.type === 'image' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
+                    <img src={previewItem.url} crossOrigin="anonymous" className="w-full h-full object-contain" alt="" />
+                  )}
+                  <button
+                    onClick={() => setPreviewItem(null)}
+                    className="absolute top-1.5 right-1.5 p-1 bg-black/60 hover:bg-black/80 rounded-full text-white/70 hover:text-white transition-colors"
+                    title="Close Preview"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="px-1 py-0.5 text-[10px] text-[var(--theme-text-muted)] truncate font-medium flex justify-between items-center">
+                  <span className="truncate flex-1 pr-2 text-[var(--theme-text-primary)]">{previewItem.name}</span>
+                  <span className="shrink-0 font-mono">{formatDuration(previewItem.duration)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Media Grid / List */}
+            <div className="flex-1 p-2.5 pt-1">
               {filteredMedia.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-[#a0a0a0]">
-                  <Film className="w-10 h-10 mb-3 opacity-20" />
-                  <p className="text-xs font-medium">No media yet</p>
-                  <p className="text-[10px] mt-1.5 text-center px-4">
-                    Import video, audio, or image files<br />
-                    or drag & drop them here
+                <div className="flex flex-col items-center justify-center py-10 text-[var(--theme-text-muted)]">
+                  <Film className="w-8 h-8 mb-2 opacity-30" />
+                  <p className="text-xs font-medium">No media found</p>
+                  <p className="text-[10px] mt-1 text-center px-4">
+                    Import files or drag them into this panel
                   </p>
                 </div>
               ) : viewMode === 'grid' ? (
-                <div className="grid grid-cols-2 gap-1.5 p-2">
+                <div className="grid grid-cols-2 gap-2">
                   {filteredMedia.map((media) => (
                     <div
                       key={media.id}
@@ -1429,66 +1487,75 @@ export function MediaPanel() {
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
                       onClick={() => setPreviewItem(media)}
-                      className={`${getMediaColor(media.type)} border rounded overflow-hidden cursor-grab hover:brightness-110 transition-all group relative ${usedMediaIds.has(media.id) ? 'ring-2 ring-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : ''}`}
+                      className={`group relative rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:border-blue-500/50 hover:shadow-md transition-all cursor-grab active:cursor-grabbing overflow-hidden ${
+                        usedMediaIds.has(media.id) ? 'ring-2 ring-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.3)]' : ''
+                      }`}
                     >
-                      {/* Thumbnail */}
-                      <div className="h-16 relative bg-black/20">
+                      {/* Thumbnail Container */}
+                      <div className="h-20 relative bg-black/20 overflow-hidden">
                         {renderMediaThumbnail(media)}
 
-                        {/* Play overlay for video */}
+                        {/* Video Play Overlay */}
                         {media.type === 'video' && (
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <div className="w-7 h-7 bg-black/60 rounded-full flex items-center justify-center backdrop-blur-sm">
-                              <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="white" />
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30 backdrop-blur-[1px]">
+                            <div className="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg">
+                              <Play className="w-3 h-3 ml-0.5 fill-white" />
                             </div>
                           </div>
                         )}
 
-                        {/* Delete button */}
+                        {/* Top Right Delete Button */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setConfirmDeleteId(media.id);
                           }}
-                          className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/80 transition-all"
+                          className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-red-600 rounded-md text-white opacity-0 group-hover:opacity-100 transition-all shadow-sm"
+                          title="Delete media"
                         >
-                          <X className="w-2.5 h-2.5 text-white" />
+                          <Trash2 className="w-2.5 h-2.5" />
                         </button>
 
-                        {/* Type badge */}
-                        <div className="absolute bottom-0.5 left-0.5 px-1 py-0.5 bg-black/60 rounded text-[7px] text-white/70 uppercase font-medium">
+                        {/* Duration Pill (Bottom-left) */}
+                        {media.duration > 0 && (
+                          <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/75 backdrop-blur-sm rounded text-[8px] font-mono text-white font-medium">
+                            {formatDuration(media.duration)}
+                          </div>
+                        )}
+
+                        {/* Type Icon Badge (Bottom-right) */}
+                        <div className="absolute bottom-1 right-1 px-1 py-0.5 bg-black/75 backdrop-blur-sm rounded text-[7px] font-semibold text-white/80 uppercase">
                           {media.type}
                         </div>
                       </div>
 
-                      {/* Info */}
-                      <div className="p-1.5">
-                        <p className="text-[10px] text-white truncate">{media.name}</p>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <p className="text-[9px] text-[#a0a0a0]">{formatDuration(media.duration)}</p>
-                          {media.width && media.height && (
-                            <p className="text-[9px] text-[#a0a0a0]">· {media.width}×{media.height}</p>
-                          )}
+                      {/* Card Info */}
+                      <div className="p-2">
+                        <p className="text-[11px] font-medium text-[var(--theme-text-primary)] truncate group-hover:text-blue-500 transition-colors">
+                          {media.name}
+                        </p>
+                        <div className="flex items-center gap-1 mt-0.5 text-[9px] text-[var(--theme-text-muted)] font-mono">
+                          {media.width && media.height ? `${media.width}×${media.height}` : formatSize(media.size)}
                         </div>
 
-                        {/* Audio waveform mini preview */}
+                        {/* Audio Waveform */}
                         {media.type === 'audio' && renderWaveformPreview(media)}
                       </div>
 
-                      {/* Delete confirmation */}
+                      {/* Delete Confirmation Overlay */}
                       {confirmDeleteId === media.id && (
-                        <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-1.5 z-20 rounded">
-                          <p className="text-[9px] text-white">Delete?</p>
-                          <div className="flex gap-1">
+                        <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center gap-1.5 z-20 p-2 text-center">
+                          <p className="text-[10px] font-semibold text-white">Delete file?</p>
+                          <div className="flex gap-1.5">
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDelete(media.id); }}
-                              className="px-2 py-0.5 bg-red-500 hover:bg-red-400 text-white text-[9px] rounded transition-colors"
+                              className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white text-[9px] font-medium rounded-md transition-colors"
                             >
                               Delete
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                              className="px-2 py-0.5 bg-[#3e3e3e] hover:bg-[#5e5e5e] text-white text-[9px] rounded transition-colors"
+                              className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-white text-[9px] font-medium rounded-md transition-colors"
                             >
                               Cancel
                             </button>
@@ -1499,7 +1566,7 @@ export function MediaPanel() {
                   ))}
                 </div>
               ) : (
-                <div className="flex flex-col">
+                <div className="flex flex-col space-y-1">
                   {filteredMedia.map((media) => (
                     <div
                       key={media.id}
@@ -1508,10 +1575,11 @@ export function MediaPanel() {
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
                       onClick={() => setPreviewItem(media)}
-                      className={`flex items-center gap-2 p-2 hover:bg-[#3e3e3e] cursor-grab border-b border-[#3e3e3e] transition-colors group ${usedMediaIds.has(media.id) ? 'bg-blue-500/10 shadow-[inset_0_0_15px_rgba(59,130,246,0.2)] border-l-2 border-l-blue-500' : ''}`}
+                      className={`flex items-center gap-2 p-2 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:border-blue-500/50 hover:bg-[var(--theme-bg-subpanel)] cursor-grab transition-all group ${
+                        usedMediaIds.has(media.id) ? 'border-l-4 border-l-blue-500 bg-blue-500/5' : ''
+                      }`}
                     >
-                      {/* Thumbnail in list view */}
-                      <div className="w-10 h-7 rounded overflow-hidden bg-black/30 shrink-0 flex items-center justify-center">
+                      <div className="w-10 h-8 rounded-md overflow-hidden bg-black/30 shrink-0 flex items-center justify-center">
                         {media.thumbnail ? (
                           <img src={media.thumbnail} crossOrigin="anonymous" alt="" className="w-full h-full object-cover" draggable={false} />
                         ) : (
@@ -1520,62 +1588,35 @@ export function MediaPanel() {
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] text-white truncate">{media.name}</p>
-                        <p className="text-[9px] text-[#a0a0a0]">
+                        <p className="text-[11px] font-medium text-[var(--theme-text-primary)] truncate">{media.name}</p>
+                        <p className="text-[9px] text-[var(--theme-text-muted)] font-mono">
                           {formatDuration(media.duration)} · {formatSize(media.size)}
-                          {media.width && media.height ? ` · ${media.width}×${media.height}` : ''}
                         </p>
                       </div>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {media.type === 'video' && <Play className="w-3 h-3 text-[#a0a0a0]" />}
-                        {media.type === 'audio' && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleRepairAudio(media); }}
-                            title="Repair / Normalize Audio"
-                            className="p-0.5 text-[#a0a0a0] hover:text-green-400 rounded transition-colors"
-                          >
-                            <Wrench className="w-3 h-3" />
-                          </button>
-                        )}
-                        {(media.type === 'audio' || media.type === 'video') && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDetectBeats(media); }}
-                            title="Detect Beats"
-                            disabled={detectingBeatId === media.id}
-                            className="p-0.5 text-[#a0a0a0] hover:text-yellow-400 rounded transition-colors disabled:opacity-50"
-                          >
-                            {detectingBeatId === media.id
-                              ? <Loader2 className="w-3 h-3 animate-spin" />
-                              : <Waves className="w-3 h-3" />
-                            }
-                          </button>
-                        )}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setConfirmDeleteId(media.id);
                           }}
-                          className="p-0.5 text-[#a0a0a0] hover:text-red-400 rounded transition-colors"
+                          className="p-1 text-[var(--theme-text-muted)] hover:text-red-500 rounded transition-colors"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
 
-
-                      {/* Delete confirmation overlay for list */}
                       {confirmDeleteId === media.id && (
-                        <div className="absolute right-2 flex items-center gap-1 bg-[#2d2d2d] border border-[#3e3e3e] rounded px-2 py-1 shadow-lg z-20">
+                        <div className="absolute right-2 flex items-center gap-1 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg p-1 shadow-lg z-20">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDelete(media.id); }}
-                            className="px-2 py-0.5 bg-red-500 hover:bg-red-400 text-white text-[9px] rounded transition-colors"
+                            className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white text-[9px] font-medium rounded transition-colors"
                           >
                             Delete
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                            className="px-2 py-0.5 bg-[#3e3e3e] hover:bg-[#5e5e5e] text-white text-[9px] rounded transition-colors"
+                            className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-white text-[9px] font-medium rounded transition-colors"
                           >
                             Cancel
                           </button>
@@ -1586,7 +1627,7 @@ export function MediaPanel() {
                 </div>
               )}
             </div>
-          </>
+          </div>
         )}
 
 

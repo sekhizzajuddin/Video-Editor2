@@ -4,34 +4,88 @@
 
 @layer base {
   :root {
-    --background: 0 0% 12%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 16%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 14%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 38 92% 50%;
+    --background: 220 20% 97%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 18%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 22%;
-    --muted-foreground: 0 0% 63%;
-    --accent: 0 0% 22%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 24%;
-    --input: 0 0% 18%;
-    --ring: 38 92% 50%;
-    --radius: 0.375rem;
-    --sidebar-background: 0 0% 10%;
-    --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 38 92% 50%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 18%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 24%;
-    --sidebar-ring: 38 92% 50%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221 83% 53%;
+    --radius: 0.5rem;
+
+    /* Theme Custom Tokens (Light) */
+    --theme-bg-app: #f4f6fb;
+    --theme-bg-panel: #ffffff;
+    --theme-bg-subpanel: #f8fafc;
+    --theme-bg-card: #ffffff;
+    --theme-bg-card-hover: #f1f5f9;
+    --theme-bg-input: #f1f5f9;
+    --theme-border: #e2e8f0;
+    --theme-border-subtle: #f1f5f9;
+    --theme-border-focus: #3b82f6;
+    --theme-text-main: #0f172a;
+    --theme-text-muted: #64748b;
+    --theme-text-dim: #94a3b8;
+    --theme-accent-blue: #2563eb;
+    --theme-accent-blue-hover: #1d4ed8;
+    --theme-accent-glow: rgba(37, 99, 235, 0.25);
+    --theme-timeline-bg: #f8fafc;
+    --theme-timeline-header: #ffffff;
+    --theme-timeline-track: #f1f5f9;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 40% 9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 40% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 14%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 217 91% 60%;
+
+    /* Theme Custom Tokens (Dark) */
+    --theme-bg-app: #0a0d14;
+    --theme-bg-panel: #10141e;
+    --theme-bg-subpanel: #131926;
+    --theme-bg-card: #161c2b;
+    --theme-bg-card-hover: #1c2438;
+    --theme-bg-input: #151b29;
+    --theme-border: #1e2638;
+    --theme-border-subtle: #182030;
+    --theme-border-focus: #3b82f6;
+    --theme-text-main: #f8fafc;
+    --theme-text-muted: #94a3b8;
+    --theme-text-dim: #64748b;
+    --theme-accent-blue: #3b82f6;
+    --theme-accent-blue-hover: #60a5fa;
+    --theme-accent-glow: rgba(59, 130, 246, 0.35);
+    --theme-timeline-bg: #0d1017;
+    --theme-timeline-header: #10141e;
+    --theme-timeline-track: #131824;
   }
 }
 
@@ -41,10 +95,11 @@
   }
   html, body, #root {
     @apply h-screen w-screen overflow-hidden m-0 p-0;
-    background: #1e1e1e;
-    color: #ffffff;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background-color: var(--theme-bg-app);
+    color: var(--theme-text-main);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     overscroll-behavior: none;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 }
 
@@ -57,6 +112,87 @@
   input[type="number"] {
     -moz-appearance: textfield;
   }
+}
+
+/* Stylish micro-interactions & modern UI utilities */
+.glass-panel {
+  background: var(--theme-bg-panel);
+  border: 1px solid var(--theme-border);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+}
+.dark .glass-panel {
+  box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.35);
+}
+
+.hover-glow {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hover-glow:hover {
+  border-color: var(--theme-accent-blue);
+  box-shadow: 0 0 12px var(--theme-accent-glow);
+}
+
+.btn-primary-gradient {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+  transition: all 0.2s ease;
+}
+.btn-primary-gradient:hover {
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+  transform: translateY(-0.5px);
+}
+
+.btn-ai-gradient {
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(124, 58, 237, 0.35);
+  transition: all 0.2s ease;
+}
+.btn-ai-gradient:hover {
+  background: linear-gradient(135deg, #6d28d9 0%, #4338ca 100%);
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.55);
+  transform: translateY(-0.5px);
+}
+
+.btn-export-gradient {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.35);
+  transition: all 0.2s ease;
+}
+.btn-export-gradient:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.5);
+  transform: translateY(-0.5px);
+}
+
+.card-hover-effect {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card-hover-effect:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 16px -2px rgba(0, 0, 0, 0.08);
+}
+.dark .card-hover-effect:hover {
+  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.5);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--theme-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-text-dim);
 }
 
 @keyframes text-slide {

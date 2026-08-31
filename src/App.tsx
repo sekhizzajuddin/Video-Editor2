@@ -559,7 +559,7 @@ function DesktopApp() {
   ];
 
   return (
-    <div className="h-screen flex flex-col bg-surface-900 text-white overflow-hidden select-none">
+    <div className="h-screen flex flex-col bg-[var(--theme-bg-app)] text-[var(--theme-text-primary)] overflow-hidden select-none transition-colors">
       {projectId === 'default' && (
         <Suspense fallback={null}>
           <WelcomeScreen />
@@ -575,23 +575,23 @@ function DesktopApp() {
           className="shrink-0 overflow-hidden"
           style={{ width: leftWidth }}
         >
-          <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
+          <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
             <MediaPanel />
           </Suspense>
         </div>
 
         {/* Left Resize Handle */}
         <div
-          className="w-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-col-resize shrink-0 transition-colors"
+          className="w-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-col-resize shrink-0 transition-colors"
           onMouseDown={() => { isDraggingLeft.current = true; }}
         />
 
         {/* Center Panel */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Preview Canvas / Generative Workspace */}
-          <div className="flex-1 overflow-hidden relative">
+          <div className="flex-1 overflow-hidden relative bg-[var(--theme-bg-app)]">
             {workspaceLayout?.preset === 'Generative' ? (
-              <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e] flex items-center justify-center text-[#a0a0a0] text-sm">Loading Generative Workspace…</div>}>
+              <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)] flex items-center justify-center text-[var(--theme-text-muted)] text-sm">Loading Generative Workspace…</div>}>
                 <GenerativeWorkspace />
               </Suspense>
             ) : (
@@ -606,40 +606,40 @@ function DesktopApp() {
 
           {/* Timeline Resize Handle */}
           <div
-            className="h-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-row-resize shrink-0 transition-colors"
+            className="h-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-row-resize shrink-0 transition-colors"
             onMouseDown={() => { isDraggingTimeline.current = true; }}
           />
 
           {/* Timeline / Audio Mixer Container */}
-          <div style={{ height: timelineHeight }} className="flex flex-col bg-[#252525] overflow-hidden shrink-0">
+          <div style={{ height: timelineHeight }} className="flex flex-col bg-[var(--theme-bg-panel)] overflow-hidden shrink-0">
             {/* Header Tabs */}
-            <div className="h-8 flex items-center justify-between px-3 bg-[#1e1e1e] border-b border-[#3e3e3e] shrink-0 select-none">
-              <div className="flex items-center gap-2">
+            <div className="h-9 flex items-center justify-between px-3 bg-[var(--theme-bg-panel)] border-b border-[var(--theme-border)] shrink-0 select-none text-xs">
+              <div className="flex items-center gap-1.5 bg-[var(--theme-bg-card)] p-1 rounded-lg border border-[var(--theme-border)] shadow-sm">
                 <button
                   onClick={() => setBottomTab('timeline')}
-                  className={`px-3 py-1 text-[11px] rounded transition-all uppercase tracking-wider font-semibold ${
+                  className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold ${
                     bottomTab === 'timeline'
-                      ? 'bg-[#2d2d2d] text-amber-500 border border-[#3e3e3e]'
-                      : 'text-[#8a8a8a] hover:text-white'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
                   Timeline
                 </button>
                 <button
                   onClick={() => setBottomTab('mixer')}
-                  className={`px-3 py-1 text-[11px] rounded transition-all uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                  className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
                     bottomTab === 'mixer'
-                      ? 'bg-[#2d2d2d] text-amber-500 border border-[#3e3e3e]'
-                      : 'text-[#8a8a8a] hover:text-white'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
                   <Music className="w-3 h-3 text-purple-400" /> Audio Mixer
                 </button>
               </div>
 
-              {/* Editing Tools (Moved from Top Toolbar) */}
-              <div className="flex items-center gap-1 opacity-90 hover:opacity-100 transition-opacity">
-                <div className="flex items-center bg-[#252525] rounded border border-[#3e3e3e] p-0.5">
+              {/* Editing Tools */}
+              <div className="flex items-center gap-1.5 opacity-95 hover:opacity-100 transition-opacity">
+                <div className="flex items-center bg-[var(--theme-bg-card)] rounded-lg border border-[var(--theme-border)] p-0.5 shadow-sm">
                   {tools.map((tool) => {
                     const Icon = tool.icon;
                     const isActive = tool.id !== 'split' && activeTool === tool.id;
@@ -682,14 +682,14 @@ function DesktopApp() {
                           }
                         }}
                         title={tool.id === 'split' ? "Split Clip at Playhead" : `${tool.label} (${tool.shortcut})`}
-                        className={`relative p-1.5 rounded transition-all duration-150 group ${
+                        className={`relative p-1.5 rounded-md transition-all duration-150 group ${
                           isActive
-                            ? 'bg-[#3e3e3e] text-white'
-                            : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
+                            ? 'bg-blue-600 text-white shadow-sm font-semibold'
+                            : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
                         }`}
                       >
                         <Icon className="w-3.5 h-3.5" />
-                        <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-black text-white text-[9px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+                        <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-[var(--theme-bg-panel)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] text-[9px] font-medium rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
                           {tool.id === 'split' ? 'Split Clip at Playhead' : `${tool.label} (${tool.shortcut})`}
                         </span>
                       </button>
@@ -697,13 +697,13 @@ function DesktopApp() {
                   })}
                 </div>
 
-                <div className="w-px h-5 bg-[#3e3e3e] mx-1.5" />
+                <div className="w-px h-5 bg-[var(--theme-border)] mx-1" />
 
                 <button
                   onClick={undo}
                   disabled={!canUndo}
                   title="Undo (Ctrl+Z)"
-                  className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
+                  className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md border border-[var(--theme-border)] disabled:opacity-30 transition-all"
                 >
                   <Undo2 className="w-3.5 h-3.5" />
                 </button>
@@ -711,7 +711,7 @@ function DesktopApp() {
                   onClick={redo}
                   disabled={!canRedo}
                   title="Redo (Ctrl+Y)"
-                  className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
+                  className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md border border-[var(--theme-border)] disabled:opacity-30 transition-all"
                 >
                   <Redo2 className="w-3.5 h-3.5" />
                 </button>
@@ -720,8 +720,8 @@ function DesktopApp() {
 
             <div className="flex-1 overflow-hidden relative">
               {bottomTab === 'timeline' ? (
-                <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-[#1a1a1a] font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
-                  <Suspense fallback={<div className="w-full h-full bg-[#1a1a1a]" />}>
+                <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-[var(--theme-bg-panel)] font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
+                  <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
                     <Timeline />
                   </Suspense>
                 </ErrorBoundary>
@@ -738,7 +738,7 @@ function DesktopApp() {
         {workspaceLayout?.preset !== 'Generative' && (
           <>
             <div
-              className="w-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-col-resize shrink-0 transition-colors"
+              className="w-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-col-resize shrink-0 transition-colors"
               onMouseDown={() => { isDraggingRight.current = true; }}
             />
 
@@ -747,7 +747,7 @@ function DesktopApp() {
               className="shrink-0 overflow-hidden"
               style={{ width: rightWidth }}
             >
-              <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
+              <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
                 <PropertiesPanel />
               </Suspense>
             </div>

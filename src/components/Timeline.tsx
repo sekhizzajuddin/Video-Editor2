@@ -267,16 +267,16 @@ export function Timeline() {
         />
 
         {/* ── Main body ────────────────────────────────────────────────── */}
-        <div className="flex-1 flex overflow-hidden relative">
+        <div className="flex-1 flex overflow-hidden relative bg-[var(--theme-bg-app)]">
           {/* ── Arrange Mode Overlay ────────────────────────────────────── */}
           {isArrangeMode && <ArrangeModeOverlay />}
 
           {/* ── Track headers ──────────────────────────────────────────── */}
           <div
-            className="bg-[#252525] border-r border-[#3e3e3e] flex flex-col overflow-hidden shrink-0"
+            className="bg-[var(--theme-bg-panel)] border-r border-[var(--theme-border)] flex flex-col overflow-hidden shrink-0 transition-colors"
             style={{ width: TRACK_HEADER_WIDTH }}
           >
-            <div className="bg-[#2d2d2d] border-b border-[#3e3e3e] shrink-0" style={{ height: RULER_HEIGHT }} />
+            <div className="bg-[var(--theme-bg-subpanel)] border-b border-[var(--theme-border)] shrink-0" style={{ height: RULER_HEIGHT }} />
 
             <div
               ref={trackHeadersRef}

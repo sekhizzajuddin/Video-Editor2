@@ -383,6 +383,7 @@ const initialState: EditorState = {
   selectedKeyframeLines: [],
   selectedTrackId: null,
   settings: {
+    theme: (typeof window !== 'undefined' && (localStorage.getItem('procut_theme') as 'dark' | 'light')) || 'dark',
     scrollSpeed: 1,
     gestureSensitivity: 1,
     autosave: true,
@@ -3668,9 +3669,21 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Remove Keyframes');
   },
 
-  updateSettings: (newSettings) => set((state) => ({
-    settings: { ...state.settings, ...newSettings }
-  })),
+  updateSettings: (newSettings) => {
+    if (newSettings.theme) {
+      try {
+        localStorage.setItem('procut_theme', newSettings.theme);
+        if (newSettings.theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } catch (_) {}
+    }
+    set((state) => ({
+      settings: { ...state.settings, ...newSettings }
+    }));
+  },
 
   // Clipboard
   copyClip: (copyType = 'whole') => {

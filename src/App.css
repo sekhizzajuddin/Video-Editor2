@@ -1,26 +1,26 @@
-/* Custom scrollbar for dark theme */
+/* Custom scrollbar for theme */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: var(--theme-bg-app);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3e3e3e;
-  border-radius: 3px;
+  background: var(--theme-border);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #5e5e5e;
+  background: var(--theme-text-dim);
 }
 
 /* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3e3e3e #1e1e1e;
+  scrollbar-color: var(--theme-border) var(--theme-bg-app);
 }
 
 /* Range input global styles */
@@ -28,7 +28,7 @@ input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  background: #3e3e3e;
+  background: var(--theme-border);
   border-radius: 2px;
   outline: none;
 }
@@ -39,24 +39,36 @@ input[type="range"]::-webkit-slider-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: var(--theme-accent-blue);
   cursor: pointer;
-  border: 2px solid white;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 8px var(--theme-accent-glow);
 }
 
 input[type="range"]::-moz-range-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: var(--theme-accent-blue);
   cursor: pointer;
-  border: 2px solid white;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 8px var(--theme-accent-glow);
 }
 
 /* Selection */
 ::selection {
-  background: rgba(245, 158, 11, 0.3);
-  color: white;
+  background: rgba(37, 99, 235, 0.25);
+  color: inherit;
 }
 
 /* Prevent text selection during drag */
