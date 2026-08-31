@@ -136,7 +136,7 @@ Ensure that the start and end times are floating point numbers representing seco
 // Audio Extraction Helpers
 // ------------------------------------------------------------------
 
-async function renderTimelineAudioToWav(
+export async function renderTimelineAudioToWav(
   tracks: any[], 
   totalDuration: number, 
   mediaLibrary: any[],
@@ -242,7 +242,7 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   return new Blob([bufferArray], { type: 'audio/wav' });
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
+export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result as string);

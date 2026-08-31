@@ -29,6 +29,7 @@ import { probeFile } from '@/utils/mediaProbe';
 import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
 import { setActiveProject } from '@/utils/projectPersistence';
 import { RecentProjectsModal } from './RecentProjectsModal';
+import { AiVoiceSyncModal } from './AiVoiceSyncModal';
 import { toast } from 'sonner';
 import { ProCutLogo } from './ProCutLogo';
 
@@ -65,6 +66,7 @@ export function TopToolbar() {
   const [showHelpMenuDropdown, setShowHelpMenuDropdown] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
   const [showRecentModal, setShowRecentModal] = useState(false);
+  const [showAiVoiceSyncModal, setShowAiVoiceSyncModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
@@ -556,19 +558,15 @@ export function TopToolbar() {
 
         {/* Sync Button */}
         <button
-          onClick={() => {
-            syncSelectedClips();
-            toast.success('Audio & Video synchronized');
-          }}
-          title="Sync Audio/Video"
+          onClick={() => setShowAiVoiceSyncModal(true)}
+          title="AI Voice Sync (Align AI Audio to Subtitles)"
           className="px-2.5 py-1.5 text-xs rounded-md border flex items-center gap-1.5 font-medium transition-all hover:bg-black/5 dark:hover:bg-white/5"
           style={{
             borderColor: 'var(--theme-border)',
-            color: 'var(--theme-text-muted)',
           }}
         >
           <LinkIcon className="w-3.5 h-3.5 text-blue-500" />
-          <span className="hidden sm:inline">Sync</span>
+          <span className="hidden sm:inline">AI Sync</span>
         </button>
 
         {/* Scopes Button */}
@@ -681,6 +679,9 @@ export function TopToolbar() {
         onClose={() => setShowRecentModal(false)}
         onSelect={() => {}}
       />
+      {showAiVoiceSyncModal && (
+        <AiVoiceSyncModal onClose={() => setShowAiVoiceSyncModal(false)} />
+      )}
     </header>
   );
 }
