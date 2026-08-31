@@ -1470,11 +1470,23 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       // CapCut-feel: dispatch one full-quality redraw event on release
       window.dispatchEvent(new CustomEvent('procut-scrub-finalize'));
 
-      // If user tapped ruler during playback without dragging, resume playback seamlessly from the new time
+      // If user tapped ruler during playback without dragging, resume playback seamlessly from the new time.
+      // CRITICAL: defer play() to let React flush the pool-management effect (which creates/loads
+      // video elements at the new position) and let the browser decode the seeked keyframe.
+      // Without this delay, play() starts the clock while video elements are still being created
+      // or decoding — causing drift, hard-seeks, and visible stutter.
       if (wasPlayingOnRulerDownRef.current) {
         wasPlayingOnRulerDownRef.current = false;
         if (!useEditorStore.getState().isPlaying) {
-          useEditorStore.getState().play();
+          // RAF lets Zustand subscribers + React commit; the 100ms timeout then
+          // gives the video decoder a window to produce the first frame.
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              if (!useEditorStore.getState().isPlaying) {
+                useEditorStore.getState().play();
+              }
+            }, 100);
+          });
         }
       }
     }

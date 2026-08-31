@@ -1545,8 +1545,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             }
 
             if (justActivated || Math.abs(rawDrift) > AUDIO_HARD_SEEK_THRESHOLD) {
-              // Hard seek only on activation or massive drift
-              if (!el.seeking) {
+              // Hard seek only on activation or massive drift — but skip if
+              // the element is already at the target (e.g. from a scrub seek)
+              if (!el.seeking && Math.abs(rawDrift) > 0.05) {
                 el.currentTime = mediaTime;
                 pendingSeeksRef.current.delete(clip.clipId);
                 accumulatedDriftAudio = 0; // Reset integral
@@ -1596,7 +1597,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             }
           } else if (playing && !isReversing) {
             if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
-              if (!el.seeking) {
+              // Skip the hard seek if the element is ALREADY at (or very near)
+              // the target — e.g. after a scrub-seek that positioned it, then
+              // playback resumed and the clip re-activated. Issuing a redundant
+              // seek cancels the in-flight decode and restarts it from scratch,
+              // which is the #1 cause of the stutter storm on ruler-click jumps.
+              if (!el.seeking && Math.abs(rawDrift) > 0.05) {
                 el.currentTime = mediaTime;
                 pendingSeeksRef.current.delete(clip.clipId);
               }

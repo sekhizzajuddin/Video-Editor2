@@ -416,11 +416,19 @@ export function MobileTimeline({
       }
       const wasPlaying = useEditorStore.getState().isPlaying;
       if (wasPlaying) {
-        // Jump & continue: instantly pause first to halt pipelines, seek cleanly, and resume playing
+        // Jump & continue: instantly pause to halt pipelines, seek cleanly, then
+        // defer play() so React can flush pool-management and video decoders can
+        // decode the seeked keyframe before the clock starts advancing again.
         useEditorStore.getState().pause();
         seek(Math.max(0, timeAt(e.clientX)));
         window.dispatchEvent(new Event('procut-frame-updated'));
-        useEditorStore.getState().play();
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (!useEditorStore.getState().isPlaying) {
+              useEditorStore.getState().play();
+            }
+          }, 100);
+        });
         return;
       }
       beginScrub(e);

@@ -242,7 +242,15 @@ export const TimelineRuler = React.memo(function TimelineRuler({
                 if (wasPlaying) st.pause();
                 seek(marker.time);
                 window.dispatchEvent(new Event('procut-frame-updated'));
-                if (wasPlaying) st.play();
+                if (wasPlaying) {
+                  requestAnimationFrame(() => {
+                    setTimeout(() => {
+                      if (!useEditorStore.getState().isPlaying) {
+                        useEditorStore.getState().play();
+                      }
+                    }, 100);
+                  });
+                }
               }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
