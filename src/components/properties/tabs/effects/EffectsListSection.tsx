@@ -126,26 +126,26 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
   };
 
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-[11px] font-semibold text-white">Active Effects ({activeEffects.length})</h4>
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-3.5 shadow-sm">
+      <div className="flex items-center justify-between mb-2.5">
+        <h4 className="text-[11px] font-bold text-[var(--theme-text-primary)]">Active Effects ({activeEffects.length})</h4>
         {activeEffects.length > 0 && (
           <button
             onClick={handleClearAll}
-            className="text-[10px] text-amber-400 hover:text-amber-300 font-medium transition-colors"
+            className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-bold transition-colors"
           >
             Clear All
           </button>
         )}
       </div>
       {activeEffects.length > 0 ? (
-        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
           {activeEffects.map((item) => (
-            <div key={item.id} className="flex items-center justify-between bg-[#1e1e1e] px-2.5 py-1.5 rounded border border-[#3e3e3e]/60">
-              <span className="text-[11px] text-[#e0e0e0] capitalize truncate max-w-[180px]">{item.name}</span>
+            <div key={item.id} className="flex items-center justify-between bg-[var(--theme-bg-subpanel)] px-3 py-2 rounded-lg border border-[var(--theme-border)]">
+              <span className="text-[11px] text-[var(--theme-text-primary)] font-medium capitalize truncate max-w-[180px]">{item.name}</span>
               <button
                 onClick={item.onRemove}
-                className="text-red-400 hover:text-red-300 text-[10px] font-semibold transition-colors shrink-0 ml-2"
+                className="text-rose-500 hover:text-rose-400 text-[10px] font-bold transition-colors shrink-0 ml-2"
               >
                 Remove
               </button>
@@ -153,12 +153,12 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-6 border border-dashed border-[#3e3e3e] rounded bg-gradient-to-b from-[#1a1a1a]/40 to-transparent">
-          <Sparkles className="w-6 h-6 text-[#3a3a3a] mb-2" />
-          <p className="text-[11px] text-[#808080] text-center">
+        <div className="flex flex-col items-center justify-center py-6 border border-dashed border-[var(--theme-border)] rounded-xl bg-[var(--theme-bg-subpanel)]/50">
+          <Sparkles className="w-6 h-6 text-[var(--theme-text-muted)] mb-2 opacity-50" />
+          <p className="text-[11px] text-[var(--theme-text-muted)] text-center font-medium">
             No active effects applied to this clip
           </p>
-          <p className="text-[9px] text-[#5a5a5a] text-center mt-1">
+          <p className="text-[9px] text-[var(--theme-text-muted)] text-center mt-1 opacity-75">
             Add chroma key, object removal, or color filters below
           </p>
         </div>

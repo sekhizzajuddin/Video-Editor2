@@ -83,8 +83,8 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
             e.stopPropagation();
             setShowFx(!showFx);
           }}
-          className={`p-0.5 rounded text-[9px] font-bold transition-colors ${
-            hasExpression ? 'bg-indigo-500/20 text-indigo-400' : 'text-[#555] hover:text-[#888]'
+          className={`p-1 rounded-md text-[9px] font-bold transition-colors ${
+            hasExpression ? 'bg-indigo-500/20 text-indigo-500' : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
           }`}
           title="Toggle Expression (Fx)"
         >
@@ -98,7 +98,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
             onJumpToPrev?.();
           }}
           disabled={!prevKf}
-          className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
+          className="p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-[var(--theme-text-primary)]"
           title="Previous keyframe"
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -116,10 +116,10 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
               onAddKeyframe(currentTime, value);
             }
           }}
-          className={`relative p-0.5 rounded transition-all ${
+          className={`relative p-1 rounded-md transition-all ${
             hasKeyframe 
-              ? 'text-amber-400 hover:text-amber-300' 
-              : 'text-[#555] hover:text-[#888]'
+              ? 'text-blue-600 dark:text-blue-400 hover:text-blue-500' 
+              : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
           }`}
           title={hasKeyframe ? 'Remove keyframe' : 'Add keyframe'}
         >
@@ -140,7 +140,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
           
           {/* Easing indicator dot */}
           {hasKeyframe && keyframe?.easing === 'bezier' && (
-            <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-cyan-400 rounded-full" />
+            <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-cyan-500 rounded-full" />
           )}
         </button>
 
@@ -151,7 +151,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
             onJumpToNext?.();
           }}
           disabled={!nextKf}
-          className="p-0.5 rounded hover:bg-[#3e3e3e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-white"
+          className="p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-[var(--theme-text-primary)]"
           title="Next keyframe"
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -173,7 +173,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
                   onUpdateEasing?.(keyframe!.time, newEasing);
                 }
               }}
-              className="bg-[#1e1e1e] border border-[#3e3e3e] text-[9px] text-[#a0a0a0] hover:text-white rounded px-1 outline-none cursor-pointer w-16"
+              className="bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-[9px] text-[var(--theme-text-primary)] rounded-md px-1.5 py-0.5 outline-none cursor-pointer w-18 shadow-sm font-medium"
               title="Easing type"
             >
               <option value="linear">Linear</option>
@@ -191,7 +191,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
                   e.stopPropagation();
                   setShowBezierEditor(true);
                 }}
-                className="p-1 rounded bg-[#2a2a2a] hover:bg-[#3e3e3e] text-cyan-400 hover:text-cyan-300 transition-colors"
+                className="p-1 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 transition-colors shadow-sm"
                 title="Edit Bezier Curve"
               >
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -225,7 +225,7 @@ export const KeyframeControl: React.FC<KeyframeControlProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleExpressionChange(e.currentTarget.value);
             }}
-            className="w-full bg-[#141414] border border-indigo-500/50 text-indigo-300 text-[10px] font-mono px-2 py-1 rounded outline-none focus:border-indigo-400"
+            className="w-full bg-[var(--theme-bg-subpanel)] border border-indigo-500/40 text-indigo-600 dark:text-indigo-300 text-[10px] font-mono px-2 py-1 rounded-lg outline-none focus:border-indigo-500 shadow-sm"
           />
         </div>
       )}
@@ -267,14 +267,14 @@ export const KeyframeMiniTimeline: React.FC<KeyframeMiniTimelineProps> = ({
 
   return (
     <div 
-      className="w-full h-5 bg-[#141414] rounded border border-[#2a2a2a] my-1 relative overflow-hidden cursor-pointer" 
+      className="w-full h-5 bg-[var(--theme-bg-subpanel)] rounded-lg border border-[var(--theme-border)] my-1 relative overflow-hidden cursor-pointer shadow-inner" 
       onClick={handleClick}
     >
       <svg ref={svgRef} className="w-full h-full" preserveAspectRatio="none">
         {/* Value curve visualization */}
         <polyline
           fill="none"
-          stroke="#2d3748"
+          stroke="var(--theme-border)"
           strokeWidth="1.5"
           points={keyframes.map((kf) => {
             const x = timeToX(kf.time);
@@ -300,14 +300,14 @@ export const KeyframeMiniTimeline: React.FC<KeyframeMiniTimelineProps> = ({
             >
               <polygon
                 points="0,-3.5 3.5,0 0,3.5 -3.5,0"
-                fill={isSelected ? '#f59e0b' : isNearPlayhead ? '#60a5fa' : '#718096'}
-                stroke={isSelected ? '#fbbf24' : 'none'}
+                fill={isSelected ? '#3b82f6' : isNearPlayhead ? '#60a5fa' : '#94a3b8'}
+                stroke={isSelected ? '#2563eb' : 'none'}
                 strokeWidth={isSelected ? 1.5 : 0}
                 transform={kf.easing === 'hold' ? 'rotate(45)' : ''}
               />
               {/* Bezier indicator dot */}
               {kf.easing === 'bezier' && (
-                <circle cy={-5} r={1} fill="#22d3ee" />
+                <circle cy={-5} r={1} fill="#06b6d4" />
               )}
             </g>
           );
@@ -319,8 +319,8 @@ export const KeyframeMiniTimeline: React.FC<KeyframeMiniTimelineProps> = ({
           y1={0}
           x2={`${timeToX(currentTime)}%`}
           y2={20}
-          stroke="#f56565"
-          strokeWidth={1}
+          stroke="#ef4444"
+          strokeWidth={1.5}
         />
       </svg>
     </div>

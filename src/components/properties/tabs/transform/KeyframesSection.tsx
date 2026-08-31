@@ -23,20 +23,20 @@ export function KeyframesSection({
   deleteMasterKeyframe,
 }: KeyframesSectionProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-3 shadow-sm">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-white">Master Keyframes</span>
+        <span className="text-xs font-bold text-[var(--theme-text-primary)]">Master Keyframes</span>
         <button
           onClick={handleToggleMasterKeyframe}
-          className={`px-3 py-1 rounded text-[10px] font-medium transition-colors ${
-            isOnKeyframe ? 'bg-amber-500/20 text-amber-500 hover:bg-amber-500/30' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
+          className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${
+            isOnKeyframe ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30' : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] hover:border-blue-500/40'
           }`}
         >
           {!hasMasterKeyframes ? 'Start' : isOnKeyframe ? 'End/Remove' : 'Add'}
         </button>
       </div>
       {keyframeTimes.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1.5 pt-1">
           {keyframeTimes.map((t: any, idx: number) => {
             const kf = animations['transform.x']?.find((k: any) => Math.abs(k.time - t) < 0.05);
             const prevKf = idx > 0 ? animations['transform.x']?.find((k: any) => Math.abs(k.time - keyframeTimes[idx - 1]) < 0.05) : null;
@@ -50,15 +50,15 @@ export function KeyframesSection({
             else if (isEnd) label = 'End';
 
             return (
-              <div key={t} className={`flex items-center justify-between text-[10px] p-1.5 rounded ${isEnd && idx !== keyframeTimes.length - 1 ? 'bg-[#2a1e1e] border border-red-500/20 mb-2' : 'bg-[#1e1e1e]'}`}>
-                <span className="text-[#a0a0a0]">
+              <div key={t} className={`flex items-center justify-between text-[10px] p-2 rounded-lg border border-[var(--theme-border)] ${isEnd && idx !== keyframeTimes.length - 1 ? 'bg-rose-500/10 border-rose-500/30 mb-2' : 'bg-[var(--theme-bg-subpanel)]'}`}>
+                <span className="text-[var(--theme-text-muted)] font-mono font-medium">
                   {label} - {t.toFixed(2)}s
                 </span>
                 <button
                   onClick={() => deleteMasterKeyframe(selectedClip.id, t)}
-                  className="text-[#a0a0a0] hover:text-red-400"
+                  className="text-[var(--theme-text-muted)] hover:text-red-500 transition-colors p-1"
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             );

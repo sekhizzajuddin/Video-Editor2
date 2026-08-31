@@ -10,20 +10,20 @@ interface ColorSectionContainerProps {
 
 export function ColorSectionContainer({ title, sectionKey, collapsedSections, toggleSection, children }: ColorSectionContainerProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] shadow-sm transition-all">
       <button
         onClick={() => toggleSection(sectionKey)}
-        className="w-full flex items-center justify-between p-2.5 text-xs text-white"
+        className="w-full flex items-center justify-between p-3 text-xs text-[var(--theme-text-primary)] font-semibold"
       >
-        <span className="font-medium">{title}</span>
+        <span>{title}</span>
         {collapsedSections[sectionKey] ? (
-          <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+          <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
         ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+          <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
         )}
       </button>
       {!collapsedSections[sectionKey] && (
-        <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+        <div className="px-3 pb-3 space-y-3 border-t border-[var(--theme-border)] pt-3">
           {children}
         </div>
       )}

@@ -12,14 +12,13 @@ export function AutoVoiceTuneSection({ selectedClipIds, isAnalyzingVoice, handle
   return (
     <button
       title={selectedClipIds.length < 2 ? "Select multiple clips (hold Shift) to match their vocals to the first selected clip" : "Match vocals to the first selected clip"}
-
       onClick={handleAutoVoiceTune}
       disabled={isAnalyzingVoice || selectedClipIds.length < 2}
-      className="w-full py-2 bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/30 text-teal-400 rounded text-[11px] font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+      className="w-full py-2.5 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-teal-600 dark:text-teal-400 rounded-xl text-[11px] font-bold transition-all disabled:opacity-40 flex items-center justify-center gap-2 shadow-sm"
     >
       {isAnalyzingVoice ? (
         <>
-          <Loader2 className="w-3 h-3 animate-spin" />
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
           Analyzing voices...
         </>
       ) : (

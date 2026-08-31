@@ -22,8 +22,8 @@ export function SpeedSliderSection({
   onClearFreeze,
 }: SpeedSliderSectionProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5 space-y-2">
-      <label className="text-xs text-white font-medium block">Speed</label>
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-3 space-y-3 shadow-sm">
+      <label className="text-xs text-[var(--theme-text-primary)] font-bold block">Speed</label>
       <div className="flex items-center gap-2">
         <input
           type="range"
@@ -37,11 +37,11 @@ export function SpeedSliderSection({
           onDoubleClick={onReset}
           className={`flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full ${
             isRamped || freezeFrame !== undefined
-              ? 'bg-[#222] [&::-webkit-slider-thumb]:bg-[#444] cursor-not-allowed'
-              : 'bg-[#3e3e3e] [&::-webkit-slider-thumb]:bg-amber-500'
+              ? 'bg-[var(--theme-bg-subpanel)] [&::-webkit-slider-thumb]:bg-[var(--theme-text-muted)] cursor-not-allowed opacity-50'
+              : 'bg-[var(--theme-border)] [&::-webkit-slider-thumb]:bg-blue-600'
           }`}
         />
-        <span className="text-[11px] text-white w-12 text-right select-none font-mono">
+        <span className="text-[11px] text-[var(--theme-text-primary)] w-14 text-right select-none font-mono font-medium">
           {isRamped ? 'Ramped' : freezeFrame !== undefined ? 'Frozen' : `${speed.toFixed(2)}x`}
         </span>
       </div>
@@ -52,10 +52,10 @@ export function SpeedSliderSection({
           onClick={onToggleReverse}
           disabled={freezeFrame !== undefined}
           title={isReversed ? "Click to play forward" : "Click to play backward"}
-          className={`flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-bold transition-all ${
             isReversed
               ? 'bg-purple-600 text-white shadow-sm'
-              : 'bg-[#3a3a3a] text-white/70 hover:bg-[#444] hover:text-white'
+              : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] border border-[var(--theme-border)]'
           } disabled:opacity-40 disabled:cursor-not-allowed`}
         >
           <span className="text-[13px]">&#9194;</span> Reverse
@@ -65,7 +65,7 @@ export function SpeedSliderSection({
           <button
             onClick={onClearFreeze}
             title={`Frozen at ${freezeFrame.toFixed(2)}s — click to unfreeze`}
-            className="flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-bold bg-blue-600 text-white hover:bg-blue-500 transition-all shadow-sm"
           >
             &#10052; Unfreeze
           </button>
@@ -74,7 +74,7 @@ export function SpeedSliderSection({
             onClick={onFreezeFrame}
             disabled={isRamped}
             title="Freeze clip at current playhead position"
-            className="flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium bg-[#3a3a3a] text-white/70 hover:bg-[#444] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-bold bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] border border-[var(--theme-border)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             &#10052; Freeze
           </button>
@@ -82,7 +82,7 @@ export function SpeedSliderSection({
       </div>
 
       {freezeFrame !== undefined && (
-        <div className="text-[10px] text-blue-400 text-center">
+        <div className="text-[10px] text-blue-500 font-medium text-center">
           Holding frame at {freezeFrame.toFixed(3)}s
         </div>
       )}

@@ -79,7 +79,7 @@ import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundSta
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
     onClick={onClick}
-    className={`p-1 rounded transition-colors ${active ? 'text-amber-400 bg-amber-400/10 hover:bg-amber-400/20' : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'}`}
+    className={`p-1 rounded-md transition-all ${active ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15 shadow-sm' : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'}`}
     title={active ? "Disable Keyframes (Removes all)" : "Enable Keyframing"}
   >
     <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
@@ -166,8 +166,8 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
   };
 
   return (
-    <div className="flex flex-col items-center gap-1.5 p-2 bg-[#1e1e1e] rounded border border-[#3e3e3e] flex-1">
-      <span className="text-[9px] font-bold tracking-wider uppercase text-white">{label}</span>
+    <div className="flex flex-col items-center gap-1.5 p-2 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] flex-1 shadow-sm">
+      <span className="text-[9px] font-bold tracking-wider uppercase text-[var(--theme-text-primary)]">{label}</span>
 
       {/* Circle Container */}
       <div
@@ -7619,36 +7619,36 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   ))}
 
                   {/* Visual */}
-                  <p className="text-[9px] font-semibold text-[#6a6a6a] uppercase tracking-wider mt-1">Visual</p>
+                  <p className="text-[9px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider mt-1">Visual</p>
                   <div className="flex flex-col gap-0.5">
                     <div className="flex justify-between">
-                      <span className="text-[10px] text-[#a0a0a0]">Color Variance</span>
-                      <span className="text-[10px] text-white">{ps.colorVariance}</span>
+                      <span className="text-[10px] text-[var(--theme-text-muted)]">Color Variance</span>
+                      <span className="text-[10px] text-[var(--theme-text-primary)]">{ps.colorVariance}</span>
                     </div>
                     <input type="range" min="0" max="100" value={ps.colorVariance}
                       onChange={(e) => upd({ colorVariance: Number(e.target.value) })}
                       className="w-full accent-pink-500" />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-[#a0a0a0]">Base Color</span>
+                    <span className="text-[10px] text-[var(--theme-text-muted)]">Base Color</span>
                     <div className="flex items-center gap-2">
-                      <span className="text-[9px] text-[#6a6a6a]">{ps.color === 'auto' ? 'auto' : ps.color}</span>
+                      <span className="text-[9px] text-[var(--theme-text-muted)]">{ps.color === 'auto' ? 'auto' : ps.color}</span>
                       {ps.color !== 'auto' && (
                         <input type="color" value={ps.color}
                           onChange={(e) => upd({ color: e.target.value })}
-                          className="w-6 h-6 rounded cursor-pointer border border-[#3e3e3e] bg-transparent" />
+                          className="w-6 h-6 rounded cursor-pointer border border-[var(--theme-border)] bg-transparent" />
                       )}
                       <button
                         onClick={() => upd({ color: ps.color === 'auto' ? '#ffffff' : 'auto' })}
-                        className="text-[9px] text-[#a0a0a0] hover:text-white px-1.5 py-0.5 border border-[#3e3e3e] rounded"
+                        className="text-[9px] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] px-1.5 py-0.5 border border-[var(--theme-border)] rounded-md"
                       >{ps.color === 'auto' ? 'Custom' : 'Auto'}</button>
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-[#a0a0a0]">Glow Effect</span>
+                    <span className="text-[10px] text-[var(--theme-text-muted)]">Glow Effect</span>
                     <button
                       onClick={() => upd({ glow: !ps.glow })}
-                      className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${ps.glow ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300' : 'border-[#3e3e3e] text-[#6a6a6a] hover:text-white'}`}
+                      className={`text-[9px] px-2 py-0.5 rounded-md border transition-colors ${ps.glow ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-500 font-bold' : 'border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'}`}
                     >{ps.glow ? 'ON' : 'OFF'}</button>
                   </div>
                 </div>
@@ -7658,22 +7658,21 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             {/* Keying and Blend controls are displayed above */}
           </div>
         )}
-        {/* ── History Tab ─────────────────────────────────────────────────── */}
-        
+
         {/* Thumbnail Designer Tab */}
         {currentTab === 'thumbnail' && (
           <div className="flex flex-col gap-4">
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 flex flex-col gap-3">
-              <h3 className="text-xs font-semibold text-white flex items-center gap-2">
-                <ImageIcon className="w-4 h-4 text-amber-500" />
+            <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-4 flex flex-col gap-3 shadow-sm">
+              <h3 className="text-xs font-bold text-[var(--theme-text-primary)] flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-blue-500" />
                 Thumbnail Designer
               </h3>
-              <p className="text-[10px] text-[#a0a0a0] leading-relaxed">
+              <p className="text-[10px] text-[var(--theme-text-muted)] leading-relaxed">
                 Add text, stickers, and shapes to the timeline to design your thumbnail. Click the button below to capture the current frame as an image.
               </p>
               
               <div className="flex items-center gap-2">
-                <label className="text-[11px] text-white flex-1 cursor-pointer select-none">
+                <label className="text-[11px] text-[var(--theme-text-primary)] font-semibold flex-1 cursor-pointer select-none">
                   Show YouTube Safe Zones
                 </label>
                 <button
@@ -7682,10 +7681,10 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                      useEditorStore.getState().updateSettings({ showSafeZones: !current });
                   }}
                   className={`w-8 h-4 rounded-full transition-colors relative ${
-                    useEditorStore.getState().settings.showSafeZones ? 'bg-amber-500' : 'bg-[#1e1e1e] border border-[#3e3e3e]'
+                    useEditorStore.getState().settings.showSafeZones ? 'bg-blue-600' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]'
                   }`}
                 >
-                  <div className={`w-3 h-3 rounded-full bg-white absolute top-[1px] transition-all ${
+                  <div className={`w-3 h-3 rounded-full bg-white absolute top-[1px] transition-all shadow-sm ${
                     useEditorStore.getState().settings.showSafeZones ? 'left-[17px]' : 'left-[1px]'
                   }`} />
                 </button>
@@ -7704,23 +7703,23 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                    link.href = dataUrl;
                    link.click();
                 }}
-                className="mt-2 w-full py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded text-xs font-semibold shadow-lg shadow-orange-900/20 transition-all flex items-center justify-center gap-2"
+                className="mt-2 w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4" />
                 Capture High-Res Thumbnail
               </button>
             </div>
             
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 flex flex-col gap-3">
-              <h3 className="text-xs font-semibold text-white">Quick Branding</h3>
+            <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-4 flex flex-col gap-3 shadow-sm">
+              <h3 className="text-xs font-bold text-[var(--theme-text-primary)]">Quick Branding</h3>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => {
                      useEditorStore.getState().insertTextClip({ text: 'BRAND NAME', fontSize: 40 });
                   }}
-                  className="py-2 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-white rounded text-[10px] transition-colors flex flex-col items-center gap-1"
+                  className="py-2.5 bg-[var(--theme-bg-subpanel)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--theme-border)] text-[var(--theme-text-primary)] rounded-lg text-[10px] font-semibold transition-colors flex flex-col items-center gap-1 shadow-sm"
                 >
-                  <Type className="w-4 h-4 text-blue-400" />
+                  <Type className="w-4 h-4 text-blue-500" />
                   Add Bold Text
                 </button>
                 <button
@@ -7732,20 +7731,20 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         const file = (e.target as HTMLInputElement).files?.[0];
                         if (file) {
                            useEditorStore.getState().addMedia({
-                              id: Math.random().toString(36).substr(2, 9),
-                              name: file.name,
-                              type: 'image',
-                              url: URL.createObjectURL(file),
-                              duration: 5,
-                              createdAt: Date.now(),
+                               id: Math.random().toString(36).substr(2, 9),
+                               name: file.name,
+                               type: 'image',
+                               url: URL.createObjectURL(file),
+                               duration: 5,
+                               createdAt: Date.now(),
                            });
                         }
                      };
                      input.click();
                   }}
-                  className="py-2 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-white rounded text-[10px] transition-colors flex flex-col items-center gap-1"
+                  className="py-2.5 bg-[var(--theme-bg-subpanel)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--theme-border)] text-[var(--theme-text-primary)] rounded-lg text-[10px] font-semibold transition-colors flex flex-col items-center gap-1 shadow-sm"
                 >
-                  <ImageIcon className="w-4 h-4 text-green-400" />
+                  <ImageIcon className="w-4 h-4 text-emerald-500" />
                   Import Logo
                 </button>
               </div>
@@ -7753,12 +7752,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           </div>
         )}
 
+        {/* ── History Tab ─────────────────────────────────────────────────── */}
         {currentTab === 'history' && (
           <div className="flex flex-col gap-3">
             {/* Header */}
-            <div className="p-3 border border-[#3e3e3e] rounded bg-[#1e1e1e]/40 flex items-center justify-between shrink-0">
-              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Undo/Redo History</span>
-              <span className="text-[9px] text-[#8a8a8a] bg-[#1e1e1e] border border-[#3e3e3e] rounded px-1.5 py-0.5 font-mono">
+            <div className="p-3 border border-[var(--theme-border)] rounded-xl bg-[var(--theme-bg-subpanel)] flex items-center justify-between shrink-0 shadow-sm">
+              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Undo/Redo History</span>
+              <span className="text-[9px] text-[var(--theme-text-muted)] bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-md px-2 py-0.5 font-mono font-medium">
                 {history.length} Actions
               </span>
             </div>
@@ -7772,32 +7772,32 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <button
                     key={idx}
                     onClick={() => jumpToHistoryIndex(idx)}
-                    className={`w-full flex items-center gap-3 p-2 rounded text-left transition-all border ${
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition-all border shadow-sm ${
                       isActive
-                        ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-medium shadow-md shadow-amber-500/5'
+                        ? 'bg-blue-500/10 border-blue-500 text-blue-600 dark:text-blue-400 font-bold'
                         : isFuture
-                        ? 'bg-[#1e1e1e]/40 border-transparent text-[#a0a0a0]/40 hover:text-white hover:bg-[#2d2d2d]'
-                        : 'bg-[#1e1e1e]/60 border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                        ? 'bg-[var(--theme-bg-subpanel)]/40 border-transparent text-[var(--theme-text-muted)]/40 hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                        : 'bg-[var(--theme-bg-card)] border-[var(--theme-border)] text-[var(--theme-text-primary)] hover:border-blue-500/40 hover:bg-black/5 dark:hover:bg-white/5'
                     }`}
                   >
                     {/* Visual Line Node */}
                     <div className="relative flex items-center justify-center shrink-0 w-4">
                       {idx < history.length - 1 && (
                         <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
-                          isFuture ? 'bg-[#3e3e3e]/40' : 'bg-amber-500/30'
+                          isFuture ? 'bg-[var(--theme-border)]/40' : 'bg-blue-500/30'
                         }`} />
                       )}
                       <div className={`w-2.5 h-2.5 rounded-full border-2 ${
                         isActive
-                          ? 'bg-amber-400 border-amber-400 ring-4 ring-amber-500/20 scale-110'
+                          ? 'bg-blue-500 border-blue-500 ring-4 ring-blue-500/20 scale-110'
                           : isFuture
-                          ? 'bg-transparent border-[#3e3e3e]'
-                          : 'bg-amber-500/40 border-amber-500/80'
+                          ? 'bg-transparent border-[var(--theme-border)]'
+                          : 'bg-blue-500/40 border-blue-500/80'
                       }`} />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <span className="text-xs truncate block">{snap.label || 'Action'}</span>
+                      <span className="text-xs truncate block font-medium">{snap.label || 'Action'}</span>
                       <span className="text-[9px] opacity-60 block mt-0.5 font-mono">
                         {idx === 0 ? 'Base State' : `Step ${idx}`}
                       </span>

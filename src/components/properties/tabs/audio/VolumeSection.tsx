@@ -8,7 +8,7 @@ interface VolumeSectionProps {
 
 export function VolumeSection({ volume, onChange, onReset }: VolumeSectionProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5 space-y-1.5">
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-3 space-y-1.5 shadow-sm">
       <AudioSlider
         label="Volume"
         value={volume}

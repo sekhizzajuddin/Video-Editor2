@@ -133,11 +133,11 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
   };
 
   return (
-    <div className="bg-[#21212a] rounded-lg border border-[#363645] p-3.5 space-y-4 text-white shadow-lg">
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-cyan-500/30 p-3.5 space-y-4 shadow-sm">
       {/* Header with Enable Switch */}
-      <div className="flex items-center justify-between pb-2 border-b border-[#323242]">
+      <div className="flex items-center justify-between pb-2.5 border-b border-[var(--theme-border)]">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">
+          <span className="text-xs font-bold text-[var(--theme-text-primary)]">
             ✨ AI Object Remove & Inpainting
           </span>
         </div>
@@ -146,13 +146,13 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
             updateOR({ enabled: !or.enabled });
             saveSnapshot();
           }}
-          className={`w-9 h-5 rounded-full transition-all relative ${
-            or.enabled ? 'bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.5)]' : 'bg-[#3e3e4e]'
+          className={`w-8 h-4 rounded-full transition-all relative ${
+            or.enabled ? 'bg-cyan-500 shadow-sm' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]'
           }`}
         >
           <div
-            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-              or.enabled ? 'left-[18px]' : 'left-[2px]'
+            className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${
+              or.enabled ? 'left-[17px]' : 'left-[1px]'
             }`}
           />
         </button>
@@ -162,44 +162,44 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
         <div className="space-y-4 pt-1 animate-fadeIn">
           {/* Mode Selector 2x2 Grid */}
           <div className="space-y-1.5">
-            <span className="text-[11px] font-semibold text-[#b8b8cc] tracking-wide uppercase">Inpainting Engine Mode</span>
-            <div className="grid grid-cols-2 gap-1.5">
+            <span className="text-[10px] font-bold text-[var(--theme-text-muted)] tracking-wider uppercase">Inpainting Engine Mode</span>
+            <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => { updateOR({ mode: 'content_aware' }); saveSnapshot(); }}
-                className={`p-2 rounded text-[11px] font-medium transition-all text-left border ${
+                className={`p-2.5 rounded-lg text-[11px] font-bold transition-all text-left border ${
                   or.mode === 'content_aware'
-                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-semibold shadow-[0_0_8px_rgba(6,182,212,0.3)]'
-                    : 'bg-[#181822] border-[#2e2e3e] text-[#9090a8] hover:border-[#46465e]'
+                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-300 shadow-sm'
+                    : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                 }`}
               >
                 🔮 Content-Aware
               </button>
               <button
                 onClick={() => { updateOR({ mode: 'patch_replace' }); saveSnapshot(); }}
-                className={`p-2 rounded text-[11px] font-medium transition-all text-left border ${
+                className={`p-2.5 rounded-lg text-[11px] font-bold transition-all text-left border ${
                   or.mode === 'patch_replace'
-                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-semibold shadow-[0_0_8px_rgba(6,182,212,0.3)]'
-                    : 'bg-[#181822] border-[#2e2e3e] text-[#9090a8] hover:border-[#46465e]'
+                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-300 shadow-sm'
+                    : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                 }`}
               >
                 📋 Patch Replace
               </button>
               <button
                 onClick={() => { updateOR({ mode: 'blur_conceal' }); saveSnapshot(); }}
-                className={`p-2 rounded text-[11px] font-medium transition-all text-left border ${
+                className={`p-2.5 rounded-lg text-[11px] font-bold transition-all text-left border ${
                   or.mode === 'blur_conceal'
-                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-semibold shadow-[0_0_8px_rgba(6,182,212,0.3)]'
-                    : 'bg-[#181822] border-[#2e2e3e] text-[#9090a8] hover:border-[#46465e]'
+                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-300 shadow-sm'
+                    : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                 }`}
               >
                 💧 Blur Conceal
               </button>
               <button
                 onClick={() => { updateOR({ mode: 'pixelate' }); saveSnapshot(); }}
-                className={`p-2 rounded text-[11px] font-medium transition-all text-left border ${
+                className={`p-2.5 rounded-lg text-[11px] font-bold transition-all text-left border ${
                   or.mode === 'pixelate'
-                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-semibold shadow-[0_0_8px_rgba(6,182,212,0.3)]'
-                    : 'bg-[#181822] border-[#2e2e3e] text-[#9090a8] hover:border-[#46465e]'
+                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-300 shadow-sm'
+                    : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                 }`}
               >
                 🔲 Mosaic Pixelate
@@ -210,14 +210,14 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
           {/* Mask Shape and Quality Selector Row */}
           <div className="grid grid-cols-2 gap-3 pt-1">
             <div className="space-y-1">
-              <span className="text-[11px] text-[#b8b8cc] font-medium">Mask Shape</span>
-              <div className="flex bg-[#181822] p-1 rounded border border-[#2e2e3e]">
+              <span className="text-[10px] text-[var(--theme-text-muted)] font-semibold uppercase">Mask Shape</span>
+              <div className="flex bg-[var(--theme-bg-subpanel)] p-1 rounded-lg border border-[var(--theme-border)]">
                 {(['rectangle', 'ellipse'] as ObjectRemovalShape[]).map((shape) => (
                   <button
                     key={shape}
                     onClick={() => { updateOR({ shape }); saveSnapshot(); }}
-                    className={`flex-1 py-1 text-[10px] capitalize rounded transition-colors ${
-                      or.shape === shape ? 'bg-cyan-600 text-white font-semibold' : 'text-[#808098] hover:text-white'
+                    className={`flex-1 py-1 text-[10px] font-semibold capitalize rounded-md transition-all ${
+                      or.shape === shape ? 'bg-cyan-600 text-white shadow-sm' : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                     }`}
                   >
                     {shape}
@@ -227,14 +227,14 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
             </div>
 
             <div className="space-y-1">
-              <span className="text-[11px] text-[#b8b8cc] font-medium">Render Quality</span>
-              <div className="flex bg-[#181822] p-1 rounded border border-[#2e2e3e]">
+              <span className="text-[10px] text-[var(--theme-text-muted)] font-semibold uppercase">Render Quality</span>
+              <div className="flex bg-[var(--theme-bg-subpanel)] p-1 rounded-lg border border-[var(--theme-border)]">
                 {(['preview', 'export'] as const).map((q) => (
                   <button
                     key={q}
                     onClick={() => { updateOR({ quality: q }); saveSnapshot(); }}
-                    className={`flex-1 py-1 text-[10px] capitalize rounded transition-colors ${
-                      or.quality === q ? 'bg-blue-600 text-white font-semibold' : 'text-[#808098] hover:text-white'
+                    className={`flex-1 py-1 text-[10px] font-semibold capitalize rounded-md transition-all ${
+                      or.quality === q ? 'bg-blue-600 text-white shadow-sm' : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                     }`}
                   >
                     {q === 'preview' ? 'Fast 60fps' : 'Studio High'}
@@ -245,35 +245,34 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
           </div>
 
           {/* Helper Switches */}
-          <div className="bg-[#181822] p-2.5 rounded-md border border-[#2e2e3e] space-y-2">
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-[11px] text-cyan-300 font-medium flex items-center gap-1.5">
-                🎯 Show Target Area Outline Guide
+          <div className="bg-[var(--theme-bg-subpanel)] p-3 rounded-xl border border-[var(--theme-border)] space-y-2">
+            <label className="flex items-center justify-between cursor-pointer select-none">
+              <span className="text-[11px] text-cyan-600 dark:text-cyan-400 font-semibold flex items-center gap-1.5">
+                🎯 Show Target Outline Guide
               </span>
               <input
                 type="checkbox"
                 checked={or.showHighlight ?? true}
                 onChange={(e) => { updateOR({ showHighlight: e.target.checked }); saveSnapshot(); }}
-                className="rounded text-cyan-500 bg-[#282838] border-[#404058] focus:ring-0 cursor-pointer"
+                className="rounded accent-cyan-500 cursor-pointer"
               />
             </label>
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-[11px] text-[#a0a0b8]">
+            <label className="flex items-center justify-between cursor-pointer select-none">
+              <span className="text-[11px] text-[var(--theme-text-muted)] font-semibold">
                 ⚡ Temporal Frame Smoothing
               </span>
               <input
                 type="checkbox"
                 checked={or.temporalSmoothing ?? true}
                 onChange={(e) => { updateOR({ temporalSmoothing: e.target.checked }); saveSnapshot(); }}
-                className="rounded text-cyan-500 bg-[#282838] border-[#404058] focus:ring-0 cursor-pointer"
+                className="rounded accent-cyan-500 cursor-pointer"
               />
             </label>
           </div>
 
-
           {/* Position and Geometry Sliders */}
-          <div className="space-y-3 pt-1">
-            <span className="text-[11px] font-semibold text-[#b8b8cc] tracking-wide uppercase block">Target Mask Placement</span>
+          <div className="space-y-3 pt-1 border-t border-[var(--theme-border)]">
+            <span className="text-[10px] font-bold text-[var(--theme-text-muted)] tracking-wider uppercase block">Target Mask Placement</span>
             {renderSliderControl('Center X Position', 'x', 'objectRemoval.x', getVal(or.x, 50, 'objectRemoval.x'), 0, 100, 0.5, '%')}
             {renderSliderControl('Center Y Position', 'y', 'objectRemoval.y', getVal(or.y, 50, 'objectRemoval.y'), 0, 100, 0.5, '%')}
             {renderSliderControl('Box Width', 'width', 'objectRemoval.width', getVal(or.width, 25, 'objectRemoval.width'), 1, 100, 0.5, '%')}
@@ -285,15 +284,15 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
 
           {/* Mode Specific Controls */}
           {or.mode === 'content_aware' && (
-            <div className="bg-gradient-to-br from-cyan-950/40 to-blue-950/40 p-3 rounded border border-cyan-800/50 space-y-2 mt-2">
-              <span className="text-[11px] font-semibold text-cyan-300 block">🔮 Content-Aware Diffusion Tuning</span>
+            <div className="bg-cyan-500/10 p-3 rounded-xl border border-cyan-500/20 space-y-2 mt-2">
+              <span className="text-[11px] font-bold text-cyan-600 dark:text-cyan-400 block">🔮 Content-Aware Diffusion</span>
               {renderSliderControl('Inward Stretch Strength', 'stretchStrength', 'objectRemoval.stretchStrength', getVal(or.stretchStrength, 80, 'objectRemoval.stretchStrength'), 1, 100, 1, '%')}
             </div>
           )}
 
           {or.mode === 'patch_replace' && (
-            <div className="bg-gradient-to-br from-blue-950/40 to-emerald-950/40 p-3 rounded border border-emerald-800/50 space-y-3 mt-2">
-              <span className="text-[11px] font-semibold text-emerald-300 block">📋 Clone Stamp Reference Source</span>
+            <div className="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 space-y-3 mt-2">
+              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 block">📋 Clone Stamp Source</span>
               {renderSliderControl('Source Sampling X', 'patchSourceX', 'objectRemoval.patchSourceX', getVal(or.patchSourceX, 30, 'objectRemoval.patchSourceX'), 0, 100, 0.5, '%')}
               {renderSliderControl('Source Sampling Y', 'patchSourceY', 'objectRemoval.patchSourceY', getVal(or.patchSourceY, 30, 'objectRemoval.patchSourceY'), 0, 100, 0.5, '%')}
             </div>

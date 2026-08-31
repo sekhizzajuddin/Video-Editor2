@@ -29,12 +29,12 @@ export function OpacitySection({
   updateClip,
 }: OpacitySectionProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] shadow-sm transition-all">
       <button
         onClick={() => toggleSection('opacity')}
-        className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+        className="w-full flex items-center justify-between p-3 text-xs text-[var(--theme-text-primary)] font-semibold group"
       >
-        <span className="font-medium">Opacity</span>
+        <span>Opacity</span>
         <div className="flex items-center gap-2">
           <div
             onClick={(e) => {
@@ -42,22 +42,22 @@ export function OpacitySection({
               setPropVal('opacity', 1, { opacity: 1 });
               scheduleSaveSnapshot();
             }}
-            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-all"
             title="Reset Opacity"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+            <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]" />
           </div>
           {collapsedSections['opacity'] ? (
-            <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+            <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+            <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
           )}
         </div>
       </button>
       {!collapsedSections['opacity'] && (
-        <div className="px-2.5 pb-2.5 space-y-1.5">
+        <div className="px-3 pb-3 space-y-2 border-t border-[var(--theme-border)] pt-3">
           <div className="flex justify-between items-center">
-            <span className="text-[10px] text-[#a0a0a0]">Opacity Value</span>
+            <span className="text-[10px] text-[var(--theme-text-muted)] font-medium">Opacity Value</span>
             <KeyframeControl
               propertyKey="opacity"
               value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
@@ -114,10 +114,10 @@ export function OpacitySection({
                 setPropVal('opacity', 1, { opacity: 1 });
                 scheduleSaveSnapshot();
               }}
-              className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+              className="flex-1 h-1 bg-[var(--theme-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:rounded-full"
             />
             <span 
-              className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+              className="text-[11px] text-[var(--theme-text-primary)] w-10 text-right cursor-pointer hover:text-blue-500 font-mono transition-colors"
               title="Click to cycle values"
               onClick={() => {
                 const steps = [0, 25, 50, 75, 100];

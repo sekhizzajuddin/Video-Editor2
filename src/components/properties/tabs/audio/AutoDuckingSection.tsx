@@ -49,25 +49,25 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
   };
 
   return (
-    <div className="bg-[#1e1e1e] rounded p-3 border border-indigo-500/20 space-y-3">
+    <div className="bg-[var(--theme-bg-card)] rounded-xl p-3 border border-indigo-500/20 space-y-3 shadow-sm">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="p-1 rounded bg-indigo-500/10 text-indigo-400">
+          <div className="p-1 rounded-lg bg-indigo-500/10 text-indigo-500">
             <Zap className="w-3.5 h-3.5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-white leading-tight">AI Auto Audio Ducking</p>
-            <p className="text-[9px] text-[#a0a0a0]">Auto-ducks background music when vocals/voice speak</p>
+            <p className="text-[11px] font-bold text-[var(--theme-text-primary)] leading-tight">AI Auto Audio Ducking</p>
+            <p className="text-[9px] text-[var(--theme-text-muted)]">Auto-ducks background music when vocals/voice speak</p>
           </div>
         </div>
 
         <button
           type="button"
           onClick={toggleDucking}
-          className={`px-2.5 py-1 text-[10px] font-medium rounded transition-colors ${
+          className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all ${
             ducking.enabled
-              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-              : 'bg-[#282828] text-[#a0a0a0] hover:text-white border border-[#3e3e3e]'
+              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm'
+              : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] border border-[var(--theme-border)]'
           }`}
         >
           {ducking.enabled ? 'Enabled' : 'Disabled'}
@@ -75,11 +75,11 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
       </div>
 
       {ducking.enabled && (
-        <div className="space-y-2.5 pt-2 border-t border-[#2a2a2a]">
+        <div className="space-y-2.5 pt-2 border-t border-[var(--theme-border)]">
           <div className="flex flex-col gap-1">
             <div className="flex justify-between items-center text-[10px]">
-              <span className="text-[#a0a0a0]">BGM Volume During Speech</span>
-              <span className="font-mono text-indigo-400 font-semibold">{ducking.duckVolume}%</span>
+              <span className="text-[var(--theme-text-muted)]">BGM Volume During Speech</span>
+              <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">{ducking.duckVolume}%</span>
             </div>
             <input
               type="range"
@@ -88,12 +88,12 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
               step="5"
               value={ducking.duckVolume}
               onChange={(e) => updateDuckVolume(Number(e.target.value))}
-              className="w-full accent-indigo-500"
+              className="w-full accent-indigo-600"
             />
           </div>
 
-          <div className="flex items-center gap-1.5 p-2 rounded bg-indigo-950/30 border border-indigo-500/10 text-[10px] text-indigo-300">
-            <Volume2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-600 dark:text-indigo-300">
+            <Volume2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
             <span>
               {overlappingVoiceClips.length > 0
                 ? `Active: ${overlappingVoiceClips.length} voice/text clip(s) detected in timestamp range!`

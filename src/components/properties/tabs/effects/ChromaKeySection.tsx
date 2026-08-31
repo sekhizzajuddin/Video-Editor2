@@ -117,16 +117,16 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
   };
 
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
-      <h4 className="text-[11px] font-semibold text-white mb-3">Chroma Key (Green Screen)</h4>
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-3.5 shadow-sm">
+      <h4 className="text-[11px] font-bold text-[var(--theme-text-primary)] mb-3">Chroma Key (Green Screen)</h4>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-[#a0a0a0]">Enabled</span>
+          <span className="text-[10px] text-[var(--theme-text-muted)] font-medium">Enabled</span>
           <button
             onClick={() => update({ enabled: !chromaKey.enabled })}
-            className={`w-8 h-4 rounded-full transition-colors relative ${chromaKey.enabled ? 'bg-green-500' : 'bg-[#3e3e3e]'}`}
+            className={`w-8 h-4 rounded-full transition-colors relative ${chromaKey.enabled ? 'bg-emerald-500' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]'}`}
           >
-            <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${chromaKey.enabled ? 'left-[17px]' : 'left-[1px]'}`} />
+            <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${chromaKey.enabled ? 'left-[17px]' : 'left-[1px]'}`} />
           </button>
         </div>
         
@@ -134,12 +134,12 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
           <>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-[#a0a0a0]">Key Color:</span>
+                <span className="text-[10px] text-[var(--theme-text-muted)] font-medium">Key Color:</span>
                 <div className="flex items-center space-x-2">
                   {typeof window !== 'undefined' && 'EyeDropper' in window && (
                     <button
                       onClick={activateEyedropper}
-                      className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${isSampling ? 'bg-green-500/20 text-green-500' : 'bg-[#1a1a1a] text-[#888] hover:text-white hover:bg-[#333]'}`}
+                      className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${isSampling ? 'bg-emerald-500/20 text-emerald-500' : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--theme-border)]'}`}
                       title="Pick color from screen"
                     >
                       <EyedropperIcon />
@@ -149,26 +149,26 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
                     type="color"
                     value={chromaKey.color || '#00ff00'}
                     onChange={(e) => handleColorChange(e.target.value)}
-                    className="w-8 h-6 rounded cursor-pointer bg-transparent border border-[#444]"
+                    className="w-8 h-6 rounded cursor-pointer bg-transparent border border-[var(--theme-border)]"
                   />
                 </div>
               </div>
-              <div className="flex space-x-1">
+              <div className="flex space-x-1.5">
                 {PRESETS.map(p => (
                   <button
                     key={p.label}
                     onClick={() => handleColorChange(p.hex)}
-                    className="w-6 h-4 rounded border border-[#444] hover:border-white transition-colors"
+                    className="w-6 h-4 rounded border border-[var(--theme-border)] hover:scale-105 transition-all shadow-sm"
                     style={{ backgroundColor: p.hex }}
                     title={p.label}
                   />
                 ))}
-                {customSwatches.length > 0 && <div className="w-[1px] h-4 bg-[#444] mx-1" />}
+                {customSwatches.length > 0 && <div className="w-[1px] h-4 bg-[var(--theme-border)] mx-1" />}
                 {customSwatches.map((hex, i) => (
                   <button
                     key={`custom-${i}`}
                     onClick={() => handleColorChange(hex)}
-                    className="w-6 h-4 rounded border border-[#444] hover:border-white transition-colors"
+                    className="w-6 h-4 rounded border border-[var(--theme-border)] hover:scale-105 transition-all shadow-sm"
                     style={{ backgroundColor: hex }}
                     title="Custom color"
                   />
@@ -177,15 +177,15 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
             </div>
 
             <div className="space-y-1">
-              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+              <div className="flex justify-between items-center text-[10px] text-[var(--theme-text-muted)]">
                 <div className="flex items-center space-x-2">
-                  <span>Threshold</span>
+                  <span className="font-medium">Threshold</span>
                   <KeyframeIcon
                     active={isKeyframed('threshold')}
                     onClick={() => toggleKeyframe('threshold')}
                   />
                 </div>
-                <span>{chromaKey.threshold || 40}%</span>
+                <span className="font-mono font-medium text-[var(--theme-text-primary)]">{chromaKey.threshold || 40}%</span>
               </div>
               <input
                 type="range"
@@ -193,20 +193,20 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
                 max="100"
                 value={chromaKey.threshold || 40}
                 onChange={(e) => update({ threshold: Number(e.target.value) })}
-                className="w-full accent-green-500 bg-[#1a1a1a] h-1 rounded cursor-pointer"
+                className="w-full accent-emerald-500 bg-[var(--theme-border)] h-1 rounded-full cursor-pointer"
               />
             </div>
 
             <div className="space-y-1">
-              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+              <div className="flex justify-between items-center text-[10px] text-[var(--theme-text-muted)]">
                 <div className="flex items-center space-x-2">
-                  <span>Edge Softness</span>
+                  <span className="font-medium">Edge Softness</span>
                   <KeyframeIcon
                     active={isKeyframed('softness')}
                     onClick={() => toggleKeyframe('softness')}
                   />
                 </div>
-                <span>{chromaKey.softness || 20}%</span>
+                <span className="font-mono font-medium text-[var(--theme-text-primary)]">{chromaKey.softness || 20}%</span>
               </div>
               <input
                 type="range"
@@ -214,20 +214,20 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
                 max="100"
                 value={chromaKey.softness || 20}
                 onChange={(e) => update({ softness: Number(e.target.value) })}
-                className="w-full accent-green-500 bg-[#1a1a1a] h-1 rounded cursor-pointer"
+                className="w-full accent-emerald-500 bg-[var(--theme-border)] h-1 rounded-full cursor-pointer"
               />
             </div>
 
             <div className="space-y-1">
-              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+              <div className="flex justify-between items-center text-[10px] text-[var(--theme-text-muted)]">
                 <div className="flex items-center space-x-2">
-                  <span>Spill Suppression</span>
+                  <span className="font-medium">Spill Suppression</span>
                   <KeyframeIcon
                     active={isKeyframed('spillSuppression')}
                     onClick={() => toggleKeyframe('spillSuppression')}
                   />
                 </div>
-                <span>{chromaKey.spillSuppression ?? 50}%</span>
+                <span className="font-mono font-medium text-[var(--theme-text-primary)]">{chromaKey.spillSuppression ?? 50}%</span>
               </div>
               <input
                 type="range"
@@ -235,20 +235,20 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
                 max="100"
                 value={chromaKey.spillSuppression ?? 50}
                 onChange={(e) => update({ spillSuppression: Number(e.target.value) })}
-                className="w-full accent-green-500 bg-[#1a1a1a] h-1 rounded cursor-pointer"
+                className="w-full accent-emerald-500 bg-[var(--theme-border)] h-1 rounded-full cursor-pointer"
               />
             </div>
 
             <div className="space-y-1">
-              <div className="flex justify-between items-center text-[10px] text-[#a0a0a0]">
+              <div className="flex justify-between items-center text-[10px] text-[var(--theme-text-muted)]">
                 <div className="flex items-center space-x-2">
-                  <span title="0 px = sharp edges, 20 px = heavy feather">Edge Feather</span>
+                  <span title="0 px = sharp edges, 20 px = heavy feather" className="font-medium">Edge Feather</span>
                   <KeyframeIcon
                     active={isKeyframed('edgeFeather')}
                     onClick={() => toggleKeyframe('edgeFeather')}
                   />
                 </div>
-                <span>{chromaKey.edgeFeather ?? 0}px</span>
+                <span className="font-mono font-medium text-[var(--theme-text-primary)]">{chromaKey.edgeFeather ?? 0}px</span>
               </div>
               <input
                 type="range"
@@ -257,7 +257,7 @@ export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
                 step="1"
                 value={chromaKey.edgeFeather ?? 0}
                 onChange={(e) => update({ edgeFeather: Number(e.target.value) })}
-                className="w-full accent-green-500 bg-[#1a1a1a] h-1 rounded cursor-pointer"
+                className="w-full accent-emerald-500 bg-[var(--theme-border)] h-1 rounded-full cursor-pointer"
                 title="0 px = sharp edges, 20 px = heavy feather"
               />
             </div>

@@ -30,6 +30,7 @@ import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectDa
 import { setActiveProject } from '@/utils/projectPersistence';
 import { RecentProjectsModal } from './RecentProjectsModal';
 import { toast } from 'sonner';
+import { ProCutLogo } from './ProCutLogo';
 
 export function TopToolbar() {
   const {
@@ -210,14 +211,9 @@ export function TopToolbar() {
     >
       {/* Left: Logo & Menus */}
       <div className="flex items-center gap-2">
-        {/* Brand Badge */}
-        <div className="flex items-center gap-2.5 mr-2 group cursor-pointer">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 via-blue-500 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
-            <Film className="w-4 h-4 text-white" />
-          </div>
-          <span className="text-sm font-bold tracking-tight bg-gradient-to-r from-blue-500 to-indigo-500 bg-clip-text text-transparent">
-            ProCut
-          </span>
+        {/* Brand Logo */}
+        <div className="mr-2 cursor-pointer">
+          <ProCutLogo size="md" />
         </div>
 
         {/* Workspace Layout Menu */}

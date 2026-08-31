@@ -37,9 +37,9 @@ export function EffectsTab({
   const isAudio = selectedTrack?.type === 'audio' || selectedClip.mediaId?.includes('audio') || selectedClip.audioSettings;
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
+    <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-white uppercase tracking-wider">AI & Effect Settings</h3>
+        <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">AI & Effect Settings</h3>
       </div>
 
       {/* Auto Beat Sync & Rhythm Detection */}

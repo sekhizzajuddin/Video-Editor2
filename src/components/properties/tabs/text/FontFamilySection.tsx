@@ -54,8 +54,8 @@ export function FontFamilySection({ fontFamily, onChange }: FontFamilySectionPro
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <label className="text-[10px] text-[#a0a0a0] uppercase tracking-wider">Font Family</label>
-        <label className="flex items-center gap-1 px-2 py-0.5 bg-[#2a2a2a] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-amber-400 cursor-pointer transition-colors">
+        <label className="text-[10px] text-[var(--theme-text-muted)] font-semibold uppercase tracking-wider">Font Family</label>
+        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] text-blue-600 dark:text-blue-400 font-bold cursor-pointer transition-all shadow-sm">
           <Upload className="w-3 h-3" />
           Upload
           <input
@@ -73,7 +73,7 @@ export function FontFamilySection({ fontFamily, onChange }: FontFamilySectionPro
       <select
         value={fontFamily || 'Arial'}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
+        className="bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-primary)] text-xs border border-[var(--theme-border)] rounded-xl p-2.5 focus:outline-none focus:border-blue-500 shadow-sm"
       >
         <optgroup label="System Fonts">
           {allFonts.filter((f) => !customFonts.find((c) => c.family === f)).map((font) => (
@@ -90,22 +90,22 @@ export function FontFamilySection({ fontFamily, onChange }: FontFamilySectionPro
       </select>
       {customFonts.length > 0 && (
         <div className="flex flex-col gap-1 mt-1">
-          <p className="text-[9px] text-[#6a6a6a] uppercase tracking-wider">Manage Custom Fonts</p>
+          <p className="text-[9px] text-[var(--theme-text-muted)] font-semibold uppercase tracking-wider">Manage Custom Fonts</p>
           {customFonts.map((font) => (
             <div
               key={font.family}
-              className="flex items-center gap-2 px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px]"
+              className="flex items-center gap-2 px-2.5 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-lg text-[10px] text-[var(--theme-text-primary)]"
             >
-              <Type className="w-3 h-3 text-amber-400" />
+              <Type className="w-3.5 h-3.5 text-blue-500" />
               <span className="flex-1 truncate" style={{ fontFamily: font.family }}>
                 {font.family}
               </span>
               <button
                 onClick={() => handleRemove(font.family)}
-                className="text-red-400 hover:text-red-300 transition-colors"
+                className="text-rose-500 hover:text-rose-400 p-1 transition-colors"
                 title="Remove font"
               >
-                <Trash2 className="w-3 h-3" />
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
           ))}

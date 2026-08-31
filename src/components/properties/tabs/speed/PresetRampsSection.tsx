@@ -14,14 +14,14 @@ export function PresetRampsSection({ isRamped, onSpeedChange }: PresetRampsSecti
   ];
 
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
-      <span className="text-xs font-medium text-white block mb-2">Preset Ramps</span>
-      <div className="grid grid-cols-2 gap-1.5">
+    <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-3 shadow-sm">
+      <span className="text-xs font-bold text-[var(--theme-text-primary)] block mb-2">Preset Ramps</span>
+      <div className="grid grid-cols-2 gap-2">
         {presets.map((preset) => (
           <button
             key={preset.name}
             onClick={() => onSpeedChange(preset.speed)}
-            className="px-2 py-1.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-white transition-colors"
+            className="px-2.5 py-2 bg-[var(--theme-bg-subpanel)] hover:bg-black/5 dark:hover:bg-white/5 border border-[var(--theme-border)] rounded-lg text-[10px] font-semibold text-[var(--theme-text-primary)] transition-all shadow-sm"
           >
             {preset.name} ({preset.speed}x)
           </button>
