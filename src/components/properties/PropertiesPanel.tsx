@@ -2111,6 +2111,61 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   const clipAudio = selectedClip?.audioSettings || defaultAudioSettings;
 
+  const handleResetClipSettings = () => {
+    if (!selectedClip) return;
+    const store = useEditorStore.getState();
+    const updatePayload: any = {
+      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+      opacity: 1,
+      speed: 1,
+      crop: undefined,
+      speedRamp: undefined,
+      isReversed: false,
+      freezeFrame: undefined,
+      animations: undefined,
+      effects: [],
+      transitionIn: undefined,
+      transitionOut: undefined,
+      colorFilters: defaultColorFilters,
+      audioSettings: defaultAudioSettings,
+      fxSettings: undefined,
+      motionEffects: undefined,
+      particleSettings: undefined,
+      aiBackground: undefined,
+      chromaKey: undefined,
+      lumaKey: undefined,
+      objectRemoval: undefined,
+      kenBurns: undefined,
+      mask: undefined,
+      vectorMask: undefined
+    };
+
+    if (selectedClip.textSettings) {
+      updatePayload.textSettings = {
+        ...selectedClip.textSettings,
+        fontSize: 72,
+        fontFamily: 'Inter',
+        fontWeight: 'bold',
+        fill: '#ffffff',
+        align: 'center',
+        stroke: '#000000',
+        strokeWidth: 0,
+        shadowColor: '#000000',
+        shadowBlur: 0,
+        shadowOffsetX: 0,
+        shadowOffsetY: 0,
+        backgroundEnabled: false,
+        backgroundColor: '#000000',
+        backgroundOpacity: 0.5,
+        backgroundPadding: 10,
+        backgroundBorderRadius: 8
+      };
+    }
+
+    store.updateClip(selectedClip.id, updatePayload);
+    store.saveSnapshot('Reset Clip Settings');
+  };
+
   const handleAudioChange = (key: keyof typeof defaultAudioSettings, val: any) => {
     if (!selectedClip) return;
     const current = selectedClip.audioSettings || defaultAudioSettings;
@@ -3441,6 +3496,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </button>
 
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleResetClipSettings}
+                    className="p-1 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-[var(--theme-bg-subpanel)] rounded-md transition-colors"
+                    title="Reset Clip Settings"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
                   <button
                     onClick={() => useEditorStore.getState().selectClip(null)}
                     className="p-1 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-[var(--theme-bg-subpanel)] rounded-md transition-colors"
