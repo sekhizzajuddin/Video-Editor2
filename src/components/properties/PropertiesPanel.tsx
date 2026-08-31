@@ -1185,6 +1185,21 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     }, { ripple: true });
   }, [updateClip]);
 
+  // Blob sources live on media items at runtime but aren't part of MediaItem's
+  // public type — narrow locally.
+  const mediaHasAudioSource = (m: (typeof mediaLibrary)[number]) =>
+    !!(m.url || (m as unknown as { _fileBlob?: Blob | File | null; _audioBlob?: Blob | File | null })._fileBlob
+      || (m as unknown as { _audioBlob?: Blob | File | null })._audioBlob);
+
+  const hasEnoughAudioClips = useMemo(
+    () =>
+      tracks.flatMap((t) => t.clips).filter((c) => {
+        const m = mediaLibrary.find((x) => x.id === c.mediaId);
+        return m && mediaHasAudioSource(m);
+      }).length >= 2,
+    [tracks, mediaLibrary]
+  );
+
   const handleRampPointerDown = (e: React.PointerEvent, idx: number) => {
     e.stopPropagation();
     e.preventDefault();
@@ -2041,21 +2056,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   };
 
   const clipAudio = selectedClip?.audioSettings || defaultAudioSettings;
-
-  // Blob sources live on media items at runtime but aren't part of MediaItem's
-  // public type — narrow locally.
-  const mediaHasAudioSource = (m: (typeof mediaLibrary)[number]) =>
-    !!(m.url || (m as unknown as { _fileBlob?: Blob | File | null; _audioBlob?: Blob | File | null })._fileBlob
-      || (m as unknown as { _audioBlob?: Blob | File | null })._audioBlob);
-
-  const hasEnoughAudioClips = useMemo(
-    () =>
-      tracks.flatMap((t) => t.clips).filter((c) => {
-        const m = mediaLibrary.find((x) => x.id === c.mediaId);
-        return m && mediaHasAudioSource(m);
-      }).length >= 2,
-    [tracks, mediaLibrary]
-  );
 
   const handleAudioChange = (key: keyof typeof defaultAudioSettings, val: any) => {
     if (!selectedClip) return;
