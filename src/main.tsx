@@ -3,6 +3,32 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
+
+// Global handler for dynamic import chunk load errors (Vite + Vercel SPA deployments)
+// When a new deployment is pushed, old JS chunks are deleted. If an active client tries to lazy-load them,
+// Vercel returns the index.html (MIME text/html), which fails to execute as JS.
+// We catch this and force a hard refresh to get the latest index.html and chunk mappings.
+const handleChunkError = (e: any) => {
+  const msg = e?.message || e?.reason?.message || '';
+  if (
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Importing a module script failed') ||
+    msg.includes('Expected a JavaScript-or-Wasm module script') ||
+    (e.type === 'vite:preloadError')
+  ) {
+    if (sessionStorage.getItem('vite-chunk-reloaded') === 'true') {
+      sessionStorage.removeItem('vite-chunk-reloaded'); // Prevents infinite loops
+      return;
+    }
+    sessionStorage.setItem('vite-chunk-reloaded', 'true');
+    window.location.reload();
+  }
+};
+
+window.addEventListener('vite:preloadError', handleChunkError);
+window.addEventListener('error', handleChunkError);
+window.addEventListener('unhandledrejection', handleChunkError);
+
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(

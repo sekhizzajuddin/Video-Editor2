@@ -20,6 +20,19 @@ export class ErrorBoundary extends Component<Props, State & { error?: Error }> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo);
+    
+    // Auto-reload the page if a dynamically imported module fails to load (e.g. after a Vercel deployment)
+    const msg = error.message || '';
+    if (
+      msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Importing a module script failed') ||
+      msg.includes('Expected a JavaScript-or-Wasm module script')
+    ) {
+      if (sessionStorage.getItem('vite-chunk-reloaded') !== 'true') {
+        sessionStorage.setItem('vite-chunk-reloaded', 'true');
+        window.location.reload();
+      }
+    }
   }
 
   public render() {

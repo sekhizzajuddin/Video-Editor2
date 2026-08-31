@@ -15,6 +15,15 @@
  */
 
 import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
+
+const setAudioParam = (param: AudioParam, target: number, ctxTime: number, rampTime: number = 0.08, threshold: number = 0.005) => {
+  const currentTarget = (param as any)._procutTarget;
+  if (currentTarget === undefined || Math.abs(currentTarget - target) > threshold) {
+    (param as any)._procutTarget = target;
+    param.setTargetAtTime(target, ctxTime, rampTime);
+  }
+};
+
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
@@ -1777,7 +1786,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const graph = entry.separationGraph;
         const S = sep.strength / 100;
         const updateGain = (node: GainNode, val: number) => {
-          if (Math.abs(node.gain.value - val) > 0.005) node.gain.setTargetAtTime(val, ctxTime, rampTime);
+          setAudioParam(node.gain, val, ctxTime, rampTime, 0.005);
         };
 
         if (sep.enabled) {
@@ -1837,49 +1846,40 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // auto-match compensation that keeps matched voices natural (the
         // compensation is baked into effectiveVocalFormant).
         const targetGain = audioSettings.humanize ? -5.0 : effectiveVocalFormant(audioSettings) * -0.05;
-        if (Math.abs(entry.vocalFilter.gain.value - targetGain) > 0.1)
-          entry.vocalFilter.gain.setTargetAtTime(targetGain, ctxTime, rampTime);
+        setAudioParam(entry.vocalFilter.gain, targetGain, ctxTime, rampTime, 0.1);
       }
       if (entry.denoiseFilter) {
         const denoiseGain = -((audioSettings.denoise ?? 0) / 100) * 30;
-        if (Math.abs(entry.denoiseFilter.gain.value - denoiseGain) > 0.1)
-          entry.denoiseFilter.gain.setTargetAtTime(denoiseGain, ctxTime, rampTime);
+        setAudioParam(entry.denoiseFilter.gain, denoiseGain, ctxTime, rampTime, 0.1);
       }
       if (entry.bassFilter) {
         const baseBass = (audioSettings.bass || 0) + (audioSettings.humanize ? 1.5 : 0);
         const targetBass = Math.max(-15, Math.min(15, baseBass));
-        if (Math.abs(entry.bassFilter.gain.value - targetBass) > 0.1)
-          entry.bassFilter.gain.setTargetAtTime(targetBass, ctxTime, rampTime);
+        setAudioParam(entry.bassFilter.gain, targetBass, ctxTime, rampTime, 0.1);
       }
       if (entry.midFilter) {
         const targetMid = Math.max(-15, Math.min(15, audioSettings.mid ?? 0));
-        if (Math.abs(entry.midFilter.gain.value - targetMid) > 0.1)
-          entry.midFilter.gain.setTargetAtTime(targetMid, ctxTime, rampTime);
+        setAudioParam(entry.midFilter.gain, targetMid, ctxTime, rampTime, 0.1);
       }
       if (entry.trebleFilter) {
         const baseTreble = (audioSettings.treble || 0) + (audioSettings.humanize ? 1.0 : 0);
         const targetTreble = Math.max(-15, Math.min(15, baseTreble));
-        if (Math.abs(entry.trebleFilter.gain.value - targetTreble) > 0.1)
-          entry.trebleFilter.gain.setTargetAtTime(targetTreble, ctxTime, rampTime);
+        setAudioParam(entry.trebleFilter.gain, targetTreble, ctxTime, rampTime, 0.1);
       }
       if (entry.compressorNode) {
         const comp = (audioSettings.compression ?? 0) / 100;
         const targetThreshold = comp > 0 ? -24 * comp : 0;
         const targetRatio = 1 + 19 * comp;
-        if (Math.abs(entry.compressorNode.threshold.value - targetThreshold) > 0.5)
-          entry.compressorNode.threshold.setTargetAtTime(targetThreshold, ctxTime, rampTime);
-        if (Math.abs(entry.compressorNode.ratio.value - targetRatio) > 0.5)
-          entry.compressorNode.ratio.setTargetAtTime(targetRatio, ctxTime, rampTime);
+        setAudioParam(entry.compressorNode.threshold, targetThreshold, ctxTime, rampTime, 0.5);
+        setAudioParam(entry.compressorNode.ratio, targetRatio, ctxTime, rampTime, 0.5);
       }
       if (entry.deEsserFilter) {
         const targetDeEsserGain = -((audioSettings.deEsser ?? 0) / 100) * 18;
-        if (Math.abs(entry.deEsserFilter.gain.value - targetDeEsserGain) > 0.1)
-          entry.deEsserFilter.gain.setTargetAtTime(targetDeEsserGain, ctxTime, rampTime);
+        setAudioParam(entry.deEsserFilter.gain, targetDeEsserGain, ctxTime, rampTime, 0.1);
       }
       if (entry.warmthFilter) {
         const targetWarmth = ((audioSettings.warmth ?? 0) / 100) * 6;
-        if (Math.abs(entry.warmthFilter.gain.value - targetWarmth) > 0.1)
-          entry.warmthFilter.gain.setTargetAtTime(targetWarmth, ctxTime, rampTime);
+        setAudioParam(entry.warmthFilter.gain, targetWarmth, ctxTime, rampTime, 0.1);
       }
 
       // Panning
@@ -1887,20 +1887,17 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const trackPan = targetTrack?.pan ?? 0;
         const combinedPan = (animatedPan / 100) + trackPan;
         const targetPan = Math.max(-1, Math.min(1, combinedPan));
-        if (Math.abs(entry.pannerNode.pan.value - targetPan) > 0.01)
-          entry.pannerNode.pan.setTargetAtTime(targetPan, ctxTime, rampTime);
+        setAudioParam(entry.pannerNode.pan, targetPan, ctxTime, rampTime, 0.01);
       }
 
       // Room ambience gates
       if (entry.feedbackInputGain) {
         const targetInputGate = audioSettings.humanize ? 0.20 : 0.0;
-        if (Math.abs(entry.feedbackInputGain.gain.value - targetInputGate) > 0.01)
-          entry.feedbackInputGain.gain.setTargetAtTime(targetInputGate, ctxTime, rampTime);
+        setAudioParam(entry.feedbackInputGain.gain, targetInputGate, ctxTime, rampTime, 0.01);
       }
       if (entry.delayGain) {
         const targetDelay = audioSettings.humanize ? 0.20 : 0.0;
-        if (Math.abs(entry.delayGain.gain.value - targetDelay) > 0.01)
-          entry.delayGain.gain.setTargetAtTime(targetDelay, ctxTime, rampTime);
+        setAudioParam(entry.delayGain.gain, targetDelay, ctxTime, rampTime, 0.01);
       }
 
       // Volume & Mute & Fades & Transitions
@@ -1965,9 +1962,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         : linearGain * volume * trackVolume * fadeInMultiplier * fadeOutMultiplier * transitionVolumeMultiplier;
 
       if (entry.gainNode) {
-        if (Math.abs(entry.gainNode.gain.value - finalVolume) > 0.005) {
-          entry.gainNode.gain.setTargetAtTime(finalVolume, ctxTime, rampTime);
-        }
+        setAudioParam(entry.gainNode.gain, finalVolume, ctxTime, rampTime, 0.005);
         if (entry.el.volume !== 1) entry.el.volume = 1;
         const shouldUnmute = isPlaying && !globalMuted;
         if (entry.el.muted !== !shouldUnmute) entry.el.muted = !shouldUnmute;
