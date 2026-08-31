@@ -416,11 +416,11 @@ export function MobileTimeline({
       }
       const wasPlaying = useEditorStore.getState().isPlaying;
       if (wasPlaying) {
-        // Jump & continue: move the playhead instantly and keep playing.
-        // The follow subscription above scrolls the tapped time under the
-        // fixed 50%-viewport playhead (instant, via the seek jump detection).
+        // Jump & continue: instantly pause first to halt pipelines, seek cleanly, and resume playing
+        useEditorStore.getState().pause();
         seek(Math.max(0, timeAt(e.clientX)));
         window.dispatchEvent(new Event('procut-frame-updated'));
+        useEditorStore.getState().play();
         return;
       }
       beginScrub(e);

@@ -828,6 +828,11 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       wasPlayingOnRulerDownRef.current = wasPlaying;
       rulerDownXRef.current = e.clientX;
 
+      // Instantly pause first to freeze clock advance, audio pipelines, and decode contention
+      if (wasPlaying) {
+        st.pause();
+      }
+
       // Move playhead instantly to clicked point
       seek(time);
       window.dispatchEvent(new Event('procut-frame-updated'));
