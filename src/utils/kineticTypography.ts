@@ -5,6 +5,8 @@ import { TEXT_TEMPLATES } from './textTemplates';
 import { transcribeAudioWithGroq, analyzeReasoningWithGroq } from './groqClient';
 import { scheduleSaveSnapshot } from './snapshotScheduler';
 
+import { fetchWithKeyFailover } from './apiKeyManager';
+
 const uuidv4 = () => crypto.randomUUID();
 
 export interface KineticTypographyOptions {
@@ -80,14 +82,37 @@ export async function generateKineticTypography(
     ? `\n\nUSER-PROVIDED GROUND-TRUTH REFERENCE SCRIPT:\n"${options.referenceScript}"\n\nCRITICAL INSTRUCTION FOR GROUND-TRUTH REFERENCE SCRIPT:\n- The user has provided the exact ground-truth script spoken in the video/audio.\n- You MUST use the exact words, spelling, and order from this reference script for the "text" properties of the generated typography objects.\n- Align each word from the reference script to its corresponding spoken audio timestamp.\n- This corrects any phonetic transcription errors from automated speech recognition.`
     : '';
 
-  const customPromptInstruction = options.customPrompt?.trim()
-    ? `\n\nUSER CUSTOM INSTRUCTION (highest priority — follow this before generating anything):\n"${options.customPrompt.trim()}"`
+  const customPromptText = options.customPrompt?.trim() || '';
+
+  const customPromptInstruction = customPromptText
+    ? `
+════════════════════════════════════════════════════════════════════════════════
+⭐ MANDATORY USER CUSTOM INSTRUCTIONS (HIGHEST PRIORITY - OVERRIDES ALL DEFAULTS):
+"${customPromptText}"
+
+HOW TO STRICTLY ENFORCE THESE CUSTOM INSTRUCTIONS:
+- POSITIONING:
+  * "bottom" / "lower third" / "bottom center" -> Set "y" to 80 (range 75–85) for all words.
+  * "top" / "upper third" / "top center" -> Set "y" to 20 (range 15–25) for all words.
+  * "center" / "middle" -> Set "y" to 50 (range 45–55) for all words.
+  * "left" / "left side" -> Set "x" to 25 (range 20–35) for all words.
+  * "right" / "right side" -> Set "x" to 75 (range 65–80) for all words.
+- COLORS & PALETTE:
+  * If the user requests specific colors (e.g. "neon cyan and magenta", "all gold and white", "red theme", "yellow on black"), output those exact hex codes in the "color", "strokeColor", "shadowColor", and "backgroundColor" properties.
+- FONTS & TYPOGRAPHY:
+  * If the user asks for specific font styles (e.g. "bold sans", "retro serif", "clean minimal", "heavy impact"), choose matching "fontFamily" ('Anton', 'Impact', 'Bebas Neue', 'Oswald', 'Outfit', 'Inter', 'Montserrat', 'Georgia') and appropriate "fontSize".
+- ANIMATION STYLE:
+  * If the user requests specific animation types (e.g. "pop only", "glitch effect", "smooth slide up", "typewriter", "bounce", "elastic"), set "animationIn" to that exact animation.
+- MULTI-DESIGN / EMPHASIS / BOXES:
+  * If the user asks for specific words to have different styles (e.g. "highlight numbers in green", "make action verbs big and red with dark box background"), differentiate those specific words using "color", "fontSize", "backgroundColor", and "strokeColor".
+════════════════════════════════════════════════════════════════════════════════
+`
     : '';
 
   // ─── Shared high-quality prompt for typography generation ──────────────────
   const prompt = `You are a world-class Kinetic Typography Director and Motion Graphics Designer.
 I am providing audio and visual frames of a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
-
+${customPromptInstruction}
 PRIMARY TASK: Generate a JSON array of text animation clips, STRICTLY WORD-BY-WORD.
 - CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE SPOKEN WORD.
 - Do NOT skip any words. Do NOT group multiple words into one object. Missing words will break the video sync.
@@ -99,19 +124,19 @@ ${casingInstruction ? `- ${casingInstruction}` : ''}${refScriptInstruction}
 
 LAYOUT REQUIREMENTS:
 ${options.typoLayout === 'column' 
-  ? "- COLUMN WISE (9:16 Short Video): Keep lines extremely short (1-3 words max). It is CRITICAL to set \"breakAfter\": true on words where a line break should naturally occur for dramatic pacing."
+  ? "- COLUMN WISE (9:16 Short Video / Reel): Keep lines extremely short (1-3 words max). It is CRITICAL to set \"breakAfter\": true on words where a line break should naturally occur for dramatic pacing."
   : "- ROW WISE (16:9 Landscape): Keep text flowing in wide lines. Set \"breakAfter\": true on words only when grammatically or visually necessary to prevent lines from exceeding 6-8 words."}
 
 DESIGNING AN EMOTIONALLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL RULES):
 1. SEMANTIC WEIGHT: Identify KEY emotional/emphatic words (nouns, verbs like 'NEVER', 'EXPLODE', 'LOVE', 'ROKNA').
-   - Key words: fontSize 85–120, bold vibrant color, dramatic animation (bounce, zoom, slideUp).
+   - Key words: fontSize 85–120, bold vibrant color, dramatic animation (bounce, zoom, slideUp, elastic, glitch).
    - Filler words (is, a, the, to, and, aur, ki, ka): fontSize 45–60, muted/white color, simple fadeIn.
-2. KINETIC DRIFT: Stagger positions word-by-word so they POP in different screen locations.
-   - x: between 30 and 70 (center screen, vary left/right)
-   - y: between 35 and 65 (vary upper/lower)
-   - Never place two consecutive words at the same x,y position.
-3. VIBRANT COLORS: Use high-contrast palette:
-   - Key words: '#fbbf24' yellow, '#22d3ee' cyan, '#f43f5e' rose-pink, '#a855f7' purple, '#22c55e' emerald.
+2. POSITIONING & COORDINATES:
+   - x: 0–100 screen percentage (50 = center, 20 = left, 80 = right)
+   - y: 0–100 screen percentage (50 = center, 20 = top/upper third, 80 = bottom/lower third)
+   ${customPromptText ? '- NOTE: Follow the USER CUSTOM INSTRUCTIONS above for target position (e.g. top/bottom/center).' : '- Stagger positions word-by-word (x: 35-65, y: 40-60) unless user custom instruction specifies otherwise.'}
+3. VIBRANT COLORS:
+   - Key words: high-contrast vibrant hex colors ('#fbbf24' yellow, '#22d3ee' cyan, '#f43f5e' rose-pink, '#a855f7' purple, '#22c55e' emerald, '#ef4444' red).
    - Filler words: '#ffffff' white or '#94a3b8' slate gray.
 4. TIMING PRECISION:
    - Each word's start/end should be tight (0.05–0.4s max for normal speech; 0.4–0.8s for slow/dramatic speech).
@@ -123,26 +148,28 @@ DESIGNING AN EMOTIONALLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL RULES):
 ${userStyle !== 'random' ? `STYLE PRESET PREFERENCE: Lean towards "${userStyle}" style where possible.` : ''}
 ${userAnim !== 'random' ? `ANIMATION PREFERENCE: Prefer "${userAnim}" for animation where applicable.` : ''}
 
-For each word, define:
-- "text": The single spoken word.
-- "start": Start time (seconds, 0–${clip.duration.toFixed(2)}).
-- "end": End time (seconds, 0–${clip.duration.toFixed(2)}).
-- "fontSize": 45–120.
-- "fontFamily": 'Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Outfit', 'Inter', 'Montserrat', or 'Georgia'.
-- "color": A vibrant hex color string.
-- "x": X position (30–70, as percentage of screen width).
-- "y": Y position (35–65, as percentage of screen height).
-- "breakAfter": true or false (AI intelligently decides line breaks based on layout requirements).
-- "animationIn": Choose from:
-  Basic: 'fadeIn', 'zoom', 'bounce', 'typewriter', 'slideUp', 'slideDown', 'slideLeft', 'slideRight'
-  Cinematic (prefer these for KEY words): 'elastic' (spring pop - best for hype/energy words), 'splitReveal' (cinematic title reveal - best for dramatic statements), 'revealWipe' (curtain wipe - best for reveals/announcements), 'rollUp' (film credit roll - best for lists/credits), 'scaleFlip' (dramatic snap - best for shocking words), 'zoomBlur' (blockbuster zoom - best for openers/big moments), 'glitch' (cyber jitter - best for tech/error/intensity words), 'letterSpacing' (expand in - best for brand names/titles)
-- "animationOut": Choose from:
-  Basic: 'fadeOut', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight'
-  Cinematic: 'elastic', 'splitReveal', 'revealWipe', 'rollUp', 'scaleFlip', 'zoomBlur', 'glitch', 'letterSpacing'
-- "stylePreset": Choose from: 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption'.
+JSON Schema for EACH word object in the returned array:
+- "text": string (the single spoken word)
+- "start": number (start time in seconds, 0–${clip.duration.toFixed(2)})
+- "end": number (end time in seconds, 0–${clip.duration.toFixed(2)})
+- "fontSize": number (45–120)
+- "fontFamily": string ('Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Outfit', 'Inter', 'Montserrat', or 'Georgia')
+- "color": string (vibrant hex color e.g. '#fbbf24')
+- "backgroundColor": string (optional, e.g. 'transparent', '#000000', 'rgba(0,0,0,0.7)', '#ff0055')
+- "backgroundStyle": string (optional, background shape ID: 'solid_pill', 'sharp_rect', 'slanted_rect', 'outline_box', 'marker_swipe', 'thick_brush', 'jagged_paint', 'splatter', 'spray_paint', 'hud_plate', 'cyber_bracket', 'neon_outline', 'glitch_box', 'action_burst', 'thought_cloud', 'speed_box', 'ribbon', 'torn_paper', 'ticket_stub', 'underline', 'double_underline', 'highlight', 'quote_bracket')
+- "strokeColor": string (optional, e.g. '#000000', '#ffffff', '#ffff00')
+- "strokeWidth": number (optional, 0, 1, 2, 3, or 4)
+- "shadowColor": string (optional hex, e.g. '#000000')
+- "rotation": number (optional degrees, e.g. -15 to 15, 0 for straight)
+- "x": number (0–100, 50 is center, 20 is left, 80 is right)
+- "y": number (0–100, 50 is center, 20 is top, 80 is bottom)
+- "breakAfter": boolean (true if line break should follow this word)
+- "animationIn": 'fadeIn' | 'zoom' | 'bounce' | 'typewriter' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'letterSpacing'
+- "animationOut": 'fadeOut' | 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'letterSpacing'
+- "stylePreset": string (e.g. 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption')
 
-Output ONLY a valid JSON array, no markdown, no explanation:${customPromptInstruction}
-[{"text":"Wow","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":52,"y":48,"breakAfter":false,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
+${customPromptText ? `CRITICAL REMINDER: You MUST strictly obey the user custom instruction: "${customPromptText}"\n` : ''}Output ONLY a valid JSON array, no markdown, no explanation:
+[{"text":"Word","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":50,"y":50,"breakAfter":false,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
   let resultJsonStr = '';
 
@@ -160,40 +187,32 @@ Output ONLY a valid JSON array, no markdown, no explanation:${customPromptInstru
         ? JSON.stringify(transcription.words, null, 2)
         : JSON.stringify(transcription.segments || transcription.text, null, 2);
 
-      const groqSystemPrompt = `You are a world-class Kinetic Typography Director.
+      const groqSystemPrompt = `You are a world-class Kinetic Typography Director and Motion Graphics Specialist.
 You have precise word-level timestamps from Whisper transcription. Your job is to create stunning, emotionally expressive typography animations.
+${customPromptInstruction}
 Rules:
 - Use the Whisper timestamps as the SOURCE OF TRUTH for word timing.
 - CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE WORD present in the Whisper transcription. Do NOT skip any words. Do NOT group words. Missing words will break the video sync.
 - Return ONLY a valid JSON array of word typography objects.
 - Each object MUST have all required fields: text, start, end, fontSize, fontFamily, color, x, y, breakAfter, animationIn, animationOut, stylePreset.
+- Optional fields: backgroundColor, backgroundStyle, strokeColor, strokeWidth, shadowColor, rotation.
 - Do NOT include any text, explanation, or markdown outside the JSON array.
+- STRICTLY RESPECT AND ENFORCE ANY USER CUSTOM INSTRUCTIONS.`;
 
-ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
-  Basic IN:  fadeIn, zoom, bounce, typewriter, slideUp, slideDown, slideLeft, slideRight
-  Cinematic IN (PREFER for KEY/EMOTIONAL words):
-    elastic      = spring overshoot pop (hype, energy, excitement words)
-    splitReveal  = cinematic title scale-reveal (dramatic statements, main subjects)
-    revealWipe   = curtain wipe left-to-right (announcements, reveals)
-    rollUp       = hard film-credit roll from below (list items, credits)
-    scaleFlip    = dramatic Y-snap pop (shock, surprise words)
-    zoomBlur     = blockbuster zoom slam (openers, powerful verbs)
-    glitch       = cyber XY jitter (tech, error, intensity, danger words)
-    letterSpacing= letters expand from compressed (brand names, titles)
-  OUT: fadeOut, zoom, slideUp/Down/Left/Right, elastic, splitReveal, revealWipe, rollUp, scaleFlip, zoomBlur, glitch, letterSpacing`;
-
-      const groqUserPrompt = `${prompt}\n\n---\nWHISPER WORD TIMESTAMPS (use these for precise timing):\n${wordTimestamps}\n\nGenerate the kinetic typography JSON array now:`;
+      const groqUserPrompt = `${prompt}\n\n---\nWHISPER WORD TIMESTAMPS (use these for precise timing):\n${wordTimestamps}\n\n${customPromptText ? `REMINDER OF USER CUSTOM INSTRUCTION (strictly apply this):\n"${customPromptText}"\n\n` : ''}Generate the kinetic typography JSON array now:`;
 
       resultJsonStr = await analyzeReasoningWithGroq(groqUserPrompt, groqSystemPrompt);
     }
     onProgress(85);
   } else {
-    // Gemini path
-    const { getLocalGeminiKey, getEnvGeminiKey } = await import('./apiKeyManager');
-    const gKey = getLocalGeminiKey() || getEnvGeminiKey();
-    if (!gKey) throw new Error('Gemini API Key is missing.');
-
+    // Gemini path with failover and systemInstruction
     const contentsParts: any[] = [{ text: prompt }];
+
+    if (customPromptText) {
+      contentsParts.push({
+        text: `CRITICAL USER CUSTOM INSTRUCTION (Strictly follow this): "${customPromptText}"`
+      });
+    }
 
     // Add audio if extracted
     if (audioDataPart) {
@@ -210,7 +229,12 @@ ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
       });
     }
 
-    const requestBody = {
+    const requestBody: any = {
+      systemInstruction: {
+        parts: [{
+          text: `You are a world-class Kinetic Typography Director and Motion Graphics Specialist. You generate precise word-by-word JSON typography objects strictly matching speech timing.\n${customPromptInstruction}`
+        }]
+      },
       contents: [{ parts: contentsParts }],
       generationConfig: {
         temperature: 0.3,
@@ -218,11 +242,15 @@ ANIMATION SELECTION GUIDE (pick cinematically for each word's emotional weight):
       }
     };
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${gKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
+    const response = await fetchWithKeyFailover(
+      (key) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      },
+      'gemini'
+    );
 
     if (!response.ok) {
       const errText = await response.text();
@@ -290,35 +318,51 @@ processedClips.push({
     // ── Mode 1: Word by Word ───────────────────────────────────
     processedClips.forEach((item: any) => {
       const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (item.stylePreset || '').toLowerCase());
-      const fontSz = item.fontSize || 60;
-      const fontFam = item.fontFamily || 'Anton';
-      const clr = item.color || '#ffffff';
+      
+      const fontSz = item.fontSize || (preset?.settings.fontSize ? Math.round(preset.settings.fontSize * 1.1) : 60);
+      const fontFam = item.fontFamily || preset?.settings.fontFamily || 'Anton';
+      const clr = item.color || preset?.settings.color || '#ffffff';
+      const bgClr = item.backgroundColor || preset?.settings.backgroundColor || 'transparent';
+      const bgStyle = item.backgroundStyle || preset?.settings.backgroundStyle;
+      const strkClr = item.strokeColor || preset?.settings.strokeColor;
+      const strkWidth = item.strokeWidth !== undefined ? item.strokeWidth : (preset?.settings.strokeWidth || (strkClr ? 2 : 0));
+      const shdw = item.shadow !== undefined ? item.shadow : (preset?.settings.shadow !== undefined ? preset.settings.shadow : true);
+      const shdwClr = item.shadowColor || preset?.settings.shadowColor || '#000000';
+      const shdwBlur = item.shadowBlur !== undefined ? item.shadowBlur : (preset?.settings.shadowBlur || 10);
+      const isBold = item.bold !== undefined ? item.bold : (preset?.settings.bold !== undefined ? preset.settings.bold : true);
+      const isItalic = item.italic !== undefined ? item.italic : (preset?.settings.italic || false);
+      const isUnderline = item.underline !== undefined ? item.underline : (preset?.settings.underline || false);
+      const rotation = item.rotation || 0;
 
       const textSettings: any = {
         text: item.text,
-        fontSize: preset ? (preset.settings.fontSize ? Math.round(preset.settings.fontSize * 0.9) : fontSz) : fontSz,
-        fontFamily: preset?.settings.fontFamily || fontFam,
-        color: preset?.settings.color || clr,
-        backgroundColor: preset?.settings.backgroundColor || 'transparent',
-        bold: preset ? (preset.settings.bold !== undefined ? preset.settings.bold : true) : true,
-        italic: preset ? (preset.settings.italic || false) : false,
-        underline: preset ? (preset.settings.underline || false) : false,
-        shadow: preset ? (preset.settings.shadow !== undefined ? preset.settings.shadow : true) : true,
-        shadowColor: preset?.settings.shadowColor || '#000000',
-        shadowBlur: 10,
+        fontSize: fontSz,
+        fontFamily: fontFam,
+        color: clr,
+        backgroundColor: bgClr,
+        backgroundStyle: bgStyle,
+        bold: isBold,
+        italic: isItalic,
+        underline: isUnderline,
+        shadow: shdw,
+        shadowColor: shdwClr,
+        shadowBlur: shdwBlur,
         textAlign: 'center',
         animation: {
-          in: item.animationIn === 'pop' ? 'zoom' : (item.animationIn || 'slideUp'),
+          in: item.animationIn === 'pop' ? 'zoom' : (item.animationIn || preset?.settings.animationPreset || 'slideUp'),
           out: item.animationOut || 'fadeOut',
           inDuration: 0.1,
           outDuration: 0.1
         }
       };
 
-      if (preset?.settings.strokeColor) {
-        textSettings.strokeColor = preset.settings.strokeColor;
-        textSettings.strokeWidth = preset.settings.strokeWidth || 2;
+      if (strkClr) {
+        textSettings.strokeColor = strkClr;
+        textSettings.strokeWidth = strkWidth;
       }
+
+      const posX = Math.round(((item.x !== undefined ? item.x : 50) - 50) * 8.54);
+      const posY = Math.round(((item.y !== undefined ? item.y : 50) - 50) * 4.8);
 
       newClips.push({
         id: uuidv4(),
@@ -329,7 +373,7 @@ processedClips.push({
         trimStart: 0,
         trimEnd: Math.max(0.1, item.end - item.start),
         opacity: 1,
-        transform: { x: Math.round((item.x - 50) * 8.54), y: Math.round((item.y - 50) * 4.8), scale: 100, rotation: 0 },
+        transform: { x: posX, y: posY, scale: 100, rotation: rotation },
         speed: 1,
         effects: [],
         textSettings
@@ -360,6 +404,51 @@ processedClips.push({
       const sEnd = grp[grp.length - 1].end;
       const sDuration = Math.max(0.2, sEnd - sStart);
       const firstW = grp[0];
+      const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (firstW.stylePreset || '').toLowerCase());
+
+      const avgX = grp.reduce((sum, w) => sum + (typeof w.x === 'number' ? w.x : (firstW.x ?? 50)), 0) / grp.length;
+      const avgY = grp.reduce((sum, w) => sum + (typeof w.y === 'number' ? w.y : (firstW.y ?? 75)), 0) / grp.length;
+      const posX = Math.round((avgX - 50) * 8.54);
+      const posY = Math.round((avgY - 50) * 4.8);
+
+      const fontSz = firstW.fontSize || 54;
+      const fontFam = firstW.fontFamily || preset?.settings.fontFamily || 'Inter';
+      const clr = firstW.color || preset?.settings.color || '#ffffff';
+      const bgClr = firstW.backgroundColor || preset?.settings.backgroundColor || 'transparent';
+      const bgStyle = firstW.backgroundStyle || preset?.settings.backgroundStyle;
+      const strkClr = firstW.strokeColor || preset?.settings.strokeColor;
+      const strkWidth = firstW.strokeWidth !== undefined ? firstW.strokeWidth : (preset?.settings.strokeWidth || (strkClr ? 2 : 0));
+      const shdw = firstW.shadow !== undefined ? firstW.shadow : (preset?.settings.shadow !== undefined ? preset.settings.shadow : true);
+      const shdwClr = firstW.shadowColor || preset?.settings.shadowColor || '#000000';
+      const shdwBlur = firstW.shadowBlur !== undefined ? firstW.shadowBlur : (preset?.settings.shadowBlur || 10);
+      const rotation = firstW.rotation || 0;
+
+      const textSettings: any = {
+        text: sentenceText,
+        fontSize: fontSz,
+        fontFamily: fontFam,
+        color: clr,
+        backgroundColor: bgClr,
+        backgroundStyle: bgStyle,
+        bold: firstW.bold !== undefined ? firstW.bold : true,
+        italic: firstW.italic !== undefined ? firstW.italic : false,
+        underline: firstW.underline !== undefined ? firstW.underline : false,
+        shadow: shdw,
+        shadowColor: shdwClr,
+        shadowBlur: shdwBlur,
+        textAlign: 'center',
+        animation: {
+          in: firstW.animationIn === 'pop' ? 'zoom' : (firstW.animationIn || 'slideUp'),
+          out: firstW.animationOut || 'fadeOut',
+          inDuration: 0.15,
+          outDuration: 0.15
+        }
+      };
+
+      if (strkClr) {
+        textSettings.strokeColor = strkClr;
+        textSettings.strokeWidth = strkWidth;
+      }
 
       newClips.push({
         id: uuidv4(),
@@ -370,29 +459,10 @@ processedClips.push({
         trimStart: 0,
         trimEnd: sDuration,
         opacity: 1,
-        transform: { x: 0, y: 160, scale: 100, rotation: 0 },
+        transform: { x: posX, y: posY, scale: 100, rotation: rotation },
         speed: 1,
         effects: [],
-        textSettings: {
-          text: sentenceText,
-          fontSize: 54,
-          fontFamily: firstW.fontFamily || 'Inter',
-          color: firstW.color || '#ffffff',
-          backgroundColor: 'transparent',
-          bold: true,
-          italic: false,
-          underline: false,
-          shadow: true,
-          shadowColor: '#000000',
-          shadowBlur: 10,
-          textAlign: 'center',
-          animation: {
-            in: firstW.animationIn || 'slideUp',
-            out: 'fadeOut',
-            inDuration: 0.15,
-            outDuration: 0.15
-          }
-        }
+        textSettings
       });
     });
   } else {
@@ -423,6 +493,13 @@ processedClips.push({
       const primaryClipId = uuidv4();
       const pipId = uuidv4();
 
+      // Compute sentence container center position from AI word x,y positions
+      const firstW = grp[0];
+      const avgX = grp.reduce((sum, w) => sum + (typeof w.x === 'number' ? w.x : (firstW.x ?? 50)), 0) / grp.length;
+      const avgY = grp.reduce((sum, w) => sum + (typeof w.y === 'number' ? w.y : (firstW.y ?? 50)), 0) / grp.length;
+      const containerX = Math.round((avgX - 50) * 8.54);
+      const containerY = Math.round((avgY - 50) * 4.8);
+
       // Main timeline primary text container clip for this sentence
       const primaryClip: TimelineClip = {
         id: primaryClipId,
@@ -433,7 +510,7 @@ processedClips.push({
         trimStart: 0,
         trimEnd: sDuration,
         opacity: 1,
-        transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+        transform: { x: containerX, y: containerY, scale: 100, rotation: 0 },
         speed: 1,
         effects: [],
         pipWindowIds: [pipId],
@@ -468,16 +545,16 @@ processedClips.push({
       const maxLineWidth = isColumn ? 420 : 860; // constrain width based on layout
       
       const totalChars = fullSentenceText.length;
-      let fontSize = 54;
+      let baseFontSize = 54;
       if (isColumn) {
-        fontSize = Math.min(68, Math.max(42, Math.floor(500 / Math.max(1, totalChars * 0.4))));
+        baseFontSize = Math.min(68, Math.max(42, Math.floor(500 / Math.max(1, totalChars * 0.4))));
       } else {
-        fontSize = Math.min(54, Math.max(36, Math.floor(760 / Math.max(1, totalChars * 0.52))));
+        baseFontSize = Math.min(54, Math.max(36, Math.floor(760 / Math.max(1, totalChars * 0.52))));
       }
       
-      const charWidth = fontSize * 0.65;
-      const spaceWidth = fontSize * 0.4;
-      const lineHeight = fontSize * 1.35;
+      const charWidth = baseFontSize * 0.65;
+      const spaceWidth = baseFontSize * 0.4;
+      const lineHeight = baseFontSize * 1.35;
 
       const lines: { word: any; width: number }[][] = [[]];
       let currentLineWidth = 0;
@@ -518,7 +595,47 @@ processedClips.push({
           const wordDuration = Math.max(0.1, sDuration - wordRelStart);
 
           const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (word.stylePreset || '').toLowerCase());
-          const wordColor = preset?.settings.color || word.color || '#fbbf24';
+          const wordColor = word.color || preset?.settings.color || '#fbbf24';
+          const wordFontFamily = word.fontFamily || preset?.settings.fontFamily || 'Inter';
+          const wordFontSize = word.fontSize || baseFontSize;
+          const wordBgColor = word.backgroundColor || preset?.settings.backgroundColor || 'transparent';
+          const wordBgStyle = word.backgroundStyle || preset?.settings.backgroundStyle;
+          const wordStrokeColor = word.strokeColor || preset?.settings.strokeColor;
+          const wordStrokeWidth = word.strokeWidth !== undefined ? word.strokeWidth : (preset?.settings.strokeWidth || (wordStrokeColor ? 2 : 0));
+          const wordShadow = word.shadow !== undefined ? word.shadow : (preset?.settings.shadow !== undefined ? preset.settings.shadow : true);
+          const wordShadowColor = word.shadowColor || preset?.settings.shadowColor || '#000000';
+          const wordShadowBlur = word.shadowBlur !== undefined ? word.shadowBlur : (preset?.settings.shadowBlur || 12);
+          const wordBold = word.bold !== undefined ? word.bold : (preset?.settings.bold !== undefined ? preset.settings.bold : true);
+          const wordItalic = word.italic !== undefined ? word.italic : (preset?.settings.italic || false);
+          const wordUnderline = word.underline !== undefined ? word.underline : (preset?.settings.underline || false);
+          const rotation = word.rotation || 0;
+
+          const wordTextSettings: any = {
+            text: word.text,
+            fontSize: wordFontSize,
+            fontFamily: wordFontFamily,
+            color: wordColor,
+            backgroundColor: wordBgColor,
+            backgroundStyle: wordBgStyle,
+            bold: wordBold,
+            italic: wordItalic,
+            underline: wordUnderline,
+            shadow: wordShadow,
+            shadowColor: wordShadowColor,
+            shadowBlur: wordShadowBlur,
+            textAlign: 'center',
+            animation: {
+              in: word.animationIn === 'pop' ? 'zoom' : (word.animationIn || 'bounce'),
+              out: word.animationOut || 'fadeOut',
+              inDuration: 0.1,
+              outDuration: 0.1
+            }
+          };
+
+          if (wordStrokeColor) {
+            wordTextSettings.strokeColor = wordStrokeColor;
+            wordTextSettings.strokeWidth = wordStrokeWidth;
+          }
 
           const wordClip: TimelineClip = {
             id: uuidv4(),
@@ -533,7 +650,7 @@ processedClips.push({
               x: posX,
               y: posY,
               scale: 100,
-              rotation: 0
+              rotation: rotation
             },
             speed: 1,
             effects: [],
@@ -547,39 +664,51 @@ processedClips.push({
                 { time: 0.06, value: 1, easing: 'linear' }
               ]
             },
-            textSettings: {
-              text: word.text,
-              fontSize: fontSize,
-              fontFamily: preset?.settings.fontFamily || word.fontFamily || 'Inter',
-              color: wordColor,
-              backgroundColor: 'transparent',
-              bold: true,
-              italic: false,
-              underline: false,
-              shadow: true,
-              shadowColor: '#000000',
-              shadowBlur: 12,
-              textAlign: 'center',
-              animation: {
-                in: word.animationIn || 'bounce',
-                out: 'fadeOut',
-                inDuration: 0.1,
-                outDuration: 0.1
-              }
-            }
+            textSettings: wordTextSettings
           };
 
           const pTrackId = uuidv4();
           wordClip.trackId = pTrackId;
-          pipTracks.push({
-            id: pTrackId,
-            name: `Word (${word.text})`,
-            type: 'text',
-            clips: [wordClip],
-            locked: false,
-            muted: false,
-            hidden: false
-          });
+
+          const activeDuration = Math.max(0.1, word.end - word.start);
+
+          if (activeDuration < wordDuration - 0.05) {
+            wordClip.duration = activeDuration;
+            wordClip.trimEnd = activeDuration;
+            
+            const inactiveClip: TimelineClip = JSON.parse(JSON.stringify(wordClip));
+            inactiveClip.id = uuidv4();
+            inactiveClip.startTime = wordRelStart + activeDuration;
+            inactiveClip.duration = wordDuration - activeDuration;
+            inactiveClip.trimEnd = inactiveClip.duration;
+            if (inactiveClip.textSettings) {
+              inactiveClip.textSettings.color = '#ffffff'; 
+              if (inactiveClip.textSettings.backgroundColor && inactiveClip.textSettings.backgroundColor !== 'transparent') {
+                 inactiveClip.textSettings.backgroundColor = 'rgba(0,0,0,0.5)';
+              }
+            }
+            inactiveClip.animations = {}; 
+            
+            pipTracks.push({
+              id: pTrackId,
+              name: `Word (${word.text})`,
+              type: 'text',
+              clips: [wordClip, inactiveClip],
+              locked: false,
+              muted: false,
+              hidden: false
+            });
+          } else {
+            pipTracks.push({
+              id: pTrackId,
+              name: `Word (${word.text})`,
+              type: 'text',
+              clips: [wordClip],
+              locked: false,
+              muted: false,
+              hidden: false
+            });
+          }
         });
       });
 

@@ -22,7 +22,7 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
-import { findActiveTransition, getTransitionAudioGains } from '@/utils/transitionEngine';
+import { findActiveTransition, getTransitionAudioGains, getTransitionWindow } from '@/utils/transitionEngine';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
 // ---------------------------------------------------------------------------
@@ -1444,10 +1444,25 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // Compute next boundary: min(clip starts > ct, clip ends > ct)
         let nextBoundary = Infinity;
         for (const track of sortedTracksRef.current) {
-          for (const clip of track.clips) {
+          for (let i = 0; i < track.clips.length; i++) {
+            const clip = track.clips[i];
             const clipEnd = clip.startTime + clip.duration;
             if (clip.startTime > ct && clip.startTime < nextBoundary) nextBoundary = clip.startTime;
             if (clipEnd > ct && clipEnd < nextBoundary) nextBoundary = clipEnd;
+
+            // Also account for transition boundaries, otherwise the incoming clip
+            // isn't activated until its precise startTime, causing a hard-seek stall
+            // midway through the transition visual blend.
+            if (i > 0) {
+              const prevClip = track.clips[i - 1];
+              const transition = clip.transitionIn || prevClip.transitionOut;
+              if (transition && transition.duration > 0) {
+                const alignment = transition.params?.alignment || 'center';
+                const win = getTransitionWindow(clip.startTime, transition.duration, alignment, prevClip, clip);
+                if (win.start > ct && win.start < nextBoundary) nextBoundary = win.start;
+                if (win.end > ct && win.end < nextBoundary) nextBoundary = win.end;
+              }
+            }
           }
         }
         nextClipBoundaryRef.current = nextBoundary;

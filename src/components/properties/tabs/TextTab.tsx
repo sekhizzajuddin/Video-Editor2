@@ -7,6 +7,7 @@ import {
   TextColorSection,
   TextStyleButtonsSection,
   TextShadowSection,
+  TextBackgroundSection,
 } from './text';
 
 interface TextTabProps {
@@ -64,6 +65,15 @@ export function TextTab({ selectedClip, updateClip }: TextTabProps) {
         <TextShadowSection
           shadow={textSettings.shadow || false}
           onToggle={() => updateClip(selectedClip.id, { textSettings: { ...textSettings, shadow: !textSettings.shadow } })}
+        />
+
+        <div className="h-px bg-white/10 my-2" />
+
+        <TextBackgroundSection
+          backgroundColor={textSettings.backgroundColor}
+          backgroundStyle={textSettings.backgroundStyle}
+          onChangeColor={(val) => updateClip(selectedClip.id, { textSettings: { ...textSettings, backgroundColor: val } })}
+          onChangeStyle={(val) => updateClip(selectedClip.id, { textSettings: { ...textSettings, backgroundStyle: val } })}
         />
       </div>
     </div>

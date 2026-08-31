@@ -45,6 +45,7 @@ import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
 import { getClipDimensions } from './previewMath';
 import { resolveBlendPlan } from '@/utils/blendCompositor';
 import { applyMotionEffect } from '@/utils/motionEffects';
+import { drawTextBackground } from '@/utils/textBackgrounds';
 import {
   findActiveTransition,
   buildTransitionPlan,
@@ -1838,25 +1839,22 @@ export async function renderCanvasEngine({
       const paddingY = textHeight * 0.3;
 
       if (ts.backgroundColor && ts.backgroundColor !== 'transparent') {
-        ctx.fillStyle = ts.backgroundColor;
         const bgX = -(maxLineWidth / 2) - paddingX;
         const bgY = -(blockHeight / 2) - paddingY;
         const bgW = maxLineWidth + paddingX * 2;
         const bgH = blockHeight + paddingY * 2;
-        const radius = Math.min(8, bgH / 4);
         
-        ctx.beginPath();
-        ctx.moveTo(bgX + radius, bgY);
-        ctx.lineTo(bgX + bgW - radius, bgY);
-        ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
-        ctx.lineTo(bgX + bgW, bgY + bgH - radius);
-        ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
-        ctx.lineTo(bgX + radius, bgY + bgH);
-        ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
-        ctx.lineTo(bgX, bgY + radius);
-        ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
-        ctx.closePath();
-        ctx.fill();
+        // Prevent shadowing on the background itself unless it's a solid box where it might look okay.
+        // Actually, let's keep it simple and just draw it.
+        drawTextBackground(
+          ctx,
+          ts.backgroundStyle || 'solid_pill',
+          bgX,
+          bgY,
+          bgW,
+          bgH,
+          ts.backgroundColor
+        );
       }
 
       if (ts.shadow) {

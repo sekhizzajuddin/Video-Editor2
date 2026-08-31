@@ -5,3 +5,4 @@ export { FontSizeSection } from './FontSizeSection';
 export { TextColorSection } from './TextColorSection';
 export { TextStyleButtonsSection } from './TextStyleButtonsSection';
 export { TextShadowSection } from './TextShadowSection';
+export * from './TextBackgroundSection';

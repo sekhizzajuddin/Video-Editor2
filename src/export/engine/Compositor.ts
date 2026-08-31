@@ -13,6 +13,7 @@ import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { drawPerspectiveTexture, getProjectedCorners } from '@/utils/canvasEffects';
 import { generateObjectRemovalInpaint } from '@/utils/objectRemoval';
 import { applyPreRenderedMaskIfAvailable, preRenderedMaskCache } from '@/utils/aiBackground';
+import { drawTextBackground } from '@/utils/textBackgrounds';
 
 const IDENTITY_CURVE_LUT = (() => {
   const lut = new Uint8ClampedArray(256);
@@ -1044,20 +1045,16 @@ export class Compositor {
       const bgY = -(blockHeight / 2) - paddingY;
       const bgW = maxWidth + paddingX * 2;
       const bgH = blockHeight + paddingY * 2;
-      const radius = Math.min(8, bgH / 4);
-      ctx.fillStyle = ts.backgroundColor;
-      ctx.beginPath();
-      ctx.moveTo(bgX + radius, bgY);
-      ctx.lineTo(bgX + bgW - radius, bgY);
-      ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
-      ctx.lineTo(bgX + bgW, bgY + bgH - radius);
-      ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
-      ctx.lineTo(bgX + radius, bgY + bgH);
-      ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
-      ctx.lineTo(bgX, bgY + radius);
-      ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
-      ctx.closePath();
-      ctx.fill();
+      
+      drawTextBackground(
+        ctx,
+        ts.backgroundStyle || 'solid_pill',
+        bgX,
+        bgY,
+        bgW,
+        bgH,
+        ts.backgroundColor
+      );
     }
 
     if (ts.shadow) {

@@ -13,6 +13,8 @@ export interface TextTemplatePreset {
   settings: {
     fontSize: number;
     color: string;
+    backgroundColor?: string;
+    backgroundStyle?: string;
     fontFamily: string;
     bold?: boolean;
     italic?: boolean;
@@ -20,7 +22,6 @@ export interface TextTemplatePreset {
     shadow?: boolean;
     shadowColor?: string;
     shadowBlur?: number;
-    backgroundColor?: string;
     strokeColor?: string;
     strokeWidth?: number;
     animationPreset?: string;

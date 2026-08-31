@@ -240,6 +240,7 @@ export interface ClipTextSettings {
   fontSize: number;
   color: string;
   backgroundColor: string;
+  backgroundStyle?: string;
   bold: boolean;
   italic: boolean;
   underline: boolean;
