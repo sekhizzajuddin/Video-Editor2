@@ -32,7 +32,9 @@ import {
   Crop,
   Pipette,
   Crosshair,
+  Film,
 } from 'lucide-react';
+import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useState, useRef, useEffect, useCallback, useMemo, Fragment, lazy, Suspense } from 'react';
@@ -182,7 +184,7 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
         aria-valuemin={0}
         aria-valuemax={360}
         aria-valuetext={`Hue: ${hue}°, Saturation: ${sat}%`}
-        className="w-16 h-16 rounded-full relative cursor-crosshair border border-[#3e3e3e] shadow-[inset_0_0_6px_rgba(0,0,0,0.6)] select-none touch-none focus:outline-none focus:ring-1 focus:ring-amber-500"
+        className="w-16 h-16 rounded-full relative cursor-crosshair border border-[var(--theme-border)] shadow-[inset_0_0_6px_rgba(0,0,0,0.6)] select-none touch-none focus:outline-none focus:ring-1 focus:ring-amber-500"
         style={{
           backgroundColor: '#3a3a3a',
           background: 'conic-gradient(from 0deg, red, yellow, lime, cyan, blue, magenta, red)',
@@ -212,14 +214,14 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
       </div>
 
       {/* Info labels */}
-      <div className="flex justify-between w-full text-[8px] text-[#a0a0a0] px-0.5 font-mono">
+      <div className="flex justify-between w-full text-[8px] text-[var(--theme-text-muted)] px-0.5 font-mono">
         <span>H: {hue}°</span>
         <span>S: {sat}%</span>
       </div>
 
       {/* Brightness/Lift Slider */}
-      <div className="w-full space-y-1 mt-1 border-t border-[#3e3e3e]/30 pt-1">
-        <div className="flex justify-between text-[8px] text-[#a0a0a0] font-mono px-0.5">
+      <div className="w-full space-y-1 mt-1 border-t border-[var(--theme-border)]/30 pt-1">
+        <div className="flex justify-between text-[8px] text-[var(--theme-text-muted)] font-mono px-0.5">
           <span>Lift</span>
           <span>{lift > 0 ? `+${lift}` : lift}</span>
         </div>
@@ -232,7 +234,7 @@ function ColorWheel({ label, value, onChange, accentColor }: ColorWheelProps) {
           onMouseUp={() => scheduleSaveSnapshot()}
           onDoubleClick={() => onChange({ hue, saturation: sat, lift: 0 })}
           title="Double-click to reset lift to 0"
-          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
         />
       </div>
     </div>
@@ -415,6 +417,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   })));
 
   const [mobileSubTab, setMobileSubTab] = useState<string>('');
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const [isClipDetailsOpen, setIsClipDetailsOpen] = useState(true);
 
   const currentTab = (isMobileView && mobileCategory)
     ? (mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : (mobileCategory as any))
@@ -1330,6 +1335,55 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
+  const selectedClipsList = useMemo(() => {
+    const ids = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
+    const list: { clip: any; track: any; media?: any }[] = [];
+    for (const track of tracks) {
+      for (const c of track.clips) {
+        if (ids.includes(c.id)) {
+          const media = mediaLibrary.find((m) => m.id === c.mediaId);
+          list.push({ clip: c, track, media });
+        }
+      }
+    }
+    return list;
+  }, [selectedClipIds, selectedClipId, tracks, mediaLibrary]);
+
+  const selectedMediaItem = mediaLibrary.find((m) => m.id === selectedClip?.mediaId);
+  const clipDisplayName = selectedClip?.name || selectedMediaItem?.name || 'Project_01.mp4';
+  const clipDurationStr = formatDuration(selectedClip?.duration || selectedMediaItem?.duration || 0);
+  const clipResolutionStr = selectedMediaItem?.height ? `${selectedMediaItem.height}p` : '1080p';
+  const clipAspectStr = selectedMediaItem?.width && selectedMediaItem?.height
+    ? (Math.abs(selectedMediaItem.width / selectedMediaItem.height - 16 / 9) < 0.1 ? '16:9' : Math.abs(selectedMediaItem.width / selectedMediaItem.height - 9 / 16) < 0.1 ? '9:16' : '1:1')
+    : '16:9';
+  const clipMetaSubtitle = `${clipResolutionStr} · ${clipAspectStr} · ${clipDurationStr}`;
+
+  const handleReplaceMediaFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedClip) return;
+    try {
+      const url = URL.createObjectURL(file);
+      const newMedia = {
+        id: `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: file.name,
+        type: file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image',
+        url,
+        size: file.size,
+        duration: 0,
+        createdAt: Date.now()
+      };
+      addMedia(newMedia as any);
+      useEditorStore.getState().replaceClipMedia(selectedClip.id, newMedia.id);
+      toast.success('Media replaced successfully');
+    } catch (err: any) {
+      toast.error('Failed to replace media');
+    } finally {
+      if (replaceFileInputRef.current) {
+        replaceFileInputRef.current.value = '';
+      }
+    }
+  };
+
   const baseTabs: { id: PropertiesTab; label: string; icon: any }[] = [];
 
   // Always show Text tab first if the clip has textSettings
@@ -1393,9 +1447,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
 
     return (
-      <div className={`h-full flex flex-col ${isMobileView ? 'bg-transparent text-white' : 'bg-[#252525] border-l border-[#3e3e3e]'}`}>
+      <div className={`h-full flex flex-col ${isMobileView ? 'bg-transparent text-white' : 'bg-[var(--theme-bg-subpanel)] border-l border-[var(--theme-border)]'}`}>
         {/* Header */}
-        <div className={`p-4 flex items-center justify-between ${isMobileView ? 'border-b border-white/10 shrink-0' : 'border-b border-[#3e3e3e]'}`}>
+        <div className={`p-4 flex items-center justify-between ${isMobileView ? 'border-b border-white/10 shrink-0' : 'border-b border-[var(--theme-border)]'}`}>
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-purple-600/20 text-purple-400 rounded">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1404,14 +1458,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
             <div>
               <h3 className="text-sm font-semibold text-white">Transition Settings</h3>
-              <p className="text-[11px] text-[#a0a0a0] truncate max-w-[180px]">
+              <p className="text-[11px] text-[var(--theme-text-muted)] truncate max-w-[180px]">
                 {selectedTransition.name || kindInfo?.label || selectedTransition.type}
               </p>
             </div>
           </div>
           <button
             onClick={() => { if (isMobileView && onMobileClose) { onMobileClose(); } else { useEditorStore.getState().selectTransition(null); } }}
-            className={`p-1 rounded transition-colors ${isMobileView ? "bg-white/5 text-white/50 hover:text-white hover:bg-white/10" : "hover:bg-[#3e3e3e] text-[#a0a0a0] hover:text-white"}`}
+            className={`p-1 rounded transition-colors ${isMobileView ? "bg-white/5 text-white/50 hover:text-white hover:bg-white/10" : "hover:bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-white"}`}
           >
             <X className="w-4 h-4" />
           </button>
@@ -1420,24 +1474,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         {/* Content */}
         <div className={`flex-1 p-4 space-y-4 overflow-y-auto ${isMobileView ? "mobile-no-scrollbar" : ""}`}>
           {/* Effect type */}
-          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+          <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
             <label className="text-xs text-white font-medium block">Effect</label>
             <div className="relative">
               <select
                 value={norm.kind}
                 onChange={(e) => setParam('kind', e.target.value)}
-                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+                className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
               >
                 {TRANSITION_KIND_INFO.map((k) => (
                   <option key={k.kind} value={k.kind}>{k.label}</option>
                 ))}
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)] absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
           </div>
 
           {/* Duration */}
-          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+          <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
             <div className="flex justify-between items-center">
               <label className="text-xs text-white font-medium">Duration</label>
               <span className="text-xs font-mono text-purple-300">
@@ -1458,51 +1512,51 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 }
                 updateTransition(selectedTransitionClip.id, { duration: val });
               }}
-              className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
+              className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
             />
-            <div className="flex justify-between text-[9px] text-[#a0a0a0]">
+            <div className="flex justify-between text-[9px] text-[var(--theme-text-muted)]">
               <span>0.1s</span>
               <span>max {maxDuration.toFixed(2)}s</span>
             </div>
           </div>
 
           {/* Alignment */}
-          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+          <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
             <label className="text-xs text-white font-medium block">Alignment</label>
             <div className="relative">
               <select
                 value={alignment}
                 onChange={(e) => setParam('alignment', e.target.value)}
-                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+                className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
               >
                 <option value="center">Center at Cut</option>
                 <option value="left">Start at Cut</option>
                 <option value="right">End at Cut</option>
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)] absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
           </div>
 
           {/* Easing */}
-          <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+          <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
             <label className="text-xs text-white font-medium block">Easing</label>
             <div className="relative">
               <select
                 value={norm.easing}
                 onChange={(e) => updateTransition(selectedTransitionClip.id, { easing: e.target.value })}
-                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
+                className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
               >
                 {TRANSITION_EASINGS.map((e) => (
                   <option key={e.value} value={e.value}>{e.label}</option>
                 ))}
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0] absolute right-2.5 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)] absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
           </div>
 
           {/* Direction — only for effects that travel */}
           {supports('direction') && (
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
               <label className="text-xs text-white font-medium block">Direction</label>
               <div className="grid grid-cols-4 gap-1">
                 {directions.map((d) => (
@@ -1512,7 +1566,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     className={`py-1.5 text-[10px] rounded border transition-colors ${
                       norm.direction === d.v
                         ? 'bg-purple-600 border-purple-500 text-white'
-                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-purple-500/50'
+                        : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white hover:border-purple-500/50'
                     }`}
                   >
                     {d.label}
@@ -1524,7 +1578,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
           {/* Zoom direction */}
           {supports('zoomDirection') && (
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
               <label className="text-xs text-white font-medium block">Zoom</label>
               <div className="grid grid-cols-2 gap-1">
                 {['in', 'out'].map((z) => (
@@ -1534,7 +1588,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     className={`py-1.5 text-[10px] rounded border capitalize transition-colors ${
                       norm.zoomDirection === z
                         ? 'bg-purple-600 border-purple-500 text-white'
-                        : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-purple-500/50'
+                        : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white hover:border-purple-500/50'
                     }`}
                   >
                     Zoom {z}
@@ -1546,7 +1600,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
           {/* Edge softness — wipes only */}
           {supports('softness') && (
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
               <div className="flex justify-between items-center">
                 <label className="text-xs text-white font-medium">Edge Softness</label>
                 <span className="text-xs font-mono text-purple-300">
@@ -1560,14 +1614,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 step={0.01}
                 value={norm.softness}
                 onChange={(e) => setParam('softness', parseFloat(e.target.value))}
-                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
+                className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
               />
             </div>
           )}
 
           {/* Intensity */}
           {supports('intensity') && (
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
               <div className="flex justify-between items-center">
                 <label className="text-xs text-white font-medium">Intensity</label>
                 <span className="text-xs font-mono text-purple-300">
@@ -1581,7 +1635,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 step={0.01}
                 value={norm.intensity}
                 onChange={(e) => setParam('intensity', parseFloat(e.target.value))}
-                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
+                className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full"
               />
             </div>
           )}
@@ -1602,16 +1656,16 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   if (selectedSubtitle) {
     return (
-      <div className={`h-full flex flex-col ${isMobileView ? "bg-transparent text-white" : "bg-[#252525] border-l border-[#3e3e3e]"}`}>
+      <div className={`h-full flex flex-col ${isMobileView ? "bg-transparent text-white" : "bg-[var(--theme-bg-subpanel)] border-l border-[var(--theme-border)]"}`}>
         {/* Header */}
-        <div className="p-4 border-b border-[#3e3e3e] flex items-center justify-between bg-[#1e1e1e]/30 shrink-0">
+        <div className="p-4 border-b border-[var(--theme-border)] flex items-center justify-between bg-[var(--theme-bg-subpanel)]/30 shrink-0">
           <div className="flex items-center gap-2">
             <Type className="w-4 h-4 text-amber-500" />
             <h3 className="text-sm font-semibold text-white">Subtitle Editor</h3>
           </div>
           <button
             onClick={() => deleteSubtitle(selectedSubtitle.id)}
-            className="p-1 hover:bg-[#3e3e3e] rounded text-red-400 hover:text-red-300 transition-colors"
+            className="p-1 hover:bg-[var(--theme-bg-subpanel)] rounded text-red-400 hover:text-red-300 transition-colors"
             title="Delete Subtitle"
           >
             <Trash2 className="w-4 h-4" />
@@ -1622,7 +1676,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         <div className="flex-1 p-4 space-y-4 overflow-y-auto scrollbar-thin min-h-0">
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] text-[#a0a0a0] uppercase font-semibold">Start Time (sec)</label>
+              <label className="text-[10px] text-[var(--theme-text-muted)] uppercase font-semibold">Start Time (sec)</label>
               <input
                 type="number"
                 step="0.01"
@@ -1636,11 +1690,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   }
                   updateSubtitle(selectedSubtitle.id, { startTime: newStart });
                 }}
-                className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
+                className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded p-2 focus:outline-none focus:border-amber-500"
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] text-[#a0a0a0] uppercase font-semibold">End Time (sec)</label>
+              <label className="text-[10px] text-[var(--theme-text-muted)] uppercase font-semibold">End Time (sec)</label>
               <input
                 type="number"
                 step="0.01"
@@ -1654,13 +1708,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   }
                   updateSubtitle(selectedSubtitle.id, { endTime: newEnd });
                 }}
-                className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
+                className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded p-2 focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] text-[#a0a0a0] uppercase font-semibold">Primary Text (English / Default)</label>
+            <label className="text-[10px] text-[var(--theme-text-muted)] uppercase font-semibold">Primary Text (English / Default)</label>
             <textarea
               value={selectedSubtitle.text}
               onChange={(e) => {
@@ -1673,18 +1727,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   }
                 });
               }}
-              className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
+              className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
             />
           </div>
 
           {/* Translations list */}
-          <div className="border-t border-[#3e3e3e]/40 pt-3 space-y-3">
+          <div className="border-t border-[var(--theme-border)]/40 pt-3 space-y-3">
             <span className="text-[10px] text-amber-500 font-bold uppercase tracking-wider block">Translations</span>
             {selectedSubtitle.translations && Object.entries(selectedSubtitle.translations).map(([lang, val]) => {
               if (lang === 'en') return null;
               return (
                 <div key={lang} className="flex flex-col gap-1.5">
-                  <span className="text-[10px] text-[#a0a0a0] uppercase font-semibold">Language: {lang.toUpperCase()}</span>
+                  <span className="text-[10px] text-[var(--theme-text-muted)] uppercase font-semibold">Language: {lang.toUpperCase()}</span>
                   <textarea
                     value={val}
                     onChange={(e) => {
@@ -1696,7 +1750,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         }
                       });
                     }}
-                    className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[50px] resize-none focus:outline-none focus:border-teal-500"
+                    className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded p-2 min-h-[50px] resize-none focus:outline-none focus:border-teal-500"
                   />
                 </div>
               );
@@ -1704,10 +1758,10 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           </div>
         </div>
         
-        <div className="p-3 border-t border-[#3e3e3e] bg-[#1e1e1e]/20 flex justify-end shrink-0">
+        <div className="p-3 border-t border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)]/20 flex justify-end shrink-0">
           <button
             onClick={() => selectSubtitle(null)}
-            className="px-4 py-1.5 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] text-white rounded text-xs transition-colors"
+            className="px-4 py-1.5 bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-white rounded text-xs transition-colors"
           >
             Close Subtitle Editor
           </button>
@@ -1768,21 +1822,21 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       );
     }
     return (
-      <div className={`h-full flex flex-col ${isMobileView ? "bg-transparent text-white" : "bg-[#252525] border-l border-[#3e3e3e]"}`}>
+      <div className={`h-full flex flex-col ${isMobileView ? "bg-transparent text-white" : "bg-[var(--theme-bg-subpanel)] border-l border-[var(--theme-border)]"}`}>
         {/* Tabs */}
-        <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
+        <div className="flex overflow-x-auto border-b border-[var(--theme-border)] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[var(--theme-bg-subpanel)]/50">
           {tabs.map((tab, idx) => {
             const Icon = tab.icon;
             const isActive = activePropertiesTab === tab.id;
             return (
               <Fragment key={tab.id}>
-                {idx > 0 && <div className="w-px h-5 bg-[#3e3e3e] self-center shrink-0 mx-1" />}
+                {idx > 0 && <div className="w-px h-5 bg-[var(--theme-bg-subpanel)] self-center shrink-0 mx-1" />}
                 <button
                   onClick={() => setActivePropertiesTab(tab.id)}
                   className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
                     isActive
-                      ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
-                      : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                      ? 'text-white border-b-2 border-amber-500 bg-[var(--theme-bg-card)]'
+                      : 'text-[var(--theme-text-muted)] hover:text-white hover:bg-[var(--theme-bg-card)]'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -1796,9 +1850,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         {currentTab === 'history' ? (
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Header */}
-            <div className="p-3 border-b border-[#3e3e3e] flex items-center justify-between shrink-0 bg-[#1e1e1e]/30">
+            <div className="p-3 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0 bg-[var(--theme-bg-subpanel)]/30">
               <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Undo/Redo History</span>
-              <span className="text-[9px] text-[#8a8a8a] bg-[#1e1e1e] border border-[#3e3e3e] rounded px-1.5 py-0.5 font-mono">
+              <span className="text-[9px] text-[#8a8a8a] bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded px-1.5 py-0.5 font-mono">
                 {history.length} Actions
               </span>
             </div>
@@ -1816,22 +1870,22 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       isActive
                         ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-medium shadow-md shadow-amber-500/5'
                         : isFuture
-                        ? 'bg-[#1e1e1e]/40 border-transparent text-[#a0a0a0]/40 hover:text-white hover:bg-[#2d2d2d]'
-                        : 'bg-[#1e1e1e]/60 border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                        ? 'bg-[var(--theme-bg-subpanel)]/40 border-transparent text-[var(--theme-text-muted)]/40 hover:text-white hover:bg-[var(--theme-bg-card)]'
+                        : 'bg-[var(--theme-bg-subpanel)]/60 border-transparent text-[var(--theme-text-muted)] hover:text-white hover:bg-[var(--theme-bg-card)]'
                     }`}
                   >
                     {/* Visual Line Node */}
                     <div className="relative flex items-center justify-center shrink-0 w-4">
                       {idx < history.length - 1 && (
                         <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
-                          isFuture ? 'bg-[#3e3e3e]/40' : 'bg-amber-500/30'
+                          isFuture ? 'bg-[var(--theme-bg-subpanel)]/40' : 'bg-amber-500/30'
                         }`} />
                       )}
                       <div className={`w-2.5 h-2.5 rounded-full border-2 ${
                         isActive
                           ? 'bg-amber-400 border-amber-400 ring-4 ring-amber-500/20 scale-110'
                           : isFuture
-                          ? 'bg-transparent border-[#3e3e3e]'
+                          ? 'bg-transparent border-[var(--theme-border)]'
                           : 'bg-amber-500/40 border-amber-500/80'
                       }`} />
                     </div>
@@ -1851,8 +1905,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           <div className="flex-1 flex items-center justify-center p-4">
             <div className="text-center">
               <Move3D className="w-10 h-10 text-[#3e3e3e] mx-auto mb-3" />
-              <p className="text-sm text-[#a0a0a0]">No clip selected</p>
-              <p className="text-xs text-[#a0a0a0] mt-1 opacity-60">
+              <p className="text-sm text-[var(--theme-text-muted)]">No clip selected</p>
+              <p className="text-xs text-[var(--theme-text-muted)] mt-1 opacity-60">
                 Click a clip on the timeline to edit its properties
               </p>
             </div>
@@ -2450,7 +2504,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const renderBlendModeSection = () => (
     <div className="space-y-3">
             {/* Blend Mode */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('blendMode') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('blendMode') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('blendMode')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
@@ -2466,12 +2520,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                     title="Reset Blend Mode & Intensity"
                   >
-                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
                   </div>
                   {collapsedSections['blendMode'] ? (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                   ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                   )}
                 </div>
               </button>
@@ -2483,31 +2537,31 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       updateClip(selectedClip.id, { transform: { ...selectedClip.transform, blendMode: e.target.value as GlobalCompositeOperation } });
                       scheduleSaveSnapshot();
                     }}
-                    className="w-full px-2 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 capitalize cursor-pointer"
+                    className="w-full px-2 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white focus:outline-none focus:border-amber-500 capitalize cursor-pointer"
                   >
-                    <optgroup label="Normal (Default)" className="bg-[#141414] text-gray-300 font-bold">
+                    <optgroup label="Normal (Default)" className="bg-[var(--theme-bg-subpanel)] text-gray-300 font-bold">
                       <option value="source-over">Normal</option>
                     </optgroup>
-                    <optgroup label="Darken (Subtract Light)" className="bg-[#141414] text-gray-300 font-bold">
+                    <optgroup label="Darken (Subtract Light)" className="bg-[var(--theme-bg-subpanel)] text-gray-300 font-bold">
                       <option value="multiply">Multiply</option>
                       <option value="darken">Darken</option>
                       <option value="color-burn">Color Burn</option>
                     </optgroup>
-                    <optgroup label="Lighten (Add Light)" className="bg-[#141414] text-gray-300 font-bold">
+                    <optgroup label="Lighten (Add Light)" className="bg-[var(--theme-bg-subpanel)] text-gray-300 font-bold">
                       <option value="screen">Screen</option>
                       <option value="lighten">Lighten</option>
                       <option value="color-dodge">Color Dodge</option>
                     </optgroup>
-                    <optgroup label="Contrast (High Dynamic)" className="bg-[#141414] text-gray-300 font-bold">
+                    <optgroup label="Contrast (High Dynamic)" className="bg-[var(--theme-bg-subpanel)] text-gray-300 font-bold">
                       <option value="overlay">Overlay</option>
                       <option value="hard-light">Hard Light</option>
                       <option value="soft-light">Soft Light</option>
                     </optgroup>
-                    <optgroup label="Inversion & Cancellation" className="bg-[#141414] text-gray-300 font-bold">
+                    <optgroup label="Inversion & Cancellation" className="bg-[var(--theme-bg-subpanel)] text-gray-300 font-bold">
                       <option value="difference">Difference</option>
                       <option value="exclusion">Exclusion</option>
                     </optgroup>
-                    <optgroup label="Color & HSL Grading" className="bg-[#141414] text-gray-300 font-bold">
+                    <optgroup label="Color & HSL Grading" className="bg-[var(--theme-bg-subpanel)] text-gray-300 font-bold">
                       <option value="hue">Hue</option>
                       <option value="saturation">Saturation</option>
                       <option value="color">Color</option>
@@ -2516,11 +2570,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </select>
 
                   {/* Blend Intensity Slider with Keyframe Control */}
-                  <div className="space-y-1.5 pt-2 border-t border-[#3e3e3e]/30">
+                  <div className="space-y-1.5 pt-2 border-t border-[var(--theme-border)]/30">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Blend Intensity (%)</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[#a0a0a0]">
+                        <span className="font-mono text-[var(--theme-text-muted)]">
                           {Math.round(getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity'))}%
                         </span>
                         <KeyframeControl
@@ -2553,7 +2607,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                       }}
                       onMouseUp={() => scheduleSaveSnapshot()}
-                      className="w-full h-1 bg-[#1e1e1e] rounded-lg accent-amber-500 cursor-pointer"
+                      className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-lg accent-amber-500 cursor-pointer"
                     />
                   </div>
                 </div>
@@ -2566,14 +2620,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     <div className={`space-y-3 ${!isSectionActive('keying') ? 'hidden' : ''}`}>
 
             {/* AI Background Removal */}
-            <div className="bg-[#1e1e1e] rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 p-3">
+            <div className="bg-[var(--theme-bg-subpanel)] rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 p-3">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-1.5 bg-cyan-500/20 rounded">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
                 </div>
                 <div>
                   <h4 className="text-[11px] font-semibold text-white">Magic Eraser (AI)</h4>
-                  <p className="text-[9px] text-[#a0a0a0]">Auto-detects and removes background</p>
+                  <p className="text-[9px] text-[var(--theme-text-muted)]">Auto-detects and removes background</p>
                 </div>
               </div>
               <label className="flex items-center gap-2 cursor-pointer mt-3">
@@ -2606,7 +2660,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       cleanupClipBackgroundState(selectedClip.id);
                     }
                   }}
-                  className="rounded bg-[#2a2a2a] border-[#3e3e3e] text-cyan-500 focus:ring-0 focus:ring-offset-0"
+                  className="rounded bg-[#2a2a2a] border-[var(--theme-border)] text-cyan-500 focus:ring-0 focus:ring-offset-0"
                 />
                 <span className="text-[11px] text-[#d0d0d0]">Enable AI Background Removal</span>
               </label>
@@ -2621,11 +2675,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         {bgAnalysisStatus.status === 'analyzing' ? 'AI Pre-rendering Masks...' : bgAnalysisStatus.status === 'completed' ? 'Real-Time 60 FPS Cache Ready' : 'Pre-calculate for 60 FPS Playback'}
                       </span>
                       {bgAnalysisStatus.status === 'analyzing' && (
-                        <span className="text-[10px] font-mono text-[#a0a0a0]">{bgAnalysisStatus.progress}% ({bgAnalysisStatus.processedFrames}/{bgAnalysisStatus.totalFrames})</span>
+                        <span className="text-[10px] font-mono text-[var(--theme-text-muted)]">{bgAnalysisStatus.progress}% ({bgAnalysisStatus.processedFrames}/{bgAnalysisStatus.totalFrames})</span>
                       )}
                     </div>
                     {bgAnalysisStatus.status === 'analyzing' && (
-                      <div className="w-full bg-[#1a1a1a] h-1.5 rounded-full overflow-hidden">
+                      <div className="w-full bg-[var(--theme-bg-subpanel)] h-1.5 rounded-full overflow-hidden">
                         <div className="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full transition-all duration-300" style={{ width: `${bgAnalysisStatus.progress}%` }} />
                       </div>
                     )}
@@ -2655,7 +2709,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
                   {/* Quality Mode */}
                   <div>
-                    <label className="block text-[10px] text-[#a0a0a0] mb-1 font-medium">Segmentation Quality</label>
+                    <label className="block text-[10px] text-[var(--theme-text-muted)] mb-1 font-medium">Segmentation Quality</label>
                     <select
                       value={selectedClip.aiBackground.modelSelection ?? 1}
                       onChange={(e) => {
@@ -2677,7 +2731,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           );
                         }
                       }}
-                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500 font-medium"
+                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500 font-medium"
                     >
                       <option value={1}>✨ High Accuracy HD (16:9 Landscape + Hair Matting)</option>
                       <option value={0}>⚡ Fast (Standard GPU Model)</option>
@@ -2687,7 +2741,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                   {/* Playback Quality */}
                   <div>
-                    <label className="block text-[10px] text-[#a0a0a0] mb-1 font-medium">Playback Quality</label>
+                    <label className="block text-[10px] text-[var(--theme-text-muted)] mb-1 font-medium">Playback Quality</label>
                     <select
                       value={selectedClip.aiBackground.playbackQuality ?? 'balanced'}
                       onChange={(e) => {
@@ -2698,7 +2752,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                         scheduleSaveSnapshot('Change AI Background Playback Quality');
                       }}
-                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
+                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
                     >
                       <option value="full">Full (Every Frame — Best Quality)</option>
                       <option value="balanced">Balanced (Smart Caching — Recommended)</option>
@@ -2710,7 +2764,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   {/* Edge Feather */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Edge Feather (Soften)</label>
+                      <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium">Edge Feather (Soften)</label>
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] text-cyan-400 font-mono">
                           {getPropVal(selectedClip.aiBackground.edgeBlur ?? 0, 'aiBackground.edgeBlur')}px
@@ -2756,7 +2810,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       colour fringe that segmentation always leaves behind. */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Matte Choke (Shrink / Grow)</label>
+                      <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium">Matte Choke (Shrink / Grow)</label>
                       <span className="text-[10px] text-cyan-400 font-mono">
                         {(selectedClip.aiBackground.choke ?? 0) > 0 ? '+' : ''}{selectedClip.aiBackground.choke ?? 0}px
                       </span>
@@ -2781,7 +2835,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   {/* Spill Suppression */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="block text-[10px] text-[#a0a0a0] font-medium">Spill Suppression</label>
+                      <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium">Spill Suppression</label>
                       <span className="text-[10px] text-cyan-400 font-mono">
                         {selectedClip.aiBackground.spillSuppression ?? 0}%
                       </span>
@@ -2806,7 +2860,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   {/* Spill colour target */}
                   {(selectedClip.aiBackground.spillSuppression ?? 0) > 0 && (
                     <div className="flex items-center gap-2">
-                      <label className="text-[10px] text-[#a0a0a0] font-medium flex-1">Spill Colour</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium flex-1">Spill Colour</label>
                       <input
                         type="color"
                         value={selectedClip.aiBackground.spillColor ?? '#00ff00'}
@@ -2815,7 +2869,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           updateClip(selectedClip.id, { aiBackground: { ...existing, spillColor: e.target.value } });
                           scheduleSaveSnapshot('Change AI Spill Colour');
                         }}
-                        className="w-8 h-6 bg-transparent border border-[#3e3e3e] rounded cursor-pointer"
+                        className="w-8 h-6 bg-transparent border border-[var(--theme-border)] rounded cursor-pointer"
                       />
                     </div>
                   )}
@@ -2824,7 +2878,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Chroma Key / Green Screen */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)]">
               <button
                 onClick={() => toggleSection('chromaKey')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -2836,13 +2890,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   )}
                 </span>
                 {collapsedSections['chromaKey'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('chromaKey') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Enable Toggle */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -2855,7 +2909,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                         scheduleSaveSnapshot();
                       }}
-                      className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-emerald-500 focus:ring-0 focus:ring-offset-0"
+                      className="rounded bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-emerald-500 focus:ring-0 focus:ring-offset-0"
                     />
                     <span className="text-[11px] text-[#d0d0d0]">Enable Chroma Key</span>
                   </label>
@@ -2864,7 +2918,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     <div className="space-y-3">
                       {/* Color Presets */}
                       <div className="space-y-1.5">
-                        <span className="text-[10px] text-[#a0a0a0] uppercase tracking-wider font-medium">Quick Presets</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)] uppercase tracking-wider font-medium">Quick Presets</span>
                         <div className="flex gap-1.5 flex-wrap">
                           {CHROMA_KEY_PRESETS.map((preset) => (
                             <button
@@ -2879,7 +2933,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                               className={`flex items-center gap-1 px-2 py-1 rounded border text-[10px] transition-colors ${
                                 selectedClip.chromaKey?.color?.toLowerCase() === preset.hex.toLowerCase()
                                   ? 'border-emerald-500 bg-emerald-500/10 text-white'
-                                  : 'border-[#3e3e3e] bg-[#1e1e1e] text-[#a0a0a0] hover:border-[#5e5e5e] hover:text-white'
+                                  : 'border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:border-[#5e5e5e] hover:text-white'
                               }`}
                             >
                               <span
@@ -2894,8 +2948,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                       {/* Active Color + Picker + Eyedropper + Auto-Detect */}
                       <div className="space-y-1.5">
-                        <span className="text-[10px] text-[#a0a0a0] uppercase tracking-wider font-medium">Key Color</span>
-                        <div className="flex items-center gap-2 bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
+                        <span className="text-[10px] text-[var(--theme-text-muted)] uppercase tracking-wider font-medium">Key Color</span>
+                        <div className="flex items-center gap-2 bg-[var(--theme-bg-subpanel)] p-2 rounded border border-[var(--theme-border)]">
                           <div
                             className="w-8 h-8 rounded border border-white/10 shrink-0 shadow-inner"
                             style={{ backgroundColor: selectedClip.chromaKey?.color || '#00ff00' }}
@@ -2922,7 +2976,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                               });
                             }}
                             onBlur={() => scheduleSaveSnapshot()}
-                            className="w-6 h-6 bg-transparent border-0 rounded cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border [&::-webkit-color-swatch]:border-[#3e3e3e] [&::-webkit-color-swatch]:rounded"
+                            className="w-6 h-6 bg-transparent border-0 rounded cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border [&::-webkit-color-swatch]:border-[var(--theme-border)] [&::-webkit-color-swatch]:rounded"
                           />
 
                           <button
@@ -2931,7 +2985,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             className={`p-1.5 rounded transition-colors ${
                               isPickingChromaColor
                                 ? 'bg-emerald-500 text-black'
-                                : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:bg-[#4e4e4e]'
+                                : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-white hover:bg-[#4e4e4e]'
                             }`}
                             title="Pick color from canvas"
                           >
@@ -2955,7 +3009,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                                 toast.success(`Auto-detected: ${color}`);
                               }
                             }}
-                            className="p-1.5 bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:bg-[#4e4e4e] transition-colors"
+                            className="p-1.5 bg-[var(--theme-bg-subpanel)] rounded text-[var(--theme-text-muted)] hover:text-white hover:bg-[#4e4e4e] transition-colors"
                             title="Auto-detect background from corners"
                           >
                             <Wand2 className="w-3.5 h-3.5" />
@@ -2968,7 +3022,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Threshold</span>
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.chromaKey?.threshold ?? 30, 'chromaKey.threshold'))}%</span>
+                            <span className="font-mono text-[var(--theme-text-muted)]">{Math.round(getPropVal(selectedClip.chromaKey?.threshold ?? 30, 'chromaKey.threshold'))}%</span>
                             <KeyframeControl
                               propertyKey="chromaKey.threshold"
                               value={getPropVal(selectedClip.chromaKey?.threshold ?? 30, 'chromaKey.threshold')}
@@ -2999,7 +3053,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             });
                           }}
                           onMouseUp={() => scheduleSaveSnapshot()}
-                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                         <div className="flex justify-between text-[9px] text-[#5a5a5a]">
                           <span>Precise</span>
@@ -3012,7 +3066,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Softness / Spill</span>
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.chromaKey?.softness ?? 10, 'chromaKey.softness'))}%</span>
+                            <span className="font-mono text-[var(--theme-text-muted)]">{Math.round(getPropVal(selectedClip.chromaKey?.softness ?? 10, 'chromaKey.softness'))}%</span>
                             <KeyframeControl
                               propertyKey="chromaKey.softness"
                               value={getPropVal(selectedClip.chromaKey?.softness ?? 10, 'chromaKey.softness')}
@@ -3043,7 +3097,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             });
                           }}
                           onMouseUp={() => scheduleSaveSnapshot()}
-                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                       </div>
 
@@ -3052,7 +3106,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Spill Suppression</span>
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.chromaKey?.spillSuppression ?? 0, 'chromaKey.spillSuppression'))}%</span>
+                            <span className="font-mono text-[var(--theme-text-muted)]">{Math.round(getPropVal(selectedClip.chromaKey?.spillSuppression ?? 0, 'chromaKey.spillSuppression'))}%</span>
                             <KeyframeControl
                               propertyKey="chromaKey.spillSuppression"
                               value={getPropVal(selectedClip.chromaKey?.spillSuppression ?? 0, 'chromaKey.spillSuppression')}
@@ -3084,7 +3138,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           }}
                           onMouseUp={() => scheduleSaveSnapshot()}
                           title="Reduces green/blue fringe on subject edges"
-                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                         <p className="text-[9px] text-[#5a5a5a]">Removes color reflection from subject edges</p>
                       </div>
@@ -3094,7 +3148,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-[#d0d0d0]">Edge Feather</span>
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-[#a0a0a0]">{getPropVal(selectedClip.chromaKey?.edgeFeather ?? 0, 'chromaKey.edgeFeather')}px</span>
+                            <span className="font-mono text-[var(--theme-text-muted)]">{getPropVal(selectedClip.chromaKey?.edgeFeather ?? 0, 'chromaKey.edgeFeather')}px</span>
                             <KeyframeControl
                               propertyKey="chromaKey.edgeFeather"
                               value={getPropVal(selectedClip.chromaKey?.edgeFeather ?? 0, 'chromaKey.edgeFeather')}
@@ -3127,7 +3181,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           }}
                           onMouseUp={() => scheduleSaveSnapshot()}
                           title="Softens the edges of the keyed area"
-                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                         <p className="text-[9px] text-[#5a5a5a]">Smooths harsh edges for natural compositing</p>
                       </div>
@@ -3138,20 +3192,20 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Luma Key / Luminance Thresholding */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)]">
               <button
                 onClick={() => toggleSection('lumaKey')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Luma Key (Luminance)</span>
                 {collapsedSections['lumaKey'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('lumaKey') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Enable Luma Key */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -3164,14 +3218,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                         scheduleSaveSnapshot();
                       }}
-                      className="rounded bg-[#1e1e1e] border-[#3e3e3e] text-amber-500 focus:ring-0 focus:ring-offset-0"
+                      className="rounded bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-amber-500 focus:ring-0 focus:ring-offset-0"
                     />
                     <span className="text-[11px] text-[#d0d0d0]">Enable Luma Key</span>
                   </label>
 
                   {/* Type Selection */}
                   <div className="space-y-1">
-                    <span className="text-[11px] text-[#a0a0a0]">Key Type</span>
+                    <span className="text-[11px] text-[var(--theme-text-muted)]">Key Type</span>
                     <div className="flex gap-2">
                       {(['light', 'dark'] as const).map((type) => (
                         <button
@@ -3185,8 +3239,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           }}
                           className={`flex-1 py-1 text-[11px] rounded border ${
                             (selectedClip.lumaKey?.type || 'light') === type
-                              ? 'bg-[#3e3e3e] border-amber-500/50 text-white'
-                              : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:bg-[#252525]'
+                              ? 'bg-[var(--theme-bg-subpanel)] border-amber-500/50 text-white'
+                              : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:bg-[var(--theme-bg-subpanel)]'
                           } capitalize`}
                         >
                           Key {type === 'light' ? 'Brights' : 'Darks'}
@@ -3200,7 +3254,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Threshold</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.lumaKey?.threshold ?? 100, 'lumaKey.threshold'))}%</span>
+                        <span className="font-mono text-[var(--theme-text-muted)]">{Math.round(getPropVal(selectedClip.lumaKey?.threshold ?? 100, 'lumaKey.threshold'))}%</span>
                         <KeyframeControl
                           propertyKey="lumaKey.threshold"
                           value={getPropVal(selectedClip.lumaKey?.threshold ?? 100, 'lumaKey.threshold')}
@@ -3231,7 +3285,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                       }}
                       onMouseUp={() => scheduleSaveSnapshot()}
-                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                   </div>
 
@@ -3240,7 +3294,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Softness / Spill</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[#a0a0a0]">{Math.round(getPropVal(selectedClip.lumaKey?.softness ?? 10, 'lumaKey.softness'))}%</span>
+                        <span className="font-mono text-[var(--theme-text-muted)]">{Math.round(getPropVal(selectedClip.lumaKey?.softness ?? 10, 'lumaKey.softness'))}%</span>
                         <KeyframeControl
                           propertyKey="lumaKey.softness"
                           value={getPropVal(selectedClip.lumaKey?.softness ?? 10, 'lumaKey.softness')}
@@ -3271,7 +3325,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                       }}
                       onMouseUp={() => scheduleSaveSnapshot()}
-                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                   </div>
                 </div>
@@ -3331,115 +3385,251 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         </>
       ) : (
         <>
-          {/* Desktop Tabs Header */}
-          <div className="flex overflow-x-auto border-b border-[var(--theme-border)] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] p-1.5 bg-[var(--theme-bg-subpanel)]/50 gap-1 select-none">
+          {/* Desktop Tabs Header (Flat Underline Style matching reference image) */}
+          <div className="flex overflow-x-auto border-b border-[var(--theme-border)] bg-[var(--theme-bg-panel)] px-3 gap-5 select-none scrollbar-none shrink-0">
             {tabs.map((tab) => {
-              const Icon = tab.icon;
               const isActive = activePropertiesTab === tab.id;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActivePropertiesTab(tab.id)}
-                  className={`flex-1 py-2 px-1.5 text-[10px] font-semibold uppercase tracking-wider flex flex-col items-center gap-1 transition-all rounded-lg ${
+                  className={`py-2.5 text-xs font-semibold relative transition-colors whitespace-nowrap ${
                     isActive
-                      ? 'text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-panel)] shadow-sm border border-[var(--theme-border)]'
-                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                      ? 'text-blue-600 dark:text-blue-400 font-bold'
+                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
                   <span>{tab.label}</span>
+                  {isActive && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400 rounded-full" />
+                  )}
                 </button>
               );
             })}
           </div>
 
-          {/* Clip Info Header */}
-          {currentTab !== 'history' && (
-            <div className="p-3 border-b border-[var(--theme-border)] bg-[var(--theme-bg-card)]">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-[var(--theme-text-primary)] flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  {selectedTrack?.name || 'Track'} <span className="text-[var(--theme-text-muted)] font-normal">/ Clip Inspector</span>
-                </span>
+          {/* Clip Details Section matching reference image */}
+          {currentTab !== 'history' && selectedClip && (
+            <div className="border-b border-[var(--theme-border)] bg-[var(--theme-bg-card)] p-3 space-y-2.5">
+              {/* Hidden file input for Replace */}
+              <input
+                ref={replaceFileInputRef}
+                type="file"
+                className="hidden"
+                accept="video/*,audio/*,image/*"
+                onChange={handleReplaceMediaFile}
+              />
+
+              {/* Section Accordion Title */}
+              <div className="flex items-center justify-between">
                 <button
-                  onClick={() => useEditorStore.getState().selectClip(null)}
-                  className="p-1 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors"
-                  title="Deselect Clip"
+                  type="button"
+                  onClick={() => setIsClipDetailsOpen(!isClipDetailsOpen)}
+                  className="flex items-center gap-1.5 text-xs font-bold text-[var(--theme-text-primary)] hover:text-blue-500 transition-colors"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  {isClipDetailsOpen ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
+                  )}
+                  <span>Clip Details</span>
+                  {selectedClipsList.length > 1 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 font-medium">
+                      {selectedClipsList.length} clips
+                    </span>
+                  )}
                 </button>
-              </div>
-              <div className="flex gap-1.5 flex-wrap">
-                <button
-                  onClick={() => {
-                    const currentMuted = selectedClip.audioSettings?.muted || false;
-                    const newSettings = {
-                      ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, tone: 0, humanize: false }),
-                      muted: !currentMuted
-                    };
-                    storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
-                    scheduleSaveSnapshot();
-                  }}
-                  title={selectedClip.audioSettings?.muted ? "Unmute Clip" : "Mute Clip"}
-                  className={`p-1.5 rounded-lg border transition-all ${
-                    selectedClip.audioSettings?.muted
-                      ? 'bg-red-600/15 text-red-500 border-red-500/30'
-                      : 'bg-[var(--theme-bg-panel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30'
-                  }`}
-                >
-                  {selectedClip.audioSettings?.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-                </button>
-                <button
-                  onClick={() => { copyClip('style'); toast.success('Style copied'); }}
-                  title="Copy Style"
-                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-purple-500 hover:text-purple-400 hover:border-purple-500/40 transition-colors"
-                >
-                  <Palette className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={() => { copyClip('whole'); toast.success('Clip copied'); }}
-                  title="Copy (Whole Clip)"
-                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30 transition-colors"
-                >
-                  <Copy className="w-3 h-3" />
-                </button>
-                {clipboardData?.clips?.length > 0 && (
+
+                <div className="flex items-center gap-1">
                   <button
-                    onClick={() => {
-                      const clipType = clipboardData.type;
-                      const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
-                      pasteClip(pasteType as any);
-                      toast.success('Style pasted to selected clip');
-                    }}
-                    title="Paste Style (Ctrl+Alt+V)"
-                    className="px-2 py-1 bg-purple-500/15 border border-purple-500/30 rounded-lg text-purple-600 dark:text-purple-300 hover:bg-purple-500/25 transition-colors flex items-center gap-1 text-[10px] font-semibold"
+                    onClick={() => useEditorStore.getState().selectClip(null)}
+                    className="p-1 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors"
+                    title="Deselect Clip"
                   >
-                    <Palette className="w-3 h-3 text-purple-500" />
-                    <span>Paste Style</span>
+                    <X className="w-3.5 h-3.5" />
                   </button>
-                )}
-                <button
-                  onClick={duplicateClip}
-                  title="Duplicate"
-                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30 transition-colors"
-                >
-                  <CopyPlus className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={() => splitClip(selectedClip.id, currentTime)}
-                  title="Split at playhead"
-                  className="p-1.5 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-lg text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/30 transition-colors"
-                >
-                  <Scissors className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={() => removeClip(selectedClip.id)}
-                  title="Delete Clip"
-                  className="p-1.5 bg-red-500/10 border border-red-500/25 rounded-lg text-red-500 hover:bg-red-500/20 transition-colors ml-auto"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                </div>
               </div>
+
+              {isClipDetailsOpen && (
+                <>
+                  {/* If Multiple Clips Selected: Display Horizontal Scroll Carousel */}
+                  {selectedClipsList.length > 1 ? (
+                    <div className="space-y-1.5">
+                      <div className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
+                        {selectedClipsList.map(({ clip: c, media: m }) => {
+                          const isPrimary = c.id === selectedClip?.id;
+                          const mName = c.name || m?.name || 'Clip';
+                          const mDur = formatDuration(c.duration || m?.duration || 0);
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => useEditorStore.getState().selectClip(c.id)}
+                              className={`shrink-0 w-32 p-1.5 rounded-xl border transition-all cursor-pointer bg-[var(--theme-bg-subpanel)] flex flex-col gap-1.5 ${
+                                isPrimary
+                                  ? 'border-blue-500 ring-2 ring-blue-500/40 shadow-sm'
+                                  : 'border-[var(--theme-border)] hover:border-blue-500/40'
+                              }`}
+                            >
+                              <div className="w-full h-16 rounded-lg overflow-hidden bg-black/40 relative flex items-center justify-center">
+                                {m?.url && (m.type === 'video' || m.type === 'image') ? (
+                                  m.type === 'video' ? (
+                                    <video src={m.url} className="w-full h-full object-cover pointer-events-none" />
+                                  ) : (
+                                    <img src={m.url} alt={mName} className="w-full h-full object-cover pointer-events-none" />
+                                  )
+                                ) : (
+                                  <Film className="w-5 h-5 text-[var(--theme-text-muted)] opacity-50" />
+                                )}
+                                <div className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/80 rounded text-[8px] font-mono text-white">
+                                  {mDur}
+                                </div>
+                              </div>
+                              <p className="text-[10px] font-bold text-[var(--theme-text-primary)] truncate">
+                                {mName}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Single Clip Preview Card matching reference image */
+                    <div className="p-2.5 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] flex items-center gap-3">
+                      <div className="w-16 h-12 rounded-lg bg-black/40 overflow-hidden relative shrink-0 border border-[var(--theme-border)] flex items-center justify-center">
+                        {selectedMediaItem?.url && (selectedMediaItem.type === 'video' || selectedMediaItem.type === 'image') ? (
+                          selectedMediaItem.type === 'video' ? (
+                            <video src={selectedMediaItem.url} className="w-full h-full object-cover pointer-events-none" />
+                          ) : (
+                            <img src={selectedMediaItem.url} alt={clipDisplayName} className="w-full h-full object-cover pointer-events-none" />
+                          )
+                        ) : (
+                          <Film className="w-5 h-5 text-[var(--theme-text-muted)] opacity-50" />
+                        )}
+                        {selectedClip?.duration > 0 && (
+                          <div className="absolute bottom-0.5 right-0.5 px-1 py-0.2 bg-black/80 rounded text-[7px] font-mono text-white">
+                            {formatDuration(selectedClip.duration)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-xs font-bold text-[var(--theme-text-primary)] truncate">
+                          {clipDisplayName}
+                        </h4>
+                        <p className="text-[10px] text-[var(--theme-text-muted)] mt-0.5 font-mono">
+                          {clipMetaSubtitle}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions Row: [ Replace ] [ Cut ] [ Delete ] [ ... ] */}
+                  <div className="relative">
+                    <div className="grid grid-cols-4 gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => replaceFileInputRef.current?.click()}
+                        className="py-1.5 px-2 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] hover:border-blue-500/40 rounded-lg text-[11px] font-semibold text-[var(--theme-text-primary)] flex items-center justify-center gap-1 transition-all shadow-sm"
+                        title="Replace Media File"
+                      >
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-blue-500" />
+                        <span>Replace</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => splitClip(selectedClip.id, currentTime)}
+                        className="py-1.5 px-2 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] hover:border-blue-500/40 rounded-lg text-[11px] font-semibold text-[var(--theme-text-primary)] flex items-center justify-center gap-1 transition-all shadow-sm"
+                        title="Cut / Split at Playhead"
+                      >
+                        <Scissors className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Cut</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeClip(selectedClip.id)}
+                        className="py-1.5 px-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 rounded-lg text-[11px] font-semibold text-rose-500 flex items-center justify-center gap-1 transition-all shadow-sm"
+                        title="Delete Clip"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowMoreActions(!showMoreActions)}
+                        className={`py-1.5 px-2 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] hover:border-blue-500/40 rounded-lg text-[11px] font-bold transition-all shadow-sm flex items-center justify-center ${
+                          showMoreActions ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'text-[var(--theme-text-muted)]'
+                        }`}
+                        title="More Clip Actions"
+                      >
+                        <span>⋯</span>
+                      </button>
+                    </div>
+
+                    {/* More Actions Popover */}
+                    {showMoreActions && (
+                      <div className="absolute right-0 top-full mt-1.5 w-48 bg-[var(--theme-bg-panel)] border border-[var(--theme-border)] rounded-xl shadow-xl p-1.5 z-30 space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const currentMuted = selectedClip.audioSettings?.muted || false;
+                            const newSettings = {
+                              ...(selectedClip.audioSettings || { volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, preservePitch: true, pitch: 0, voiceFormant: 0, tone: 0, humanize: false }),
+                              muted: !currentMuted
+                            };
+                            storeUpdateClip(selectedClip.id, { audioSettings: newSettings });
+                            scheduleSaveSnapshot();
+                            setShowMoreActions(false);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-left text-xs font-semibold text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-subpanel)] rounded-lg flex items-center gap-2"
+                        >
+                          {selectedClip.audioSettings?.muted ? <Volume2 className="w-3.5 h-3.5 text-emerald-500" /> : <VolumeX className="w-3.5 h-3.5 text-red-500" />}
+                          <span>{selectedClip.audioSettings?.muted ? 'Unmute Clip' : 'Mute Clip'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { copyClip('style'); toast.success('Style copied'); setShowMoreActions(false); }}
+                          className="w-full px-2.5 py-1.5 text-left text-xs font-semibold text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-subpanel)] rounded-lg flex items-center gap-2"
+                        >
+                          <Palette className="w-3.5 h-3.5 text-purple-500" />
+                          <span>Copy Style</span>
+                        </button>
+                        {clipboardData?.clips?.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const clipType = clipboardData.type;
+                              const pasteType = clipType === 'style-with-position' ? 'style-with-position' : (clipType === 'style-only' ? 'style-only' : 'style');
+                              pasteClip(pasteType as any);
+                              toast.success('Style pasted');
+                              setShowMoreActions(false);
+                            }}
+                            className="w-full px-2.5 py-1.5 text-left text-xs font-semibold text-purple-600 dark:text-purple-400 hover:bg-[var(--theme-bg-subpanel)] rounded-lg flex items-center gap-2"
+                          >
+                            <Palette className="w-3.5 h-3.5 text-purple-500" />
+                            <span>Paste Style</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => { duplicateClip(); setShowMoreActions(false); }}
+                          className="w-full px-2.5 py-1.5 text-left text-xs font-semibold text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-subpanel)] rounded-lg flex items-center gap-2"
+                        >
+                          <CopyPlus className="w-3.5 h-3.5 text-blue-500" />
+                          <span>Duplicate Clip</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { copyClip('whole'); toast.success('Clip copied'); setShowMoreActions(false); }}
+                          className="w-full px-2.5 py-1.5 text-left text-xs font-semibold text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-subpanel)] rounded-lg flex items-center gap-2"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
+                          <span>Copy Clip</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </>
@@ -3461,14 +3651,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           return (
             <div className="space-y-3">
                             {/* Smart Reframe AI */}
-              <div className={`bg-[#1e1e1e] p-3 rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 ${!isSectionActive('reframe') ? 'hidden' : ''}`}>
+              <div className={`bg-[var(--theme-bg-subpanel)] p-3 rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 ${!isSectionActive('reframe') ? 'hidden' : ''}`}>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="p-1.5 bg-cyan-500/20 rounded">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect width="10" height="14" x="7" y="5" rx="2"/></svg>
                   </div>
                   <div>
                     <h4 className="text-[11px] font-semibold text-white">Smart Reframe</h4>
-                    <p className="text-[9px] text-[#a0a0a0]">Auto-track subject for 9:16</p>
+                    <p className="text-[9px] text-[var(--theme-text-muted)]">Auto-track subject for 9:16</p>
                   </div>
                 </div>
                 <button
@@ -3488,14 +3678,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
 
               {/* Master Keyframes */}
-              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5 ${!isSectionActive('keyframes') ? 'hidden' : ''}`}>
+              <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5 ${!isSectionActive('keyframes') ? 'hidden' : ''}`}>
 
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-white">Master Keyframes</span>
                   <button
                     onClick={handleToggleMasterKeyframe}
                     className={`px-3 py-1 rounded text-[10px] font-medium transition-colors ${
-                      isOnKeyframe ? 'bg-amber-500/20 text-amber-500 hover:bg-amber-500/30' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
+                      isOnKeyframe ? 'bg-amber-500/20 text-amber-500 hover:bg-amber-500/30' : 'bg-[var(--theme-bg-subpanel)] text-white hover:bg-[#4a4a4a]'
                     }`}
                   >
                     {!hasMasterKeyframes ? 'Start' : isOnKeyframe ? 'End/Remove' : 'Add'}
@@ -3516,13 +3706,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       else if (isEnd) label = 'End';
 
                       return (
-                        <div key={t} className={`flex items-center justify-between text-[10px] p-1.5 rounded ${isEnd && idx !== keyframeTimes.length - 1 ? 'bg-[#2a1e1e] border border-red-500/20 mb-2' : 'bg-[#1e1e1e]'}`}>
-                          <span className="text-[#a0a0a0]">
+                        <div key={t} className={`flex items-center justify-between text-[10px] p-1.5 rounded ${isEnd && idx !== keyframeTimes.length - 1 ? 'bg-[#2a1e1e] border border-red-500/20 mb-2' : 'bg-[var(--theme-bg-subpanel)]'}`}>
+                          <span className="text-[var(--theme-text-muted)]">
                             {label} - {t.toFixed(2)}s
                           </span>
                           <button
                             onClick={() => deleteMasterKeyframe(selectedClip.id, t)}
-                            className="text-[#a0a0a0] hover:text-red-400"
+                            className="text-[var(--theme-text-muted)] hover:text-red-400"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -3533,7 +3723,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 )}
               </div>
               {/* Position */}
-              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('position') ? 'hidden' : ''}`}>
+              <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('position') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('position')}
                   className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
@@ -3550,12 +3740,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Position"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                      <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
                     </div>
                     {collapsedSections['position'] ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     )}
                   </div>
                 </button>
@@ -3564,7 +3754,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Position X */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">X Position</label>
+                        <label className="text-[10px] text-[var(--theme-text-muted)]">X Position</label>
                         <KeyframeControl
                           propertyKey="transform.x"
                           value={getPropVal(selectedClip.transform.x, 'transform.x')}
@@ -3615,14 +3805,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                         }}
-                        className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
 
                     {/* Position Y */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">Y Position</label>
+                        <label className="text-[10px] text-[var(--theme-text-muted)]">Y Position</label>
                         <KeyframeControl
                           propertyKey="transform.y"
                           value={getPropVal(selectedClip.transform.y, 'transform.y')}
@@ -3673,7 +3863,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                         }}
-                        className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
                   </div>
@@ -3681,7 +3871,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
 
               {/* Scale */}
-              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('scale') ? 'hidden' : ''}`}>
+              <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('scale') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('scale')}
                   className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
@@ -3697,19 +3887,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Scale"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                      <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
                     </div>
                     {collapsedSections['scale'] ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     )}
                   </div>
                 </button>
                 {isSectionOpen('scale') && (
                   <div className="px-2.5 pb-2.5 space-y-1.5">
                     <div className="flex justify-between items-center">
-                      <span className="text-[10px] text-[#a0a0a0]">Scale Multiplier</span>
+                      <span className="text-[10px] text-[var(--theme-text-muted)]">Scale Multiplier</span>
                       <KeyframeControl
                         propertyKey="transform.scale"
                         value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
@@ -3765,7 +3955,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
                           scheduleSaveSnapshot();
                         }}
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                       <span 
                         className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
@@ -3786,7 +3976,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
 
               {/* Rotation */}
-              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('rotation') ? 'hidden' : ''}`}>
+              <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('rotation') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('rotation')}
                   className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
@@ -3804,12 +3994,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Rotation"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                      <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
                     </div>
                     {collapsedSections['rotation'] ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     )}
                   </div>
                 </button>
@@ -3818,7 +4008,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Rotate X */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">Rotate X (3D)</label>
+                        <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate X (3D)</label>
                         <KeyframeControl
                           propertyKey="transform.rotationX"
                           value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
@@ -3874,7 +4064,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
                             scheduleSaveSnapshot();
                           }}
-                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                         <span 
                           className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
@@ -3895,7 +4085,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Rotate Y */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">Rotate Y (3D)</label>
+                        <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate Y (3D)</label>
                         <KeyframeControl
                           propertyKey="transform.rotationY"
                           value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
@@ -3951,7 +4141,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
                             scheduleSaveSnapshot();
                           }}
-                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                         <span 
                           className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
@@ -3972,7 +4162,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Rotate Z */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[#a0a0a0]">Rotate Z (3D)</label>
+                        <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate Z (3D)</label>
                         <KeyframeControl
                           propertyKey="transform.rotation"
                           value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
@@ -4028,7 +4218,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
                             scheduleSaveSnapshot();
                           }}
-                          className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                         <span 
                           className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
@@ -4050,7 +4240,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
 
               {/* Opacity */}
-              <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('opacity') ? 'hidden' : ''}`}>
+              <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('opacity') ? 'hidden' : ''}`}>
                 <button
                   onClick={() => toggleSection('opacity')}
                   className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
@@ -4066,19 +4256,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                       title="Reset Opacity"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                      <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
                     </div>
                     {collapsedSections['opacity'] ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                      <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                     )}
                   </div>
                 </button>
                 {isSectionOpen('opacity') && (
                   <div className="px-2.5 pb-2.5 space-y-1.5">
                     <div className="flex justify-between items-center">
-                      <span className="text-[10px] text-[#a0a0a0]">Opacity Value</span>
+                      <span className="text-[10px] text-[var(--theme-text-muted)]">Opacity Value</span>
                       <KeyframeControl
                         propertyKey="opacity"
                         value={getPropVal(selectedClip.opacity ?? 1, 'opacity')}
@@ -4135,7 +4325,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           setPropVal('opacity', 1, { opacity: 1 });
                           scheduleSaveSnapshot();
                         }}
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                       <span 
                         className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
@@ -4154,16 +4344,16 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
                 )}
               </div>
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('flip') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('flip') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('flip')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Flip / Mirror</span>
                 {collapsedSections['flip'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('flip') && (
@@ -4177,7 +4367,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       scheduleSaveSnapshot('Flip Horizontal');
                     }}
                     className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
-                      selectedClip.transform.flipH ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
+                      selectedClip.transform.flipH ? 'bg-amber-500 text-black' : 'bg-[var(--theme-bg-subpanel)] text-white hover:bg-[#4a4a4a]'
                     }`}
                   >
                     Flip Horizontal
@@ -4191,7 +4381,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       scheduleSaveSnapshot('Flip Vertical');
                     }}
                     className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
-                      selectedClip.transform.flipV ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white hover:bg-[#4a4a4a]'
+                      selectedClip.transform.flipV ? 'bg-amber-500 text-black' : 'bg-[var(--theme-bg-subpanel)] text-white hover:bg-[#4a4a4a]'
                     }`}
                   >
                     Flip Vertical
@@ -4201,16 +4391,16 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Perspective Warp & Motion Tracking */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('perspective') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('perspective') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('perspective')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
               >
                 <span className="font-medium">Perspective Warp & Tracker</span>
                 {collapsedSections['perspective'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('perspective') && (
@@ -4256,14 +4446,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         updateClip(selectedClip.id, updates);
                         scheduleSaveSnapshot();
                       }}
-                      className="rounded border-[#3e3e3e] text-amber-500 bg-[#1e1e1e] focus:ring-0 focus:ring-offset-0"
+                      className="rounded border-[var(--theme-border)] text-amber-500 bg-[var(--theme-bg-subpanel)] focus:ring-0 focus:ring-offset-0"
                     />
                     <span className="text-xs text-white">Enable Corner Pinning</span>
                   </label>
 
                   {selectedClip.transform.perspectivePin && (
-                    <div className="pt-2 border-t border-[#3e3e3e] space-y-2">
-                      <p className="text-[10px] text-[#a0a0a0]">
+                    <div className="pt-2 border-t border-[var(--theme-border)] space-y-2">
+                      <p className="text-[10px] text-[var(--theme-text-muted)]">
                         Drag the 4 corner handles on the preview screen to adjust the perspective warp.
                       </p>
                       <button
@@ -4426,7 +4616,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             {renderBlendModeSection()}
 
             {/* Crop */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('crop') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('crop') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('crop')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
@@ -4445,12 +4635,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                     title="Reset Crop"
                   >
-                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
                   </div>
                   {collapsedSections['crop'] ? (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                   ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                   )}
                 </div>
               </button>
@@ -4463,7 +4653,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     return (
                       <div key={edge} className="space-y-1">
                         <div className="flex justify-between items-center mb-1">
-                          <label className="text-[10px] text-[#a0a0a0] capitalize">{edge}</label>
+                          <label className="text-[10px] text-[var(--theme-text-muted)] capitalize">{edge}</label>
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] text-white w-8 text-right">{Math.round(value)}%</span>
                           </div>
@@ -4491,7 +4681,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             setPropVal(propKey, 0, { crop: { ...currentCrop, [edge]: 0 } });
                             scheduleSaveSnapshot();
                           }}
-                          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                          className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
                       </div>
                     );
@@ -4534,7 +4724,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               }) => (
                 <div className="space-y-0.5">
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-[#a0a0a0]">{label}</span>
+                    <span className="text-[10px] text-[var(--theme-text-muted)]">{label}</span>
                     <span 
                       className="text-[10px] text-white font-mono w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
                       title="Click to cycle values"
@@ -4554,13 +4744,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     onMouseUp={() => scheduleSaveSnapshot()}
                     onDoubleClick={() => { onChange(label === 'Scale' ? 100 : 0); scheduleSaveSnapshot(); }}
                     title={`Double-click to reset`}
-                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-500"
+                    className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-500"
                   />
                 </div>
               );
 
               return (
-                <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+                <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)]">
                   <button
                     onClick={() => toggleSection('kenBurns')}
                     className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white group`}
@@ -4573,21 +4763,21 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     <div className="flex items-center gap-2">
                       <div
                         onClick={e => { e.stopPropagation(); updateKb({ enabled: !isKbEnabled }); scheduleSaveSnapshot(); }}
-                        className="flex items-center gap-1 px-2 py-0.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] transition-colors"
+                        className="flex items-center gap-1 px-2 py-0.5 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-[10px] transition-colors"
                         title={isKbEnabled ? 'Disable Ken Burns' : 'Enable Ken Burns'}
                       >
-                        <span className={isKbEnabled ? 'text-emerald-400' : 'text-[#a0a0a0]'}>{isKbEnabled ? 'Enabled' : 'Enable'}</span>
+                        <span className={isKbEnabled ? 'text-emerald-400' : 'text-[var(--theme-text-muted)]'}>{isKbEnabled ? 'Enabled' : 'Enable'}</span>
                       </div>
                       {collapsedSections['kenBurns'] ? (
-                        <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                        <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                       ) : (
-                        <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                        <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                       )}
                     </div>
                   </button>
 
                   {isSectionOpen('kenBurns') && (
-                    <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                    <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                       {/* Start Frame */}
                       <div className="space-y-2">
                         <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">Start Frame</p>
@@ -4608,7 +4798,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           });
                           scheduleSaveSnapshot();
                         }}
-                        className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-[#a0a0a0] hover:text-white transition-colors"
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-[10px] text-[var(--theme-text-muted)] hover:text-white transition-colors"
                         title="Swap Start and End states"
                       >
                         <ArrowLeftRight className="w-3 h-3" /> Reverse Direction
@@ -4627,25 +4817,25 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                       {/* Easing Curve */}
                       <div className="space-y-1">
-                        <label className="text-[10px] text-[#a0a0a0] block">Easing Curve</label>
+                        <label className="text-[10px] text-[var(--theme-text-muted)] block">Easing Curve</label>
                         <div className="relative">
                           <select
                             value={kbVal.easing}
                             onChange={e => { updateKb({ easing: e.target.value as ClipKenBurnsSettings['easing'] }); scheduleSaveSnapshot(); }}
-                            className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-[11px] text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer"
+                            className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-[11px] text-white rounded px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer"
                           >
                             <option value="linear">Linear</option>
                             <option value="easeIn">Ease In</option>
                             <option value="easeOut">Ease Out</option>
                             <option value="easeInOut">Ease In-Out (Smooth)</option>
                           </select>
-                          <ChevronDown className="w-3 h-3 text-[#a0a0a0] absolute right-2 top-2 pointer-events-none" />
+                          <ChevronDown className="w-3 h-3 text-[var(--theme-text-muted)] absolute right-2 top-2 pointer-events-none" />
                         </div>
                       </div>
 
                       {/* Quick Presets */}
                       <div className="space-y-1">
-                        <label className="text-[10px] text-[#a0a0a0] block">Quick Presets</label>
+                        <label className="text-[10px] text-[var(--theme-text-muted)] block">Quick Presets</label>
                         <div className="grid grid-cols-2 gap-1">
                           {[
                             { label: 'Zoom In',    patch: { startScale: 100, startPanX: 0, startPanY: 0, endScale: 140, endPanX: 0,   endPanY: 0,   easing: 'easeInOut' as const } },
@@ -4658,7 +4848,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             <button
                               key={preset.label}
                               onClick={() => { updateKb({ enabled: true, ...preset.patch }); scheduleSaveSnapshot(); }}
-                              className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#2a2a2a] border border-[#3e3e3e] hover:border-emerald-500/40 rounded text-[10px] text-white transition-colors text-center truncate"
+                              className="px-1.5 py-1 bg-[var(--theme-bg-subpanel)] hover:bg-[#2a2a2a] border border-[var(--theme-border)] hover:border-emerald-500/40 rounded text-[10px] text-white transition-colors text-center truncate"
                             >
                               {preset.label}
                             </button>
@@ -4685,7 +4875,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className="space-y-1">
               <div className="flex justify-between items-center text-[11px]">
                 <span className="text-[#d0d0d0]">{label}</span>
-                <span className="font-mono text-[#a0a0a0]">{value}{unit}</span>
+                <span className="font-mono text-[var(--theme-text-muted)]">{value}{unit}</span>
               </div>
               <input
                 type="range"
@@ -4694,7 +4884,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 value={value}
                 onChange={(e) => updateMask({ [prop]: Number(e.target.value) })}
                 onMouseUp={handleMouseUp}
-                className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
               />
             </div>
           );
@@ -4702,11 +4892,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           return (
             <div className="space-y-4">
               {/* Enable Toggle */}
-              <div className="flex items-center justify-between p-3 bg-[#1e1e1e] rounded-md border border-[#3e3e3e]">
-                <span className="text-xs text-[#a0a0a0]">Enable Masking</span>
+              <div className="flex items-center justify-between p-3 bg-[var(--theme-bg-subpanel)] rounded-md border border-[var(--theme-border)]">
+                <span className="text-xs text-[var(--theme-text-muted)]">Enable Masking</span>
                 <button
                   onClick={() => { updateMask({ enabled: !mask.enabled }); handleMouseUp(); }}
-                  className={`w-10 h-5 rounded-full transition-colors relative ${mask.enabled ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
+                  className={`w-10 h-5 rounded-full transition-colors relative ${mask.enabled ? 'bg-amber-500' : 'bg-[var(--theme-bg-subpanel)]'}`}
                 >
                   <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${mask.enabled ? 'left-[22px]' : 'left-0.5'}`} />
                 </button>
@@ -4716,13 +4906,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 <>
                   {/* Mask Type */}
                   <div className="space-y-1">
-                    <label className="text-[10px] uppercase tracking-wider text-[#a0a0a0]">Mask Shape</label>
+                    <label className="text-[10px] uppercase tracking-wider text-[var(--theme-text-muted)]">Mask Shape</label>
                     <div className="grid grid-cols-4 gap-1.5">
                       {['rectangle', 'circle', 'split', 'filmstrip', 'heart', 'star', 'matte'].map(t => (
                         <button
                           key={t}
                           onClick={() => { updateMask({ type: t }); handleMouseUp(); }}
-                          className={`py-1 text-[10px] rounded border transition-colors ${mask.type === t ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-[#3e3e3e] bg-[#2d2d2d] text-[#a0a0a0] hover:border-[#4e4e4e]'}`}
+                          className={`py-1 text-[10px] rounded border transition-colors ${mask.type === t ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-[var(--theme-border)] bg-[var(--theme-bg-card)] text-[var(--theme-text-muted)] hover:border-[#4e4e4e]'}`}
                         >
                           {t.charAt(0).toUpperCase() + t.slice(1)}
                         </button>
@@ -4731,7 +4921,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
 
                   {/* Properties depending on type */}
-                  <div className="space-y-3 p-3 bg-[#2d2d2d] rounded-md border border-[#3e3e3e]">
+                  <div className="space-y-3 p-3 bg-[var(--theme-bg-card)] rounded-md border border-[var(--theme-border)]">
                     <Slider label="Position X" value={mask.x} min={0} max={100} unit="%" prop="x" />
                     <Slider label="Position Y" value={mask.y} min={0} max={100} unit="%" prop="y" />
                     
@@ -4751,11 +4941,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     
                     {mask.type === 'matte' && (
                       <div className="space-y-1">
-                        <label className="text-[10px] uppercase tracking-wider text-[#a0a0a0]">Matte Source Clip</label>
+                        <label className="text-[10px] uppercase tracking-wider text-[var(--theme-text-muted)]">Matte Source Clip</label>
                         <select
                           value={mask.matteSourceClipId || ''}
                           onChange={(e) => { updateMask({ matteSourceClipId: e.target.value }); handleMouseUp(); }}
-                          className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-white rounded p-1.5 focus:outline-none focus:border-amber-500"
+                          className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-white rounded p-1.5 focus:outline-none focus:border-amber-500"
                         >
                           <option value="">Select visual clip...</option>
                           {tracks.flatMap(t => t.clips)
@@ -4773,15 +4963,15 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       </div>
                     )}
                     
-                    <div className="h-px bg-[#3e3e3e] my-2" />
+                    <div className="h-px bg-[var(--theme-bg-subpanel)] my-2" />
                     
                     <Slider label="Feather" value={mask.feather} min={0} max={100} unit="px" prop="feather" />
                     
                     <div className="flex items-center justify-between pt-2">
-                      <span className="text-xs text-[#a0a0a0]">Invert Mask</span>
+                      <span className="text-xs text-[var(--theme-text-muted)]">Invert Mask</span>
                       <button
                         onClick={() => { updateMask({ invert: !mask.invert }); handleMouseUp(); }}
-                        className={`w-8 h-4 rounded-full transition-colors relative ${mask.invert ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
+                        className={`w-8 h-4 rounded-full transition-colors relative ${mask.invert ? 'bg-amber-500' : 'bg-[var(--theme-bg-subpanel)]'}`}
                       >
                         <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${mask.invert ? 'left-[18px]' : 'left-0.5'}`} />
                       </button>
@@ -4796,18 +4986,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         {currentTab === 'color' && (
           <div className="space-y-3">
             {selectedClip && (
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2 flex items-center justify-between gap-2">
+              <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2 flex items-center justify-between gap-2">
                 <div className="flex gap-2 w-full">
                   <button
                     onClick={() => copyColorGrade(selectedClip.id)}
-                    className="flex-1 px-2 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-xs text-white rounded transition-colors"
+                    className="flex-1 px-2 py-1.5 bg-[var(--theme-bg-subpanel)] hover:bg-[#4a4a4a] text-xs text-white rounded transition-colors"
                   >
                     Copy Grade
                   </button>
                   <button
                     onClick={() => pasteColorGrade(selectedClip.id)}
                     disabled={!colorClipboard}
-                    className="flex-1 px-2 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] disabled:bg-[#1a1a1a] disabled:text-[#666] text-xs text-white rounded transition-colors"
+                    className="flex-1 px-2 py-1.5 bg-[var(--theme-bg-subpanel)] hover:bg-[#4a4a4a] disabled:bg-[var(--theme-bg-subpanel)] disabled:text-[#666] text-xs text-white rounded transition-colors"
                   >
                     Paste Grade
                   </button>
@@ -4826,25 +5016,25 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             )}
             
             {/* Basic Correction Section */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('colorBasic') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('colorBasic') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorBasic')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Basic Correction</span>
                 {collapsedSections['colorBasic'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('colorBasic') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Temperature */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Temperature</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {getPropVal(clipFilters.temperature, 'color.temperature') > 0 ? `+${getPropVal(clipFilters.temperature, 'color.temperature')}` : getPropVal(clipFilters.temperature, 'color.temperature')}
                       </span>
                     </div>
@@ -4867,7 +5057,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Tint</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {getPropVal(clipFilters.tint, 'color.tint') > 0 ? `+${getPropVal(clipFilters.tint, 'color.tint')}` : getPropVal(clipFilters.tint, 'color.tint')}
                       </span>
                     </div>
@@ -4930,7 +5120,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Exposure</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {getPropVal(clipFilters.exposure, 'color.exposure') > 0 ? `+${getPropVal(clipFilters.exposure, 'color.exposure')}` : getPropVal(clipFilters.exposure, 'color.exposure')}
                       </span>
                     </div>
@@ -4944,7 +5134,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('exposure')}
                         title="Double-click to reset to 0"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -4953,7 +5143,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Contrast</span>
-                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.contrast, 'color.contrast')}%</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{getPropVal(clipFilters.contrast, 'color.contrast')}%</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -4965,7 +5155,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('contrast')}
                         title="Double-click to reset to 100%"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -4974,7 +5164,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Saturation</span>
-                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.saturation, 'color.saturation')}%</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{getPropVal(clipFilters.saturation, 'color.saturation')}%</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -4986,7 +5176,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('saturation')}
                         title="Double-click to reset to 100%"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -4995,7 +5185,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Blur</span>
-                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.blur, 'color.blur')}px</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{getPropVal(clipFilters.blur, 'color.blur')}px</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -5007,7 +5197,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('blur')}
                         title="Double-click to reset to 0px"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -5016,25 +5206,25 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Creative Section */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('colorCreative') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('colorCreative') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorCreative')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Creative</span>
                 {collapsedSections['colorCreative'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('colorCreative') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Faded Film */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Faded Film</span>
-                      <span className="font-mono text-[#a0a0a0]">{getPropVal(clipFilters.fadedFilm, 'color.fadedFilm')}%</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{getPropVal(clipFilters.fadedFilm, 'color.fadedFilm')}%</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -5046,7 +5236,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleFilterReset('fadedFilm')}
                         title="Double-click to reset to 0%"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -5055,7 +5245,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Vignette</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {getPropVal(clipFilters.vignette, 'color.vignette') > 0 ? `+${getPropVal(clipFilters.vignette, 'color.vignette')}` : getPropVal(clipFilters.vignette, 'color.vignette')}
                       </span>
                     </div>
@@ -5078,7 +5268,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* 3-Way Color Wheels */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] group ${!isSectionActive('colorWheels') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] group ${!isSectionActive('colorWheels') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('colorWheels')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -5101,17 +5291,17 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
                     title="Reset All Wheels"
                   >
-                    <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+                    <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
                   </div>
                   {collapsedSections['colorWheels'] ? (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                   ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                    <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                   )}
                 </div>
               </button>
               {isSectionOpen('colorWheels') && (
-                <div className="px-2 pb-3 flex gap-2 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2 pb-3 flex gap-2 border-t border-[var(--theme-border)]/30 pt-2.5">
                   <ColorWheel
                     label="Shadows"
                     value={selectedClip.colorFilters?.shadows}
@@ -5147,7 +5337,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* LUT Color Grade */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('lutGrade') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('lutGrade') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('lutGrade')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -5160,9 +5350,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   )}
                 </span>
                 {collapsedSections['lutGrade'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('lutGrade') && (() => {
@@ -5173,7 +5363,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 const lutItems = mediaLibrary.filter((m) => m.type === 'lut');
 
                 return (
-                  <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                  <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                     {/* Current LUT */}
                     {selectedClip.lut && lutMedia ? (
                       <div className="space-y-2">
@@ -5194,9 +5384,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         {/* Intensity slider */}
                         <div className="space-y-1">
                           <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-[#a0a0a0]">Intensity</span>
+                            <span className="text-[var(--theme-text-muted)]">Intensity</span>
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-[#a0a0a0]">
+                              <span className="font-mono text-[var(--theme-text-muted)]">
                                 {Math.round(getPropVal(selectedClip.lut.intensity ?? 100, 'lut.intensity'))}%
                               </span>
                               <KeyframeControl
@@ -5238,7 +5428,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Apply from library */}
                     {lutItems.length > 0 && (
                       <div className="space-y-1">
-                        <p className="text-[10px] text-[#a0a0a0]">Apply from library:</p>
+                        <p className="text-[10px] text-[var(--theme-text-muted)]">Apply from library:</p>
                         <select
                           value={selectedClip.lut?.mediaId ?? ''}
                           onChange={(e) => {
@@ -5250,7 +5440,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             }
                             scheduleSaveSnapshot();
                           }}
-                          className="w-full bg-[#1e1e1e] text-white text-[11px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                          className="w-full bg-[var(--theme-bg-subpanel)] text-white text-[11px] border border-[var(--theme-border)] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                         >
                           <option value="">— None —</option>
                           {lutItems.map((m) => (
@@ -5270,7 +5460,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         {currentTab === 'speed' && (
           <div className="space-y-3">
             {/* Speed range input */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5">
               <label className="text-xs text-white font-medium block mb-2">Speed</label>
               <div className="flex items-center gap-2">
                 <input
@@ -5309,7 +5499,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   className={`flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full ${
                     isRamped
                       ? 'bg-[#222] [&::-webkit-slider-thumb]:bg-[#444] cursor-not-allowed'
-                      : 'bg-[#3e3e3e] [&::-webkit-slider-thumb]:bg-amber-500'
+                      : 'bg-[var(--theme-bg-subpanel)] [&::-webkit-slider-thumb]:bg-amber-500'
                   }`}
                 />
                 <span className="text-[11px] text-white w-12 text-right select-none font-mono">
@@ -5319,7 +5509,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Speed Ramping Toggle & Editor */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5 space-y-2">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5 space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs text-white font-medium">Speed Ramping</label>
                 <input
@@ -5341,14 +5531,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     }
                     scheduleSaveSnapshot();
                   }}
-                  className="rounded border-[#3e3e3e] bg-[#1e1e1e] text-amber-500 focus:ring-0 cursor-pointer h-4 w-4"
+                  className="rounded border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] text-amber-500 focus:ring-0 cursor-pointer h-4 w-4"
                 />
               </div>
 
               {isRamped && (
                 <div className="space-y-3 pt-2">
                   {/* SVG Editor */}
-                  <div className="relative bg-[#1e1e1e] border border-[#3e3e3e] rounded p-1">
+                  <div className="relative bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded p-1">
                     <svg
                       ref={svgRef}
                       viewBox="0 0 240 100"
@@ -5543,13 +5733,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       })}
                     </svg>
                   </div>
-                  <div className="text-[10px] text-[#888] flex justify-between px-1 select-none">
+                  <div className="text-[10px] text-[var(--theme-text-muted)] flex justify-between px-1 select-none">
                     <span>Double-click graph to add. Double-click keyframe to delete.</span>
                   </div>
 
                   {/* Preset Buttons */}
                   <div className="space-y-1.5">
-                    <label className="text-[10px] text-[#a0a0a0] block font-medium">Speed Ramp Presets</label>
+                    <label className="text-[10px] text-[var(--theme-text-muted)] block font-medium">Speed Ramp Presets</label>
                     <div className="grid grid-cols-3 gap-1">
                       {[
                         { id: 'slowMo', label: 'Slow-Mo' },
@@ -5581,7 +5771,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             }, { ripple: true });
                             scheduleSaveSnapshot();
                           }}
-                          className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-[#333] border border-[#3e3e3e] rounded text-[10px] text-white transition-colors text-center truncate focus:outline-none"
+                          className="px-1.5 py-1 bg-[var(--theme-bg-subpanel)] hover:bg-[#333] border border-[var(--theme-border)] rounded text-[10px] text-white transition-colors text-center truncate focus:outline-none"
                         >
                           {preset.label}
                         </button>
@@ -5604,7 +5794,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           }, { ripple: true });
                           scheduleSaveSnapshot();
                         }}
-                        className="px-1.5 py-1 bg-[#1e1e1e] hover:bg-red-950/40 hover:border-red-900 border border-[#3e3e3e] rounded text-[10px] text-[#ff6b6b] transition-colors text-center focus:outline-none"
+                        className="px-1.5 py-1 bg-[var(--theme-bg-subpanel)] hover:bg-red-950/40 hover:border-red-900 border border-[var(--theme-border)] rounded text-[10px] text-[#ff6b6b] transition-colors text-center focus:outline-none"
                       >
                         Reset Ramp
                       </button>
@@ -5613,7 +5803,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                   {/* Keyframe List Details */}
                   <div className="space-y-1">
-                    <label className="text-[10px] text-[#a0a0a0] block font-medium">Keyframes</label>
+                    <label className="text-[10px] text-[var(--theme-text-muted)] block font-medium">Keyframes</label>
                     <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
                       {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
                         const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
@@ -5622,7 +5812,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         return (
                           <div
                             key={idx}
-                            className="flex flex-col gap-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded p-1.5 text-[10px]"
+                            className="flex flex-col gap-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded p-1.5 text-[10px]"
                           >
                             <div className="flex items-center justify-between">
                               <span className="text-amber-500 font-mono font-bold">Keyframe #{idx + 1}</span>
@@ -5648,7 +5838,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             </div>
                             <div className="grid grid-cols-3 gap-1 items-center">
                               <div className="flex items-center gap-1">
-                                <span className="text-[#888]">Time:</span>
+                                <span className="text-[var(--theme-text-muted)]">Time:</span>
                                 {isBoundary ? (
                                   <span className="text-white font-mono">{(kf?.sourceTime ?? 0).toFixed(1)}s</span>
                                 ) : (
@@ -5677,12 +5867,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                                       }, { ripple: true });
                                     }}
                                     onBlur={() => scheduleSaveSnapshot()}
-                                    className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
+                                    className="w-12 bg-black border border-[var(--theme-border)] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
                                   />
                                 )}
                               </div>
                               <div className="flex items-center gap-1">
-                                <span className="text-[#888]">Speed:</span>
+                                <span className="text-[var(--theme-text-muted)]">Speed:</span>
                                 <input
                                   type="number"
                                   min={0.1}
@@ -5702,11 +5892,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                                     }, { ripple: true });
                                   }}
                                   onBlur={() => scheduleSaveSnapshot()}
-                                  className="w-12 bg-black border border-[#3e3e3e] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
+                                  className="w-12 bg-black border border-[var(--theme-border)] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
                                 />
                               </div>
                               <div className="flex items-center gap-1">
-                                <span className="text-[#888]">Ease:</span>
+                                <span className="text-[var(--theme-text-muted)]">Ease:</span>
                                 <select
                                   value={kf.easing || 'linear'}
                                   onChange={(e) => {
@@ -5726,7 +5916,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                                     }, { ripple: true });
                                     scheduleSaveSnapshot();
                                   }}
-                                  className="bg-black text-white text-[8px] border border-[#3e3e3e] rounded px-1 py-0.5 focus:outline-none"
+                                  className="bg-black text-white text-[8px] border border-[var(--theme-border)] rounded px-1 py-0.5 focus:outline-none"
                                 >
                                   <option value="linear">Linear</option>
                                   <option value="hold">Hold</option>
@@ -5747,16 +5937,16 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Clip Timeline Settings */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] text-[#a0a0a0] block mb-1">Duration</label>
-                  <div className="px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white">
+                  <label className="text-[10px] text-[var(--theme-text-muted)] block mb-1">Duration</label>
+                  <div className="px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white">
                     {(selectedClip?.duration ?? 0).toFixed(2)}s
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-[#a0a0a0] block mb-1">Start</label>
+                  <label className="text-[10px] text-[var(--theme-text-muted)] block mb-1">Start</label>
                   <input
                     type="number"
                     step={0.1}
@@ -5770,17 +5960,17 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
-                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                    className="w-full px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
               </div>
             </div>
 
             {/* Trimming */}
-            <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5">
+            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] text-[#a0a0a0] block mb-1">Trim Start</label>
+                  <label className="text-[10px] text-[var(--theme-text-muted)] block mb-1">Trim Start</label>
                   <input
                     type="number"
                     step={0.1}
@@ -5798,11 +5988,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
-                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                    className="w-full px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-[#a0a0a0] block mb-1">Trim End</label>
+                  <label className="text-[10px] text-[var(--theme-text-muted)] block mb-1">Trim End</label>
                   <input
                     type="number"
                     step={0.1}
@@ -5820,7 +6010,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                     }}
-                    className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                    className="w-full px-2 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
               </div>
@@ -5842,7 +6032,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </p>
 
                 {isDuckingAudio ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[var(--theme-bg-subpanel)] rounded border border-[var(--theme-border)]">
                     <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
                     <span className="text-[10px] text-emerald-400 font-medium">
                       Separating and Analyzing Vocals ({duckingProgress}%)...
@@ -5877,13 +6067,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </p>
 
                 {/* AI Provider Configuration */}
-                <div className="space-y-2 pt-1 border-t border-[#3e3e3e]/40">
+                <div className="space-y-2 pt-1 border-t border-[var(--theme-border)]/40">
                   <div className="flex items-center gap-2">
                      <label className="text-[10px] text-white">AI Provider:</label>
                      <select 
                        value={aiProvider}
                        onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'groq')}
-                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                       className="bg-[var(--theme-bg-subpanel)] text-white text-[10px] border border-[var(--theme-border)] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                      >
                        <option value="gemini">Gemini (Default)</option>
                        <option value="groq">Groq (Llama 3 Vision)</option>
@@ -5894,7 +6084,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                      <select 
                        value={soundDesignFps}
                        onChange={(e) => setSoundDesignFps(Number(e.target.value))}
-                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                       className="bg-[var(--theme-bg-subpanel)] text-white text-[10px] border border-[var(--theme-border)] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                      >
                        <option value={1}>1 FPS (Standard)</option>
                        <option value={5}>5 FPS (High)</option>
@@ -5902,7 +6092,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                      </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] text-[#a0a0a0]">Freesound Key (Optional)</label>
+                    <label className="text-[9px] text-[var(--theme-text-muted)]">Freesound Key (Optional)</label>
                     <input
                       type="password"
                       placeholder="Leave blank for public key"
@@ -5911,13 +6101,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         setFreesoundApiKey(e.target.value);
                         sessionStorage.setItem('procut_freesound_key', e.target.value);
                       }}
-                      className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                      className="bg-[var(--theme-bg-subpanel)] text-white text-[10px] border border-[var(--theme-border)] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                     />
                   </div>
                 </div>
 
                 {isAnalyzingAudio ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[var(--theme-bg-subpanel)] rounded border border-[var(--theme-border)]">
                     <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
                     <span className="text-[10px] text-amber-400 font-medium">
                       {audioAnalyzeProgress}...
@@ -6004,14 +6194,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             )}
 
                         {/* Auto Jump Cuts AI */}
-            <div className="bg-[#1e1e1e] p-3 rounded border border-purple-500/30 mb-3 shadow-lg shadow-purple-900/20">
+            <div className="bg-[var(--theme-bg-subpanel)] p-3 rounded border border-purple-500/30 mb-3 shadow-lg shadow-purple-900/20">
               <div className="flex items-center gap-2 mb-2">
                 <div className="p-1.5 bg-purple-500/20 rounded">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></svg>
                 </div>
                 <div>
                   <h4 className="text-[11px] font-semibold text-white">Auto Jump Cuts</h4>
-                  <p className="text-[9px] text-[#a0a0a0]">Remove silences instantly</p>
+                  <p className="text-[9px] text-[var(--theme-text-muted)]">Remove silences instantly</p>
                 </div>
               </div>
               <button
@@ -6026,7 +6216,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Clip Volume & Pan */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVolume') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('audioVolume') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioVolume')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6036,22 +6226,22 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <span>Clip Volume & Pan</span>
                 </div>
                 {collapsedSections['audioVolume'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('audioVolume') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Mute toggle */}
-                  <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
+                  <div className="flex justify-between items-center text-[11px] bg-[var(--theme-bg-subpanel)] p-2 rounded border border-[var(--theme-border)]">
                     <span className="text-[#d0d0d0] font-medium">Clip Audio Muted</span>
                     <button
                       onClick={() => handleAudioChange('muted', !clipAudio.muted)}
                       className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
                         clipAudio.muted
                           ? 'bg-red-600 hover:bg-red-500 text-white'
-                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
+                          : 'bg-[var(--theme-bg-card)] hover:bg-[#3d3d3d] text-[var(--theme-text-muted)] hover:text-white'
                       }`}
                     >
                       {clipAudio.muted ? 'Muted' : 'Mute'}
@@ -6062,7 +6252,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Volume Gain</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {getPropVal(clipAudio.volume, 'audio.volume') > 0 ? `+${getPropVal(clipAudio.volume, 'audio.volume')}` : getPropVal(clipAudio.volume, 'audio.volume')} dB ({Math.round(Math.pow(10, getPropVal(clipAudio.volume, 'audio.volume') / 20) * 100)}%)
                       </span>
                     </div>
@@ -6076,12 +6266,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('volume')}
                         title="Double-click to reset to 0 dB"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                     {/* Peak Normalization */}
                     <div className="pt-1.5 flex items-center justify-between">
-                      <span className="text-[10px] text-[#808080]">Peak Normalization</span>
+                      <span className="text-[10px] text-[var(--theme-text-muted)]">Peak Normalization</span>
                       <button
                         onClick={handleNormalizeAudio}
                         disabled={isNormalizing || selectedClip.mediaId?.startsWith('text-placeholder')}
@@ -6104,7 +6294,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Pan / Balance</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {getPropVal(clipAudio.pan, 'audio.pan') === 0 ? 'Center' : getPropVal(clipAudio.pan, 'audio.pan') > 0 ? `R${getPropVal(clipAudio.pan, 'audio.pan')}` : `L${Math.abs(getPropVal(clipAudio.pan, 'audio.pan'))}`}
                       </span>
                     </div>
@@ -6127,7 +6317,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Vocal Tune & Character */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioVocalTune') || isMobileView ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('audioVocalTune') || isMobileView ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioVocalTune')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6137,13 +6327,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <span>Vocal Tune & Character</span>
                 </div>
                 {collapsedSections['audioVocalTune'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('audioVocalTune') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Humanize AI Voice Toggle */}
                   <div className="flex justify-between items-center text-[11px] bg-purple-950/20 p-2 rounded border border-purple-500/20">
                     <div>
@@ -6155,7 +6345,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
                         clipAudio.humanize
                           ? 'bg-purple-600 hover:bg-purple-500 text-white'
-                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
+                          : 'bg-[var(--theme-bg-card)] hover:bg-[#3d3d3d] text-[var(--theme-text-muted)] hover:text-white'
                       }`}
                     >
                       {clipAudio.humanize ? 'Active' : 'Off'}
@@ -6166,7 +6356,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Pitch Shift</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {clipAudio.pitch === 0 ? 'Original Pitch' : clipAudio.pitch > 0 ? `+${clipAudio.pitch} Semitones` : `${clipAudio.pitch} Semitones`}
                       </span>
                     </div>
@@ -6181,7 +6371,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('pitch')}
                         title="Double-click to reset to 0 semitones"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6203,7 +6393,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Voice Formant / Tone</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {clipAudio.voiceFormant === 0 ? 'Default' : clipAudio.voiceFormant > 0 ? `+${clipAudio.voiceFormant}` : clipAudio.voiceFormant}
                       </span>
                     </div>
@@ -6217,7 +6407,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('voiceFormant')}
                         title="Double-click to reset to Default"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6226,7 +6416,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Warmth</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {(clipAudio.warmth ?? 0) === 0 ? 'Neutral' : (clipAudio.warmth ?? 0) > 0 ? `+${clipAudio.warmth} Warm` : `${clipAudio.warmth} Thin`}
                       </span>
                     </div>
@@ -6238,7 +6428,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('warmth')}
                         title="Double-click to reset. Adds low-mid body to thin AI voices."
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6247,7 +6437,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Compression</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {(clipAudio.compression ?? 0) === 0 ? 'Off' : `${clipAudio.compression}%`}
                       </span>
                     </div>
@@ -6259,7 +6449,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('compression')}
                         title="Double-click to turn off. Evens out loud and quiet parts."
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6268,7 +6458,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">De-Esser</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {(clipAudio.deEsser ?? 0) === 0 ? 'Off' : `${clipAudio.deEsser}%`}
                       </span>
                     </div>
@@ -6280,7 +6470,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('deEsser')}
                         title="Double-click to turn off. Reduces harsh S and Sh sibilance sounds."
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-red-400 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-red-400 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6289,25 +6479,25 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Audio Fades */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioFades') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('audioFades') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioFades')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Audio Fades</span>
                 {collapsedSections['audioFades'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('audioFades') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Fade In */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Fade In duration</span>
-                      <span className="font-mono text-[#a0a0a0]">{(clipAudio?.fadeIn ?? 0).toFixed(1)}s</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{(clipAudio?.fadeIn ?? 0).toFixed(1)}s</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -6320,7 +6510,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('fadeIn')}
                         title="Double-click to reset to 0s"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6329,7 +6519,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Fade Out duration</span>
-                      <span className="font-mono text-[#a0a0a0]">{(clipAudio?.fadeOut ?? 0).toFixed(1)}s</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{(clipAudio?.fadeOut ?? 0).toFixed(1)}s</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -6342,7 +6532,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('fadeOut')}
                         title="Double-click to reset to 0s"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6351,7 +6541,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* AI Audio Enhancements */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEnhancements') || isMobileView ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('audioEnhancements') || isMobileView ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioEnhancements')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6361,17 +6551,17 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <span>AI Noise Reduction</span>
                 </div>
                 {collapsedSections['audioEnhancements'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('audioEnhancements') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Reduce Background Noise</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipAudio.denoise ?? 0}%</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{clipAudio.denoise ?? 0}%</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -6384,7 +6574,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('denoise')}
                         title="Double-click to reset to 0%"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6393,7 +6583,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Equalizer (EQ) */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioEQ') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('audioEQ') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioEQ')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6403,18 +6593,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <span>Equalizer (EQ)</span>
                 </div>
                 {collapsedSections['audioEQ'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('audioEQ') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
                   {/* Bass */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Bass (Low-shelf)</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {clipAudio.bass > 0 ? `+${clipAudio.bass}` : clipAudio.bass} dB
                       </span>
                     </div>
@@ -6428,7 +6618,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('bass')}
                         title="Double-click to reset to 0 dB"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6437,7 +6627,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Mid (1kHz Presence)</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {(clipAudio.mid ?? 0) > 0 ? `+${clipAudio.mid ?? 0}` : (clipAudio.mid ?? 0)} dB
                       </span>
                     </div>
@@ -6451,7 +6641,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('mid')}
                         title="Double-click to reset to 0 dB"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-yellow-400 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-yellow-400 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6460,7 +6650,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Treble (High-shelf)</span>
-                      <span className="font-mono text-[#a0a0a0]">
+                      <span className="font-mono text-[var(--theme-text-muted)]">
                         {clipAudio.treble > 0 ? `+${clipAudio.treble}` : clipAudio.treble} dB
                       </span>
                     </div>
@@ -6474,7 +6664,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onMouseUp={() => scheduleSaveSnapshot()}
                         onDoubleClick={() => handleAudioReset('treble')}
                         title="Double-click to reset to 0 dB"
-                        className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                        className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                       />
                     </div>
                   </div>
@@ -6483,7 +6673,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* AI Vocal / BGM Separation */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('aiVocalSeparation') || isMobileView ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('aiVocalSeparation') || isMobileView ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('aiVocalSeparation')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
@@ -6496,20 +6686,20 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   )}
                 </div>
                 {collapsedSections['aiVocalSeparation'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('aiVocalSeparation') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
-                  <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-2">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
+                  <div className="bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]/50 rounded p-2.5 space-y-2">
                     <div className="flex justify-between items-center text-[11px]">
                       <div>
                         <span className="text-cyan-400 font-semibold block flex items-center gap-1">
                           Demucs AI Model
                         </span>
-                        <span className="text-[9px] text-[#a0a0a0] block">
+                        <span className="text-[9px] text-[var(--theme-text-muted)] block">
                           Extract vocals locally via WebGPU
                         </span>
                       </div>
@@ -6518,7 +6708,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         disabled={isSeparating || clipAudio.aiVocalSeparation?.isProcessed}
                         className={`px-2.5 py-1.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors flex items-center gap-1 ${
                           isSeparating || clipAudio.aiVocalSeparation?.isProcessed
-                            ? 'bg-[#2d2d2d] text-[#606060] cursor-not-allowed'
+                            ? 'bg-[var(--theme-bg-card)] text-[#606060] cursor-not-allowed'
                             : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold'
                         }`}
                       >
@@ -6547,8 +6737,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
                   
                   {/* Info Note */}
-                  <div className="bg-[#1e1e1e] border border-[#3e3e3e]/50 rounded p-2.5 space-y-1">
-                    <p className="text-[10px] text-[#a0a0a0]">
+                  <div className="bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]/50 rounded p-2.5 space-y-1">
+                    <p className="text-[10px] text-[var(--theme-text-muted)]">
                       <span className="text-cyan-400 font-medium">How it works:</span> Uses Demucs AI running entirely in your browser via WebGPU to separate vocals from background music.
                     </p>
                     <p className="text-[9px] text-[#6a6a6a]">
@@ -6560,31 +6750,31 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
 
             {/* Speed Pitch Settings */}
-            <div className={`bg-[#2d2d2d] rounded border border-[#3e3e3e] ${!isSectionActive('audioSpeedPitch') ? 'hidden' : ''}`}>
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('audioSpeedPitch') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('audioSpeedPitch')}
                 className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-white`}
               >
                 <span className="font-medium">Speed Pitch Settings</span>
                 {collapsedSections['audioSpeedPitch'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 )}
               </button>
               {isSectionOpen('audioSpeedPitch') && (
-                <div className="px-2.5 pb-3 space-y-3 border-t border-[#3e3e3e]/30 pt-2.5">
-                  <div className="flex justify-between items-center text-[11px] bg-[#1e1e1e] p-2 rounded border border-[#3e3e3e]">
+                <div className="px-2.5 pb-3 space-y-3 border-t border-[var(--theme-border)]/30 pt-2.5">
+                  <div className="flex justify-between items-center text-[11px] bg-[var(--theme-bg-subpanel)] p-2 rounded border border-[var(--theme-border)]">
                     <div>
                       <span className="text-[#d0d0d0] font-medium block">Maintain Audio Pitch</span>
-                      <span className="text-[9px] text-[#a0a0a0] block">Keeps pitch stable on speed changes</span>
+                      <span className="text-[9px] text-[var(--theme-text-muted)] block">Keeps pitch stable on speed changes</span>
                     </div>
                     <button
                       onClick={() => handleAudioChange('preservePitch', !clipAudio.preservePitch)}
                       className={`px-2.5 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors ${
                         clipAudio.preservePitch
                           ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                          : 'bg-[#2d2d2d] hover:bg-[#3d3d3d] text-[#a0a0a0] hover:text-white'
+                          : 'bg-[var(--theme-bg-card)] hover:bg-[#3d3d3d] text-[var(--theme-text-muted)] hover:text-white'
                       }`}
                     >
                       {clipAudio.preservePitch ? 'On' : 'Off'}
@@ -6605,18 +6795,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <label className="text-xs text-[#a0a0a0]">Content</label>
+                <label className="text-xs text-[var(--theme-text-muted)]">Content</label>
                 <textarea
                   value={selectedClip.textSettings.text}
                   onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, text: e.target.value } })}
                   onBlur={() => scheduleSaveSnapshot()}
-                  className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
+                  className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded p-2 min-h-[60px] resize-none focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-xs text-[#a0a0a0]">Style Presets</label>
-                <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto p-1.5 border border-[#3e3e3e]/40 rounded bg-[#181818] scrollbar-thin">
+                <label className="text-xs text-[var(--theme-text-muted)]">Style Presets</label>
+                <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto p-1.5 border border-[var(--theme-border)]/40 rounded bg-[#181818] scrollbar-thin">
                   {TEXT_TEMPLATES.map((tmpl) => (
                     <button
                       key={tmpl.name}
@@ -6641,7 +6831,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         scheduleSaveSnapshot();
                         toast.success(`Applied style "${tmpl.name}"`);
                       }}
-                      className="p-2 bg-[#2d2d2d] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-left truncate transition-colors text-[10px] text-white flex items-center justify-center font-semibold"
+                      className="p-2 bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-left truncate transition-colors text-[10px] text-white flex items-center justify-center font-semibold"
                       title={tmpl.name}
                     >
                       <span className={tmpl.style} style={{ fontSize: '10px' }}>{tmpl.name}</span>
@@ -6651,14 +6841,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-xs text-[#a0a0a0]">Font Family</label>
+                <label className="text-xs text-[var(--theme-text-muted)]">Font Family</label>
                 <select
                   value={selectedClip.textSettings.fontFamily || 'Inter'}
                   onChange={(e) => {
                     updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, fontFamily: e.target.value } });
                     scheduleSaveSnapshot();
                   }}
-                  className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer"
+                  className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer"
                 >
                   <option value="Inter">Inter</option>
                   <option value="Roboto">Roboto</option>
@@ -6677,7 +6867,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-xs text-[#a0a0a0]">Font Size</label>
+                <label className="text-xs text-[var(--theme-text-muted)]">Font Size</label>
                 <div className="flex items-center gap-3">
                   <input
                     type="range"
@@ -6695,7 +6885,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
               <div className="flex gap-4">
                 <div className="flex flex-col gap-2 flex-1">
-                  <label className="text-xs text-[#a0a0a0]">Color</label>
+                  <label className="text-xs text-[var(--theme-text-muted)]">Color</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="color"
@@ -6709,7 +6899,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
 
                 <div className="flex flex-col gap-2 flex-1">
-                  <label className="text-xs text-[#a0a0a0]">Background</label>
+                  <label className="text-xs text-[var(--theme-text-muted)]">Background</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="color"
@@ -6723,7 +6913,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, backgroundColor: 'transparent' } });
                         scheduleSaveSnapshot();
                       }}
-                      className="text-[10px] bg-[#3e3e3e] hover:bg-[#5e5e5e] px-2 py-1 rounded text-white transition-colors"
+                      className="text-[10px] bg-[var(--theme-bg-subpanel)] hover:bg-[#5e5e5e] px-2 py-1 rounded text-white transition-colors"
                     >
                       Clear
                     </button>
@@ -6731,9 +6921,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
               </div>
 
-              <div className="flex gap-4 border-t border-[#3e3e3e] pt-4">
+              <div className="flex gap-4 border-t border-[var(--theme-border)] pt-4">
                 <div className="flex flex-col gap-2 flex-1">
-                  <label className="text-xs text-[#a0a0a0]">Stroke Color</label>
+                  <label className="text-xs text-[var(--theme-text-muted)]">Stroke Color</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="color"
@@ -6747,7 +6937,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
 
                 <div className="flex flex-col gap-2 flex-1">
-                  <label className="text-xs text-[#a0a0a0]">Stroke Width</label>
+                  <label className="text-xs text-[var(--theme-text-muted)]">Stroke Width</label>
                   <div className="flex items-center gap-3">
                     <input
                       type="range"
@@ -6764,7 +6954,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 border-t border-[#3e3e3e] pt-4">
+              <div className="flex items-center gap-4 border-t border-[var(--theme-border)] pt-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -6773,7 +6963,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, bold: e.target.checked } });
                       scheduleSaveSnapshot();
                     }}
-                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                    className="accent-amber-500 rounded bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)]"
                   />
                   <span className="text-xs text-white font-bold">Bold</span>
                 </label>
@@ -6785,14 +6975,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, italic: e.target.checked } });
                       scheduleSaveSnapshot();
                     }}
-                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                    className="accent-amber-500 rounded bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)]"
                   />
                   <span className="text-xs text-white italic">Italic</span>
                 </label>
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-xs text-[#a0a0a0]">Alignment</label>
+                <label className="text-xs text-[var(--theme-text-muted)]">Alignment</label>
                 <div className="flex gap-1">
                   {(['left','center','right'] as const).map((align) => (
                     <button
@@ -6804,7 +6994,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       className={`flex-1 py-1.5 text-xs rounded border transition-colors capitalize ${
                         (selectedClip.textSettings as any).textAlign === align || (!((selectedClip.textSettings as any).textAlign) && align === 'center')
                           ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-                          : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                          : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'
                       }`}
                     >
                       {align}
@@ -6813,7 +7003,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
               </div>
 
-              <div className="border-t border-[#3e3e3e] pt-4 flex flex-col gap-4">
+              <div className="border-t border-[var(--theme-border)] pt-4 flex flex-col gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -6822,7 +7012,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, shadow: e.target.checked } });
                       scheduleSaveSnapshot();
                     }}
-                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                    className="accent-amber-500 rounded bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)]"
                   />
                   <span className="text-xs text-white">Drop Shadow</span>
                 </label>
@@ -6851,7 +7041,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 )}
               </div>
 
-              <div className="border-t border-[#3e3e3e] pt-4 flex flex-col gap-4">
+              <div className="border-t border-[var(--theme-border)] pt-4 flex flex-col gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -6860,14 +7050,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, threeD: e.target.checked } });
                       scheduleSaveSnapshot();
                     }}
-                    className="accent-amber-500 rounded bg-[#1e1e1e] border-[#3e3e3e]"
+                    className="accent-amber-500 rounded bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)]"
                   />
                   <span className="text-xs text-white">3D Effect</span>
                 </label>
                 {selectedClip.textSettings.threeD && (
                   <div className="pl-6 flex flex-col gap-2">
                     <div className="flex items-center gap-3">
-                      <label className="text-[10px] text-[#a0a0a0] w-10">Depth</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] w-10">Depth</label>
                       <input
                         type="range"
                         min="1"
@@ -6885,12 +7075,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
 
               {/* Text Animation Presets */}
-              <div className="border-t border-[#3e3e3e] pt-4 flex flex-col gap-4">
+              <div className="border-t border-[var(--theme-border)] pt-4 flex flex-col gap-4">
                 <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Text Animations</p>
                 
                 {/* Intro Animation (IN) */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-xs text-[#a0a0a0]">Intro (IN)</label>
+                  <label className="text-xs text-[var(--theme-text-muted)]">Intro (IN)</label>
                   <div className="flex gap-2">
                     <select
                       value={selectedClip.textSettings.animation?.in || 'none'}
@@ -6904,7 +7094,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                         scheduleSaveSnapshot();
                       }}
-                      className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
+                      className="flex-1 bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
                     >
                       <option value="none">None</option>
                       <optgroup label="── Basic ──">
@@ -6947,9 +7137,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             });
                           }}
                           onBlur={() => scheduleSaveSnapshot()}
-                          className="w-12 px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
+                          className="w-12 px-1.5 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
                         />
-                        <span className="text-[10px] text-[#a0a0a0]">sec</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)]">sec</span>
                       </div>
                     )}
                   </div>
@@ -6957,7 +7147,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                 {/* Outro Animation (OUT) */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-xs text-[#a0a0a0]">Outro (OUT)</label>
+                  <label className="text-xs text-[var(--theme-text-muted)]">Outro (OUT)</label>
                   <div className="flex gap-2">
                     <select
                       value={selectedClip.textSettings.animation?.out || 'none'}
@@ -6971,7 +7161,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         });
                         scheduleSaveSnapshot();
                       }}
-                      className="flex-1 bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
+                      className="flex-1 bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 appearance-none cursor-pointer capitalize"
                     >
                       <option value="none">None</option>
                       <optgroup label="── Basic ──">
@@ -7012,9 +7202,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                             });
                           }}
                           onBlur={() => scheduleSaveSnapshot()}
-                          className="w-12 px-1.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
+                          className="w-12 px-1.5 py-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-center text-[10px] text-white focus:outline-none focus:border-amber-500"
                         />
-                        <span className="text-[10px] text-[#a0a0a0]">sec</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)]">sec</span>
                       </div>
                     )}
                   </div>
@@ -7046,7 +7236,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </p>
 
                 {isDuckingAudio ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[var(--theme-bg-subpanel)] rounded border border-[var(--theme-border)]">
                     <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
                     <span className="text-[10px] text-emerald-400 font-medium">
                       Separating and Analyzing Vocals ({duckingProgress}%)...
@@ -7081,13 +7271,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </p>
 
                 {/* AI Provider Configuration */}
-                <div className="space-y-2 pt-1 border-t border-[#3e3e3e]/40">
+                <div className="space-y-2 pt-1 border-t border-[var(--theme-border)]/40">
                   <div className="flex items-center gap-2">
                      <label className="text-[10px] text-white">AI Provider:</label>
                      <select 
                        value={aiProvider}
                        onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'groq')}
-                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                       className="bg-[var(--theme-bg-subpanel)] text-white text-[10px] border border-[var(--theme-border)] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                      >
                        <option value="gemini">Gemini (Default)</option>
                        <option value="groq">Groq (Llama 3 Vision)</option>
@@ -7098,7 +7288,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                      <select 
                        value={soundDesignFps}
                        onChange={(e) => setSoundDesignFps(Number(e.target.value))}
-                       className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                       className="bg-[var(--theme-bg-subpanel)] text-white text-[10px] border border-[var(--theme-border)] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
                      >
                        <option value={1}>1 FPS (Standard)</option>
                        <option value={5}>5 FPS (High)</option>
@@ -7108,7 +7298,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
 
                 {isAnalyzingAudio ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[var(--theme-bg-subpanel)] rounded border border-[var(--theme-border)]">
                     <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
                     <span className="text-[10px] text-amber-400 font-medium">
                       {audioAnalyzeProgress}...
@@ -7127,18 +7317,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
             {/* AI Vocal / BGM Separation (Under AI Tab) */}
             {isSectionActive('aiVocalSeparation') && selectedClip && (
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-2">
+              <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <Music className="w-4 h-4 text-purple-400" />
                   <span className="text-xs text-white font-semibold">AI Vocal / BGM Splitter</span>
                 </div>
-                <p className="text-[11px] text-[#a0a0a0]">Separate dialogue/vocals from background music track using on-device Demucs AI.</p>
+                <p className="text-[11px] text-[var(--theme-text-muted)]">Separate dialogue/vocals from background music track using on-device Demucs AI.</p>
                 <button
                   onClick={handleAiSeparate}
                   disabled={isSeparating || clipAudio.aiVocalSeparation?.isProcessed}
                   className={`w-full py-2 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
                     isSeparating || clipAudio.aiVocalSeparation?.isProcessed
-                      ? 'bg-[#1e1e1e] text-[#606060] cursor-not-allowed'
+                      ? 'bg-[var(--theme-bg-subpanel)] text-[#606060] cursor-not-allowed'
                       : 'bg-purple-600 hover:bg-purple-500 text-white'
                   }`}
                 >
@@ -7161,7 +7351,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
             {/* AI Audio Voice Enhance (Under AI Tab) */}
             {isSectionActive('audioEnhancements') && selectedClip && (
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-3">
+              <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <Wand2 className="w-4 h-4 text-emerald-400" />
                   <span className="text-xs text-white font-semibold">AI Voice Enhancements</span>
@@ -7170,7 +7360,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="text-[#d0d0d0]">Reduce Background Noise</span>
-                      <span className="font-mono text-[#a0a0a0]">{clipAudio.denoise ?? 0}%</span>
+                      <span className="font-mono text-[var(--theme-text-muted)]">{clipAudio.denoise ?? 0}%</span>
                     </div>
                     <input
                       type="range"
@@ -7180,7 +7370,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       value={clipAudio.denoise ?? 0}
                       onChange={(e) => handleAudioChange('denoise', Number(e.target.value))}
                       onMouseUp={() => scheduleSaveSnapshot()}
-                      className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                      className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                     />
                   </div>
                 </div>
@@ -7189,7 +7379,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
             {/* AI Voice Tune & Character (Under AI Tab) */}
             {isSectionActive('audioVocalTune') && selectedClip && (
-              <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 space-y-3">
+              <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-400" />
                   <span className="text-xs text-white font-semibold">AI Voice Character & Pitch</span>
@@ -7198,7 +7388,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 <div className="space-y-1">
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-[#d0d0d0]">Voice Formant (Male &harr; Female)</span>
-                    <span className="font-mono text-[#a0a0a0]">
+                    <span className="font-mono text-[var(--theme-text-muted)]">
                       {clipAudio.voiceFormant === 0 ? 'Default' : clipAudio.voiceFormant > 0 ? `+${clipAudio.voiceFormant}` : clipAudio.voiceFormant}
                     </span>
                   </div>
@@ -7209,14 +7399,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     value={clipAudio.voiceFormant}
                     onChange={(e) => handleAudioChange('voiceFormant', Number(e.target.value))}
                     onMouseUp={() => scheduleSaveSnapshot()}
-                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                   />
                 </div>
                 {/* Warmth */}
                 <div className="space-y-1">
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-[#d0d0d0]">Voice Warmth</span>
-                    <span className="font-mono text-[#a0a0a0]">
+                    <span className="font-mono text-[var(--theme-text-muted)]">
                       {(clipAudio.warmth ?? 0) === 0 ? 'Neutral' : (clipAudio.warmth ?? 0) > 0 ? `+${clipAudio.warmth}` : `${clipAudio.warmth}`}
                     </span>
                   </div>
@@ -7225,14 +7415,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     value={clipAudio.warmth ?? 0}
                     onChange={(e) => handleAudioChange('warmth', Number(e.target.value))}
                     onMouseUp={() => scheduleSaveSnapshot()}
-                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+                    className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                   />
                 </div>
                 {/* Compression */}
                 <div className="space-y-1">
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-[#d0d0d0]">Voice Compression</span>
-                    <span className="font-mono text-[#a0a0a0]">
+                    <span className="font-mono text-[var(--theme-text-muted)]">
                       {(clipAudio.compression ?? 0) === 0 ? 'Off' : `${clipAudio.compression}%`}
                     </span>
                   </div>
@@ -7241,7 +7431,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     value={clipAudio.compression ?? 0}
                     onChange={(e) => handleAudioChange('compression', Number(e.target.value))}
                     onMouseUp={() => scheduleSaveSnapshot()}
-                    className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full"
+                    className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full"
                   />
                 </div>
               </div>
@@ -7289,7 +7479,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
             {/* ── Timeline FX Settings ── */}
             {selectedClip.fxSettings && (
-              <div className="flex flex-col gap-3 bg-[#1e1e1e] rounded p-3 border border-rose-500/20">
+              <div className="flex flex-col gap-3 bg-[var(--theme-bg-subpanel)] rounded p-3 border border-rose-500/20">
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider">Timeline FX</p>
                   <button
@@ -7301,11 +7491,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-[#a0a0a0]">Effect Type</label>
+                  <label className="text-[10px] text-[var(--theme-text-muted)]">Effect Type</label>
                   <select
                     value={selectedClip.fxSettings.type}
                     onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, type: e.target.value as any } })}
-                    className="bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-rose-500 font-medium"
+                    className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-rose-500 font-medium"
                   >
                     <option value="subject_outline_flash">✨ Subject Outline Flash (AI Human Extract)</option>
                     <option value="rhythmic_mirror">🔄 Rhythmic Mirror Flip (Action/Walking)</option>
@@ -7339,13 +7529,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 {selectedClip.fxSettings.type === 'subject_outline_flash' && (
                   <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0]">Neon Glow Color</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)]">Neon Glow Color</label>
                       <div className="flex items-center gap-2">
                         <input
                           type="color"
                           value={selectedClip.fxSettings.outlineColor || '#00f0ff'}
                           onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, outlineColor: e.target.value } })}
-                          className="w-7 h-7 rounded border border-[#3e3e3e] bg-transparent cursor-pointer"
+                          className="w-7 h-7 rounded border border-[var(--theme-border)] bg-transparent cursor-pointer"
                         />
                         <div className="flex gap-1">
                           {['#00f0ff', '#f43f5e', '#facc15', '#a855f7', '#22c55e', '#ffffff'].map((c) => (
@@ -7362,7 +7552,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     </div>
 
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
                         Flash Speed
                         <span className="font-mono text-cyan-400">{selectedClip.fxSettings.strobeSpeed ?? 8} Hz</span>
                       </label>
@@ -7378,7 +7568,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     </div>
 
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
                         Outline Stroke Width
                         <span className="font-mono text-cyan-400">{selectedClip.fxSettings.outlineWidth ?? 3} px</span>
                       </label>
@@ -7394,7 +7584,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     </div>
 
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
                         Neon Glow Radius
                         <span className="font-mono text-cyan-400">{selectedClip.fxSettings.glowBlur ?? 14} px</span>
                       </label>
@@ -7415,7 +7605,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 {selectedClip.fxSettings.type === 'rhythmic_mirror' && (
                   <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
                         Mirror Flip Speed
                         <span className="font-mono text-amber-400">Every {selectedClip.fxSettings.flipInterval ?? 0.5}s</span>
                       </label>
@@ -7431,11 +7621,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     </div>
 
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0]">Flip Axis</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)]">Flip Axis</label>
                       <select
                         value={selectedClip.fxSettings.flipAxis ?? 'horizontal'}
                         onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipAxis: e.target.value as any } })}
-                        className="bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1"
+                        className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1"
                       >
                         <option value="horizontal">Horizontal Flip (Walking Scene)</option>
                         <option value="vertical">Vertical Flip</option>
@@ -7459,7 +7649,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 {selectedClip.fxSettings.type === 'action_zoom_pulse' && (
                   <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
                         Pulse Frequency (Speed)
                         <span className="font-mono text-cyan-400">{selectedClip.fxSettings.pulseSpeed ?? 2} Hz</span>
                       </label>
@@ -7474,7 +7664,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
                         Zoom Amplitude
                         <span className="font-mono text-cyan-400">+{selectedClip.fxSettings.pulseDepth ?? 20}%</span>
                       </label>
@@ -7495,7 +7685,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 {selectedClip.fxSettings.type === 'action_strobe' && (
                   <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[#a0a0a0] flex justify-between">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
                         Strobe Speed
                         <span className="font-mono text-yellow-300">{selectedClip.fxSettings.strobeSpeed ?? 8} Hz</span>
                       </label>
@@ -7513,7 +7703,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 )}
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-[#a0a0a0]">Intensity — {selectedClip.fxSettings.intensity ?? 100}%</label>
+                  <label className="text-[10px] text-[var(--theme-text-muted)]">Intensity — {selectedClip.fxSettings.intensity ?? 100}%</label>
                   <input type="range" min="0" max="100"
                     value={selectedClip.fxSettings.intensity ?? 100}
                     onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, intensity: Number(e.target.value) } })}
@@ -7530,7 +7720,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 updateClip(selectedClip.id, { particleSettings: { ...ps, ...patch } });
 
               return (
-                <div className="flex flex-col gap-3 bg-[#1e1e1e] rounded p-3 border border-violet-500/20">
+                <div className="flex flex-col gap-3 bg-[var(--theme-bg-subpanel)] rounded p-3 border border-violet-500/20">
                   <div className="flex items-center justify-between">
                     <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider">✦ Particle Effect</p>
                     <button
@@ -7541,11 +7731,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                   {/* Type selector */}
                   <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-[#a0a0a0]">Effect Type</label>
+                    <label className="text-[10px] text-[var(--theme-text-muted)]">Effect Type</label>
                     <select
                       value={ps.type}
                       onChange={(e) => upd({ type: e.target.value as any })}
-                      className="bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-2 py-1.5 focus:outline-none focus:border-violet-500"
+                      className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-violet-500"
                     >
                       <option value="snow">❄️ Snow</option>
                       <option value="rain">🌧️ Rain</option>
@@ -7562,7 +7752,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
                   {/* Emitter Position */}
                   <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-[#a0a0a0]">Emitter Position</label>
+                    <label className="text-[10px] text-[var(--theme-text-muted)]">Emitter Position</label>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <span className="text-[9px] text-[#6a6a6a]">X — {Math.round(ps.emitterX)}%</span>
@@ -7589,7 +7779,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   ] as const).map(({ key, label, min, max, unit }) => (
                     <div key={key} className="flex flex-col gap-0.5">
                       <div className="flex justify-between">
-                        <span className="text-[10px] text-[#a0a0a0]">{label}</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)]">{label}</span>
                         <span className="text-[10px] text-white">{ps[key]}{unit}</span>
                       </div>
                       <input type="range" min={min} max={max} value={ps[key]}
@@ -7609,7 +7799,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   ] as const).map(({ key, label, min, max, unit }) => (
                     <div key={key} className="flex flex-col gap-0.5">
                       <div className="flex justify-between">
-                        <span className="text-[10px] text-[#a0a0a0]">{label}</span>
+                        <span className="text-[10px] text-[var(--theme-text-muted)]">{label}</span>
                         <span className="text-[10px] text-white">{ps[key]}{unit}</span>
                       </div>
                       <input type="range" min={min} max={max} value={ps[key]}

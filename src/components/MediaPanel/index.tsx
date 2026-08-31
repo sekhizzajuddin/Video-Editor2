@@ -55,6 +55,7 @@ import {
   Scissors,
   Wand2,
   Wrench,
+  Sliders,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
@@ -1295,9 +1296,9 @@ export function MediaPanel() {
 
         {activeMediaTab === 'project' && (
           <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
-            {/* Search & Category Filter Pills */}
-            <div className="p-2.5 space-y-2 border-b border-[var(--theme-border)] bg-[var(--theme-bg-panel)] shrink-0">
-              <div className="relative">
+            {/* Search Input */}
+            <div className="p-2.5 pb-2 bg-[var(--theme-bg-panel)] shrink-0">
+              <div className="relative flex items-center">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
                 <label htmlFor="media-search" className="sr-only">Search media</label>
                 <input
@@ -1306,48 +1307,31 @@ export function MediaPanel() {
                   placeholder="Search media..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-7 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-lg text-xs text-[var(--theme-text-primary)] placeholder-[var(--theme-text-muted)] focus:outline-none focus:border-blue-500 transition-colors"
+                  className="w-full pl-8 pr-8 py-1.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-lg text-xs text-[var(--theme-text-primary)] placeholder-[var(--theme-text-muted)] focus:outline-none focus:border-blue-500 transition-colors"
                 />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-
-              {/* Category Filter Pills */}
-              <div className="flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-                {(['all', 'video', 'audio', 'image'] as const).map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setMediaTypeFilter(cat)}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-medium capitalize transition-all whitespace-nowrap ${
-                      mediaTypeFilter === cat
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-card)] border border-[var(--theme-border)]'
-                    }`}
-                  >
-                    {cat === 'all' ? 'All' : cat === 'image' ? 'Images' : cat + 's'}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] p-0.5"
+                  title="Filter options"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
 
-            {/* Dashed Import Dropzone Card */}
-            <div className="p-2.5 pb-1">
+            {/* Compact Import Media Dropzone Card */}
+            <div className="px-2.5 pb-2">
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-blue-500/30 hover:border-blue-500/60 rounded-xl p-3.5 bg-gradient-to-b from-blue-500/[0.04] to-transparent hover:from-blue-500/[0.08] transition-all cursor-pointer group flex flex-col items-center text-center gap-1.5"
+                className="border border-dashed border-blue-500/30 hover:border-blue-500/60 rounded-xl p-2.5 bg-gradient-to-b from-blue-500/[0.04] to-transparent hover:from-blue-500/[0.08] transition-all cursor-pointer group flex flex-col items-center text-center gap-1.5"
               >
-                <div className="w-8 h-8 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-500 group-hover:scale-110 group-hover:bg-blue-600/20 transition-all">
-                  <Upload className="w-4 h-4" />
+                <div className="w-7 h-7 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-500 group-hover:scale-110 group-hover:bg-blue-600/20 transition-all">
+                  <Upload className="w-3.5 h-3.5" />
                 </div>
-                <div>
-                  <p className="text-xs font-semibold text-[var(--theme-text-primary)]">Import Media</p>
-                  <p className="text-[10px] text-[var(--theme-text-muted)] mt-0.5">Videos, Images, Audio</p>
+                <div className="leading-tight">
+                  <p className="text-xs font-bold text-[var(--theme-text-primary)]">Import Media</p>
+                  <p className="text-[9px] text-[var(--theme-text-muted)] mt-0.5">Videos, Images, Audio</p>
                 </div>
                 <button
                   type="button"
@@ -1355,12 +1339,32 @@ export function MediaPanel() {
                     e.stopPropagation();
                     fileInputRef.current?.click();
                   }}
-                  className="btn-primary-gradient px-3 py-1 text-[11px] font-medium rounded-lg text-white shadow-md hover:shadow-blue-500/20 transition-all flex items-center gap-1 mt-0.5"
+                  className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-[11px] font-semibold rounded-lg text-white shadow-sm transition-all flex items-center justify-center gap-1.5"
                 >
-                  <Plus className="w-3 h-3" />
-                  Import
+                  <Plus className="w-3.5 h-3.5" />
+                  + Import
                 </button>
               </div>
+            </div>
+
+            {/* Flat Underline Category Tabs (Non-Rounded) */}
+            <div className="flex items-center justify-between px-3 border-b border-[var(--theme-border)] bg-[var(--theme-bg-panel)] shrink-0">
+              {(['all', 'video', 'audio', 'image'] as const).map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setMediaTypeFilter(cat)}
+                  className={`py-2 px-1 text-xs font-semibold relative transition-colors ${
+                    mediaTypeFilter === cat
+                      ? 'text-blue-600 dark:text-blue-400 font-bold'
+                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                  }`}
+                >
+                  {cat === 'all' ? 'All' : cat === 'image' ? 'Images' : cat === 'video' ? 'Video' : 'Audio'}
+                  {mediaTypeFilter === cat && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400 rounded-full" />
+                  )}
+                </button>
+              ))}
             </div>
 
             {/* Quick Action Tools */}
