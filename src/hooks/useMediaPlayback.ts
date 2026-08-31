@@ -115,6 +115,8 @@ interface MediaElement {
   sourceNode?: MediaElementAudioSourceNode;
   pitchNode?: ScriptProcessorNode;
   vocalFilter?: BiquadFilterNode;
+  vocalFilterF1?: BiquadFilterNode; // F1 formant ~500Hz
+  vocalFilterF3?: BiquadFilterNode; // F3 formant ~2500Hz
   denoiseFilter?: BiquadFilterNode;
   bassFilter?: BiquadFilterNode;
   midFilter?: BiquadFilterNode;
@@ -507,20 +509,148 @@ function createPitchNode(audioCtx: AudioContext): ScriptProcessorNode {
   (pitchNode as any).pitch = 0;
   (pitchNode as any).humanize = false;
 
-  const grainSize = 1024;
-  const overlap = grainSize / 2;
-  const bufferLen = 65536;
-  const writeBufL = new Float32Array(bufferLen);
-  const writeBufR = new Float32Array(bufferLen);
-  let writePos = 0;
-  let readPosA = 0;
-  let readPosB = overlap;
-  let grainCounterA = 0;
-  let grainCounterB = overlap;
+  // ── Phase Vocoder Pitch Shift ──────────────────────────────────────────
+  // Replaces the old granular time-stretcher with a proper Bernsee-style
+  // phase vocoder that maintains phase coherence. This eliminates the
+  // robotic / chorusy artifacts that plagued the granular approach.
+  // Algorithm matches phaseVocoder.ts (used by export) so preview = export.
+  const FFT_N = 2048;
+  const HOP = FFT_N / 4; // 75% overlap — 4 grains summing to unity
+  const HALF = FFT_N / 2;
+  const omega = (2 * Math.PI * HOP) / FFT_N; // expected phase advance per bin per hop
 
-  const hannWindow = new Float32Array(grainSize);
-  for (let i = 0; i < grainSize; i++) {
-    hannWindow[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / grainSize));
+  // Hann window scaled for 75% overlap-add (4 overlapping windows sum to 1.5)
+  const win = new Float32Array(FFT_N);
+  for (let i = 0; i < FFT_N; i++) {
+    win[i] = (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (FFT_N - 1))) * (2 / 3);
+  }
+
+  // Per-channel state
+  function makeChannelState() {
+    return {
+      inBuf: new Float32Array(FFT_N * 4),   // circular input buffer
+      outBuf: new Float32Array(FFT_N * 4),   // overlap-add output buffer
+      inPos: 0,
+      outReadPos: 0,
+      outWritePos: 0,
+      lastPhase: new Float32Array(HALF + 1),
+      sumPhase: new Float32Array(HALF + 1),
+      hopAccum: 0, // fractional hop accumulator
+    };
+  }
+  const stateL = makeChannelState();
+  const stateR = makeChannelState();
+
+  // Inline radix-2 FFT (same as phaseVocoder.ts)
+  function fftInPlace(re: Float32Array, im: Float32Array): void {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        let t = re[i]; re[i] = re[j]; re[j] = t;
+        t = im[i]; im[i] = im[j]; im[j] = t;
+      }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = (-2 * Math.PI) / len;
+      const wRe = Math.cos(ang);
+      const wIm = Math.sin(ang);
+      for (let i = 0; i < n; i += len) {
+        let curRe = 1, curIm = 0;
+        const half = len >> 1;
+        for (let j = 0; j < half; j++) {
+          const uRe = re[i + j], uIm = im[i + j];
+          const vRe = re[i + j + half] * curRe - im[i + j + half] * curIm;
+          const vIm = re[i + j + half] * curIm + im[i + j + half] * curRe;
+          re[i + j] = uRe + vRe;   im[i + j] = uIm + vIm;
+          re[i + j + half] = uRe - vRe; im[i + j + half] = uIm - vIm;
+          const nextRe = curRe * wRe - curIm * wIm;
+          curIm = curRe * wIm + curIm * wRe;
+          curRe = nextRe;
+        }
+      }
+    }
+  }
+
+  function princArg(x: number): number {
+    while (x > Math.PI) x -= 2 * Math.PI;
+    while (x < -Math.PI) x += 2 * Math.PI;
+    return x;
+  }
+
+  // Shared FFT scratch buffers (allocated once, reused every hop)
+  const fftRe = new Float32Array(FFT_N);
+  const fftIm = new Float32Array(FFT_N);
+  const mag = new Float32Array(HALF + 1);
+  const instFreq = new Float32Array(HALF + 1);
+  const phase = new Float32Array(HALF + 1);
+
+  function processHop(
+    st: ReturnType<typeof makeChannelState>,
+    ratio: number,
+    inputSamples: Float32Array,
+    inputOffset: number
+  ): void {
+    const inBuf = st.inBuf;
+    const inLen = inBuf.length;
+
+    // Write HOP new input samples into the circular buffer
+    for (let i = 0; i < HOP; i++) {
+      inBuf[(st.inPos + i) % inLen] = inputSamples[inputOffset + i];
+    }
+
+    // ── Analysis: window FFT_N samples ending at inPos + HOP ──
+    const frameStart = ((st.inPos + HOP - FFT_N) + inLen * 2) % inLen;
+    for (let i = 0; i < FFT_N; i++) {
+      fftRe[i] = inBuf[(frameStart + i) % inLen] * win[i];
+      fftIm[i] = 0;
+    }
+    fftInPlace(fftRe, fftIm);
+
+    // Extract magnitude + instantaneous frequency via phase unwrapping
+    for (let k = 0; k <= HALF; k++) {
+      mag[k] = Math.hypot(fftRe[k], fftIm[k]);
+      phase[k] = Math.atan2(fftIm[k], fftRe[k]);
+      const advance = princArg(phase[k] - st.lastPhase[k] - k * omega) / HOP;
+      instFreq[k] = k * ((2 * Math.PI) / FFT_N) + advance;
+      st.lastPhase[k] = phase[k];
+    }
+
+    // ── Pitch shift: bin k ← bin k/ratio ──
+    for (let k = 0; k <= HALF; k++) {
+      const src = k / ratio;
+      if (src > HALF) { fftRe[k] = 0; fftIm[k] = 0; continue; }
+      const i0 = Math.floor(src);
+      const frac = src - i0;
+      const i1 = Math.min(HALF, i0 + 1);
+      const m = mag[i0] + (mag[i1] - mag[i0]) * frac;
+      const f = instFreq[i0] + (instFreq[i1] - instFreq[i0]) * frac;
+      st.sumPhase[k] += f * ratio * HOP;
+      fftRe[k] = m * Math.cos(st.sumPhase[k]);
+      fftIm[k] = m * Math.sin(st.sumPhase[k]);
+    }
+    // Hermitian symmetry
+    for (let k = 1; k < HALF; k++) {
+      fftRe[FFT_N - k] = fftRe[k];
+      fftIm[FFT_N - k] = -fftIm[k];
+    }
+    fftRe[HALF] = 0; fftIm[HALF] = 0;
+
+    // ── Inverse FFT via conjugate trick ──
+    for (let i = 0; i < FFT_N; i++) fftIm[i] = -fftIm[i];
+    fftInPlace(fftRe, fftIm);
+    const inv = 1 / FFT_N;
+
+    // ── Overlap-add into output buffer ──
+    const outLen = st.outBuf.length;
+    for (let i = 0; i < FFT_N; i++) {
+      st.outBuf[(st.outWritePos + i) % outLen] += fftRe[i] * inv;
+    }
+
+    st.inPos = (st.inPos + HOP) % inLen;
+    st.outWritePos = (st.outWritePos + HOP) % outLen;
   }
 
   pitchNode.onaudioprocess = (e) => {
@@ -529,7 +659,7 @@ function createPitchNode(audioCtx: AudioContext): ScriptProcessorNode {
     const outputL = e.outputBuffer.getChannelData(0);
     const outputR = e.outputBuffer.getChannelData(1);
 
-    const pitch = (pitchNode as any).pitch || 0;
+    const pitchSt = (pitchNode as any).pitch || 0;
     const isHumanize = (pitchNode as any).humanize || false;
     let jitter = 0;
     if (isHumanize) {
@@ -537,7 +667,7 @@ function createPitchNode(audioCtx: AudioContext): ScriptProcessorNode {
       jitter = Math.sin(time * 2 * Math.PI * 5.5) * 0.06;
     }
 
-    const semitones = pitch + jitter;
+    const semitones = pitchSt + jitter;
     if (Math.abs(semitones) < 0.01) {
       outputL.set(inputL);
       outputR.set(inputR);
@@ -545,52 +675,27 @@ function createPitchNode(audioCtx: AudioContext): ScriptProcessorNode {
     }
 
     const ratio = Math.pow(2, semitones / 12);
-    for (let i = 0; i < inputL.length; i++) {
-      writeBufL[writePos] = inputL[i];
-      writeBufR[writePos] = inputR[i];
+    const samplesPerBlock = inputL.length;
 
-      const winA = hannWindow[grainCounterA % grainSize];
-      const rA = readPosA;
-      const iA0 = ((Math.floor(rA) - 1) + bufferLen) % bufferLen;
-      const iA1 = Math.floor(rA) % bufferLen;
-      const iA2 = (iA1 + 1) % bufferLen;
-      const iA3 = (iA1 + 2) % bufferLen;
-      const fA = rA - Math.floor(rA);
-      const cubicL_A = cubicInterp(writeBufL[iA0], writeBufL[iA1], writeBufL[iA2], writeBufL[iA3], fA);
-      const cubicR_A = cubicInterp(writeBufR[iA0], writeBufR[iA1], writeBufR[iA2], writeBufR[iA3], fA);
-
-      const winB = hannWindow[grainCounterB % grainSize];
-      const rB = readPosB;
-      const iB0 = ((Math.floor(rB) - 1) + bufferLen) % bufferLen;
-      const iB1 = Math.floor(rB) % bufferLen;
-      const iB2 = (iB1 + 1) % bufferLen;
-      const iB3 = (iB1 + 2) % bufferLen;
-      const fB = rB - Math.floor(rB);
-      const cubicL_B = cubicInterp(writeBufL[iB0], writeBufL[iB1], writeBufL[iB2], writeBufL[iB3], fB);
-      const cubicR_B = cubicInterp(writeBufR[iB0], writeBufR[iB1], writeBufR[iB2], writeBufR[iB3], fB);
-
-      outputL[i] = cubicL_A * winA + cubicL_B * winB;
-      outputR[i] = cubicR_A * winA + cubicR_B * winB;
-
-      writePos = (writePos + 1) % bufferLen;
-      readPosA = (readPosA + ratio + bufferLen) % bufferLen;
-      readPosB = (readPosB + ratio + bufferLen) % bufferLen;
-      grainCounterA++;
-      grainCounterB++;
-
-      if (grainCounterA >= grainSize) {
-        grainCounterA = 0;
-        const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
-        const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
-        readPosA = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
-      }
-      if (grainCounterB >= grainSize) {
-        grainCounterB = 0;
-        const pseudoRandom = ((writePos * 1103515245 + 12345) % 2147483648) / 2147483648;
-        const jitterSamples = Math.floor((pseudoRandom - 0.5) * 180);
-        readPosB = (writePos - grainSize + jitterSamples + bufferLen) % bufferLen;
-      }
+    // Process in HOP-sized chunks
+    for (let offset = 0; offset + HOP <= samplesPerBlock; offset += HOP) {
+      processHop(stateL, ratio, inputL, offset);
+      processHop(stateR, ratio, inputR, offset);
     }
+
+    // Read HOP * (samplesPerBlock/HOP) output samples
+    const outLen = stateL.outBuf.length;
+    for (let i = 0; i < samplesPerBlock; i++) {
+      const posL = (stateL.outReadPos + i) % outLen;
+      const posR = (stateR.outReadPos + i) % outLen;
+      outputL[i] = stateL.outBuf[posL];
+      outputR[i] = stateR.outBuf[posR];
+      // Clear after reading for next overlap-add cycle
+      stateL.outBuf[posL] = 0;
+      stateR.outBuf[posR] = 0;
+    }
+    stateL.outReadPos = (stateL.outReadPos + samplesPerBlock) % outLen;
+    stateR.outReadPos = (stateR.outReadPos + samplesPerBlock) % outLen;
   };
   return pitchNode;
 }
@@ -601,11 +706,23 @@ function initAudioGraph(entry: MediaElement) {
   try {
     const sourceNode = audioCtx.createMediaElementSource(entry.el);
 
+    const vocalFilterF1 = audioCtx.createBiquadFilter();
+    vocalFilterF1.type = 'peaking';
+    vocalFilterF1.frequency.value = 500;  // F1 formant — vowel openness
+    vocalFilterF1.Q.value = 1.2;
+    vocalFilterF1.gain.value = 0;
+
     const vocalFilter = audioCtx.createBiquadFilter();
     vocalFilter.type = 'peaking';
-    vocalFilter.frequency.value = 1500;
+    vocalFilter.frequency.value = 1500;   // F2 formant — vowel frontness
     vocalFilter.Q.value = 1.0;
     vocalFilter.gain.value = 0;
+
+    const vocalFilterF3 = audioCtx.createBiquadFilter();
+    vocalFilterF3.type = 'peaking';
+    vocalFilterF3.frequency.value = 2500; // F3 formant — vocal timbre
+    vocalFilterF3.Q.value = 1.2;
+    vocalFilterF3.gain.value = 0;
 
     const denoiseFilter = audioCtx.createBiquadFilter();
     denoiseFilter.type = 'highshelf';
@@ -663,8 +780,10 @@ function initAudioGraph(entry: MediaElement) {
 
     const separationGraph = createSeparationGraph(audioCtx);
     sourceNode.connect(separationGraph.input);
-    separationGraph.output.connect(vocalFilter);
-    vocalFilter.connect(denoiseFilter);
+    separationGraph.output.connect(vocalFilterF1);
+    vocalFilterF1.connect(vocalFilter);
+    vocalFilter.connect(vocalFilterF3);
+    vocalFilterF3.connect(denoiseFilter);
     denoiseFilter.connect(bassFilter);
     bassFilter.connect(midFilter);
     midFilter.connect(trebleFilter);
@@ -690,6 +809,8 @@ function initAudioGraph(entry: MediaElement) {
     entry.audioCtx = audioCtx;
     entry.sourceNode = sourceNode;
     entry.vocalFilter = vocalFilter;
+    entry.vocalFilterF1 = vocalFilterF1;
+    entry.vocalFilterF3 = vocalFilterF3;
     entry.denoiseFilter = denoiseFilter;
     entry.bassFilter = bassFilter;
     entry.midFilter = midFilter;
@@ -1561,6 +1682,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 separationGraph: entry.separationGraph,
                 sourceNode: entry.sourceNode,
                 vocalFilter: entry.vocalFilter,
+                vocalFilterF1: entry.vocalFilterF1,
+                vocalFilterF3: entry.vocalFilterF3,
                 pitchNode: entry.pitchNode,
                 compressorNode: entry.compressorNode,
                 denoiseFilter: entry.denoiseFilter,
@@ -1867,13 +1990,26 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         entry._fxConnected = false;
       }
 
-      // EQ & Filters
+      // EQ & Filters — Multi-band formant compensation
+      // When auto-match shifts pitch, the spectral envelope shifts too (chipmunk
+      // effect). We compensate across three formant bands (F1/F2/F3) to preserve
+      // the speaker's vocal character. Gain is 4x stronger than the old single-
+      // band approach and distributed across the vocal frequency range.
       if (entry.vocalFilter) {
-        // Formant filter: manual Voice Formant + Vocal Tone formant + the
-        // auto-match compensation that keeps matched voices natural (the
-        // compensation is baked into effectiveVocalFormant).
-        const targetGain = audioSettings.humanize ? -5.0 : effectiveVocalFormant(audioSettings) * -0.05;
-        setAudioParam(entry.vocalFilter.gain, targetGain, ctxTime, rampTime, 0.1);
+        const formantVal = effectiveVocalFormant(audioSettings);
+        const baseGain = audioSettings.humanize ? -5.0 : formantVal * -0.12;
+        // F2 (1500 Hz) gets the primary compensation
+        setAudioParam(entry.vocalFilter.gain, baseGain, ctxTime, rampTime, 0.1);
+      }
+      if (entry.vocalFilterF1) {
+        const formantVal = effectiveVocalFormant(audioSettings);
+        const f1Gain = audioSettings.humanize ? -3.0 : formantVal * -0.08;
+        setAudioParam(entry.vocalFilterF1.gain, f1Gain, ctxTime, rampTime, 0.1);
+      }
+      if (entry.vocalFilterF3) {
+        const formantVal = effectiveVocalFormant(audioSettings);
+        const f3Gain = audioSettings.humanize ? -2.5 : formantVal * -0.06;
+        setAudioParam(entry.vocalFilterF3.gain, f3Gain, ctxTime, rampTime, 0.1);
       }
       if (entry.denoiseFilter) {
         const denoiseGain = -((audioSettings.denoise ?? 0) / 100) * 30;

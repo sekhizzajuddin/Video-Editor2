@@ -113,19 +113,32 @@ export class AudioMixer {
           treble.type = 'highshelf';
           treble.frequency.value = 3000;
           treble.gain.value = clip.audioSettings?.treble || 0;
-          // Vocal formant filter — mirrors the preview's vocalFilter so the
-          // exported vocal tone (manual + tone + auto-match compensation)
-          // matches what the user hears while editing.
+          // Multi-band vocal formant filter — mirrors the preview's 3-band
+          // formant compensation (F1/F2/F3) so the exported vocal tone (manual +
+          // tone + auto-match compensation) matches what the user hears while editing.
+          const formantVal = effectiveVocalFormant(clip.audioSettings);
+          const vocalF1 = ctx.createBiquadFilter();
+          vocalF1.type = 'peaking';
+          vocalF1.frequency.value = 500;
+          vocalF1.Q.value = 1.2;
+          vocalF1.gain.value = formantVal * -0.08;
           const vocal = ctx.createBiquadFilter();
           vocal.type = 'peaking';
           vocal.frequency.value = 1500;
           vocal.Q.value = 1.0;
-          vocal.gain.value = effectiveVocalFormant(clip.audioSettings) * -0.05;
+          vocal.gain.value = formantVal * -0.12;
+          const vocalF3 = ctx.createBiquadFilter();
+          vocalF3.type = 'peaking';
+          vocalF3.frequency.value = 2500;
+          vocalF3.Q.value = 1.2;
+          vocalF3.gain.value = formantVal * -0.06;
           const panner = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
           if (panner) panner.pan.value = Math.max(-1, Math.min(1, (clip.audioSettings?.pan || 0) / 100));
 
-          source.connect(vocal);
-          vocal.connect(bass);
+          source.connect(vocalF1);
+          vocalF1.connect(vocal);
+          vocal.connect(vocalF3);
+          vocalF3.connect(bass);
           bass.connect(treble);
           treble.connect(gainNode);
           if (panner) {

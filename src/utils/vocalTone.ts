@@ -120,9 +120,56 @@ export function estimateVocalF0(mono: Float32Array, sampleRate: number): number 
   const step = Math.max(1, Math.round(sampleRate / targetSr));
   const n = Math.floor(mono.length / step);
   if (n < 256) return null;
-  const data = new Float32Array(n);
-  for (let i = 0; i < n; i++) data[i] = mono[i * step];
+  const raw = new Float32Array(n);
+  for (let i = 0; i < n; i++) raw[i] = mono[i * step];
   const sr = sampleRate / step;
+
+  // ── Bandpass pre-filter (200–3500 Hz) ──────────────────────────────────
+  // Rejects bass instruments, sub-bass, and high-frequency noise/cymbal
+  // artifacts that otherwise dominate the autocorrelation in AI-generated
+  // video clips where voice is mixed with music/SFX.
+  const data = new Float32Array(n);
+  // Simple 2nd-order high-pass at 200 Hz (reject bass instruments)
+  const hpFreq = 200;
+  const hpOmega = 2 * Math.PI * hpFreq / sr;
+  const hpAlpha = Math.sin(hpOmega) / (2 * 0.707);
+  const hpA0 = 1 + hpAlpha;
+  const hpB0 = ((1 + Math.cos(hpOmega)) / 2) / hpA0;
+  const hpB1 = -(1 + Math.cos(hpOmega)) / hpA0;
+  const hpB2 = hpB0;
+  const hpA1 = (-2 * Math.cos(hpOmega)) / hpA0;
+  const hpA2 = (1 - hpAlpha) / hpA0;
+
+  // Simple 2nd-order low-pass at 3500 Hz (reject cymbals/noise)
+  const lpFreq = 3500;
+  const lpOmega = 2 * Math.PI * lpFreq / sr;
+  const lpAlpha = Math.sin(lpOmega) / (2 * 0.707);
+  const lpA0 = 1 + lpAlpha;
+  const lpB0 = ((1 - Math.cos(lpOmega)) / 2) / lpA0;
+  const lpB1 = (1 - Math.cos(lpOmega)) / lpA0;
+  const lpB2 = lpB0;
+  const lpA1 = (-2 * Math.cos(lpOmega)) / lpA0;
+  const lpA2 = (1 - lpAlpha) / lpA0;
+
+  // Apply high-pass
+  let hp_x1 = 0, hp_x2 = 0, hp_y1 = 0, hp_y2 = 0;
+  const hpOut = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = raw[i];
+    const y = hpB0 * x + hpB1 * hp_x1 + hpB2 * hp_x2 - hpA1 * hp_y1 - hpA2 * hp_y2;
+    hpOut[i] = y;
+    hp_x2 = hp_x1; hp_x1 = x;
+    hp_y2 = hp_y1; hp_y1 = y;
+  }
+  // Apply low-pass
+  let lp_x1 = 0, lp_x2 = 0, lp_y1 = 0, lp_y2 = 0;
+  for (let i = 0; i < n; i++) {
+    const x = hpOut[i];
+    const y = lpB0 * x + lpB1 * lp_x1 + lpB2 * lp_x2 - lpA1 * lp_y1 - lpA2 * lp_y2;
+    data[i] = y;
+    lp_x2 = lp_x1; lp_x1 = x;
+    lp_y2 = lp_y1; lp_y1 = y;
+  }
 
   const minF0 = 60;
   const maxF0 = 500;
@@ -175,7 +222,9 @@ export function estimateVocalF0(mono: Float32Array, sampleRate: number): number 
         bestLag = lag;
       }
     }
-    if (bestLag >= minLag && bestR > 0.35) {
+    // Higher confidence threshold (0.50 vs old 0.35) rejects music-dominated
+    // frames where the autocorrelation peak is from instruments, not voice.
+    if (bestLag >= minLag && bestR > 0.50) {
       // Parabolic refinement for sub-sample lag accuracy.
       const r0 = corrAt(start, mean, energy, bestLag - 1);
       const r2 = corrAt(start, mean, energy, bestLag + 1);
