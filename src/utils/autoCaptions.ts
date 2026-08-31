@@ -1,4 +1,4 @@
-import { TimelineClip } from '@/types';
+import { TimelineClip, SubtitleItem } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import { getGeminiKey } from './aiClient';
 import { parseSRT } from './srtParser';
@@ -39,9 +39,21 @@ export async function generateAutoCaptions(
   // 3. Send to Gemini API
   const prompt = `You are a professional video transcription and translation assistant.
 I have provided an audio track from a video timeline.
-Please generate perfectly timed subtitles in SRT format for the following languages: ${languages.join(', ')}.
+Please generate perfectly timed subtitles with WORD-LEVEL TIMESTAMPS for the following languages: ${languages.join(', ')}.
 
-Return ONLY a valid JSON object where the keys are the 2-character language codes (e.g., "${languages[0]}") and the values are the raw SRT format strings. Do not include markdown code blocks or any other text outside the JSON.`;
+Return ONLY a valid JSON object where the keys are the 2-character language codes (e.g., "${languages[0]}") and the values are arrays of subtitle segments.
+Each subtitle segment MUST follow this exact structure:
+{
+  "start": 0.0,
+  "end": 2.5,
+  "text": "Hello world",
+  "words": [
+    { "word": "Hello", "start": 0.0, "end": 1.0 },
+    { "word": "world", "start": 1.1, "end": 2.5 }
+  ]
+}
+
+Ensure that the start and end times are floating point numbers representing seconds. Do not include markdown code blocks or any other text outside the JSON.`;
 
   const requestBody = {
     contents: [
@@ -87,34 +99,32 @@ Return ONLY a valid JSON object where the keys are the 2-character language code
   
   const srtResults = JSON.parse(resultJsonStr);
 
-  // 4. Parse SRTs and construct merged SubtitleItems
+  // 4. Parse the JSON array and construct merged SubtitleItems
   const primaryLang = languages[0] || 'en';
-  if (!srtResults[primaryLang]) {
+  if (!srtResults[primaryLang] || !Array.isArray(srtResults[primaryLang])) {
     throw new Error(`Failed to generate subtitles in primary language (${primaryLang}).`);
   }
 
-  const primaryParsed = parseSRT(srtResults[primaryLang]);
+  const primarySegments = srtResults[primaryLang];
 
-  const newSubtitles = primaryParsed.map((sub: any, idx: number) => {
+  const newSubtitles: SubtitleItem[] = primarySegments.map((sub: any, idx: number) => {
     const translations: Record<string, string> = {};
     for (const lang of languages) {
-      if (srtResults[lang]) {
-        const parsedLang = parseSRT(srtResults[lang]);
-        if (parsedLang[idx]) {
-          translations[lang] = parsedLang[idx].text;
-        }
+      if (srtResults[lang] && Array.isArray(srtResults[lang]) && srtResults[lang][idx]) {
+        translations[lang] = srtResults[lang][idx].text;
       }
     }
     
-    const startTime = sub.start !== undefined ? sub.start : sub.startTime !== undefined ? sub.startTime : 0;
-    const endTime = sub.end !== undefined ? sub.end : sub.endTime !== undefined ? sub.endTime : startTime + 2;
+    const startTime = typeof sub.start === 'number' ? sub.start : 0;
+    const endTime = typeof sub.end === 'number' ? sub.end : startTime + 2;
     
     return {
       id: uuidv4(),
       startTime,
       endTime,
-      text: sub.text,
-      translations
+      text: sub.text || '',
+      translations,
+      words: Array.isArray(sub.words) ? sub.words : undefined
     };
   });
 

@@ -707,6 +707,7 @@ export interface SubtitleItem {
   speaker?: string;
   confidence?: number;
   translations?: Record<string, string>; // language code -> translated text
+  words?: { word: string; start: number; end: number }[]; // word-level timestamps for lip-sync and karaoke
 }
 
 // ─── Timeline Marker ──────────────────────────────────────────────────────

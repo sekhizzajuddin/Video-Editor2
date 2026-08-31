@@ -16,6 +16,7 @@ import {
   Grid3X3,
   List,
   Upload,
+  Download,
   Sparkles,
   Waves,
   Folder,
@@ -720,6 +721,22 @@ export function MediaPanel() {
     } finally {
       setIsGeneratingCaptions(false);
     }
+  };
+
+  const handleExportCaptions = () => {
+    if (subtitles.length === 0) {
+      toast.error('No captions to export.');
+      return;
+    }
+    const data = JSON.stringify(subtitles, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `captions_export_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Captions exported successfully!');
   };
 
   const [isRecordingScreen, setIsRecordingScreen] = useState(false);
@@ -2308,6 +2325,14 @@ export function MediaPanel() {
                   >
                     <Upload className="w-3.5 h-3.5 text-purple-500" />
                     SRT Import
+                  </button>
+                  <button
+                    onClick={handleExportCaptions}
+                    disabled={subtitles.length === 0}
+                    className="flex-1 py-2 bg-[var(--theme-bg-subpanel)] hover:bg-black/5 dark:hover:bg-white/5 text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5 text-green-500" />
+                    Export
                   </button>
                 </div>
 

@@ -2501,12 +2501,23 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         const clip = targetClips.find((c) => c.id === r.clipId);
         if (!clip) continue;
         const cur = clip.audioSettings || defaultAudioSettings;
+        let newSettings = {
+          ...cur,
+          vocalMatchEnabled: true,
+          vocalMatchShift: r.shiftSemitones ?? undefined,
+        };
+        if (r.eqAdjustments) {
+          newSettings = {
+            ...newSettings,
+            bass: r.eqAdjustments.bass,
+            mid: r.eqAdjustments.mid,
+            treble: r.eqAdjustments.treble,
+            warmth: r.eqAdjustments.warmth,
+            compression: r.eqAdjustments.compression,
+          };
+        }
         updateClip(r.clipId, {
-          audioSettings: {
-            ...cur,
-            vocalMatchEnabled: true,
-            vocalMatchShift: r.shiftSemitones ?? undefined,
-          },
+          audioSettings: newSettings,
         });
         applied++;
       }

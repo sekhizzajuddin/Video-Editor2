@@ -28,8 +28,10 @@ export const TONE_MIN = -100;
 export const TONE_MAX = 100;
 /** Hard ceiling for the combined (pitch + tone + auto-match) semitone shift. */
 export const MAX_VOCAL_PITCH_ST = 14;
-/** Sanity ceiling for a single auto-match correction. */
-export const MAX_MATCH_SHIFT_ST = 14;
+/** Sanity ceiling for a single auto-match correction. Kept low (3st) because
+ *  larger pitch shifts always sound unnatural/robotic regardless of algorithm.
+ *  The remainder is compensated via spectral EQ matching instead. */
+export const MAX_MATCH_SHIFT_ST = 3;
 
 export function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -290,7 +292,125 @@ export interface VocalMatchResult {
   f0: number | null;
   /** Correction needed to match the reference clip (null when not computable). */
   shiftSemitones: number | null;
+  /** Unclamped raw semitone difference (before MAX_MATCH_SHIFT_ST cap). */
+  rawShiftSemitones: number | null;
+  /** Recommended EQ adjustments to compensate what pitch shift can't fix. */
+  eqAdjustments?: {
+    bass: number;       // -15 to 15
+    mid: number;        // -15 to 15
+    treble: number;     // -15 to 15
+    warmth: number;     // -100 to 100
+    compression: number; // 0 to 100
+  };
   status: 'reference' | 'matched' | 'no-audio' | 'no-voice' | 'error';
+}
+
+/**
+ * Analyzes the spectral energy distribution of a mono signal and returns
+ * normalized band energies (bass, mid, treble, presence).
+ */
+export function analyzeSpectralProfile(
+  mono: Float32Array,
+  sampleRate: number
+): { bass: number; mid: number; treble: number; presence: number; rms: number } | null {
+  if (!mono || mono.length < 2048) return null;
+
+  // Simple band energy analysis using overlapping frames
+  const frameLen = 2048;
+  const hop = 1024;
+  let bassE = 0, midE = 0, trebleE = 0, presenceE = 0, totalE = 0;
+  let frames = 0;
+
+  for (let start = 0; start + frameLen <= mono.length; start += hop) {
+    // Compute power spectrum via DFT energy in bands
+    // Bass: 80-300 Hz, Mid: 300-2000 Hz, Treble: 2000-6000 Hz, Presence: 1000-4000 Hz
+    const bassLow = Math.floor(80 * frameLen / sampleRate);
+    const bassHigh = Math.floor(300 * frameLen / sampleRate);
+    const midLow = bassHigh;
+    const midHigh = Math.floor(2000 * frameLen / sampleRate);
+    const trebLow = midHigh;
+    const trebHigh = Math.min(Math.floor(6000 * frameLen / sampleRate), frameLen / 2);
+    const presLow = Math.floor(1000 * frameLen / sampleRate);
+    const presHigh = Math.min(Math.floor(4000 * frameLen / sampleRate), frameLen / 2);
+
+    // Use simple energy-in-band via time-domain bandpass approximation
+    // (cheaper than full FFT, good enough for coarse spectral matching)
+    for (let i = 0; i < frameLen; i++) {
+      const v = mono[start + i];
+      totalE += v * v;
+    }
+
+    // Approximate band energies via autocorrelation at band-center lags
+    // Bass center ~150Hz, Mid center ~800Hz, Treble center ~4000Hz
+    const bassLag = Math.round(sampleRate / 150);
+    const midLag = Math.round(sampleRate / 800);
+    const trebLag = Math.round(sampleRate / 4000);
+    const presLag = Math.round(sampleRate / 2000);
+
+    let bCorr = 0, mCorr = 0, tCorr = 0, pCorr = 0;
+    const segLen = Math.min(frameLen, 1024);
+    for (let i = 0; i < segLen; i++) {
+      const v = mono[start + i];
+      if (i + bassLag < frameLen) bCorr += v * mono[start + i + bassLag];
+      if (i + midLag < frameLen) mCorr += v * mono[start + i + midLag];
+      if (i + trebLag < frameLen) tCorr += v * mono[start + i + trebLag];
+      if (i + presLag < frameLen) pCorr += v * mono[start + i + presLag];
+    }
+    bassE += Math.max(0, bCorr);
+    midE += Math.max(0, mCorr);
+    trebleE += Math.max(0, tCorr);
+    presenceE += Math.max(0, pCorr);
+    frames++;
+  }
+
+  if (frames === 0 || totalE < 1e-10) return null;
+  const rms = Math.sqrt(totalE / (frames * frameLen));
+  const norm = bassE + midE + trebleE + 1e-10;
+  return {
+    bass: bassE / norm,
+    mid: midE / norm,
+    treble: trebleE / norm,
+    presence: presenceE / (norm + 1e-10),
+    rms,
+  };
+}
+
+/**
+ * Computes EQ adjustments to make a clip's spectral profile closer to the
+ * reference's profile. Returns conservative adjustments that won't distort.
+ */
+export function computeEqAdjustments(
+  refProfile: ReturnType<typeof analyzeSpectralProfile>,
+  clipProfile: ReturnType<typeof analyzeSpectralProfile>,
+  rawShiftDiff: number // how many semitones couldn't be covered by pitch shift
+): { bass: number; mid: number; treble: number; warmth: number; compression: number } {
+  const defaults = { bass: 0, mid: 0, treble: 0, warmth: 0, compression: 0 };
+  if (!refProfile || !clipProfile) return defaults;
+
+  // Spectral difference → EQ adjustments (scaled conservatively)
+  const bassDiff = (refProfile.bass - clipProfile.bass) * 30; // ±15 dB range
+  const midDiff = (refProfile.mid - clipProfile.mid) * 20;
+  const trebleDiff = (refProfile.treble - clipProfile.treble) * 20;
+
+  // Warmth: if the reference is warmer (more bass relative to treble), add warmth
+  const refWarmth = refProfile.bass / (refProfile.treble + 1e-10);
+  const clipWarmth = clipProfile.bass / (clipProfile.treble + 1e-10);
+  const warmthDiff = clamp((refWarmth - clipWarmth) * 30, -50, 50);
+
+  // Add compression to unify dynamics (more compression for larger voice differences)
+  const compressionBase = Math.min(60, Math.abs(rawShiftDiff) * 10);
+
+  // RMS loudness matching → additional gain compensation via compression
+  const rmsRatio = refProfile.rms / (clipProfile.rms + 1e-10);
+  const rmsComp = rmsRatio > 1.5 || rmsRatio < 0.67 ? 20 : 0;
+
+  return {
+    bass: round2(clamp(bassDiff, -10, 10)),
+    mid: round2(clamp(midDiff, -8, 8)),
+    treble: round2(clamp(trebleDiff, -10, 10)),
+    warmth: round2(clamp(warmthDiff, -50, 50)),
+    compression: round2(clamp(compressionBase + rmsComp, 0, 60)),
+  };
 }
 
 // Shared decode context (decodeAudioData works even while suspended, so the
@@ -364,11 +484,13 @@ export async function analyzeClipsForVocalMatch(
   const byId = new Map(mediaMap.map((m) => [m.id, m]));
   const sorted = [...clips].sort((a, b) => a.startTime - b.startTime);
   const results: VocalMatchResult[] = [];
+  const spectralProfiles: (ReturnType<typeof analyzeSpectralProfile>)[] = [];
 
   for (const clip of sorted) {
     const media = byId.get(clip.mediaId);
     if (!media || (!media.url && !media._fileBlob && !media._audioBlob)) {
-      results.push({ clipId: clip.id, f0: null, shiftSemitones: null, status: 'no-audio' });
+      results.push({ clipId: clip.id, f0: null, shiftSemitones: null, rawShiftSemitones: null, status: 'no-audio' });
+      spectralProfiles.push(null);
       continue;
     }
     let buffer: DecodedAudioLike | null = null;
@@ -378,7 +500,8 @@ export async function analyzeClipsForVocalMatch(
       buffer = null;
     }
     if (!buffer) {
-      results.push({ clipId: clip.id, f0: null, shiftSemitones: null, status: 'error' });
+      results.push({ clipId: clip.id, f0: null, shiftSemitones: null, rawShiftSemitones: null, status: 'error' });
+      spectralProfiles.push(null);
       continue;
     }
     const sourceDuration = media.duration ?? buffer.duration;
@@ -390,16 +513,31 @@ export async function analyzeClipsForVocalMatch(
     const endSec = Math.min(sourceDuration, startSec + span);
     const window = extractMonoWindow(buffer, startSec, endSec);
     const f0 = estimateVocalF0(window, buffer.sampleRate);
-    results.push({ clipId: clip.id, f0, shiftSemitones: null, status: f0 !== null ? 'matched' : 'no-voice' });
+    const spectral = analyzeSpectralProfile(window, buffer.sampleRate);
+    results.push({ clipId: clip.id, f0, shiftSemitones: null, rawShiftSemitones: null, status: f0 !== null ? 'matched' : 'no-voice' });
+    spectralProfiles.push(spectral);
   }
 
-  const reference = results.find((r) => r.f0 !== null);
-  if (!reference) return results; // no voiced content anywhere → nothing to match
+  const refIdx = results.findIndex((r) => r.f0 !== null);
+  if (refIdx < 0) return results; // no voiced content anywhere → nothing to match
+  const reference = results[refIdx];
+  const refProfile = spectralProfiles[refIdx];
 
-  for (const r of results) {
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
     if (r.f0 === null) continue;
-    r.shiftSemitones = computeMatchShiftSemitones(reference.f0 as number, r.f0);
+    // Compute raw (unclamped) shift
+    const rawSt = computeMatchShiftSemitones(reference.f0 as number, r.f0);
+    r.rawShiftSemitones = rawSt;
+    // Clamped shift (MAX_MATCH_SHIFT_ST = 3) for the actual pitch adjustment
+    r.shiftSemitones = rawSt !== null ? round2(clamp(rawSt, -MAX_MATCH_SHIFT_ST, MAX_MATCH_SHIFT_ST)) : null;
     r.status = r.clipId === reference.clipId ? 'reference' : 'matched';
+
+    // Compute EQ adjustments to compensate what pitch can't fix
+    if (r.clipId !== reference.clipId && rawSt !== null) {
+      const uncoveredSt = (rawSt ?? 0) - (r.shiftSemitones ?? 0);
+      r.eqAdjustments = computeEqAdjustments(refProfile, spectralProfiles[i], uncoveredSt);
+    }
   }
   return results;
 }
