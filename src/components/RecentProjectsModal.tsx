@@ -70,15 +70,15 @@ export function RecentProjectsModal({ isOpen, onClose, onSelect }: RecentProject
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center">
-      <div className="bg-[#2d2d2d] rounded-lg shadow-2xl w-[480px] max-h-[80vh] overflow-hidden border border-[#3e3e3e] flex flex-col">
-        <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
+      <div className="bg-popover rounded-lg shadow-2xl w-[480px] max-h-[80vh] overflow-hidden border border-border flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Clock className="w-5 h-5 text-amber-400" />
-            <h2 className="text-sm font-semibold text-white">Recent Projects</h2>
+            <h2 className="text-sm font-semibold text-foreground">Recent Projects</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors"
+            className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -86,23 +86,23 @@ export function RecentProjectsModal({ isOpen, onClose, onSelect }: RecentProject
 
         <div className="flex-1 overflow-y-auto p-2">
           {loading ? (
-            <div className="text-center py-8 text-xs text-[#6a6a6a]">Loading...</div>
+            <div className="text-center py-8 text-xs text-muted-foreground/70">Loading...</div>
           ) : projects.length === 0 ? (
-            <div className="text-center py-8 text-xs text-[#6a6a6a]">
+            <div className="text-center py-8 text-xs text-muted-foreground/70">
               No recent projects found.
             </div>
           ) : (
             projects.map((proj) => (
               <div
                 key={proj.id}
-                className="flex items-center justify-between gap-3 px-3 py-2 rounded hover:bg-[#3e3e3e] transition-colors group"
+                className="flex items-center justify-between gap-3 px-3 py-2 rounded hover:bg-accent transition-colors group"
               >
                 <button
                   onClick={() => handleOpen(proj.id)}
                   className="flex-1 min-w-0 text-left"
                 >
-                  <div className="text-xs text-white font-medium truncate">{proj.name}</div>
-                  <div className="text-[10px] text-[#6a6a6a]">{formatTime(proj.lastModified)}</div>
+                  <div className="text-xs text-foreground font-medium truncate">{proj.name}</div>
+                  <div className="text-[10px] text-muted-foreground/70">{formatTime(proj.lastModified)}</div>
                 </button>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button

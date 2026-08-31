@@ -274,9 +274,9 @@ export const TemplatePreviewCard = React.memo(function TemplatePreviewCard({ tmp
       onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className="flex items-center gap-2.5 p-2.5 rounded border border-[#3e3e3e] hover:border-amber-500/50 bg-[#1e1e1e] hover:bg-[#2a2a2a] cursor-pointer transition-all group"
+      className="flex items-center gap-2.5 p-2.5 rounded border border-border hover:border-amber-500/50 bg-card hover:bg-secondary cursor-pointer transition-all group"
     >
-      <div className="w-16 h-10 bg-[#141414] rounded overflow-hidden shrink-0 flex items-center justify-center border border-[#3e3e3e]/40 relative">
+      <div className="w-16 h-10 bg-background rounded overflow-hidden shrink-0 flex items-center justify-center border border-border/40 relative">
         {isHovered ? (
           <canvas
             ref={canvasRef}
@@ -295,8 +295,8 @@ export const TemplatePreviewCard = React.memo(function TemplatePreviewCard({ tmp
       </div>
 
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-white font-medium truncate">{tmpl.name}</p>
-        <p className="text-[9px] text-[#6a6a6a] truncate">{tmpl.description}</p>
+        <p className="text-xs text-foreground font-medium truncate">{tmpl.name}</p>
+        <p className="text-[9px] text-muted-foreground/70 truncate">{tmpl.description}</p>
         <p className="text-[8px] mt-0.5" style={{ color: tmpl.accentColor + 'cc' }}>
           {tmpl.defaultDuration > 0 ? `${tmpl.defaultDuration}s` : 'Preset'} · {tmpl.category}
         </p>
@@ -1192,25 +1192,25 @@ export function MediaPanel() {
   return (
     <div
       data-help-id="media-panel"
-      className="h-full flex flex-col bg-[#252525] border-r border-[#3e3e3e]"
+      className="h-full flex flex-col bg-secondary border-r border-border"
       onDragOver={handleZoneDragOver}
       onDragLeave={handleZoneDragLeave}
       onDrop={handleZoneDrop}
     >
       {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-[#3e3e3e] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[#1a1a1a]/50">
+      <div className="flex overflow-x-auto border-b border-border [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-background/50">
         {tabs.map((tab, idx) => {
           const Icon = tab.icon;
           const isActive = activeMediaTab === tab.id;
           return (
             <Fragment key={tab.id}>
-              {idx > 0 && <div className="w-px h-5 bg-[#3e3e3e] self-center shrink-0 mx-1" />}
+              {idx > 0 && <div className="w-px h-5 bg-accent self-center shrink-0 mx-1" />}
               <button
                 onClick={() => setActiveMediaTab(tab.id)}
                 className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
                   isActive
-                    ? 'text-white border-b-2 border-amber-500 bg-[#2d2d2d]'
-                    : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+                    ? 'text-foreground border-b-2 border-amber-500 bg-popover'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-popover'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
@@ -1235,9 +1235,9 @@ export function MediaPanel() {
         {activeMediaTab === 'project' && (
           <>
             {/* Search & View Controls */}
-            <div className="p-2 border-b border-[#3e3e3e]">
+            <div className="p-2 border-b border-border">
               <div className="relative mb-2">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#a0a0a0]" />
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <label htmlFor="media-search" className="sr-only">Search media</label>
                 <input
                   id="media-search"
@@ -1245,20 +1245,20 @@ export function MediaPanel() {
                   placeholder="Search media..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white placeholder-[#a0a0a0] focus:outline-none focus:border-amber-500 transition-colors"
+                  className="w-full pl-8 pr-3 py-1.5 bg-card border border-border rounded text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-[#a0a0a0]">
+                  <span className="text-[10px] text-muted-foreground">
                     {filteredMedia.length} items
                   </span>
                 </div>
-                <div className="flex bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                <div className="flex bg-card rounded border border-border">
                   <button
                     onClick={() => setViewMode('grid')}
                     className={`p-1 rounded transition-colors ${
-                      viewMode === 'grid' ? 'bg-[#3e3e3e] text-white' : 'text-[#a0a0a0] hover:text-white'
+                      viewMode === 'grid' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     <Grid3X3 className="w-3 h-3" />
@@ -1266,7 +1266,7 @@ export function MediaPanel() {
                   <button
                     onClick={() => setViewMode('list')}
                     className={`p-1 rounded transition-colors ${
-                      viewMode === 'list' ? 'bg-[#3e3e3e] text-white' : 'text-[#a0a0a0] hover:text-white'
+                      viewMode === 'list' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     <List className="w-3 h-3" />
@@ -1282,7 +1282,7 @@ export function MediaPanel() {
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={importing}
-                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-amber-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  className="flex-1 py-2 border-2 border-dashed border-border rounded text-muted-foreground hover:text-foreground hover:border-amber-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
                   title="Import Video, Audio, or Image files"
                 >
                   {importing ? (
@@ -1295,7 +1295,7 @@ export function MediaPanel() {
                 <button
                   onClick={() => srtInputRef.current?.click()}
                   disabled={importing}
-                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-purple-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  className="flex-1 py-2 border-2 border-dashed border-border rounded text-muted-foreground hover:text-foreground hover:border-purple-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
                   title="Import Subtitles (.srt file)"
                 >
                   <Type className="w-3 h-3 text-purple-400" />
@@ -1306,7 +1306,7 @@ export function MediaPanel() {
                 <button
                   onClick={isRecordingScreen ? stopScreenRecord : startScreenRecord}
                   disabled={importing}
-                  className={`flex-1 py-2 border-2 ${isRecordingScreen ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-dashed border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-red-500'} rounded text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50`}
+                  className={`flex-1 py-2 border-2 ${isRecordingScreen ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-dashed border-border text-muted-foreground hover:text-white hover:border-red-500'} rounded text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50`}
                   title="Record Screen"
                 >
                   {isRecordingScreen ? <Square className="w-3 h-3 text-red-400" /> : <Monitor className="w-3 h-3 text-red-400" />}
@@ -1374,7 +1374,7 @@ export function MediaPanel() {
               })()}
 
               {previewItem && (
-                <div className="mx-2 mb-2 p-2 bg-[#252525] border border-[#3e3e3e] rounded flex flex-col gap-2 relative">
+                <div className="mx-2 mb-2 p-2 bg-secondary border border-border rounded flex flex-col gap-2 relative">
                   <div className="relative aspect-video bg-black flex items-center justify-center rounded overflow-hidden">
                     {previewItem.type === 'video' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
                       <video
@@ -1403,7 +1403,7 @@ export function MediaPanel() {
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="px-1 py-0.5 text-[10px] text-[#a0a0a0] truncate font-medium flex justify-between items-center">
+                  <div className="px-1 py-0.5 text-[10px] text-muted-foreground truncate font-medium flex justify-between items-center">
                     <span className="truncate flex-1 pr-2">{previewItem.name}</span>
                     <span className="shrink-0">{formatDuration(previewItem.duration)}</span>
                   </div>
@@ -1411,7 +1411,7 @@ export function MediaPanel() {
               )}
 
               {filteredMedia.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-[#a0a0a0]">
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                   <Film className="w-10 h-10 mb-3 opacity-20" />
                   <p className="text-xs font-medium">No media yet</p>
                   <p className="text-[10px] mt-1.5 text-center px-4">
@@ -1439,7 +1439,7 @@ export function MediaPanel() {
                         {media.type === 'video' && (
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                             <div className="w-7 h-7 bg-black/60 rounded-full flex items-center justify-center backdrop-blur-sm">
-                              <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="white" />
+                              <Play className="w-3.5 h-3.5 text-foreground ml-0.5" fill="white" />
                             </div>
                           </div>
                         )}
@@ -1452,7 +1452,7 @@ export function MediaPanel() {
                           }}
                           className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/80 transition-all"
                         >
-                          <X className="w-2.5 h-2.5 text-white" />
+                          <X className="w-2.5 h-2.5 text-foreground" />
                         </button>
 
                         {/* Type badge */}
@@ -1463,11 +1463,11 @@ export function MediaPanel() {
 
                       {/* Info */}
                       <div className="p-1.5">
-                        <p className="text-[10px] text-white truncate">{media.name}</p>
+                        <p className="text-[10px] text-foreground truncate">{media.name}</p>
                         <div className="flex items-center gap-1 mt-0.5">
-                          <p className="text-[9px] text-[#a0a0a0]">{formatDuration(media.duration)}</p>
+                          <p className="text-[9px] text-muted-foreground">{formatDuration(media.duration)}</p>
                           {media.width && media.height && (
-                            <p className="text-[9px] text-[#a0a0a0]">· {media.width}×{media.height}</p>
+                            <p className="text-[9px] text-muted-foreground">· {media.width}×{media.height}</p>
                           )}
                         </div>
 
@@ -1478,7 +1478,7 @@ export function MediaPanel() {
                       {/* Delete confirmation */}
                       {confirmDeleteId === media.id && (
                         <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-1.5 z-20 rounded">
-                          <p className="text-[9px] text-white">Delete?</p>
+                          <p className="text-[9px] text-foreground">Delete?</p>
                           <div className="flex gap-1">
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDelete(media.id); }}
@@ -1488,7 +1488,7 @@ export function MediaPanel() {
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                              className="px-2 py-0.5 bg-[#3e3e3e] hover:bg-[#5e5e5e] text-white text-[9px] rounded transition-colors"
+                              className="px-2 py-0.5 bg-accent hover:bg-border text-foreground text-[9px] rounded transition-colors"
                             >
                               Cancel
                             </button>
@@ -1508,7 +1508,7 @@ export function MediaPanel() {
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
                       onClick={() => setPreviewItem(media)}
-                      className={`flex items-center gap-2 p-2 hover:bg-[#3e3e3e] cursor-grab border-b border-[#3e3e3e] transition-colors group ${usedMediaIds.has(media.id) ? 'bg-blue-500/10 shadow-[inset_0_0_15px_rgba(59,130,246,0.2)] border-l-2 border-l-blue-500' : ''}`}
+                      className={`flex items-center gap-2 p-2 hover:bg-accent cursor-grab border-b border-border transition-colors group ${usedMediaIds.has(media.id) ? 'bg-blue-500/10 shadow-[inset_0_0_15px_rgba(59,130,246,0.2)] border-l-2 border-l-blue-500' : ''}`}
                     >
                       {/* Thumbnail in list view */}
                       <div className="w-10 h-7 rounded overflow-hidden bg-black/30 shrink-0 flex items-center justify-center">
@@ -1520,8 +1520,8 @@ export function MediaPanel() {
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] text-white truncate">{media.name}</p>
-                        <p className="text-[9px] text-[#a0a0a0]">
+                        <p className="text-[11px] text-foreground truncate">{media.name}</p>
+                        <p className="text-[9px] text-muted-foreground">
                           {formatDuration(media.duration)} · {formatSize(media.size)}
                           {media.width && media.height ? ` · ${media.width}×${media.height}` : ''}
                         </p>
@@ -1529,12 +1529,12 @@ export function MediaPanel() {
 
                       {/* Actions */}
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {media.type === 'video' && <Play className="w-3 h-3 text-[#a0a0a0]" />}
+                        {media.type === 'video' && <Play className="w-3 h-3 text-muted-foreground" />}
                         {media.type === 'audio' && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleRepairAudio(media); }}
                             title="Repair / Normalize Audio"
-                            className="p-0.5 text-[#a0a0a0] hover:text-green-400 rounded transition-colors"
+                            className="p-0.5 text-muted-foreground hover:text-green-400 rounded transition-colors"
                           >
                             <Wrench className="w-3 h-3" />
                           </button>
@@ -1544,7 +1544,7 @@ export function MediaPanel() {
                             onClick={(e) => { e.stopPropagation(); handleDetectBeats(media); }}
                             title="Detect Beats"
                             disabled={detectingBeatId === media.id}
-                            className="p-0.5 text-[#a0a0a0] hover:text-yellow-400 rounded transition-colors disabled:opacity-50"
+                            className="p-0.5 text-muted-foreground hover:text-yellow-400 rounded transition-colors disabled:opacity-50"
                           >
                             {detectingBeatId === media.id
                               ? <Loader2 className="w-3 h-3 animate-spin" />
@@ -1557,7 +1557,7 @@ export function MediaPanel() {
                             e.stopPropagation();
                             setConfirmDeleteId(media.id);
                           }}
-                          className="p-0.5 text-[#a0a0a0] hover:text-red-400 rounded transition-colors"
+                          className="p-0.5 text-muted-foreground hover:text-red-400 rounded transition-colors"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -1566,7 +1566,7 @@ export function MediaPanel() {
 
                       {/* Delete confirmation overlay for list */}
                       {confirmDeleteId === media.id && (
-                        <div className="absolute right-2 flex items-center gap-1 bg-[#2d2d2d] border border-[#3e3e3e] rounded px-2 py-1 shadow-lg z-20">
+                        <div className="absolute right-2 flex items-center gap-1 bg-popover border border-border rounded px-2 py-1 shadow-lg z-20">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDelete(media.id); }}
                             className="px-2 py-0.5 bg-red-500 hover:bg-red-400 text-white text-[9px] rounded transition-colors"
@@ -1575,7 +1575,7 @@ export function MediaPanel() {
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                            className="px-2 py-0.5 bg-[#3e3e3e] hover:bg-[#5e5e5e] text-white text-[9px] rounded transition-colors"
+                            className="px-2 py-0.5 bg-accent hover:bg-border text-foreground text-[9px] rounded transition-colors"
                           >
                             Cancel
                           </button>
@@ -1594,18 +1594,18 @@ export function MediaPanel() {
         {activeMediaTab === 'audio' && (
           <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin">
             {/* Timeline Voiceover Info */}
-            <div className="p-3 bg-[#1e1e1e]/40 border border-[#3e3e3e] rounded-lg">
+            <div className="p-3 bg-card/40 border border-border rounded-lg">
               <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 animate-pulse" />
                 Voiceover Recorder
               </p>
-              <p className="text-xs text-[#a0a0a0] leading-relaxed">
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 Click the microphone icon <Mic className="w-3 h-3 inline text-red-500 mx-0.5" /> in any audio track header to record live narration directly onto the timeline at the playhead position.
               </p>
             </div>
 
             {/* AI Text-to-Speech Generator */}
-            <div className="p-3 bg-[#1e1e1e]/60 border border-[#3e3e3e] rounded-lg space-y-3.5">
+            <div className="p-3 bg-card/60 border border-border rounded-lg space-y-3.5">
               <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" />
                 AI Text-to-Speech (TTS)
@@ -1613,23 +1613,23 @@ export function MediaPanel() {
 
               {/* Textarea */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">Script / Speech Text</label>
+                <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Script / Speech Text</label>
                 <textarea
                   value={ttsText}
                   onChange={(e) => setTtsText(e.target.value)}
                   placeholder="Type or paste the speech script here..."
                   maxLength={200}
-                  className="w-full h-24 bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg p-2.5 resize-none focus:outline-none focus:border-amber-500 placeholder-[#5a5a5a] scrollbar-thin"
+                  className="w-full h-24 bg-background text-foreground text-xs border border-border rounded-lg p-2.5 resize-none focus:outline-none focus:border-amber-500 placeholder:text-muted-foreground/60 scrollbar-thin"
                 />
                 <div className="flex justify-end">
-                  <span className="text-[9px] text-[#6a6a6a] font-mono">{ttsText.length}/200 chars</span>
+                  <span className="text-[9px] text-muted-foreground/70 font-mono">{ttsText.length}/200 chars</span>
                 </div>
               </div>
 
               {/* Engine Toggle */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">TTS Voice Quality</label>
-                <div className="flex flex-col gap-1 bg-[#141414] p-1 border border-[#3e3e3e] rounded-lg">
+                <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">TTS Voice Quality</label>
+                <div className="flex flex-col gap-1 bg-background p-1 border border-border rounded-lg">
                   <div className="flex gap-1">
                     <button
                       type="button"
@@ -1640,7 +1640,7 @@ export function MediaPanel() {
                       className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
                         ttsEngine === 'gemini'
                           ? 'bg-amber-500 text-black font-bold shadow'
-                          : 'text-[#a0a0a0] hover:text-white'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       ✨ Gemini 2.5 Flash
@@ -1653,8 +1653,8 @@ export function MediaPanel() {
                       }}
                       className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
                         ttsEngine === 'edge'
-                          ? 'bg-[#3e3e3e] text-white font-bold shadow'
-                          : 'text-[#a0a0a0] hover:text-white'
+                          ? 'bg-accent text-foreground font-bold shadow'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       🚀 Edge
@@ -1669,8 +1669,8 @@ export function MediaPanel() {
                       }}
                       className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
                         ttsEngine === 'neural'
-                          ? 'bg-[#3e3e3e] text-white font-bold shadow'
-                          : 'text-[#a0a0a0] hover:text-white'
+                          ? 'bg-accent text-foreground font-bold shadow'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       🔥 Cloud
@@ -1680,8 +1680,8 @@ export function MediaPanel() {
                       onClick={() => setTtsEngine('standard')}
                       className={`flex-1 py-1.5 text-[10px] rounded transition-all font-semibold ${
                         ttsEngine === 'standard'
-                          ? 'bg-[#3e3e3e] text-white font-bold shadow'
-                          : 'text-[#a0a0a0] hover:text-white'
+                          ? 'bg-accent text-foreground font-bold shadow'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       Standard
@@ -1693,11 +1693,11 @@ export function MediaPanel() {
               {ttsEngine === 'edge' ? (
                 /* Edge Voices selector */
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">AI Voice Profile (Microsoft Edge)</label>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">AI Voice Profile (Microsoft Edge)</label>
                   <select
                     value={ttsVoice}
                     onChange={(e) => setTtsVoice(e.target.value)}
-                    className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer"
+                    className="w-full bg-background text-foreground text-xs border border-border rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
                     <option value="en-US-AriaNeural">English (US) - Aria (Female)</option>
                     <option value="en-US-GuyNeural">English (US) - Guy (Male)</option>
@@ -1715,11 +1715,11 @@ export function MediaPanel() {
               ) : ttsEngine === 'neural' ? (
                 /* Neural Voices selector */
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">AI Voice Profile (OpenAI)</label>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">AI Voice Profile (OpenAI)</label>
                   <select
                     value={ttsVoice}
                     onChange={(e) => setTtsVoice(e.target.value)}
-                    className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                    className="w-full bg-background text-foreground text-xs border border-border rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
                   >
                     <option value="alloy">Alloy (Warm, Balanced)</option>
                     <option value="echo">Echo (Crisp, Direct)</option>
@@ -1732,11 +1732,11 @@ export function MediaPanel() {
               ) : ttsEngine === 'gemini' ? (
                 /* Gemini Voices selector */
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">AI Voice Profile (Gemini 2.5)</label>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">AI Voice Profile (Gemini 2.5)</label>
                   <select
                     value={ttsVoice}
                     onChange={(e) => setTtsVoice(e.target.value)}
-                    className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                    className="w-full bg-background text-foreground text-xs border border-border rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
                   >
                     <option value="Aoede">Aoede (Warm, Engaging)</option>
                     <option value="Charon">Charon (Deep, Authoritative)</option>
@@ -1749,11 +1749,11 @@ export function MediaPanel() {
                 /* Standard Languages selector */
                 <>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] text-[#8a8a8a] uppercase tracking-wider font-medium">Voice Language</label>
+                    <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Voice Language</label>
                     <select
                       value={ttsLanguage}
                       onChange={(e) => setTtsLanguage(e.target.value)}
-                      className="w-full bg-[#141414] text-white text-xs border border-[#3e3e3e] rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                      className="w-full bg-background text-foreground text-xs border border-border rounded-lg px-2.5 py-2 focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
                     >
                       <option value="en">English (United States)</option>
                       <option value="es">Spanish (Spain)</option>
@@ -1773,9 +1773,9 @@ export function MediaPanel() {
                   <div className="grid grid-cols-2 gap-3">
                     {/* Speed / Rate */}
                     <div className="flex flex-col gap-1">
-                      <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
+                      <div className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-wider">
                         <span>Speed</span>
-                        <span className="font-mono text-white">{ttsRate}x</span>
+                        <span className="font-mono text-foreground">{ttsRate}x</span>
                       </div>
                       <input
                         type="range"
@@ -1790,9 +1790,9 @@ export function MediaPanel() {
 
                     {/* Pitch */}
                     <div className="flex flex-col gap-1">
-                      <div className="flex justify-between text-[10px] text-[#8a8a8a] uppercase tracking-wider">
+                      <div className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-wider">
                         <span>Pitch</span>
-                        <span className="font-mono text-white">{ttsPitch}</span>
+                        <span className="font-mono text-foreground">{ttsPitch}</span>
                       </div>
                       <input
                         type="range"
@@ -1814,7 +1814,7 @@ export function MediaPanel() {
                   type="button"
                   onClick={previewTTS}
                   disabled={!ttsText.trim() || isGeneratingTTS}
-                  className="flex-1 py-2 text-xs border border-[#4e4e4e] hover:border-white text-[#a0a0a0] hover:text-white rounded-lg transition-all font-medium disabled:opacity-30 disabled:pointer-events-none"
+                  className="flex-1 py-2 text-xs border border-border hover:border-white text-muted-foreground hover:text-foreground rounded-lg transition-all font-medium disabled:opacity-30 disabled:pointer-events-none"
                 >
                   Preview Speech
                 </button>
@@ -1840,27 +1840,27 @@ export function MediaPanel() {
             </div>
 
             {/* AI SFX Generator */}
-            <div className="p-3 bg-[#1e1e1e]/60 border border-[#3e3e3e] rounded-lg space-y-3.5 mt-4">
+            <div className="p-3 bg-card/60 border border-border rounded-lg space-y-3.5 mt-4">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Waves className="w-3.5 h-3.5" />
                   AI SFX Generator (HuggingFace)
                 </p>
               </div>
-              <p className="text-xs text-[#a0a0a0] leading-relaxed">
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 Analyze a 10-second chunk of your timeline starting from the current playhead. The AI will generate custom Sound Effects based on the visuals and transitions.
               </p>
               
               {!sfxAnalysisCues ? (
                 <div className="space-y-3">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-medium text-[#a0a0a0] flex justify-between">
+                    <label className="text-[10px] font-medium text-muted-foreground flex justify-between">
                       <span>Vision Model</span>
                     </label>
                     <select
                       value={sfxVisionProvider}
                       onChange={(e) => setSfxVisionProvider(e.target.value as 'gemini' | 'groq')}
-                      className="w-full bg-[#141414] text-xs text-white border border-[#3e3e3e] rounded-lg px-3 py-2 outline-none focus:border-teal-500 transition-colors appearance-none"
+                      className="w-full bg-background text-xs text-foreground border border-border rounded-lg px-3 py-2 outline-none focus:border-teal-500 transition-colors appearance-none"
                     >
                       <option value="gemini">Gemini 3.1 Flash Lite (High Speed)</option>
                       <option value="groq">Groq LLaMA-4 Scout (Reasoning)</option>
@@ -1886,9 +1886,9 @@ export function MediaPanel() {
                   </button>
                 </div>
               ) : (
-                <div className="space-y-3 border-t border-[#3e3e3e] pt-3">
+                <div className="space-y-3 border-t border-border pt-3">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs text-white">Found {sfxAnalysisCues.length} SFX cues</p>
+                    <p className="text-xs text-foreground">Found {sfxAnalysisCues.length} SFX cues</p>
                     <button 
                       onClick={() => {
                         setSfxAnalysisCues(null);
@@ -1903,10 +1903,10 @@ export function MediaPanel() {
                   </div>
                   <div className="max-h-32 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                     {sfxAnalysisCues.map((cue, idx) => (
-                      <div key={idx} className="bg-[#141414] p-2 rounded border border-[#3e3e3e]">
+                      <div key={idx} className="bg-background p-2 rounded border border-border">
                         <div className="flex justify-between text-[10px] text-teal-400 mb-1 font-mono">
                           <span>{cue.start.toFixed(1)}s – {cue.end.toFixed(1)}s</span>
-                          <span className="text-[#6a6a6a]">@{(sfxChunkStartTime + cue.start).toFixed(1)}s</span>
+                          <span className="text-muted-foreground/70">@{(sfxChunkStartTime + cue.start).toFixed(1)}s</span>
                         </div>
                         <input
                           type="text"
@@ -1916,9 +1916,9 @@ export function MediaPanel() {
                             newCues[idx].query = e.target.value;
                             setSfxAnalysisCues(newCues);
                           }}
-                          className="w-full bg-transparent text-xs text-white border-b border-[#3e3e3e] focus:border-teal-500 focus:outline-none py-1"
+                          className="w-full bg-transparent text-xs text-foreground border-b border-border focus:border-teal-500 focus:outline-none py-1"
                         />
-                        <p className="text-[9px] text-[#6a6a6a] mt-1 italic">{cue.reason}</p>
+                        <p className="text-[9px] text-muted-foreground/70 mt-1 italic">{cue.reason}</p>
                       </div>
                     ))}
                   </div>
@@ -1971,15 +1971,15 @@ export function MediaPanel() {
         )}
 
         {activeMediaTab === 'text' && (
-          <div className="flex-1 overflow-hidden flex flex-col p-2 min-h-0 bg-[#1e1e1e]/20">
+          <div className="flex-1 overflow-hidden flex flex-col p-2 min-h-0 bg-card/20">
             {/* Sub-tabs header */}
-            <div className="flex border-b border-[#3e3e3e] shrink-0 mb-3 bg-[#1e1e1e]/40 rounded-t overflow-hidden">
+            <div className="flex border-b border-border shrink-0 mb-3 bg-card/40 rounded-t overflow-hidden">
               <button
                 onClick={() => setTextSubTab('text')}
                 className={`flex-1 py-2 text-xs font-semibold border-b-2 transition-all ${
                   textSubTab === 'text'
-                    ? 'text-white border-amber-500 bg-[#2d2d2d]/30'
-                    : 'text-[#a0a0a0] border-transparent hover:text-white hover:bg-[#2d2d2d]/10'
+                    ? 'text-foreground border-amber-500 bg-popover/30'
+                    : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-popover/10'
                 }`}
               >
                 Text Clips
@@ -1988,8 +1988,8 @@ export function MediaPanel() {
                 onClick={() => setTextSubTab('subtitle')}
                 className={`flex-1 py-2 text-xs font-semibold border-b-2 transition-all ${
                   textSubTab === 'subtitle'
-                    ? 'text-white border-amber-500 bg-[#2d2d2d]/30'
-                    : 'text-[#a0a0a0] border-transparent hover:text-white hover:bg-[#2d2d2d]/10'
+                    ? 'text-foreground border-amber-500 bg-popover/30'
+                    : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-popover/10'
                 }`}
               >
                 Subtitles
@@ -2022,7 +2022,7 @@ export function MediaPanel() {
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] uppercase font-bold tracking-wider text-amber-500">Text Library (Not on Timeline)</span>
-                        <span className="text-[9px] text-[#666] font-mono">{unusedTextItems.length} items</span>
+                        <span className="text-[9px] text-muted-foreground/70 font-mono">{unusedTextItems.length} items</span>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-2">
@@ -2034,13 +2034,13 @@ export function MediaPanel() {
                               e.dataTransfer.setData('application/procut-media', item.id);
                               (window as any).__procutDraggingMediaId = item.id;
                             }}
-                            className="p-2.5 bg-[#252525] border border-[#383838] hover:border-amber-500/50 rounded flex flex-col justify-between h-[82px] cursor-grab active:cursor-grabbing relative group select-none transition-all shadow-sm"
+                            className="p-2.5 bg-secondary border border-border hover:border-amber-500/50 rounded flex flex-col justify-between h-[82px] cursor-grab active:cursor-grabbing relative group select-none transition-all shadow-sm"
                           >
                             <div className="flex items-center gap-1.5 overflow-hidden">
                               <Type className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                              <span className="text-[10px] text-white font-medium truncate pr-6">{item.name}</span>
+                              <span className="text-[10px] text-foreground font-medium truncate pr-6">{item.name}</span>
                             </div>
-                            <div className="text-[9px] text-[#a0a0a0] truncate bg-[#161616] p-1 rounded border border-[#2e2e2e] max-h-[36px] overflow-hidden leading-tight font-mono">
+                            <div className="text-[9px] text-muted-foreground truncate bg-card p-1 rounded border border-border max-h-[36px] overflow-hidden leading-tight font-mono">
                               {item.textContent || 'Text'}
                             </div>
                             
@@ -2114,7 +2114,7 @@ export function MediaPanel() {
                           </div>
                         ))}
                         {unusedTextItems.length === 0 && (
-                          <div className="col-span-2 flex flex-col items-center justify-center py-6 text-center text-[#555] border border-[#2e2e2e]/40 border-dashed rounded bg-[#1e1e1e]/20">
+                          <div className="col-span-2 flex flex-col items-center justify-center py-6 text-center text-muted-foreground/60 border border-border/40 border-dashed rounded bg-card/20">
                             <span className="text-[10px]">No unassigned text assets</span>
                           </div>
                         )}
@@ -2123,9 +2123,9 @@ export function MediaPanel() {
 
                     {/* Group 2: Timeline Text Clips (On Timeline) */}
                     <div>
-                      <div className="flex items-center justify-between mb-2 border-t border-[#3e3e3e]/40 pt-3">
+                      <div className="flex items-center justify-between mb-2 border-t border-border/40 pt-3">
                         <span className="text-[10px] uppercase font-bold tracking-wider text-teal-400">Timeline Clips (Sorted by Time)</span>
-                        <span className="text-[9px] text-[#666] font-mono">{timelineTextClips.length} clips</span>
+                        <span className="text-[9px] text-muted-foreground/70 font-mono">{timelineTextClips.length} clips</span>
                       </div>
 
                       <div className="space-y-2">
@@ -2139,13 +2139,13 @@ export function MediaPanel() {
                                 selectClip(c.id);
                               }}
                               className={`group relative p-2.5 rounded border transition-all cursor-pointer ${
-                                isActive ? 'bg-amber-500/10 border-amber-500/50' : 'bg-[#1b1b1b] border-[#2c2c2c] hover:border-[#444]'
+                                isActive ? 'bg-amber-500/10 border-amber-500/50' : 'bg-card border-border hover:border-border'
                               }`}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex items-center gap-1.5 overflow-hidden">
                                   <Type className="w-3.5 h-3.5 text-teal-500 shrink-0" />
-                                  <span className="text-[11px] text-[#d0d0d0] font-medium truncate pr-8">
+                                  <span className="text-[11px] text-foreground/80 font-medium truncate pr-8">
                                     {c.textSettings?.text?.trim() || 'Text Clip'}
                                   </span>
                                   {/* Kinetic sentence containers own their word layers; badge the
@@ -2182,7 +2182,7 @@ export function MediaPanel() {
                               </div>
 
                               <div className="mt-1 flex items-center gap-2">
-                                <span className="text-[9px] font-mono text-[#5a5a5a]">
+                                <span className="text-[9px] font-mono text-muted-foreground/60">
                                   {formatSimpleTime(c.startTime)} - {formatSimpleTime(c.startTime + c.duration)}
                                 </span>
                                 {isActive && (
@@ -2219,12 +2219,12 @@ export function MediaPanel() {
                                           className={`flex items-center justify-between gap-2 px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
                                             isWordSelected
                                               ? 'bg-teal-500/20 text-teal-200'
-                                              : 'text-[#9a9a9a] hover:bg-white/5 hover:text-white'
+                                              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
                                           }`}
                                           title={`Select "${wordText}" in the PiP window`}
                                         >
                                           <span className="text-[10px] truncate">{wordText}</span>
-                                          <span className="text-[8px] font-mono text-[#5a5a5a] shrink-0">
+                                          <span className="text-[8px] font-mono text-muted-foreground/60 shrink-0">
                                             {formatSimpleTime(wordClip.startTime)}
                                           </span>
                                         </div>
@@ -2237,7 +2237,7 @@ export function MediaPanel() {
                           );
                         })}
                         {timelineTextClips.length === 0 && (
-                          <div className="flex flex-col items-center justify-center py-6 text-center text-[#555] border border-[#2e2e2e]/40 border-dashed rounded bg-[#1e1e1e]/20">
+                          <div className="flex flex-col items-center justify-center py-6 text-center text-muted-foreground/60 border border-border/40 border-dashed rounded bg-card/20">
                             <span className="text-[10px]">No active text clips on timeline</span>
                           </div>
                         )}
@@ -2261,7 +2261,7 @@ export function MediaPanel() {
                   <button
                     onClick={() => srtInputRef.current?.click()}
                     disabled={importing}
-                    className="flex-1 py-2 bg-[#2d2d2d] hover:bg-[#3e3e3e] text-white border border-[#3e3e3e] rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                    className="flex-1 py-2 bg-popover hover:bg-accent text-foreground border border-border rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                   >
                     <Upload className="w-3.5 h-3.5 text-purple-400" />
                     SRT Import
@@ -2278,21 +2278,21 @@ export function MediaPanel() {
                           useEditorStore.setState({ currentTime: sub.startTime });
                           selectSubtitle(sub.id);
                         }}
-                        className={`p-3 bg-[#252525] border rounded cursor-pointer transition-all flex flex-col gap-2 hover:border-[#4e4e4e] shadow-sm ${
-                          isSelected ? 'border-amber-500 bg-[#2d271a]' : 'border-[#3e3e3e]'
+                        className={`p-3 bg-secondary border rounded cursor-pointer transition-all flex flex-col gap-2 hover:border-border shadow-sm ${
+                          isSelected ? 'border-amber-500 bg-[#2d271a]' : 'border-border'
                         }`}
                       >
-                        <div className="flex items-center justify-between text-[9px] text-[#a0a0a0] font-mono border-b border-[#303030] pb-1.5">
-                          <span className="bg-[#1e1e1e] px-1.5 py-0.5 rounded border border-[#2e2e2e] text-amber-400 font-semibold">
+                        <div className="flex items-center justify-between text-[9px] text-muted-foreground font-mono border-b border-border pb-1.5">
+                          <span className="bg-card px-1.5 py-0.5 rounded border border-border text-amber-400 font-semibold">
                             In: {sub.startTime.toFixed(2)}s
                           </span>
-                          <span className="bg-[#1e1e1e] px-1.5 py-0.5 rounded border border-[#2e2e2e] text-amber-400 font-semibold">
+                          <span className="bg-card px-1.5 py-0.5 rounded border border-border text-amber-400 font-semibold">
                             Out: {sub.endTime.toFixed(2)}s
                           </span>
                         </div>
                         
                         <div className="space-y-1.5">
-                          <div className="text-[11px] text-white leading-relaxed font-semibold">
+                          <div className="text-[11px] text-foreground leading-relaxed font-semibold">
                             {sub.text}
                           </div>
                           {sub.translations && Object.entries(sub.translations).map(([lang, val]) => {
@@ -2312,7 +2312,7 @@ export function MediaPanel() {
                   })}
                   
                   {subtitles.length === 0 && (
-                    <div className="flex-1 flex flex-col items-center justify-center py-12 text-center text-[#6a6a6a]">
+                    <div className="flex-1 flex flex-col items-center justify-center py-12 text-center text-muted-foreground/70">
                       <Globe className="w-8 h-8 mb-2 opacity-30 text-amber-500" />
                       <span className="text-xs font-semibold">No Subtitles Generated</span>
                       <span className="text-[10px] mt-1 opacity-60 max-w-[200px] leading-normal">
@@ -2327,18 +2327,18 @@ export function MediaPanel() {
             {/* Language Selection Modal */}
             {showCaptionLanguageModal && (
               <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-                <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl p-5 w-full max-w-[380px]">
-                  <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-1.5">
+                <div className="bg-card border border-border rounded-lg shadow-xl p-5 w-full max-w-[380px]">
+                  <h3 className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     Generate Auto-Captions
                   </h3>
-                  <p className="text-[11px] text-[#a0a0a0] mb-4 leading-normal">
+                  <p className="text-[11px] text-muted-foreground mb-4 leading-normal">
                     Select target transcription languages. The AI will analyze timeline speech and create multi-lingual captions.
                   </p>
                   
-                  <div className="space-y-1.5 max-h-[180px] overflow-y-auto mb-5 pr-1 border border-[#2d2d2d] rounded p-2 bg-[#151515] scrollbar-thin">
+                  <div className="space-y-1.5 max-h-[180px] overflow-y-auto mb-5 pr-1 border border-border rounded p-2 bg-card scrollbar-thin">
                     {CAPTION_LANGUAGES.map(lang => (
-                      <label key={lang.code} className="flex items-center gap-2.5 p-2 rounded hover:bg-[#252525] cursor-pointer transition-colors select-none text-xs">
+                      <label key={lang.code} className="flex items-center gap-2.5 p-2 rounded hover:bg-secondary cursor-pointer transition-colors select-none text-xs">
                         <input 
                           type="checkbox"
                           checked={selectedCaptionLanguages.includes(lang.code)}
@@ -2349,17 +2349,17 @@ export function MediaPanel() {
                               setSelectedCaptionLanguages(prev => prev.filter(c => c !== lang.code));
                             }
                           }}
-                          className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
+                          className="w-3.5 h-3.5 rounded border-border bg-secondary text-amber-500 focus:ring-amber-500 focus:ring-offset-[#1e1e1e]"
                         />
-                        <span className="text-white font-medium">{lang.name} ({lang.code})</span>
+                        <span className="text-foreground font-medium">{lang.name} ({lang.code})</span>
                       </label>
                     ))}
                   </div>
 
-                  <div className="flex justify-end gap-2.5 pt-2 border-t border-[#2d2d2d]">
+                  <div className="flex justify-end gap-2.5 pt-2 border-t border-border">
                     <button
                       onClick={() => setShowCaptionLanguageModal(false)}
-                      className="px-3.5 py-1.5 text-xs text-[#a0a0a0] hover:text-white transition-colors font-medium"
+                      className="px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
                     >
                       Cancel
                     </button>
@@ -2411,13 +2411,13 @@ export function MediaPanel() {
           return (
             <div className="flex-1 flex flex-col min-h-0">
               {/* Sub-Tab Selector */}
-              <div className="flex border-b border-[#3e3e3e] bg-[#222]">
+              <div className="flex border-b border-border bg-card">
                 <button
                   onClick={() => { setTemplateSubTab('text'); setTemplateCategory('all'); }}
                   className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
                     templateSubTab === 'text'
-                      ? 'border-amber-500 text-amber-500 bg-[#2d2d2d]'
-                      : 'border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#252525]'
+                      ? 'border-amber-500 text-amber-500 bg-popover'
+                      : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary'
                   }`}
                 >
                   Text Templates
@@ -2426,8 +2426,8 @@ export function MediaPanel() {
                   onClick={() => { setTemplateSubTab('video'); setTemplateCategory('all'); }}
                   className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
                     templateSubTab === 'video'
-                      ? 'border-amber-500 text-amber-500 bg-[#2d2d2d]'
-                      : 'border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#252525]'
+                      ? 'border-amber-500 text-amber-500 bg-popover'
+                      : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary'
                   }`}
                 >
                   Video Templates
@@ -2436,8 +2436,8 @@ export function MediaPanel() {
                   onClick={() => setTemplateSubTab('project')}
                   className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
                     templateSubTab === 'project'
-                      ? 'border-amber-500 text-amber-500 bg-[#2d2d2d]'
-                      : 'border-transparent text-[#a0a0a0] hover:text-white hover:bg-[#252525]'
+                      ? 'border-amber-500 text-amber-500 bg-popover'
+                      : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary'
                   }`}
                 >
                   Project Layouts
@@ -2447,7 +2447,7 @@ export function MediaPanel() {
               {templateSubTab !== 'project' ? (
                 <div className="flex-1 overflow-y-auto flex flex-col">
                   {/* Category filter pills */}
-                  <div className="flex gap-1 p-2 flex-wrap border-b border-[#3e3e3e] bg-[#1e1e1e]">
+                  <div className="flex gap-1 p-2 flex-wrap border-b border-border bg-card">
                     {categories.map((cat) => (
                       <button
                         key={cat.id}
@@ -2455,14 +2455,14 @@ export function MediaPanel() {
                         className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                           templateCategory === cat.id
                             ? 'bg-amber-500 text-black'
-                            : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                            : 'bg-accent text-muted-foreground hover:text-foreground'
                         }`}
                       >
                         {cat.label}
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-[#6a6a6a] px-3 py-1.5 font-medium uppercase tracking-wider text-amber-400/80">
+                  <p className="text-[10px] text-muted-foreground/70 px-3 py-1.5 font-medium uppercase tracking-wider text-amber-400/80">
                     {templateSubTab === 'text' 
                       ? 'Drag to Text Track / Click to Insert' 
                       : 'Drag to Video Clip / Click to Apply'}
@@ -2493,7 +2493,7 @@ export function MediaPanel() {
 
                   <div className="flex flex-col gap-2">
                     {projectTemplates.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 text-center text-[#6a6a6a]">
+                      <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground/70">
                         <p className="text-xs font-medium">No Project Templates saved yet</p>
                         <p className="text-[10px] mt-1">Configure your tracks and clips, then click save above to reuse it.</p>
                       </div>
@@ -2508,13 +2508,13 @@ export function MediaPanel() {
                         return (
                           <div
                             key={tmpl.id}
-                            className="flex flex-col p-3 rounded border border-[#3e3e3e] bg-[#1e1e1e] hover:border-amber-500/30 transition-all group"
+                            className="flex flex-col p-3 rounded border border-border bg-card hover:border-amber-500/30 transition-all group"
                           >
                             <div className="flex justify-between items-start gap-2">
                               <div className="min-w-0">
-                                <h4 className="text-xs text-white font-semibold truncate">{tmpl.name}</h4>
+                                <h4 className="text-xs text-foreground font-semibold truncate">{tmpl.name}</h4>
                                 {tmpl.description && (
-                                  <p className="text-[10px] text-[#a0a0a0] mt-0.5 line-clamp-2 leading-relaxed">
+                                  <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
                                     {tmpl.description}
                                   </p>
                                 )}
@@ -2523,19 +2523,19 @@ export function MediaPanel() {
                                 onClick={async () => {
                                   await deleteProjectTemplate(tmpl.id);
                                 }}
-                                className="p-1 hover:bg-[#2d2d2d] rounded text-[#a0a0a0] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                                className="p-1 hover:bg-popover rounded text-muted-foreground hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
                                 title="Delete Template"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
 
-                            <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-[#2d2d2d]">
+                            <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-border">
                               <div className="flex flex-col gap-0.5">
-                                <span className="text-[8px] text-[#6a6a6a]">
+                                <span className="text-[8px] text-muted-foreground/70">
                                   {dateStr}
                                 </span>
-                                <span className="text-[9px] text-[#a0a0a0] font-medium">
+                                <span className="text-[9px] text-muted-foreground font-medium">
                                   {tmpl.tracks.length} track(s) · {(tmpl.totalDuration || 0).toFixed(1)}s
                                 </span>
                               </div>
@@ -2566,18 +2566,18 @@ export function MediaPanel() {
                 <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
                 <span className="text-xs font-semibold uppercase tracking-wider">🤖 Auto Beat Sync</span>
               </div>
-              <p className="text-[10px] text-[#a0a0a0] leading-tight">
+              <p className="text-[10px] text-muted-foreground leading-tight">
                 Automatically align video cuts & apply professional transitions synchronized to your audio track's beat markers.
               </p>
 
               <div className="space-y-2">
                 {/* Audio Clip Selection */}
                 <div>
-                  <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Select Audio Track (Beats Source)</label>
+                  <label className="text-[9px] uppercase tracking-wider text-muted-foreground/70 block mb-1">Select Audio Track (Beats Source)</label>
                   <select
                     value={syncAudioClip}
                     onChange={(e) => setSyncAudioClip(e.target.value)}
-                    className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-card border border-border text-xs text-foreground/80 rounded p-1.5 focus:outline-none focus:border-indigo-500"
                   >
                     <option value="">Select audio...</option>
                     {tracks.flatMap(t => t.clips)
@@ -2596,11 +2596,11 @@ export function MediaPanel() {
 
                 {/* Target Video Track Selection */}
                 <div>
-                  <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Select Video Track to Sync</label>
+                  <label className="text-[9px] uppercase tracking-wider text-muted-foreground/70 block mb-1">Select Video Track to Sync</label>
                   <select
                     value={syncTargetTrack}
                     onChange={(e) => setSyncTargetTrack(e.target.value)}
-                    className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-card border border-border text-xs text-foreground/80 rounded p-1.5 focus:outline-none focus:border-indigo-500"
                   >
                     <option value="">Select video track...</option>
                     {tracks.filter(t => t.type === 'video').map(t => (
@@ -2614,11 +2614,11 @@ export function MediaPanel() {
                 <div className="grid grid-cols-2 gap-2">
                   {/* Every N Beats */}
                   <div>
-                    <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Interval (Beats)</label>
+                    <label className="text-[9px] uppercase tracking-wider text-muted-foreground/70 block mb-1">Interval (Beats)</label>
                     <select
                       value={syncEveryNBeats}
                       onChange={(e) => setSyncEveryNBeats(Number(e.target.value))}
-                      className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-card border border-border text-xs text-foreground/80 rounded p-1.5 focus:outline-none focus:border-indigo-500"
                     >
                       <option value="1">Every Beat (1)</option>
                       <option value="2">2 Beats</option>
@@ -2629,11 +2629,11 @@ export function MediaPanel() {
 
                   {/* Transition Type */}
                   <div>
-                    <label className="text-[9px] uppercase tracking-wider text-[#707070] block mb-1">Transition</label>
+                    <label className="text-[9px] uppercase tracking-wider text-muted-foreground/70 block mb-1">Transition</label>
                     <select
                       value={syncTransitionType}
                       onChange={(e) => setSyncTransitionType(e.target.value)}
-                      className="w-full bg-[#1e1e1e] border border-[#3e3e3e] text-xs text-[#d0d0d0] rounded p-1.5 focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-card border border-border text-xs text-foreground/80 rounded p-1.5 focus:outline-none focus:border-indigo-500"
                     >
                       <option value="">None (Hard Cuts)</option>
                       <option value="dissolve">Cross Dissolve</option>
@@ -2679,9 +2679,9 @@ export function MediaPanel() {
               </button>
             </div>
 
-            <div className="h-px bg-[#3e3e3e]" />
+            <div className="h-px bg-accent" />
 
-            <p className="text-xs text-[#a0a0a0] mb-1">Drag transitions between clips on timeline (Hover to preview)</p>
+            <p className="text-xs text-muted-foreground mb-1">Drag transitions between clips on timeline (Hover to preview)</p>
             <div className="grid grid-cols-2 gap-2">
               {TRANSITIONS.map((transition) => (
                 <TransitionCard key={transition.name} transition={transition} />
@@ -2695,12 +2695,12 @@ export function MediaPanel() {
             <div>
               <button
                 onClick={() => setOpenSection(prev => prev === id ? 'fx' : id)}
-                className={`w-full flex items-center justify-between px-2 py-1.5 rounded hover:bg-[#3a3a3a] transition-colors mb-1`}
+                className={`w-full flex items-center justify-between px-2 py-1.5 rounded hover:bg-accent transition-colors mb-1`}
               >
                 <span className={`text-[10px] font-semibold uppercase tracking-wider ${color}`}>{label}</span>
                 {openSection === id
-                  ? <ChevronDown className="w-3 h-3 text-[#6a6a6a]" />
-                  : <ChevronRight className="w-3 h-3 text-[#6a6a6a]" />}
+                  ? <ChevronDown className="w-3 h-3 text-muted-foreground/70" />
+                  : <ChevronRight className="w-3 h-3 text-muted-foreground/70" />}
               </button>
               {openSection === id && <div className="mb-3">{children}</div>}
             </div>
@@ -2710,7 +2710,7 @@ export function MediaPanel() {
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {/* ── Timeline FX ── */}
               <Section id="fx" label="Timeline FX" color="text-rose-400">
-                <p className="text-[9px] text-[#6a6a6a] px-1 mb-1.5">Add FX Track first, then drag here</p>
+                <p className="text-[9px] text-muted-foreground/70 px-1 mb-1.5">Add FX Track first, then drag here</p>
                 <div className="grid grid-cols-1 gap-0.5">
                   {FX_EFFECTS.map((effect) => {
                     const Icon = effect.icon;
@@ -2725,14 +2725,14 @@ export function MediaPanel() {
                         onClick={() => handleEffectClick(effect)}
                         onMouseEnter={() => setHoveredItem(effect.name)}
                         onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-pointer transition-colors group"
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-accent rounded cursor-pointer transition-colors group"
                       >
                         <div className="w-7 h-7 rounded bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
                           <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <span className="text-xs text-white block leading-tight">{effect.name}</span>
-                          <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
+                          <span className="text-xs text-foreground block leading-tight">{effect.name}</span>
+                          <span className="text-[9px] text-muted-foreground/70">{effect.desc}</span>
                         </div>
                         <span className="text-[8px] text-rose-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">FX</span>
                       </div>
@@ -2741,11 +2741,11 @@ export function MediaPanel() {
                 </div>
               </Section>
 
-              <div className="h-px bg-[#3e3e3e]" />
+              <div className="h-px bg-accent" />
 
               {/* ── Color Presets ── */}
               <Section id="color" label="Color Presets" color="text-amber-400">
-                <p className="text-[9px] text-[#6a6a6a] px-1 mb-1.5">Drag onto a video / image clip</p>
+                <p className="text-[9px] text-muted-foreground/70 px-1 mb-1.5">Drag onto a video / image clip</p>
                 <div className="grid grid-cols-1 gap-0.5">
                   {COLOR_CORRECTION_EFFECTS.map((effect) => {
                     const Icon = effect.icon;
@@ -2761,14 +2761,14 @@ export function MediaPanel() {
                         onClick={() => handleColorPresetClick(effect)}
                         onMouseEnter={() => setHoveredItem(effect.name)}
                         onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-pointer transition-colors group"
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-accent rounded cursor-pointer transition-colors group"
                       >
                         <div className="w-7 h-7 rounded bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
                           <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <span className="text-xs text-white block leading-tight">{effect.name}</span>
-                          <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
+                          <span className="text-xs text-foreground block leading-tight">{effect.name}</span>
+                          <span className="text-[9px] text-muted-foreground/70">{effect.desc}</span>
                         </div>
                         <span className="text-[8px] text-amber-400/50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">CC</span>
                       </div>
@@ -2777,11 +2777,11 @@ export function MediaPanel() {
                 </div>
               </Section>
 
-              <div className="h-px bg-[#3e3e3e]" />
+              <div className="h-px bg-accent" />
 
               {/* ── Particle Effects ── */}
               <Section id="particles" label="✦ Particle Effects" color="text-violet-400">
-                <p className="text-[9px] text-[#6a6a6a] px-1 mb-1.5">Drag onto any video/image clip — click emitter on preview to reposition</p>
+                <p className="text-[9px] text-muted-foreground/70 px-1 mb-1.5">Drag onto any video/image clip — click emitter on preview to reposition</p>
                 <div className="grid grid-cols-1 gap-0.5">
                   {PARTICLE_EFFECTS.map((effect) => {
                     const Icon = effect.icon;
@@ -2796,14 +2796,14 @@ export function MediaPanel() {
                         onClick={() => handleParticleClick(effect)}
                         onMouseEnter={() => setHoveredItem(effect.name)}
                         onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-[#3a3a3a] rounded cursor-pointer transition-colors group"
+                        className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-accent rounded cursor-pointer transition-colors group"
                       >
                         <div className={`w-7 h-7 rounded ${effect.bgColor} border flex items-center justify-center shrink-0`}>
                           <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <span className="text-xs text-white block leading-tight">{effect.name}</span>
-                          <span className="text-[9px] text-[#6a6a6a]">{effect.desc}</span>
+                          <span className="text-xs text-foreground block leading-tight">{effect.name}</span>
+                          <span className="text-[9px] text-muted-foreground/70">{effect.desc}</span>
                         </div>
                         <span className="text-[8px] text-violet-400/60 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">✦</span>
                       </div>
@@ -2852,12 +2852,12 @@ export function MediaPanel() {
       {/* Save Template Modal */}
       {showSaveTemplateModal && (
         <div className="fixed inset-0 bg-black/60 z-[120] flex items-center justify-center">
-          <div className="bg-[#2d2d2d] border border-[#3e3e3e] rounded-lg p-5 w-80 space-y-4 shadow-2xl">
+          <div className="bg-popover border border-border rounded-lg p-5 w-80 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-white uppercase tracking-wider">Save Project Template</h4>
+              <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider">Save Project Template</h4>
               <button
                 onClick={() => setShowSaveTemplateModal(false)}
-                className="text-[#a0a0a0] hover:text-white transition-colors"
+                className="text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2865,24 +2865,24 @@ export function MediaPanel() {
             
             <div className="space-y-3">
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[#a0a0a0]">Template Name</label>
+                <label className="text-[10px] text-muted-foreground">Template Name</label>
                 <input
                   type="text"
                   placeholder="e.g. My Vlog Layout"
                   value={templateName}
                   onChange={(e) => setTemplateName(e.target.value)}
-                  className="bg-[#1e1e1e] border border-[#3e3e3e] rounded px-2 py-1.5 text-xs text-white placeholder-[#6a6a6a] focus:outline-none focus:border-amber-500"
+                  className="bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[#a0a0a0]">Description</label>
+                <label className="text-[10px] text-muted-foreground">Description</label>
                 <textarea
                   placeholder="What is this template for?"
                   value={templateDesc}
                   rows={2}
                   onChange={(e) => setTemplateDesc(e.target.value)}
-                  className="bg-[#1e1e1e] border border-[#3e3e3e] rounded px-2 py-1.5 text-xs text-white placeholder-[#6a6a6a] focus:outline-none focus:border-amber-500 resize-none"
+                  className="bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-amber-500 resize-none"
                 />
               </div>
             </div>
@@ -2903,7 +2903,7 @@ export function MediaPanel() {
               </button>
               <button
                 onClick={() => setShowSaveTemplateModal(false)}
-                className="flex-1 py-1.5 text-xs font-medium text-[#a0a0a0] hover:text-white bg-[#3e3e3e] hover:bg-[#4d4d4d] rounded transition-colors"
+                className="flex-1 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-accent hover:bg-border rounded transition-colors"
               >
                 Cancel
               </button>
@@ -2915,13 +2915,13 @@ export function MediaPanel() {
       {/* Load Template Confirmation Modal */}
       {confirmLoadTemplateId && (
         <div className="fixed inset-0 bg-black/60 z-[120] flex items-center justify-center">
-          <div className="bg-[#2d2d2d] border border-red-500/20 rounded-lg p-5 w-80 space-y-4 shadow-2xl">
+          <div className="bg-popover border border-red-500/20 rounded-lg p-5 w-80 space-y-4 shadow-2xl">
             <div className="flex items-center gap-2 text-amber-500">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <h4 className="text-xs font-semibold uppercase tracking-wider">Overwrite Timeline?</h4>
             </div>
 
-            <p className="text-xs text-[#a0a0a0] leading-relaxed">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               Loading this template will **completely overwrite** your current timeline tracks and layout. This action can be undone.
             </p>
 
@@ -2937,7 +2937,7 @@ export function MediaPanel() {
               </button>
               <button
                 onClick={() => setConfirmLoadTemplateId(null)}
-                className="flex-1 py-1.5 text-xs font-medium text-[#a0a0a0] hover:text-white bg-[#3e3e3e] hover:bg-[#4d4d4d] rounded transition-colors"
+                className="flex-1 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-accent hover:bg-border rounded transition-colors"
               >
                 Cancel
               </button>
@@ -3320,7 +3320,7 @@ export const TransitionCard = React.memo(function TransitionCard({ transition, o
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
         onClick={onClick}
-      className="flex flex-col bg-[#1a1a1a] border border-[#3e3e3e] hover:border-purple-500 rounded overflow-hidden cursor-grab transition-all duration-150 relative group"
+      className="flex flex-col bg-background border border-border hover:border-purple-500 rounded overflow-hidden cursor-grab transition-all duration-150 relative group"
     >
       <div className="w-full aspect-video bg-black relative">
         <canvas
@@ -3335,11 +3335,11 @@ export const TransitionCard = React.memo(function TransitionCard({ transition, o
           </div>
         )}
       </div>
-      <div className="p-1.5 flex flex-col min-w-0 bg-[#252525]">
-        <span className="text-[10px] text-white font-medium truncate block">
+      <div className="p-1.5 flex flex-col min-w-0 bg-secondary">
+        <span className="text-[10px] text-foreground font-medium truncate block">
           {transition.name}
         </span>
-        <span className="text-[8px] text-[#a0a0a0] truncate">
+        <span className="text-[8px] text-muted-foreground truncate">
           {transition.preview}
         </span>
       </div>

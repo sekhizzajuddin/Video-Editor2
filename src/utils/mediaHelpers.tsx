@@ -28,7 +28,7 @@ export function getMediaColor(type: MediaType): string {
     case 'image': return 'border-purple-500/30 hover:border-purple-500 text-purple-400';
     case 'text': return 'border-amber-500/30 hover:border-amber-500 text-amber-400';
     case 'fx': return 'border-rose-500/30 hover:border-rose-500 text-rose-400';
-    default: return 'border-[#3e3e3e] hover:border-[#5e5e5e] text-[#a0a0a0]';
+    default: return 'border-border hover:border-border text-muted-foreground';
   }
 }
 
@@ -39,6 +39,6 @@ export function getMediaIcon(type: MediaType) {
     case 'image': return <Image className="w-4 h-4 text-purple-400" />;
     case 'text': return <FileText className="w-4 h-4 text-amber-400" />;
     case 'fx': return <Sparkles className="w-4 h-4 text-rose-400" />;
-    default: return <Film className="w-4 h-4 text-[#a0a0a0]" />;
+    default: return <Film className="w-4 h-4 text-muted-foreground" />;
   }
 }

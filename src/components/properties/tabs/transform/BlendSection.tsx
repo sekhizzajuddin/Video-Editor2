@@ -10,11 +10,11 @@ export function BlendSection({ clip, updateClip }: BlendSectionProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <label className="text-[10px] text-[#a0a0a0] uppercase tracking-wider">Blend Mode</label>
+        <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Blend Mode</label>
         <select
           value={clip.transform.blendMode || 'normal'}
           onChange={(e) => updateClip(clip.id, { transform: { ...clip.transform, blendMode: e.target.value } })}
-          className="w-full bg-[#1e1e1e] text-white border border-[#3e3e3e] rounded p-2 text-sm focus:border-amber-500 focus:outline-none"
+          className="w-full bg-card text-foreground border border-border rounded p-2 text-sm focus:border-amber-500 focus:outline-none"
         >
           <option value="normal">Normal</option>
           <option value="multiply">Multiply</option>

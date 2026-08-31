@@ -16,7 +16,7 @@ export function TemperatureSection({ temperature, onChange, onReset }: Temperatu
       onChange={onChange}
       onReset={onReset}
       formatValue={(v) => v > 0 ? `+${v}` : `${v}`}
-      gradient="bg-gradient-to-r from-blue-500 via-[#3e3e3e] to-orange-500"
+      gradient="bg-gradient-to-r from-blue-500 via-accent to-orange-500"
       title="Double-click to reset to 0"
     />
   );

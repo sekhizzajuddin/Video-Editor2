@@ -34,7 +34,7 @@ export const InsertOverwriteButtons = React.memo(function InsertOverwriteButtons
         onClick={handleInsert}
         title="Insert Edit: Insert clip at playhead and shift downstream clips right"
         disabled={!selectedClipId}
-        className="p-1 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#a0a0a0]"
+        className="p-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
       >
         <ArrowLeftToLine className="w-3.5 h-3.5" />
       </button>
@@ -42,7 +42,7 @@ export const InsertOverwriteButtons = React.memo(function InsertOverwriteButtons
         onClick={handleOverwrite}
         title="Overwrite Edit: Replace content at playhead position"
         disabled={!selectedClipId}
-        className="p-1 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#a0a0a0]"
+        className="p-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
       >
         <ArrowRightToLine className="w-3.5 h-3.5" />
       </button>

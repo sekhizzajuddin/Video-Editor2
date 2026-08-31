@@ -306,7 +306,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
       ref={pipContainerRef}
       data-pip-window="true"
       data-pip-id={pipWindow.id}
-      className={`absolute z-50 rounded-lg shadow-2xl bg-[#2a2a2a]/95 backdrop-blur-md border border-[#4a4a4a] flex flex-col pointer-events-auto ${isCollapsed ? 'rounded-lg' : ''}`}
+      className={`absolute z-50 rounded-lg shadow-2xl bg-secondary/95 backdrop-blur-md border border-border flex flex-col pointer-events-auto ${isCollapsed ? 'rounded-lg' : ''}`}
       style={{
         left: `${windowLeft}px`,
         top: `${windowTop}px`,
@@ -317,10 +317,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
       onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="flex items-center justify-between px-2 py-1 bg-[#1e1e1e] border-b border-[#3e3e3e] cursor-move select-none rounded-t-lg"
+        className="flex items-center justify-between px-2 py-1 bg-card border-b border-border cursor-move select-none rounded-t-lg"
         onMouseDown={handleDragStart}
       >
-        <div className="flex items-center gap-1.5 text-[#a0a0a0]">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
           <GripHorizontal className="w-3.5 h-3.5" />
           <span className="text-[10px] font-medium tracking-wide">PIP WORKSPACE</span>
         </div>
@@ -342,7 +342,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                   <button 
                     disabled={selectedTrackIdx === 0}
                     onClick={(e) => { e.stopPropagation(); reorderPipTrack(pipWindow.id, selectedTrackIdx, 'up'); }}
-                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-foreground disabled:opacity-30 transition-colors"
                     title="Move Layer Up"
                   >
                     <ChevronUp className="w-3.5 h-3.5" />
@@ -350,7 +350,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                   <button 
                     disabled={selectedTrackIdx === pipWindow.tracks.length - 1}
                     onClick={(e) => { e.stopPropagation(); reorderPipTrack(pipWindow.id, selectedTrackIdx, 'down'); }}
-                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-foreground disabled:opacity-30 transition-colors"
                     title="Move Layer Down"
                   >
                     <ChevronDown className="w-3.5 h-3.5" />
@@ -381,7 +381,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                               updatePipTrack(pipWindow.id, selTrack.id, { hidden: !selTrack.hidden });
                             }
                           }}
-                          className={`p-1 rounded hover:bg-white/10 transition-colors ${isMutedOrHidden ? 'text-red-400' : 'text-gray-400 hover:text-white'}`}
+                          className={`p-1 rounded hover:bg-white/10 transition-colors ${isMutedOrHidden ? 'text-red-400' : 'text-gray-400 hover:text-foreground'}`}
                           title={selTrack.type === 'audio' ? (selTrack.muted ? 'Unmute' : 'Mute') : (selTrack.hidden ? 'Show' : 'Hide')}
                         >
                           {selTrack.type === 'audio' ? (
@@ -395,7 +395,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                             e.stopPropagation();
                             updatePipTrack(pipWindow.id, selTrack.id, { locked: !selTrack.locked });
                           }}
-                          className={`p-1 rounded hover:bg-white/10 transition-colors ${selTrack.locked ? 'text-yellow-400' : 'text-gray-400 hover:text-white'}`}
+                          className={`p-1 rounded hover:bg-white/10 transition-colors ${selTrack.locked ? 'text-yellow-400' : 'text-gray-400 hover:text-foreground'}`}
                           title={selTrack.locked ? 'Unlock' : 'Lock'}
                         >
                           {selTrack.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
@@ -432,7 +432,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                     e.stopPropagation();
                     setShowAddTrackMenu(!showAddTrackMenu);
                   }}
-                  className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors flex items-center justify-center disabled:opacity-30"
+                  className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-foreground transition-colors flex items-center justify-center disabled:opacity-30"
                   title={canAddTrack ? "Add Track to PIP" : "PIP track limit reached"}
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -440,7 +440,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
               );
             })()}
             {showAddTrackMenu && (
-              <div className="absolute right-0 mt-1 w-24 bg-[#1e1e1e]/95 backdrop-blur-md border border-[#4a4a4a] rounded shadow-2xl z-[100] flex flex-col py-1 text-[10px]">
+              <div className="absolute right-0 mt-1 w-24 bg-card/95 backdrop-blur-md border border-border rounded shadow-2xl z-[100] flex flex-col py-1 text-[10px]">
                 {(['video', 'audio', 'text', 'fx'] as const).map((type) => (
                   <button
                     key={type}
@@ -449,7 +449,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                       addEmptyTrackToPip(pipWindow.id, type);
                       setShowAddTrackMenu(false);
                     }}
-                    className="px-3 py-1.5 text-left hover:bg-white/10 text-gray-300 hover:text-white transition-colors capitalize font-medium flex items-center gap-1.5"
+                    className="px-3 py-1.5 text-left hover:bg-white/10 text-gray-300 hover:text-foreground transition-colors capitalize font-medium flex items-center gap-1.5"
                   >
                     <span>+</span> {type}
                   </button>
@@ -465,7 +465,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
               setIsCollapsed(!isCollapsed);
             }}
             title={isCollapsed ? "Expand Workspace" : "Collapse Workspace"}
-            className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
+            className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-foreground transition-colors"
           >
             {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
           </button>
@@ -487,7 +487,7 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
               onClose();
             }}
             title="Close Window"
-            className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
+            className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-foreground transition-colors"
           >
             <X className="w-3.5 h-3.5" />
           </button>

@@ -50,7 +50,7 @@ export const FX_EFFECTS = [
   { name: 'Glitch',              icon: Tv2,          color: 'text-rose-400',    type: 'glitch',           desc: 'Digital corruption distortion' },
   { name: 'Old Film',            icon: Film,         color: 'text-amber-400',   type: 'old_film',         desc: 'Grain, flicker, sepia tone' },
   { name: 'VHS',                 icon: Radio,        color: 'text-green-400',   type: 'vhs',              desc: 'Retro VHS tape artifact' },
-  { name: 'Cinematic Bars',      icon: Monitor,      color: 'text-[#a0a0a0]',   type: 'cinematic_bars',   desc: 'Black letterbox bars 2.39:1' },
+  { name: 'Cinematic Bars',      icon: Monitor,      color: 'text-muted-foreground',   type: 'cinematic_bars',   desc: 'Black letterbox bars 2.39:1' },
   { name: 'Neon Glow',           icon: Flame,        color: 'text-pink-400',    type: 'neon_glow',        desc: 'Electric bloom / glow effect' },
   { name: 'RGB Split',           icon: ScanLine,     color: 'text-red-400',     type: 'rgb_split',        desc: 'Chromatic aberration prism' },
   { name: 'Pixelate',            icon: Hexagon,      color: 'text-indigo-400',  type: 'pixelate',         desc: 'Mosaic / pixel block effect' },

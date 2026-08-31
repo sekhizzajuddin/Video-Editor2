@@ -76,7 +76,7 @@ export function MotionTrackingSection({ selectedClip }: MotionTrackingSectionPro
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Target className="h-4 w-4 text-emerald-400" />
-          <span className="font-semibold text-white">Motion Tracking</span>
+          <span className="font-semibold text-foreground">Motion Tracking</span>
         </div>
         {isVideo && (
           <button
@@ -160,7 +160,7 @@ export function MotionTrackingSection({ selectedClip }: MotionTrackingSectionPro
       </div>
 
       {mediaItem?.type === 'video' && (
-        <div className="pt-2 mt-4 border-t border-[#3e3e3e]">
+        <div className="pt-2 mt-4 border-t border-border">
           <h4 className="text-xs font-semibold text-zinc-300 mb-2 flex items-center">
             <span className="mr-1.5">📱</span> Auto-Reframe (9:16)
           </h4>

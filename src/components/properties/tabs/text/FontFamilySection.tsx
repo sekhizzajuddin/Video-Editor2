@@ -54,8 +54,8 @@ export function FontFamilySection({ fontFamily, onChange }: FontFamilySectionPro
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <label className="text-[10px] text-[#a0a0a0] uppercase tracking-wider">Font Family</label>
-        <label className="flex items-center gap-1 px-2 py-0.5 bg-[#2a2a2a] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-amber-400 cursor-pointer transition-colors">
+        <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Font Family</label>
+        <label className="flex items-center gap-1 px-2 py-0.5 bg-secondary hover:bg-accent border border-border rounded text-[10px] text-amber-400 cursor-pointer transition-colors">
           <Upload className="w-3 h-3" />
           Upload
           <input
@@ -73,7 +73,7 @@ export function FontFamilySection({ fontFamily, onChange }: FontFamilySectionPro
       <select
         value={fontFamily || 'Arial'}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-[#1e1e1e] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-amber-500"
+        className="bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-amber-500"
       >
         <optgroup label="System Fonts">
           {allFonts.filter((f) => !customFonts.find((c) => c.family === f)).map((font) => (
@@ -90,11 +90,11 @@ export function FontFamilySection({ fontFamily, onChange }: FontFamilySectionPro
       </select>
       {customFonts.length > 0 && (
         <div className="flex flex-col gap-1 mt-1">
-          <p className="text-[9px] text-[#6a6a6a] uppercase tracking-wider">Manage Custom Fonts</p>
+          <p className="text-[9px] text-muted-foreground/70 uppercase tracking-wider">Manage Custom Fonts</p>
           {customFonts.map((font) => (
             <div
               key={font.family}
-              className="flex items-center gap-2 px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-[10px]"
+              className="flex items-center gap-2 px-2 py-1 bg-card border border-border rounded text-[10px]"
             >
               <Type className="w-3 h-3 text-amber-400" />
               <span className="flex-1 truncate" style={{ fontFamily: font.family }}>

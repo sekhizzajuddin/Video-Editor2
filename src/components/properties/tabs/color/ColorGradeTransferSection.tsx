@@ -76,14 +76,14 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
   );
 
   return (
-    <div className="bg-[#1e1e1e] rounded p-3 border border-emerald-500/20 space-y-3 mt-3">
+    <div className="bg-card rounded p-3 border border-emerald-500/20 space-y-3 mt-3">
       <div className="flex items-center gap-2">
         <div className="p-1 rounded bg-emerald-500/10 text-emerald-400">
           <Wand2 className="w-3.5 h-3.5" />
         </div>
         <div>
-          <p className="text-[11px] font-semibold text-white leading-tight">Color Transfer & AI Match</p>
-          <p className="text-[9px] text-[#a0a0a0]">Copy grade to other clips or match shot-to-shot reference look</p>
+          <p className="text-[11px] font-semibold text-foreground leading-tight">Color Transfer & AI Match</p>
+          <p className="text-[9px] text-muted-foreground">Copy grade to other clips or match shot-to-shot reference look</p>
         </div>
       </div>
 
@@ -92,7 +92,7 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
         <button
           type="button"
           onClick={handleCopyToAll}
-          className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-[#282828] hover:bg-[#323232] text-white text-[10px] font-medium rounded border border-[#3e3e3e] transition-colors"
+          className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-secondary hover:bg-accent text-foreground text-[10px] font-medium rounded border border-border transition-colors"
         >
           {copiedStatus === 'all' ? (
             <>
@@ -113,8 +113,8 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
           onClick={handleCopyToSelected}
           className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-[10px] font-medium rounded border transition-colors ${
             selectedClipIds.length > 1
-              ? 'bg-[#282828] hover:bg-[#323232] text-white border-[#3e3e3e]'
-              : 'bg-[#181818] text-[#666666] border-[#282828] cursor-not-allowed'
+              ? 'bg-secondary hover:bg-accent text-foreground border-border'
+              : 'bg-card text-muted-foreground/70 border-border cursor-not-allowed'
           }`}
         >
           {copiedStatus === 'selected' ? (
@@ -133,13 +133,13 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
 
       {/* AI Shot-to-Shot Reference Match */}
       {candidateRefClips.length > 0 && (
-        <div className="space-y-2 pt-2 border-t border-[#2a2a2a]">
-          <label className="text-[10px] text-[#a0a0a0] block">AI Match Color from Reference Clip</label>
+        <div className="space-y-2 pt-2 border-t border-border">
+          <label className="text-[10px] text-muted-foreground block">AI Match Color from Reference Clip</label>
           <div className="flex gap-2">
             <select
               value={referenceClipId}
               onChange={(e) => setReferenceClipId(e.target.value)}
-              className="flex-1 bg-[#252525] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-emerald-500"
+              className="flex-1 bg-secondary text-foreground text-[10px] border border-border rounded px-2 py-1 focus:outline-none focus:border-emerald-500"
             >
               <option value="">Select Reference Shot...</option>
               {candidateRefClips.map((c: TimelineClip, idx: number) => (
@@ -156,7 +156,7 @@ export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: Col
               className={`px-3 py-1 text-[10px] font-medium rounded transition-colors ${
                 referenceClipId
                   ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-500/30'
-                  : 'bg-[#252525] text-[#666666] border border-[#3a3a3a] cursor-not-allowed'
+                  : 'bg-secondary text-muted-foreground/70 border border-border cursor-not-allowed'
               }`}
             >
               {copiedStatus === 'aiMatched' ? 'Matched!' : 'Match Color'}

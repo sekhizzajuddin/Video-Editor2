@@ -30,7 +30,7 @@ export const DialogueEditor: React.FC<DialogueEditorProps> = ({
   return (
     <div className="flex flex-col space-y-1.5">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-semibold uppercase tracking-wider text-[#a0a0a0]">
+        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Dialogue / Script
         </label>
         {mode === 'clip' && (
@@ -45,15 +45,15 @@ export const DialogueEditor: React.FC<DialogueEditorProps> = ({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        className="w-full h-32 bg-[#1a1a1a] border border-[#3e3e3e] rounded-lg p-3 text-sm text-white placeholder-[#606060] resize-none focus:outline-none focus:border-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
+        className="w-full h-32 bg-background border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground/70 resize-none focus:outline-none focus:border-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
       />
 
-      <div className="flex items-center justify-between text-xs text-[#a0a0a0] px-1">
+      <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
         <span>
-          <strong className="text-white font-medium">{wordCount}</strong> {wordCount === 1 ? 'word' : 'words'}
+          <strong className="text-foreground font-medium">{wordCount}</strong> {wordCount === 1 ? 'word' : 'words'}
         </span>
         <span>
-          <strong className="text-white font-medium">{charCount}</strong> characters
+          <strong className="text-foreground font-medium">{charCount}</strong> characters
         </span>
       </div>
     </div>

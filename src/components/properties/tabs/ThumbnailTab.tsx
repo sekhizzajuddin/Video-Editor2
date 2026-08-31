@@ -9,17 +9,17 @@ interface ThumbnailTabProps {
 export function ThumbnailTab({ selectedClip }: ThumbnailTabProps) {
   return (
     <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
-      <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3 flex flex-col gap-3">
-        <h3 className="text-xs font-semibold text-white flex items-center gap-2">
+      <div className="bg-popover rounded border border-border p-3 flex flex-col gap-3">
+        <h3 className="text-xs font-semibold text-foreground flex items-center gap-2">
           <ImageIcon className="w-4 h-4 text-amber-500" />
           Thumbnail Designer
         </h3>
-        <p className="text-[10px] text-[#a0a0a0] leading-relaxed">
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
           Add text, stickers, and shapes to the timeline to design your thumbnail. Click the button below to capture the current frame as an image.
         </p>
         
         <div className="flex items-center gap-2">
-          <label className="text-[11px] text-white flex-1 cursor-pointer select-none">
+          <label className="text-[11px] text-foreground flex-1 cursor-pointer select-none">
             Show YouTube Safe Zones
           </label>
           <button
@@ -28,7 +28,7 @@ export function ThumbnailTab({ selectedClip }: ThumbnailTabProps) {
               useEditorStore.getState().updateSettings({ showSafeZones: !current });
             }}
             className={`w-8 h-4 rounded-full transition-colors relative ${
-              useEditorStore.getState().settings.showSafeZones ? 'bg-amber-500' : 'bg-[#1e1e1e] border border-[#3e3e3e]'
+              useEditorStore.getState().settings.showSafeZones ? 'bg-amber-500' : 'bg-card border border-border'
             }`}
           >
             <div className={`w-3 h-3 rounded-full bg-white absolute top-[1px] transition-all ${
@@ -57,14 +57,14 @@ export function ThumbnailTab({ selectedClip }: ThumbnailTabProps) {
         </button>
       </div>
 
-      <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
-        <h4 className="text-[11px] font-semibold text-white mb-2">Quick Actions</h4>
+      <div className="bg-popover rounded border border-border p-3">
+        <h4 className="text-[11px] font-semibold text-foreground mb-2">Quick Actions</h4>
         <div className="space-y-2">
           <button
             onClick={() => {
               useEditorStore.getState().updateSettings({ showSafeZones: true });
             }}
-            className="w-full py-1.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-white transition-colors"
+            className="w-full py-1.5 bg-card hover:bg-accent border border-border rounded text-[10px] text-foreground transition-colors"
           >
             Show Safe Zones
           </button>
@@ -72,7 +72,7 @@ export function ThumbnailTab({ selectedClip }: ThumbnailTabProps) {
             onClick={() => {
               useEditorStore.getState().updateSettings({ showSafeZones: false });
             }}
-            className="w-full py-1.5 bg-[#1e1e1e] hover:bg-[#3e3e3e] border border-[#3e3e3e] rounded text-[10px] text-white transition-colors"
+            className="w-full py-1.5 bg-card hover:bg-accent border border-border rounded text-[10px] text-foreground transition-colors"
           >
             Hide Safe Zones
           </button>

@@ -104,14 +104,14 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-full max-w-xl bg-[#1e1e1e] border border-[#3e3e3e] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div className="w-full max-w-xl bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-[#3e3e3e] bg-[#222] flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-border bg-card flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-teal-400 animate-pulse" />
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider">AI Suggested Motion Graphics</h2>
+            <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">AI Suggested Motion Graphics</h2>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-[#2d2d2d] text-[#8a8a8a] hover:text-white transition-colors">
+          <button onClick={onClose} className="p-1 rounded hover:bg-popover text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -135,7 +135,7 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
                 className={`p-3 rounded-lg border transition-all ${
                   selectedSuggestions[idx] 
                     ? 'bg-[#182828]/25 border-teal-500/40 shadow-sm' 
-                    : 'bg-[#222]/30 border-[#2d2d2d] opacity-50'
+                    : 'bg-card/30 border-border opacity-50'
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -157,26 +157,26 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
                         >
                           {tmpl.category}
                         </span>
-                        <h4 className="text-xs font-bold text-white">{tmpl.name}</h4>
+                        <h4 className="text-xs font-bold text-foreground">{tmpl.name}</h4>
                       </div>
                       <span className="text-[10px] text-teal-400 font-mono font-semibold">
                         At {(suggestion?.start ?? 0).toFixed(1)}s - {(suggestion.start + (tmpl.defaultDuration || 4)).toFixed(1)}s
                       </span>
                     </div>
 
-                    <p className="text-[10px] text-[#a0a0a0] leading-relaxed">
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
                       <strong>AI Suggestion:</strong> {suggestion.reason}
                     </p>
 
                     {/* Edit text input */}
-                    <div className="flex flex-col gap-1 bg-[#141414] p-2 rounded border border-[#2d2d2d]">
-                      <label className="text-[9px] text-[#6a6a6a] font-medium uppercase tracking-wider">Custom Overlay Text</label>
+                    <div className="flex flex-col gap-1 bg-background p-2 rounded border border-border">
+                      <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wider">Custom Overlay Text</label>
                       <input
                         type="text"
                         value={customTexts[idx] ?? ''}
                         disabled={!selectedSuggestions[idx]}
                         onChange={(e) => setCustomTexts({ ...customTexts, [idx]: e.target.value })}
-                        className="bg-[#1c1c1c] text-white text-xs border border-[#2d2d2d] focus:border-teal-500 rounded px-2.5 py-1.5 focus:outline-none w-full disabled:opacity-50"
+                        className="bg-card text-foreground text-xs border border-border focus:border-teal-500 rounded px-2.5 py-1.5 focus:outline-none w-full disabled:opacity-50"
                         placeholder="Customize text here..."
                       />
                     </div>
@@ -188,14 +188,14 @@ export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotio
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-[#3e3e3e] bg-[#222] flex items-center justify-between">
-          <span className="text-[10px] text-[#8a8a8a]">
+        <div className="px-5 py-3.5 border-t border-border bg-card flex items-center justify-between">
+          <span className="text-[10px] text-muted-foreground">
             Selected: {Object.values(selectedSuggestions).filter(Boolean).length} / {suggestions.length} templates
           </span>
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-3.5 py-1.5 border border-[#3e3e3e] hover:bg-[#2d2d2d] rounded-lg text-xs text-white transition-colors"
+              className="px-3.5 py-1.5 border border-border hover:bg-popover rounded-lg text-xs text-foreground transition-colors"
             >
               Cancel
             </button>

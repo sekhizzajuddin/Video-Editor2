@@ -60,7 +60,7 @@ export function MaskTab({ selectedClip, updateClip }: MaskTabProps) {
       <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
         <div className="flex items-center gap-2">
           <PenTool className="h-4 w-4 text-indigo-400" />
-          <span className="font-semibold text-white">Vector Bezier Mask</span>
+          <span className="font-semibold text-foreground">Vector Bezier Mask</span>
         </div>
         <button
           onClick={handleToggleMask}
@@ -204,7 +204,7 @@ export function MaskTab({ selectedClip, updateClip }: MaskTabProps) {
           <div className="flex items-center justify-between pt-1">
             <button
               onClick={() => handleSelectShapePreset(vectorMask.shapeType)}
-              className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition-colors"
+              className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-foreground transition-colors"
             >
               <RotateCcw className="h-3 w-3" />
               Reset Shape Points

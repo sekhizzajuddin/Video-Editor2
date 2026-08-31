@@ -46,14 +46,14 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col backdrop-blur-md">
       {/* Top Bar */}
-      <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e] bg-[#1e1e1e]">
+      <div className="flex items-center justify-between p-4 border-b border-border bg-card">
         <div className="flex items-center gap-4">
-          <h2 className="text-white font-semibold uppercase tracking-wider text-sm flex items-center gap-2">
+          <h2 className="text-foreground font-semibold uppercase tracking-wider text-sm flex items-center gap-2">
             <Type className="w-4 h-4 text-emerald-400" />
             Teleprompter
           </h2>
           
-          <div className="w-px h-6 bg-[#3e3e3e]" />
+          <div className="w-px h-6 bg-accent" />
           
           {/* Controls */}
           <button
@@ -64,14 +64,14 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
             {isPlaying ? 'PAUSE' : 'START SCROLL'}
           </button>
 
-          <div className="flex items-center gap-2 bg-[#252525] p-1 rounded border border-[#3e3e3e]">
-            <button onClick={() => setSpeed(Math.max(0.5, speed - 0.5))} className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white"><Rewind className="w-4 h-4" /></button>
-            <span className="text-xs text-white w-12 text-center">Spd {speed}x</span>
-            <button onClick={() => setSpeed(speed + 0.5)} className="p-1 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white"><FastForward className="w-4 h-4" /></button>
+          <div className="flex items-center gap-2 bg-secondary p-1 rounded border border-border">
+            <button onClick={() => setSpeed(Math.max(0.5, speed - 0.5))} className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground"><Rewind className="w-4 h-4" /></button>
+            <span className="text-xs text-foreground w-12 text-center">Spd {speed}x</span>
+            <button onClick={() => setSpeed(speed + 0.5)} className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground"><FastForward className="w-4 h-4" /></button>
           </div>
 
-          <div className="flex items-center gap-2 bg-[#252525] p-1 rounded border border-[#3e3e3e]">
-            <span className="text-xs text-[#a0a0a0] pl-2">Size</span>
+          <div className="flex items-center gap-2 bg-secondary p-1 rounded border border-border">
+            <span className="text-xs text-muted-foreground pl-2">Size</span>
             <input 
               type="range" 
               min="24" max="120" 
@@ -81,13 +81,13 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-[#a0a0a0] hover:text-white cursor-pointer ml-2">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer ml-2">
             <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} className="accent-emerald-500" />
             Mirror Text
           </label>
         </div>
 
-        <button onClick={onClose} className="p-2 bg-[#252525] hover:bg-red-500 hover:text-white rounded text-[#a0a0a0] transition-colors">
+        <button onClick={onClose} className="p-2 bg-secondary hover:bg-red-500 hover:text-white rounded text-muted-foreground transition-colors">
           <X className="w-5 h-5" />
         </button>
       </div>
@@ -101,14 +101,14 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
         >
           {isPlaying ? (
             <div 
-              className="w-full min-h-[200vh] whitespace-pre-wrap text-center font-bold text-white leading-relaxed pb-[80vh] pt-[40vh]"
+              className="w-full min-h-[200vh] whitespace-pre-wrap text-center font-bold text-foreground leading-relaxed pb-[80vh] pt-[40vh]"
               style={{ fontSize: `${fontSize}px` }}
             >
               {script}
             </div>
           ) : (
             <textarea
-              className="w-full h-full bg-transparent text-white font-bold text-center resize-none focus:outline-none placeholder:text-[#3e3e3e]"
+              className="w-full h-full bg-transparent text-foreground font-bold text-center resize-none focus:outline-none placeholder:text-[#3e3e3e]"
               style={{ fontSize: `${fontSize}px`, lineHeight: 1.5 }}
               value={script}
               onChange={(e) => setScript(e.target.value)}

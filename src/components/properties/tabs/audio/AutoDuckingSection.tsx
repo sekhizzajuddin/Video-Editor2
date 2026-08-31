@@ -49,15 +49,15 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
   };
 
   return (
-    <div className="bg-[#1e1e1e] rounded p-3 border border-indigo-500/20 space-y-3">
+    <div className="bg-card rounded p-3 border border-indigo-500/20 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="p-1 rounded bg-indigo-500/10 text-indigo-400">
             <Zap className="w-3.5 h-3.5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-white leading-tight">AI Auto Audio Ducking</p>
-            <p className="text-[9px] text-[#a0a0a0]">Auto-ducks background music when vocals/voice speak</p>
+            <p className="text-[11px] font-semibold text-foreground leading-tight">AI Auto Audio Ducking</p>
+            <p className="text-[9px] text-muted-foreground">Auto-ducks background music when vocals/voice speak</p>
           </div>
         </div>
 
@@ -67,7 +67,7 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
           className={`px-2.5 py-1 text-[10px] font-medium rounded transition-colors ${
             ducking.enabled
               ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-              : 'bg-[#282828] text-[#a0a0a0] hover:text-white border border-[#3e3e3e]'
+              : 'bg-secondary text-muted-foreground hover:text-foreground border border-border'
           }`}
         >
           {ducking.enabled ? 'Enabled' : 'Disabled'}
@@ -75,10 +75,10 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
       </div>
 
       {ducking.enabled && (
-        <div className="space-y-2.5 pt-2 border-t border-[#2a2a2a]">
+        <div className="space-y-2.5 pt-2 border-t border-border">
           <div className="flex flex-col gap-1">
             <div className="flex justify-between items-center text-[10px]">
-              <span className="text-[#a0a0a0]">BGM Volume During Speech</span>
+              <span className="text-muted-foreground">BGM Volume During Speech</span>
               <span className="font-mono text-indigo-400 font-semibold">{ducking.duckVolume}%</span>
             </div>
             <input

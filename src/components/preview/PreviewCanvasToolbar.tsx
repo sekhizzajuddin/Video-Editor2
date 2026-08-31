@@ -77,13 +77,13 @@ export function PreviewCanvasHeaderToolbar({
   } = useEditorStore();
 
   return (
-    <div role="toolbar" className="preview-header-toolbar shrink-0 flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-[#2e2e2e] select-none text-xs">
+    <div role="toolbar" className="preview-header-toolbar shrink-0 flex items-center justify-between px-3 py-1.5 bg-card border-b border-border select-none text-xs">
       {/* Left: Aspect Ratio & Grid */}
       <div className="flex items-center gap-2">
         <select
           value={aspectRatio}
           onChange={(e) => setAspectRatio(e.target.value as any)}
-          className="bg-[#2a2a2a] text-white border border-[#3e3e3e] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-amber-500 font-medium"
+          className="bg-secondary text-foreground border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:border-amber-500 font-medium"
           aria-label="Aspect Ratio"
         >
           <option value="16:9">16:9 Widescreen</option>
@@ -104,7 +104,7 @@ export function PreviewCanvasHeaderToolbar({
         )}
 
         <label
-          className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-[#3e3e3e] bg-[#252525] hover:bg-[#2e2e2e] cursor-pointer text-[11px] select-none transition-colors"
+          className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-border bg-secondary hover:bg-secondary cursor-pointer text-[11px] select-none transition-colors"
           title="Remember separate video canvas framing & position for each screen aspect ratio (16:9, 9:16, 1:1)"
         >
           <input
@@ -113,7 +113,7 @@ export function PreviewCanvasHeaderToolbar({
             onChange={(e) => setPerRatioFramingEnabled(e.target.checked)}
             className="w-3 h-3 accent-amber-500 rounded cursor-pointer"
           />
-          <span className={perRatioFramingEnabled ? 'text-amber-400 font-medium' : 'text-[#a0a0a0]'}>
+          <span className={perRatioFramingEnabled ? 'text-amber-400 font-medium' : 'text-muted-foreground'}>
             Remember Framing
           </span>
         </label>
@@ -122,18 +122,18 @@ export function PreviewCanvasHeaderToolbar({
           onClick={() => setShowGrid(!showGrid)}
           title="Toggle Grid Overlay"
           className={`p-1 rounded transition-colors ${
-            showGrid ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-[#888] hover:text-white hover:bg-white/5'
+            showGrid ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-muted-foreground hover:text-white hover:bg-white/5'
           }`}
         >
           <Grid className="w-3.5 h-3.5" />
         </button>
 
-        <div className="flex items-center gap-1 border-l border-[#333] pl-2 ml-1">
+        <div className="flex items-center gap-1 border-l border-border pl-2 ml-1">
           <button
             onClick={() => setVirtualCameraEnabled(!virtualCamera.enabled)}
             title={virtualCamera.enabled ? 'Disable Smart Reframe (Virtual Camera)' : 'Smart Reframe / Pan & Scan Overlay'}
             className={`p-1 rounded transition-colors ${
-              virtualCamera.enabled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-[#888] hover:text-white hover:bg-white/5'
+              virtualCamera.enabled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-muted-foreground hover:text-white hover:bg-white/5'
             }`}
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -143,7 +143,7 @@ export function PreviewCanvasHeaderToolbar({
             <select
               value={virtualCamera.aspectRatio}
               onChange={(e) => setVirtualCameraAspectRatio(e.target.value as any)}
-              className="bg-[#2a2a2a] text-amber-400 border border-amber-500/40 rounded px-2 py-0.5 text-[10px] focus:outline-none font-medium ml-1"
+              className="bg-secondary text-amber-400 border border-amber-500/40 rounded px-2 py-0.5 text-[10px] focus:outline-none font-medium ml-1"
               aria-label="Smart Reframe Target Aspect Ratio"
             >
               <option value="16:9">16:9</option>
@@ -157,7 +157,7 @@ export function PreviewCanvasHeaderToolbar({
 
       {/* Center: Zoom / View Status */}
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-[#888] font-mono">
+        <span className="text-[10px] text-muted-foreground font-mono">
           {Math.round(viewportZoom * 100)}%
         </span>
         {viewportZoom !== 1 && (
@@ -170,7 +170,7 @@ export function PreviewCanvasHeaderToolbar({
         )}
         <button
           onClick={onFitZoom}
-          className="text-[10px] text-[#aaa] hover:text-white hover:underline"
+          className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
         >
           Fit
         </button>
@@ -183,7 +183,7 @@ export function PreviewCanvasHeaderToolbar({
           className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
             showScopes
               ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-              : 'bg-[#2a2a2a] text-[#888] border-[#3e3e3e] hover:text-white'
+              : 'bg-secondary text-muted-foreground border-border hover:text-foreground'
           }`}
         >
           Scopes
@@ -194,7 +194,7 @@ export function PreviewCanvasHeaderToolbar({
           className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
             showThumbnailModal
               ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-              : 'bg-[#2a2a2a] text-[#888] border-[#3e3e3e] hover:text-white'
+              : 'bg-secondary text-muted-foreground border-border hover:text-foreground'
           }`}
         >
           Thumbnail
@@ -203,7 +203,7 @@ export function PreviewCanvasHeaderToolbar({
         <button
           onClick={onToggleFullscreen}
           title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Canvas'}
-          className="p-1 text-[#888] hover:text-white hover:bg-white/5 rounded transition-colors"
+          className="p-1 text-muted-foreground hover:text-foreground hover:bg-white/5 rounded transition-colors"
         >
           {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
@@ -212,7 +212,7 @@ export function PreviewCanvasHeaderToolbar({
           onClick={() => setShowSettingsPanel(!showSettingsPanel)}
           title="Preview Settings"
           className={`p-1 rounded transition-colors ${
-            showSettingsPanel ? 'text-amber-400 bg-white/10' : 'text-[#888] hover:text-white hover:bg-white/5'
+            showSettingsPanel ? 'text-amber-400 bg-white/10' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
           }`}
         >
           <Settings2 className="w-3.5 h-3.5" />
@@ -220,16 +220,16 @@ export function PreviewCanvasHeaderToolbar({
 
         {/* Dropdown Settings Panel */}
         {showSettingsPanel && (
-          <div className="absolute top-full right-0 mt-2 w-72 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl overflow-hidden pointer-events-auto z-50">
-            <div className="p-3 bg-[#252525] border-b border-[#3e3e3e] flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-white">Preview Settings</h3>
-              <button onClick={() => setShowSettingsPanel(false)} className="text-[#888] hover:text-white">
+          <div className="absolute top-full right-0 mt-2 w-72 bg-card border border-border rounded-lg shadow-xl overflow-hidden pointer-events-auto z-50">
+            <div className="p-3 bg-secondary border-b border-border flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-foreground">Preview Settings</h3>
+              <button onClick={() => setShowSettingsPanel(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-3 space-y-4 max-h-[60vh] overflow-y-auto scrollbar-thin">
               <div>
-                <label className="text-[10px] text-[#a0a0a0] mb-2 block">Preview Quality</label>
+                <label className="text-[10px] text-muted-foreground mb-2 block">Preview Quality</label>
                 <div className="grid grid-cols-3 gap-1">
                   {(['full', 'half', 'quarter'] as const).map((q) => (
                     <button
@@ -238,7 +238,7 @@ export function PreviewCanvasHeaderToolbar({
                       className={`py-1.5 text-[10px] rounded capitalize transition-colors ${
                         settings.previewQuality === q
                           ? 'bg-amber-500 text-white'
-                          : 'bg-[#2a2a2a] hover:bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                          : 'bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       {q}
@@ -248,20 +248,20 @@ export function PreviewCanvasHeaderToolbar({
               </div>
 
               <div className="flex items-center justify-between">
-                <label className="text-[10px] text-[#a0a0a0]">Hardware Acceleration</label>
+                <label className="text-[10px] text-muted-foreground">Hardware Acceleration</label>
                 <button
                   onClick={() => updateSettings({ hardwareAcceleration: !settings.hardwareAcceleration })}
-                  className={`w-8 h-4 rounded-full transition-colors relative ${settings.hardwareAcceleration ? 'bg-amber-500' : 'bg-[#3e3e3e]'}`}
+                  className={`w-8 h-4 rounded-full transition-colors relative ${settings.hardwareAcceleration ? 'bg-amber-500' : 'bg-accent'}`}
                 >
                   <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${settings.hardwareAcceleration ? 'left-4' : 'left-0.5'}`} />
                 </button>
               </div>
 
               <div className="flex items-center justify-between">
-                <label className="text-[10px] text-[#a0a0a0]">Safe Zones</label>
+                <label className="text-[10px] text-muted-foreground">Safe Zones</label>
                 <button
                   onClick={() => updateSettings({ showSafeZones: !settings.showSafeZones })}
-                  className={`w-8 h-4 rounded-full transition-colors relative ${settings.showSafeZones ? 'bg-sky-500' : 'bg-[#3e3e3e]'}`}
+                  className={`w-8 h-4 rounded-full transition-colors relative ${settings.showSafeZones ? 'bg-sky-500' : 'bg-accent'}`}
                 >
                   <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${settings.showSafeZones ? 'left-4' : 'left-0.5'}`} />
                 </button>
@@ -351,13 +351,13 @@ export function PreviewCanvasTransportControls({
 
   return (
     <div
-      className="shrink-0 flex flex-col bg-[#181818] border-t border-[#2e2e2e]"
+      className="shrink-0 flex flex-col bg-card border-t border-border"
       onPointerDown={(e) => e.stopPropagation()}
     >
       {/* Progress Bar */}
       <div className="px-3 pt-2 pb-1">
         <div className="relative h-1.5 group cursor-pointer">
-          <div className="absolute inset-0 rounded-full bg-[#333]" />
+          <div className="absolute inset-0 rounded-full bg-accent" />
           <div
             ref={progressFillRef}
             className="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400"
@@ -384,9 +384,9 @@ export function PreviewCanvasTransportControls({
       <div className="flex items-center justify-between px-3 pb-2">
         {/* Left: Time Display */}
         <div className="flex items-center gap-2 min-w-[90px]">
-          <span className="text-[10px] font-mono text-[#a0a0a0] tabular-nums select-text">
+          <span className="text-[10px] font-mono text-muted-foreground tabular-nums select-text">
             <span ref={timecodeRef}>00:00.00</span>
-            <span className="text-[#555]"> / {String(Math.floor(totalDuration / 60)).padStart(2, '0')}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
+            <span className="text-muted-foreground/60"> / {String(Math.floor(totalDuration / 60)).padStart(2, '0')}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
           </span>
         </div>
 
@@ -395,7 +395,7 @@ export function PreviewCanvasTransportControls({
           <button
             onClick={handleRestart}
             title="Go to Start"
-            className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-white/5 rounded transition-all"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
@@ -403,7 +403,7 @@ export function PreviewCanvasTransportControls({
           <button
             onClick={handleSkipBackward}
             title="Skip Back 10s"
-            className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-white/5 rounded transition-all"
           >
             <SkipBack className="w-4 h-4" />
           </button>
@@ -418,7 +418,7 @@ export function PreviewCanvasTransportControls({
               flex items-center justify-center w-9 h-9 rounded-full mx-1 transition-all duration-150 active:scale-95
               ${isPlaying
                 ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-md shadow-amber-500/40'
-                : 'bg-white/10 hover:bg-white/20 text-white border border-white/10 hover:border-white/20'}
+                : 'bg-white/10 hover:bg-white/20 text-foreground border border-white/10 hover:border-white/20'}
             `}
           >
             {isPlaying
@@ -429,7 +429,7 @@ export function PreviewCanvasTransportControls({
           <button
             onClick={handleSkipForward}
             title="Skip Forward 10s"
-            className="p-1.5 text-[#888] hover:text-white hover:bg-white/5 rounded transition-all"
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-white/5 rounded transition-all"
           >
             <SkipForward className="w-4 h-4" />
           </button>
@@ -445,14 +445,14 @@ export function PreviewCanvasTransportControls({
             <button
               onClick={toggleMute}
               title={isMuted ? 'Unmute' : 'Mute'}
-              className="p-1 text-[#888] hover:text-white transition-colors shrink-0"
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors shrink-0"
             >
               {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
             </button>
             <div className="w-14 h-1.5 relative">
-              <div className="absolute inset-0 rounded-full bg-[#333]" />
+              <div className="absolute inset-0 rounded-full bg-accent" />
               <div
-                className="absolute top-0 left-0 h-full rounded-full bg-[#666] group-hover/vol:bg-amber-500 transition-colors"
+                className="absolute top-0 left-0 h-full rounded-full bg-accent group-hover/vol:bg-amber-500 transition-colors"
                 style={volumeBarStyle}
               />
               <input
@@ -471,12 +471,12 @@ export function PreviewCanvasTransportControls({
             <button
               onClick={() => setShowSpeedMenu(!showSpeedMenu)}
               title="Playback Speed"
-              className="text-[10px] font-mono text-[#888] hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-white/5 border border-transparent hover:border-white/10"
+              className="text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-white/5 border border-transparent hover:border-white/10"
             >
               {playbackSpeed === 1 ? '1×' : `${playbackSpeed}×`}
             </button>
             {showSpeedMenu && (
-              <div className="absolute bottom-full right-0 mb-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg shadow-xl overflow-hidden z-50 pointer-events-auto">
+              <div className="absolute bottom-full right-0 mb-1 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50 pointer-events-auto">
                 {speedOptions.map((s) => (
                   <button
                     key={s}
@@ -484,7 +484,7 @@ export function PreviewCanvasTransportControls({
                     className={`block w-full text-left px-4 py-1.5 text-xs transition-colors ${
                       playbackSpeed === s
                         ? 'bg-amber-500/20 text-amber-300'
-                        : 'text-[#a0a0a0] hover:bg-[#2a2a2a] hover:text-white'
+                        : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
                     }`}
                   >
                     {s}×

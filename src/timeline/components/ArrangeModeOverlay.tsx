@@ -139,12 +139,12 @@ function buildSequenceWithGaps(clips: TimelineClip[]): SequenceItem[] {
 const GapCard = React.memo(function GapCard({ duration, sizeConfig }: { duration: number; sizeConfig: SizeConfig }) {
   return (
     <div
-      className="flex-shrink-0 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/20 bg-white/[0.03] text-white/40 select-none"
+      className="flex-shrink-0 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/20 bg-white/[0.03] text-foreground/40 select-none"
       style={{ width: sizeConfig.gapWidth, height: sizeConfig.cardHeight }}
       title={`Gap: ${duration.toFixed(2)}s`}
     >
-      <Clock className="w-4 h-4 text-white/30 mb-1" />
-      <span className="text-[9px] uppercase tracking-wider font-bold text-white/50">Gap</span>
+      <Clock className="w-4 h-4 text-foreground/30 mb-1" />
+      <span className="text-[9px] uppercase tracking-wider font-bold text-foreground/50">Gap</span>
       <span className="text-[10px] font-mono text-amber-400/90 font-semibold tabular-nums mt-0.5">+{duration.toFixed(1)}s</span>
     </div>
   );
@@ -213,7 +213,7 @@ const ClipCard = React.memo(function ClipCard({
             <span className="text-[9px] text-emerald-200 font-medium truncate max-w-[90%] text-center px-1">{media?.name || 'Audio'}</span>
           </div>
         ) : (
-          <div className="w-full h-full flex items-center justify-center"><Icon className="w-6 h-6 text-white/30" /></div>
+          <div className="w-full h-full flex items-center justify-center"><Icon className="w-6 h-6 text-foreground/30" /></div>
         )}
         {isSelected && (
           <button
@@ -229,14 +229,14 @@ const ClipCard = React.memo(function ClipCard({
         )}
       </div>
       <div className="px-2 py-1 flex flex-col justify-center bg-[#14141e] border-t border-white/10 pointer-events-none">
-        <span className={`font-semibold text-white/90 truncate leading-tight ${sizeConfig.nameFontSize}`}>{name}</span>
+        <span className={`font-semibold text-foreground/90 truncate leading-tight ${sizeConfig.nameFontSize}`}>{name}</span>
         <div className="flex items-center justify-between mt-0.5">
-          <span className={`text-white/50 font-mono tabular-nums ${sizeConfig.durFontSize}`}>{clip.duration.toFixed(1)}s</span>
-          <span className="text-[8px] font-bold uppercase px-1 rounded text-white/80" style={{ background: `${color}55` }}>{mediaType}</span>
+          <span className={`text-foreground/50 font-mono tabular-nums ${sizeConfig.durFontSize}`}>{clip.duration.toFixed(1)}s</span>
+          <span className="text-[8px] font-bold uppercase px-1 rounded text-foreground/80" style={{ background: `${color}55` }}>{mediaType}</span>
         </div>
       </div>
       <div className="absolute top-1 left-1 pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity">
-        <GripVertical className="w-3.5 h-3.5 text-white drop-shadow" />
+        <GripVertical className="w-3.5 h-3.5 text-foreground drop-shadow" />
       </div>
     </div>
   );
@@ -279,9 +279,9 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
       <div className="flex-shrink-0 flex items-center justify-between px-3.5 py-2 bg-[#1b1b26] border-b border-white/10 select-none">
         <div className="flex items-center gap-2">
           <Icon className="w-4 h-4 text-amber-400" />
-          <span className="text-xs font-bold text-white tracking-wide">{track.name}</span>
-          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-white/10 text-white/70 font-semibold">{track.type}</span>
-          <span className="text-[11px] text-white/40 tabular-nums font-mono">{sortedClips.length} {sortedClips.length === 1 ? 'clip' : 'clips'}</span>
+          <span className="text-xs font-bold text-foreground tracking-wide">{track.name}</span>
+          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-white/10 text-foreground/70 font-semibold">{track.type}</span>
+          <span className="text-[11px] text-foreground/40 tabular-nums font-mono">{sortedClips.length} {sortedClips.length === 1 ? 'clip' : 'clips'}</span>
         </div>
         {isFx && <span className="text-[10px] text-rose-400 flex items-center gap-1 font-semibold"><Lock className="w-3 h-3" /> FX Locked</span>}
       </div>
@@ -291,9 +291,9 @@ const LinearTrackRow = React.memo(function LinearTrackRow({
         style={{ minHeight: sizeConfig.trackLaneMinHeight, scrollbarWidth: 'thin' }}
       >
         {isFx ? (
-          <div className="flex items-center justify-center w-full py-4 text-xs text-white/40 italic">FX tracks cannot be rearranged</div>
+          <div className="flex items-center justify-center w-full py-4 text-xs text-foreground/40 italic">FX tracks cannot be rearranged</div>
         ) : sortedClips.length === 0 ? (
-          <div className="flex items-center gap-2 py-4 px-4 text-xs text-white/40 border-2 border-dashed border-white/10 rounded-lg w-full justify-center min-h-[70px]">
+          <div className="flex items-center gap-2 py-4 px-4 text-xs text-foreground/40 border-2 border-dashed border-white/10 rounded-lg w-full justify-center min-h-[70px]">
             {isOverThisTrack ? <DropSlot sizeConfig={sizeConfig} /> : <span>Empty Track — Drag clips here</span>}
           </div>
         ) : (
@@ -651,11 +651,11 @@ export function ArrangeModeOverlay() {
             <LayoutGrid className="w-4 h-4" />
             <span>Arrange Mode</span>
           </div>
-          <span className="hidden md:inline text-xs text-white/60">Drag cards to reorder • Gaps shown • Select to preview</span>
+          <span className="hidden md:inline text-xs text-foreground/60">Drag cards to reorder • Gaps shown • Select to preview</span>
         </div>
         <div className="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-lg border border-white/10">
-          <SlidersHorizontal className="w-3.5 h-3.5 text-white/50 mr-1" />
-          <span className="text-[10px] text-white/60 uppercase font-bold mr-1">SIZE:</span>
+          <SlidersHorizontal className="w-3.5 h-3.5 text-foreground/50 mr-1" />
+          <span className="text-[10px] text-foreground/60 uppercase font-bold mr-1">SIZE:</span>
           {(['small', 'medium', 'large'] as ThumbSize[]).map((size) => (
             <button key={size} onClick={() => setThumbSize(size)}
               className={`px-3 py-0.5 rounded text-xs font-semibold capitalize transition-all ${
@@ -665,7 +665,7 @@ export function ArrangeModeOverlay() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={handleCancel} className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/70 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 active:scale-95 font-medium">
+          <button onClick={handleCancel} className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-foreground/70 hover:text-foreground bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 active:scale-95 font-medium">
             <X className="w-3.5 h-3.5" /> Cancel
           </button>
           <button onClick={handleDone} className="flex items-center gap-1.5 px-4 py-1.5 text-xs text-black font-bold bg-amber-400 hover:bg-amber-300 rounded-lg shadow-md active:scale-95">
@@ -698,7 +698,7 @@ export function ArrangeModeOverlay() {
           />
         ))}
         {draftTracks.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center py-16 text-white/30 text-sm gap-2">
+          <div className="flex-1 flex flex-col items-center justify-center py-16 text-foreground/30 text-sm gap-2">
             <LayoutGrid className="w-8 h-8 opacity-30" />
             <span>No tracks found in timeline</span>
           </div>
@@ -725,7 +725,7 @@ export function ArrangeModeOverlay() {
             ) : <Film className="w-6 h-6 text-amber-400" />}
           </div>
           <div className="p-1.5 bg-[#161622] flex flex-col justify-center border-t border-white/10">
-            <span className={`font-bold text-white truncate ${sizeConfig.nameFontSize}`}>{draggingMedia?.name || 'Clip'}</span>
+            <span className={`font-bold text-foreground truncate ${sizeConfig.nameFontSize}`}>{draggingMedia?.name || 'Clip'}</span>
             <span className={`text-amber-400 font-mono font-semibold ${sizeConfig.durFontSize}`}>{draggingClip.duration.toFixed(1)}s</span>
           </div>
         </div>

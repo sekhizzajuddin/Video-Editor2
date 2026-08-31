@@ -559,7 +559,7 @@ function DesktopApp() {
   ];
 
   return (
-    <div className="h-screen flex flex-col bg-surface-900 text-white overflow-hidden select-none">
+    <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden select-none">
       {projectId === 'default' && (
         <Suspense fallback={null}>
           <WelcomeScreen />
@@ -575,14 +575,14 @@ function DesktopApp() {
           className="shrink-0 overflow-hidden"
           style={{ width: leftWidth }}
         >
-          <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
+          <Suspense fallback={<div className="w-full h-full bg-card" />}>
             <MediaPanel />
           </Suspense>
         </div>
 
         {/* Left Resize Handle */}
         <div
-          className="w-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-col-resize shrink-0 transition-colors"
+          className="w-1 bg-border hover:bg-primary cursor-col-resize shrink-0 transition-colors"
           onMouseDown={() => { isDraggingLeft.current = true; }}
         />
 
@@ -591,7 +591,7 @@ function DesktopApp() {
           {/* Preview Canvas / Generative Workspace */}
           <div className="flex-1 overflow-hidden relative">
             {workspaceLayout?.preset === 'Generative' ? (
-              <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e] flex items-center justify-center text-[#a0a0a0] text-sm">Loading Generative Workspace…</div>}>
+              <Suspense fallback={<div className="w-full h-full bg-card flex items-center justify-center text-muted-foreground text-sm">Loading Generative Workspace…</div>}>
                 <GenerativeWorkspace />
               </Suspense>
             ) : (
@@ -606,31 +606,31 @@ function DesktopApp() {
 
           {/* Timeline Resize Handle */}
           <div
-            className="h-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-row-resize shrink-0 transition-colors"
+            className="h-1 bg-border hover:bg-primary cursor-row-resize shrink-0 transition-colors"
             onMouseDown={() => { isDraggingTimeline.current = true; }}
           />
 
           {/* Timeline / Audio Mixer Container */}
-          <div style={{ height: timelineHeight }} className="flex flex-col bg-[#252525] overflow-hidden shrink-0">
+          <div style={{ height: timelineHeight }} className="flex flex-col bg-secondary overflow-hidden shrink-0">
             {/* Header Tabs */}
-            <div className="h-8 flex items-center justify-between px-3 bg-[#1e1e1e] border-b border-[#3e3e3e] shrink-0 select-none">
+            <div className="h-8 flex items-center justify-between px-3 bg-card border-b border-border shrink-0 select-none">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setBottomTab('timeline')}
-                  className={`px-3 py-1 text-[11px] rounded transition-all uppercase tracking-wider font-semibold ${
+                  className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold ${
                     bottomTab === 'timeline'
-                      ? 'bg-[#2d2d2d] text-amber-500 border border-[#3e3e3e]'
-                      : 'text-[#8a8a8a] hover:text-white'
+                      ? 'bg-popover text-primary border border-border shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   Timeline
                 </button>
                 <button
                   onClick={() => setBottomTab('mixer')}
-                  className={`px-3 py-1 text-[11px] rounded transition-all uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                  className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
                     bottomTab === 'mixer'
-                      ? 'bg-[#2d2d2d] text-amber-500 border border-[#3e3e3e]'
-                      : 'text-[#8a8a8a] hover:text-white'
+                      ? 'bg-popover text-primary border border-border shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   <Music className="w-3 h-3 text-purple-400" /> Audio Mixer
@@ -639,7 +639,7 @@ function DesktopApp() {
 
               {/* Editing Tools (Moved from Top Toolbar) */}
               <div className="flex items-center gap-1 opacity-90 hover:opacity-100 transition-opacity">
-                <div className="flex items-center bg-[#252525] rounded border border-[#3e3e3e] p-0.5">
+                <div className="flex items-center bg-secondary rounded border border-border p-0.5">
                   {tools.map((tool) => {
                     const Icon = tool.icon;
                     const isActive = tool.id !== 'split' && activeTool === tool.id;
@@ -684,8 +684,8 @@ function DesktopApp() {
                         title={tool.id === 'split' ? "Split Clip at Playhead" : `${tool.label} (${tool.shortcut})`}
                         className={`relative p-1.5 rounded transition-all duration-150 group ${
                           isActive
-                            ? 'bg-[#3e3e3e] text-white'
-                            : 'text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e]'
+                            ? 'bg-accent text-foreground'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                         }`}
                       >
                         <Icon className="w-3.5 h-3.5" />
@@ -697,13 +697,13 @@ function DesktopApp() {
                   })}
                 </div>
 
-                <div className="w-px h-5 bg-[#3e3e3e] mx-1.5" />
+                <div className="w-px h-5 bg-accent mx-1.5" />
 
                 <button
                   onClick={undo}
                   disabled={!canUndo}
                   title="Undo (Ctrl+Z)"
-                  className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
+                  className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded disabled:opacity-30 transition-all"
                 >
                   <Undo2 className="w-3.5 h-3.5" />
                 </button>
@@ -711,7 +711,7 @@ function DesktopApp() {
                   onClick={redo}
                   disabled={!canRedo}
                   title="Redo (Ctrl+Y)"
-                  className="p-1.5 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded disabled:opacity-30 transition-all"
+                  className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded disabled:opacity-30 transition-all"
                 >
                   <Redo2 className="w-3.5 h-3.5" />
                 </button>
@@ -720,8 +720,8 @@ function DesktopApp() {
 
             <div className="flex-1 overflow-hidden relative">
               {bottomTab === 'timeline' ? (
-                <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-[#1a1a1a] font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
-                  <Suspense fallback={<div className="w-full h-full bg-[#1a1a1a]" />}>
+                <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-background font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
+                  <Suspense fallback={<div className="w-full h-full bg-background" />}>
                     <Timeline />
                   </Suspense>
                 </ErrorBoundary>
@@ -738,7 +738,7 @@ function DesktopApp() {
         {workspaceLayout?.preset !== 'Generative' && (
           <>
             <div
-              className="w-1 bg-[#3e3e3e] hover:bg-amber-500 cursor-col-resize shrink-0 transition-colors"
+              className="w-1 bg-border hover:bg-primary cursor-col-resize shrink-0 transition-colors"
               onMouseDown={() => { isDraggingRight.current = true; }}
             />
 
@@ -747,7 +747,7 @@ function DesktopApp() {
               className="shrink-0 overflow-hidden"
               style={{ width: rightWidth }}
             >
-              <Suspense fallback={<div className="w-full h-full bg-[#1e1e1e]" />}>
+              <Suspense fallback={<div className="w-full h-full bg-card" />}>
                 <PropertiesPanel />
               </Suspense>
             </div>
@@ -833,7 +833,7 @@ function App() {
 
   if (device === 'mobile' || device === 'tablet') {
     return (
-      <Suspense fallback={<div className="h-screen w-screen bg-[#0a0a0a]" />}>
+      <Suspense fallback={<div className="h-screen w-screen bg-background" />}>
         <MobileApp />
       </Suspense>
     );

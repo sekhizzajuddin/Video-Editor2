@@ -25,8 +25,8 @@ export function AudioSlider({
   return (
     <div className="space-y-1">
       <div className="flex justify-between items-center">
-        <label className="text-[10px] text-[#a0a0a0]">{label}</label>
-        <span className="text-[10px] font-mono text-white">{displayValue}</span>
+        <label className="text-[10px] text-muted-foreground">{label}</label>
+        <span className="text-[10px] font-mono text-foreground">{displayValue}</span>
       </div>
       <input
         type="range"
@@ -36,7 +36,7 @@ export function AudioSlider({
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         onDoubleClick={() => onReset && onReset()}
-        className={`w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full ${gradient || 'bg-[#3e3e3e]'}`}
+        className={`w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full ${gradient || 'bg-accent'}`}
       />
     </div>
   );

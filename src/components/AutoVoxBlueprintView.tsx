@@ -83,8 +83,8 @@ function MapTile({ pip, onPreview, onDelete, onEdit, width = 'w-32', height = 'h
 
       {/* Map badge */}
       <div className="absolute top-1 left-1 bg-blue-600/90 rounded px-1 py-0.5 flex items-center gap-0.5">
-        <MapPin className="w-2 h-2 text-white" />
-        <span className="text-[8px] text-white font-bold">MAP</span>
+        <MapPin className="w-2 h-2 text-foreground" />
+        <span className="text-[8px] text-foreground font-bold">MAP</span>
       </div>
 
       {/* Hover overlay */}
@@ -92,7 +92,7 @@ function MapTile({ pip, onPreview, onDelete, onEdit, width = 'w-32', height = 'h
         className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100 gap-1.5"
         onClick={onEdit}
       >
-        <div className="bg-white/20 backdrop-blur-sm rounded px-1.5 py-0.5 text-[8px] text-white">Edit</div>
+        <div className="bg-white/20 backdrop-blur-sm rounded px-1.5 py-0.5 text-[8px] text-foreground">Edit</div>
       </div>
 
       {/* Delete button */}
@@ -102,7 +102,7 @@ function MapTile({ pip, onPreview, onDelete, onEdit, width = 'w-32', height = 'h
           className="absolute top-1 right-1 p-0.5 bg-red-500/80 hover:bg-red-600 rounded transition-opacity opacity-0 group-hover:opacity-100 z-10"
           title="Delete"
         >
-          <Trash2 className="w-2.5 h-2.5 text-white" />
+          <Trash2 className="w-2.5 h-2.5 text-foreground" />
         </button>
       )}
     </div>
@@ -169,15 +169,15 @@ function ImageTile({ prompt, resolvedUrl, settings, onPreview, onDelete, onUrlRe
   }, [prompt, resolvedUrl]);
 
   return (
-    <div className={`relative shrink-0 rounded-lg overflow-hidden bg-[#111] border border-[#2a2a2a] group cursor-pointer ${width} ${height}`}>
+    <div className={`relative shrink-0 rounded-lg overflow-hidden bg-background border border-border group cursor-pointer ${width} ${height}`}>
       {status === 'loading' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-[#111]">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-background">
           <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
-          <span className="text-[9px] text-[#6a6a6a] text-center px-1">Generating...</span>
+          <span className="text-[9px] text-muted-foreground/70 text-center px-1">Generating...</span>
         </div>
       )}
       {status === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 p-2 bg-[#111]">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 p-2 bg-background">
           <span className="text-[9px] text-red-400 text-center">Failed</span>
           <button
             onClick={(e) => { e.stopPropagation(); generate(); }}
@@ -200,7 +200,7 @@ function ImageTile({ prompt, resolvedUrl, settings, onPreview, onDelete, onUrlRe
           className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100"
           onClick={() => onPreview(url)}
         >
-          <ZoomIn className="w-4 h-4 text-white" />
+          <ZoomIn className="w-4 h-4 text-foreground" />
         </div>
       )}
       {onDelete && (
@@ -209,7 +209,7 @@ function ImageTile({ prompt, resolvedUrl, settings, onPreview, onDelete, onUrlRe
           className="absolute top-1 right-1 p-0.5 bg-red-500/80 hover:bg-red-600 rounded transition-opacity opacity-0 group-hover:opacity-100 z-10"
           title="Delete"
         >
-          <Trash2 className="w-2.5 h-2.5 text-white" />
+          <Trash2 className="w-2.5 h-2.5 text-foreground" />
         </button>
       )}
     </div>
@@ -232,12 +232,12 @@ function ImagePreviewModal({ prompt, url, onClose, onPromptChange }: PreviewModa
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl max-w-xl w-full p-5 flex flex-col gap-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-background border border-border rounded-2xl max-w-xl w-full p-5 flex flex-col gap-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-white flex items-center gap-2">
+          <span className="text-sm font-semibold text-foreground flex items-center gap-2">
             <ZoomIn className="w-4 h-4 text-indigo-400" /> Image Preview
           </span>
-          <button onClick={onClose} className="text-[#6a6a6a] hover:text-white rounded p-1 hover:bg-white/10">
+          <button onClick={onClose} className="text-muted-foreground/70 hover:text-foreground rounded p-1 hover:bg-white/10">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -247,22 +247,22 @@ function ImagePreviewModal({ prompt, url, onClose, onPromptChange }: PreviewModa
           ) : (
             <div className="flex flex-col items-center gap-2">
               <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
-              <span className="text-xs text-[#6a6a6a]">Generating image...</span>
+              <span className="text-xs text-muted-foreground/70">Generating image...</span>
             </div>
           )}
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-semibold text-[#8a8a8a] uppercase tracking-wider">
+          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
             Image Prompt — edit and apply to regenerate
           </label>
           <textarea
             value={editPrompt}
             onChange={(e) => setEditPrompt(e.target.value)}
-            className="w-full h-20 bg-[#0e0e0e] border border-[#2a2a2a] focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white outline-none resize-none"
+            className="w-full h-20 bg-background border border-border focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-foreground outline-none resize-none"
           />
         </div>
         <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white border border-[#2a2a2a] rounded-lg transition-colors">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg transition-colors">
             Close
           </button>
           <button
@@ -316,12 +316,12 @@ function MapEditModal({ pip, onClose, onSave }: MapEditModalProps) {
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl max-w-lg w-full p-5 flex flex-col gap-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-background border border-border rounded-2xl max-w-lg w-full p-5 flex flex-col gap-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-white flex items-center gap-2">
+          <span className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Map className="w-4 h-4 text-blue-400" /> Configure Map Animation
           </span>
-          <button onClick={onClose} className="text-[#6a6a6a] hover:text-white rounded p-1 hover:bg-white/10">
+          <button onClick={onClose} className="text-muted-foreground/70 hover:text-foreground rounded p-1 hover:bg-white/10">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -339,7 +339,7 @@ function MapEditModal({ pip, onClose, onSave }: MapEditModalProps) {
             <div className="w-full h-full flex flex-col items-center justify-center gap-2">
               <Map className="w-8 h-8 text-blue-500" />
               <span className="text-xs text-blue-400">Map preview</span>
-              <span className="text-[10px] text-[#5a5a5a]">{lat}, {lng} · zoom {zoom}</span>
+              <span className="text-[10px] text-muted-foreground/60">{lat}, {lng} · zoom {zoom}</span>
             </div>
           )}
         </div>
@@ -347,49 +347,49 @@ function MapEditModal({ pip, onClose, onSave }: MapEditModalProps) {
         {/* Fields */}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2 flex flex-col gap-1">
-            <label className="text-[10px] font-semibold text-[#8a8a8a] uppercase tracking-wider">Location Name</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Location Name</label>
             <input
               value={location}
               onChange={(e) => { setLocation(e.target.value); setLabel(e.target.value); setPreviewError(false); }}
               placeholder="e.g. Cairo, Egypt"
-              className="bg-[#0e0e0e] border border-[#2a2a2a] focus:border-blue-500 rounded-lg px-3 py-2 text-xs text-white outline-none"
+              className="bg-background border border-border focus:border-blue-500 rounded-lg px-3 py-2 text-xs text-foreground outline-none"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-semibold text-[#8a8a8a] uppercase tracking-wider">Latitude</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Latitude</label>
             <input
               value={lat}
               onChange={(e) => { setLat(e.target.value); setPreviewError(false); }}
               placeholder="e.g. 30.0444"
-              className="bg-[#0e0e0e] border border-[#2a2a2a] focus:border-blue-500 rounded-lg px-3 py-2 text-xs text-white outline-none"
+              className="bg-background border border-border focus:border-blue-500 rounded-lg px-3 py-2 text-xs text-foreground outline-none"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-semibold text-[#8a8a8a] uppercase tracking-wider">Longitude</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Longitude</label>
             <input
               value={lng}
               onChange={(e) => { setLng(e.target.value); setPreviewError(false); }}
               placeholder="e.g. 31.2357"
-              className="bg-[#0e0e0e] border border-[#2a2a2a] focus:border-blue-500 rounded-lg px-3 py-2 text-xs text-white outline-none"
+              className="bg-background border border-border focus:border-blue-500 rounded-lg px-3 py-2 text-xs text-foreground outline-none"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-semibold text-[#8a8a8a] uppercase tracking-wider">Zoom (1–18)</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Zoom (1–18)</label>
             <div className="flex items-center gap-2">
               <input
                 type="range" min={1} max={18} value={zoom}
                 onChange={(e) => { setZoom(parseInt(e.target.value)); setPreviewError(false); }}
                 className="flex-1 h-1 accent-blue-500"
               />
-              <span className="text-[10px] text-white w-4">{zoom}</span>
+              <span className="text-[10px] text-foreground w-4">{zoom}</span>
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-semibold text-[#8a8a8a] uppercase tracking-wider">Animation</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Animation</label>
             <select
               value={animType}
               onChange={(e) => setAnimType(e.target.value as any)}
-              className="bg-[#0e0e0e] border border-[#2a2a2a] focus:border-blue-500 rounded-lg px-2 py-1.5 text-xs text-white outline-none"
+              className="bg-background border border-border focus:border-blue-500 rounded-lg px-2 py-1.5 text-xs text-foreground outline-none"
             >
               <option value="flyTo">Fly To</option>
               <option value="route">Route</option>
@@ -397,7 +397,7 @@ function MapEditModal({ pip, onClose, onSave }: MapEditModalProps) {
             </select>
           </div>
           <div className="col-span-2 flex flex-col gap-1">
-            <label className="text-[10px] font-semibold text-[#8a8a8a] uppercase tracking-wider">Map Style</label>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Map Style</label>
             <div className="flex gap-2">
               {(['standard', 'dark', 'satellite', 'vintage'] as const).map((s) => (
                 <button
@@ -406,7 +406,7 @@ function MapEditModal({ pip, onClose, onSave }: MapEditModalProps) {
                   className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors border ${
                     style === s
                       ? 'bg-blue-600 border-blue-500 text-white'
-                      : 'bg-[#111] border-[#2a2a2a] text-[#8a8a8a] hover:border-blue-600 hover:text-white'
+                      : 'bg-background border-border text-muted-foreground hover:border-blue-600 hover:text-foreground'
                   }`}
                 >
                   {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -417,7 +417,7 @@ function MapEditModal({ pip, onClose, onSave }: MapEditModalProps) {
         </div>
 
         <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white border border-[#2a2a2a] rounded-lg transition-colors">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg transition-colors">
             Cancel
           </button>
           <button
@@ -498,12 +498,12 @@ function PipTile({ pip, settings, disabled, onDelete, onUpdatePip, onPreviewImag
   return (
     <div className="flex flex-col gap-1 shrink-0">
       {/* Source toggle pill */}
-      <div className="flex rounded-md overflow-hidden border border-[#2a2a2a] h-5">
+      <div className="flex rounded-md overflow-hidden border border-border h-5">
         <button
           onClick={() => switchSource('ai_image')}
           disabled={disabled}
           className={`flex-1 flex items-center justify-center gap-0.5 text-[8px] font-medium transition-colors px-1 ${
-            !isMap ? 'bg-indigo-700 text-white' : 'bg-[#1a1a1a] text-[#6a6a6a] hover:text-white'
+            !isMap ? 'bg-indigo-700 text-white' : 'bg-background text-muted-foreground/70 hover:text-white'
           }`}
           title="Switch to AI Image"
         >
@@ -513,7 +513,7 @@ function PipTile({ pip, settings, disabled, onDelete, onUpdatePip, onPreviewImag
           onClick={() => switchSource('map')}
           disabled={disabled}
           className={`flex-1 flex items-center justify-center gap-0.5 text-[8px] font-medium transition-colors px-1 ${
-            isMap ? 'bg-blue-700 text-white' : 'bg-[#1a1a1a] text-[#6a6a6a] hover:text-white'
+            isMap ? 'bg-blue-700 text-white' : 'bg-background text-muted-foreground/70 hover:text-white'
           }`}
           title="Switch to Map Animation"
         >
@@ -548,7 +548,7 @@ function PipTile({ pip, settings, disabled, onDelete, onUpdatePip, onPreviewImag
             onChange={(e) => setAnimDir(e.target.value as PipAnimDirection)}
             disabled={disabled}
             title="Animation Direction"
-            className="w-full appearance-none bg-[#111] border border-[#2a2a2a] hover:border-indigo-600/60 rounded-md pl-4 pr-1 py-0.5 text-[8px] text-indigo-300 outline-none cursor-pointer disabled:opacity-50 transition-colors"
+            className="w-full appearance-none bg-background border border-border hover:border-indigo-600/60 rounded-md pl-4 pr-1 py-0.5 text-[8px] text-indigo-300 outline-none cursor-pointer disabled:opacity-50 transition-colors"
           >
             {ANIM_DIRECTIONS.map(({ value, label }) => (
               <option key={value} value={value}>{label}</option>
@@ -664,14 +664,14 @@ export function AutoVoxBlueprintView({ blueprint, onChange, disabled }: AutoVoxB
         <Sparkles className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
         <div>
           <div className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest mb-1">Story Theme</div>
-          <div className="text-xs text-white/90 leading-snug">{blueprint.storyTheme}</div>
+          <div className="text-xs text-foreground/90 leading-snug">{blueprint.storyTheme}</div>
         </div>
       </div>
 
       {/* ── Global Backgrounds ──────────────────────────── */}
-      <div className="bg-[#181818] border border-[#252525] rounded-xl p-3.5">
+      <div className="bg-card border border-border rounded-xl p-3.5">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-[9px] font-bold text-[#7a7a7a] uppercase tracking-widest">
+          <div className="text-[9px] font-bold text-muted-foreground/80 uppercase tracking-widest">
             Global Backgrounds ({blueprint.globalBackgrounds.length})
           </div>
           <button
@@ -686,7 +686,7 @@ export function AutoVoxBlueprintView({ blueprint, onChange, disabled }: AutoVoxB
         <div className="flex gap-3 flex-wrap">
           {blueprint.globalBackgrounds.map((bg, bgIdx) => (
             <div key={`bg-${bgIdx}-${bg.prompt.substring(0, 20)}`} className="flex flex-col gap-1 items-center">
-              <div className="text-[9px] text-[#5a5a5a] font-medium">BG {bgIdx + 1}</div>
+              <div className="text-[9px] text-muted-foreground/60 font-medium">BG {bgIdx + 1}</div>
               <ImageTile
                 prompt={bg.prompt}
                 resolvedUrl={bg.resolvedUrl}
@@ -710,34 +710,34 @@ export function AutoVoxBlueprintView({ blueprint, onChange, disabled }: AutoVoxB
       {blueprint.scenes.map((scene, sceneIdx) => (
         <div
           key={`scene-${sceneIdx}`}
-          className="bg-[#181818] border border-[#252525] rounded-xl p-3.5"
+          className="bg-card border border-border rounded-xl p-3.5"
         >
           {/* Row header */}
           <div className="flex items-start justify-between gap-3 mb-3">
             <div className="flex-1 min-w-0">
-              <div className="text-[9px] font-bold text-[#5a5a5a] uppercase tracking-widest mb-1">
+              <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-1">
                 Dialogue {sceneIdx + 1} &nbsp;·&nbsp; {scene.startTime.toFixed(1)}s – {scene.endTime.toFixed(1)}s &nbsp;·&nbsp; {scene.duration.toFixed(1)}s
               </div>
-              <div className="text-xs text-[#b0b0b0] leading-snug line-clamp-2">
+              <div className="text-xs text-muted-foreground leading-snug line-clamp-2">
                 "{scene.narration}"
               </div>
             </div>
 
             {/* Background selector */}
             <div className="flex flex-col gap-1 shrink-0">
-              <div className="text-[9px] text-[#5a5a5a] font-medium">Background</div>
+              <div className="text-[9px] text-muted-foreground/60 font-medium">Background</div>
               <div className="relative">
                 <select
                   value={scene.selectedBackgroundIndex}
                   onChange={(e) => updateSceneBg(sceneIdx, parseInt(e.target.value))}
                   disabled={disabled}
-                  className="appearance-none bg-[#0e0e0e] border border-[#2a2a2a] hover:border-indigo-600 focus:border-indigo-500 rounded-lg px-2.5 py-1 pr-6 text-[11px] text-white outline-none cursor-pointer disabled:opacity-50 transition-colors"
+                  className="appearance-none bg-background border border-border hover:border-indigo-600 focus:border-indigo-500 rounded-lg px-2.5 py-1 pr-6 text-[11px] text-foreground outline-none cursor-pointer disabled:opacity-50 transition-colors"
                 >
                   {blueprint.globalBackgrounds.map((_, bgIdx) => (
                     <option key={bgIdx} value={bgIdx}>BG {bgIdx + 1}</option>
                   ))}
                 </select>
-                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[#6a6a6a] pointer-events-none" />
+                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground/70 pointer-events-none" />
               </div>
             </div>
           </div>
@@ -775,10 +775,10 @@ export function AutoVoxBlueprintView({ blueprint, onChange, disabled }: AutoVoxB
             {!disabled && (
               <button
                 onClick={() => addPip(sceneIdx)}
-                className="shrink-0 w-32 h-20 rounded-lg border border-dashed border-[#333] hover:border-indigo-600/60 flex flex-col items-center justify-center gap-1.5 transition-colors group mt-5"
+                className="shrink-0 w-32 h-20 rounded-lg border border-dashed border-border hover:border-indigo-600/60 flex flex-col items-center justify-center gap-1.5 transition-colors group mt-5"
               >
-                <Plus className="w-4 h-4 text-[#5a5a5a] group-hover:text-indigo-400 transition-colors" />
-                <span className="text-[9px] text-[#5a5a5a] group-hover:text-indigo-400 transition-colors">Add Content</span>
+                <Plus className="w-4 h-4 text-muted-foreground/60 group-hover:text-indigo-400 transition-colors" />
+                <span className="text-[9px] text-muted-foreground/60 group-hover:text-indigo-400 transition-colors">Add Content</span>
               </button>
             )}
           </div>

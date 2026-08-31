@@ -22,20 +22,20 @@ export function AudioMixer() {
   const audioCapableTracks = tracks.filter(t => t.type === 'audio' || t.type === 'video');
 
   return (
-    <div className="h-full w-full bg-[#1e1e1e] flex flex-col overflow-hidden select-none">
+    <div className="h-full w-full bg-card flex flex-col overflow-hidden select-none">
       {/* Mixer Header */}
-      <div className="h-8 shrink-0 bg-[#252525] border-b border-[#3e3e3e] flex items-center px-4 justify-between">
-        <div className="flex items-center gap-1.5 text-[#a0a0a0]">
+      <div className="h-8 shrink-0 bg-secondary border-b border-border flex items-center px-4 justify-between">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
           <Sliders className="w-3.5 h-3.5 text-amber-500" />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-white">Audio Mixer</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground">Audio Mixer</span>
         </div>
-        <div className="text-[10px] text-[#6a6a6a]">
+        <div className="text-[10px] text-muted-foreground/70">
           Double-click Pan slider to reset to center (C)
         </div>
       </div>
 
       {/* Mixer Board */}
-      <div className="flex-1 flex overflow-x-auto p-4 gap-4 bg-[#1a1a1a] scrollbar-thin">
+      <div className="flex-1 flex overflow-x-auto p-4 gap-4 bg-background scrollbar-thin">
         {/* Track Channels */}
         {audioCapableTracks.map((track) => (
           <ChannelStrip
@@ -49,7 +49,7 @@ export function AudioMixer() {
         ))}
 
         {/* Master Channel Strip Separator */}
-        <div className="w-px self-stretch bg-[#3e3e3e] my-1" />
+        <div className="w-px self-stretch bg-accent my-1" />
 
         {/* Master Channel Strip */}
         <MasterChannelStrip
@@ -211,10 +211,10 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
   };
 
   return (
-    <div className="w-20 flex flex-col items-center select-none bg-[#232323] border border-[#2d2d2d] rounded py-2 shrink-0">
+    <div className="w-20 flex flex-col items-center select-none bg-card border border-border rounded py-2 shrink-0">
       {/* Pan slider */}
       <div className="w-full px-2 flex flex-col items-center gap-0.5 mb-2">
-        <span className="text-[9px] text-[#a0a0a0] uppercase tracking-wide">Pan</span>
+        <span className="text-[9px] text-muted-foreground uppercase tracking-wide">Pan</span>
         <span className="text-[10px] font-mono text-amber-500 font-semibold">
           {formatPanLabel(pan)}
         </span>
@@ -226,7 +226,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
           value={pan}
           onDoubleClick={() => onPanChange(0)}
           onChange={(e) => onPanChange(Number(e.target.value))}
-          className="w-full h-1 bg-[#3e3e3e] rounded appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          className="w-full h-1 bg-accent rounded appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
           title="Drag to adjust stereo panning. Double click to center."
         />
       </div>
@@ -239,7 +239,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
           className={`w-6 h-5 rounded text-[10px] font-bold border transition-colors flex items-center justify-center ${
             isSolo
               ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-              : 'bg-[#1a1a1a] border-[#3e3e3e] text-[#6a6a6a] hover:text-[#a0a0a0]'
+              : 'bg-background border-border text-muted-foreground/70 hover:text-muted-foreground'
           }`}
           title="Solo Track"
         >
@@ -251,7 +251,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
           className={`w-6 h-5 rounded text-[10px] font-bold border transition-colors flex items-center justify-center ${
             isMuted
               ? 'bg-red-500/20 border-red-500 text-red-400'
-              : 'bg-[#1a1a1a] border-[#3e3e3e] text-[#6a6a6a] hover:text-[#a0a0a0]'
+              : 'bg-background border-border text-muted-foreground/70 hover:text-muted-foreground'
           }`}
           title="Mute Track"
         >
@@ -266,7 +266,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
           ref={canvasRef}
           width={8}
           height={144}
-          className="w-2 rounded bg-black border border-[#1e1e1e]"
+          className="w-2 rounded bg-black border border-border"
         />
 
         {/* Fader Input — FIX H13: disable fader when muted so drag doesn't change volume invisibly */}
@@ -280,7 +280,7 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
             disabled={isMuted}
             onChange={(e) => !isMuted && onVolumeChange(Number(e.target.value))}
             style={{ writingMode: 'bt-lr', WebkitAppearance: 'slider-vertical' } as any}
-            className={`h-36 w-4 bg-[#1e1e1e] border border-[#2d2d2d] rounded appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black [&::-webkit-slider-thumb]:rounded-sm ${
+            className={`h-36 w-4 bg-card border border-border rounded appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black [&::-webkit-slider-thumb]:rounded-sm ${
               isMuted ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
             }`}
           />
@@ -288,18 +288,18 @@ function ChannelStrip({ track, onVolumeChange, onPanChange, onMuteToggle, onSolo
       </div>
 
       {/* Value */}
-      <div className="text-[10px] font-mono text-[#a0a0a0] mt-2 mb-1">
+      <div className="text-[10px] font-mono text-muted-foreground mt-2 mb-1">
         {volume <= 0.001 ? '-∞ dB' : `${(20 * Math.log10(volume)).toFixed(1)} dB`}
       </div>
 
       {/* Track Label */}
-      <div className="w-full border-t border-[#2d2d2d] pt-1.5 px-1.5 flex items-center justify-center gap-1">
+      <div className="w-full border-t border-border pt-1.5 px-1.5 flex items-center justify-center gap-1">
         {track.type === 'video' ? (
           <Film className="w-3 h-3 text-blue-400 shrink-0" />
         ) : (
           <Music className="w-3 h-3 text-emerald-400 shrink-0" />
         )}
-        <span className="text-[10px] font-semibold text-white truncate max-w-full">
+        <span className="text-[10px] font-semibold text-foreground truncate max-w-full">
           {track.name}
         </span>
       </div>
@@ -495,9 +495,9 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
   }, []);
 
   return (
-    <div className="w-24 flex flex-col items-center select-none bg-[#292929] border border-amber-500/20 rounded py-2 shrink-0 shadow-lg">
+    <div className="w-24 flex flex-col items-center select-none bg-secondary border border-amber-500/20 rounded py-2 shrink-0 shadow-lg">
       <div className="w-full px-2 flex flex-col items-center gap-0.5 mb-2">
-        <span className="text-[9px] text-[#a0a0a0] uppercase tracking-wide">Output</span>
+        <span className="text-[9px] text-muted-foreground uppercase tracking-wide">Output</span>
         <span className="text-[10px] font-mono text-red-500 font-semibold">LR</span>
       </div>
 
@@ -508,7 +508,7 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
           className={`w-14 h-5 rounded text-[10px] font-bold border transition-colors flex items-center justify-center gap-1 ${
             isMuted
               ? 'bg-red-500/20 border-red-500 text-red-400'
-              : 'bg-[#1a1a1a] border-[#3e3e3e] text-[#6a6a6a] hover:text-[#a0a0a0]'
+              : 'bg-background border-border text-muted-foreground/70 hover:text-muted-foreground'
           }`}
           title="Mute Master Output"
         >
@@ -524,7 +524,7 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
           ref={canvasRef}
           width={16}
           height={144}
-          className="w-4 rounded bg-black border border-[#1e1e1e]"
+          className="w-4 rounded bg-black border border-border"
         />
 
         {/* Fader Input */}
@@ -537,7 +537,7 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
             value={isMuted ? 0 : volume}
             onChange={(e) => onVolumeChange(Number(e.target.value))}
             style={{ writingMode: 'bt-lr', WebkitAppearance: 'slider-vertical' } as any}
-            className="h-36 w-4 bg-[#1e1e1e] border border-[#2d2d2d] rounded cursor-pointer appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black [&::-webkit-slider-thumb]:rounded-sm"
+            className="h-36 w-4 bg-card border border-border rounded cursor-pointer appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black [&::-webkit-slider-thumb]:rounded-sm"
           />
         </div>
       </div>
@@ -548,9 +548,9 @@ function MasterChannelStrip({ volume, isMuted, onVolumeChange, onMuteToggle }: M
       </div>
 
       {/* Track Label */}
-      <div className="w-full border-t border-[#3e3e3e] pt-1.5 px-1.5 flex items-center justify-center gap-1">
+      <div className="w-full border-t border-border pt-1.5 px-1.5 flex items-center justify-center gap-1">
         <Radio className="w-3.5 h-3.5 text-amber-500 shrink-0 animate-pulse" />
-        <span className="text-[10px] font-bold text-white uppercase tracking-wider">
+        <span className="text-[10px] font-bold text-foreground uppercase tracking-wider">
           MASTER
         </span>
       </div>

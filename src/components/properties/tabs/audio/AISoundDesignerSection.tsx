@@ -27,30 +27,30 @@ export function AISoundDesignerSection({
     <div className="bg-amber-950/20 border border-amber-500/30 rounded p-3 space-y-3">
       <div className="flex items-center gap-2">
         <Sparkles className="w-4 h-4 text-amber-400" />
-        <span className="text-xs text-white font-semibold">AI Sound Designer</span>
+        <span className="text-xs text-foreground font-semibold">AI Sound Designer</span>
       </div>
       <p className="text-[11px] text-[#e0c090]">
         Analyze scene storyboard using Gemini 2.0 Vision and suggest optimized SFX options using Groq.
       </p>
 
-      <div className="space-y-2 pt-1 border-t border-[#3e3e3e]/40">
+      <div className="space-y-2 pt-1 border-t border-border/40">
         <div className="flex items-center gap-2">
-          <label className="text-[10px] text-white">AI Provider:</label>
+          <label className="text-[10px] text-foreground">AI Provider:</label>
           <select 
             value={aiProvider}
             onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'groq')}
-            className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+            className="bg-card text-foreground text-[10px] border border-border rounded px-2 py-1 focus:outline-none focus:border-amber-500"
           >
             <option value="gemini">Gemini (Default)</option>
             <option value="groq">Groq (Llama 3 Vision)</option>
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-[10px] text-white">Precision:</label>
+          <label className="text-[10px] text-foreground">Precision:</label>
           <select 
             value={soundDesignFps}
             onChange={(e) => setSoundDesignFps(Number(e.target.value))}
-            className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+            className="bg-card text-foreground text-[10px] border border-border rounded px-2 py-1 focus:outline-none focus:border-amber-500"
           >
             <option value={1}>1 FPS (Standard)</option>
             <option value={5}>5 FPS (High)</option>
@@ -58,7 +58,7 @@ export function AISoundDesignerSection({
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-[9px] text-[#a0a0a0]">Freesound Key (Optional)</label>
+          <label className="text-[9px] text-muted-foreground">Freesound Key (Optional)</label>
           <input
             type="password"
             placeholder="Leave blank for public key"
@@ -67,7 +67,7 @@ export function AISoundDesignerSection({
               setFreesoundApiKey(e.target.value);
               sessionStorage.setItem('procut_freesound_key', e.target.value);
             }}
-            className="bg-[#1e1e1e] text-white text-[10px] border border-[#3e3e3e] rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+            className="bg-card text-foreground text-[10px] border border-border rounded px-2 py-1 focus:outline-none focus:border-amber-500"
           />
         </div>
       </div>

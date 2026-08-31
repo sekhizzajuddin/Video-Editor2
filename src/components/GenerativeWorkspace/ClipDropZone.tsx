@@ -194,9 +194,9 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
 
   if (selectedClipUrl) {
     return (
-      <div className="relative rounded-xl border border-[#3e3e3e] bg-[#1a1a1a] p-4 transition hover:border-amber-400/60 group">
+      <div className="relative rounded-xl border border-border bg-background p-4 transition hover:border-amber-400/60 group">
         <div className="flex items-center gap-4">
-          <div className="relative w-24 h-16 rounded-lg overflow-hidden bg-black flex-shrink-0 border border-[#2d2d2d] flex items-center justify-center">
+          <div className="relative w-24 h-16 rounded-lg overflow-hidden bg-black flex-shrink-0 border border-border flex items-center justify-center">
             <video
               src={selectedClipUrl}
               className="w-full h-full object-cover"
@@ -205,26 +205,26 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
               preload="metadata"
             />
             <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              <Video className="w-5 h-5 text-white/80" />
+              <Video className="w-5 h-5 text-foreground/80" />
             </div>
           </div>
 
           <div className="flex-1 min-w-0">
-            <h4 className="text-sm font-semibold text-white truncate" title={selectedClipName || 'Selected Clip'}>
+            <h4 className="text-sm font-semibold text-foreground truncate" title={selectedClipName || 'Selected Clip'}>
               {selectedClipName || 'Selected Clip'}
             </h4>
             <div className="flex items-center gap-2 mt-1">
               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-400/10 text-amber-400 border border-amber-400/20">
                 {selectedClipDuration > 0 ? `${selectedClipDuration.toFixed(1)}s` : 'Video Clip'}
               </span>
-              <span className="text-xs text-[#a0a0a0]">Ready for motion graphics</span>
+              <span className="text-xs text-muted-foreground">Ready for motion graphics</span>
             </div>
           </div>
 
           <button
             type="button"
             onClick={onRemove ? onRemove : () => onClipDrop('', '', 0)}
-            className="p-1.5 rounded-lg text-[#a0a0a0] hover:text-red-400 hover:bg-[#252525] transition-colors"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-secondary transition-colors"
             title="Remove clip"
           >
             <X className="w-5 h-5" />
@@ -242,7 +242,7 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
       className={`rounded-xl border border-dashed p-6 transition-all flex flex-col items-center justify-center text-center ${
         isDragOver
           ? 'border-amber-400 bg-amber-400/5 scale-[0.99]'
-          : 'border-[#3e3e3e] bg-[#1a1a1a] hover:border-amber-400'
+          : 'border-border bg-background hover:border-amber-400'
       }`}
     >
       <input
@@ -256,7 +256,7 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
         }}
       />
 
-      <div className="w-12 h-12 rounded-full bg-[#252525] border border-[#3e3e3e] flex items-center justify-center mb-3">
+      <div className="w-12 h-12 rounded-full bg-secondary border border-border flex items-center justify-center mb-3">
         {isDragOver ? (
           <UploadCloud className="w-6 h-6 text-amber-400 animate-bounce" />
         ) : (
@@ -264,10 +264,10 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
         )}
       </div>
 
-      <p className="text-sm font-medium text-white mb-1">
+      <p className="text-sm font-medium text-foreground mb-1">
         Drop a clip here <span className="text-amber-400 font-semibold">(max 30s)</span>
       </p>
-      <p className="text-xs text-[#a0a0a0] mb-3">
+      <p className="text-xs text-muted-foreground mb-3">
         or drag from Media Panel / drop a video file
       </p>
 
@@ -275,14 +275,14 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#252525] text-white border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors"
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-foreground border border-border hover:border-amber-400 hover:text-amber-400 transition-colors"
         >
           Browse files
         </button>
         <button
           type="button"
           onClick={openLibraryPicker}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#252525] text-[#a0a0a0] border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-muted-foreground border border-border hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
         >
           <FolderOpen className="w-3.5 h-3.5" />
           Media library
@@ -291,7 +291,7 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
 
       {libraryItems.length > 0 && (
         <select
-          className="mt-3 w-full bg-[#121212] border border-[#3e3e3e] rounded-lg text-xs text-white px-2 py-1.5 focus:outline-none focus:border-amber-400"
+          className="mt-3 w-full bg-background border border-border rounded-lg text-xs text-foreground px-2 py-1.5 focus:outline-none focus:border-amber-400"
           defaultValue=""
           onChange={(e) => {
             const item = libraryItems.find((i) => i.id === e.target.value);
@@ -305,7 +305,7 @@ export const ClipDropZone: React.FC<ClipDropZoneProps> = ({
             Select a clip ({libraryItems.length} under 30s)
           </option>
           {libraryItems.map((item) => (
-            <option key={item.id} value={item.id} className="bg-[#1a1a1a] text-white">
+            <option key={item.id} value={item.id} className="bg-background text-foreground">
               {item.name} • {item.duration.toFixed(1)}s
             </option>
           ))}

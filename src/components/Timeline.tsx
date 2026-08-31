@@ -254,7 +254,7 @@ export function Timeline() {
 
   return (
     <>
-      <div className="h-full flex flex-col bg-[#1e1e1e] border-t border-[#3e3e3e]" ref={timelineRef}>
+      <div className="h-full flex flex-col bg-card border-t border-border" ref={timelineRef}>
         {/* ── Toolbar ──────────────────────────────────────────────────── */}
         <TimelineToolbar
           zoomLevel={zoomLevel}
@@ -273,10 +273,10 @@ export function Timeline() {
 
           {/* ── Track headers ──────────────────────────────────────────── */}
           <div
-            className="bg-[#252525] border-r border-[#3e3e3e] flex flex-col overflow-hidden shrink-0"
+            className="bg-secondary border-r border-border flex flex-col overflow-hidden shrink-0"
             style={{ width: TRACK_HEADER_WIDTH }}
           >
-            <div className="bg-[#2d2d2d] border-b border-[#3e3e3e] shrink-0" style={{ height: RULER_HEIGHT }} />
+            <div className="bg-popover border-b border-border shrink-0" style={{ height: RULER_HEIGHT }} />
 
             <div
               ref={trackHeadersRef}

@@ -144,11 +144,11 @@ export const HelpModal: React.FC = () => {
             <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
               <span className="text-amber-500 font-bold text-lg">?</span>
             </div>
-            <h2 className="text-xl font-bold text-white">Help & Documentation</h2>
+            <h2 className="text-xl font-bold text-foreground">Help & Documentation</h2>
           </div>
           <button
             onClick={() => setShowHelpMenu(false)}
-            className="p-2 text-surface-400 hover:text-white hover:bg-surface-700 rounded-lg transition-colors"
+            className="p-2 text-surface-400 hover:text-foreground hover:bg-surface-700 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -166,7 +166,7 @@ export const HelpModal: React.FC = () => {
                   className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-all ${
                     isActive 
                       ? 'bg-amber-500/10 text-amber-500 font-medium' 
-                      : 'text-surface-400 hover:bg-surface-800 hover:text-white'
+                      : 'text-surface-400 hover:bg-surface-800 hover:text-foreground'
                   }`}
                 >
                   <Icon className={`w-4 h-4 ${isActive ? 'text-amber-500' : 'text-surface-400'}`} />
@@ -180,7 +180,7 @@ export const HelpModal: React.FC = () => {
             <div className="max-w-3xl mx-auto space-y-8">
               <div className="flex items-center gap-3">
                 <activeContent.icon className="w-8 h-8 text-amber-500" />
-                <h1 className="text-3xl font-bold text-white">{activeContent.title}</h1>
+                <h1 className="text-3xl font-bold text-foreground">{activeContent.title}</h1>
               </div>
               
               <p className="text-lg text-surface-300 leading-relaxed">
@@ -189,7 +189,7 @@ export const HelpModal: React.FC = () => {
 
               {activeContent.options && activeContent.options.length > 0 && (
                 <div className="mt-8 space-y-4">
-                  <h3 className="text-xl font-semibold text-white border-b border-surface-700 pb-2">Options & Features</h3>
+                  <h3 className="text-xl font-semibold text-foreground border-b border-surface-700 pb-2">Options & Features</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {activeContent.options.map((opt, i) => (
                       <div key={i} className="p-4 bg-surface-900/50 rounded-lg border border-surface-700 hover:border-surface-600 transition-colors">

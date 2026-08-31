@@ -90,18 +90,18 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
     (mode === 'text' && !dialogueText.trim());
 
   return (
-    <div className={`h-full flex flex-col md:flex-row bg-[#181818] text-white overflow-hidden ${className}`}>
+    <div className={`h-full flex flex-col md:flex-row bg-card text-foreground overflow-hidden ${className}`}>
       {/* Left Column: Motion Controls & Studio Configuration (collapsible rail) */}
       <div
         className={`${
           controlsOpen ? 'w-full md:w-[360px] xl:w-[400px]' : 'w-11'
-        } shrink-0 border-b md:border-b-0 md:border-r border-[#333333] bg-[#1a1a1a] flex flex-col h-full overflow-hidden transition-[width] duration-200`}
+        } shrink-0 border-b md:border-b-0 md:border-r border-border bg-background flex flex-col h-full overflow-hidden transition-[width] duration-200`}
       >
         {!controlsOpen ? (
           <button
             type="button"
             onClick={() => setControlsOpen(true)}
-            className="flex-1 flex flex-col items-center gap-3 py-3 text-[#808080] hover:text-white transition-colors"
+            className="flex-1 flex flex-col items-center gap-3 py-3 text-muted-foreground/80 hover:text-foreground transition-colors"
             title="Show motion controls"
           >
             <PanelLeftOpen className="w-4 h-4" />
@@ -115,15 +115,15 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
         ) : (
           <>
         {/* Header */}
-        <div className="p-4 border-b border-[#2d2d2d] space-y-3">
+        <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-start gap-2">
             <span className="text-xl">🎬</span>
             <div className="flex-1 min-w-0">
-              <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
                 Generative Motion Graphics
                 <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
               </h2>
-              <p className="text-[11px] text-[#a0a0a0]">
+              <p className="text-[11px] text-muted-foreground">
                 AI-powered vector scene &amp; kinetic type animator
               </p>
             </div>
@@ -131,7 +131,7 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={toggleTimeline}
-                className="p-1.5 rounded hover:bg-[#2a2a2a] text-[#808080] hover:text-white transition-colors"
+                className="p-1.5 rounded hover:bg-secondary text-muted-foreground/80 hover:text-foreground transition-colors"
                 title={timelineHidden ? 'Show editor timeline' : 'Hide editor timeline (focus preview)'}
               >
                 {timelineHidden ? (
@@ -143,7 +143,7 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setControlsOpen(false)}
-                className="p-1.5 rounded hover:bg-[#2a2a2a] text-[#808080] hover:text-white transition-colors"
+                className="p-1.5 rounded hover:bg-secondary text-muted-foreground/80 hover:text-foreground transition-colors"
                 title="Hide motion controls (full-width preview)"
               >
                 <PanelLeftClose className="w-4 h-4" />
@@ -152,14 +152,14 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
           </div>
 
           {/* Tab Switcher */}
-          <div className="grid grid-cols-2 p-1 bg-[#121212] rounded-lg border border-[#2d2d2d]">
+          <div className="grid grid-cols-2 p-1 bg-background rounded-lg border border-border">
             <button
               type="button"
               onClick={() => setMode('clip')}
               className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
                 mode === 'clip'
-                  ? 'bg-[#252525] text-amber-400 shadow-sm border border-amber-400/30'
-                  : 'text-[#808080] hover:text-white'
+                  ? 'bg-secondary text-amber-400 shadow-sm border border-amber-400/30'
+                  : 'text-muted-foreground/80 hover:text-foreground'
               }`}
             >
               <Film className="w-3.5 h-3.5" />
@@ -170,8 +170,8 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
               onClick={() => setMode('text')}
               className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
                 mode === 'text'
-                  ? 'bg-[#252525] text-amber-400 shadow-sm border border-amber-400/30'
-                  : 'text-[#808080] hover:text-white'
+                  ? 'bg-secondary text-amber-400 shadow-sm border border-amber-400/30'
+                  : 'text-muted-foreground/80 hover:text-foreground'
               }`}
             >
               <Type className="w-3.5 h-3.5" />
@@ -272,7 +272,7 @@ export const GenerativeWorkspace: React.FC<GenerativeWorkspaceProps> = ({
       </div>
 
       {/* Right Column: Full-Size Preview Theater Screen */}
-      <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden p-2 sm:p-3 bg-[#111111]">
+      <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden p-2 sm:p-3 bg-background">
         <ResultPreview
           result={result}
           motionVideoUrl={motionVideoUrl}

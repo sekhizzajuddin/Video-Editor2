@@ -17,7 +17,7 @@ export function CropSection({ clip, getPropVal, setPropVal }: CropSectionProps) 
         return (
           <div key={edge} className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-white capitalize">{edge}</span>
+              <span className="text-xs font-medium text-foreground capitalize">{edge}</span>
               <span className="text-xs text-amber-500">{Math.round(value)}%</span>
             </div>
             <input

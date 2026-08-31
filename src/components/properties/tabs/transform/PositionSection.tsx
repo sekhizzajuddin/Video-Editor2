@@ -29,10 +29,10 @@ export function PositionSection({
   updateClip,
 }: PositionSectionProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+    <div className="bg-popover rounded border border-border">
       <button
         onClick={() => toggleSection('position')}
-        className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+        className="w-full flex items-center justify-between p-2.5 text-xs text-foreground group"
       >
         <span className="font-medium">Position</span>
         <div className="flex items-center gap-2">
@@ -43,15 +43,15 @@ export function PositionSection({
               setPropVal('transform.y', 0, { transform: { ...selectedClip.transform, y: 0 } });
               scheduleSaveSnapshot();
             }}
-            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-accent rounded transition-all"
             title="Reset Position"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+            <RotateCcw className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
           </div>
           {collapsedSections['position'] ? (
-            <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
           )}
         </div>
       </button>
@@ -60,7 +60,7 @@ export function PositionSection({
           {/* Position X */}
           <div className="space-y-1">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] text-[#a0a0a0]">X Position</label>
+              <label className="text-[10px] text-muted-foreground">X Position</label>
               <KeyframeControl
                 propertyKey="transform.x"
                 value={getPropVal(selectedClip.transform.x, 'transform.x')}
@@ -111,14 +111,14 @@ export function PositionSection({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
               }}
-              className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+              className="w-full px-2 py-1 bg-card border border-border rounded text-xs text-foreground focus:outline-none focus:border-amber-500"
             />
           </div>
 
           {/* Position Y */}
           <div className="space-y-1">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] text-[#a0a0a0]">Y Position</label>
+              <label className="text-[10px] text-muted-foreground">Y Position</label>
               <KeyframeControl
                 propertyKey="transform.y"
                 value={getPropVal(selectedClip.transform.y, 'transform.y')}
@@ -169,7 +169,7 @@ export function PositionSection({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
               }}
-              className="w-full px-2 py-1 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white focus:outline-none focus:border-amber-500"
+              className="w-full px-2 py-1 bg-card border border-border rounded text-xs text-foreground focus:outline-none focus:border-amber-500"
             />
           </div>
         </div>

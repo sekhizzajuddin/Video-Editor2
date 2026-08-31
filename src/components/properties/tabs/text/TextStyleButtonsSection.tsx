@@ -10,14 +10,14 @@ interface TextStyleButtonsSectionProps {
 export function TextStyleButtonsSection({ bold, italic, underline, onBoldToggle, onItalicToggle, onUnderlineToggle }: TextStyleButtonsSectionProps) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-[10px] text-[#a0a0a0] uppercase tracking-wider">Style</label>
+      <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Style</label>
       <div className="flex gap-2">
         <button
           onClick={onBoldToggle}
           className={`flex-1 py-1.5 px-3 rounded text-[11px] font-medium transition-colors border ${
             bold
               ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-              : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+              : 'bg-card border-border text-muted-foreground hover:text-foreground'
           }`}
         >
           Bold
@@ -27,7 +27,7 @@ export function TextStyleButtonsSection({ bold, italic, underline, onBoldToggle,
           className={`flex-1 py-1.5 px-3 rounded text-[11px] font-medium transition-colors border ${
             italic
               ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-              : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+              : 'bg-card border-border text-muted-foreground hover:text-foreground'
           }`}
         >
           Italic
@@ -37,7 +37,7 @@ export function TextStyleButtonsSection({ bold, italic, underline, onBoldToggle,
           className={`flex-1 py-1.5 px-3 rounded text-[11px] font-medium transition-colors border ${
             underline
               ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-              : 'bg-[#1e1e1e] border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+              : 'bg-card border-border text-muted-foreground hover:text-foreground'
           }`}
         >
           Underline

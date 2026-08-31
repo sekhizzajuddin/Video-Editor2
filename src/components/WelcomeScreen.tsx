@@ -105,28 +105,28 @@ export const WelcomeScreen: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 bg-[#1a1a1a] z-50 flex flex-col items-center justify-center p-8 text-white">
-      <div className="w-full max-w-4xl bg-[#2d2d2d] rounded-xl shadow-2xl p-8 flex flex-col gap-8 h-[80vh]">
+    <div className="fixed inset-0 bg-background z-50 flex flex-col items-center justify-center p-8 text-foreground">
+      <div className="w-full max-w-4xl bg-popover rounded-xl shadow-2xl p-8 flex flex-col gap-8 h-[80vh]">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-amber-600">ProCut Studio</h1>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-1 overflow-hidden">
           {/* New Project Column */}
-          <div className="flex flex-col gap-4 border-r border-[#3e3e3e] pr-8">
-            <h2 className="text-xl font-semibold mb-4 text-[#e0e0e0]">Start a New Project</h2>
+          <div className="flex flex-col gap-4 border-r border-border pr-8">
+            <h2 className="text-xl font-semibold mb-4 text-foreground/90">Start a New Project</h2>
             
             {isCreating ? (
               <form onSubmit={handleCreateNewProject} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="projectName" className="text-sm text-[#a0a0a0]">Project Name</label>
+                  <label htmlFor="projectName" className="text-sm text-muted-foreground">Project Name</label>
                   <input
                     id="projectName"
                     type="text"
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
                     placeholder={generateDefaultName()}
-                    className="bg-[#3e3e3e] border border-[#4a4a4a] rounded p-3 text-white focus:outline-none focus:border-amber-500 transition-colors"
+                    className="bg-accent border border-border rounded p-3 text-foreground focus:outline-none focus:border-amber-500 transition-colors"
                     autoFocus
                   />
                 </div>
@@ -140,7 +140,7 @@ export const WelcomeScreen: React.FC = () => {
                   <button 
                     type="button"
                     onClick={() => setIsCreating(false)}
-                    className="flex-1 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-white py-3 rounded font-medium transition-colors"
+                    className="flex-1 bg-accent hover:bg-border text-foreground py-3 rounded font-medium transition-colors"
                   >
                     Cancel
                   </button>
@@ -152,48 +152,48 @@ export const WelcomeScreen: React.FC = () => {
                   setNewProjectName(generateDefaultName());
                   setIsCreating(true);
                 }}
-                className="group flex flex-col items-center justify-center gap-4 bg-[#3e3e3e]/50 hover:bg-[#3e3e3e] border-2 border-dashed border-[#4a4a4a] hover:border-amber-500 rounded-xl p-12 transition-all cursor-pointer h-64"
+                className="group flex flex-col items-center justify-center gap-4 bg-accent/50 hover:bg-accent border-2 border-dashed border-border hover:border-amber-500 rounded-xl p-12 transition-all cursor-pointer h-64"
               >
                 <div className="w-16 h-16 rounded-full bg-amber-600/20 group-hover:bg-amber-600/40 flex items-center justify-center transition-colors">
                   <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
                 </div>
-                <span className="text-lg font-medium text-[#e0e0e0] group-hover:text-white">Create New Project</span>
+                <span className="text-lg font-medium text-foreground/90 group-hover:text-foreground">Create New Project</span>
               </button>
             )}
           </div>
 
           {/* Load Workspace Column */}
           <div className="flex flex-col overflow-hidden pl-4">
-            <h2 className="text-xl font-semibold mb-4 text-[#e0e0e0]">Open Workspace Folder</h2>
+            <h2 className="text-xl font-semibold mb-4 text-foreground/90">Open Workspace Folder</h2>
             
             {!workspaceSelected ? (
               <div className="flex flex-col items-center justify-center flex-1">
                 <button 
                   onClick={handleSelectWorkspace}
-                  className="group flex flex-col items-center justify-center gap-4 bg-[#3e3e3e]/50 hover:bg-[#3e3e3e] border-2 border-dashed border-[#4a4a4a] hover:border-amber-500 rounded-xl p-8 w-full max-w-sm transition-all cursor-pointer h-48"
+                  className="group flex flex-col items-center justify-center gap-4 bg-accent/50 hover:bg-accent border-2 border-dashed border-border hover:border-amber-500 rounded-xl p-8 w-full max-w-sm transition-all cursor-pointer h-48"
                 >
                   <div className="w-16 h-16 rounded-full bg-amber-600/20 group-hover:bg-amber-600/40 flex items-center justify-center transition-colors">
                     <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
                     </svg>
                   </div>
-                  <span className="text-lg font-medium text-[#e0e0e0] group-hover:text-white">Select Workspace Folder</span>
+                  <span className="text-lg font-medium text-foreground/90 group-hover:text-foreground">Select Workspace Folder</span>
                 </button>
               </div>
             ) : (
               <div className="flex flex-col flex-1 overflow-hidden">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-amber-500 font-medium">Found {projects.length} project(s)</span>
-                  <button onClick={handleSelectWorkspace} className="text-xs text-[#a0a0a0] hover:text-white underline">Change Folder</button>
+                  <button onClick={handleSelectWorkspace} className="text-xs text-muted-foreground hover:text-foreground underline">Change Folder</button>
                 </div>
                 {loading ? (
                   <div className="flex items-center justify-center flex-1">
                     <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
                   </div>
                 ) : projects.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center flex-1 text-[#a0a0a0] gap-2">
+                  <div className="flex flex-col items-center justify-center flex-1 text-muted-foreground gap-2">
                     <svg className="w-12 h-12 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                     </svg>
@@ -205,13 +205,13 @@ export const WelcomeScreen: React.FC = () => {
                       <div 
                         key={project.id}
                         onClick={() => handleOpenProcutFile(project)}
-                        className="group flex items-center justify-between bg-[#3e3e3e]/30 hover:bg-[#3e3e3e] border border-[#4a4a4a]/50 hover:border-amber-500/50 p-4 rounded-lg cursor-pointer transition-all"
+                        className="group flex items-center justify-between bg-accent/30 hover:bg-accent border border-border/50 hover:border-amber-500/50 p-4 rounded-lg cursor-pointer transition-all"
                       >
                         <div className="flex flex-col gap-1">
-                          <span className="font-medium text-[#f0f0f0] group-hover:text-white truncate max-w-[200px]" title={project.name}>
+                          <span className="font-medium text-foreground group-hover:text-foreground truncate max-w-[200px]" title={project.name}>
                             {project.name}
                           </span>
-                          <span className="text-xs text-[#a0a0a0]">
+                          <span className="text-xs text-muted-foreground">
                             Last modified: {new Date(project.lastModified).toLocaleString()}
                           </span>
                         </div>
@@ -224,7 +224,7 @@ export const WelcomeScreen: React.FC = () => {
 
             {/* Crashed Projects Recovery */}
             {crashedProjects.length > 0 && (
-              <div className="mt-6 border-t border-[#3e3e3e] pt-4">
+              <div className="mt-6 border-t border-border pt-4">
                 <h3 className="text-sm font-semibold mb-3 text-red-400 flex items-center gap-2">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />

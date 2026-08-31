@@ -547,11 +547,11 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
     : 'Opaque';
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-[#141414] border border-[#2d2d2d] rounded-xl overflow-hidden shadow-2xl">
+    <div className="flex-1 min-h-0 flex flex-col bg-background border border-border rounded-xl overflow-hidden shadow-2xl">
       {/* Top Theater Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-[#1e1e1e] border-b border-[#3e3e3e] gap-3 flex-wrap">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-card border-b border-border gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <Film className="w-4 h-4 text-amber-400" />
             <span>Preview Theater</span>
           </div>
@@ -618,14 +618,14 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
 
           {/* Source switcher: rendered WebM vs live CSS */}
           {motionVideoUrl && hasLiveScenes && (
-            <div className="flex items-center bg-[#141414] rounded-lg p-0.5 border border-[#3e3e3e]">
+            <div className="flex items-center bg-background rounded-lg p-0.5 border border-border">
               <button
                 type="button"
                 onClick={() => setPreviewSource('rendered')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                   effectiveSource === 'rendered'
-                    ? 'bg-[#2a2a2a] text-amber-400 shadow-sm'
-                    : 'text-[#808080] hover:text-white'
+                    ? 'bg-secondary text-amber-400 shadow-sm'
+                    : 'text-muted-foreground/80 hover:text-foreground'
                 }`}
                 title="Play the rendered WebM overlay"
               >
@@ -636,8 +636,8 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
                 onClick={() => setPreviewSource('live')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                   effectiveSource === 'live'
-                    ? 'bg-[#2a2a2a] text-amber-400 shadow-sm'
-                    : 'text-[#808080] hover:text-white'
+                    ? 'bg-secondary text-amber-400 shadow-sm'
+                    : 'text-muted-foreground/80 hover:text-foreground'
                 }`}
                 title="Scrub the raw HTML/CSS animation live (great while editing code)"
               >
@@ -648,14 +648,14 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
 
           {/* Display Mode Switcher (when source clip & motion graphic both exist) */}
           {selectedClipUrl && motionVideoUrl && (
-            <div className="flex items-center bg-[#141414] rounded-lg p-0.5 border border-[#3e3e3e]">
+            <div className="flex items-center bg-background rounded-lg p-0.5 border border-border">
               <button
                 type="button"
                 onClick={() => setDisplayMode('composite')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                   displayMode === 'composite'
-                    ? 'bg-[#2a2a2a] text-amber-400 shadow-sm'
-                    : 'text-[#808080] hover:text-white'
+                    ? 'bg-secondary text-amber-400 shadow-sm'
+                    : 'text-muted-foreground/80 hover:text-foreground'
                 }`}
                 title="Source Video with Motion Graphics Overlay"
               >
@@ -666,8 +666,8 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
                 onClick={() => setDisplayMode('motion-only')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                   displayMode === 'motion-only'
-                    ? 'bg-[#2a2a2a] text-amber-400 shadow-sm'
-                    : 'text-[#808080] hover:text-white'
+                    ? 'bg-secondary text-amber-400 shadow-sm'
+                    : 'text-muted-foreground/80 hover:text-foreground'
                 }`}
                 title="Motion Graphic Only (Transparent Alpha)"
               >
@@ -678,8 +678,8 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
                 onClick={() => setDisplayMode('video-only')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                   displayMode === 'video-only'
-                    ? 'bg-[#2a2a2a] text-amber-400 shadow-sm'
-                    : 'text-[#808080] hover:text-white'
+                    ? 'bg-secondary text-amber-400 shadow-sm'
+                    : 'text-muted-foreground/80 hover:text-foreground'
                 }`}
                 title="Source Video Only"
               >
@@ -699,7 +699,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
                 className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
                   showCodeEditor
                     ? 'bg-amber-400/10 text-amber-400 border-amber-400/40'
-                    : 'bg-[#252525] text-[#a0a0a0] hover:text-white border-[#3e3e3e]'
+                    : 'bg-secondary text-muted-foreground hover:text-foreground border-border'
                 }`}
                 title="View and manually tweak generated HTML/CSS code"
               >
@@ -727,7 +727,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
                 className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
                   isRePromptOpen
                     ? 'bg-purple-500/10 text-purple-400 border-purple-500/40'
-                    : 'bg-[#252525] text-[#a0a0a0] hover:text-white border-[#3e3e3e]'
+                    : 'bg-secondary text-muted-foreground hover:text-foreground border-border'
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5 text-purple-400" />
@@ -771,7 +771,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
       {isRePromptOpen && (
         <form
           onSubmit={handleSendRePrompt}
-          className="flex items-center gap-2 p-2 bg-[#1c1c1c] border-b border-purple-500/30 px-4"
+          className="flex items-center gap-2 p-2 bg-card border-b border-purple-500/30 px-4"
         >
           <input
             type="text"
@@ -779,7 +779,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             onChange={(e) => setRePromptText(e.target.value)}
             placeholder="Describe changes... e.g. 'make the lower third blue and add an animated arrow pointing right'"
             autoFocus
-            className="flex-1 bg-[#141414] border border-[#3e3e3e] rounded text-xs text-white placeholder-[#606060] focus:outline-none focus:border-purple-400 px-3 py-1.5"
+            className="flex-1 bg-background border border-border rounded text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-purple-400 px-3 py-1.5"
           />
           <button
             type="submit"
@@ -795,7 +795,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
       {/* Main Viewport Screen */}
       <div
         ref={viewportRef}
-        className="flex-1 min-h-0 relative flex items-center justify-center p-3 sm:p-4 bg-[#0a0a0a] overflow-hidden select-none"
+        className="flex-1 min-h-0 relative flex items-center justify-center p-3 sm:p-4 bg-background overflow-hidden select-none"
       >
         {/* Transparent Checkerboard Pattern Background for Alpha Mode */}
         <div
@@ -812,7 +812,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             and every layer inside it shares the same pixel box. */}
         <div
           ref={screenRef}
-          className="relative bg-[#0a0a0a] rounded-lg overflow-hidden border border-[#2d2d2d] shadow-2xl flex items-center justify-center"
+          className="relative bg-background rounded-lg overflow-hidden border border-border shadow-2xl flex items-center justify-center"
           style={{
             width: stage.w > 0 ? `${stage.w}px` : '100%',
             height: stage.h > 0 ? `${stage.h}px` : '100%',
@@ -878,12 +878,12 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
           {/* Standby Empty State */}
           {!selectedClipUrl && !motionVideoUrl && !hasLiveScenes && (
             <div className="flex flex-col items-center justify-center text-center p-8 space-y-3 z-20">
-              <div className="w-14 h-14 rounded-2xl bg-[#1a1a1a] border border-[#3e3e3e] flex items-center justify-center shadow-inner">
+              <div className="w-14 h-14 rounded-2xl bg-background border border-border flex items-center justify-center shadow-inner">
                 <Sparkles className="w-7 h-7 text-amber-400 animate-pulse" />
               </div>
               <div className="space-y-1">
-                <h4 className="text-sm font-semibold text-white">Full-Resolution Motion Studio</h4>
-                <p className="text-xs text-[#808080] max-w-sm">
+                <h4 className="text-sm font-semibold text-foreground">Full-Resolution Motion Studio</h4>
+                <p className="text-xs text-muted-foreground/80 max-w-sm">
                   Drop a video clip on the left or type your dialogue to generate synced motion graphics.
                 </p>
               </div>
@@ -892,7 +892,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
 
           {/* Standby State (Clip loaded, awaiting generation) */}
           {selectedClipUrl && !motionVideoUrl && !hasLiveScenes && !isGenerating && (
-            <div className="absolute top-3 right-3 z-30 bg-black/75 backdrop-blur px-3 py-1 rounded-md border border-[#3e3e3e] text-[11px] text-[#a0a0a0] flex items-center gap-1.5">
+            <div className="absolute top-3 right-3 z-30 bg-black/75 backdrop-blur px-3 py-1 rounded-md border border-border text-[11px] text-muted-foreground flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
               Source Video Loaded • Click Generate
             </div>
@@ -903,7 +903,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             the stage (the old layout) squeezed the preview to a sliver whenever
             the editor was open; floating keeps the 16:9 stage full size. */}
         {showCodeEditor && (
-          <div className="absolute right-3 top-3 bottom-3 z-40 w-[min(58%,640px)] min-w-[380px] rounded-xl overflow-hidden shadow-2xl border border-[#3e3e3e] bg-[#141414]/95 backdrop-blur-sm flex flex-col">
+          <div className="absolute right-3 top-3 bottom-3 z-40 w-[min(58%,640px)] min-w-[380px] rounded-xl overflow-hidden shadow-2xl border border-border bg-background/95 backdrop-blur-sm flex flex-col">
             <CodeEditor
               code={editedHtmlCss}
               onChange={setEditedHtmlCss}
@@ -916,13 +916,13 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
       </div>
 
       {/* Bottom Transport Scrubber Bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#1a1a1a] border-t border-[#3e3e3e] text-xs gap-4">
+      <div className="flex items-center justify-between px-4 py-2 bg-background border-t border-border text-xs gap-4">
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={togglePlay}
             disabled={!canTransport}
-            className="w-8 h-8 rounded-lg bg-[#252525] hover:bg-amber-400 hover:text-black text-white flex items-center justify-center transition-colors disabled:opacity-40"
+            className="w-8 h-8 rounded-lg bg-secondary hover:bg-amber-400 hover:text-black text-white flex items-center justify-center transition-colors disabled:opacity-40"
             title={isPlaying ? 'Pause' : 'Play'}
           >
             {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
@@ -932,7 +932,7 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             type="button"
             onClick={handleRestart}
             disabled={!canTransport}
-            className="w-8 h-8 rounded-lg bg-[#252525] hover:bg-[#333] text-[#a0a0a0] hover:text-white flex items-center justify-center transition-colors disabled:opacity-40"
+            className="w-8 h-8 rounded-lg bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors disabled:opacity-40"
             title="Restart from beginning"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -941,14 +941,14 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
           <button
             type="button"
             onClick={() => setIsMuted(!isMuted)}
-            className="w-8 h-8 rounded-lg bg-[#252525] hover:bg-[#333] text-[#a0a0a0] hover:text-white flex items-center justify-center transition-colors"
+            className="w-8 h-8 rounded-lg bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors"
             title={isMuted ? 'Unmute' : 'Mute'}
           >
-            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-[#808080]" /> : <Volume2 className="w-3.5 h-3.5 text-white" />}
+            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-muted-foreground/80" /> : <Volume2 className="w-3.5 h-3.5 text-foreground" />}
           </button>
 
-          <div className="font-mono text-[11px] text-[#a0a0a0] ml-2">
-            <span className="text-white font-semibold">{formatTimecode(currentTime)}</span> /{' '}
+          <div className="font-mono text-[11px] text-muted-foreground ml-2">
+            <span className="text-foreground font-semibold">{formatTimecode(currentTime)}</span> /{' '}
             <span>{formatTimecode(effectiveDuration)}</span>
           </div>
         </div>
@@ -961,13 +961,13 @@ export const ResultPreview: React.FC<ResultPreviewProps> = ({
             step={0.05}
             value={Math.min(currentTime, effectiveDuration || 15)}
             onChange={(e) => seekAll(parseFloat(e.target.value))}
-            className="w-full h-1.5 bg-[#333] rounded-lg appearance-none cursor-pointer accent-amber-400"
+            className="w-full h-1.5 bg-accent rounded-lg appearance-none cursor-pointer accent-amber-400"
           />
         </div>
 
-        <div className="text-[11px] text-[#808080] font-medium truncate max-w-[200px] flex items-center gap-1">
+        <div className="text-[11px] text-muted-foreground/80 font-medium truncate max-w-[200px] flex items-center gap-1">
           {scenes.length > 0 && (
-            <span className="flex items-center gap-1 text-[#a0a0a0]">
+            <span className="flex items-center gap-1 text-muted-foreground">
               <Layers className="w-3.5 h-3.5" />
               {scenes.length} scene{scenes.length === 1 ? '' : 's'}
             </span>

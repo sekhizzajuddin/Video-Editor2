@@ -145,10 +145,10 @@ export function CurvesEditor({ curves, onChange }: CurvesEditorProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <label className="text-[10px] text-[#a0a0a0] uppercase tracking-wider">Curves</label>
+        <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Curves</label>
         <button
           onClick={resetCurve}
-          className="flex items-center gap-1 px-2 py-0.5 text-[9px] text-[#a0a0a0] hover:text-white border border-[#3e3e3e] rounded transition-colors"
+          className="flex items-center gap-1 px-2 py-0.5 text-[9px] text-muted-foreground hover:text-foreground border border-border rounded transition-colors"
           title="Reset active channel curve"
         >
           <RotateCcw className="w-2.5 h-2.5" /> Reset
@@ -163,7 +163,7 @@ export function CurvesEditor({ curves, onChange }: CurvesEditorProps) {
             className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
               activeChannel === ch
                 ? 'border-amber-500 bg-amber-500/10 text-white'
-                : 'border-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+                : 'border-border text-muted-foreground hover:text-foreground'
             }`}
             title={`${CHANNEL_LABELS[ch]} channel`}
           >
@@ -182,7 +182,7 @@ export function CurvesEditor({ curves, onChange }: CurvesEditorProps) {
           width={SVG_SIZE}
           height={SVG_SIZE}
           viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`}
-          className="bg-[#1a1a1a] border border-[#3e3e3e] rounded cursor-crosshair"
+          className="bg-background border border-border rounded cursor-crosshair"
           onClick={handleAddPoint}
         >
           {/* Grid */}
@@ -256,7 +256,7 @@ export function CurvesEditor({ curves, onChange }: CurvesEditorProps) {
             );
           })}
         </svg>
-        <div className="absolute top-1 left-1 text-[9px] text-[#6a6a6a] pointer-events-none">
+        <div className="absolute top-1 left-1 text-[9px] text-muted-foreground/70 pointer-events-none">
           click to add · drag to move · alt+drag to delete
         </div>
       </div>

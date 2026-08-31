@@ -887,7 +887,7 @@ export function PreviewCanvasContainer() {
   const activeCanvasHeight = (isExporting && exportHeight) ? exportHeight : previewHeight;
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e1e]">
+    <div className="flex flex-col h-full bg-card">
       {/* Header Toolbar */}
       <PreviewCanvasHeaderToolbar
         aspectRatio={aspectRatio}
@@ -911,7 +911,7 @@ export function PreviewCanvasContainer() {
       <div
         ref={containerRef}
         id="preview-canvas-wrapper"
-        className="relative flex-1 overflow-hidden bg-[#0a0a0a] select-none touch-none min-h-0"
+        className="relative flex-1 overflow-hidden bg-background select-none touch-none min-h-0"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

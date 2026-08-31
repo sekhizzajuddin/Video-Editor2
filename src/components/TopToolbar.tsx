@@ -74,8 +74,11 @@ import {
   Link,
   Activity,
   Sparkles,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useTheme } from '@/hooks/useTheme';
 import type { EditorTool } from '@/types';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
@@ -115,6 +118,8 @@ export function TopToolbar() {
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
   const [showRecentModal, setShowRecentModal] = useState(false);
+
+  const { theme, toggle } = useTheme();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -259,24 +264,24 @@ export function TopToolbar() {
   }, [showFileMenu, showEditMenu, showViewMenu, showLayoutMenu]);
 
   return (
-    <div id="top-toolbar-root" className="h-12 bg-[#1e1e1e] border-b border-[#3e3e3e] flex items-center px-3 select-none z-50">
+    <div id="top-toolbar-root" className="h-12 bg-card border-b border-border flex items-center px-3 select-none z-50">
       {/* Left: Logo + Menus */}
       <div className="flex items-center gap-1">
         <div className="flex items-center gap-2 mr-4">
           <Clapperboard className="w-5 h-5 text-amber-400" />
-          <span className="text-sm font-semibold text-white tracking-wide">ProCut</span>
+          <span className="text-sm font-semibold text-foreground tracking-wide">ProCut</span>
         </div>
 
         {/* Workspace Layout Menu */}
         <div className="relative ml-2 mr-2">
           <button
             onClick={() => { setShowLayoutMenu(!showLayoutMenu); setShowFileMenu(false); setShowEditMenu(false); setShowViewMenu(false); }}
-            className="px-3 py-1.5 text-xs text-amber-400 font-medium hover:text-amber-300 hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            className="px-3 py-1.5 text-xs text-amber-400 font-medium hover:text-amber-300 hover:bg-accent rounded flex items-center gap-1 transition-colors"
           >
             <Layout className="w-3.5 h-3.5" /> Workspace: {workspaceLayout?.preset || 'Editing'} <ChevronDown className="w-3 h-3" />
           </button>
           {showLayoutMenu && (
-            <div className="absolute top-full left-0 mt-1 w-40 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
+            <div className="absolute top-full left-0 mt-1 w-40 bg-popover border border-border rounded shadow-xl z-50 py-1">
               {['Editing', 'Color', 'Audio', 'Generative'].map((preset) => (
                 <button
                   key={preset}
@@ -287,7 +292,7 @@ export function TopToolbar() {
                     if (preset === 'Generative') setWorkspaceLayout({ preset: 'Generative', leftWidth: 200, rightWidth: 0, timelineHeight: 250 });
                     setShowLayoutMenu(false);
                   }}
-                  className={`w-full px-3 py-2 text-xs text-left hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors ${workspaceLayout?.preset === preset ? 'text-amber-400' : 'text-[#a0a0a0]'}`}
+                  className={`w-full px-3 py-2 text-xs text-left hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors ${workspaceLayout?.preset === preset ? 'text-amber-400' : 'text-muted-foreground'}`}
                 >
                   {preset === 'Generative' && <Sparkles className="w-3 h-3 text-purple-400" />}
                   {preset}
@@ -301,52 +306,52 @@ export function TopToolbar() {
         <div className="relative">
           <button
             onClick={() => { setShowFileMenu(!showFileMenu); setShowEditMenu(false); setShowViewMenu(false); setShowLayoutMenu(false); }}
-            className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded flex items-center gap-1 transition-colors"
           >
             File <ChevronDown className="w-3 h-3" />
           </button>
           {showFileMenu && (
-            <div className="absolute top-full left-0 mt-1 w-56 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
+            <div className="absolute top-full left-0 mt-1 w-56 bg-popover border border-border rounded shadow-xl z-50 py-1">
               <button
                 onClick={() => { fileInputRef.current?.click(); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <FolderOpen className="w-3.5 h-3.5" /> Import Media
               </button>
               <button
                 onClick={handleSaveProjectFile}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <Save className="w-3.5 h-3.5 text-amber-400" /> Save Project
               </button>
               <button
                 onClick={handleSaveProjectAs}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <Save className="w-3.5 h-3.5 text-amber-400 opacity-70" /> Save Project As...
               </button>
               <button
                 onClick={(e) => handleOpenProjectFile(e as any)}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <FileUp className="w-3.5 h-3.5 text-amber-400" /> Open Project File
               </button>
               <button
                 onClick={() => { setShowRecentModal(true); setShowFileMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> Open Recovered Projects
               </button>
               <button
                 onClick={() => { setShowExportModal(true); setShowFileMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <Download className="w-3.5 h-3.5" /> Export Video
               </button>
-              <div className="border-t border-[#3e3e3e] my-1" />
+              <div className="border-t border-border my-1" />
               <button
                 onClick={handleCloseProject}
-                className="w-full px-3 py-2 text-xs text-left text-red-400 hover:text-red-300 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-red-400 hover:text-red-300 hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> Close Project (Home)
               </button>
@@ -358,59 +363,59 @@ export function TopToolbar() {
         <div className="relative">
           <button
             onClick={() => { setShowEditMenu(!showEditMenu); setShowFileMenu(false); setShowViewMenu(false); }}
-            className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded flex items-center gap-1 transition-colors"
           >
             Edit <ChevronDown className="w-3 h-3" />
           </button>
           {showEditMenu && (
-            <div className="absolute top-full left-0 mt-1 w-48 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
+            <div className="absolute top-full left-0 mt-1 w-48 bg-popover border border-border rounded shadow-xl z-50 py-1">
               <button
                 onClick={() => { undo(); setShowEditMenu(false); }}
                 disabled={!canUndo}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 disabled:opacity-30 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 disabled:opacity-30 transition-colors"
               >
                 <Undo2 className="w-3.5 h-3.5" /> Undo
               </button>
               <button
                 onClick={() => { redo(); setShowEditMenu(false); }}
                 disabled={!canRedo}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 disabled:opacity-30 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 disabled:opacity-30 transition-colors"
               >
                 <Redo2 className="w-3.5 h-3.5" /> Redo
               </button>
-              <div className="border-t border-[#3e3e3e] my-1" />
+              <div className="border-t border-border my-1" />
               <button
                 onClick={() => { cutClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <Scissors className="w-3.5 h-3.5" /> Cut
               </button>
               <button
                 onClick={() => { copyClip('whole'); toast.success('Clip copied'); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-between transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <Plus className="w-3.5 h-3.5" /> Copy
                 </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+C</span>
+                <span className="text-[10px] text-muted-foreground/70 font-mono">Ctrl+C</span>
               </button>
               <button
                 onClick={() => { copyClip('style'); toast.success('Style copied'); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-purple-400 hover:text-purple-300 hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-purple-400 hover:text-purple-300 hover:bg-accent flex items-center justify-between transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <Palette className="w-3.5 h-3.5" /> Copy Style
                 </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+Alt+C</span>
+                <span className="text-[10px] text-muted-foreground/70 font-mono">Ctrl+Alt+C</span>
               </button>
               <button
                 onClick={() => { pasteClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-between transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <FolderOpen className="w-3.5 h-3.5" /> Paste
                 </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+V</span>
+                <span className="text-[10px] text-muted-foreground/70 font-mono">Ctrl+V</span>
               </button>
               {clipboardData?.clips?.length > 0 && (
                 <button
@@ -426,17 +431,17 @@ export function TopToolbar() {
                   <div className="flex items-center gap-2">
                     <Palette className="w-3.5 h-3.5" /> Paste Style
                   </div>
-                  <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+Alt+V</span>
+                  <span className="text-[10px] text-muted-foreground/70 font-mono">Ctrl+Alt+V</span>
                 </button>
               )}
               <button
                 onClick={() => { duplicateClip(); setShowEditMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center justify-between transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-between transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <Plus className="w-3.5 h-3.5" /> Duplicate
                 </div>
-                <span className="text-[10px] text-[#6a6a6a] font-mono">Ctrl+D</span>
+                <span className="text-[10px] text-muted-foreground/70 font-mono">Ctrl+D</span>
               </button>
             </div>
           )}
@@ -446,28 +451,28 @@ export function TopToolbar() {
         <div className="relative">
           <button
             onClick={() => { setShowViewMenu(!showViewMenu); setShowFileMenu(false); setShowEditMenu(false); }}
-            className="px-3 py-1.5 text-xs text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded flex items-center gap-1 transition-colors"
+            className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded flex items-center gap-1 transition-colors"
           >
             View <ChevronDown className="w-3 h-3" />
           </button>
           {showViewMenu && (
-            <div className="absolute top-full left-0 mt-1 w-40 bg-[#2d2d2d] border border-[#3e3e3e] rounded shadow-xl z-50 py-1">
+            <div className="absolute top-full left-0 mt-1 w-40 bg-popover border border-border rounded shadow-xl z-50 py-1">
               <button
                 onClick={() => { useEditorStore.getState().zoomIn(); setShowViewMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <ZoomIn className="w-3.5 h-3.5" /> Zoom In
               </button>
               <button
                 onClick={() => { useEditorStore.getState().zoomOut(); setShowViewMenu(false); }}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <ZoomIn className="w-3.5 h-3.5 rotate-180" /> Zoom Out
               </button>
-              <div className="border-t border-[#3e3e3e] my-1" />
+              <div className="border-t border-border my-1" />
               <button
                 onClick={handleZoomToFit}
-                className="w-full px-3 py-2 text-xs text-left text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                className="w-full px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
               >
                 <ZoomIn className="w-3.5 h-3.5 text-amber-400" /> Zoom to Fit
               </button>
@@ -504,7 +509,7 @@ export function TopToolbar() {
         <button
           onClick={() => syncSelectedClips()}
           title="Sync Audio/Video"
-          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
+          className="px-3 py-1.5 bg-accent hover:bg-border text-foreground/90 text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
         >
           <Link className="w-3.5 h-3.5" />
           Sync
@@ -519,7 +524,7 @@ export function TopToolbar() {
           className={`px-3 py-1.5 text-xs rounded flex items-center gap-1.5 transition-colors font-medium ${
             scopeSettings.enabled 
               ? 'bg-blue-600/30 text-blue-300 border border-blue-500/30' 
-              : 'bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0]'
+              : 'bg-accent hover:bg-border text-foreground/90'
           }`}
         >
           <Activity className="w-3.5 h-3.5" />
@@ -543,7 +548,7 @@ export function TopToolbar() {
         <button
           onClick={() => setShowTeleprompter(true)}
           title="Teleprompter"
-          className="px-3 py-1.5 bg-[#3e3e3e] hover:bg-[#4a4a4a] text-[#e0e0e0] text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
+          className="px-3 py-1.5 bg-accent hover:bg-border text-foreground/90 text-xs rounded flex items-center gap-1.5 transition-colors font-medium"
         >
           <MonitorPlay className="w-3.5 h-3.5" />
           Teleprompter
@@ -557,9 +562,19 @@ export function TopToolbar() {
         </button>
 
         <button
+          type="button"
+          onClick={toggle}
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label="Toggle color theme"
+          className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
+        >
+          {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
+
+        <button
           onClick={() => setShowSettingsModal(true)}
           title="Settings"
-          className="p-2 text-[#a0a0a0] hover:text-white hover:bg-[#3e3e3e] rounded transition-colors"
+          className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
         >
           <Settings className="w-4 h-4" />
         </button>

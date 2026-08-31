@@ -255,7 +255,7 @@ export function ScopesPanel() {
   
   return (
     <div 
-      className={`absolute z-50 bg-[#1a1a1a]/95 border border-[#3e3e3e] rounded-lg shadow-2xl backdrop-blur-sm pointer-events-auto
+      className={`absolute z-50 bg-background/95 border border-border rounded-lg shadow-2xl backdrop-blur-sm pointer-events-auto
         ${scopeSettings.position === 'top-left' ? 'top-16 left-4' : ''}
         ${scopeSettings.position === 'top-right' ? 'top-16 right-4' : ''}
         ${scopeSettings.position === 'bottom-left' ? 'bottom-16 left-4' : ''}
@@ -263,12 +263,12 @@ export function ScopesPanel() {
       `}
       style={{ opacity: scopeSettings.opacity }}
     >
-      <div className="p-2 border-b border-[#3e3e3e] flex items-center justify-between">
+      <div className="p-2 border-b border-border flex items-center justify-between">
         <div className="flex gap-1">
           <button
             onClick={() => setScopeSettings({ ...scopeSettings, type: 'waveform' })}
             className={`px-2 py-0.5 text-xs rounded transition-colors ${
-              scopeSettings.type === 'waveform' ? 'bg-blue-600 text-white' : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+              scopeSettings.type === 'waveform' ? 'bg-blue-600 text-white' : 'bg-accent text-muted-foreground hover:text-white'
             }`}
           >
             Waveform
@@ -276,7 +276,7 @@ export function ScopesPanel() {
           <button
             onClick={() => setScopeSettings({ ...scopeSettings, type: 'vectorscope' })}
             className={`px-2 py-0.5 text-xs rounded transition-colors ${
-              scopeSettings.type === 'vectorscope' ? 'bg-blue-600 text-white' : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+              scopeSettings.type === 'vectorscope' ? 'bg-blue-600 text-white' : 'bg-accent text-muted-foreground hover:text-white'
             }`}
           >
             Vectorscope
@@ -284,7 +284,7 @@ export function ScopesPanel() {
           <button
             onClick={() => setScopeSettings({ ...scopeSettings, type: 'rgb-parade' })}
             className={`px-2 py-0.5 text-xs rounded transition-colors ${
-              scopeSettings.type === 'rgb-parade' ? 'bg-blue-600 text-white' : 'bg-[#3e3e3e] text-[#a0a0a0] hover:text-white'
+              scopeSettings.type === 'rgb-parade' ? 'bg-blue-600 text-white' : 'bg-accent text-muted-foreground hover:text-white'
             }`}
           >
             RGB Parade
@@ -294,7 +294,7 @@ export function ScopesPanel() {
           <select 
             value={scopeSettings.size}
             onChange={(e) => setScopeSettings({ ...scopeSettings, size: e.target.value as any })}
-            className="bg-[#2a2a2a] text-xs text-[#a0a0a0] rounded border-none outline-none py-0.5 px-1"
+            className="bg-secondary text-xs text-muted-foreground rounded border-none outline-none py-0.5 px-1"
           >
             <option value="small">Small</option>
             <option value="medium">Medium</option>
@@ -302,7 +302,7 @@ export function ScopesPanel() {
           </select>
           <button 
             onClick={() => setScopeSettings({ ...scopeSettings, enabled: false })}
-            className="text-[#a0a0a0] hover:text-white p-0.5"
+            className="text-muted-foreground hover:text-foreground p-0.5"
           >
             ×
           </button>

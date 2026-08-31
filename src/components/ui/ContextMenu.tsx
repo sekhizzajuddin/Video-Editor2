@@ -50,12 +50,12 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={menuRef}
       role="menu"
-      className="fixed z-[200] min-w-[200px] max-h-[80vh] overflow-y-auto bg-[#1e1e1e] border border-[#3e3e3e] rounded-md shadow-2xl py-1 text-xs [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      className="fixed z-[200] min-w-[200px] max-h-[80vh] overflow-y-auto bg-card border border-border rounded-md shadow-2xl py-1 text-xs [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       style={{ left: adjustedX, top: adjustedY }}
     >
       {items.map((item, idx) => {
         if (item.separator) {
-          return <div key={`sep-${idx}`} className="h-px bg-[#3e3e3e] my-1 mx-1" />;
+          return <div key={`sep-${idx}`} className="h-px bg-accent my-1 mx-1" />;
         }
 
         const isDisabled = item.disabled;
@@ -75,14 +75,14 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             }}
             className={`w-full px-3 py-1.5 flex items-center gap-2 text-left transition-colors ${
               isDisabled
-                ? 'text-[#6a6a6a] cursor-not-allowed'
+                ? 'text-muted-foreground/70 cursor-not-allowed'
                 : variantClass
             }`}
           >
             {item.icon && <span className="w-4 h-4 flex items-center justify-center">{item.icon}</span>}
             <span className="flex-1">{item.label}</span>
             {item.shortcut && (
-              <span className="text-[9px] text-[#6a6a6a] font-mono">{item.shortcut}</span>
+              <span className="text-[9px] text-muted-foreground/70 font-mono">{item.shortcut}</span>
             )}
             {item.checked !== undefined && (
               <span className="text-amber-500">{item.checked ? '✓' : ''}</span>

@@ -126,9 +126,9 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
   };
 
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
+    <div className="bg-popover rounded border border-border p-3">
       <div className="flex items-center justify-between mb-2">
-        <h4 className="text-[11px] font-semibold text-white">Active Effects ({activeEffects.length})</h4>
+        <h4 className="text-[11px] font-semibold text-foreground">Active Effects ({activeEffects.length})</h4>
         {activeEffects.length > 0 && (
           <button
             onClick={handleClearAll}
@@ -141,8 +141,8 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
       {activeEffects.length > 0 ? (
         <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
           {activeEffects.map((item) => (
-            <div key={item.id} className="flex items-center justify-between bg-[#1e1e1e] px-2.5 py-1.5 rounded border border-[#3e3e3e]/60">
-              <span className="text-[11px] text-[#e0e0e0] capitalize truncate max-w-[180px]">{item.name}</span>
+            <div key={item.id} className="flex items-center justify-between bg-card px-2.5 py-1.5 rounded border border-border/60">
+              <span className="text-[11px] text-foreground/90 capitalize truncate max-w-[180px]">{item.name}</span>
               <button
                 onClick={item.onRemove}
                 className="text-red-400 hover:text-red-300 text-[10px] font-semibold transition-colors shrink-0 ml-2"
@@ -153,12 +153,12 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-6 border border-dashed border-[#3e3e3e] rounded bg-gradient-to-b from-[#1a1a1a]/40 to-transparent">
+        <div className="flex flex-col items-center justify-center py-6 border border-dashed border-border rounded bg-gradient-to-b from-background/40 to-transparent">
           <Sparkles className="w-6 h-6 text-[#3a3a3a] mb-2" />
-          <p className="text-[11px] text-[#808080] text-center">
+          <p className="text-[11px] text-muted-foreground/80 text-center">
             No active effects applied to this clip
           </p>
-          <p className="text-[9px] text-[#5a5a5a] text-center mt-1">
+          <p className="text-[9px] text-muted-foreground/60 text-center mt-1">
             Add chroma key, object removal, or color filters below
           </p>
         </div>

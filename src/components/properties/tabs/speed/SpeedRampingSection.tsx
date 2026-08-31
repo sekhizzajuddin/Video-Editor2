@@ -41,9 +41,9 @@ export function SpeedRampingSection({ selectedClip, isRamped, mediaLibrary, upda
   };
 
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-3">
+    <div className="bg-popover rounded border border-border p-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-white">Speed Ramping</span>
+        <span className="text-xs font-medium text-foreground">Speed Ramping</span>
         <button
           onClick={() => {
             if (isRamped) {
@@ -79,8 +79,8 @@ export function SpeedRampingSection({ selectedClip, isRamped, mediaLibrary, upda
             + Add Keyframe at Playhead
           </button>
           {selectedClip.speedRamp.map((point: SpeedRampKeyframe, idx: number) => (
-            <div key={point.id} className="flex items-center gap-2 bg-[#1e1e1e] p-2 rounded">
-              <span className="text-[10px] text-[#a0a0a0] w-8">#{idx + 1}</span>
+            <div key={point.id} className="flex items-center gap-2 bg-card p-2 rounded">
+              <span className="text-[10px] text-muted-foreground w-8">#{idx + 1}</span>
               <input
                 type="number"
                 min={0.1}
@@ -93,9 +93,9 @@ export function SpeedRampingSection({ selectedClip, isRamped, mediaLibrary, upda
                   newRamp[idx] = { ...point, speed: val };
                   updateClip(selectedClip.id, { speedRamp: newRamp });
                 }}
-                className="w-20 bg-[#2d2d2d] border border-[#3e3e3e] rounded text-xs text-white px-2 py-1"
+                className="w-20 bg-popover border border-border rounded text-xs text-foreground px-2 py-1"
               />
-              <span className="text-[10px] text-white flex-1">
+              <span className="text-[10px] text-foreground flex-1">
                 {point.sourceTime.toFixed(2)}s
               </span>
               {idx > 0 && idx < selectedClip.speedRamp!.length - 1 && (

@@ -15,7 +15,7 @@ export function FlipSection({ clip, updateClip }: FlipSectionProps) {
           updateClip(clip.id, { transform: { ...clip.transform, flipH: !cur } });
         }}
         className={`flex-1 py-3 rounded-lg text-sm font-medium transition-colors ${
-          clip.transform.flipH ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white'
+          clip.transform.flipH ? 'bg-amber-500 text-black' : 'bg-accent text-white'
         }`}
       >
         Flip Horizontal
@@ -26,7 +26,7 @@ export function FlipSection({ clip, updateClip }: FlipSectionProps) {
           updateClip(clip.id, { transform: { ...clip.transform, flipV: !cur } });
         }}
         className={`flex-1 py-3 rounded-lg text-sm font-medium transition-colors ${
-          clip.transform.flipV ? 'bg-amber-500 text-black' : 'bg-[#3e3e3e] text-white'
+          clip.transform.flipV ? 'bg-amber-500 text-black' : 'bg-accent text-white'
         }`}
       >
         Flip Vertical

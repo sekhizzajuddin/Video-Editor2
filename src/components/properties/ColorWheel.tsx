@@ -83,8 +83,8 @@ export function ColorWheel({ label, value, onChange, accentColor }: ColorWheelPr
   };
 
   return (
-    <div className="flex flex-col items-center gap-1.5 p-2 bg-[#1e1e1e] rounded border border-[#3e3e3e] flex-1">
-      <span className="text-[9px] font-bold tracking-wider uppercase text-white">{label}</span>
+    <div className="flex flex-col items-center gap-1.5 p-2 bg-card rounded border border-border flex-1">
+      <span className="text-[9px] font-bold tracking-wider uppercase text-foreground">{label}</span>
 
       {/* Circle Container */}
       <div
@@ -99,7 +99,7 @@ export function ColorWheel({ label, value, onChange, accentColor }: ColorWheelPr
         aria-valuemin={0}
         aria-valuemax={360}
         aria-valuetext={`Hue: ${hue}°, Saturation: ${sat}%`}
-        className="w-16 h-16 rounded-full relative cursor-crosshair border border-[#3e3e3e] shadow-[inset_0_0_6px_rgba(0,0,0,0.6)] select-none touch-none focus:outline-none focus:ring-1 focus:ring-amber-500"
+        className="w-16 h-16 rounded-full relative cursor-crosshair border border-border shadow-[inset_0_0_6px_rgba(0,0,0,0.6)] select-none touch-none focus:outline-none focus:ring-1 focus:ring-amber-500"
         style={{
           backgroundColor: '#3a3a3a',
           background: 'conic-gradient(from 0deg, red, yellow, lime, cyan, blue, magenta, red)',
@@ -129,14 +129,14 @@ export function ColorWheel({ label, value, onChange, accentColor }: ColorWheelPr
       </div>
 
       {/* Info labels */}
-      <div className="flex justify-between w-full text-[8px] text-[#a0a0a0] px-0.5 font-mono">
+      <div className="flex justify-between w-full text-[8px] text-muted-foreground px-0.5 font-mono">
         <span>H: {hue}°</span>
         <span>S: {sat}%</span>
       </div>
 
       {/* Brightness/Lift Slider */}
-      <div className="w-full space-y-1 mt-1 border-t border-[#3e3e3e]/30 pt-1">
-        <div className="flex justify-between text-[8px] text-[#a0a0a0] font-mono px-0.5">
+      <div className="w-full space-y-1 mt-1 border-t border-border/30 pt-1">
+        <div className="flex justify-between text-[8px] text-muted-foreground font-mono px-0.5">
           <span>Lift</span>
           <span>{lift > 0 ? `+${lift}` : lift}</span>
         </div>
@@ -149,7 +149,7 @@ export function ColorWheel({ label, value, onChange, accentColor }: ColorWheelPr
           onMouseUp={() => scheduleSaveSnapshot()}
           onDoubleClick={() => onChange({ hue, saturation: sat, lift: 0 })}
           title="Double-click to reset lift to 0"
-          className="w-full h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+          className="w-full h-1 bg-accent rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
         />
       </div>
     </div>

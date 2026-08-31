@@ -11,8 +11,8 @@ interface EQSectionProps {
 
 export function EQSection({ bass, mid, treble, onBassChange, onMidChange, onTrebleChange }: EQSectionProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e] p-2.5 space-y-3">
-      <span className="text-[10px] font-medium text-white uppercase tracking-wider">EQ</span>
+    <div className="bg-popover rounded border border-border p-2.5 space-y-3">
+      <span className="text-[10px] font-medium text-foreground uppercase tracking-wider">EQ</span>
       
       <AudioSlider
         label="Bass"

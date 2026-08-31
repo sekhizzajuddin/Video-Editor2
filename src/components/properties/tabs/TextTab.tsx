@@ -22,7 +22,7 @@ export function TextTab({ selectedClip, updateClip }: TextTabProps) {
   return (
     <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Text Properties</h3>
+        <h3 className="text-xs font-semibold text-foreground uppercase tracking-wider">Text Properties</h3>
       </div>
       
       <div className="flex flex-col gap-4">

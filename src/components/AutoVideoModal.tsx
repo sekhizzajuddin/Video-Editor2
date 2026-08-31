@@ -761,18 +761,18 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl w-full max-w-6xl h-[88vh] shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-background border border-border rounded-xl w-full max-w-6xl h-[88vh] shadow-2xl flex flex-col overflow-hidden">
 
         {/* ── Header ───────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2a2a] bg-[#1a1a1a] shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background shrink-0">
           <div className="flex items-center gap-2">
             <Wand2 className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-semibold text-white">Vox-Style Auto Video</h2>
+            <h2 className="text-sm font-semibold text-foreground">Vox-Style Auto Video</h2>
           </div>
           <button
             onClick={onClose}
             disabled={isBusy}
-            className="p-1 text-[#6a6a6a] hover:text-white rounded hover:bg-white/10 disabled:opacity-50 transition-colors"
+            className="p-1 text-muted-foreground/70 hover:text-foreground rounded hover:bg-white/10 disabled:opacity-50 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -782,11 +782,11 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
         <div className="flex flex-1 overflow-hidden">
 
           {/* ── LEFT: Controls ───────────────────────────── */}
-          <div className="w-72 min-w-[272px] border-r border-[#2a2a2a] bg-[#171717] flex flex-col p-4 gap-3 overflow-y-auto shrink-0">
+          <div className="w-72 min-w-[272px] border-r border-border bg-card flex flex-col p-4 gap-3 overflow-y-auto shrink-0">
 
             {/* Script */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-[#a0a0a0] flex items-center gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                 <Type className="w-3.5 h-3.5" /> Script
               </label>
               <textarea
@@ -794,23 +794,23 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                 onChange={(e) => setScript(e.target.value)}
                 placeholder="Paste your raw script here…"
                 disabled={isBusy}
-                className="w-full h-28 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none resize-none disabled:opacity-60"
+                className="w-full h-28 bg-card border border-border rounded-lg px-3 py-2 text-xs text-foreground focus:border-indigo-500 outline-none resize-none disabled:opacity-60"
               />
             </div>
 
             {/* Audio Upload */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-[#a0a0a0] flex items-center gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                 <Music className="w-3.5 h-3.5" /> Upload Audio (optional)
               </label>
               <input type="file" accept="audio/*" ref={fileInputRef} onChange={handleAudioUpload} className="hidden" />
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isBusy}
-                className="w-full bg-[#1e1e1e] border border-dashed border-[#3e3e3e] hover:border-indigo-500 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-60"
+                className="w-full bg-card border border-dashed border-border hover:border-indigo-500 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-60"
               >
-                <Upload className="w-4 h-4 text-[#6a6a6a]" />
-                <span className="text-xs text-[#8a8a8a]">{audioFile ? audioFile.name : 'Upload Audio File'}</span>
+                <Upload className="w-4 h-4 text-muted-foreground/70" />
+                <span className="text-xs text-muted-foreground">{audioFile ? audioFile.name : 'Upload Audio File'}</span>
               </button>
             </div>
 
@@ -826,12 +826,12 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
             {/* Voice selector */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-[#a0a0a0]">Voice Actor</label>
+              <label className="text-xs font-medium text-muted-foreground">Voice Actor</label>
               <select
                 value={ttsVoice}
                 onChange={(e) => setTtsVoice(e.target.value)}
                 disabled={isBusy}
-                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 disabled:opacity-60"
+                className="w-full bg-card border border-border rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:border-indigo-500 disabled:opacity-60"
               >
                 <option value="en-US-AriaNeural">Aria (Female EN)</option>
                 <option value="en-US-GuyNeural">Guy (Male EN)</option>
@@ -842,12 +842,12 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
             {/* Visual Style */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-[#a0a0a0]">Visual Style</label>
+              <label className="text-xs font-medium text-muted-foreground">Visual Style</label>
               <select
                 value={visualStyle}
                 onChange={(e) => setVisualStyle(e.target.value)}
                 disabled={isBusy}
-                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 disabled:opacity-60"
+                className="w-full bg-card border border-border rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:border-indigo-500 disabled:opacity-60"
               >
                 <option value="vox_vintage">Vox Documentary (Vintage Collage)</option>
                 <option value="vox_realistic">Vox Documentary (Realistic)</option>
@@ -860,8 +860,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
             {/* Character Ref */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-[#a0a0a0] flex items-center justify-between">
-                <span>Character Ref <span className="text-[#5a5a5a]">(optional)</span></span>
+              <label className="text-xs font-medium text-muted-foreground flex items-center justify-between">
+                <span>Character Ref <span className="text-muted-foreground/60">(optional)</span></span>
                 {characterRef && (
                   <button onClick={() => setCharacterRef(null)} className="text-red-400 hover:text-red-300 text-[10px]">
                     Remove
@@ -871,24 +871,24 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               <input type="file" accept="image/*" ref={charInputRef} onChange={handleCharRefUpload} className="hidden" />
               <div
                 onClick={() => !characterRef && charInputRef.current?.click()}
-                className={`w-full h-14 bg-[#1e1e1e] border border-dashed rounded-lg flex items-center justify-center overflow-hidden transition-colors ${characterRef ? 'border-[#3e3e3e]' : 'border-[#3e3e3e] hover:border-indigo-500 cursor-pointer'}`}
+                className={`w-full h-14 bg-card border border-dashed rounded-lg flex items-center justify-center overflow-hidden transition-colors ${characterRef ? 'border-border' : 'border-border hover:border-indigo-500 cursor-pointer'}`}
               >
                 {characterRef
                   ? <img src={characterRef} alt="Char ref" className="w-full h-full object-cover" />
-                  : <span className="text-[10px] text-[#6a6a6a]">Upload style reference</span>
+                  : <span className="text-[10px] text-muted-foreground/70">Upload style reference</span>
                 }
               </div>
             </div>
 
             {/* Custom Instructions */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-[#a0a0a0]">Custom AI Instructions</label>
+              <label className="text-xs font-medium text-muted-foreground">Custom AI Instructions</label>
               <textarea
                 value={customInstructions}
                 onChange={(e) => setCustomInstructions(e.target.value)}
                 placeholder="E.g. Dark moody thriller, neon colors…"
                 disabled={isBusy}
-                className="w-full h-12 bg-[#1e1e1e] border border-[#3e3e3e] rounded-lg px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none resize-none disabled:opacity-60"
+                className="w-full h-12 bg-card border border-border rounded-lg px-3 py-2 text-xs text-foreground focus:border-indigo-500 outline-none resize-none disabled:opacity-60"
               />
             </div>
 
@@ -908,7 +908,7 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               <button
                 onClick={handleGenerateBlueprint}
                 disabled={isBusy || !audioMediaId}
-                className="w-full py-2.5 bg-[#2a2a2a] hover:bg-[#333] border border-[#3e3e3e] hover:border-indigo-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-2 transition-colors"
+                className="w-full py-2.5 bg-secondary hover:bg-accent border border-border hover:border-indigo-600 disabled:opacity-50 text-foreground text-xs font-medium rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 {isGeneratingBP ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings className="w-4 h-4" />}
                 {audioMediaId ? '2. Generate Blueprint' : '2. Generate Blueprint (need audio)'}
@@ -917,11 +917,11 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
           </div>
 
           {/* ── RIGHT: Blueprint Preview ──────────────── */}
-          <div className="flex-1 bg-[#141414] flex flex-col relative overflow-hidden">
+          <div className="flex-1 bg-background flex flex-col relative overflow-hidden">
 
             {/* Top bar */}
-            <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center justify-between bg-[#1a1a1a] shrink-0">
-              <h3 className="text-sm font-semibold text-white">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between bg-background shrink-0">
+              <h3 className="text-sm font-semibold text-foreground">
                 {blueprint ? `Blueprint · ${blueprint.scenes.length} Dialogues` : 'Scene Blueprint'}
               </h3>
               {blueprint && !isAssembling && (
@@ -950,8 +950,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
                     <Wand2 className="w-7 h-7 text-indigo-400" />
                   </div>
                   <div>
-                    <div className="text-sm font-semibold text-white mb-1">Ready to Build</div>
-                    <div className="text-xs text-[#6a6a6a] max-w-xs leading-relaxed">
+                    <div className="text-sm font-semibold text-foreground mb-1">Ready to Build</div>
+                    <div className="text-xs text-muted-foreground/70 max-w-xs leading-relaxed">
                       {!generatedAudioUrl
                         ? 'Paste your script → click "Generate Audio" → then "Generate Blueprint".'
                         : 'Audio is ready. Click "Generate Blueprint" to create your scene plan.'}
@@ -963,8 +963,8 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
               {isGeneratingBP && (
                 <div className="flex flex-col items-center justify-center h-full gap-3">
                   <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-                  <div className="text-sm text-white font-medium">{status || 'Building blueprint…'}</div>
-                  <div className="text-xs text-[#6a6a6a]">AI is analysing script and creating dialogue scenes…</div>
+                  <div className="text-sm text-foreground font-medium">{status || 'Building blueprint…'}</div>
+                  <div className="text-xs text-muted-foreground/70">AI is analysing script and creating dialogue scenes…</div>
                 </div>
               )}
 
@@ -979,12 +979,12 @@ export function AutoVideoModal({ onClose }: AutoVideoModalProps) {
 
             {/* Progress bar overlay during assembly */}
             {isAssembling && (
-              <div className="absolute bottom-4 left-4 right-4 bg-[#1e1e1e] border border-[#3e3e3e] rounded-xl p-3.5 shadow-2xl">
+              <div className="absolute bottom-4 left-4 right-4 bg-card border border-border rounded-xl p-3.5 shadow-2xl">
                 <div className="flex items-center justify-between text-xs mb-2">
-                  <span className="text-white font-medium truncate pr-4">{status}</span>
-                  <span className="text-[#6a6a6a] shrink-0">{progress}%</span>
+                  <span className="text-foreground font-medium truncate pr-4">{status}</span>
+                  <span className="text-muted-foreground/70 shrink-0">{progress}%</span>
                 </div>
-                <div className="w-full h-1.5 bg-[#141414] rounded-full overflow-hidden">
+                <div className="w-full h-1.5 bg-background rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-indigo-600 to-violet-500 rounded-full transition-all duration-500"
                     style={{ width: `${progress}%` }}

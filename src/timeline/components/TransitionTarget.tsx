@@ -119,7 +119,7 @@ function TransitionPreviewTooltipCanvas({ transitionName }: { transitionName: st
       ref={canvasRef}
       width={120}
       height={68}
-      className="rounded border border-purple-500/30 bg-[#0c0c0c]"
+      className="rounded border border-purple-500/30 bg-background"
     />
   );
 }
@@ -202,7 +202,7 @@ export function TransitionTarget({
 
     return (
       <div
-        className={`absolute top-2 bottom-2 rounded-sm z-30 flex items-center justify-center cursor-pointer text-white border transition-all group/trans ${
+        className={`absolute top-2 bottom-2 rounded-sm z-30 flex items-center justify-center cursor-pointer text-foreground border transition-all group/trans ${
           isSelected
             ? 'bg-purple-600 border-purple-300 ring-1 ring-purple-300 shadow-lg'
             : 'bg-purple-700/80 border-purple-600 hover:bg-purple-600 hover:border-purple-500'
@@ -226,10 +226,10 @@ export function TransitionTarget({
 
         {isHovered && transitionName && (
           <div
-            className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-[#1a1a1a]/95 border border-purple-500 rounded p-1.5 shadow-2xl z-50 flex flex-col items-center gap-1.5 pointer-events-none animate-in fade-in zoom-in-95 duration-100"
+            className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-background/95 border border-purple-500 rounded p-1.5 shadow-2xl z-50 flex flex-col items-center gap-1.5 pointer-events-none animate-in fade-in zoom-in-95 duration-100"
             style={{ minWidth: '130px' }}
           >
-            <span className="text-[9px] text-white font-semibold capitalize whitespace-nowrap">
+            <span className="text-[9px] text-foreground font-semibold capitalize whitespace-nowrap">
               {transitionName}
             </span>
             <TransitionPreviewTooltipCanvas transitionName={transitionName} />
@@ -261,7 +261,7 @@ export function TransitionTarget({
       <div className={`w-5 h-5 rounded-full border flex items-center justify-center shadow-md transition-all ${
         isDragOver
           ? 'bg-purple-600 border-purple-300 text-white scale-125'
-          : 'bg-[#252525] border-purple-500/60 text-purple-400 hover:text-white hover:scale-110 hover:border-purple-500'
+          : 'bg-secondary border-purple-500/60 text-purple-400 hover:text-foreground hover:scale-110 hover:border-purple-500'
       }`}>
         <Plus className="w-3.5 h-3.5" />
       </div>

@@ -90,15 +90,15 @@ export function TimelineTrackHeader({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onContextMenu={handleContextMenu}
-      className={`flex items-center px-2 border-b border-[#3e3e3e] ${
-        selectedTrackId === track.id ? 'bg-[#3e3e3e]' : ''
+      className={`flex items-center px-2 border-b border-border ${
+        selectedTrackId === track.id ? 'bg-accent' : ''
       }`}
       style={{ height: getTrackHeight(track) }}
       onClick={() => selectTrack(track.id)}
     >
       <div className="flex items-center gap-1 flex-1 min-w-0">
-        <GripVertical className="w-3 h-3 text-[#a0a0a0] shrink-0 cursor-grab" />
-        <span className="text-[11px] text-white font-medium truncate">{track.name}</span>
+        <GripVertical className="w-3 h-3 text-muted-foreground shrink-0 cursor-grab" />
+        <span className="text-[11px] text-foreground font-medium truncate">{track.name}</span>
         
         {track.subtitleVariants && Object.keys(track.subtitleVariants).length > 0 && (
           <select
@@ -120,7 +120,7 @@ export function TimelineTrackHeader({
               useEditorStore.setState({ tracks: newTracks });
             }}
             onClick={e => e.stopPropagation()}
-            className="ml-2 bg-[#2a2a2a] border border-[#3e3e3e] text-[10px] text-white rounded px-1 py-0.5 outline-none cursor-pointer"
+            className="ml-2 bg-secondary border border-border text-[10px] text-foreground rounded px-1 py-0.5 outline-none cursor-pointer"
           >
             {Object.keys(track.subtitleVariants).map(lang => (
               <option key={lang} value={lang}>{lang}</option>
@@ -156,7 +156,7 @@ export function TimelineTrackHeader({
           }}
           title={track.locked ? 'Unlock' : 'Lock'}
           className={`p-0.5 rounded transition-colors ${
-            track.locked ? 'text-amber-400' : 'text-[#a0a0a0] hover:text-white'
+            track.locked ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
           {track.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -172,7 +172,7 @@ export function TimelineTrackHeader({
             className={`p-0.5 rounded transition-all ${
               isRecordingVoiceover && recordingTrackId === track.id
                 ? 'bg-red-600 text-white animate-pulse shadow-lg shadow-red-600/35 scale-110'
-                : 'text-[#a0a0a0] hover:text-red-400'
+                : 'text-muted-foreground hover:text-red-400'
             }`}
           >
             <Mic className="w-3.5 h-3.5" />
@@ -187,7 +187,7 @@ export function TimelineTrackHeader({
             }}
             title={track.hidden ? 'Show Track' : 'Hide Track'}
             className={`p-0.5 rounded transition-colors ${
-              track.hidden ? 'text-red-400' : 'text-[#a0a0a0] hover:text-white'
+              track.hidden ? 'text-red-400' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {track.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
@@ -201,7 +201,7 @@ export function TimelineTrackHeader({
           }}
           title={track.muted ? 'Unmute Track' : 'Mute Track'}
           className={`p-0.5 rounded transition-colors ${
-            track.muted ? 'text-red-400' : 'text-[#a0a0a0] hover:text-white'
+            track.muted ? 'text-red-400' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
           {track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
@@ -214,7 +214,7 @@ export function TimelineTrackHeader({
               removeTrack(track.id);
             }}
             title="Remove track"
-            className="p-0.5 text-[#a0a0a0] hover:text-red-400 rounded transition-colors"
+            className="p-0.5 text-muted-foreground hover:text-red-400 rounded transition-colors"
           >
             <Trash2 className="w-3 h-3" />
           </button>

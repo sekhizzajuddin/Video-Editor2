@@ -254,24 +254,24 @@ export function ColorScopes({ canvasRef }: ColorScopesProps) {
 
   return (
     <div 
-      className={`absolute top-4 left-4 z-50 bg-[#1e1e1e]/95 backdrop-blur border border-[#3e3e3e] rounded-lg shadow-2xl flex flex-col overflow-hidden transition-all duration-300 ${isExpanded ? 'w-[800px] h-[500px]' : 'w-[320px] h-[400px]'}`}
+      className={`absolute top-4 left-4 z-50 bg-card/95 backdrop-blur border border-border rounded-lg shadow-2xl flex flex-col overflow-hidden transition-all duration-300 ${isExpanded ? 'w-[800px] h-[500px]' : 'w-[320px] h-[400px]'}`}
     >
       {/* Header */}
-      <div className="h-10 bg-[#252525] border-b border-[#3e3e3e] flex items-center justify-between px-3 shrink-0">
-        <div className="flex items-center gap-2 text-white">
+      <div className="h-10 bg-secondary border-b border-border flex items-center justify-between px-3 shrink-0">
+        <div className="flex items-center gap-2 text-foreground">
           <Settings2 className="w-4 h-4 text-amber-500" />
           <span className="text-xs font-medium">Color Scopes</span>
         </div>
         <div className="flex items-center gap-1">
           <button 
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 hover:bg-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white transition-colors"
+            className="p-1.5 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
           >
             {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
           <button 
             onClick={() => setShowScopes(false)}
-            className="p-1.5 hover:bg-red-500/20 rounded text-[#a0a0a0] hover:text-red-400 transition-colors"
+            className="p-1.5 hover:bg-red-500/20 rounded text-muted-foreground hover:text-red-400 transition-colors"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -280,13 +280,13 @@ export function ColorScopes({ canvasRef }: ColorScopesProps) {
 
       {/* Tabs */}
       {!isExpanded && (
-        <div className="flex border-b border-[#3e3e3e] shrink-0">
+        <div className="flex border-b border-border shrink-0">
           {(['all', 'vectorscope', 'waveform', 'parade'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveScope(tab)}
               className={`flex-1 py-1.5 text-[10px] uppercase font-semibold transition-colors ${
-                activeScope === tab ? 'bg-amber-500/10 text-amber-500 border-b-2 border-amber-500' : 'text-[#a0a0a0] hover:text-[#d0d0d0]'
+                activeScope === tab ? 'bg-amber-500/10 text-amber-500 border-b-2 border-amber-500' : 'text-muted-foreground hover:text-foreground/80'
               }`}
             >
               {tab}
@@ -299,8 +299,8 @@ export function ColorScopes({ canvasRef }: ColorScopesProps) {
       <div className={`flex-1 p-2 gap-2 overflow-hidden ${isExpanded ? 'flex flex-row' : 'flex flex-col'}`}>
         
         {(activeScope === 'vectorscope' || activeScope === 'all') && (
-          <div className="flex-1 flex flex-col bg-black rounded border border-[#3e3e3e] overflow-hidden">
-            <div className="text-[10px] text-[#a0a0a0] px-2 py-1 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">Vectorscope (Cb/Cr)</div>
+          <div className="flex-1 flex flex-col bg-black rounded border border-border overflow-hidden">
+            <div className="text-[10px] text-muted-foreground px-2 py-1 bg-background border-b border-border shrink-0">Vectorscope (Cb/Cr)</div>
             <div className="flex-1 relative flex items-center justify-center p-2">
               <canvas ref={vscopeRef} width={200} height={200} className="max-w-full max-h-full object-contain" />
             </div>
@@ -308,8 +308,8 @@ export function ColorScopes({ canvasRef }: ColorScopesProps) {
         )}
 
         {(activeScope === 'waveform' || activeScope === 'all') && (
-          <div className="flex-1 flex flex-col bg-black rounded border border-[#3e3e3e] overflow-hidden">
-            <div className="text-[10px] text-[#a0a0a0] px-2 py-1 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">Luma Waveform</div>
+          <div className="flex-1 flex flex-col bg-black rounded border border-border overflow-hidden">
+            <div className="text-[10px] text-muted-foreground px-2 py-1 bg-background border-b border-border shrink-0">Luma Waveform</div>
             <div className="flex-1 relative flex items-center justify-center p-2">
               <canvas ref={waveRef} width={256} height={144} className="max-w-full max-h-full object-contain w-full" />
             </div>
@@ -317,8 +317,8 @@ export function ColorScopes({ canvasRef }: ColorScopesProps) {
         )}
 
         {(activeScope === 'parade' || activeScope === 'all') && (
-          <div className="flex-1 flex flex-col bg-black rounded border border-[#3e3e3e] overflow-hidden">
-            <div className="text-[10px] text-[#a0a0a0] px-2 py-1 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0 flex justify-between">
+          <div className="flex-1 flex flex-col bg-black rounded border border-border overflow-hidden">
+            <div className="text-[10px] text-muted-foreground px-2 py-1 bg-background border-b border-border shrink-0 flex justify-between">
               <span>RGB Parade</span>
               <span className="flex gap-4">
                 <span className="text-red-400">R</span>

@@ -99,10 +99,10 @@ export function FloatingScrubTooltip({
   return (
     <div
       ref={containerRef}
-      className="absolute z-50 bg-[#141414]/95 text-amber-400 text-[10px] font-bold px-2 py-1 rounded border border-[#3e3e3e] shadow-2xl pointer-events-none -translate-x-1/2 flex items-center gap-1.5"
+      className="absolute z-50 bg-background/95 text-amber-400 text-[10px] font-bold px-2 py-1 rounded border border-border shadow-2xl pointer-events-none -translate-x-1/2 flex items-center gap-1.5"
       style={{ top: `${RULER_HEIGHT + 6}px` }}
     >
-      <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#141414] border-t border-l border-[#3e3e3e] rotate-45" />
+      <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-background border-t border-l border-border rotate-45" />
       <span ref={textRef} className="relative z-10 tabular-nums"></span>
     </div>
   );

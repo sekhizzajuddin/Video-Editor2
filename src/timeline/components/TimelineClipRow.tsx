@@ -185,7 +185,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
           }}
           title={`${clip.transitionIn.name} Transition (Click to edit)`}
         >
-          <span className="text-[8px] text-white font-semibold rotate-90 whitespace-nowrap opacity-80 pointer-events-none">
+          <span className="text-[8px] text-foreground font-semibold rotate-90 whitespace-nowrap opacity-80 pointer-events-none">
             {clip.transitionIn.name}
           </span>
         </div>
@@ -387,7 +387,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             PIP
           </div>
         )}
-        <div className="absolute bottom-0.5 right-1 flex items-center gap-1 text-[8px] text-white/50 tabular-nums select-none">
+        <div className="absolute bottom-0.5 right-1 flex items-center gap-1 text-[8px] text-foreground/50 tabular-nums select-none">
           {clip.speedRamp && clip.speedRamp.length >= 2 ? (
             <span className="bg-amber-500/20 text-amber-300 px-1 py-px rounded-sm font-semibold">Ramped</span>
           ) : clip.speed !== 1.0 ? (
@@ -518,8 +518,8 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
   return (
     <div
       data-track-id={track.id}
-      className={`relative border-b border-[#3e3e3e] transition-colors group ${
-        hoveredTrackId === track.id ? 'bg-[#3e3e3e]/30' : ''
+      className={`relative border-b border-border transition-colors group ${
+        hoveredTrackId === track.id ? 'bg-accent/30' : ''
       }`}
       style={{ height: getTrackHeight(track) }}
       onDragOver={(e) => handleDragOver(e, track.id)}
@@ -570,7 +570,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
       }}
     >
       {/* Faint track type label */}
-      <div className="absolute left-1 top-1 text-[8px] text-[#a0a0a0] opacity-30 uppercase select-none">
+      <div className="absolute left-1 top-1 text-[8px] text-muted-foreground opacity-30 uppercase select-none">
         {track.type}
       </div>
 

@@ -59,11 +59,11 @@ export function presetToTextAnimationPatch(preset?: string): { animation?: ClipT
 
 export const TEXT_TEMPLATES: TextTemplatePreset[] = [
   // ── Headings & Subtitles (1-6) ──
-  { name: 'Heading Large', style: 'text-3xl font-bold text-white', settings: { fontSize: 56, bold: true, fontFamily: 'Inter', color: '#ffffff' } },
-  { name: 'Heading Medium', style: 'text-2xl font-bold text-white', settings: { fontSize: 40, bold: true, fontFamily: 'Inter', color: '#ffffff' } },
+  { name: 'Heading Large', style: 'text-3xl font-bold text-foreground', settings: { fontSize: 56, bold: true, fontFamily: 'Inter', color: '#ffffff' } },
+  { name: 'Heading Medium', style: 'text-2xl font-bold text-foreground', settings: { fontSize: 40, bold: true, fontFamily: 'Inter', color: '#ffffff' } },
   { name: 'Subtitle Large', style: 'text-xl font-medium text-gray-300', settings: { fontSize: 32, bold: false, fontFamily: 'Inter', color: '#cbd5e1' } },
   { name: 'Subtitle Small', style: 'text-lg font-normal text-gray-400', settings: { fontSize: 24, bold: false, fontFamily: 'Inter', color: '#94a3b8' } },
-  { name: 'Body Text', style: 'text-sm font-normal text-white', settings: { fontSize: 18, bold: false, fontFamily: 'Inter', color: '#ffffff' } },
+  { name: 'Body Text', style: 'text-sm font-normal text-foreground', settings: { fontSize: 18, bold: false, fontFamily: 'Inter', color: '#ffffff' } },
   { name: 'Caption', style: 'text-xs text-gray-400 italic', settings: { fontSize: 14, italic: true, fontFamily: 'Inter', color: '#94a3b8' } },
 
   // ── Vibrant Colors (7-16) ──
@@ -88,17 +88,17 @@ export const TEXT_TEMPLATES: TextTemplatePreset[] = [
   { name: 'White Box', style: 'px-2 py-0.5 bg-white text-black font-bold rounded text-sm', settings: { fontSize: 24, bold: true, color: '#000000', backgroundColor: '#ffffff', fontFamily: 'Inter' } },
   { name: 'Purple Badge', style: 'px-2 py-0.5 bg-purple-600 text-white font-bold rounded-full text-sm', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#9333ea', fontFamily: 'Inter' } },
   { name: 'Orange Tag', style: 'px-2 py-0.5 bg-orange-500 text-white font-bold rounded text-sm', settings: { fontSize: 24, bold: true, color: '#ffffff', backgroundColor: '#f97316', fontFamily: 'Inter' } },
-  { name: 'Teal Bordered', style: 'px-2 py-0.5 border border-teal-400 text-teal-400 rounded bg-[#1e1e1e] text-sm', settings: { fontSize: 24, color: '#2dd4bf', backgroundColor: '#1e1e1e', strokeColor: '#2dd4bf', strokeWidth: 1, fontFamily: 'Inter' } },
+  { name: 'Teal Bordered', style: 'px-2 py-0.5 border border-teal-400 text-teal-400 rounded bg-card text-sm', settings: { fontSize: 24, color: '#2dd4bf', backgroundColor: '#1e1e1e', strokeColor: '#2dd4bf', strokeWidth: 1, fontFamily: 'Inter' } },
 
   // ── Shadows & Outlines (27-34) ──
-  { name: 'Deep Drop Shadow', style: 'text-xl font-bold text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.9)]', settings: { fontSize: 32, bold: true, color: '#ffffff', shadow: true, shadowColor: '#000000', shadowBlur: 12, fontFamily: 'Inter' } },
+  { name: 'Deep Drop Shadow', style: 'text-xl font-bold text-foreground drop-shadow-[0_4px_12px_rgba(0,0,0,0.9)]', settings: { fontSize: 32, bold: true, color: '#ffffff', shadow: true, shadowColor: '#000000', shadowBlur: 12, fontFamily: 'Inter' } },
   { name: 'Neon Pink Glow', style: 'text-xl font-bold text-pink-500 drop-shadow-[0_4px_10px_rgba(244,63,94,0.8)]', settings: { fontSize: 32, bold: true, color: '#ec4899', shadow: true, shadowColor: '#f43f5e', shadowBlur: 10, fontFamily: 'Inter' } },
   { name: 'Cyan Glow', style: 'text-xl font-bold text-cyan-400 drop-shadow-[0_4px_10px_rgba(6,182,212,0.8)]', settings: { fontSize: 32, bold: true, color: '#22d3ee', shadow: true, shadowColor: '#06b6d4', shadowBlur: 10, fontFamily: 'Inter' } },
   { name: 'Golden Glow', style: 'text-xl font-bold text-[#d4af37] drop-shadow-[0_4px_10px_rgba(212,175,55,0.8)]', settings: { fontSize: 32, bold: true, color: '#d4af37', shadow: true, shadowColor: '#d4af37', shadowBlur: 10, fontFamily: 'Inter' } },
-  { name: 'White Outline', style: 'text-xl font-black text-white stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#ffffff', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Inter' } },
+  { name: 'White Outline', style: 'text-xl font-black text-foreground stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#ffffff', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Inter' } },
   { name: 'Outline Yellow', style: 'text-xl font-black text-yellow-400 stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#facc15', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Inter' } },
-  { name: 'Ghost White', style: 'text-lg font-bold text-white/40 border border-white/20 px-2 py-0.5 bg-transparent', settings: { fontSize: 24, bold: true, color: 'rgba(255,255,255,0.4)', fontFamily: 'Inter' } },
-  { name: 'Chunky Shadow', style: 'text-xl font-extrabold text-white [text-shadow:2px_2px_0_#000]', settings: { fontSize: 32, bold: true, color: '#ffffff', shadow: true, shadowColor: '#000000', shadowBlur: 1, fontFamily: 'Inter' } },
+  { name: 'Ghost White', style: 'text-lg font-bold text-foreground/40 border border-white/20 px-2 py-0.5 bg-transparent', settings: { fontSize: 24, bold: true, color: 'rgba(255,255,255,0.4)', fontFamily: 'Inter' } },
+  { name: 'Chunky Shadow', style: 'text-xl font-extrabold text-foreground [text-shadow:2px_2px_0_#000]', settings: { fontSize: 32, bold: true, color: '#ffffff', shadow: true, shadowColor: '#000000', shadowBlur: 1, fontFamily: 'Inter' } },
 
   // ── Presets & Fonts (35-40) ──
   { name: 'Typewriter Green', style: 'text-lg font-mono text-green-400', settings: { fontSize: 28, color: '#4ade80', fontFamily: 'Courier New', animationPreset: 'typewriter' } },
@@ -115,7 +115,7 @@ export const TEXT_TEMPLATES: TextTemplatePreset[] = [
   { name: 'Twitch Live', style: 'px-2 py-0.5 bg-[#9146ff] text-white font-bold uppercase rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#9146ff', fontFamily: 'Inter' } },
   { name: 'Facebook Like', style: 'px-2 py-0.5 bg-[#1877f2] text-white font-bold rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#1877f2', fontFamily: 'Inter' } },
   { name: 'LinkedIn Connect', style: 'px-2 py-0.5 bg-[#0a66c2] text-white font-bold rounded-lg text-[10px]', settings: { fontSize: 22, bold: true, color: '#ffffff', backgroundColor: '#0a66c2', fontFamily: 'Inter' } },
-  { name: 'Meme Text Bottom', style: 'text-xl font-extrabold text-white uppercase stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#ffffff', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Impact' } },
+  { name: 'Meme Text Bottom', style: 'text-xl font-extrabold text-foreground uppercase stroke-black stroke-[0.5px]', settings: { fontSize: 32, bold: true, color: '#ffffff', strokeColor: '#000000', strokeWidth: 2, fontFamily: 'Impact' } },
   { name: 'Comic Style', style: 'text-xl font-extrabold text-yellow-300 italic drop-shadow-[1px_1px_0_#000]', settings: { fontSize: 32, bold: true, color: '#fde047', italic: true, shadow: true, shadowColor: '#000000', shadowBlur: 1, fontFamily: 'Inter' } },
   { name: 'Glitch Cyber', style: 'text-xl font-black text-cyan-300 tracking-wide', settings: { fontSize: 32, bold: true, color: '#67e8f9', fontFamily: 'Oswald' } },
   { name: 'Bubble Caption', style: 'px-2 py-0.5 bg-[#f8fafc] text-[#0f172a] rounded-lg border border-[#cbd5e1] text-[10px]', settings: { fontSize: 22, color: '#0f172a', backgroundColor: '#f8fafc', fontFamily: 'Inter' } },

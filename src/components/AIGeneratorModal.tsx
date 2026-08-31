@@ -217,14 +217,14 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl w-full max-w-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-background border border-border rounded-xl w-full max-w-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[#2a2a2a] bg-[#1a1a1a]">
+        <div className="flex items-center justify-between p-4 border-b border-border bg-background">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-amber-500" />
-            <h2 className="text-sm font-semibold text-white">AI Video & Image Generation (OpenRouter)</h2>
+            <h2 className="text-sm font-semibold text-foreground">AI Video & Image Generation (OpenRouter)</h2>
           </div>
-          <button onClick={onClose} className="p-1 text-[#6a6a6a] hover:text-white rounded transition-colors hover:bg-white/10">
+          <button onClick={onClose} className="p-1 text-muted-foreground/70 hover:text-foreground rounded transition-colors hover:bg-white/10">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -232,16 +232,16 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
         <div className="p-4 flex flex-col gap-4 overflow-y-auto max-h-[70vh]">
           {/* Model Selection */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-[#a0a0a0]">Select AI Model</label>
+            <label className="text-xs font-medium text-muted-foreground">Select AI Model</label>
             {loadingModels ? (
-              <div className="h-9 flex items-center px-3 border border-[#3e3e3e] rounded text-xs text-[#a0a0a0] bg-[#1e1e1e]">
+              <div className="h-9 flex items-center px-3 border border-border rounded text-xs text-muted-foreground bg-card">
                 <Loader2 className="w-3 h-3 animate-spin mr-2" /> Loading models...
               </div>
             ) : (
               <select
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white focus:border-amber-500 outline-none"
+                className="w-full bg-card border border-border rounded px-3 py-2 text-xs text-foreground focus:border-amber-500 outline-none"
               >
                 {models.length === 0 && <option disabled>No models found (Check API Key)</option>}
                 {models.map(m => {
@@ -259,7 +259,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
 
           {/* Custom Model ID */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-[#a0a0a0]">Or Custom Model ID (Overrides Dropdown)</label>
+            <label className="text-xs font-medium text-muted-foreground">Or Custom Model ID (Overrides Dropdown)</label>
             <input
               type="text"
               placeholder="e.g., kwaivgi/kling-v3.0-pro"
@@ -268,26 +268,26 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
                 setCustomModelId(e.target.value);
                 localStorage.setItem('openRouterCustomModelId', e.target.value);
               }}
-              className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white focus:border-amber-500 outline-none"
+              className="w-full bg-card border border-border rounded px-3 py-2 text-xs text-foreground focus:border-amber-500 outline-none"
             />
           </div>
 
           {/* Reference Image */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-[#a0a0a0]">Reference Image URL (Optional)</label>
+            <label className="text-xs font-medium text-muted-foreground">Reference Image URL (Optional)</label>
             <input
               type="text"
               placeholder="https://example.com/image.jpg"
               value={referenceUrl}
               onChange={(e) => setReferenceUrl(e.target.value)}
-              className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded px-3 py-2 text-xs text-white focus:border-amber-500 outline-none"
+              className="w-full bg-card border border-border rounded px-3 py-2 text-xs text-foreground focus:border-amber-500 outline-none"
             />
           </div>
 
           {/* Prompt */}
           <div className="flex flex-col gap-1.5 relative">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-[#a0a0a0]">Prompt</label>
+              <label className="text-xs font-medium text-muted-foreground">Prompt</label>
               <button
                 onClick={handleEnhancePrompt}
                 disabled={isEnhancing || !prompt}
@@ -301,13 +301,13 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
               placeholder="A cinematic shot of a cyberpunk city at night with neon lights..."
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              className="w-full bg-[#1e1e1e] border border-[#3e3e3e] rounded p-3 text-xs text-white focus:border-amber-500 outline-none min-h-[100px] resize-y"
+              className="w-full bg-card border border-border rounded p-3 text-xs text-foreground focus:border-amber-500 outline-none min-h-[100px] resize-y"
             />
           </div>
 
           {/* Result / Progress Area */}
           {aiVideoIsGenerating && (
-            <div className="flex flex-col items-center justify-center py-12 px-6 border-2 border-dashed border-[#333333] rounded-lg bg-[#1A1A1A]">
+            <div className="flex flex-col items-center justify-center py-12 px-6 border-2 border-dashed border-border rounded-lg bg-background">
               <Loader2 className="w-10 h-10 text-amber-500 animate-spin mb-4" />
               <div className="text-sm font-medium mb-2 text-center">Generating your masterpiece...</div>
               <div className="w-full max-w-xs bg-black rounded-full h-2 mb-2 overflow-hidden relative">
@@ -316,12 +316,12 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
                   style={{ width: `${aiVideoProgress}%` }}
                 ></div>
               </div>
-              <div className="text-xs text-[#888888]">{Math.round(aiVideoProgress)}%</div>
+              <div className="text-xs text-muted-foreground">{Math.round(aiVideoProgress)}%</div>
             </div>
           )}
 
           {aiVideoResultUrl && !aiVideoIsGenerating && (
-            <div className="flex flex-col gap-4 border border-[#333333] rounded-lg p-2 bg-[#1A1A1A]">
+            <div className="flex flex-col gap-4 border border-border rounded-lg p-2 bg-background">
               <div className="relative aspect-video rounded overflow-hidden bg-black group">
                 {aiVideoResultUrl.includes('.mp4') || selectedModel.includes('video') ? (
                   <video 
@@ -355,7 +355,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
                       });
                       toast.success('Added to Media Library');
                     }}
-                    className="px-4 py-2 bg-[#333333] hover:bg-[#444444] text-white text-xs font-medium rounded flex items-center justify-center gap-2 transition-colors"
+                    className="px-4 py-2 bg-accent hover:bg-border text-foreground text-xs font-medium rounded flex items-center justify-center gap-2 transition-colors"
                   >
                     <Plus className="w-3 h-3" /> Add to Library
                   </button>
@@ -364,7 +364,7 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
                     download
                     target="_blank"
                     rel="noreferrer"
-                    className="px-4 py-2 border border-[#333333] hover:bg-[#333333] text-white text-xs font-medium rounded flex items-center justify-center gap-2 transition-colors"
+                    className="px-4 py-2 border border-border hover:bg-accent text-foreground text-xs font-medium rounded flex items-center justify-center gap-2 transition-colors"
                   >
                     <Download className="w-3 h-3" /> Download
                   </a>
@@ -382,10 +382,10 @@ export function AIGeneratorModal({ onClose }: AIGeneratorModalProps) {
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-[#2a2a2a] bg-[#1a1a1a] flex justify-end gap-2">
+        <div className="p-4 border-t border-border bg-background flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium text-[#a0a0a0] hover:text-white transition-colors"
+            className="px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
             Close
           </button>

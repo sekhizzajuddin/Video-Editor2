@@ -73,18 +73,18 @@ export const AutoVideoPreviewTrimmer: React.FC<AutoVideoPreviewTrimmerProps> = (
           onClick={togglePlay}
           className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
         >
-          {isPlaying ? <Pause className="w-12 h-12 text-white" /> : <Play className="w-12 h-12 text-white fill-white" />}
+          {isPlaying ? <Pause className="w-12 h-12 text-foreground" /> : <Play className="w-12 h-12 text-foreground fill-white" />}
         </button>
       </div>
 
-      <div className="flex flex-col gap-1 bg-[#1a1a1a] p-2 rounded border border-[#2a2a2a]">
-        <div className="flex items-center justify-between text-[10px] text-[#a0a0a0] mb-1">
+      <div className="flex flex-col gap-1 bg-background p-2 rounded border border-border">
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
           <span className="flex items-center gap-1"><Scissors className="w-3 h-3" /> Trim</span>
           <span>{trimStart.toFixed(1)}s - {trimEnd.toFixed(1)}s</span>
         </div>
         
         {/* Simple Dual Range Slider for Trimming */}
-        <div className="relative h-6 bg-[#111] rounded overflow-hidden flex items-center px-2">
+        <div className="relative h-6 bg-background rounded overflow-hidden flex items-center px-2">
           {/* Mini Waveform Visualization (Mock) */}
           <div className="absolute inset-0 flex items-center gap-[1px] px-2 opacity-30">
             {Array.from({ length: 40 }).map((_, i) => (

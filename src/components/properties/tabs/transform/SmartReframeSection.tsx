@@ -9,7 +9,7 @@ interface SmartReframeSectionProps {
 
 export function SmartReframeSection({ selectedClip, updateClip }: SmartReframeSectionProps) {
   return (
-    <div className="bg-[#1e1e1e] p-3 rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20">
+    <div className="bg-card p-3 rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20">
       <div className="flex items-center gap-2 mb-2">
         <div className="p-1.5 bg-cyan-500/20 rounded">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -21,8 +21,8 @@ export function SmartReframeSection({ selectedClip, updateClip }: SmartReframeSe
           </svg>
         </div>
         <div>
-          <h4 className="text-[11px] font-semibold text-white">Smart Reframe</h4>
-          <p className="text-[9px] text-[#a0a0a0]">Auto-track subject for 9:16</p>
+          <h4 className="text-[11px] font-semibold text-foreground">Smart Reframe</h4>
+          <p className="text-[9px] text-muted-foreground">Auto-track subject for 9:16</p>
         </div>
       </div>
       <button

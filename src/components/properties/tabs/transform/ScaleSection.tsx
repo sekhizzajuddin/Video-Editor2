@@ -29,10 +29,10 @@ export function ScaleSection({
   updateClip,
 }: ScaleSectionProps) {
   return (
-    <div className="bg-[#2d2d2d] rounded border border-[#3e3e3e]">
+    <div className="bg-popover rounded border border-border">
       <button
         onClick={() => toggleSection('scale')}
-        className="w-full flex items-center justify-between p-2.5 text-xs text-white group"
+        className="w-full flex items-center justify-between p-2.5 text-xs text-foreground group"
       >
         <span className="font-medium">Scale</span>
         <div className="flex items-center gap-2">
@@ -42,22 +42,22 @@ export function ScaleSection({
               setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
               scheduleSaveSnapshot();
             }}
-            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-accent rounded transition-all"
             title="Reset Scale"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-[#a0a0a0] hover:text-white" />
+            <RotateCcw className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
           </div>
           {collapsedSections['scale'] ? (
-            <ChevronRight className="w-3.5 h-3.5 text-[#a0a0a0]" />
+            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-[#a0a0a0]" />
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
           )}
         </div>
       </button>
       {!collapsedSections['scale'] && (
         <div className="px-2.5 pb-2.5 space-y-1.5">
           <div className="flex justify-between items-center">
-            <span className="text-[10px] text-[#a0a0a0]">Scale Multiplier</span>
+            <span className="text-[10px] text-muted-foreground">Scale Multiplier</span>
             <KeyframeControl
               propertyKey="transform.scale"
               value={getPropVal(selectedClip.transform.scale, 'transform.scale')}
@@ -113,10 +113,10 @@ export function ScaleSection({
                 setPropVal('transform.scale', 100, { transform: { ...selectedClip.transform, scale: 100 } });
                 scheduleSaveSnapshot();
               }}
-              className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
+              className="flex-1 h-1 bg-accent rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
             />
             <span 
-              className="text-[11px] text-white w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
+              className="text-[11px] text-foreground w-10 text-right cursor-pointer hover:text-amber-500 transition-colors"
               title="Click to cycle common values"
               onClick={() => {
                 const steps = [10, 25, 50, 75, 100, 150, 200, 300, 400];

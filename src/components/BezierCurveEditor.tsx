@@ -144,7 +144,7 @@ export const BezierCurveEditor: React.FC<BezierCurveEditorProps> = ({
         width={width}
         height={height}
         viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}
-        className="bg-[#1a1a1a] rounded-lg border border-[#3e3e3e]"
+        className="bg-background rounded-lg border border-border"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
@@ -341,7 +341,7 @@ export const BezierCurveEditor: React.FC<BezierCurveEditorProps> = ({
       </svg>
 
       {/* Value readout */}
-      <div className="flex gap-4 text-[10px] font-mono text-[#888]">
+      <div className="flex gap-4 text-[10px] font-mono text-muted-foreground">
         <span className="text-amber-500">
           CP1: ({cp1x.toFixed(3)}, {cp1y.toFixed(3)})
         </span>

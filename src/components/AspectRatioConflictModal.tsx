@@ -43,7 +43,7 @@ export function AspectRatioConflictModal() {
               <Layout className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-white">Aspect Ratio Mismatch</h3>
+              <h3 className="text-lg font-semibold text-foreground">Aspect Ratio Mismatch</h3>
               <p className="text-xs text-zinc-400">First video clip added to project</p>
             </div>
           </div>

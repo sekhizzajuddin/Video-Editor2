@@ -52,24 +52,24 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
   setTransparent,
 }) => {
   return (
-    <div className="bg-[#252525] border border-[#3e3e3e] rounded-xl p-4 space-y-4">
-      <div className="flex items-center justify-between border-b border-[#3e3e3e] pb-2">
+    <div className="bg-secondary border border-border rounded-xl p-4 space-y-4">
+      <div className="flex items-center justify-between border-b border-border pb-2">
         <div className="flex items-center gap-2">
           <Sliders className="w-4 h-4 text-amber-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-white">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground">
             Generation Settings
           </h3>
         </div>
 
         {/* Provider Toggle */}
-        <div className="flex items-center bg-[#1a1a1a] p-0.5 rounded-lg border border-[#3e3e3e]">
+        <div className="flex items-center bg-background p-0.5 rounded-lg border border-border">
           <button
             type="button"
             onClick={() => setProvider('gemini')}
             className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
               provider === 'gemini'
                 ? 'bg-amber-400 text-black font-semibold shadow-sm'
-                : 'text-[#a0a0a0] hover:text-white'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             Gemini
@@ -80,7 +80,7 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
             className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
               provider === 'groq'
                 ? 'bg-amber-400 text-black font-semibold shadow-sm'
-                : 'text-[#a0a0a0] hover:text-white'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             Groq
@@ -91,17 +91,17 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {/* Style Dropdown */}
         <div className="space-y-1">
-          <label className="text-xs text-[#a0a0a0] flex items-center gap-1.5">
+          <label className="text-xs text-muted-foreground flex items-center gap-1.5">
             <Palette className="w-3.5 h-3.5 text-amber-400/80" />
             Motion Style
           </label>
           <select
             value={style}
             onChange={(e) => setStyle(e.target.value)}
-            className="w-full bg-[#1a1a1a] border border-[#3e3e3e] rounded text-sm text-white px-2.5 py-1.5 focus:outline-none focus:border-amber-400 transition"
+            className="w-full bg-background border border-border rounded text-sm text-foreground px-2.5 py-1.5 focus:outline-none focus:border-amber-400 transition"
           >
             {STYLE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-[#1a1a1a] text-white">
+              <option key={opt.value} value={opt.value} className="bg-background text-foreground">
                 {opt.label}
               </option>
             ))}
@@ -110,17 +110,17 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
 
         {/* Layout Dropdown */}
         <div className="space-y-1">
-          <label className="text-xs text-[#a0a0a0] flex items-center gap-1.5">
+          <label className="text-xs text-muted-foreground flex items-center gap-1.5">
             <LayoutGrid className="w-3.5 h-3.5 text-amber-400/80" />
             Layout Composition
           </label>
           <select
             value={layout}
             onChange={(e) => setLayout(e.target.value)}
-            className="w-full bg-[#1a1a1a] border border-[#3e3e3e] rounded text-sm text-white px-2.5 py-1.5 focus:outline-none focus:border-amber-400 transition"
+            className="w-full bg-background border border-border rounded text-sm text-foreground px-2.5 py-1.5 focus:outline-none focus:border-amber-400 transition"
           >
             {LAYOUT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-[#1a1a1a] text-white">
+              <option key={opt.value} value={opt.value} className="bg-background text-foreground">
                 {opt.label}
               </option>
             ))}
@@ -129,7 +129,7 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
       </div>
 
       {/* Transparent overlay toggle — the whole point of the overlay pipeline */}
-      <div className="pt-1 border-t border-[#3e3e3e]/60">
+      <div className="pt-1 border-t border-border/60">
         <button
           type="button"
           onClick={() => setTransparent(!transparent)}
@@ -138,7 +138,7 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
         >
           <div
             className={`mt-0.5 w-9 h-5 shrink-0 rounded-full p-0.5 transition-colors ${
-              transparent ? 'bg-amber-400' : 'bg-[#3e3e3e]'
+              transparent ? 'bg-amber-400' : 'bg-accent'
             }`}
           >
             <div
@@ -148,11 +148,11 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
             />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 text-xs text-white font-medium">
+            <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
               <Droplet className="w-3.5 h-3.5 text-amber-400/80" />
               Transparent background
             </div>
-            <p className="text-[11px] text-[#808080] leading-snug mt-0.5">
+            <p className="text-[11px] text-muted-foreground/80 leading-snug mt-0.5">
               {transparent
                 ? 'Full-frame backdrops are stripped so the animation overlays your base video.'
                 : 'Keeps the AI-designed backdrop. Turn off only if you want a self-contained plate.'}
@@ -163,9 +163,9 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
 
       {/* Target Duration Slider (only in text mode) */}
       {mode === 'text' && (
-        <div className="space-y-1.5 pt-1 border-t border-[#3e3e3e]/60">
+        <div className="space-y-1.5 pt-1 border-t border-border/60">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-[#a0a0a0] flex items-center gap-1.5">
+            <span className="text-muted-foreground flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-amber-400/80" />
               Target Duration
             </span>
@@ -180,9 +180,9 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
             step={1}
             value={targetDuration}
             onChange={(e) => setTargetDuration(Number(e.target.value))}
-            className="w-full accent-amber-400 cursor-pointer h-1.5 bg-[#1a1a1a] rounded-lg appearance-none"
+            className="w-full accent-amber-400 cursor-pointer h-1.5 bg-background rounded-lg appearance-none"
           />
-          <div className="flex justify-between text-[10px] text-[#606060]">
+          <div className="flex justify-between text-[10px] text-muted-foreground/70">
             <span>5s</span>
             <span>15s</span>
             <span>30s</span>
@@ -191,8 +191,8 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
       )}
 
       {/* Custom Prompt */}
-      <div className="space-y-1 pt-1 border-t border-[#3e3e3e]/60">
-        <label className="text-xs text-[#a0a0a0] flex items-center gap-1.5">
+      <div className="space-y-1 pt-1 border-t border-border/60">
+        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-amber-400/80" />
           Custom Instructions / Prompt
         </label>
@@ -201,7 +201,7 @@ export const MotionStyleControls: React.FC<MotionStyleControlsProps> = ({
           onChange={(e) => setCustomPrompt(e.target.value)}
           placeholder='Additional instructions... e.g. "use red and black colors only", "add 3D bounce"'
           rows={2}
-          className="w-full bg-[#1a1a1a] border border-[#3e3e3e] rounded text-sm text-white placeholder-[#606060] p-2.5 resize-none focus:outline-none focus:border-amber-400 transition"
+          className="w-full bg-background border border-border rounded text-sm text-foreground placeholder:text-muted-foreground/70 p-2.5 resize-none focus:outline-none focus:border-amber-400 transition"
         />
       </div>
     </div>

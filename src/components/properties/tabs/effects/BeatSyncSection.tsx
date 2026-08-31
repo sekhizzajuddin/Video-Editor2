@@ -50,7 +50,7 @@ export function BeatSyncSection({ selectedClip }: BeatSyncSectionProps) {
             <Music2 className="w-3.5 h-3.5" />
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-white">Auto Beat Sync & Detection</h4>
+            <h4 className="text-xs font-semibold text-foreground">Auto Beat Sync & Detection</h4>
             <p className="text-[9px] text-[#90b8b8]">Detects music tempo & marks snap points on timeline</p>
           </div>
         </div>

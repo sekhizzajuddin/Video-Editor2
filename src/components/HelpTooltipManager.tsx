@@ -99,7 +99,7 @@ export const HelpTooltipManager: React.FC = () => {
       }}
     >
       <HelpCircle className="w-4 h-4 text-amber-500" />
-      <span className="text-xs text-white font-medium tracking-wide">Press F1 for Help</span>
+      <span className="text-xs text-foreground font-medium tracking-wide">Press F1 for Help</span>
     </div>
   );
 };

@@ -39,7 +39,7 @@ export function AISFXSection({
             <Volume2 className="w-3.5 h-3.5" />
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-white">AI SFX & Sound Designer</h4>
+            <h4 className="text-xs font-semibold text-foreground">AI SFX & Sound Designer</h4>
             <p className="text-[9px] text-[#e0c090]">Auto-generates & layers sound effects to visual cues</p>
           </div>
         </div>

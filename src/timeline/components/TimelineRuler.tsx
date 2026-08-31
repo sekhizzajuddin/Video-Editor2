@@ -72,7 +72,7 @@ export const TimelineGridLines = React.memo(function TimelineGridLines({
       {visibleMarkers.map((m, i) => (
         <div
           key={`g-${i}-${m.time}`}
-          className="absolute top-0 bottom-0 w-px bg-[#3e3e3e]/30 pointer-events-none"
+          className="absolute top-0 bottom-0 w-px bg-accent/30 pointer-events-none"
           style={{ left: `${m.time * zoomLevel}px` }}
         />
       ))}
@@ -141,7 +141,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   return (
     <div
       ref={rulerContainerRef}
-      className="procut-timeline-ruler bg-[#2d2d2d] border-b border-[#3e3e3e] relative overflow-hidden shrink-0 cursor-pointer select-none"
+      className="procut-timeline-ruler bg-popover border-b border-border relative overflow-hidden shrink-0 cursor-pointer select-none"
       style={{ height: RULER_HEIGHT, touchAction: 'none' }}
       onPointerDown={handleRulerPointerDown}
       onDoubleClick={handleDoubleClick}
@@ -173,7 +173,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
                 style={{ height, backgroundColor: color }}
               />
               {tick.label && (
-                <span className="absolute left-1 top-0 text-[8px] text-[#8a8a8a] select-none font-mono">
+                <span className="absolute left-1 top-0 text-[8px] text-muted-foreground select-none font-mono">
                   {tick.label}
                 </span>
               )}
@@ -184,13 +184,13 @@ export const TimelineRuler = React.memo(function TimelineRuler({
         {/* Shading outside In/Out Points */}
         {inPoint !== null && (
           <div
-            className="absolute top-0 bottom-0 left-0 bg-black/35 border-r border-[#3e3e3e] pointer-events-none"
+            className="absolute top-0 bottom-0 left-0 bg-black/35 border-r border-border pointer-events-none"
             style={{ width: `${inPoint * zoomLevel}px` }}
           />
         )}
         {outPoint !== null && (
           <div
-            className="absolute top-0 bottom-0 bg-black/35 border-l border-[#3e3e3e] pointer-events-none"
+            className="absolute top-0 bottom-0 bg-black/35 border-l border-border pointer-events-none"
             style={{
               left: `${outPoint * zoomLevel}px`,
               right: 0,
@@ -240,7 +240,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
               }}
             >
               <div
-                className="absolute top-0.5 -translate-x-1/2 px-1 py-0.5 rounded text-[8px] font-bold text-white shadow-md flex items-center gap-0.5 border border-white/40 group-hover:scale-110 transition-transform"
+                className="absolute top-0.5 -translate-x-1/2 px-1 py-0.5 rounded text-[8px] font-bold text-foreground shadow-md flex items-center gap-0.5 border border-white/40 group-hover:scale-110 transition-transform"
                 style={{ backgroundColor: marker.color || cfg.color }}
               >
                 <span>{cfg.symbol}</span>
@@ -251,7 +251,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
                 style={{ backgroundColor: marker.color || cfg.color }}
               />
               {/* Hover Tooltip */}
-              <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-[#141414] border border-[#3e3e3e] text-[9px] text-white px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+              <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-background border border-border text-[9px] text-foreground px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
                 <span className="font-semibold text-amber-400 mr-1">[{cfg.label}]</span> {marker.name}
               </div>
             </div>

@@ -2840,13 +2840,13 @@ export function PreviewCanvasOverlay({
           style={{ right: 0 }}
         >
           <div
-            className={`flex flex-col bg-[#141414]/95 backdrop-blur-md border border-[#3e3e3e] border-r-0 rounded-l-xl shadow-2xl overflow-y-auto overflow-x-hidden max-h-[90vh] custom-scrollbar transition-all duration-200 ${
+            className={`flex flex-col bg-background/95 backdrop-blur-md border border-border border-r-0 rounded-l-xl shadow-2xl overflow-y-auto overflow-x-hidden max-h-[90vh] custom-scrollbar transition-all duration-200 ${
               imageEditorTool !== 'none' || true ? 'w-[90px]' : 'w-0 opacity-0'
             }`}
           >
             {/* SELECTION TOOLS */}
             <div className="px-2 pt-2 pb-1">
-              <span className="block text-center text-[8px] font-bold text-[#6a6a6a] uppercase tracking-widest mb-1.5">Select</span>
+              <span className="block text-center text-[8px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1.5">Select</span>
 
               <button
                 onClick={() => {
@@ -2857,7 +2857,7 @@ export function PreviewCanvasOverlay({
                 className={`w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 transition-all ${
                   imageEditorTool === 'magic'
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
-                    : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
+                    : 'text-foreground/70 hover:bg-secondary hover:text-foreground'
                 }`}
                 title="Magic Wand – auto-select region by color"
               >
@@ -2874,7 +2874,7 @@ export function PreviewCanvasOverlay({
                 className={`w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 transition-all ${
                   imageEditorTool === 'lasso'
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
-                    : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
+                    : 'text-foreground/70 hover:bg-secondary hover:text-foreground'
                 }`}
                 title="Lasso – draw freehand selection"
               >
@@ -2891,7 +2891,7 @@ export function PreviewCanvasOverlay({
                 className={`w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg transition-all ${
                   imageEditorTool === 'poly'
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
-                    : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
+                    : 'text-foreground/70 hover:bg-secondary hover:text-foreground'
                 }`}
                 title="Polygon – click points to draw polygon"
               >
@@ -2911,16 +2911,16 @@ export function PreviewCanvasOverlay({
               )}
             </div>
 
-            <div className="h-px bg-[#2e2e2e] mx-2 my-0.5" />
+            <div className="h-px bg-secondary mx-2 my-0.5" />
 
             {/* ACTION TOOLS */}
             <div className="px-2 pt-1 pb-2">
-              <span className="block text-center text-[8px] font-bold text-[#6a6a6a] uppercase tracking-widest mb-1.5">Action</span>
+              <span className="block text-center text-[8px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1.5">Action</span>
 
               <button
                 onClick={() => applyEditorAction('delete')}
                 disabled={selectionPath.length === 0 && !selectionMask}
-                className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 bg-red-600/80 hover:bg-red-500 disabled:bg-[#252525] disabled:text-[#555] text-white transition-all"
+                className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 bg-red-600/80 hover:bg-red-500 disabled:bg-secondary disabled:text-muted-foreground/60 text-white transition-all"
                 title="Delete – fill selection with black"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/></svg>
@@ -2930,7 +2930,7 @@ export function PreviewCanvasOverlay({
               <button
                 onClick={() => applyEditorAction('remove')}
                 disabled={selectionPath.length === 0 && !selectionMask}
-                className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 bg-gradient-to-b from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 disabled:from-[#252525] disabled:to-[#252525] disabled:text-[#555] text-white transition-all"
+                className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 bg-gradient-to-b from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 disabled:from-secondary disabled:to-secondary disabled:text-muted-foreground/60 text-white transition-all"
                 title="Remove – AI object removal (inpainting)"
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -2940,7 +2940,7 @@ export function PreviewCanvasOverlay({
               <button
                 onClick={() => applyEditorAction('erase')}
                 disabled={selectionPath.length === 0 && !selectionMask}
-                className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg bg-purple-700/80 hover:bg-purple-600 disabled:bg-[#252525] disabled:text-[#555] text-white transition-all"
+                className="w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg bg-purple-700/80 hover:bg-purple-600 disabled:bg-secondary disabled:text-muted-foreground/60 text-white transition-all"
                 title="Erase – make selection transparent"
               >
                 <Eraser className="w-3.5 h-3.5" />
@@ -2948,16 +2948,16 @@ export function PreviewCanvasOverlay({
               </button>
             </div>
 
-            <div className="h-px bg-[#2e2e2e] mx-2 my-0.5" />
+            <div className="h-px bg-secondary mx-2 my-0.5" />
 
             {/* TRANSFORM TOOLS */}
             <div className="px-2 pt-1 pb-2">
-              <span className="block text-center text-[8px] font-bold text-[#6a6a6a] uppercase tracking-widest mb-1.5">Canvas</span>
+              <span className="block text-center text-[8px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1.5">Canvas</span>
               <button
                 className={`w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg mb-1 transition-all ${
                   canvasTransformMode === 'resize'
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
-                    : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
+                    : 'text-foreground/70 hover:bg-secondary hover:text-foreground'
                 }`}
                 onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('resize'); setImageEditorTool('none'); }}
                 title="Transform Mode"
@@ -2969,7 +2969,7 @@ export function PreviewCanvasOverlay({
                 className={`w-full flex flex-col items-center gap-0.5 py-1.5 px-1 rounded-lg transition-all ${
                   canvasTransformMode === 'crop'
                     ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/50'
-                    : 'text-[#c0c0c0] hover:bg-[#252525] hover:text-white'
+                    : 'text-foreground/70 hover:bg-secondary hover:text-foreground'
                 }`}
                 onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('crop'); setImageEditorTool('none'); }}
                 title="Crop Mode"
@@ -2983,10 +2983,10 @@ export function PreviewCanvasOverlay({
       )}
 
       {mediaItem?.type !== 'image' && (
-        <div className="absolute top-4 right-4 bg-[#252525] border border-[#3e3e3e] rounded flex flex-col overflow-hidden shadow-lg pointer-events-auto z-10">
+        <div className="absolute top-4 right-4 bg-secondary border border-border rounded flex flex-col overflow-hidden shadow-lg pointer-events-auto z-10">
           <button
             className={`p-2 transition-colors ${
-              canvasTransformMode === 'resize' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+              canvasTransformMode === 'resize' ? 'bg-accent text-amber-500' : 'text-muted-foreground hover:text-foreground hover:bg-popover'
             }`}
             onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('resize'); }}
             title="Transform Mode"
@@ -2995,7 +2995,7 @@ export function PreviewCanvasOverlay({
           </button>
           <button
             className={`p-2 transition-colors ${
-              canvasTransformMode === 'crop' ? 'bg-[#3e3e3e] text-amber-500' : 'text-[#a0a0a0] hover:text-white hover:bg-[#2d2d2d]'
+              canvasTransformMode === 'crop' ? 'bg-accent text-amber-500' : 'text-muted-foreground hover:text-foreground hover:bg-popover'
             }`}
             onClick={(e) => { e.stopPropagation(); setCanvasTransformMode('crop'); }}
             title="Crop Mode"

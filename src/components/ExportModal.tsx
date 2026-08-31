@@ -162,16 +162,16 @@ export function ExportModal() {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
-      <div className="bg-[#2d2d2d] rounded-lg shadow-2xl w-full max-w-lg overflow-hidden border border-[#3e3e3e]">
+      <div className="bg-popover rounded-lg shadow-2xl w-full max-w-lg overflow-hidden border border-border">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
+        <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Download className="w-5 h-5 text-amber-400" />
-            <h2 className="text-sm font-semibold text-white">Export Video</h2>
+            <h2 className="text-sm font-semibold text-foreground">Export Video</h2>
           </div>
           <button
             onClick={() => exportState.phase === 'rendering' ? cancelExport() : setShowExportModal(false)}
-            className="p-1 text-[#a0a0a0] hover:text-white rounded transition-colors"
+            className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -180,35 +180,35 @@ export function ExportModal() {
         <div className="p-4 space-y-3">
           {/* Filename Input */}
           <div>
-            <label className="text-xs text-[#a0a0a0] block mb-1.5">Filename</label>
+            <label className="text-xs text-muted-foreground block mb-1.5">Filename</label>
             <div className="flex gap-2 items-center">
-              <Film className="w-4 h-4 text-[#606060] shrink-0" />
+              <Film className="w-4 h-4 text-muted-foreground/70 shrink-0" />
               <input
                 type="text"
                 disabled={!canEdit}
                 value={filename}
                 onChange={e => setFilename(e.target.value)}
                 placeholder="Enter filename..."
-                className="flex-1 bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 disabled:opacity-40 placeholder-[#606060]"
+                className="flex-1 bg-secondary text-foreground text-xs border border-border rounded px-3 py-2 focus:outline-none focus:border-amber-500 disabled:opacity-40 placeholder:text-muted-foreground/70"
               />
-              <span className="text-xs text-[#606060] shrink-0">.{format}</span>
+              <span className="text-xs text-muted-foreground/70 shrink-0">.{format}</span>
             </div>
           </div>
 
           {/* Output Folder */}
           <div>
-            <label className="text-xs text-[#a0a0a0] block mb-1.5">Save to</label>
+            <label className="text-xs text-muted-foreground block mb-1.5">Save to</label>
             <div className="flex gap-2 items-center">
               <div 
-                className="flex-1 bg-[#252525] text-xs border border-[#3e3e3e] rounded px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap"
+                className="flex-1 bg-secondary text-xs border border-border rounded px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap"
                 title={outputFolder || 'Desktop (default)'}
               >
-                <span className={outputFolder ? 'text-white' : 'text-[#606060]'}>{displayFolder}</span>
+                <span className={outputFolder ? 'text-foreground' : 'text-muted-foreground/70'}>{displayFolder}</span>
               </div>
               <button
                 disabled={!canEdit || isBrowsing}
                 onClick={handleBrowseFolder}
-                className="shrink-0 px-3 py-2 bg-[#353535] hover:bg-[#404040] text-[#a0a0a0] hover:text-white text-xs border border-[#3e3e3e] rounded transition-colors disabled:opacity-40 flex items-center gap-1.5"
+                className="shrink-0 px-3 py-2 bg-accent hover:bg-border text-muted-foreground hover:text-foreground text-xs border border-border rounded transition-colors disabled:opacity-40 flex items-center gap-1.5"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
                 {isBrowsing ? 'Picking...' : 'Browse'}
@@ -218,7 +218,7 @@ export function ExportModal() {
 
           {/* Resolution Selector */}
           <div>
-            <label className="text-xs text-[#a0a0a0] block mb-1.5">Resolution</label>
+            <label className="text-xs text-muted-foreground block mb-1.5">Resolution</label>
             <select
               disabled={!canEdit}
               value={selectedResolution.name}
@@ -226,7 +226,7 @@ export function ExportModal() {
                 const preset = Object.values(RESOLUTION_PRESETS).find(r => r.name === e.target.value);
                 if (preset) setSelectedResolution(preset);
               }}
-              className="w-full bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
+              className="w-full bg-secondary text-foreground text-xs border border-border rounded px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
             >
               {Object.values(RESOLUTION_PRESETS).map(res => (
                 <option key={res.name} value={res.name}>
@@ -239,8 +239,8 @@ export function ExportModal() {
           {/* Quality / compression selector */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-[#a0a0a0]">Quality &amp; file size</label>
-              <span className="text-[10px] text-[#707070]">
+              <label className="text-xs text-muted-foreground">Quality &amp; file size</label>
+              <span className="text-[10px] text-muted-foreground/70">
                 ~{(recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality) / 1_000_000).toFixed(1)} Mbps
               </span>
             </div>
@@ -253,20 +253,20 @@ export function ExportModal() {
                   className={`px-2 py-1.5 rounded text-[11px] capitalize border transition-colors ${
                     quality === level
                       ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                      : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white disabled:opacity-40'
+                      : 'bg-secondary border-border text-muted-foreground hover:text-foreground disabled:opacity-40'
                   }`}
                 >
                   {level}
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-[10px] text-[#666]">High is recommended for YouTube: sharp H.264 with a smaller upload.</p>
+            <p className="mt-1.5 text-[10px] text-muted-foreground/70">High is recommended for YouTube: sharp H.264 with a smaller upload.</p>
           </div>
 
           {/* FPS & Format Row */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[#a0a0a0] block mb-1.5">Frame Rate</label>
+              <label className="text-xs text-muted-foreground block mb-1.5">Frame Rate</label>
               <div className="flex gap-1.5">
                 {[24, 30, 60].map((f) => (
                   <button
@@ -276,7 +276,7 @@ export function ExportModal() {
                     className={`flex-1 px-2 py-1.5 rounded text-xs border transition-colors ${
                       fps === f
                         ? 'bg-amber-600/20 border-amber-500 text-amber-400'
-                        : 'bg-[#252525] border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-[#a0a0a0] disabled:opacity-40'
+                        : 'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-border disabled:opacity-40'
                     }`}
                   >
                     {f}fps
@@ -285,12 +285,12 @@ export function ExportModal() {
               </div>
             </div>
             <div>
-              <label className="text-xs text-[#a0a0a0] block mb-1.5">Format</label>
+              <label className="text-xs text-muted-foreground block mb-1.5">Format</label>
               <select 
                 disabled={!canEdit}
                 value={format} 
                 onChange={(e) => setFormat(e.target.value as any)}
-                className="w-full bg-[#252525] text-white text-xs border border-[#3e3e3e] rounded px-3 py-[7px] focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
+                className="w-full bg-secondary text-foreground text-xs border border-border rounded px-3 py-[7px] focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-40"
               >
                 <option value="mp4">MP4 (H.264)</option>
                 <option value="webm">WebM (VP9)</option>
@@ -301,19 +301,19 @@ export function ExportModal() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 text-[10px] text-[#707070]">
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500/80" />
             Hybrid decoding: HEVC/H.265 uses hardware; H.264, VP8 and VP9 use software
           </div>
 
           {/* Progress Display */}
           {isWorking && (
-            <div className="bg-[#252525] rounded p-4 border border-[#3e3e3e] space-y-3">
+            <div className="bg-secondary rounded p-4 border border-border space-y-3">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium text-amber-400">{getPhaseLabel(exportState.phase)}</span>
-                <span className="text-xs font-bold text-white">{exportState.progress.toFixed(1)}%</span>
+                <span className="text-xs font-bold text-foreground">{exportState.progress.toFixed(1)}%</span>
               </div>
-              <div className="w-full bg-[#1a1a1a] rounded-full h-2.5 overflow-hidden relative">
+              <div className="w-full bg-background rounded-full h-2.5 overflow-hidden relative">
                 <div 
                   className="bg-amber-500 h-2.5 rounded-full transition-all duration-500 ease-out" 
                   style={{ width: `${Math.max(exportState.progress, exportState.phase === 'preparing' ? 5 : exportState.phase === 'analyzing' ? 2 : 0)}%` }}
@@ -330,7 +330,7 @@ export function ExportModal() {
                   />
                 )}
               </div>
-              <div className="flex justify-between text-[10px] text-[#a0a0a0]">
+              <div className="flex justify-between text-[10px] text-muted-foreground">
                 {exportState.phase === 'rendering' ? (
                   <span>Frame {exportState.currentFrame} / {exportState.totalFrames}</span>
                 ) : (
@@ -370,7 +370,7 @@ export function ExportModal() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-2 p-4 border-t border-[#3e3e3e] bg-[#252525]/50">
+        <div className="flex items-center justify-end gap-2 p-4 border-t border-border bg-secondary/50">
           {exportState.phase === 'completed' ? (
             <>
               {exportState.savedViaRuntime && (
@@ -379,7 +379,7 @@ export function ExportModal() {
                   Saved to {outputFolder ? outputFolder.split(/[/\\]/).pop() : 'Desktop'}!
                 </span>
               )}
-              <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors">
+              <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 Close
               </button>
               {!exportState.savedViaRuntime && (
@@ -399,7 +399,7 @@ export function ExportModal() {
             </>
           ) : (
             <>
-              <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-[#a0a0a0] hover:text-white transition-colors">
+              <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 Cancel
               </button>
               <button onClick={handleExport} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded font-medium transition-colors">

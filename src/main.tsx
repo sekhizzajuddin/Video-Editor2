@@ -4,6 +4,11 @@ import { BrowserRouter } from 'react-router'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.tsx'
+import { applyTheme, getInitialTheme } from '@/utils/theme'
+
+// Ensure the theme class is set before the app renders (the inline script in
+// index.html already handles the first paint; this is a belt-and-braces call).
+applyTheme(getInitialTheme());
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

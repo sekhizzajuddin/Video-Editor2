@@ -270,15 +270,15 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
     if (state === 'running') return <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />;
     if (state === 'pass') return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />;
     if (state === 'fail') return <XCircle className="w-3.5 h-3.5 text-red-400" />;
-    return <span className="w-3.5 h-3.5 inline-block rounded-full border border-[#4a4a4a]" />;
+    return <span className="w-3.5 h-3.5 inline-block rounded-full border border-border" />;
   };
 
   return (
-    <div className="bg-[#1a1a1a] border border-[#3e3e3e] rounded-xl overflow-hidden">
+    <div className="bg-background border border-border rounded-xl overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-[#a0a0a0] hover:text-white transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
       >
         <span className="flex items-center gap-1.5">
           <Bug className="w-3.5 h-3.5" />
@@ -288,8 +288,8 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
       </button>
 
       {open && (
-        <div className="px-3 pb-3 space-y-2 border-t border-[#2d2d2d] pt-2">
-          <p className="text-[11px] text-[#808080] leading-snug">
+        <div className="px-3 pb-3 space-y-2 border-t border-border pt-2">
+          <p className="text-[11px] text-muted-foreground/80 leading-snug">
             Verifies every capability the overlay pipeline depends on, without an AI call.
           </p>
 
@@ -300,8 +300,8 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
                   <StatusIcon state={check.state} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-medium text-white">{check.label}</div>
-                  <div className="text-[10px] text-[#707070] leading-snug">{check.hint}</div>
+                  <div className="text-[11px] font-medium text-foreground">{check.label}</div>
+                  <div className="text-[10px] text-muted-foreground/70 leading-snug">{check.hint}</div>
                   {check.detail && (
                     <div
                       className={`text-[10px] mt-0.5 ${
@@ -323,7 +323,7 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
               loop
               muted
               playsInline
-              className="w-full rounded-lg border border-[#3e3e3e] bg-black aspect-video object-contain"
+              className="w-full rounded-lg border border-border bg-black aspect-video object-contain"
             />
           )}
 
@@ -332,7 +332,7 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
               type="button"
               onClick={runSelfTest}
               disabled={running}
-              className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold bg-[#252525] text-white border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold bg-secondary text-foreground border border-border hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
               {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bug className="w-3.5 h-3.5" />}
               {running ? 'Running…' : 'Run self-test'}
@@ -342,7 +342,7 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
               <button
                 type="button"
                 onClick={() => onLoadDemo(DEMO_SCENE_HTML)}
-                className="py-1.5 px-2.5 rounded-lg text-[11px] font-semibold bg-[#252525] text-[#a0a0a0] border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
+                className="py-1.5 px-2.5 rounded-lg text-[11px] font-semibold bg-secondary text-muted-foreground border border-border hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
                 title="Load the reference scene into the code editor"
               >
                 <Wand2 className="w-3.5 h-3.5" />
@@ -353,7 +353,7 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
             <button
               type="button"
               onClick={copyReport}
-              className="py-1.5 px-2.5 rounded-lg text-[11px] font-semibold bg-[#252525] text-[#a0a0a0] border border-[#3e3e3e] hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
+              className="py-1.5 px-2.5 rounded-lg text-[11px] font-semibold bg-secondary text-muted-foreground border border-border hover:border-amber-400 hover:text-amber-400 transition-colors flex items-center gap-1.5"
               title="Copy the full report (browser + every check) to the clipboard"
             >
               {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}

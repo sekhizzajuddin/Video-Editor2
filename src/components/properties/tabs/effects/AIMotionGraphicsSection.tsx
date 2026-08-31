@@ -70,7 +70,7 @@ export function AIMotionGraphicsSection({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-teal-400 animate-pulse" />
-          <span className="text-xs text-white font-semibold tracking-wide">AI Motion & Typography Gen</span>
+          <span className="text-xs text-foreground font-semibold tracking-wide">AI Motion & Typography Gen</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-teal-300 font-medium">Provider:</span>
@@ -120,7 +120,7 @@ export function AIMotionGraphicsSection({
         >
           <Type className="w-3.5 h-3.5 text-amber-400" />
           <span>Kinetic Typography</span>
-          {showKineticConfig ? <ChevronUp className="w-3 h-3 ml-0.5 text-teal-400" /> : <ChevronDown className="w-3 h-3 ml-0.5 text-[#888]" />}
+          {showKineticConfig ? <ChevronUp className="w-3 h-3 ml-0.5 text-teal-400" /> : <ChevronDown className="w-3 h-3 ml-0.5 text-muted-foreground" />}
         </button>
       </div>
 
@@ -138,7 +138,7 @@ export function AIMotionGraphicsSection({
 
           {/* Mode Selector (Word, Sentence, Hybrid) */}
           <div className="space-y-1">
-            <label className="block text-[10px] font-semibold text-white uppercase tracking-wider">
+            <label className="block text-[10px] font-semibold text-foreground uppercase tracking-wider">
               Animation Mode <span className="text-amber-400/90 lowercase font-normal">(required)</span>
             </label>
             <select
@@ -161,7 +161,7 @@ export function AIMotionGraphicsSection({
           {/* Typography Layout Selector (Row vs Column) */}
           {(typoMode === 'hybrid' || typoMode === 'sentence') && (
             <div className="space-y-1 animate-in fade-in pt-1 border-t border-teal-500/20 mt-2">
-              <label className="block text-[10px] font-semibold text-white uppercase tracking-wider">
+              <label className="block text-[10px] font-semibold text-foreground uppercase tracking-wider">
                 Typography Layout <span className="text-indigo-400 lowercase font-normal">(16:9 vs 9:16)</span>
               </label>
               <select

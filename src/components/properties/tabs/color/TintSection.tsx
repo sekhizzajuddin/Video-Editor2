@@ -16,7 +16,7 @@ export function TintSection({ tint, onChange, onReset }: TintSectionProps) {
       onChange={onChange}
       onReset={onReset}
       formatValue={(v) => v > 0 ? `+${v}` : `${v}`}
-      gradient="bg-gradient-to-r from-green-500 via-[#3e3e3e] to-purple-500"
+      gradient="bg-gradient-to-r from-green-500 via-accent to-purple-500"
     />
   );
 }

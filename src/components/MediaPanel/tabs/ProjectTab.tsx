@@ -19,9 +19,9 @@ export function ProjectTab({
 
 
             {/* Search & View Controls */}
-            <div className="p-2 border-b border-[#3e3e3e]">
+            <div className="p-2 border-b border-border">
               <div className="relative mb-2">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#a0a0a0]" />
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <label htmlFor="media-search" className="sr-only">Search media</label>
                 <input
                   id="media-search"
@@ -29,20 +29,20 @@ export function ProjectTab({
                   placeholder="Search media..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-[#1e1e1e] border border-[#3e3e3e] rounded text-xs text-white placeholder-[#a0a0a0] focus:outline-none focus:border-amber-500 transition-colors"
+                  className="w-full pl-8 pr-3 py-1.5 bg-card border border-border rounded text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-[#a0a0a0]">
+                  <span className="text-[10px] text-muted-foreground">
                     {filteredMedia.length} items
                   </span>
                 </div>
-                <div className="flex bg-[#1e1e1e] rounded border border-[#3e3e3e]">
+                <div className="flex bg-card rounded border border-border">
                   <button
                     onClick={() => setViewMode('grid')}
                     className={`p-1 rounded transition-colors ${
-                      viewMode === 'grid' ? 'bg-[#3e3e3e] text-white' : 'text-[#a0a0a0] hover:text-white'
+                      viewMode === 'grid' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     <Grid3X3 className="w-3 h-3" />
@@ -50,7 +50,7 @@ export function ProjectTab({
                   <button
                     onClick={() => setViewMode('list')}
                     className={`p-1 rounded transition-colors ${
-                      viewMode === 'list' ? 'bg-[#3e3e3e] text-white' : 'text-[#a0a0a0] hover:text-white'
+                      viewMode === 'list' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     <List className="w-3 h-3" />
@@ -66,7 +66,7 @@ export function ProjectTab({
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={importing}
-                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-amber-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  className="flex-1 py-2 border-2 border-dashed border-border rounded text-muted-foreground hover:text-foreground hover:border-amber-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
                   title="Import Video, Audio, or Image files"
                 >
                   {importing ? (
@@ -79,7 +79,7 @@ export function ProjectTab({
                 <button
                   onClick={() => srtInputRef.current?.click()}
                   disabled={importing}
-                  className="flex-1 py-2 border-2 border-dashed border-[#3e3e3e] rounded text-[#a0a0a0] hover:text-white hover:border-purple-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  className="flex-1 py-2 border-2 border-dashed border-border rounded text-muted-foreground hover:text-foreground hover:border-purple-500 text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
                   title="Import Subtitles (.srt file)"
                 >
                   <Type className="w-3 h-3 text-purple-400" />
@@ -90,7 +90,7 @@ export function ProjectTab({
                 <button
                   onClick={isRecordingScreen ? stopScreenRecord : startScreenRecord}
                   disabled={importing}
-                  className={`flex-1 py-2 border-2 ${isRecordingScreen ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-dashed border-[#3e3e3e] text-[#a0a0a0] hover:text-white hover:border-red-500'} rounded text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50`}
+                  className={`flex-1 py-2 border-2 ${isRecordingScreen ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-dashed border-border text-muted-foreground hover:text-white hover:border-red-500'} rounded text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50`}
                   title="Record Screen"
                 >
                   {isRecordingScreen ? <Square className="w-3 h-3 text-red-400" /> : <Monitor className="w-3 h-3 text-red-400" />}
@@ -147,7 +147,7 @@ export function ProjectTab({
               })()}
 
               {previewItem && (
-                <div className="mx-2 mb-2 p-2 bg-[#252525] border border-[#3e3e3e] rounded flex flex-col gap-2 relative">
+                <div className="mx-2 mb-2 p-2 bg-secondary border border-border rounded flex flex-col gap-2 relative">
                   <div className="relative aspect-video bg-black flex items-center justify-center rounded overflow-hidden">
                     {previewItem.type === 'video' && previewItem.url && previewItem.url !== 'PENDING_RESTORE' && (
                       <video
@@ -175,7 +175,7 @@ export function ProjectTab({
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="px-1 py-0.5 text-[10px] text-[#a0a0a0] truncate font-medium flex justify-between items-center">
+                  <div className="px-1 py-0.5 text-[10px] text-muted-foreground truncate font-medium flex justify-between items-center">
                     <span className="truncate flex-1 pr-2">{previewItem.name}</span>
                     <span className="shrink-0">{formatDuration(previewItem.duration)}</span>
                   </div>
@@ -183,7 +183,7 @@ export function ProjectTab({
               )}
 
               {filteredMedia.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-[#a0a0a0]">
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                   <Film className="w-10 h-10 mb-3 opacity-20" />
                   <p className="text-xs font-medium">No media yet</p>
                   <p className="text-[10px] mt-1.5 text-center px-4">
@@ -211,7 +211,7 @@ export function ProjectTab({
                         {media.type === 'video' && (
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                             <div className="w-7 h-7 bg-black/60 rounded-full flex items-center justify-center backdrop-blur-sm">
-                              <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="white" />
+                              <Play className="w-3.5 h-3.5 text-foreground ml-0.5" fill="white" />
                             </div>
                           </div>
                         )}
@@ -224,7 +224,7 @@ export function ProjectTab({
                           }}
                           className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/80 transition-all"
                         >
-                          <X className="w-2.5 h-2.5 text-white" />
+                          <X className="w-2.5 h-2.5 text-foreground" />
                         </button>
 
                         {/* Type badge */}
@@ -235,11 +235,11 @@ export function ProjectTab({
 
                       {/* Info */}
                       <div className="p-1.5">
-                        <p className="text-[10px] text-white truncate">{media.name}</p>
+                        <p className="text-[10px] text-foreground truncate">{media.name}</p>
                         <div className="flex items-center gap-1 mt-0.5">
-                          <p className="text-[9px] text-[#a0a0a0]">{formatDuration(media.duration)}</p>
+                          <p className="text-[9px] text-muted-foreground">{formatDuration(media.duration)}</p>
                           {media.width && media.height && (
-                            <p className="text-[9px] text-[#a0a0a0]">· {media.width}×{media.height}</p>
+                            <p className="text-[9px] text-muted-foreground">· {media.width}×{media.height}</p>
                           )}
                         </div>
 
@@ -250,7 +250,7 @@ export function ProjectTab({
                       {/* Delete confirmation */}
                       {confirmDeleteId === media.id && (
                         <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-1.5 z-20 rounded">
-                          <p className="text-[9px] text-white">Delete?</p>
+                          <p className="text-[9px] text-foreground">Delete?</p>
                           <div className="flex gap-1">
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDelete(media.id); }}
@@ -260,7 +260,7 @@ export function ProjectTab({
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                              className="px-2 py-0.5 bg-[#3e3e3e] hover:bg-[#5e5e5e] text-white text-[9px] rounded transition-colors"
+                              className="px-2 py-0.5 bg-accent hover:bg-border text-foreground text-[9px] rounded transition-colors"
                             >
                               Cancel
                             </button>
@@ -280,7 +280,7 @@ export function ProjectTab({
                       onMouseEnter={() => setHoveredItem(media.id)}
                       onMouseLeave={() => setHoveredItem(null)}
                       onClick={() => setPreviewItem(media)}
-                      className="flex items-center gap-2 p-2 hover:bg-[#3e3e3e] cursor-grab border-b border-[#3e3e3e] transition-colors group"
+                      className="flex items-center gap-2 p-2 hover:bg-accent cursor-grab border-b border-border transition-colors group"
                     >
                       {/* Thumbnail in list view */}
                       <div className="w-10 h-7 rounded overflow-hidden bg-black/30 shrink-0 flex items-center justify-center">
@@ -292,8 +292,8 @@ export function ProjectTab({
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] text-white truncate">{media.name}</p>
-                        <p className="text-[9px] text-[#a0a0a0]">
+                        <p className="text-[11px] text-foreground truncate">{media.name}</p>
+                        <p className="text-[9px] text-muted-foreground">
                           {formatDuration(media.duration)} · {formatSize(media.size)}
                           {media.width && media.height ? ` · ${media.width}×${media.height}` : ''}
                         </p>
@@ -301,13 +301,13 @@ export function ProjectTab({
 
                       {/* Actions */}
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {media.type === 'video' && <Play className="w-3 h-3 text-[#a0a0a0]" />}
+                        {media.type === 'video' && <Play className="w-3 h-3 text-muted-foreground" />}
                         {(media.type === 'audio' || media.type === 'video') && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDetectBeats(media); }}
                             title="Detect Beats"
                             disabled={detectingBeatId === media.id}
-                            className="p-0.5 text-[#a0a0a0] hover:text-yellow-400 rounded transition-colors disabled:opacity-50"
+                            className="p-0.5 text-muted-foreground hover:text-yellow-400 rounded transition-colors disabled:opacity-50"
                           >
                             {detectingBeatId === media.id
                               ? <Loader2 className="w-3 h-3 animate-spin" />
@@ -320,7 +320,7 @@ export function ProjectTab({
                             e.stopPropagation();
                             setConfirmDeleteId(media.id);
                           }}
-                          className="p-0.5 text-[#a0a0a0] hover:text-red-400 rounded transition-colors"
+                          className="p-0.5 text-muted-foreground hover:text-red-400 rounded transition-colors"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -329,7 +329,7 @@ export function ProjectTab({
 
                       {/* Delete confirmation overlay for list */}
                       {confirmDeleteId === media.id && (
-                        <div className="absolute right-2 flex items-center gap-1 bg-[#2d2d2d] border border-[#3e3e3e] rounded px-2 py-1 shadow-lg z-20">
+                        <div className="absolute right-2 flex items-center gap-1 bg-popover border border-border rounded px-2 py-1 shadow-lg z-20">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDelete(media.id); }}
                             className="px-2 py-0.5 bg-red-500 hover:bg-red-400 text-white text-[9px] rounded transition-colors"
@@ -338,7 +338,7 @@ export function ProjectTab({
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                            className="px-2 py-0.5 bg-[#3e3e3e] hover:bg-[#5e5e5e] text-white text-[9px] rounded transition-colors"
+                            className="px-2 py-0.5 bg-accent hover:bg-border text-foreground text-[9px] rounded transition-colors"
                           >
                             Cancel
                           </button>

@@ -775,18 +775,18 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
   // ─────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-      <div className="w-full max-w-6xl h-[90vh] flex flex-col bg-[#111] border border-[#2a2a2a] rounded-2xl shadow-2xl overflow-hidden text-white">
+      <div className="w-full max-w-6xl h-[90vh] flex flex-col bg-background border border-border rounded-2xl shadow-2xl overflow-hidden text-foreground">
 
         {/* ── Header ──────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2a] bg-[#161616] shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-card shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <div>
               <h2 className="font-bold text-sm tracking-wide">AI Sound Designer</h2>
-              <p className="text-[9px] text-[#707070]">Epidemic-style multi-track preview with BGM + SFX design</p>
+              <p className="text-[9px] text-muted-foreground/70">Epidemic-style multi-track preview with BGM + SFX design</p>
             </div>
           </div>
-          <button onClick={onClose} disabled={isApplying} className="p-1 hover:bg-[#2a2a2a] rounded-lg text-[#707070] hover:text-white transition-colors">
+          <button onClick={onClose} disabled={isApplying} className="p-1 hover:bg-secondary rounded-lg text-muted-foreground/70 hover:text-foreground transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -795,7 +795,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
         <div className="flex flex-1 min-h-0 overflow-hidden">
 
           {/* Left: Video Canvas */}
-          <div className="flex flex-col border-r border-[#2a2a2a] bg-black" style={{ width: '58%' }}>
+          <div className="flex flex-col border-r border-border bg-black" style={{ width: '58%' }}>
             {/* Video */}
             <div className="flex-1 flex items-center justify-center bg-black min-h-0 overflow-hidden">
               {isWholeTimelineMode ? (
@@ -805,7 +805,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                     className="max-w-full max-h-full object-contain"
                   />
                 ) : (
-                  <div className="text-xs text-[#606060] text-center">
+                  <div className="text-xs text-muted-foreground/70 text-center">
                     <Film className="w-8 h-8 mx-auto mb-2 opacity-30 animate-pulse" />
                     Connecting to timeline canvas...
                   </div>
@@ -819,7 +819,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                   playsInline
                 />
               ) : (
-                <div className="text-xs text-[#606060] text-center">
+                <div className="text-xs text-muted-foreground/70 text-center">
                   <Volume2 className="w-8 h-8 mx-auto mb-2 opacity-30" />
                   No video source
                 </div>
@@ -827,10 +827,10 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
             </div>
 
             {/* Player Controls */}
-            <div className="shrink-0 px-4 py-3 bg-[#141414] border-t border-[#2a2a2a] space-y-2">
+            <div className="shrink-0 px-4 py-3 bg-background border-t border-border space-y-2">
               {/* Progress bar */}
               <div
-                className="relative h-1.5 bg-[#2a2a2a] rounded-full cursor-pointer group"
+                className="relative h-1.5 bg-secondary rounded-full cursor-pointer group"
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   seekTo(((e.clientX - rect.left) / rect.width) * clip.duration);
@@ -848,10 +848,10 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
 
               {/* Controls row */}
               <div className="flex items-center gap-2">
-                <button onClick={() => seekTo(0)} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                <button onClick={() => seekTo(0)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
                   <SkipBack className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => seekTo(Math.max(0, currentTime - 5))} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                <button onClick={() => seekTo(Math.max(0, currentTime - 5))} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
                 <button
@@ -861,25 +861,25 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                   {isPlaying ? <Pause className="w-3.5 h-3.5 fill-black" /> : <Play className="w-3.5 h-3.5 fill-black" />}
                   {isPlaying ? 'Pause' : 'Play'}
                 </button>
-                <button onClick={handleStop} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                <button onClick={handleStop} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
                   <Square className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => seekTo(Math.min(clip.duration, currentTime + 5))} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                <button onClick={() => seekTo(Math.min(clip.duration, currentTime + 5))} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => seekTo(clip.duration)} className="p-1.5 rounded-lg hover:bg-[#252525] text-[#a0a0a0] hover:text-white transition-colors">
+                <button onClick={() => seekTo(clip.duration)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
                   <SkipForward className="w-3.5 h-3.5" />
                 </button>
 
-                <div className="ml-auto flex items-center gap-2 text-[#a0a0a0]">
-                  <span className="text-[10px] font-mono text-white">{fmt(currentTime)}</span>
+                <div className="ml-auto flex items-center gap-2 text-muted-foreground">
+                  <span className="text-[10px] font-mono text-foreground">{fmt(currentTime)}</span>
                   <span className="text-[10px] font-mono">/</span>
                   <span className="text-[10px] font-mono">{fmt(clip.duration)}</span>
                   
                   {isWholeTimelineMode ? (
                     <button
                       onClick={() => setMuteTimelineAudio(!muteTimelineAudio)}
-                      className={`p-1 ml-2 rounded transition-colors ${muteTimelineAudio ? 'text-red-400 hover:text-red-300' : 'text-[#a0a0a0] hover:text-white'}`}
+                      className={`p-1 ml-2 rounded transition-colors ${muteTimelineAudio ? 'text-red-400 hover:text-red-300' : 'text-muted-foreground hover:text-foreground'}`}
                       title={muteTimelineAudio ? 'Unmute timeline audio' : 'Mute timeline audio'}
                     >
                       {muteTimelineAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
@@ -887,7 +887,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                   ) : (
                     <button
                       onClick={() => setVideoMuted(!videoMuted)}
-                      className={`p-1 ml-2 rounded transition-colors ${videoMuted ? 'text-red-400 hover:text-red-300' : 'text-[#a0a0a0] hover:text-white'}`}
+                      className={`p-1 ml-2 rounded transition-colors ${videoMuted ? 'text-red-400 hover:text-red-300' : 'text-muted-foreground hover:text-foreground'}`}
                       title={videoMuted ? 'Unmute original audio' : 'Mute original audio'}
                     >
                       {videoMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
@@ -907,9 +907,9 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
           </div>
 
           {/* Right: Inspector / Alternates Panel */}
-          <div className="flex flex-col overflow-y-auto bg-[#111]" style={{ width: '42%' }}>
+          <div className="flex flex-col overflow-y-auto bg-background" style={{ width: '42%' }}>
             {editedCueIndices.size > 0 && (
-              <div className="p-4 border-b border-[#2a2a2a] bg-[#1a1a1a]/50 shrink-0">
+              <div className="p-4 border-b border-border bg-background/50 shrink-0">
                 <button
                   onClick={() => handleRegenerateCues(Array.from(editedCueIndices))}
                   disabled={isRegenerating}
@@ -927,17 +927,17 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
             {activeCue ? (
               <div className="p-4 space-y-4">
                 {/* Cue info */}
-                <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-4 space-y-2">
+                <div className="bg-background border border-border rounded-xl p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className={`text-[8px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${activeCue.type === 'bgm' ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`}>
                       {activeCue.type === 'bgm' ? '🎵 BGM' : '⚡ SFX'}
                     </span>
-                    <span className="text-[9px] font-mono text-[#707070]">
+                    <span className="text-[9px] font-mono text-muted-foreground/70">
                       {(activeCue?.start ?? 0).toFixed(2)}s → {(activeCue?.end ?? 0).toFixed(2)}s
                     </span>
                   </div>
                   <div className="space-y-1 my-1">
-                    <label className="text-[8px] font-bold text-[#707070] uppercase tracking-wider block">
+                    <label className="text-[8px] font-bold text-muted-foreground/70 uppercase tracking-wider block">
                       Edit Generation Prompt
                     </label>
                     <input
@@ -952,7 +952,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                           return next;
                         });
                       }}
-                      className="w-full px-2.5 py-1.5 bg-black border border-[#2a2a2a] rounded-lg text-xs text-white focus:outline-none focus:border-amber-500 transition-colors"
+                      className="w-full px-2.5 py-1.5 bg-black border border-border rounded-lg text-xs text-white focus:outline-none focus:border-amber-500 transition-colors"
                       placeholder="e.g. metallic door slam"
                     />
                   </div>
@@ -971,25 +971,25 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                     </button>
                   )}
                   {activeCue.scene && (
-                    <div className="mt-2 text-[10px] bg-black/40 p-2 rounded-lg border border-[#222]">
-                      <span className="text-[#a0a0a0] font-bold block mb-0.5 uppercase tracking-wide text-[8px]">Scene Context:</span>
-                      <p className="text-white leading-relaxed">{activeCue.scene}</p>
+                    <div className="mt-2 text-[10px] bg-black/40 p-2 rounded-lg border border-border">
+                      <span className="text-muted-foreground font-bold block mb-0.5 uppercase tracking-wide text-[8px]">Scene Context:</span>
+                      <p className="text-foreground leading-relaxed">{activeCue.scene}</p>
                     </div>
                   )}
-                  <p className="text-[9px] text-[#707070] italic leading-relaxed pt-1">
-                    <span className="font-bold text-[#808080]">AI Reason: </span>{activeCue.reason}
+                  <p className="text-[9px] text-muted-foreground/70 italic leading-relaxed pt-1">
+                    <span className="font-bold text-muted-foreground/80">AI Reason: </span>{activeCue.reason}
                   </p>
 
                   {/* Trim controls & Waveform */}
                   {activeCue.options[selectedOptions[activeCueIndex!] ?? 0] && (() => {
                     const option = activeCue.options[selectedOptions[activeCueIndex!] ?? 0];
                     return (
-                    <div className="pt-2 border-t border-[#2a2a2a]">
+                    <div className="pt-2 border-t border-border">
                       <div className="flex items-center justify-between">
-                        <p className="text-[9px] text-[#707070] mb-1">Trim Selection (drag waveform):</p>
+                        <p className="text-[9px] text-muted-foreground/70 mb-1">Trim Selection (drag waveform):</p>
                         <div className="flex items-center gap-3 text-[9px] font-mono">
-                          <span>Start: <span className="text-white">{(activeCue?.trimOffset ?? 0).toFixed(2)}s</span></span>
-                          <span>Duration: <span className="text-white">{(activeCue?.trimDuration ?? 0).toFixed(2)}s</span></span>
+                          <span>Start: <span className="text-foreground">{(activeCue?.trimOffset ?? 0).toFixed(2)}s</span></span>
+                          <span>Duration: <span className="text-foreground">{(activeCue?.trimDuration ?? 0).toFixed(2)}s</span></span>
                         </div>
                       </div>
                       <WaveformViewer
@@ -1011,7 +1011,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                 {/* Alternate Options */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-[9px] text-[#707070] uppercase font-bold tracking-wider">
+                    <h4 className="text-[9px] text-muted-foreground/70 uppercase font-bold tracking-wider">
                       Alternate Sounds
                     </h4>
                     <button
@@ -1060,7 +1060,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                               toast.error('Search failed: ' + e.message, { id: toastId });
                             }
                           }}
-                          className="px-2 py-0.5 bg-[#252525] hover:bg-[#353535] text-[#909090] hover:text-white text-[9px] rounded-full transition-colors"
+                          className="px-2 py-0.5 bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground text-[9px] rounded-full transition-colors"
                         >
                           {alt}
                         </button>
@@ -1081,22 +1081,22 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                             className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${
                               isSelected
                                 ? 'bg-amber-500/10 border-amber-500'
-                                : 'bg-[#191919] border-[#252525] hover:border-[#404040]'
+                                : 'bg-card border-border hover:border-border'
                             }`}
                           >
                             <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                              isSelected ? 'border-amber-500 bg-amber-500' : 'border-[#505050]'
+                              isSelected ? 'border-amber-500 bg-amber-500' : 'border-border'
                             }`}>
                               {isSelected && <div className="w-1.5 h-1.5 bg-black rounded-full" />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="text-[10px] font-semibold text-white truncate">{option.name}</div>
-                              <div className="text-[8px] text-[#707070]">{(option?.duration ?? 0).toFixed(1)}s · {option.tags.slice(0, 3).join(', ')}</div>
+                              <div className="text-[10px] font-semibold text-foreground truncate">{option.name}</div>
+                              <div className="text-[8px] text-muted-foreground/70">{(option?.duration ?? 0).toFixed(1)}s · {option.tags.slice(0, 3).join(', ')}</div>
                             </div>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleAuditionOption(option, audKey); }}
                               className={`p-1.5 rounded-full shrink-0 transition-colors ${
-                                isAuditioning ? 'bg-red-500 text-white animate-pulse' : 'bg-[#252525] text-[#a0a0a0] hover:text-white hover:bg-[#303030]'
+                                isAuditioning ? 'bg-red-500 text-white animate-pulse' : 'bg-secondary text-muted-foreground hover:text-white hover:bg-accent'
                               }`}
                             >
                               {isAuditioning ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
@@ -1122,10 +1122,10 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
         </div>
 
         {/* ── Multi-track Timeline ──────────────────────────────── */}
-        <div className="shrink-0 border-t border-[#2a2a2a] bg-[#0c0c0c]">
+        <div className="shrink-0 border-t border-border bg-background">
           {/* Timeline header */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e1e1e]">
-            <span className="text-[9px] font-bold uppercase tracking-widest text-[#707070]">Timeline</span>
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/70">Timeline</span>
             <span className="text-[8px] text-[#505050]">Drag playhead to scrub · Click block to select · Drag handles to trim</span>
           </div>
 
@@ -1133,10 +1133,10 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
           <div className="px-0">
             {/* Ruler row */}
             <div className="flex">
-              <div className="w-16 shrink-0 border-r border-[#1e1e1e] bg-[#111]" />
+              <div className="w-16 shrink-0 border-r border-border bg-background" />
               <div
                 ref={timelineRef}
-                className="flex-1 relative h-6 border-b border-[#1e1e1e] bg-[#111] cursor-crosshair select-none"
+                className="flex-1 relative h-6 border-b border-border bg-background cursor-crosshair select-none"
                 onMouseDown={handleTimelineMouseDown}
               >
                 {/* Tick marks */}
@@ -1146,8 +1146,8 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
                     style={{ left: `${(sec / clip.duration) * 100}%` }}
                     className="absolute top-0 bottom-0 flex flex-col items-center"
                   >
-                    <div className="w-px h-2 bg-[#333]" />
-                    <span className="text-[7px] text-[#555] mt-0.5 font-mono">{sec}s</span>
+                    <div className="w-px h-2 bg-accent" />
+                    <span className="text-[7px] text-muted-foreground/60 mt-0.5 font-mono">{sec}s</span>
                   </div>
                 ))}
                 {/* Playhead on ruler */}
@@ -1161,12 +1161,12 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
             </div>
 
             {/* BGM track row */}
-            <div className="flex border-b border-[#1e1e1e]" style={{ height: '40px' }}>
-              <div className="w-16 shrink-0 flex items-center justify-center border-r border-[#1e1e1e] bg-[#111] gap-1">
+            <div className="flex border-b border-border" style={{ height: '40px' }}>
+              <div className="w-16 shrink-0 flex items-center justify-center border-r border-border bg-background gap-1">
                 <Music className="w-3 h-3 text-purple-400" />
                 <span className="text-[8px] font-bold text-purple-400">BGM</span>
               </div>
-              <div className="flex-1 relative bg-[#0e0e0e] overflow-hidden" onMouseDown={handleTimelineMouseDown}>
+              <div className="flex-1 relative bg-background overflow-hidden" onMouseDown={handleTimelineMouseDown}>
                 {bgmCues.map(({ cue, idx }) => renderCueBlock(cue, idx, 'bg-purple-600/70 border border-purple-500/50 text-purple-100'))}
                 {/* Playhead line on track */}
                 <div
@@ -1179,11 +1179,11 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
             {/* SFX track rows dynamically packed */}
             {sfxTracks.map((track, trackIdx) => (
               <div key={`sfx-${trackIdx}`} className="flex" style={{ height: '40px', borderTop: trackIdx > 0 ? '1px solid #1e1e1e' : 'none' }}>
-                <div className="w-16 shrink-0 flex items-center justify-center border-r border-[#1e1e1e] bg-[#111] gap-1">
+                <div className="w-16 shrink-0 flex items-center justify-center border-r border-border bg-background gap-1">
                   <Zap className="w-3 h-3 text-amber-400" />
                   <span className="text-[8px] font-bold text-amber-400">SFX {trackIdx + 1}</span>
                 </div>
-                <div className="flex-1 relative bg-[#0e0e0e] overflow-hidden" onMouseDown={handleTimelineMouseDown}>
+                <div className="flex-1 relative bg-background overflow-hidden" onMouseDown={handleTimelineMouseDown}>
                   {track.map(({ cue, idx }) => renderCueBlock(cue, idx, 'bg-amber-600/70 border border-amber-500/50 text-amber-100'))}
                   {/* Playhead line on track */}
                   <div
@@ -1197,14 +1197,14 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
         </div>
 
         {/* ── Footer ────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-[#2a2a2a] bg-[#161616] shrink-0">
-          <div className="text-[9px] text-[#707070]">
+        <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-card shrink-0">
+          <div className="text-[9px] text-muted-foreground/70">
             <span className="text-purple-400 font-bold">{bgmCues.length}</span> BGM ·{' '}
             <span className="text-amber-400 font-bold">{cues.filter(c => c.type === 'sfx').length}</span> SFX ·{' '}
-            <span className="text-white font-bold">{cues.length}</span> total tracks ready to import
+            <span className="text-foreground font-bold">{cues.length}</span> total tracks ready to import
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={onClose} disabled={isApplying} className="px-4 py-1.5 text-xs font-semibold text-[#a0a0a0] bg-[#1e1e1e] hover:bg-[#2a2a2a] rounded-lg border border-[#2a2a2a] transition-colors">
+            <button onClick={onClose} disabled={isApplying} className="px-4 py-1.5 text-xs font-semibold text-muted-foreground bg-card hover:bg-secondary rounded-lg border border-border transition-colors">
               Cancel
             </button>
             <button

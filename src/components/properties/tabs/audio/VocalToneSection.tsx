@@ -58,8 +58,8 @@ export function VocalToneSection({
       {/* Vocal Tone slider */}
       <div className="space-y-1">
         <div className="flex justify-between items-center text-[11px]">
-          <span className="text-[#d0d0d0]">Vocal Tone</span>
-          <span className="font-mono text-[#a0a0a0]">
+          <span className="text-foreground/80">Vocal Tone</span>
+          <span className="font-mono text-muted-foreground">
             {tone === 0 ? 'Original' : `${toneLabel(tone)} · ${tone > 0 ? '+' : ''}${(tone * 0.05).toFixed(1)} st`}
           </span>
         </div>
@@ -73,7 +73,7 @@ export function VocalToneSection({
             onChange={(e) => onToneChange(Number(e.target.value))}
             onDoubleClick={onToneReset}
             title="Double-click to reset to Original (0)"
-            className="flex-1 h-1 bg-[#3e3e3e] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-pink-500 [&::-webkit-slider-thumb]:rounded-full"
+            className="flex-1 h-1 bg-accent rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-pink-500 [&::-webkit-slider-thumb]:rounded-full"
           />
         </div>
         <div className="flex justify-between text-[9px] text-[#6a6a7a] font-mono">
@@ -117,12 +117,12 @@ export function VocalToneSection({
         )}
 
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] text-[#a0a0a0]">Auto-match this clip</span>
+          <span className="text-[10px] text-muted-foreground">Auto-match this clip</span>
           <button
             onClick={() => onToggleAutoMatch(!autoMatchOn)}
             disabled={isMatchingVocals}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors disabled:opacity-50 ${
-              autoMatchOn ? 'bg-teal-600/30 text-teal-300 border border-teal-500/40' : 'bg-[#2d2d2d] text-[#a0a0a0] border border-[#3a3a4a]'
+              autoMatchOn ? 'bg-teal-600/30 text-teal-300 border border-teal-500/40' : 'bg-popover text-muted-foreground border border-[#3a3a4a]'
             }`}
           >
             {autoMatchOn ? 'ON' : 'OFF'}
@@ -143,7 +143,7 @@ export function VocalToneSection({
           <div className="max-h-28 overflow-y-auto space-y-0.5 rounded bg-[#191925] border border-[#2a2a3a] p-1.5">
             {matchResults.map((r) => (
               <div key={r.clipId} className="flex justify-between items-center text-[9px] font-mono">
-                <span className="text-[#a0a0a0] truncate max-w-[55%]">{r.clipName}</span>
+                <span className="text-muted-foreground truncate max-w-[55%]">{r.clipName}</span>
                 <span className={statusColor[r.status]}>
                   {r.status === 'reference'
                     ? 'Reference'

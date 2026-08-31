@@ -1,26 +1,26 @@
-/* Custom scrollbar for dark theme */
+/* Theme-aware scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3e3e3e;
-  border-radius: 3px;
+  background: hsl(var(--border));
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #5e5e5e;
+  background: hsl(var(--muted-foreground) / 0.6);
 }
 
 /* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3e3e3e #1e1e1e;
+  scrollbar-color: hsl(var(--border)) transparent;
 }
 
 /* Range input global styles */
@@ -28,7 +28,7 @@ input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  background: #3e3e3e;
+  background: hsl(var(--border));
   border-radius: 2px;
   outline: none;
 }
@@ -39,18 +39,18 @@ input[type="range"]::-webkit-slider-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: hsl(var(--primary));
   cursor: pointer;
-  border: 2px solid white;
+  border: 2px solid hsl(var(--background));
 }
 
 input[type="range"]::-moz-range-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: hsl(var(--primary));
   cursor: pointer;
-  border: 2px solid white;
+  border: 2px solid hsl(var(--background));
 }
 
 /* Selection */

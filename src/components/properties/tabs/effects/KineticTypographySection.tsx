@@ -90,7 +90,7 @@ export function KineticTypographySection({
             <Type className="w-3.5 h-3.5" />
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-white flex items-center gap-1.5">
+            <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
               AI Kinetic Typography
               <Sparkles className="w-3 h-3 text-teal-400" />
             </h4>
@@ -154,13 +154,13 @@ export function KineticTypographySection({
 
             {/* Script / Language */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">
+              <label className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
                 Script / Language
               </label>
               <select
                 value={kineticTypoScript}
                 onChange={(e) => setKineticTypoScript(e.target.value)}
-                className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                className="bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-teal-500 w-full"
               >
                 <option value="english">English</option>
                 <option value="roman_urdu_hindi">Roman Urdu / Hindi</option>
@@ -173,7 +173,7 @@ export function KineticTypographySection({
 
             {/* AI Provider */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center flex-wrap gap-1">
+              <label className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider flex justify-between items-center flex-wrap gap-1">
                 <span>AI Reasoning Provider</span>
                 {kineticTypoProvider === 'groq' && (
                   <span className="px-1.5 py-0.5 rounded text-[8px] bg-purple-500/20 text-purple-400 font-bold border border-purple-500/30">
@@ -189,7 +189,7 @@ export function KineticTypographySection({
               <select
                 value={kineticTypoProvider}
                 onChange={(e) => setKineticTypoProvider(e.target.value as 'gemini' | 'groq')}
-                className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                className="bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-teal-500 w-full"
               >
                 <option value="groq">Groq (Faster, Advanced NLP & Timing)</option>
                 <option value="gemini">Gemini (Analyzes Scene Video Frames)</option>
@@ -197,8 +197,8 @@ export function KineticTypographySection({
             </div>
 
             {/* Typography Type */}
-            <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
-              <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center flex-wrap gap-1">
+            <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+              <label className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider flex justify-between items-center flex-wrap gap-1">
                 <span>Typography Type</span>
                 <span className="px-1.5 py-0.5 rounded text-[8px] bg-teal-500/20 text-teal-400 font-bold border border-teal-500/30 uppercase">
                   {kineticTypoType}
@@ -207,13 +207,13 @@ export function KineticTypographySection({
               <select
                 value={kineticTypoType}
                 onChange={(e) => setKineticTypoType(e.target.value as 'word' | 'sentence' | 'hybrid')}
-                className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full font-medium"
+                className="bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-teal-500 w-full font-medium"
               >
                 <option value="hybrid">Hybrid (Sentence + Word Animate In)</option>
                 <option value="word">Word by Word (Clip Per Word)</option>
                 <option value="sentence">Sentence by Sentence (Full Sentence Clips)</option>
               </select>
-              <p className="text-[10px] text-[#888] leading-tight">
+              <p className="text-[10px] text-muted-foreground leading-tight">
                 {kineticTypoType === 'hybrid' && 'Full sentence displayed while words animate in via PiP — no overlap.'}
                 {kineticTypoType === 'word' && 'Individual word clips placed on timeline as each word is spoken.'}
                 {kineticTypoType === 'sentence' && 'Complete sentence text clips added to timeline per spoken sentence.'}
@@ -222,8 +222,8 @@ export function KineticTypographySection({
 
             {/* Layout (conditional) */}
             {(kineticTypoType === 'hybrid' || kineticTypoType === 'sentence') && (
-              <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3 animate-fadeIn">
-                <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider flex justify-between items-center flex-wrap gap-1">
+              <div className="flex flex-col gap-1.5 border-t border-border pt-3 animate-fadeIn">
+                <label className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider flex justify-between items-center flex-wrap gap-1">
                   <span>Typography Layout</span>
                   <span className="px-1.5 py-0.5 rounded text-[8px] bg-indigo-500/20 text-indigo-400 font-bold border border-indigo-500/30 uppercase">
                     {kineticTypoLayout}
@@ -232,12 +232,12 @@ export function KineticTypographySection({
                 <select
                   value={kineticTypoLayout}
                   onChange={(e) => setKineticTypoLayout(e.target.value as 'row' | 'column')}
-                  className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                  className="bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-teal-500 w-full"
                 >
                   <option value="row">Row (16:9 Landscape)</option>
                   <option value="column">Column (9:16 Shorts / Reels)</option>
                 </select>
-                <p className="text-[10px] text-[#888] leading-tight">
+                <p className="text-[10px] text-muted-foreground leading-tight">
                   {kineticTypoLayout === 'row' && 'Text flows in wide lines — optimized for landscape videos.'}
                   {kineticTypoLayout === 'column' && 'Short punchy line breaks optimized for vertical short videos.'}
                 </p>
@@ -245,7 +245,7 @@ export function KineticTypographySection({
             )}
 
             {/* Reference Script */}
-            <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
+            <div className="space-y-2 border-t border-border pt-3">
               <div className="flex items-center justify-between flex-wrap gap-1">
                 <button
                   type="button"
@@ -268,9 +268,9 @@ export function KineticTypographySection({
                     onChange={(e) => setReferenceScript(e.target.value)}
                     placeholder="Paste or type your exact ground-truth transcript/script here..."
                     rows={3}
-                    className="w-full bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 font-mono resize-none"
+                    className="w-full bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-teal-500 font-mono resize-none"
                   />
-                  <p className="text-[10px] text-[#888] leading-tight">
+                  <p className="text-[10px] text-muted-foreground leading-tight">
                     Provides exact ground-truth words to AI — helps with strong accents or background noise.
                   </p>
                 </div>
@@ -279,42 +279,42 @@ export function KineticTypographySection({
 
             {/* Casing (English / Roman Urdu only) */}
             {(kineticTypoScript === 'english' || kineticTypoScript === 'roman_urdu_hindi') && (
-              <div className="space-y-2 border-t border-[#2d2d2d] pt-3">
-                <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider block">
+              <div className="space-y-2 border-t border-border pt-3">
+                <label className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">
                   Casing Constraints
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <label className="flex items-center gap-2 p-2 bg-[#151515] border border-[#2d2d2d] rounded cursor-pointer text-xs select-none hover:border-teal-500/40 transition-colors">
+                  <label className="flex items-center gap-2 p-2 bg-card border border-border rounded cursor-pointer text-xs select-none hover:border-teal-500/40 transition-colors">
                     <input
                       type="checkbox"
                       checked={englishCasing === 'all_caps'}
                       onChange={(e) => setEnglishCasing(e.target.checked ? 'all_caps' : 'none')}
-                      className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
+                      className="w-3.5 h-3.5 rounded border-border bg-secondary text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
                     />
-                    <span className="text-white text-[10px] font-medium">ALL CAPS</span>
+                    <span className="text-foreground text-[10px] font-medium">ALL CAPS</span>
                   </label>
-                  <label className="flex items-center gap-2 p-2 bg-[#151515] border border-[#2d2d2d] rounded cursor-pointer text-xs select-none hover:border-teal-500/40 transition-colors">
+                  <label className="flex items-center gap-2 p-2 bg-card border border-border rounded cursor-pointer text-xs select-none hover:border-teal-500/40 transition-colors">
                     <input
                       type="checkbox"
                       checked={englishCasing === 'first_letter_caps'}
                       onChange={(e) => setEnglishCasing(e.target.checked ? 'first_letter_caps' : 'none')}
-                      className="w-3.5 h-3.5 rounded border-[#3e3e3e] bg-[#2a2a2a] text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
+                      className="w-3.5 h-3.5 rounded border-border bg-secondary text-teal-500 focus:ring-teal-500 focus:ring-offset-[#1e1e1e]"
                     />
-                    <span className="text-white text-[10px] font-medium">First Letter Caps</span>
+                    <span className="text-foreground text-[10px] font-medium">First Letter Caps</span>
                   </label>
                 </div>
               </div>
             )}
 
             {/* Style Selection */}
-            <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
-              <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">
+            <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+              <label className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
                 Style Selection
               </label>
               <select
                 value={kineticTypoStyle}
                 onChange={(e) => setKineticTypoStyle(e.target.value)}
-                className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                className="bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-teal-500 w-full"
               >
                 <option value="random">AI / Random Style Presets</option>
                 {TEXT_TEMPLATES.map((t) => (
@@ -326,14 +326,14 @@ export function KineticTypographySection({
             </div>
 
             {/* Animation Selection */}
-            <div className="flex flex-col gap-1.5 border-t border-[#2d2d2d] pt-3">
-              <label className="text-[10px] text-[#a0a0a0] uppercase font-bold tracking-wider">
+            <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+              <label className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
                 Animation Selection
               </label>
               <select
                 value={kineticTypoAnimation}
                 onChange={(e) => setKineticTypoAnimation(e.target.value)}
-                className="bg-[#151515] text-white text-xs border border-[#3e3e3e] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
+                className="bg-card text-foreground text-xs border border-border rounded p-2 focus:outline-none focus:border-teal-500 w-full"
               >
                 <option value="random">AI / Random Animations</option>
                 <option value="zoom">Specific: Pop / Zoom</option>
@@ -355,7 +355,7 @@ export function KineticTypographySection({
                   Custom AI Instruction
                 </label>
               </div>
-              <p className="text-[10px] text-[#888] leading-relaxed">
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
                 Give the AI a custom instruction it will follow before generating — e.g., text position, multi-design style, emphasis on specific words, mood, color theme, or any creative direction.
               </p>
               <textarea
@@ -373,7 +373,7 @@ export function KineticTypographySection({
                   <button
                     type="button"
                     onClick={() => setCustomPrompt('')}
-                    className="text-[9px] text-[#888] hover:text-red-400 transition-colors"
+                    className="text-[9px] text-muted-foreground hover:text-red-400 transition-colors"
                   >
                     Clear
                   </button>

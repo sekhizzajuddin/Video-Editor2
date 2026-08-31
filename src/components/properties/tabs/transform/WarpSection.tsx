@@ -30,13 +30,13 @@ export function WarpSection({ clip, updateClip }: WarpSectionProps) {
             }
             updateClip(clip.id, updates);
           }}
-          className="w-5 h-5 rounded border-[#3e3e3e] text-amber-500 bg-[#1e1e1e]"
+          className="w-5 h-5 rounded border-border text-amber-500 bg-card"
         />
-        <span className="text-sm font-medium text-white">Enable Corner Pinning</span>
+        <span className="text-sm font-medium text-foreground">Enable Corner Pinning</span>
       </label>
       {clip.transform.perspectivePin && (
-        <div className="pt-3 border-t border-[#3e3e3e]">
-          <p className="text-xs text-[#a0a0a0] mb-3">Drag the 4 corner handles on the preview screen to adjust.</p>
+        <div className="pt-3 border-t border-border">
+          <p className="text-xs text-muted-foreground mb-3">Drag the 4 corner handles on the preview screen to adjust.</p>
           <button
             onClick={() => {
               const newAnimations = { ...(clip.animations || {}) };
