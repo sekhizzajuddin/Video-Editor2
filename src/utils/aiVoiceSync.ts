@@ -3,6 +3,8 @@ import { getGeminiKey } from './aiClient';
 import { renderTimelineAudioToWav, blobToBase64 } from './autoCaptions';
 import { TimelineClip } from '@/types';
 
+import { extractJsonFromLlmResponse } from './jsonHelper';
+
 const uuidv4 = () => crypto.randomUUID();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -41,13 +43,10 @@ async function callGemini(apiKey: string, parts: any[], temperature = 0.1): Prom
   }
 
   const data = await response.json();
-  let resultStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  const resultStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!resultStr) throw new Error('No valid response from Gemini.');
   
-  resultStr = resultStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
-  // Extract JSON array or object robustly if extra text is present
-  const match = resultStr.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-  return match ? match[0] : resultStr;
+  return extractJsonFromLlmResponse(resultStr);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────
