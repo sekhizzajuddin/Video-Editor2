@@ -248,7 +248,7 @@ export async function renderTimelineAudioToWav(
   return audioBufferToWav(renderedBuffer);
 }
 
-function audioBufferToWav(buffer: AudioBuffer): Blob {
+export function audioBufferToWav(buffer: AudioBuffer): Blob {
   const numOfChan = buffer.numberOfChannels;
   const length = buffer.length * numOfChan * 2 + 44;
   const bufferArray = new ArrayBuffer(length);
