@@ -1,4 +1,4 @@
-﻿import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore } from '@/store/editorStore';
 import { getGeminiKey } from './aiClient';
 import { renderTimelineAudioToWav, blobToBase64 } from './autoCaptions';
 import { TimelineClip } from '@/types';
@@ -43,7 +43,11 @@ async function callGemini(apiKey: string, parts: any[], temperature = 0.1): Prom
   const data = await response.json();
   let resultStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!resultStr) throw new Error('No valid response from Gemini.');
-  return resultStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+  
+  resultStr = resultStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+  // Extract JSON array or object robustly if extra text is present
+  const match = resultStr.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+  return match ? match[0] : resultStr;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────

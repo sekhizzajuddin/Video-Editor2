@@ -144,6 +144,8 @@ Identify the speaker and their likely gender ("Male", "Female", or "Unknown") fo
 
   // Clean markdown if present
   resultJsonStr = resultJsonStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+  const match = resultJsonStr.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+  resultJsonStr = match ? match[0] : resultJsonStr;
   
   const srtResults = JSON.parse(resultJsonStr);
 
