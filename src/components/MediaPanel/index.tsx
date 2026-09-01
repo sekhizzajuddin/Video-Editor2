@@ -728,15 +728,78 @@ export function MediaPanel() {
       toast.error('No captions to export.');
       return;
     }
-    const data = JSON.stringify(subtitles, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
+
+    let scriptText = "VOICEOVER SCRIPT (AI Pacing Analysis)\n=====================================\n\n";
+    
+    let currentSpeaker = "";
+    let currentGender = "";
+    let blockText = "";
+    let blockDuration = 0;
+
+    const flushBlock = () => {
+      if (!blockText.trim()) return;
+      const speakerName = currentSpeaker || "Speaker";
+      const genderStr = currentGender ? ` (${currentGender})` : "";
+      scriptText += `[${speakerName}${genderStr}] - Total Duration: ${blockDuration.toFixed(1)}s\n`;
+      scriptText += `${blockText.trim()}\n\n`;
+      blockText = "";
+      blockDuration = 0;
+    };
+
+    subtitles.forEach((sub: any, i: number) => {
+      const spk = sub.speaker || "Speaker";
+      const gen = sub.gender || "";
+      if (spk !== currentSpeaker && i !== 0) {
+        flushBlock();
+      }
+      currentSpeaker = spk;
+      if (gen) currentGender = gen;
+
+      blockDuration += (sub.endTime - sub.startTime);
+
+      if (sub.words && sub.words.length > 0) {
+        let sentenceText = "";
+        sub.words.forEach((w: any, wIdx: number) => {
+          sentenceText += w.word;
+          if (wIdx < sub.words.length - 1) {
+            const gap = sub.words[wIdx + 1].start - w.end;
+            if (gap >= 1.0) sentenceText += " ......... ";
+            else if (gap >= 0.5) sentenceText += " ...... ";
+            else if (gap >= 0.2) sentenceText += " ... ";
+            else sentenceText += " ";
+          }
+        });
+        
+        // Gap to the next subtitle segment if it's the same speaker
+        if (i < subtitles.length - 1) {
+          const nextSub = subtitles[i + 1];
+          if ((nextSub.speaker || "Speaker") === currentSpeaker) {
+            const gapToNext = nextSub.startTime - sub.endTime;
+            if (gapToNext >= 1.0) sentenceText += " ......... ";
+            else if (gapToNext >= 0.5) sentenceText += " ...... ";
+            else if (gapToNext >= 0.2) sentenceText += " ... ";
+            else sentenceText += " ";
+          }
+        } else {
+          sentenceText += " ";
+        }
+        
+        blockText += sentenceText;
+      } else {
+        blockText += sub.text + " ";
+      }
+    });
+    
+    flushBlock();
+
+    const blob = new Blob([scriptText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `captions_export_${Date.now()}.json`;
+    a.download = `vocal_script_${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('Captions exported successfully!');
+    toast.success('Refined Vocal Script exported successfully!');
   };
 
   const [isRecordingScreen, setIsRecordingScreen] = useState(false);

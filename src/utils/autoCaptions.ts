@@ -47,13 +47,15 @@ Each subtitle segment MUST follow this exact structure:
   "start": 0.0,
   "end": 2.5,
   "text": "Hello world",
+  "speaker": "Speaker 1",
+  "gender": "Male",
   "words": [
     { "word": "Hello", "start": 0.0, "end": 1.0 },
     { "word": "world", "start": 1.1, "end": 2.5 }
   ]
 }
 
-Ensure that the start and end times are floating point numbers representing seconds. Do not include markdown code blocks or any other text outside the JSON.`;
+Identify the speaker and their likely gender ("Male", "Female", or "Unknown") for each segment. Ensure that the start and end times are floating point numbers representing seconds. Do not include markdown code blocks or any other text outside the JSON.`;
 
   const requestBody = {
     contents: [
@@ -123,6 +125,8 @@ Ensure that the start and end times are floating point numbers representing seco
       startTime,
       endTime,
       text: sub.text || '',
+      speaker: sub.speaker,
+      gender: sub.gender,
       translations,
       words: Array.isArray(sub.words) ? sub.words : undefined
     };

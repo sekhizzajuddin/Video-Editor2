@@ -705,6 +705,7 @@ export interface SubtitleItem {
   endTime: number;
   text: string;
   speaker?: string;
+  gender?: string;
   confidence?: number;
   translations?: Record<string, string>; // language code -> translated text
   words?: { word: string; start: number; end: number }[]; // word-level timestamps for lip-sync and karaoke
