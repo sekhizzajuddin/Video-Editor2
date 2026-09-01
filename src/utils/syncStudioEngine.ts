@@ -20,6 +20,24 @@ export interface SyncWordPair {
   confirmed: boolean;
 }
 
+// ─── In-Memory Blob Cache (Persists across modal close/open) ─────────────
+let _cachedSourceBlob: Blob | null = null;
+let _cachedTtsBlob: Blob | null = null;
+
+export function setCachedSourceBlob(blob: Blob | null) {
+  _cachedSourceBlob = blob;
+}
+export function getCachedSourceBlob(): Blob | null {
+  return _cachedSourceBlob;
+}
+
+export function setCachedTtsBlob(blob: Blob | null) {
+  _cachedTtsBlob = blob;
+}
+export function getCachedTtsBlob(): Blob | null {
+  return _cachedTtsBlob;
+}
+
 // ─── AI API Wrapper ───────────────────────────────────────────────────────
 
 async function callGemini(apiKey: string, prompt: string, base64AudioPart?: string): Promise<string> {
