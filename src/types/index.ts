@@ -701,6 +701,7 @@ export interface PipWindow {
 // ─── Subtitle ─────────────────────────────────────────────────────────────
 export interface SubtitleItem {
   id: string;
+  sentenceId?: string;     // groups words into a sentence for sync matching
   startTime: number;
   endTime: number;
   text: string;

@@ -674,6 +674,7 @@ export function MediaPanel() {
   const [captionProgress, setCaptionProgress] = useState(0);
   const [showCaptionLanguageModal, setShowCaptionLanguageModal] = useState(false);
   const [selectedCaptionLanguages, setSelectedCaptionLanguages] = useState<string[]>(['EN']);
+  const [captionReferenceScript, setCaptionReferenceScript] = useState<string>('');
 
   // AI SFX Generator States
 
@@ -707,13 +708,13 @@ export function MediaPanel() {
     { code: 'JA', name: 'Japanese' }
   ];
 
-  const handleGenerateCaptions = async (languages: string[]) => {
+  const handleGenerateCaptions = async (languages: string[], refScript?: string) => {
     setShowCaptionLanguageModal(false);
     setIsGeneratingCaptions(true);
     setCaptionProgress(0);
     try {
       const { generateAutoCaptions } = await import('@/utils/autoCaptions');
-      await generateAutoCaptions(languages, (p) => setCaptionProgress(p));
+      await generateAutoCaptions(languages, (p) => setCaptionProgress(p), refScript);
       toast.success("Auto Captions generated!");
     } catch (err: any) {
       console.error(err);
@@ -2487,6 +2488,21 @@ export function MediaPanel() {
                     ))}
                   </div>
 
+                  <div className="mb-4">
+                    <label className="block text-[11px] font-semibold mb-1.5 text-[var(--theme-text-secondary)]">
+                      Reference Script (Optional)
+                    </label>
+                    <textarea
+                      value={captionReferenceScript}
+                      onChange={(e) => setCaptionReferenceScript(e.target.value)}
+                      placeholder="Paste the raw dialogue/script here for 100% accurate word alignment. Leave empty for AI transcription."
+                      className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none resize-none h-[80px] placeholder:text-[var(--theme-text-muted)]/50"
+                    />
+                    <p className="text-[9px] text-[var(--theme-text-muted)] mt-1">
+                      Providing a reference script eliminates missing words and improves timing accuracy.
+                    </p>
+                  </div>
+
                   <div className="flex justify-end gap-2.5 pt-2 border-t border-[var(--theme-border)]">
                     <button
                       onClick={() => setShowCaptionLanguageModal(false)}
@@ -2495,7 +2511,7 @@ export function MediaPanel() {
                       Cancel
                     </button>
                     <button
-                      onClick={() => handleGenerateCaptions(selectedCaptionLanguages)}
+                      onClick={() => handleGenerateCaptions(selectedCaptionLanguages, captionReferenceScript || undefined)}
                       disabled={selectedCaptionLanguages.length === 0}
                       className="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-blue-500/20 disabled:opacity-50"
                     >

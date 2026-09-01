@@ -7,7 +7,8 @@ const uuidv4 = () => crypto.randomUUID();
 
 export async function generateAutoCaptions(
   languages: string[],
-  onProgress: (p: number) => void
+  onProgress: (p: number) => void,
+  referenceScript?: string
 ): Promise<void> {
   const store = useEditorStore.getState();
   const apiKey = getGeminiKey();
@@ -36,14 +37,57 @@ export async function generateAutoCaptions(
 
   onProgress(50);
 
-  // 3. Send to Gemini API
-  const prompt = `You are a professional video transcription and translation assistant.
+  // 3. Build prompt — with or without reference script
+  let prompt: string;
+  
+  if (referenceScript && referenceScript.trim().length > 0) {
+    // REFERENCE SCRIPT MODE: Align exact words to audio timestamps
+    prompt = `You are a professional audio-to-text alignment assistant.
+I have provided an audio track AND the exact reference script that was spoken in it.
+
+YOUR TASK: Align every word from the reference script to the audio. Do NOT skip, merge, rephrase, or add any words. The reference script is the GROUND TRUTH.
+
+REFERENCE SCRIPT:
+"""
+${referenceScript.trim()}
+"""
+
+Break the script into logical sentence segments. For each segment, provide the sentence text and precise word-level timestamps by listening to the audio.
+
+Return ONLY a valid JSON object where the keys are the 2-character language codes and the values are arrays of subtitle segments.
+Languages to generate: ${languages.join(', ')}
+
+Each segment MUST follow this structure:
+{
+  "sentenceId": "S1",
+  "start": 0.0,
+  "end": 2.5,
+  "text": "The exact sentence from the script",
+  "speaker": "Speaker 1",
+  "gender": "Male",
+  "words": [
+    { "word": "The", "start": 0.0, "end": 0.3 },
+    { "word": "exact", "start": 0.35, "end": 0.7 },
+    { "word": "sentence", "start": 0.75, "end": 1.2 },
+    { "word": "from", "start": 1.25, "end": 1.5 },
+    { "word": "the", "start": 1.55, "end": 1.7 },
+    { "word": "script", "start": 1.75, "end": 2.5 }
+  ]
+}
+
+sentenceId must be sequential: "S1", "S2", "S3", etc.
+Identify speaker and gender ("Male", "Female", or "Unknown") for each segment.
+Start and end times are floating point seconds. Do not include markdown code blocks.`;
+  } else {
+    // TRANSCRIPTION MODE: Standard audio-only transcription
+    prompt = `You are a professional video transcription and translation assistant.
 I have provided an audio track from a video timeline.
 Please generate perfectly timed subtitles with WORD-LEVEL TIMESTAMPS for the following languages: ${languages.join(', ')}.
 
 Return ONLY a valid JSON object where the keys are the 2-character language codes (e.g., "${languages[0]}") and the values are arrays of subtitle segments.
 Each subtitle segment MUST follow this exact structure:
 {
+  "sentenceId": "S1",
   "start": 0.0,
   "end": 2.5,
   "text": "Hello world",
@@ -55,7 +99,9 @@ Each subtitle segment MUST follow this exact structure:
   ]
 }
 
+sentenceId must be sequential: "S1", "S2", "S3", etc.
 Identify the speaker and their likely gender ("Male", "Female", or "Unknown") for each segment. Ensure that the start and end times are floating point numbers representing seconds. Do not include markdown code blocks or any other text outside the JSON.`;
+  }
 
   const requestBody = {
     contents: [
@@ -72,7 +118,7 @@ Identify the speaker and their likely gender ("Male", "Female", or "Unknown") fo
       }
     ],
     generationConfig: {
-      temperature: 0.2,
+      temperature: 0.1,
       responseMimeType: "application/json"
     }
   };
@@ -122,6 +168,7 @@ Identify the speaker and their likely gender ("Male", "Female", or "Unknown") fo
     
     return {
       id: uuidv4(),
+      sentenceId: sub.sentenceId || `S${idx + 1}`,
       startTime,
       endTime,
       text: sub.text || '',
