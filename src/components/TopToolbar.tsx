@@ -22,13 +22,6 @@ import {
   X,
   User,
   Film,
-  Upload,
-  Trash2,
-  SplitSquareHorizontal,
-  Layers,
-  Play,
-  Bot,
-  Mic,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -36,15 +29,11 @@ import { probeFile } from '@/utils/mediaProbe';
 import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
 import { setActiveProject } from '@/utils/projectPersistence';
 import { RecentProjectsModal } from './RecentProjectsModal';
-import { SettingsModal } from './SettingsModal';
-import { ExportModal } from './ExportModal';
-import { AiCopilot } from './AiCopilot';
-import { VoiceSyncStudioModal } from './VoiceSyncStudioModal';
+import { AiVoiceSyncModal } from './AiVoiceSyncModal';
 import { toast } from 'sonner';
 import { ProCutLogo } from './ProCutLogo';
-import { Button } from './ui/button';
 
-export const TopToolbar: React.FC = () => {
+export function TopToolbar() {
   const {
     undo,
     redo,
@@ -77,7 +66,7 @@ export const TopToolbar: React.FC = () => {
   const [showHelpMenuDropdown, setShowHelpMenuDropdown] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
   const [showRecentModal, setShowRecentModal] = useState(false);
-  const [showVoiceSyncStudio, setShowVoiceSyncStudio] = useState(false);
+  const [showAiVoiceSyncModal, setShowAiVoiceSyncModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
@@ -555,7 +544,7 @@ export const TopToolbar: React.FC = () => {
         {clipboardData && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-500 text-xs rounded-full">
             <span className="font-medium text-[11px]">
-              ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ {clipboardData.clips.length} {clipboardData.type === 'clip' ? 'Media' : clipboardData.type === 'style' ? 'Style' : 'Clip'}
+              📋 {clipboardData.clips.length} {clipboardData.type === 'clip' ? 'Media' : clipboardData.type === 'style' ? 'Style' : 'Clip'}
             </span>
             <button 
               onClick={clearClipboard} 
@@ -565,18 +554,19 @@ export const TopToolbar: React.FC = () => {
               <X className="w-2.5 h-2.5" />
             </button>
           </div>
-        )}        {/* Sync Button */}
+        )}
+
+        {/* Sync Button */}
         <button
-          onClick={() => setShowVoiceSyncStudio(true)}
-          title="Voice Sync Studio"
+          onClick={() => setShowAiVoiceSyncModal(true)}
+          title="AI Voice Sync (Align AI Audio to Subtitles)"
           className="px-2.5 py-1.5 text-xs rounded-md border flex items-center gap-1.5 font-medium transition-all hover:bg-black/5 dark:hover:bg-white/5"
           style={{
             borderColor: 'var(--theme-border)',
-            color: 'var(--theme-text-primary)'
           }}
         >
-          <Mic className="w-3.5 h-3.5 text-blue-500" />
-          <span>Sync Studio</span>
+          <LinkIcon className="w-3.5 h-3.5 text-blue-500" />
+          <span className="hidden sm:inline">AI Sync</span>
         </button>
 
         {/* Scopes Button */}
@@ -689,8 +679,8 @@ export const TopToolbar: React.FC = () => {
         onClose={() => setShowRecentModal(false)}
         onSelect={() => {}}
       />
-      {showVoiceSyncStudio && (
-        <VoiceSyncStudioModal onClose={() => setShowVoiceSyncStudio(false)} />
+      {showAiVoiceSyncModal && (
+        <AiVoiceSyncModal onClose={() => setShowAiVoiceSyncModal(false)} />
       )}
     </header>
   );

@@ -20,24 +20,6 @@ export interface SyncWordPair {
   confirmed: boolean;
 }
 
-// ─── In-Memory Blob Cache (Persists across modal close/open) ─────────────
-let _cachedSourceBlob: Blob | null = null;
-let _cachedTtsBlob: Blob | null = null;
-
-export function setCachedSourceBlob(blob: Blob | null) {
-  _cachedSourceBlob = blob;
-}
-export function getCachedSourceBlob(): Blob | null {
-  return _cachedSourceBlob;
-}
-
-export function setCachedTtsBlob(blob: Blob | null) {
-  _cachedTtsBlob = blob;
-}
-export function getCachedTtsBlob(): Blob | null {
-  return _cachedTtsBlob;
-}
-
 // ─── AI API Wrapper ───────────────────────────────────────────────────────
 
 async function callGemini(apiKey: string, prompt: string, base64AudioPart?: string): Promise<string> {
@@ -167,10 +149,21 @@ Return a JSON array of words:
   }));
 }
 
-import { pairWordsAlgorithm as advancedPairing } from './pairAlgorithm';
-
 export function pairWordsAlgorithm(sourceWords: SyncWord[], ttsWords: SyncWord[]): SyncWordPair[] {
-  return advancedPairing(sourceWords, ttsWords);
+  const pairs: SyncWordPair[] = [];
+  
+  // A naive sequential alignment, which user can manually fix in UI.
+  // We can improve this with edit-distance alignment later, but for now map sequentially.
+  // The user expressly asked for manual intervention, so this is a starting point.
+  for (let i = 0; i < sourceWords.length; i++) {
+    pairs.push({
+      id: uuidv4(),
+      sourceWord: sourceWords[i],
+      ttsWord: ttsWords[i],
+      confirmed: false
+    });
+  }
+  return pairs;
 }
 
 // ─── Micro Analysis Fallback ──────────────────────────────────────────────
