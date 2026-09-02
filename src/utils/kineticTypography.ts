@@ -20,6 +20,8 @@ export interface KineticTypographyOptions {
   typoLayout?: 'row' | 'column';
   referenceScript?: string;
   customPrompt?: string;
+  backgroundSelection?: string;
+  pipBackgroundArea?: boolean;
 }
 
 export async function generateKineticTypography(
@@ -125,6 +127,8 @@ JSON Schema for EACH word object in the returned array:
 5. PREFERENCES: 
 ${userStyle !== 'random' ? `STYLE PRESET PREFERENCE: Lean towards "${userStyle}" style where possible.` : ''}
 ${userAnim !== 'random' ? `ANIMATION PREFERENCE: Prefer "${userAnim}" for animation where applicable.` : ''}
+${options.pipBackgroundArea ? 'BACKGROUND PREFERENCE: DO NOT generate any backgroundColor or backgroundStyle for the individual words. It will be handled globally.' : (options.backgroundSelection && options.backgroundSelection !== 'random' && options.backgroundSelection !== 'none' ? `BACKGROUND PREFERENCE: You MUST use the "${options.backgroundSelection}" backgroundStyle for the words.` : (options.backgroundSelection === 'none' ? 'BACKGROUND PREFERENCE: DO NOT use any backgroundStyle.' : ''))}
+
 
 Output ONLY a valid JSON array, no markdown, no explanation:
 [{"text":"Word","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":50,"y":50,"breakAfter":false,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
@@ -540,9 +544,21 @@ processedClips.push({
       const totalSentenceHeight = lines.length * lineHeight;
       const startY = -totalSentenceHeight / 2 + lineHeight / 2;
 
+
       // Record the authored line arrangement on the container so later resizes
       // reproduce it exactly instead of re-deriving it from word positions.
       (primaryClip as any).kineticLineStructure = lines.map((l) => l.length);
+
+if (options.pipBackgroundArea) {
+        if (!primaryClip.textSettings) primaryClip.textSettings = {} as any;
+        primaryClip.textSettings!.text = lines.map(l => l.map(item => item.word.text).join(' ')).join('\n');
+        primaryClip.textSettings!.fontSize = baseFontSize;
+        primaryClip.textSettings!.color = 'transparent';
+        primaryClip.textSettings!.backgroundColor = 'rgba(0,0,0,0.8)';
+        primaryClip.textSettings!.backgroundStyle = (options.backgroundSelection && options.backgroundSelection !== 'none' && options.backgroundSelection !== 'random') ? options.backgroundSelection : 'solid_pill';
+        primaryClip.textSettings!.fontFamily = grp[0].fontFamily || 'Inter';
+      }
+
 
       lines.forEach((line, lineIdx) => {
         const lineW = line.reduce((sum, item) => sum + item.width, 0) + (line.length - 1) * spaceWidth;

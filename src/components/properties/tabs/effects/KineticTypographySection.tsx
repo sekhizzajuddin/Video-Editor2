@@ -3,6 +3,7 @@ import { Type, Sparkles, Loader2, FileText, ChevronDown, ChevronUp, MessageSquar
 import type { TimelineClip } from '@/types';
 import { generateKineticTypography } from '@/utils/kineticTypography';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
+import { TEXT_BACKGROUNDS } from '@/utils/textBackgrounds';
 import { toast } from 'sonner';
 
 interface KineticTypographySectionProps {
@@ -24,6 +25,8 @@ export function KineticTypographySection({
   const [englishCasing, setEnglishCasing] = useState<'all_caps' | 'first_letter_caps' | 'none'>('none');
   const [kineticTypoStyle, setKineticTypoStyle] = useState<string>('random');
   const [kineticTypoAnimation, setKineticTypoAnimation] = useState<string>('random');
+  const [kineticTypoBackground, setKineticTypoBackground] = useState<string>('none');
+  const [pipBackgroundArea, setPipBackgroundArea] = useState(false);
   const [kineticTypoProvider, setKineticTypoProvider] = useState<'gemini' | 'groq'>(aiProvider);
   const [kineticTypoType, setKineticTypoType] = useState<'word' | 'sentence' | 'hybrid'>('hybrid');
   const [kineticTypoLayout, setKineticTypoLayout] = useState<'row' | 'column'>('row');
@@ -61,6 +64,8 @@ export function KineticTypographySection({
           casing: englishCasing,
           styleSelection: kineticTypoStyle,
           animationSelection: kineticTypoAnimation,
+          backgroundSelection: kineticTypoBackground,
+          pipBackgroundArea: pipBackgroundArea,
           provider: kineticTypoProvider,
           typoType: kineticTypoType,
           typoLayout: kineticTypoLayout,
