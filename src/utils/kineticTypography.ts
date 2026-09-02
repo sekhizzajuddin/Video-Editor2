@@ -522,7 +522,7 @@ processedClips.push({
       
       const charWidth = baseFontSize * 0.65;
       const spaceWidth = baseFontSize * 0.4;
-      const lineHeight = baseFontSize * 1.35;
+      const lineHeight = baseFontSize * 1.25;
 
       const lines: { word: any; width: number }[][] = [[]];
       let currentLineWidth = 0;
