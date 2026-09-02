@@ -55,7 +55,17 @@ export class AudioMixer {
           // Only the clip's used source region is shifted; the region keeps
           // its length, so all trim/start math below stays valid.
           let buffer: import('@/utils/audio/phaseVocoder').AudioBufferLike = audioBuffer;
-          const totalPitchSt = effectiveVocalPitchSt(clip.audioSettings);
+          let totalPitchSt = effectiveVocalPitchSt(clip.audioSettings);
+
+          // If the clip speed is altered, Web Audio's playbackRate will naturally
+          // shift the pitch up or down. If pitch preservation is enabled (default),
+          // we counter-act that shift here in the offline vocoder phase.
+          const preservePitch = clip.audioSettings?.preservePitch !== false;
+          if (clip.speed && clip.speed !== 1 && preservePitch) {
+            const speedShiftSt = 12 * Math.log2(clip.speed);
+            totalPitchSt -= speedShiftSt;
+          }
+
           if (Math.abs(totalPitchSt) >= 0.01) {
             const sourceDuration = audioBuffer.duration || 0;
             const span = getRampedClipSourceSpan(clip, sourceDuration);
