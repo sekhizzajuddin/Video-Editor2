@@ -36,123 +36,68 @@ export async function generateKineticTypography(
     throw new Error('Media not available for analysis');
   }
 
-  onProgress(10);
+  const CHUNK_DURATION = 15;
+  const numChunks = Math.ceil(clip.duration / CHUNK_DURATION);
+  let allTypoResults: any[] = [];
 
-  // 1. Extract visual frames for the clip's duration
-  const frames = await extractFramesFromVideo(media.url, 1, clip.trimStart, clip.trimStart + clip.duration);
-  onProgress(30);
-
-  // 2. Extract audio for the clip
-  const wavBlob = await extractClipAudio(media.url, clip.trimStart, clip.duration);
-  let audioDataPart: string | null = null;
-  
-  if (wavBlob) {
-    const base64Audio = await blobToBase64(wavBlob);
-    audioDataPart = base64Audio.split(',')[1] || base64Audio;
-  }
-  
-  onProgress(50);
-
-  // Translate script code to readable instruction
-  let scriptInstruction = "";
-  if (options.script === 'roman_urdu_hindi') {
-    scriptInstruction = "Transcribe in Roman Urdu/Hindi (i.e. Urdu/Hindi written in English/Latin letters, e.g. 'aur all loving hai', 'kya baat hai'). Preserve the spoken language's rhythm and emphasis.";
-  } else if (options.script === 'hindi') {
-    scriptInstruction = "Transcribe in Devanagari Hindi script (e.g. 'और ऑल लविंग है', 'क्या बात है'). Preserve emphasis and spoken rhythm.";
-  } else if (options.script === 'english') {
-    scriptInstruction = "Transcribe in English. Preserve natural spoken rhythms and contractions (e.g., don't, I'm, we're).";
-  } else {
-    scriptInstruction = `Translate and transcribe the spoken words into the ${options.script.toUpperCase()} script/language. Preserve emphasis and rhythm.`;
-  }
-
-  // Casing requirement
-  const activeCasing = options.casing || options.englishCasing || 'none';
-  let casingInstruction = "";
-  if (options.script === 'english' || options.script === 'roman_urdu_hindi') {
-    if (activeCasing === 'all_caps') {
-      casingInstruction = "Convert ALL words to strictly UPPERCASE (e.g. 'HELLO', 'WORLD', 'AAJ', 'MERA').";
-    } else if (activeCasing === 'first_letter_caps') {
-      casingInstruction = "Capitalize ONLY the first letter of each word (e.g. 'Hello', 'World', 'Aaj', 'Mera').";
-    }
-  }
-
+  let activeCasing = options.casing || 'first_letter_caps';
   const userStyle = options.styleSelection || 'random';
   const userAnim = options.animationSelection || 'random';
-  const refScriptInstruction = options.referenceScript
-    ? `\n\nUSER-PROVIDED GROUND-TRUTH REFERENCE SCRIPT:\n"${options.referenceScript}"\n\nCRITICAL INSTRUCTION FOR GROUND-TRUTH REFERENCE SCRIPT:\n- The user has provided the exact ground-truth script spoken in the video/audio.\n- You MUST use the exact words, spelling, and order from this reference script for the "text" properties of the generated typography objects.\n- Align each word from the reference script to its corresponding spoken audio timestamp.\n- This corrects any phonetic transcription errors from automated speech recognition.`
-    : '';
 
-  const customPromptText = options.customPrompt?.trim() || '';
 
-  const customPromptInstruction = customPromptText
-    ? `
-════════════════════════════════════════════════════════════════════════════════
-⭐ MANDATORY USER CUSTOM INSTRUCTIONS (HIGHEST PRIORITY - OVERRIDES ALL DEFAULTS):
-"${customPromptText}"
+  for (let i = 0; i < numChunks; i++) {
+    const chunkStartRel = i * CHUNK_DURATION;
+    const chunkDuration = Math.min(CHUNK_DURATION, clip.duration - chunkStartRel);
+    const chunkTrimStart = clip.trimStart + chunkStartRel;
 
-HOW TO STRICTLY ENFORCE THESE CUSTOM INSTRUCTIONS:
-- POSITIONING:
-  * "bottom" / "lower third" / "bottom center" -> Set "y" to 80 (range 75–85) for all words.
-  * "top" / "upper third" / "top center" -> Set "y" to 20 (range 15–25) for all words.
-  * "center" / "middle" -> Set "y" to 50 (range 45–55) for all words.
-  * "left" / "left side" -> Set "x" to 25 (range 20–35) for all words.
-  * "right" / "right side" -> Set "x" to 75 (range 65–80) for all words.
-- COLORS & PALETTE:
-  * If the user requests specific colors (e.g. "neon cyan and magenta", "all gold and white", "red theme", "yellow on black"), output those exact hex codes in the "color", "strokeColor", "shadowColor", and "backgroundColor" properties.
-- FONTS & TYPOGRAPHY:
-  * If the user asks for specific font styles (e.g. "bold sans", "retro serif", "clean minimal", "heavy impact"), choose matching "fontFamily" ('Anton', 'Impact', 'Bebas Neue', 'Oswald', 'Outfit', 'Inter', 'Montserrat', 'Georgia') and appropriate "fontSize".
-- ANIMATION STYLE:
-  * If the user requests specific animation types (e.g. "pop only", "glitch effect", "smooth slide up", "typewriter", "bounce", "elastic"), set "animationIn" to that exact animation.
-- MULTI-DESIGN / EMPHASIS / BOXES:
-  * If the user asks for specific words to have different styles (e.g. "highlight numbers in green", "make action verbs big and red with dark box background"), differentiate those specific words using "color", "fontSize", "backgroundColor", and "strokeColor".
-════════════════════════════════════════════════════════════════════════════════
-`
-    : '';
+    onProgress(10 + Math.round((i / numChunks) * 75)); // Progress scales through loop
 
-  // ─── Shared high-quality prompt for typography generation ──────────────────
-  const prompt = `You are a world-class Kinetic Typography Director and Motion Graphics Designer.
-I am providing audio and visual frames of a video clip (Duration: ${clip.duration.toFixed(2)} seconds).
+    const frames = await extractFramesFromVideo(media.url, 1, chunkTrimStart, chunkTrimStart + chunkDuration);
+    const wavBlob = await extractClipAudio(media.url, chunkTrimStart, chunkDuration);
+    let audioDataPart: string | null = null;
+    
+    if (wavBlob) {
+      const base64Audio = await blobToBase64(wavBlob);
+      audioDataPart = base64Audio.split(',')[1] || base64Audio;
+    }
+
+    let scriptInstruction = "";
+    if (options.script === 'roman_urdu_hindi') {
+      scriptInstruction = "Transcribe in Roman Urdu/Hindi (i.e. Urdu/Hindi written in English/Latin letters). Preserve the spoken language's rhythm and emphasis.";
+    } else if (options.script === 'hindi') {
+      scriptInstruction = "Transcribe in Hindi (Devanagari script). Ensure grammatically correct sentences.";
+    } else if (options.script === 'spanish') {
+      scriptInstruction = "Transcribe in Spanish. Capture emotion and rhythm.";
+    } else {
+      scriptInstruction = "Transcribe strictly in English. Preserve correct casing and punctuation.";
+    }
+
+    activeCasing = options.casing || 'first_letter_caps';
+    let casingInstruction = "Use natural casing (e.g., 'Hello world', 'I love it').";
+    if (activeCasing === 'all_caps') casingInstruction = "OUTPUT ALL TEXT IN ALL CAPS (e.g. 'HELLO WORLD').";
+
+    if (activeCasing === 'first_letter_caps') casingInstruction = "Capitalize The First Letter Of Every Word (e.g. 'Hello World').";
+
+    const customPromptText = options.customPrompt?.trim() || "";
+    const customPromptInstruction = customPromptText 
+      ? `\n>>> USER CUSTOM INSTRUCTION (MANDATORY HIGHEST PRIORITY): <<<\n"${customPromptText}"\n>>> YOU MUST APPLY THIS CUSTOM INSTRUCTION ACROSS ALL GENERATED WORDS AND ANIMATIONS <<<\n`
+      : "";
+
+
+
+
+    const prompt = `You are a world-class Kinetic Typography Director.
+I am providing audio and frames of a video chunk (Duration: ${chunkDuration.toFixed(2)} seconds).
 ${customPromptInstruction}
 PRIMARY TASK: Generate a JSON array of text animation clips, STRICTLY WORD-BY-WORD.
-- CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE SPOKEN WORD.
-- Do NOT skip any words. Do NOT group multiple words into one object. Missing words will break the video sync.
-- Every word must have a precise, short duration matching the real audio timing.
-
-SPOKEN SCRIPT & LANGUAGE:
-- ${scriptInstruction}
-${casingInstruction ? `- ${casingInstruction}` : ''}${refScriptInstruction}
-
-LAYOUT REQUIREMENTS:
-${options.typoLayout === 'column' 
-  ? "- COLUMN WISE (9:16 Short Video / Reel): Keep lines extremely short (1-3 words max). It is CRITICAL to set \"breakAfter\": true on words where a line break should naturally occur for dramatic pacing."
-  : "- ROW WISE (16:9 Landscape): Keep text flowing in wide lines. Set \"breakAfter\": true on words only when grammatically or visually necessary to prevent lines from exceeding 6-8 words."}
-
-DESIGNING AN EMOTIONALLY EXPRESSIVE TYPOGRAPHY FLOW (CRITICAL RULES):
-1. SEMANTIC WEIGHT: Identify KEY emotional/emphatic words (nouns, verbs like 'NEVER', 'EXPLODE', 'LOVE', 'ROKNA').
-   - Key words: fontSize 85–120, bold vibrant color, dramatic animation (bounce, zoom, slideUp, elastic, glitch).
-   - Filler words (is, a, the, to, and, aur, ki, ka): fontSize 45–60, muted/white color, simple fadeIn.
-2. POSITIONING & COORDINATES:
-   - x: 0–100 screen percentage (50 = center, 20 = left, 80 = right)
-   - y: 0–100 screen percentage (50 = center, 20 = top/upper third, 80 = bottom/lower third)
-   ${customPromptText ? '- NOTE: Follow the USER CUSTOM INSTRUCTIONS above for target position (e.g. top/bottom/center).' : '- Stagger positions word-by-word (x: 35-65, y: 40-60) unless user custom instruction specifies otherwise.'}
-3. VIBRANT COLORS:
-   - Key words: high-contrast vibrant hex colors ('#fbbf24' yellow, '#22d3ee' cyan, '#f43f5e' rose-pink, '#a855f7' purple, '#22c55e' emerald, '#ef4444' red).
-   - Filler words: '#ffffff' white or '#94a3b8' slate gray.
-4. TIMING PRECISION:
-   - Each word's start/end should be tight (0.05–0.4s max for normal speech; 0.4–0.8s for slow/dramatic speech).
-   - Do not leave gaps between words unless there is a genuine silence in audio.
-5. FONT HIERARCHY:
-   - Key words: 'Anton', 'Bebas Neue', 'Impact', 'Oswald'.
-   - Filler words: 'Inter', 'Outfit', 'Montserrat'.
-
-${userStyle !== 'random' ? `STYLE PRESET PREFERENCE: Lean towards "${userStyle}" style where possible.` : ''}
-${userAnim !== 'random' ? `ANIMATION PREFERENCE: Prefer "${userAnim}" for animation where applicable.` : ''}
+- CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE SPOKEN WORD in this chunk.
+- DO NOT SKIP WORDS.
 
 JSON Schema for EACH word object in the returned array:
 - "text": string (the single spoken word)
-- "start": number (start time in seconds, 0–${clip.duration.toFixed(2)})
-- "end": number (end time in seconds, 0–${clip.duration.toFixed(2)})
-- "fontSize": number (45–120)
+- "start": number (start time in seconds, 0 - ${chunkDuration.toFixed(2)})
+- "end": number (end time in seconds, 0 - ${chunkDuration.toFixed(2)})
+- "fontSize": number (45 - 120)
 - "fontFamily": string ('Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Outfit', 'Inter', 'Montserrat', or 'Georgia')
 - "color": string (vibrant hex color e.g. '#fbbf24')
 - "backgroundColor": string (optional, e.g. 'transparent', '#000000', 'rgba(0,0,0,0.7)', '#ff0055')
@@ -161,123 +106,142 @@ JSON Schema for EACH word object in the returned array:
 - "strokeWidth": number (optional, 0, 1, 2, 3, or 4)
 - "shadowColor": string (optional hex, e.g. '#000000')
 - "rotation": number (optional degrees, e.g. -15 to 15, 0 for straight)
-- "x": number (0–100, 50 is center, 20 is left, 80 is right)
-- "y": number (0–100, 50 is center, 20 is top, 80 is bottom)
+- "x": number (0 - 100, 50 is center, 20 is left, 80 is right)
+- "y": number (0 - 100, 50 is center, 20 is top, 80 is bottom)
 - "breakAfter": boolean (true if line break should follow this word)
 - "animationIn": 'fadeIn' | 'zoom' | 'bounce' | 'typewriter' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'letterSpacing'
 - "animationOut": 'fadeOut' | 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'letterSpacing'
 - "stylePreset": string (e.g. 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption')
 
-${customPromptText ? `CRITICAL REMINDER: You MUST strictly obey the user custom instruction: "${customPromptText}"\n` : ''}Output ONLY a valid JSON array, no markdown, no explanation:
+1. SCRIPT/LANGUAGE:
+   ${scriptInstruction}
+   ${casingInstruction}
+2. POSITIONING & COORDINATES:
+   - x: 0 - 100 screen percentage
+   - y: 0 - 100 screen percentage
+   ${customPromptText ? '- NOTE: Follow the USER CUSTOM INSTRUCTIONS above for target position (e.g. top/bottom/center).' : '- Stagger positions word-by-word (x: 35-65, y: 40-60) unless user custom instruction specifies otherwise.'}
+3. VIBRANT COLORS: Use high contrast colors.
+4. TIMING PRECISION: Keep start/end tight based on audio.
+5. PREFERENCES: 
+${userStyle !== 'random' ? `STYLE PRESET PREFERENCE: Lean towards "${userStyle}" style where possible.` : ''}
+${userAnim !== 'random' ? `ANIMATION PREFERENCE: Prefer "${userAnim}" for animation where applicable.` : ''}
+
+Output ONLY a valid JSON array, no markdown, no explanation:
 [{"text":"Word","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":50,"y":50,"breakAfter":false,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
-  let resultJsonStr = '';
+    let resultJsonStr = '';
 
-  if (provider === 'groq') {
-    // Groq path: Use Whisper for precise word-level timestamps, then feed to LLaMA 3.3 for layout
-    if (!wavBlob) {
-      console.warn('[Kinetic Typography] Audio extraction failed. Groq path requires audio; falling back to basic timestamp estimation.');
-      // Generate evenly-spaced timestamps as a fallback instead of crashing
-      resultJsonStr = JSON.stringify(generateFallbackTypography(clip.duration, prompt));
-    } else {
-      const transcription = await transcribeAudioWithGroq(wavBlob);
-      onProgress(65);
+    if (provider === 'groq') {
+      if (!wavBlob) {
+        console.warn('[Kinetic Typography] Audio extraction failed for chunk; falling back.');
+        resultJsonStr = JSON.stringify(generateFallbackTypography(chunkDuration, prompt));
+      } else {
+        const transcription = await transcribeAudioWithGroq(wavBlob);
+        const wordTimestamps = transcription.words
+          ? JSON.stringify(transcription.words, null, 2)
+          : JSON.stringify(transcription.segments || transcription.text, null, 2);
 
-      const wordTimestamps = transcription.words
-        ? JSON.stringify(transcription.words, null, 2)
-        : JSON.stringify(transcription.segments || transcription.text, null, 2);
-
-      const groqSystemPrompt = `You are a world-class Kinetic Typography Director and Motion Graphics Specialist.
-You have precise word-level timestamps from Whisper transcription. Your job is to create stunning, emotionally expressive typography animations.
+        const groqSystemPrompt = `You are a world-class Kinetic Typography Director.
+You have precise word-level timestamps from Whisper transcription. 
 ${customPromptInstruction}
 Rules:
 - Use the Whisper timestamps as the SOURCE OF TRUTH for word timing.
-- CRITICAL: You MUST generate EXACTLY ONE JSON object for EVERY SINGLE WORD present in the Whisper transcription. Do NOT skip any words. Do NOT group words. Missing words will break the video sync.
-- Return ONLY a valid JSON array of word typography objects.
-- Each object MUST have all required fields: text, start, end, fontSize, fontFamily, color, x, y, breakAfter, animationIn, animationOut, stylePreset.
-- Optional fields: backgroundColor, backgroundStyle, strokeColor, strokeWidth, shadowColor, rotation.
-- Do NOT include any text, explanation, or markdown outside the JSON array.
+- CRITICAL: MUST generate EXACTLY ONE JSON object for EVERY SINGLE WORD present in transcription.
+- Return ONLY a valid JSON array.
 - STRICTLY RESPECT AND ENFORCE ANY USER CUSTOM INSTRUCTIONS.`;
 
-      const groqUserPrompt = `${prompt}\n\n---\nWHISPER WORD TIMESTAMPS (use these for precise timing):\n${wordTimestamps}\n\n${customPromptText ? `REMINDER OF USER CUSTOM INSTRUCTION (strictly apply this):\n"${customPromptText}"\n\n` : ''}Generate the kinetic typography JSON array now:`;
+        const groqUserPrompt = `${prompt}
 
-      resultJsonStr = await analyzeReasoningWithGroq(groqUserPrompt, groqSystemPrompt);
-    }
-    onProgress(85);
-  } else {
-    // Gemini path with failover and systemInstruction
-    const contentsParts: any[] = [{ text: prompt }];
+---
+WHISPER WORD TIMESTAMPS (use these for precise timing):
+${wordTimestamps}
 
-    if (customPromptText) {
-      contentsParts.push({
-        text: `CRITICAL USER CUSTOM INSTRUCTION (Strictly follow this): "${customPromptText}"`
-      });
-    }
+${customPromptText ? `REMINDER OF USER CUSTOM INSTRUCTION (strictly apply this):
+"${customPromptText}"
 
-    // Add audio if extracted
-    if (audioDataPart) {
-      contentsParts.push({
-        inlineData: { mimeType: 'audio/wav', data: audioDataPart }
-      });
-    }
+` : ''}Generate the kinetic typography JSON array now:`;
 
-    // Add frames
-    for (const frame of frames) {
-      const b64 = frame.replace(/^data:image\/(png|jpeg|webp);base64,/, '');
-      contentsParts.push({
-        inlineData: { mimeType: 'image/jpeg', data: b64 }
-      });
-    }
-
-    const requestBody: any = {
-      systemInstruction: {
-        parts: [{
-          text: `You are a world-class Kinetic Typography Director and Motion Graphics Specialist. You generate precise word-by-word JSON typography objects strictly matching speech timing.\n${customPromptInstruction}`
-        }]
-      },
-      contents: [{ parts: contentsParts }],
-      generationConfig: {
-        temperature: 0.3,
-        responseMimeType: "application/json"
+        resultJsonStr = await analyzeReasoningWithGroq(groqUserPrompt, groqSystemPrompt);
       }
-    };
+    } else {
+      const contentsParts: any[] = [{ text: prompt }];
 
-    const response = await fetchWithKeyFailover(
-      (key) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      },
-      'gemini'
-    );
+      if (customPromptText) {
+        contentsParts.push({
+          text: `CRITICAL USER CUSTOM INSTRUCTION (Strictly follow this): "${customPromptText}"`
+        });
+      }
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini API Error: ${response.status} - ${errText}`);
+      if (audioDataPart) {
+        contentsParts.push({
+          inlineData: { mimeType: 'audio/wav', data: audioDataPart }
+        });
+      }
+
+      for (const frame of frames) {
+        const b64 = frame.replace(/^data:image\/(png|jpeg|webp);base64,/, '');
+        contentsParts.push({
+          inlineData: { mimeType: 'image/jpeg', data: b64 }
+        });
+      }
+
+      const requestBody: any = {
+        systemInstruction: {
+          parts: [{
+            text: `You are a Kinetic Typography Director. Generate word-by-word JSON typography objects matching speech timing.
+${customPromptInstruction}`
+          }]
+        },
+        contents: [{ parts: contentsParts }],
+        generationConfig: {
+          temperature: 0.3,
+          responseMimeType: "application/json"
+        }
+      };
+
+      const response = await fetchWithKeyFailover(
+        (key) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        },
+        'gemini'
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Gemini API Error: ${response.status} - ${errText}`);
+      }
+
+      const data = await response.json();
+      resultJsonStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!resultJsonStr) {
+        throw new Error('No valid response from Gemini for this chunk.');
+      }
     }
 
-    const data = await response.json();
-    onProgress(85);
+    resultJsonStr = resultJsonStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+    let chunkResults = [];
+    try {
+      chunkResults = JSON.parse(resultJsonStr);
+    } catch(e) {
+      console.warn(`Failed to parse AI typography response for chunk ${i}: ${resultJsonStr}`);
+      continue; // Skip this chunk and move to next instead of crashing whole process
+    }
 
-    resultJsonStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!resultJsonStr) {
-      throw new Error('No valid response from Gemini.');
+    // Offset chunk timestamps to absolute clip time
+    for (const item of chunkResults) {
+      if (item.start !== undefined) item.start += chunkStartRel;
+      if (item.end !== undefined) item.end += chunkStartRel;
+      allTypoResults.push(item);
     }
   }
 
-  resultJsonStr = resultJsonStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
-  let typoResults = [];
-  try {
-    typoResults = JSON.parse(resultJsonStr);
-  } catch(e) {
-    throw new Error(`Failed to parse AI typography response: ${resultJsonStr}`);
-  }
 
-  // Post-processing of text to guarantee casing constraints and word-by-word split
   const processedClips: any[] = [];
   
-  for (const item of typoResults) {
+  for (const item of allTypoResults) {
     const rawText = (item.text || '').trim();
     if (!rawText) continue;
 

@@ -1,25 +1,78 @@
 import { useEditorStore } from '@/store/editorStore';
 import { getGeminiKey } from './aiClient';
 import { renderTimelineAudioToWav, blobToBase64 } from './autoCaptions';
-import { TimelineClip } from '@/types';
+import { TimelineClip, SubtitleItem } from '@/types';
 import { extractJsonFromLlmResponse } from './jsonHelper';
 
 const uuidv4 = () => crypto.randomUUID();
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
-
-function normalizeText(text: string): string {
-  return text.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+function cleanWord(w: string): string {
+  return w.replace(/[،۔؟.,!]/g, "").trim().toLowerCase();
 }
 
-function textSimilarity(a: string, b: string): number {
-  const wordsA = normalizeText(a).split(' ').filter(Boolean);
-  const wordsB = normalizeText(b).split(' ').filter(Boolean);
-  if (wordsA.length === 0 && wordsB.length === 0) return 1;
-  if (wordsA.length === 0 || wordsB.length === 0) return 0;
-  const setB = new Set(wordsB);
-  const overlap = wordsA.filter(w => setB.has(w)).length;
-  return overlap / Math.max(wordsA.length, wordsB.length);
+interface WordToken {
+  word: string;
+  raw: string;
+  start: number;
+  end: number;
+}
+
+function extractWordList(items: { words?: { word: string; start: number; end: number }[] }[]): WordToken[] {
+  const list: WordToken[] = [];
+  for (const item of items) {
+    if (!item.words) continue;
+    for (const w of item.words) {
+      const cw = cleanWord(w.word);
+      if (cw) {
+        list.push({ word: cw, raw: w.word, start: w.start, end: w.end });
+      }
+    }
+  }
+  return list;
+}
+
+interface MatchBlock {
+  aIndex: number;
+  bIndex: number;
+  length: number;
+}
+
+function getMatchingBlocks(a: string[], b: string[]): MatchBlock[] {
+  function findLongestMatch(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+    let maxLen = 0;
+    let bestA = aStart;
+    let bestB = bStart;
+
+    for (let i = aStart; i < aEnd; i++) {
+      for (let j = bStart; j < bEnd; j++) {
+        if (a[i] === b[j]) {
+          let k = 1;
+          while (i + k < aEnd && j + k < bEnd && a[i + k] === b[j + k]) {
+            k++;
+          }
+          if (k > maxLen) {
+            maxLen = k;
+            bestA = i;
+            bestB = j;
+          }
+        }
+      }
+    }
+    return { bestA, bestB, maxLen };
+  }
+
+  const blocks: MatchBlock[] = [];
+  function recurse(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+    const { bestA, bestB, maxLen } = findLongestMatch(aStart, aEnd, bStart, bEnd);
+    if (maxLen > 0) {
+      recurse(aStart, bestA, bStart, bestB);
+      blocks.push({ aIndex: bestA, bIndex: bestB, length: maxLen });
+      recurse(bestA + maxLen, aEnd, bestB + maxLen, bEnd);
+    }
+  }
+
+  recurse(0, a.length, 0, b.length);
+  return blocks.sort((x, y) => x.aIndex - y.aIndex);
 }
 
 async function callGemini(apiKey: string, parts: any[], temperature = 0.1): Promise<string> {
@@ -45,8 +98,6 @@ async function callGemini(apiKey: string, parts: any[], temperature = 0.1): Prom
   return extractJsonFromLlmResponse(resultStr);
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────
-
 interface TtsSentence {
   sentenceId: string;
   text: string;
@@ -54,15 +105,6 @@ interface TtsSentence {
   end: number;
   words: { word: string; start: number; end: number }[];
 }
-
-interface SyncCorrection {
-  sentenceId: string;
-  newTtsStart?: number;
-  newTtsEnd?: number;
-  issue?: string;
-}
-
-// ─── Main Export ──────────────────────────────────────────────────────────
 
 export async function syncAiVoiceToSubtitles(
   targetTrackId: string,
@@ -94,7 +136,7 @@ export async function syncAiVoiceToSubtitles(
   const base64Audio = await blobToBase64(wavBlob);
   const dataPart = base64Audio.split(',')[1] || base64Audio;
 
-  onProgress(30, 'Transcribing TTS audio...');
+  onProgress(30, 'Transcribing TTS audio for word-level timestamps...');
 
   const sentenceReference = originalSubtitles.map((sub, i) => ({
     sentenceId: sub.sentenceId || `S${i + 1}`,
@@ -104,7 +146,7 @@ export async function syncAiVoiceToSubtitles(
   const phase1Prompt = `You are a professional audio transcription and alignment assistant.
 I have provided an audio track containing a TTS (text-to-speech) voiceover.
 
-The voiceover was generated from the following script sentences. Your job is to listen to the audio and find EXACTLY where each sentence starts and ends in the audio, plus word-level timestamps.
+The voiceover was generated from the following script sentences. Your job is to listen to the audio and find EXACTLY where each sentence starts and ends in the audio, plus precise word-level timestamps.
 
 SENTENCE REFERENCE (in order):
 ${JSON.stringify(sentenceReference, null, 2)}
@@ -113,7 +155,7 @@ IMPORTANT RULES:
 - Match each sentence from the reference to its spoken location in the audio.
 - Use the same sentenceId values from the reference.
 - If a sentence is not found in the audio, still include it with start=0 and end=0.
-- Provide precise word-level timestamps for each sentence.
+- Provide PRECISE word-level timestamps for each sentence. We need every single word aligned.
 - The audio language is "${language}".
 
 Return ONLY a JSON array of sentence objects:
@@ -129,7 +171,7 @@ Return ONLY a JSON array of sentence objects:
   }
 ]
 
-Start and end are floating point seconds. Do not include markdown.`;
+Start and end are floating point seconds.`;
 
   const phase1Result = await callGemini(apiKey, [
     { text: phase1Prompt },
@@ -139,160 +181,145 @@ Start and end are floating point seconds. Do not include markdown.`;
   const ttsSentences: TtsSentence[] = JSON.parse(phase1Result);
   if (!Array.isArray(ttsSentences)) throw new Error('Phase 1 failed: Invalid TTS transcription.');
 
-  onProgress(55, 'Aligning sentences (Smart Split)...');
+  onProgress(55, 'Aligning words (Continuous Anchor Engine)...');
 
-  // ─── Phase 2: Sentence-Level Slicing & Alignment ───────────────────
+  // ─── Phase 2: Word-Level Sequence Matching (Continuous Anchor Alignment) ───
 
-  const ttsMap = new Map<string, TtsSentence>();
-  for (const ts of ttsSentences) {
-    ttsMap.set(ts.sentenceId, ts);
+  const wordsOrg = extractWordList(originalSubtitles);
+  const wordsTts = extractWordList(ttsSentences);
+
+  const tokensOrg = wordsOrg.map(w => w.word);
+  const tokensTts = wordsTts.map(w => w.word);
+
+  const blocks = getMatchingBlocks(tokensOrg, tokensTts);
+
+  const anchors: { o_start: number; o_end: number; t_start: number; t_end: number; text: string }[] = [];
+  for (const b of blocks) {
+    if (b.length > 0) {
+      const o_s = wordsOrg[b.aIndex].start;
+      const o_e = wordsOrg[b.aIndex + b.length - 1].end;
+      const t_s = wordsTts[b.bIndex].start;
+      const t_e = wordsTts[b.bIndex + b.length - 1].end;
+      anchors.push({
+        o_start: o_s,
+        o_end: o_e,
+        t_start: t_s,
+        t_end: t_e,
+        text: tokensTts.slice(b.bIndex, b.bIndex + b.length).join(" ")
+      });
+    }
   }
+
+  if (anchors.length === 0) {
+    throw new Error('No matching words found between TTS audio and original subtitles. Make sure the TTS matches the script!');
+  }
+
+  // Generate continuous chunks
+  const ttsTotalDur = Math.max(...ttsSentences.map(s => s.end));
+  const orgTotalDur = Math.max(...originalSubtitles.map(s => s.endTime));
+
+  const chunks: { t_start: number; t_end: number; o_start: number; o_end: number }[] = [];
+  let curr_t = 0.0;
+  let curr_o = 0.0;
+
+  for (const a of anchors) {
+    if (a.t_start > curr_t) {
+      chunks.push({
+        t_start: curr_t, t_end: a.t_start,
+        o_start: curr_o, o_end: a.o_start
+      });
+    }
+    chunks.push({
+      t_start: a.t_start, t_end: a.t_end,
+      o_start: a.o_start, o_end: a.o_end
+    });
+    curr_t = a.t_end;
+    curr_o = a.o_end;
+  }
+
+  if (curr_t < ttsTotalDur) {
+    chunks.push({
+      t_start: curr_t, t_end: ttsTotalDur,
+      o_start: curr_o, o_end: Math.max(orgTotalDur, curr_o + (ttsTotalDur - curr_t))
+    });
+  }
+
+  // Merge extremely short chunks to prevent timeline clutter
+  const mergedChunks: typeof chunks = [];
+  let current: typeof chunks[0] | null = null;
+
+  for (const c of chunks) {
+    c.o_end = Math.max(c.o_start + 0.01, c.o_end);
+    c.t_end = Math.max(c.t_start + 0.01, c.t_end);
+
+    if (!current) {
+      current = { ...c };
+    } else {
+      const t_dur = current.t_end - current.t_start;
+      if (t_dur < 1.0) { // Merge if less than 1.0 sec to keep timeline clean
+        current.t_end = c.t_end;
+        current.o_end = c.o_end;
+      } else {
+        mergedChunks.push(current);
+        current = { ...c };
+      }
+    }
+  }
+  if (current) mergedChunks.push(current);
 
   const sourceClip = targetTrack.clips[0];
   const newClips: TimelineClip[] = [];
 
-  // SMART SPLIT LOGIC: Group contiguous sentences that share the same pacing.
-  let currentBlock: {
-    firstSubStart: number;
-    firstTtsStart: number;
-    lastTtsEnd: number;
-    sentences: { sub: any, tts: TtsSentence }[];
-  } | null = null;
+  let write_cursor = 0; // Timeline time cursor
 
-  const flushBlock = () => {
-    if (!currentBlock) return;
+  for (const c of mergedChunks) {
+    const t_s = c.t_start;
+    const t_e = c.t_end;
+    const o_s = c.o_start;
+    const o_e = c.o_end;
+
+    // Adjust target org duration based on cursor to avoid drifting
+    const expected_o_start = write_cursor > 0 ? write_cursor : o_s;
     
-    // Natural duration of this TTS block
-    const ttsDuration = Math.max(0.05, currentBlock.lastTtsEnd - currentBlock.firstTtsStart);
+    let t_dur = t_e - t_s;
+    let o_dur = o_e - expected_o_start;
+    if (o_dur < 0.05) o_dur = 0.05;
+
+    let speed = t_dur / o_dur;
     
-    const newClip: TimelineClip = {
+    // Soft clamp speed limits (0.6x to 1.6x) just like the IDE script
+    if (speed < 0.6) {
+      speed = 0.6;
+      o_dur = t_dur / speed;
+    } else if (speed > 1.6) {
+      speed = 1.6;
+      o_dur = t_dur / speed;
+    }
+
+    if (t_dur <= 0) continue;
+
+    newClips.push({
       ...sourceClip,
       id: uuidv4(),
-      startTime: currentBlock.firstSubStart,
-      duration: ttsDuration, // Play at natural speed!
-      trimStart: currentBlock.firstTtsStart,
-      speed: 1.0, // DO NOT stretch the audio
+      startTime: expected_o_start,
+      duration: o_dur,
+      trimStart: t_s + sourceClip.trimStart, // Offset by original source trim
+      speed: speed,
       audioSettings: {
         volume: 0, pan: 0, fadeIn: 0, fadeOut: 0, bass: 0, treble: 0, muted: false, pitch: 0, voiceFormant: 0, humanize: false,
         ...(sourceClip.audioSettings || {}),
         preservePitch: true
       } as any
-    };
-    newClips.push(newClip);
-    currentBlock = null;
-  };
+    });
 
-  const MAX_SYNC_DRIFT = 0.5; // seconds (if TTS drifts by more than 500ms from subtitles, we split)
-
-  for (let i = 0; i < originalSubtitles.length; i++) {
-    const sub = originalSubtitles[i];
-    const subSentenceId = sub.sentenceId || `S${i + 1}`;
-
-    let matched = ttsMap.get(subSentenceId);
-    if (!matched) {
-      let bestScore = 0;
-      for (const ts of ttsSentences) {
-        const score = textSimilarity(sub.text, ts.text);
-        if (score > bestScore) {
-          bestScore = score;
-          matched = ts;
-        }
-      }
-      if (bestScore < 0.3) matched = undefined;
-    }
-
-    if (!matched || (matched.start === 0 && matched.end === 0)) {
-      continue; // Skip silently if not found
-    }
-
-    if (!currentBlock) {
-      // Start a new block
-      currentBlock = {
-        firstSubStart: sub.startTime,
-        firstTtsStart: matched.start,
-        lastTtsEnd: matched.end,
-        sentences: [{ sub, tts: matched }]
-      };
-    } else {
-      // Check if we should append to current block or split
-      const subGap = sub.startTime - currentBlock.firstSubStart;
-      const ttsGap = matched.start - currentBlock.firstTtsStart;
-      const drift = Math.abs(subGap - ttsGap);
-
-      if (drift > MAX_SYNC_DRIFT) {
-        // Significant pacing drift -> SPLIT the audio here
-        flushBlock();
-        currentBlock = {
-          firstSubStart: sub.startTime,
-          firstTtsStart: matched.start,
-          lastTtsEnd: matched.end,
-          sentences: [{ sub, tts: matched }]
-        };
-      } else {
-        // Pacing matches nicely -> APPEND to block
-        currentBlock.lastTtsEnd = matched.end;
-        currentBlock.sentences.push({ sub, tts: matched });
-      }
-    }
+    write_cursor = expected_o_start + o_dur;
   }
-  
-  // Flush final block
-  flushBlock();
 
-  if (newClips.length === 0) throw new Error('No sentences could be matched between subtitles and TTS audio.');
-
-  // Apply initial placement
+  // Apply to timeline
   const updatedTracks = store.tracks.map(t =>
     t.id === targetTrackId ? { ...t, clips: newClips } : t
   );
   useEditorStore.setState({ tracks: updatedTracks });
 
-  onProgress(75, 'Verifying sync...');
-
-  // ─── Phase 3: AI Verification Pass ─────────────────────────────────
-  const alignmentSummary = newClips.map((clip, i) => {
-    return {
-      clipIndex: i,
-      ttsStart: clip.trimStart,
-      ttsDuration: clip.duration,
-      timelineStart: clip.startTime
-    };
-  });
-
-  const phase3Prompt = `You are an audio-sync verification assistant.
-I have aligned TTS audio clips to subtitle timestamps. Below is the alignment summary.
-
-ALIGNMENT:
-${JSON.stringify(alignmentSummary, null, 2)}
-
-Please verify each alignment. Check if no two clips overlap on the timeline.
-If everything looks correct, return: { "status": "ok", "corrections": [] }
-If any clips overlap, return: { "status": "needs_correction", "corrections": [ { "clipIndex": 1, "newTimelineStart": 5.2 } ] }
-Return ONLY valid JSON.`;
-
-  try {
-    const phase3Result = await callGemini(apiKey, [{ text: phase3Prompt }]);
-    const verification = JSON.parse(phase3Result);
-
-    if (verification.status === 'needs_correction' && Array.isArray(verification.corrections)) {
-      const corrections = verification.corrections;
-      if (corrections.length > 0) {
-        onProgress(85, `Applying ${corrections.length} overlap corrections...`);
-        const correctedClips = [...newClips];
-        for (const fix of corrections) {
-          if (fix.clipIndex !== undefined && fix.newTimelineStart !== undefined && correctedClips[fix.clipIndex]) {
-            correctedClips[fix.clipIndex] = { ...correctedClips[fix.clipIndex], startTime: fix.newTimelineStart };
-          }
-        }
-        const finalTracks = useEditorStore.getState().tracks.map(t =>
-          t.id === targetTrackId ? { ...t, clips: correctedClips } : t
-        );
-        useEditorStore.setState({ tracks: finalTracks });
-      }
-    }
-  } catch (verifyErr) {
-    console.warn('Phase 3 verification failed (non-critical):', verifyErr);
-  }
-
-  onProgress(100, 'Sync complete!');
+  onProgress(100, 'Continuous Sync complete!');
 }
