@@ -6,11 +6,18 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Clapperboard, FolderOpen } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { listRecentProjects, setActiveProject, saveProjectMeta, type ProjectMetadata } from '@/utils/projectPersistence';
 
 export function MobileWelcomeScreen({ onImport }: { onImport: () => void }) {
   const [projects, setProjects] = useState<ProjectMetadata[]>([]);
-  const { resetProject, setProjectInfo, loadProject } = useEditorStore();
+  const { resetProject, setProjectInfo, loadProject } = useEditorStore(
+    useShallow(s => ({
+      resetProject: s.resetProject,
+      setProjectInfo: s.setProjectInfo,
+      loadProject: s.loadProject,
+    }))
+  );
 
   useEffect(() => {
     listRecentProjects()

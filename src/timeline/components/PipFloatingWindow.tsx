@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { PipWindow, TimelineClip } from '@/types';
 import { X, GripHorizontal, ChevronUp, ChevronDown, Plus, Lock, Unlock, Eye, EyeOff, Volume2, VolumeX, Trash2, Film, Music, Type, Sparkles } from 'lucide-react';
 import { DEFAULT_TRACK_HEIGHT } from '../timelineConstants';
@@ -34,7 +35,7 @@ interface PipFloatingWindowProps {
 }
 
 const PipPlayhead = React.memo(({ absoluteStart, duration, zoomLevel }: { absoluteStart: number, duration: number, zoomLevel: number }) => {
-  const currentTime = useEditorStore(s => s.currentTime);
+  const currentTime = usePlaybackTime(10); // throttled to 10 Hz instead of ~30 Hz
   if (currentTime >= absoluteStart && currentTime <= absoluteStart + duration) {
     return (
       <div 
@@ -84,7 +85,6 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     enterCompoundClip,
     toggleKeyframeLineSelection,
     isScrubbing,
-    currentTime,
   } = useEditorStore(useShallow(s => ({
     updatePipWindowStartTime: s.updatePipWindowStartTime,
     updatePipWindowDuration: s.updatePipWindowDuration,
@@ -97,10 +97,10 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     selectedClipId: s.selectedClipId,
     selectedTrackId: s.selectedTrackId,
     isScrubbing: s.isScrubbing,
-    currentTime: s.currentTime,
     enterCompoundClip: s.enterCompoundClip,
     toggleKeyframeLineSelection: s.toggleKeyframeLineSelection,
   })));
+  const currentTime = usePlaybackTime(10);
 
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);

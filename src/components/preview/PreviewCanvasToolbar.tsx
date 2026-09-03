@@ -30,6 +30,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { unlockiOSVideoPlay } from '@/hooks/useMediaPlayback';
 import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
 
@@ -76,7 +77,15 @@ export function PreviewCanvasHeaderToolbar({
     virtualCamera,
     setVirtualCameraEnabled,
     setVirtualCameraAspectRatio 
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    settings: s.settings,
+    updateSettings: s.updateSettings,
+    perRatioFramingEnabled: s.perRatioFramingEnabled,
+    setPerRatioFramingEnabled: s.setPerRatioFramingEnabled,
+    virtualCamera: s.virtualCamera,
+    setVirtualCameraEnabled: s.setVirtualCameraEnabled,
+    setVirtualCameraAspectRatio: s.setVirtualCameraAspectRatio
+  })));
 
   return (
     <div

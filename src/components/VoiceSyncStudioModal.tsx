@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { X, Mic, Loader2, Play, FileText, Check, Plus, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { 
@@ -19,9 +20,14 @@ const CAPTION_LANGUAGES = [
 ];
 
 export const VoiceSyncStudioModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const store = useEditorStore();
-  const tracks = store.tracks;
-  const mediaLibrary = store.mediaLibrary.filter(m => m.type === 'audio' || m.type === 'video');
+  const { tracks, mediaLibrary: allMedia, totalDuration } = useEditorStore(
+    useShallow(s => ({
+      tracks: s.tracks,
+      mediaLibrary: s.mediaLibrary,
+      totalDuration: s.totalDuration,
+    }))
+  );
+  const mediaLibrary = allMedia.filter(m => m.type === 'audio' || m.type === 'video');
 
   // Multi-step State
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -75,7 +81,7 @@ export const VoiceSyncStudioModal: React.FC<{ onClose: () => void }> = ({ onClos
     setIsProcessing(true);
     setLoadingText('Rendering Source Audio...');
     try {
-      const blob = await extractAudioFromTracks(sourceTrackIds, store.totalDuration || 10);
+      const blob = await extractAudioFromTracks(sourceTrackIds, totalDuration || 10);
       if (!blob) throw new Error("Failed to render tracks");
       setSourceBlob(blob);
       

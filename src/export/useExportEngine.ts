@@ -269,6 +269,11 @@ export function useExportEngine() {
         }
         // No fallback succeeded → rethrow original
         throw workerErr;
+      } finally {
+        // Terminate the worker immediately — download() reads from OPFS, not the worker.
+        // Without this, every export leaves a live worker holding decoded frames + GPU state.
+        exporterRef.current?.dispose();
+        exporterRef.current = null;
       }
     } catch (error) {
       if ((error as Error).message === 'AbortError') {

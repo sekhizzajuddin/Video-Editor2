@@ -1,5 +1,6 @@
 import { X, Layers, Image as ImageIcon } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { SequenceTransitionType } from '@/types';
 
 export function SequenceProperties() {
@@ -10,7 +11,16 @@ export function SequenceProperties() {
     updateSequence,
     dissolveSequence,
     sequences,
-  } = useEditorStore();
+  } = useEditorStore(
+    useShallow(s => ({
+      tracks: s.tracks,
+      selectedClipId: s.selectedClipId,
+      selectedClipIds: s.selectedClipIds,
+      updateSequence: s.updateSequence,
+      dissolveSequence: s.dissolveSequence,
+      sequences: s.sequences,
+    }))
+  );
 
   const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
   if (!primarySelectedId) return null;

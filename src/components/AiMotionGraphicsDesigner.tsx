@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, X, Loader2 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { AIMotionGraphicSuggestion } from '@/utils/aiClient';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
 import { toast } from 'sonner';
@@ -12,7 +13,14 @@ interface AiMotionGraphicsProps {
 }
 
 export function AiMotionGraphicsDesigner({ clip, suggestions, onClose }: AiMotionGraphicsProps) {
-  const { tracks, addMedia, addClip, addTrack } = useEditorStore();
+  const { tracks, addMedia, addClip, addTrack } = useEditorStore(
+    useShallow(s => ({
+      tracks: s.tracks,
+      addMedia: s.addMedia,
+      addClip: s.addClip,
+      addTrack: s.addTrack,
+    }))
+  );
   const [selectedSuggestions, setSelectedSuggestions] = useState<Record<number, boolean>>({});
   const [customTexts, setCustomTexts] = useState<Record<number, string>>({});
   const [isApplying, setIsApplying] = useState(false);

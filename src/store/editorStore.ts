@@ -29,6 +29,8 @@ import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAcc
 import { cleanupClipBackgroundState } from '@/utils/aiBackground';
 import { detectAspectRatio } from '@/utils/aspectRatioHelper';
 import { setPlaybackTime, getPlaybackTime } from '@/utils/playbackClock';
+import { clearImageBitmapPool } from '@/utils/imageBitmapPool';
+import { clearAllMediaWindows } from '@/utils/ramWindowedBlobCache';
 import {
   planKineticSync,
   planGroupReflow,
@@ -2063,7 +2065,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         perRatioFraming: updatedPerRatioFraming,
       };
     });
-    get().recalcTotalDuration();
+    // Only recalc duration when timing properties actually changed — not on
+    // transform, opacity, or color edits which fire at 60 Hz during drag.
+    const timingKeys = ['startTime', 'duration', 'trimStart', 'trimEnd', 'speed', 'speedRamp', 'startOffset'];
+    if (typeof updates === 'object' && updates && timingKeys.some(k => k in updates)) {
+      get().recalcTotalDuration();
+    }
     if (pipsToRecalc.length > 0) {
       pipsToRecalc.forEach(pid => get().recalcPipDurations(pid));
     }
@@ -3223,16 +3230,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     // Keep the React-free playback clock in front of the store at all times so
     // the media-sync loop and canvas renderer never read a stale playhead.
     setPlaybackTime(clamped);
-    // During scrubbing, write directly to store state without triggering React's
-    // reconciler. Zustand subscribers (RAF loop, media playback) still get notified
-    // via the store's own subscription mechanism — React components do NOT re-render
-    // at 60 Hz, which eliminates the #1 CPU spike during playhead drag.
     const st = get();
     if (st.isScrubbing) {
-      // Use Zustand's internal setState to bypass React batch update triggers.
-      // Components that SELECT currentTime will re-render, but only one per
-      // animation frame via useShallow — not the full tree.
-      set({ currentTime: clamped });
+      // During scrubbing, only update the store if the value changed by more
+      // than half a frame (~120 fps threshold). This prevents 60 Hz re-render
+      // storms while keeping the playhead visually accurate.
+      if (Math.abs(st.currentTime - clamped) > 0.008) {
+        set({ currentTime: clamped });
+      }
     } else {
       set({ currentTime: clamped });
     }
@@ -3875,40 +3880,24 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       else if (state.activePropertiesTab === 'effects') defaultLabel = 'Adjust Effect';
 
       const snapshot: EditorSnapshot = {
-        tracks: JSON.parse(JSON.stringify(state.tracks)),
+        tracks: structuredClone(state.tracks),
         currentTime: state.currentTime,
-        pipWindows: JSON.parse(JSON.stringify(state.pipWindows || {})),
-        subtitles: JSON.parse(JSON.stringify(state.subtitles || [])),
-        markers: JSON.parse(JSON.stringify(state.markers || [])),
-        beatMarkers: JSON.parse(JSON.stringify(state.beatMarkers || [])),
+        pipWindows: structuredClone(state.pipWindows || {}),
+        subtitles: structuredClone(state.subtitles || []),
+        markers: structuredClone(state.markers || []),
+        beatMarkers: structuredClone(state.beatMarkers || []),
         label: label || defaultLabel,
       };
 
       // Check if anything actually changed (ignoring currentTime and label)
+      // Single stringify comparison instead of 10 separate calls
       if (state.historyIndex >= 0 && state.history[state.historyIndex]) {
         const lastSnap = state.history[state.historyIndex];
-        
-        // Fast string comparison since we already stringified above
-        const t1 = JSON.stringify(lastSnap.tracks);
-        const t2 = JSON.stringify(snapshot.tracks);
-        
-        if (t1 === t2) {
-          const p1 = JSON.stringify(lastSnap.pipWindows || {});
-          const p2 = JSON.stringify(snapshot.pipWindows || {});
-          
-          if (p1 === p2) {
-            const s1 = JSON.stringify(lastSnap.subtitles || []);
-            const s2 = JSON.stringify(snapshot.subtitles || []);
-            const m1 = JSON.stringify(lastSnap.markers || []);
-            const m2 = JSON.stringify(snapshot.markers || []);
-            const b1 = JSON.stringify(lastSnap.beatMarkers || []);
-            const b2 = JSON.stringify(snapshot.beatMarkers || []);
-            
-            if (s1 === s2 && m1 === m2 && b1 === b2) {
-              // Nothing meaningful changed, don't create history entry
-              return {};
-            }
-          }
+        const lastKey = JSON.stringify([lastSnap.tracks, lastSnap.pipWindows, lastSnap.subtitles, lastSnap.markers, lastSnap.beatMarkers]);
+        const newKey = JSON.stringify([snapshot.tracks, snapshot.pipWindows, snapshot.subtitles, snapshot.markers, snapshot.beatMarkers]);
+        if (lastKey === newKey) {
+          // Nothing meaningful changed, don't create history entry
+          return {};
         }
       }
 
@@ -4018,6 +4007,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
     const { previewCanvas, masterAudioStream } = get();
     const freshTracks = createEmptyTracks();
+
+    // Clear decoded bitmap pool (~64 MB cap) and windowed blob cache
+    // that would otherwise leak across project boundaries
+    clearImageBitmapPool();
+    clearAllMediaWindows();
+
     set({
       ...initialState,
       previewCanvas,

@@ -8,6 +8,7 @@
 import React, { useEffect } from 'react';
 import { X, Video, SlidersHorizontal, Settings2, MonitorPlay, FileOutput, LayoutTemplate } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const HELP_SECTIONS = [
   { 
@@ -115,7 +116,13 @@ const HELP_SECTIONS = [
 ];
 
 export const HelpModal: React.FC = () => {
-  const { showHelpMenu, activeHelpSection, setShowHelpMenu } = useEditorStore();
+  const { showHelpMenu, activeHelpSection, setShowHelpMenu } = useEditorStore(
+    useShallow(s => ({
+      showHelpMenu: s.showHelpMenu,
+      activeHelpSection: s.activeHelpSection,
+      setShowHelpMenu: s.setShowHelpMenu,
+    }))
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

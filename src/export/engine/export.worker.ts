@@ -825,14 +825,11 @@ async function handleExport(
     
     if (useLocalRuntime && ws) {
       ws.close();
-      compositor.dispose();
-      scheduler.dispose();
-      framePool.clear();
+      // compositor/scheduler/framePool disposed in finally block
       postMessage({ 
         type: 'COMPLETE', 
         payload: { fileSize: 0, filename: config.filename || 'Export', savedViaRuntime: true }, 
       });
-      isExporting = false;
       return;
     }
 
@@ -853,10 +850,6 @@ async function handleExport(
       writable = null;
     }
     
-    compositor.dispose();
-    scheduler.dispose();
-    framePool.clear();
-
     const finalFileName = outputFileHandle ? outputFileHandle.name : outFileName;
     let finalFileSize = 0;
     try {
@@ -881,6 +874,10 @@ async function handleExport(
       payload: { message: error.message }, 
     });
   } finally {
+    // Guaranteed cleanup — runs on success, error, AND cancellation.
+    try { compositor?.dispose(); } catch {}
+    try { scheduler?.dispose(); } catch {}
+    try { framePool?.clear(); } catch {}
     isExporting = false;
     if (writable) {
       await writable.close().catch(() => {});

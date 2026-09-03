@@ -116,9 +116,12 @@ export async function getWindowedMediaURL(
  * widened slightly for safety.
  */
 function sliceFileWindow(file: File, playheadSeconds: number, windowSeconds: number): Blob {
-  // Approximate bytes-per-second from the total size; accurate enough for
-  // a slice window. For very large files this gives us ~1% error.
-  const approxBytesPerSec = Math.max(1, file.size / Math.max(1, file.size / 1_000_000)); // ≈ 1 MB/s heuristic
+  // Estimate bytes-per-second from file size. Assume ~4 Mbps (500 KB/s) average
+  // bitrate which is typical for 1080p H.264. This gives a reasonable window for
+  // VBR media. The old formula (file.size / (file.size / 1_000_000)) was always
+  // exactly 1,000,000 for files >= 1 MB — a no-op constant.
+  const assumedDurationSec = Math.max(1, file.size / 500_000); // ~4 Mbps
+  const approxBytesPerSec = Math.max(1, file.size / assumedDurationSec);
   const halfWindow = windowSeconds / 2;
   const startByte = Math.max(0, Math.floor((playheadSeconds - halfWindow) * approxBytesPerSec));
   const endByte = Math.min(file.size, Math.floor((playheadSeconds + halfWindow) * approxBytesPerSec));

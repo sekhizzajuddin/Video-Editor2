@@ -38,9 +38,9 @@ export function acquireImageBitmap(width: number, height: number): ImageBitmap |
   for (let i = 0; i < pool.length; i++) {
     if (pool[i].width === width && pool[i].height === height) {
       const entry = pool.splice(i, 1)[0];
-      entry.lastUsed = now;
-      // Keep in pool (do not re-insert; caller will release)
-      pool.push(entry);
+      // Entry is removed from pool — caller owns it exclusively now.
+      // Caller MUST call releaseImageBitmap() to return it.
+      totalPixels -= entry.width * entry.height;
       return entry.bitmap;
     }
   }

@@ -1,10 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { HelpCircle } from 'lucide-react';
 
 export const HelpTooltipManager: React.FC = () => {
   const [tooltipPos, setTooltipPos] = useState<{ x: number, y: number } | null>(null);
-  const { setShowHelpMenu, showHelpMenu } = useEditorStore();
+  const { setShowHelpMenu, showHelpMenu } = useEditorStore(
+    useShallow(s => ({
+      setShowHelpMenu: s.setShowHelpMenu,
+      showHelpMenu: s.showHelpMenu,
+    }))
+  );
   const hoveredHelpIdRef = useRef<string | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTooltipVisibleRef = useRef<boolean>(false);

@@ -137,11 +137,6 @@ export class ExportWorkerManager {
       }
     }, transferables);
 
-    // Handle cancellation
-    signal.addEventListener('abort', () => {
-      this.worker.postMessage({ type: 'CANCEL' });
-    });
-
     // We rely on the callbacks passed via options, but we can also return a promise
     return new Promise<{filename: string, savedViaRuntime: boolean}>((resolve, reject) => {
       const cleanup = () => {
@@ -150,6 +145,8 @@ export class ExportWorkerManager {
       };
       
       const abortHandler = () => {
+        // Send cancel to worker AND reject the promise (merged from two separate listeners)
+        this.worker.postMessage({ type: 'CANCEL' });
         reject(new Error('AbortError'));
         cleanup();
       };

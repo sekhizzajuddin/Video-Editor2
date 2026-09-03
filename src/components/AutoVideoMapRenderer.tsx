@@ -72,8 +72,11 @@ export const AutoVideoMapRenderer: React.FC<AutoVideoMapRendererProps> = ({
 
     mediaRecorder.start();
 
+    let rafHandle: number | null = null;
+    let cancelled = false;
+
     const drawFrame = () => {
-      if (currentFrame > totalFrames) {
+      if (cancelled || currentFrame > totalFrames) {
         mediaRecorder.stop();
         return;
       }
@@ -114,16 +117,20 @@ export const AutoVideoMapRenderer: React.FC<AutoVideoMapRendererProps> = ({
       }
 
       currentFrame++;
-      requestAnimationFrame(drawFrame);
+      rafHandle = requestAnimationFrame(drawFrame);
     };
 
     // Give tiles a moment to load before starting
-    setTimeout(() => {
+    const timeoutHandle = window.setTimeout(() => {
       drawFrame();
     }, 1000);
 
     return () => {
+      cancelled = true;
+      if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+      clearTimeout(timeoutHandle);
       if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      stream.getTracks().forEach(t => t.stop());
       map.remove();
     };
   }, [waypoints, style, duration]);

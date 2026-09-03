@@ -80,40 +80,10 @@ export function debouncedScrub(
   }
 }
 
-// OPTIMIZATION 3: Frame cache preloading for smooth scrubbing
-export function preloadAdjacentFrames(
-  currentTime: number,
-  clipId: string,
-  frameCache: Map<string, any[]>,
-  videoElement: HTMLVideoElement | null,
-  direction: 'forward' | 'backward' | 'both' = 'forward'
-) {
-  if (!videoElement || videoElement.readyState < 3) return;
-  
-  const PRELOAD_FRAMES = 2;
-  const FRAME_INTERVAL = 1 / 30; // 30 FPS
-  
-  for (let i = 1; i <= PRELOAD_FRAMES; i++) {
-    let targetTime: number;
-    
-    if (direction === 'forward') {
-      targetTime = currentTime + (i * FRAME_INTERVAL);
-    } else if (direction === 'backward') {
-      targetTime = currentTime - (i * FRAME_INTERVAL);
-    } else {
-      // Both directions
-      targetTime = currentTime + (i % 2 === 0 ? -1 : 1) * (Math.ceil(i / 2) * FRAME_INTERVAL);
-    }
-    
-    const cache = frameCache.get(clipId);
-    if (cache && cache.some(f => Math.abs(f.time - targetTime) < 0.01)) {
-      continue; // Already cached
-    }
-    
-    // Request frame preload (browser will decode when ready)
-    videoElement.currentTime = targetTime;
-  }
-}
+// OPTIMIZATION 3: Frame cache preloading — REMOVED
+// The old preloadAdjacentFrames set videoElement.currentTime in a loop,
+// which thrashes the decoder (seeks) instead of preloading. It was never
+// called anywhere. Use requestVideoFrameCallback-based predecode instead.
 
 // OPTIMIZATION 4: Smooth interpolation during scrubbing
 export function interpolateScrubPosition(

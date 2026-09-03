@@ -7,6 +7,7 @@
 
 import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw, History, Trash2, Heart } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { getAutosavesFromDB, deleteAutosaveFromDB, restoreSnapshotMedia } from '@/utils/projectPersistence';
@@ -18,7 +19,7 @@ import { DEFAULT_SHORTCUTS, getShortcutString, SHORTCUT_PROFILES } from '@/utils
 import { toast } from 'sonner';
 
 export function SettingsModal() {
-  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings, aspectRatio, reframeProject, showProgressBar, useProxies, setUseProxies, setShowProgressBar, progressBarColor, setProgressBarColor, progressBarHeight, setProgressBarHeight } = useEditorStore();
+  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings, aspectRatio, reframeProject, showProgressBar, useProxies, setUseProxies, setShowProgressBar, progressBarColor, setProgressBarColor, progressBarHeight, setProgressBarHeight } = useEditorStore(useShallow(s => ({ showSettingsModal: s.showSettingsModal, setShowSettingsModal: s.setShowSettingsModal, resetProject: s.resetProject, addMedia: s.addMedia, settings: s.settings, updateSettings: s.updateSettings, aspectRatio: s.aspectRatio, reframeProject: s.reframeProject, showProgressBar: s.showProgressBar, useProxies: s.useProxies, setUseProxies: s.setUseProxies, setShowProgressBar: s.setShowProgressBar, progressBarColor: s.progressBarColor, setProgressBarColor: s.setProgressBarColor, progressBarHeight: s.progressBarHeight, setProgressBarHeight: s.setProgressBarHeight })));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {

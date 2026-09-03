@@ -681,6 +681,10 @@ export class FrameScheduler {
     }
 
     layers.sort((a, b) => (a.zIndex - b.zIndex) || ((a.order ?? 0) - (b.order ?? 0)));
+
+    // Evict decoders for clips whose time range has completely passed
+    this.evictExpiredDecoders(timestampSeconds);
+
     return layers;
   }
 
@@ -697,6 +701,32 @@ export class FrameScheduler {
     }
     const layers = await this.getLayersAtTime(timestampSeconds);
     return { layers, overlays };
+  }
+
+  /**
+   * Evict decoders for clips whose time range has completely passed.
+   * This prevents holding dozens of decoded canvas pools (each ~33 MB at 4K)
+   * for clips that will never be needed again during a forward export.
+   */
+  private evictExpiredDecoders(currentTimeSec: number): void {
+    const neededMediaIds = new Set<string>();
+    for (const track of this.timeline.tracks || []) {
+      for (const clip of track.clips || []) {
+        const clipEnd = (clip.startTime || 0) + (clip.duration || 0);
+        // Keep decoders for clips that haven't ended yet (+ 1s safety margin for transitions)
+        if (clipEnd > currentTimeSec - 1) {
+          const lookupId = clip.mediaId || clip.id;
+          neededMediaIds.add(lookupId);
+          if (clip.mediaId) neededMediaIds.add(clip.mediaId);
+        }
+      }
+    }
+    for (const [id, decoder] of this.mediaDecoders) {
+      if (!neededMediaIds.has(id)) {
+        decoder.dispose();
+        this.mediaDecoders.delete(id);
+      }
+    }
   }
 
   dispose() {

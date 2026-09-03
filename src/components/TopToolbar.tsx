@@ -24,6 +24,7 @@ import {
   Film,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
@@ -58,7 +59,31 @@ export function TopToolbar() {
     setScopeSettings,
     settings,
     updateSettings,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    undo: s.undo,
+    redo: s.redo,
+    historyIndex: s.historyIndex,
+    history: s.history,
+    setShowExportModal: s.setShowExportModal,
+    setShowSettingsModal: s.setShowSettingsModal,
+    setShowTeleprompter: s.setShowTeleprompter,
+    setShowHelpMenu: s.setShowHelpMenu,
+    syncSelectedClips: s.syncSelectedClips,
+    resetProject: s.resetProject,
+    copyClip: s.copyClip,
+    pasteClip: s.pasteClip,
+    cutClip: s.cutClip,
+    duplicateClip: s.duplicateClip,
+    addMedia: s.addMedia,
+    workspaceLayout: s.workspaceLayout,
+    setWorkspaceLayout: s.setWorkspaceLayout,
+    clipboardData: s.clipboardData,
+    clearClipboard: s.clearClipboard,
+    scopeSettings: s.scopeSettings,
+    setScopeSettings: s.setScopeSettings,
+    settings: s.settings,
+    updateSettings: s.updateSettings,
+  })));
 
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showEditMenu, setShowEditMenu] = useState(false);

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { Volume2, VolumeX, Music, Film, Radio, Sliders } from 'lucide-react';
 import type { TimelineTrack } from '@/types';
 
@@ -14,7 +15,17 @@ export function AudioMixer() {
     setTrackPan,
     toggleTrackSolo,
     toggleTrackMute,
-  } = useEditorStore();
+  } = useEditorStore(useShallow(s => ({
+    tracks: s.tracks,
+    volume: s.volume,
+    isMuted: s.isMuted,
+    setVolume: s.setVolume,
+    toggleMute: s.toggleMute,
+    setTrackVolume: s.setTrackVolume,
+    setTrackPan: s.setTrackPan,
+    toggleTrackSolo: s.toggleTrackSolo,
+    toggleTrackMute: s.toggleTrackMute,
+  })));
 
   // (activePanTrack state removed — M14 fix: it was declared but never used)
 

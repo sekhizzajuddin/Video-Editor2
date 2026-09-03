@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { listRecentProjects, ProjectMetadata, setActiveProject, deleteProjectMeta, saveProjectMeta } from '@/utils/projectPersistence';
 import { getProcutFilesInDirectory } from '@/utils/fileSystemAccess';
 import { ProCutLogo } from '@/components/ProCutLogo';
@@ -23,7 +24,13 @@ export const WelcomeScreen: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
 
-  const { resetProject, setProjectInfo, loadProject } = useEditorStore();
+  const { resetProject, setProjectInfo, loadProject } = useEditorStore(
+    useShallow(s => ({
+      resetProject: s.resetProject,
+      setProjectInfo: s.setProjectInfo,
+      loadProject: s.loadProject,
+    }))
+  );
 
   useEffect(() => {
     loadCrashedProjects();

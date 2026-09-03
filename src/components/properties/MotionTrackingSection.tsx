@@ -8,6 +8,7 @@
 import React from 'react';
 import type { TimelineClip, MotionTrackingData, MotionTrackAttachment } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { createMotionTrack } from '@/utils/motionTrackingEngine';
 import { Target, Link, Unlink, Activity, CheckCircle2 } from 'lucide-react';
 
@@ -16,7 +17,14 @@ interface MotionTrackingSectionProps {
 }
 
 export function MotionTrackingSection({ selectedClip }: MotionTrackingSectionProps) {
-  const { tracks, updateClip, saveSnapshot, mediaLibrary } = useEditorStore();
+  const { tracks, updateClip, saveSnapshot, mediaLibrary } = useEditorStore(
+    useShallow(s => ({
+      tracks: s.tracks,
+      updateClip: s.updateClip,
+      saveSnapshot: s.saveSnapshot,
+      mediaLibrary: s.mediaLibrary,
+    }))
+  );
 
   const mediaItem = mediaLibrary.find((m: any) => m.id === selectedClip.mediaId);
 

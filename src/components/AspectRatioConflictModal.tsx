@@ -7,12 +7,19 @@
 
 import React, { useState } from 'react';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { getAspectRatioMetadata } from '@/utils/aspectRatioHelper';
 import { Monitor, Smartphone, Layout, ArrowRight, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function AspectRatioConflictModal() {
-  const { aspectRatioConflictData, resolveAspectRatioConflict, setAspectRatioConflictData } = useEditorStore();
+  const { aspectRatioConflictData, resolveAspectRatioConflict, setAspectRatioConflictData } = useEditorStore(
+    useShallow(s => ({
+      aspectRatioConflictData: s.aspectRatioConflictData,
+      resolveAspectRatioConflict: s.resolveAspectRatioConflict,
+      setAspectRatioConflictData: s.setAspectRatioConflictData,
+    }))
+  );
   const [dontAskAgain, setDontAskAgain] = useState(false);
 
   if (!aspectRatioConflictData) return null;

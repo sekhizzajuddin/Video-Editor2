@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { AICueResult, analyzeAudioWithGemini } from '@/utils/aiClient';
 import { AudioOption, searchFreesound } from '@/utils/audioSearchClient';
 import { WaveformViewer } from './WaveformViewer';
@@ -51,7 +52,7 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
     muteTimelineAudio: s.muteTimelineAudio,
     setMuteTimelineAudio: s.setMuteTimelineAudio,
   })));
-  const globalCurrentTime = useEditorStore((s) => s.currentTime);
+  const globalCurrentTime = usePlaybackTime(10); // throttled to 10 Hz instead of ~30 Hz
 
   const clip = clipProp || {
     duration: 10,
