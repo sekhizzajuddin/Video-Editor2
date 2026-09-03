@@ -327,6 +327,9 @@ async function handleExport(
 
   let outputFileHandle: FileSystemFileHandle | null = null;
   let writable: FileSystemWritableFileStream | null = null;
+  let framePool: FramePool | null = null;
+  let scheduler: FrameScheduler | null = null;
+  let compositor: Compositor | null = null;
 
   try {
     postMessage({ type: 'PHASE_CHANGE', payload: { phase: 'preparing' } });
@@ -393,8 +396,8 @@ async function handleExport(
     const outputHeight = Math.floor(config.height / 2) * 2;
 
     // Frame Scheduler Initialization
-    const framePool = new FramePool(30);
-    const scheduler = new FrameScheduler(timeline, framePool, mediaBuffers);
+    framePool = new FramePool(30);
+    scheduler = new FrameScheduler(timeline, framePool, mediaBuffers);
     await scheduler.initializeDecoders();
 
     // Surface per-clip decode failures immediately — a silently black export
@@ -405,7 +408,7 @@ async function handleExport(
 
     // Compositor Initialization
     const canvas = new OffscreenCanvas(outputWidth, outputHeight);
-    const compositor = new Compositor(canvas, config.aspectRatio);
+    compositor = new Compositor(canvas, config.aspectRatio);
 
     // Calculate duration reliably
     let duration = timeline.duration || timeline.totalDuration || 0;
