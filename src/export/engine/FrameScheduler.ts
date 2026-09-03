@@ -676,6 +676,67 @@ export class FrameScheduler {
       }
     }
 
+    // ── PiP Windows (Kinetic Typography Hybrid Mode) ──────────────────
+    const pipWindows = (this.timeline as any).pipWindows || {};
+    for (const pw of Object.values(pipWindows) as any[]) {
+      if (!pw || !pw.tracks) continue;
+      // Find the parent clip on the main timeline
+      let parentClip: any = null;
+      for (const track of tracks) {
+        for (const clip of track.clips || []) {
+          if ((clip.pipWindowIds && clip.pipWindowIds.includes(pw.id)) 
+              || clip.id === pw.parentClipId 
+              || clip.id === pw.clipId) {
+            parentClip = clip;
+            break;
+          }
+        }
+        if (parentClip) break;
+      }
+      if (!parentClip) continue;
+      
+      const pipAbsStart = parentClip.startTime + (pw.relativeStartTime || 0);
+      const pipAbsEnd = pipAbsStart + (pw.duration || parentClip.duration);
+      if (timestampSeconds < pipAbsStart || timestampSeconds >= pipAbsEnd) continue;
+      
+      // Traverse PiP tracks and find active word clips
+      for (const pipTrack of pw.tracks) {
+        if (pipTrack.hidden) continue;
+        for (const pClip of pipTrack.clips || []) {
+          if (pClip.disabled) continue;
+          const clipAbsStart = pipAbsStart + pClip.startTime;
+          const clipAbsEnd = clipAbsStart + pClip.duration;
+          if (timestampSeconds >= clipAbsStart && timestampSeconds < clipAbsEnd) {
+            // Create a synthetic clip that inherits parent transform
+            const syntheticClip = {
+              ...pClip,
+              startTime: clipAbsStart,
+              __parentTransform: parentClip.transform,
+              __parentId: parentClip.id,
+              __parentStartTime: parentClip.startTime,
+              __parentAnimations: parentClip.animations,
+              __parentOpacity: parentClip.opacity,
+            };
+            
+            // Push as a text render layer
+            if (syntheticClip.textSettings) {
+              layers.push({
+                type: 'text',
+                textData: syntheticClip,
+                timestampSeconds,
+                startTime: clipAbsStart,
+                clipId: pClip.id,
+                opacity: (parentClip.opacity !== undefined ? parentClip.opacity : 1),
+                transform: pClip.transform || parentClip.transform || { x: 0, y: 0, scale: 1, rotation: 0 },
+                zIndex: 300 + (pipTrack.zIndex || 0),
+                order: layers.length,
+              });
+            }
+          }
+        }
+      }
+    }
+
     if (pending.length > 0) {
       await Promise.allSettled(pending);
     }

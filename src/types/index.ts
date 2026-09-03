@@ -217,7 +217,7 @@ export type TextAnimationPreset =
   | 'slideRight' 
   | 'bounce'
   | 'zoom'
-  // ─── Cinematic additions ────────────────────────────────────────────
+  // ─── Cinematic ────────────────────────────────────────────────────────
   | 'elastic'        // spring overshoot — bouncy kinetic pop
   | 'revealWipe'     // clip-path wipe from left → right (reveal curtain)
   | 'splitReveal'    // scale from 0.1 outward with fade — cinematic title
@@ -225,13 +225,29 @@ export type TextAnimationPreset =
   | 'letterSpacing'  // characters compress-in then expand to final spacing
   | 'rollUp'         // fast hard roll from below (film-credit style)
   | 'scaleFlip'      // Y-axis squeeze then snap to full height — dramatic pop
-  | 'zoomBlur';      // zoom in with motion-blur alpha ramp — blockbuster intro
+  | 'zoomBlur'       // zoom in with motion-blur alpha ramp — blockbuster intro
+  // ─── New additions ────────────────────────────────────────────────────
+  | 'spinIn'         // 360° rotation with scale-up
+  | 'dropBounce'     // falls from above with physics bounce
+  | 'flipX'          // 3D card flip around X axis
+  | 'flipY'          // 3D card flip around Y axis
+  | 'blurIn'         // blur clears from 8px to 0px with fade
+  | 'expandWidth'    // scaleX only (0→1), height stays constant
+  | 'wave'           // sinusoidal Y offset cascade through characters
+  | 'scramble';      // random chars that resolve to correct text
+
+export type TextLoopAnimation = 'none' | 'wiggle' | 'pulse' | 'float' | 'neonFlicker' | 'shake' | 'colorCycle';
 
 export interface ClipTextAnimation {
   in: TextAnimationPreset;
   out: TextAnimationPreset;
-  inDuration: number;  // in seconds (default 0.5)
-  outDuration: number; // in seconds (default 0.5)
+  inDuration: number;   // in seconds (default 0.5)
+  outDuration: number;  // in seconds (default 0.5)
+  easing?: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'easeOutBack' | 'easeOutElastic' | 'easeOutBounce';
+  perUnit?: 'all' | 'word' | 'character';  // cascade unit
+  stagger?: number;     // delay between cascade units in seconds (e.g. 0.05)
+  loop?: TextLoopAnimation;  // ambient animation during hold phase
+  loopSpeed?: number;   // loop speed multiplier (default 1.0)
 }
 
 export interface ClipTextSettings {
@@ -254,6 +270,10 @@ export interface ClipTextSettings {
   strokeColor?: string;
   strokeWidth?: number;
   animation?: ClipTextAnimation;
+  gradientColors?: string[];      // gradient fill colors (e.g. ['#ff0000', '#0000ff'])
+  gradientDirection?: 'horizontal' | 'vertical' | 'diagonal';  // gradient direction
+  outerStrokeColor?: string;      // second stroke for sticker/double-outline effect
+  outerStrokeWidth?: number;      // outer stroke width
 }
 
 export interface ClipFxSettings {

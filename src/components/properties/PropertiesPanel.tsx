@@ -7025,6 +7025,79 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
               </div>
 
+              {/* Outer Stroke (Sticker Effect) */}
+              <div className="flex gap-4">
+                <div className="flex flex-col gap-2 flex-1">
+                  <label className="text-xs text-[var(--theme-text-muted)]">Outer Stroke</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={selectedClip.textSettings.outerStrokeColor || '#000000'}
+                      onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, outerStrokeColor: e.target.value } })}
+                      onBlur={() => scheduleSaveSnapshot()}
+                      className="w-6 h-6 rounded bg-transparent cursor-pointer"
+                    />
+                    <input
+                      type="range"
+                      min="0"
+                      max="20"
+                      value={selectedClip.textSettings.outerStrokeWidth || 0}
+                      onChange={(e) => updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, outerStrokeWidth: Number(e.target.value) } })}
+                      onMouseUp={() => scheduleSaveSnapshot()}
+                      className="flex-1 accent-amber-500"
+                    />
+                    <span className="text-xs text-[var(--theme-text-primary)] w-5 text-right">{selectedClip.textSettings.outerStrokeWidth || 0}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Gradient Text Fill */}
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-[var(--theme-text-muted)]">Gradient Fill</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={(selectedClip.textSettings.gradientColors || [])[0] || selectedClip.textSettings.color || '#ffffff'}
+                    onChange={(e) => {
+                      const existing = selectedClip.textSettings.gradientColors || [selectedClip.textSettings.color || '#ffffff', '#0066ff'];
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, gradientColors: [e.target.value, existing[1] || '#0066ff'] } });
+                    }}
+                    onBlur={() => scheduleSaveSnapshot()}
+                    className="w-6 h-6 rounded bg-transparent cursor-pointer"
+                  />
+                  <span className="text-[10px] text-[var(--theme-text-muted)]">→</span>
+                  <input
+                    type="color"
+                    value={(selectedClip.textSettings.gradientColors || [])[1] || '#0066ff'}
+                    onChange={(e) => {
+                      const existing = selectedClip.textSettings.gradientColors || [selectedClip.textSettings.color || '#ffffff', '#0066ff'];
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, gradientColors: [existing[0] || '#ffffff', e.target.value] } });
+                    }}
+                    onBlur={() => scheduleSaveSnapshot()}
+                    className="w-6 h-6 rounded bg-transparent cursor-pointer"
+                  />
+                  <select
+                    value={selectedClip.textSettings.gradientDirection || 'horizontal'}
+                    onChange={(e) => {
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, gradientDirection: e.target.value as any } });
+                      scheduleSaveSnapshot();
+                    }}
+                    className="flex-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-[var(--theme-text-primary)] px-1 py-0.5"
+                  >
+                    <option value="horizontal">Horizontal</option>
+                    <option value="vertical">Vertical</option>
+                    <option value="diagonal">Diagonal</option>
+                  </select>
+                  <button
+                    onClick={() => {
+                      updateClip(selectedClip.id, { textSettings: { ...selectedClip.textSettings!, gradientColors: undefined } });
+                      scheduleSaveSnapshot();
+                    }}
+                    className="text-[10px] text-red-400 hover:text-red-300 px-1"
+                    title="Clear gradient"
+                  >✕</button>
+                </div>
+              </div>
               <div className="flex items-center gap-4 border-t border-[var(--theme-border)] pt-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -7187,6 +7260,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <option value="zoomBlur">🔥 Zoom Blur</option>
                         <option value="glitch">⚠ Glitch</option>
                         <option value="letterSpacing">✦ Letter Expand</option>
+                        <option value="spinIn">🌀 Spin In</option>
+                        <option value="dropBounce">⬇️ Drop Bounce</option>
+                        <option value="flipX">🔄 Flip X</option>
+                        <option value="flipY">🔄 Flip Y</option>
+                        <option value="blurIn">🌫️ Blur In</option>
+                        <option value="expandWidth">↔️ Expand Width</option>
+                        <option value="wave">🌊 Wave</option>
+                        <option value="scramble">🔀 Scramble</option>
                       </optgroup>
                     </select>
                     
@@ -7245,13 +7326,21 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       </optgroup>
                       <optgroup label="── Cinematic ──">
                         <option value="elastic">⚡ Elastic Snap</option>
-                        <option value="splitReveal">🎬 Collapse Center</option>
-                        <option value="revealWipe">▶ Wipe Out</option>
-                        <option value="rollUp">🎞 Roll Off</option>
                         <option value="scaleFlip">💥 Scale Flip</option>
                         <option value="zoomBlur">🔥 Zoom Blur Out</option>
+                        <option value="revealWipe">▶ Wipe Out</option>
+                        <option value="splitReveal">🎬 Collapse Center</option>
                         <option value="glitch">⚠ Glitch Out</option>
                         <option value="letterSpacing">✦ Letter Compress</option>
+                        <option value="rollUp">🎞 Roll Off</option>
+                        <option value="spinIn">🌀 Spin Out</option>
+                        <option value="dropBounce">⬇️ Drop Out</option>
+                        <option value="flipX">🔄 Flip X Out</option>
+                        <option value="flipY">🔄 Flip Y Out</option>
+                        <option value="blurIn">🌫️ Blur Out</option>
+                        <option value="expandWidth">↔️ Collapse Width</option>
+                        <option value="wave">🌊 Wave Out</option>
+                        <option value="scramble">🔀 Scramble Out</option>
                       </optgroup>
                     </select>
                     
@@ -7280,6 +7369,118 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     )}
                   </div>
                 </div>
+
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] text-[var(--theme-text-secondary)] w-16">Easing</span>
+                  <select
+                    value={selectedClip.textSettings?.animation?.easing || 'easeOut'}
+                    onChange={(e) => {
+                      const anim = selectedClip.textSettings?.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                      updateClip(selectedClip.id, {
+                        textSettings: { ...selectedClip.textSettings!, animation: { ...anim, easing: e.target.value } }
+                      });
+                      scheduleSaveSnapshot();
+                    }}
+                    className="flex-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-[var(--theme-text-primary)] px-1 py-0.5"
+                  >
+                    <option value="linear">Linear</option>
+                    <option value="easeIn">Ease In</option>
+                    <option value="easeOut">Ease Out (Default)</option>
+                    <option value="easeInOut">Ease In-Out</option>
+                    <option value="easeOutBack">Back (Overshoot)</option>
+                    <option value="easeOutElastic">Elastic</option>
+                    <option value="easeOutBounce">Bounce</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] text-[var(--theme-text-secondary)] w-16">Loop</span>
+                  <select
+                    value={selectedClip.textSettings?.animation?.loop || 'none'}
+                    onChange={(e) => {
+                      const anim = selectedClip.textSettings?.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                      updateClip(selectedClip.id, {
+                        textSettings: { ...selectedClip.textSettings!, animation: { ...anim, loop: e.target.value } }
+                      });
+                      scheduleSaveSnapshot();
+                    }}
+                    className="flex-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-[var(--theme-text-primary)] px-1 py-0.5"
+                  >
+                    <option value="none">None</option>
+                    <option value="wiggle">🎨 Wiggle</option>
+                    <option value="pulse">💗 Pulse</option>
+                    <option value="float">☁️ Float</option>
+                    <option value="neonFlicker">💡 Neon Flicker</option>
+                    <option value="shake">📳 Shake</option>
+                    <option value="colorCycle">🌈 Color Cycle</option>
+                  </select>
+                </div>
+
+                {selectedClip.textSettings?.animation?.loop && selectedClip.textSettings.animation.loop !== 'none' && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-[var(--theme-text-secondary)] w-16">Speed</span>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="3"
+                      step="0.1"
+                      value={selectedClip.textSettings?.animation?.loopSpeed || 1}
+                      onChange={(e) => {
+                        const anim = selectedClip.textSettings?.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                        updateClip(selectedClip.id, {
+                          textSettings: { ...selectedClip.textSettings!, animation: { ...anim, loopSpeed: parseFloat(e.target.value) } }
+                        });
+                      }}
+                      onMouseUp={() => scheduleSaveSnapshot()}
+                      className="flex-1"
+                    />
+                    <span className="text-[10px] text-[var(--theme-text-secondary)] w-10 text-right">
+                      {(selectedClip.textSettings?.animation?.loopSpeed || 1).toFixed(1)}×
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] text-[var(--theme-text-secondary)] w-16">Cascade</span>
+                  <select
+                    value={selectedClip.textSettings?.animation?.perUnit || 'all'}
+                    onChange={(e) => {
+                      const anim = selectedClip.textSettings?.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                      updateClip(selectedClip.id, {
+                        textSettings: { ...selectedClip.textSettings!, animation: { ...anim, perUnit: e.target.value } }
+                      });
+                      scheduleSaveSnapshot();
+                    }}
+                    className="flex-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded text-xs text-[var(--theme-text-primary)] px-1 py-0.5"
+                  >
+                    <option value="all">All at Once</option>
+                    <option value="word">Per Word</option>
+                    <option value="character">Per Character</option>
+                  </select>
+                </div>
+
+                {selectedClip.textSettings?.animation?.perUnit && selectedClip.textSettings.animation.perUnit !== 'all' && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-[var(--theme-text-secondary)] w-16">Stagger</span>
+                    <input
+                      type="range"
+                      min="0.01"
+                      max="0.2"
+                      step="0.01"
+                      value={selectedClip.textSettings?.animation?.stagger || 0.05}
+                      onChange={(e) => {
+                        const anim = selectedClip.textSettings?.animation || { in: 'none', out: 'none', inDuration: 0.5, outDuration: 0.5 };
+                        updateClip(selectedClip.id, {
+                          textSettings: { ...selectedClip.textSettings!, animation: { ...anim, stagger: parseFloat(e.target.value) } }
+                        });
+                      }}
+                      onMouseUp={() => scheduleSaveSnapshot()}
+                      className="flex-1"
+                    />
+                    <span className="text-[10px] text-[var(--theme-text-secondary)] w-10 text-right">
+                      {((selectedClip.textSettings?.animation?.stagger || 0.05) * 1000).toFixed(0)}ms
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

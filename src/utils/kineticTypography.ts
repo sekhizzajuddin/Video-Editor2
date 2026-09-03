@@ -111,8 +111,9 @@ JSON Schema for EACH word object in the returned array:
 - "x": number (0 - 100, 50 is center, 20 is left, 80 is right)
 - "y": number (0 - 100, 50 is center, 20 is top, 80 is bottom)
 - "breakAfter": boolean (true if line break should follow this word)
-- "animationIn": 'fadeIn' | 'zoom' | 'bounce' | 'typewriter' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'letterSpacing'
-- "animationOut": 'fadeOut' | 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'letterSpacing'
+- "emphasis": "high" | "medium" | "low" (HIGH = key nouns/verbs/numbers that carry the sentence meaning. MEDIUM = normal words. LOW = filler words like "the", "a", "and", "is", "to", "of", "in", "it". HIGH words get bigger, bolder, accent colors. LOW words are smaller, muted.)
+- "animationIn": 'fadeIn' | 'zoom' | 'bounce' | 'typewriter' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'spinIn' | 'dropBounce' | 'flipX' | 'flipY' | 'blurIn' | 'expandWidth'
+- "animationOut": 'fadeOut' | 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'spinIn' | 'dropBounce' | 'flipX' | 'flipY' | 'blurIn' | 'expandWidth'
 - "stylePreset": string (e.g. 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption')
 
 1. SCRIPT/LANGUAGE:
@@ -122,16 +123,18 @@ JSON Schema for EACH word object in the returned array:
    - x: 0 - 100 screen percentage
    - y: 0 - 100 screen percentage
    ${customPromptText ? '- NOTE: Follow the USER CUSTOM INSTRUCTIONS above for target position (e.g. top/bottom/center).' : '- Stagger positions word-by-word (x: 35-65, y: 40-60) unless user custom instruction specifies otherwise.'}
-3. VIBRANT COLORS: Use high contrast colors.
+3. VIBRANT COLORS: Use high contrast colors. HIGH emphasis words get vivid accent colors (yellows, cyans, magentas). LOW emphasis words get neutral/muted colors (white, gray, subtle tones).
 4. TIMING PRECISION: Keep start/end tight based on audio.
-5. PREFERENCES: 
+5. EMPHASIS SIZING: HIGH emphasis words MUST have fontSize 80-120 and bold fonts (Anton, Impact, Bebas Neue). LOW emphasis words should have fontSize 45-65. MEDIUM words fontSize 60-85. Vary animations: use dramatic animations (elastic, dropBounce, spinIn, zoom) for HIGH emphasis words and subtle animations (fadeIn, blurIn) for LOW emphasis words.
+6. ANIMATION VARIETY: Use DIFFERENT animations for different words. Don't repeat the same animationIn for every word. Mix zoom, bounce, elastic, slideUp, dropBounce, spinIn, flipY etc.
+7. PREFERENCES: 
 ${userStyle !== 'random' ? `STYLE PRESET PREFERENCE: Lean towards "${userStyle}" style where possible.` : ''}
 ${userAnim !== 'random' ? `ANIMATION PREFERENCE: Prefer "${userAnim}" for animation where applicable.` : ''}
 ${options.pipBackgroundArea ? 'BACKGROUND PREFERENCE: DO NOT generate any backgroundColor or backgroundStyle for the individual words. It will be handled globally.' : (options.backgroundSelection && options.backgroundSelection !== 'random' && options.backgroundSelection !== 'none' ? `BACKGROUND PREFERENCE: You MUST use the "${options.backgroundSelection}" backgroundStyle for the words.` : (options.backgroundSelection === 'none' ? 'BACKGROUND PREFERENCE: DO NOT use any backgroundStyle.' : ''))}
 
 
 Output ONLY a valid JSON array, no markdown, no explanation:
-[{"text":"Word","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":50,"y":50,"breakAfter":false,"animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
+[{"text":"Word","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":50,"y":50,"breakAfter":false,"emphasis":"high","animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
     let resultJsonStr = '';
 
@@ -575,20 +578,44 @@ if (options.pipBackgroundArea) {
           const wordDuration = Math.max(0.1, sDuration - wordRelStart);
 
           const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (word.stylePreset || '').toLowerCase());
-          const wordColor = word.color || preset?.settings.color || '#fbbf24';
-          const wordFontFamily = word.fontFamily || preset?.settings.fontFamily || 'Inter';
-          const wordFontSize = word.fontSize || baseFontSize;
-          const wordBgColor = word.backgroundColor || preset?.settings.backgroundColor || 'transparent';
-          const wordBgStyle = word.backgroundStyle || preset?.settings.backgroundStyle;
+          
+          // Emphasis-based variable sizing (MrBeast/Hormozi style)
+          const emphasis = word.emphasis || 'medium';
+          let emphasisScale = 1.0;
+          let emphasisColor = word.color || preset?.settings.color || '#fbbf24';
+          if (emphasis === 'high') {
+            emphasisScale = 1.5;
+            // HIGH words get vivid accent colors if not already specified
+            if (!word.color && !preset?.settings.color) {
+              const accentColors = ['#FFE600', '#00FF66', '#00F0FF', '#FF3366', '#FF6600', '#fbbf24'];
+              emphasisColor = accentColors[Math.floor(Math.random() * accentColors.length)];
+            }
+          } else if (emphasis === 'low') {
+            emphasisScale = 0.75;
+            // LOW words get muted/neutral colors
+            if (!word.color && !preset?.settings.color) {
+              emphasisColor = '#d4d4d4';
+            }
+          }
+          
+          const wordColor = emphasisColor;
+          const wordFontFamily = word.fontFamily || preset?.settings.fontFamily || (emphasis === 'high' ? 'Anton' : 'Inter');
+          const wordFontSize = Math.round((word.fontSize || baseFontSize) * emphasisScale);
+          const wordBgColor = options.pipBackgroundArea ? 'transparent' : (word.backgroundColor || preset?.settings.backgroundColor || 'transparent');
+          const wordBgStyle = options.pipBackgroundArea ? 'none' : (word.backgroundStyle || preset?.settings.backgroundStyle);
           const wordStrokeColor = word.strokeColor || preset?.settings.strokeColor;
           const wordStrokeWidth = word.strokeWidth !== undefined ? word.strokeWidth : (preset?.settings.strokeWidth || (wordStrokeColor ? 2 : 0));
           const wordShadow = word.shadow !== undefined ? word.shadow : (preset?.settings.shadow !== undefined ? preset.settings.shadow : true);
           const wordShadowColor = word.shadowColor || preset?.settings.shadowColor || '#000000';
           const wordShadowBlur = word.shadowBlur !== undefined ? word.shadowBlur : (preset?.settings.shadowBlur || 12);
-          const wordBold = word.bold !== undefined ? word.bold : (preset?.settings.bold !== undefined ? preset.settings.bold : true);
+          const wordBold = word.bold !== undefined ? word.bold : (preset?.settings.bold !== undefined ? preset.settings.bold : (emphasis === 'high'));
           const wordItalic = word.italic !== undefined ? word.italic : (preset?.settings.italic || false);
           const wordUnderline = word.underline !== undefined ? word.underline : (preset?.settings.underline || false);
           const rotation = word.rotation || 0;
+          
+          // Emphasis-based animation durations: HIGH words get longer, more dramatic entrance
+          const inDur = emphasis === 'high' ? 0.2 : (emphasis === 'low' ? 0.08 : 0.12);
+          const outDur = emphasis === 'high' ? 0.15 : 0.08;
 
           const wordTextSettings: any = {
             text: word.text,
@@ -605,10 +632,11 @@ if (options.pipBackgroundArea) {
             shadowBlur: wordShadowBlur,
             textAlign: 'center',
             animation: {
-              in: word.animationIn === 'pop' ? 'zoom' : (word.animationIn || 'bounce'),
+              in: word.animationIn === 'pop' ? 'zoom' : (word.animationIn || (emphasis === 'high' ? 'elastic' : (emphasis === 'low' ? 'fadeIn' : 'bounce'))),
               out: word.animationOut || 'fadeOut',
-              inDuration: 0.1,
-              outDuration: 0.1
+              inDuration: inDur,
+              outDuration: outDur,
+              easing: emphasis === 'high' ? 'easeOutBack' : 'easeOut'
             }
           };
 

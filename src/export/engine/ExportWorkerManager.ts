@@ -355,6 +355,7 @@ export class ExportWorkerManager {
       duration,
       totalDuration: duration,
       aspectRatio: timeline.aspectRatio || 16/9,
+      pipWindows: timeline.pipWindows || {},
     };
     
     // Deep clone just in case there are nested non-serializable proxies

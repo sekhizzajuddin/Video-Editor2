@@ -341,14 +341,34 @@ export function KineticTypographySection({
                 className="bg-[#151515] text-white text-xs border border-[var(--theme-border)] rounded p-2 focus:outline-none focus:border-teal-500 w-full"
               >
                 <option value="random">AI / Random Animations</option>
-                <option value="zoom">Specific: Pop / Zoom</option>
-                <option value="bounce">Specific: Bounce</option>
-                <option value="slideUp">Specific: Slide Up</option>
-                <option value="slideDown">Specific: Slide Down</option>
-                <option value="slideLeft">Specific: Slide Left</option>
-                <option value="slideRight">Specific: Slide Right</option>
-                <option value="fadeIn">Specific: Fade In</option>
-                <option value="typewriter">Specific: Typewriter</option>
+                <optgroup label="── Basic ──">
+                  <option value="zoom">Pop / Zoom</option>
+                  <option value="bounce">Bounce</option>
+                  <option value="slideUp">Slide Up</option>
+                  <option value="slideDown">Slide Down</option>
+                  <option value="slideLeft">Slide Left</option>
+                  <option value="slideRight">Slide Right</option>
+                  <option value="fadeIn">Fade In</option>
+                  <option value="typewriter">Typewriter</option>
+                </optgroup>
+                <optgroup label="── Cinematic ──">
+                  <option value="elastic">⚡ Elastic Spring</option>
+                  <option value="spinIn">🌀 Spin In</option>
+                  <option value="dropBounce">⬇️ Drop Bounce</option>
+                  <option value="flipX">🔄 Flip X</option>
+                  <option value="flipY">🔄 Flip Y</option>
+                  <option value="blurIn">🌫️ Blur In</option>
+                  <option value="expandWidth">↔️ Expand Width</option>
+                  <option value="splitReveal">🎬 Split Reveal</option>
+                  <option value="rollUp">🎞 Roll Up</option>
+                  <option value="scaleFlip">💥 Scale Flip</option>
+                  <option value="zoomBlur">🔥 Zoom Blur</option>
+                  <option value="glitch">⚠ Glitch</option>
+                  <option value="revealWipe">▶ Reveal Wipe</option>
+                  <option value="wave">🌊 Wave</option>
+                  <option value="scramble">🔀 Scramble</option>
+                  <option value="letterSpacing">✦ Letter Expand</option>
+                </optgroup>
               </select>
             </div>
 

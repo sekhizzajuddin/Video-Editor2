@@ -14,6 +14,7 @@ import { drawPerspectiveTexture, getProjectedCorners } from '@/utils/canvasEffec
 import { generateObjectRemovalInpaint } from '@/utils/objectRemoval';
 import { applyPreRenderedMaskIfAvailable, preRenderedMaskCache } from '@/utils/aiBackground';
 import { drawTextBackground } from '@/utils/textBackgrounds';
+import { applyEasing, smoothNoise } from '@/utils/textAnimationEasing';
 
 const IDENTITY_CURVE_LUT = (() => {
   const lut = new Uint8ClampedArray(256);
@@ -858,7 +859,7 @@ export class Compositor {
    * in the preview but exported as a static, full-opacity title.
    */
   private computeTextAnimation(clip: any, timestampSeconds?: number) {
-    const out = { opacity: 1, scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 };
+    const out = { opacity: 1, scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0, rotation: 0 };
     const anim = clip?.textSettings?.animation;
     if (!anim) return out;
 
@@ -870,8 +871,12 @@ export class Compositor {
     const timeSinceStart = currentTime - startTime;
     const timeUntilEnd = startTime + duration - currentTime;
 
+    const easingType = anim.easing || 'easeOut';
+
     if (timeSinceStart < inDuration && timeSinceStart >= 0) {
-      const progress = inDuration > 0 ? timeSinceStart / inDuration : 1;
+      const rawProgress = inDuration > 0 ? timeSinceStart / inDuration : 1;
+      const needsCustomEasing = !['bounce', 'elastic', 'dropBounce'].includes(anim.in);
+      const progress = needsCustomEasing ? applyEasing(rawProgress, easingType) : rawProgress;
       switch (anim.in) {
         case 'fadeIn':
           out.opacity = progress;
@@ -881,27 +886,27 @@ export class Compositor {
           out.opacity = progress;
           break;
         case 'bounce':
-          out.scaleX = out.scaleY = 1 - Math.cos(progress * Math.PI * 2) * (1 - progress) * 0.5;
+          out.scaleX = out.scaleY = 1 - Math.cos(rawProgress * Math.PI * 2) * (1 - rawProgress) * 0.5;
           break;
         case 'slideUp':
           out.offsetY = (1 - progress) * 100;
-          out.opacity = progress;
+          out.opacity = Math.min(1, rawProgress * 3);
           break;
         case 'slideDown':
           out.offsetY = -(1 - progress) * 100;
-          out.opacity = progress;
+          out.opacity = Math.min(1, rawProgress * 3);
           break;
         case 'slideLeft':
           out.offsetX = (1 - progress) * 100;
-          out.opacity = progress;
+          out.opacity = Math.min(1, rawProgress * 3);
           break;
         case 'slideRight':
           out.offsetX = -(1 - progress) * 100;
-          out.opacity = progress;
+          out.opacity = Math.min(1, rawProgress * 3);
           break;
         case 'elastic': {
-          const p = progress;
-          out.scaleX = out.scaleY = Math.pow(2, -10 * p) * Math.sin((p * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+          const ep = rawProgress;
+          out.scaleX = out.scaleY = Math.pow(2, -10 * ep) * Math.sin((ep * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
           break;
         }
         case 'scaleFlip':
@@ -911,11 +916,77 @@ export class Compositor {
           out.scaleX = out.scaleY = 1 + (1 - progress);
           out.opacity = progress;
           break;
+        case 'revealWipe':
+          clip.__revealWipeProgress = progress;
+          break;
+        case 'splitReveal':
+          out.scaleX = out.scaleY = 0.1 + progress * 0.9;
+          out.opacity = progress;
+          break;
+        case 'glitch': {
+          const intensity = (1 - rawProgress) * 15;
+          out.offsetX = (Math.random() - 0.5) * intensity;
+          out.offsetY = (Math.random() - 0.5) * intensity * 0.5;
+          out.opacity = rawProgress > 0.1 ? 1 : rawProgress * 10;
+          break;
+        }
+        case 'letterSpacing':
+          clip.__letterSpacingProgress = progress;
+          out.opacity = Math.min(1, rawProgress * 2);
+          break;
+        case 'rollUp':
+          out.offsetY = (1 - progress) * 150;
+          out.opacity = progress;
+          out.scaleY = 0.6 + progress * 0.4;
+          break;
+        case 'spinIn':
+          out.rotation = (1 - progress) * 360;
+          out.scaleX = out.scaleY = progress;
+          out.opacity = Math.min(1, rawProgress * 2);
+          break;
+        case 'dropBounce': {
+          let t = rawProgress;
+          let bounceVal = 0;
+          if (t < 0.3636) bounceVal = 7.5625 * t * t;
+          else if (t < 0.7272) bounceVal = 7.5625 * (t -= 0.5454) * t + 0.75;
+          else if (t < 0.9090) bounceVal = 7.5625 * (t -= 0.8181) * t + 0.9375;
+          else bounceVal = 7.5625 * (t -= 0.9545) * t + 0.984375;
+          out.offsetY = -(1 - bounceVal) * 200;
+          out.opacity = Math.min(1, rawProgress * 3);
+          break;
+        }
+        case 'flipX':
+          out.scaleY = Math.abs(Math.cos((1 - progress) * Math.PI));
+          out.opacity = rawProgress > 0.15 ? 1 : rawProgress * 6;
+          break;
+        case 'flipY':
+          out.scaleX = Math.abs(Math.cos((1 - progress) * Math.PI));
+          out.opacity = rawProgress > 0.15 ? 1 : rawProgress * 6;
+          break;
+        case 'blurIn':
+          out.opacity = progress;
+          out.scaleX = out.scaleY = 1 + (1 - progress) * 0.08;
+          break;
+        case 'expandWidth':
+          out.scaleX = progress;
+          out.scaleY = 1;
+          out.opacity = Math.min(1, rawProgress * 2);
+          break;
+        case 'wave':
+          clip.__waveProgress = progress;
+          out.opacity = Math.min(1, rawProgress * 2);
+          break;
+        case 'scramble':
+          clip.__scrambleProgress = rawProgress;
+          out.opacity = 1;
+          break;
         default:
           break;
       }
     } else if (timeUntilEnd < outDuration && timeUntilEnd >= 0) {
-      const progress = outDuration > 0 ? 1 - timeUntilEnd / outDuration : 1;
+      const rawProgress = outDuration > 0 ? 1 - timeUntilEnd / outDuration : 1;
+      const needsCustomEasing = !['bounce', 'elastic'].includes(anim.out);
+      const progress = needsCustomEasing ? applyEasing(rawProgress, easingType) : rawProgress;
       switch (anim.out) {
         case 'fadeOut':
           out.opacity = 1 - progress;
@@ -924,26 +995,138 @@ export class Compositor {
           out.scaleX = out.scaleY = 1 - progress;
           out.opacity = 1 - progress;
           break;
+        case 'bounce':
+          out.scaleX = out.scaleY = 1 - Math.cos(rawProgress * Math.PI * 2) * (1 - rawProgress) * 0.5;
+          break;
         case 'slideUp':
           out.offsetY = -(progress * 100);
-          out.opacity = 1 - progress;
+          out.opacity = 1 - Math.min(1, rawProgress * 1.5);
           break;
         case 'slideDown':
           out.offsetY = progress * 100;
-          out.opacity = 1 - progress;
+          out.opacity = 1 - Math.min(1, rawProgress * 1.5);
           break;
         case 'slideLeft':
           out.offsetX = -(progress * 100);
-          out.opacity = 1 - progress;
+          out.opacity = 1 - Math.min(1, rawProgress * 1.5);
           break;
         case 'slideRight':
           out.offsetX = progress * 100;
+          out.opacity = 1 - Math.min(1, rawProgress * 1.5);
+          break;
+        case 'elastic': {
+          const ep = rawProgress;
+          out.scaleX = out.scaleY = Math.pow(2, -10 * ep) * Math.sin((ep * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+          break;
+        }
+        case 'scaleFlip':
+          out.scaleY = 1 - progress;
+          break;
+        case 'zoomBlur':
+          out.scaleX = out.scaleY = 1 + progress;
           out.opacity = 1 - progress;
+          break;
+        case 'revealWipe':
+          clip.__revealWipeProgress = 1 - progress;
+          break;
+        case 'splitReveal':
+          out.scaleX = out.scaleY = 0.1 + (1 - progress) * 0.9;
+          out.opacity = 1 - progress;
+          break;
+        case 'glitch': {
+          const intensity = rawProgress * 15;
+          out.offsetX = (Math.random() - 0.5) * intensity;
+          out.offsetY = (Math.random() - 0.5) * intensity * 0.5;
+          out.opacity = rawProgress < 0.9 ? 1 : (1 - rawProgress) * 10;
+          break;
+        }
+        case 'letterSpacing':
+          clip.__letterSpacingProgress = 1 - progress;
+          out.opacity = Math.min(1, (1 - rawProgress) * 2);
+          break;
+        case 'rollUp':
+          out.offsetY = -(progress * 150);
+          out.opacity = 1 - progress;
+          out.scaleY = 0.6 + (1 - progress) * 0.4;
+          break;
+        case 'spinIn':
+          out.rotation = progress * 360;
+          out.scaleX = out.scaleY = 1 - progress;
+          out.opacity = 1 - Math.min(1, rawProgress * 1.5);
+          break;
+        case 'dropBounce': {
+          out.offsetY = progress * 200;
+          out.opacity = 1 - progress;
+          break;
+        }
+        case 'flipX':
+          out.scaleY = Math.abs(Math.cos(progress * Math.PI));
+          out.opacity = Math.min(1, (1 - rawProgress) * 2);
+          break;
+        case 'flipY':
+          out.scaleX = Math.abs(Math.cos(progress * Math.PI));
+          out.opacity = Math.min(1, (1 - rawProgress) * 2);
+          break;
+        case 'blurIn':
+          out.opacity = 1 - progress;
+          out.scaleX = out.scaleY = 1 + progress * 0.08;
+          break;
+        case 'expandWidth':
+          out.scaleX = 1 - progress;
+          out.scaleY = 1;
+          out.opacity = 1 - Math.min(1, rawProgress * 1.5);
+          break;
+        case 'wave':
+          clip.__waveProgress = 1 - progress;
+          out.opacity = Math.min(1, (1 - rawProgress) * 2);
+          break;
+        case 'scramble':
+          clip.__scrambleProgress = 1 - rawProgress;
+          out.opacity = rawProgress > 0.8 ? (1 - rawProgress) * 5 : 1;
           break;
         default:
           break;
       }
     }
+    
+    else if (anim.loop && anim.loop !== 'none') {
+      const loopSpeed = anim.loopSpeed || 1;
+      const t = timeSinceStart * loopSpeed;
+      switch (anim.loop) {
+        case 'wiggle': {
+          const clipSeed = clip.id ? clip.id.charCodeAt(0) + clip.id.charCodeAt(Math.min(1, clip.id.length - 1)) : 42;
+          out.rotation += (smoothNoise(clipSeed + 200, t, 2) - 0.5) * 3;
+          out.offsetX += (smoothNoise(clipSeed, t, 3) - 0.5) * 6;
+          out.offsetY += (smoothNoise(clipSeed + 100, t, 2.5) - 0.5) * 4;
+          break;
+        }
+        case 'pulse': {
+          const s = 1 + Math.sin(t * Math.PI * 2) * 0.03;
+          out.scaleX *= s;
+          out.scaleY *= s;
+          break;
+        }
+        case 'float':
+          out.offsetY += Math.sin(t * Math.PI * 0.8) * 8;
+          out.offsetX += Math.cos(t * Math.PI * 0.5) * 3;
+          break;
+        case 'neonFlicker': {
+          const clipSeed = clip.id ? clip.id.charCodeAt(0) + clip.id.charCodeAt(Math.min(1, clip.id.length - 1)) : 42;
+          const flickerVal = smoothNoise(clipSeed, t, 8);
+          out.opacity = flickerVal < 0.15 ? 0.7 : 1;
+          break;
+        }
+        case 'shake': {
+          const clipSeed = clip.id ? clip.id.charCodeAt(0) + clip.id.charCodeAt(Math.min(1, clip.id.length - 1)) : 42;
+          out.offsetX += (smoothNoise(clipSeed, t, 12) - 0.5) * 8;
+          break;
+        }
+        case 'colorCycle':
+          clip.__colorCyclePhase = (t * 360) % 360;
+          break;
+      }
+    }
+
     return out;
   }
 
@@ -1015,6 +1198,9 @@ export class Compositor {
     // context exactly like the preview's text branch, so the exported motion
     // matches the editor frame-for-frame.
     ctx.translate(anim.offsetX, anim.offsetY);
+    if (anim.rotation) {
+      ctx.rotate((anim.rotation * Math.PI) / 180);
+    }
     ctx.scale(anim.scaleX, anim.scaleY);
 
     ctx.globalAlpha = (layer.opacity ?? 1) * anim.opacity;
@@ -1030,20 +1216,21 @@ export class Compositor {
     ctx.textBaseline = 'middle';
 
     const lines = String(text).split('\n');
-    const lineHeight = fontSize * 1.2;
+    const lineHeight = fontSize * 1.25;
     const blockHeight = lines.length * lineHeight;
+
+    let maxLineWidth = 0;
+    for (const line of lines) {
+      maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line).width);
+    }
+    const paddingX = fontSize * 0.5;
+    const paddingY = fontSize * 0.3;
 
     // Background pill (matches preview padding maths)
     if (ts.backgroundColor && ts.backgroundColor !== 'transparent') {
-      let maxWidth = 0;
-      for (const line of lines) {
-        maxWidth = Math.max(maxWidth, ctx.measureText(line).width);
-      }
-      const paddingX = fontSize * 0.5;
-      const paddingY = fontSize * 0.3;
-      const bgX = -(maxWidth / 2) - paddingX;
+      const bgX = -(maxLineWidth / 2) - paddingX;
       const bgY = -(blockHeight / 2) - paddingY;
-      const bgW = maxWidth + paddingX * 2;
+      const bgW = maxLineWidth + paddingX * 2;
       const bgH = blockHeight + paddingY * 2;
       
       drawTextBackground(
@@ -1062,32 +1249,222 @@ export class Compositor {
       ctx.shadowBlur = ts.shadowBlur !== undefined ? ts.shadowBlur : 10;
       ctx.shadowOffsetX = 2;
       ctx.shadowOffsetY = 2;
+    } else {
+      ctx.shadowColor = 'transparent';
+    }
+
+    // ── Per-unit cascade animation & enhanced text rendering ────────────
+    const perUnit = ts.animation?.perUnit || 'all';
+    const stagger = ts.animation?.stagger || 0.05;
+    const revealWipeProgress = clip.__revealWipeProgress;
+    const letterSpacingProg = clip.__letterSpacingProgress;
+    const waveProgress = clip.__waveProgress;
+    const scrambleProgress = clip.__scrambleProgress;
+    const colorCyclePhase = clip.__colorCyclePhase;
+
+    // Gradient fill
+    let textFillStyle: string | CanvasGradient = ts.color || '#ffffff';
+    if (ts.gradientColors && ts.gradientColors.length >= 2) {
+      const gDir = ts.gradientDirection || 'horizontal';
+      const halfW = maxLineWidth / 2;
+      const halfH = blockHeight / 2;
+      let grad: CanvasGradient;
+      if (gDir === 'vertical') {
+        grad = ctx.createLinearGradient(0, -halfH, 0, halfH);
+      } else if (gDir === 'diagonal') {
+        grad = ctx.createLinearGradient(-halfW, -halfH, halfW, halfH);
+      } else {
+        grad = ctx.createLinearGradient(-halfW, 0, halfW, 0);
+      }
+      ts.gradientColors.forEach((c: string, idx: number) => {
+        grad.addColorStop(idx / (ts.gradientColors!.length - 1), c);
+      });
+      textFillStyle = grad;
+    }
+
+    // Color cycle hue rotation
+    if (colorCyclePhase !== undefined) {
+      ctx.filter = `hue-rotate(${colorCyclePhase}deg)`;
+    }
+
+    // Reveal wipe clip
+    if (revealWipeProgress !== undefined) {
+      ctx.save();
+      const wipeW = (maxLineWidth + paddingX * 2) * revealWipeProgress;
+      ctx.beginPath();
+      ctx.rect(-(maxLineWidth / 2) - paddingX, -(blockHeight / 2) - paddingY, wipeW, blockHeight + paddingY * 2);
+      ctx.clip();
     }
 
     const firstLineY = -(blockHeight / 2) + lineHeight / 2;
-    for (let i = 0; i < lines.length; i++) {
-      const lineY = firstLineY + i * lineHeight;
-      if (ts.strokeColor && ts.strokeWidth) {
-        ctx.strokeStyle = ts.strokeColor;
-        ctx.lineWidth = ts.strokeWidth;
-        ctx.strokeText(lines[i], 0, lineY);
-      }
-      ctx.fillStyle = ts.color || '#ffffff';
-      ctx.fillText(lines[i], 0, lineY);
+    const needsPerUnit = (perUnit !== 'all' && ts.animation && (ts.animation.in !== 'none' || ts.animation.out !== 'none'))
+      || letterSpacingProg !== undefined
+      || waveProgress !== undefined
+      || scrambleProgress !== undefined;
 
-      if (ts.underline) {
-        const lw = ctx.measureText(lines[i]).width;
-        ctx.save();
-        ctx.shadowColor = 'transparent';
-        ctx.beginPath();
-        ctx.strokeStyle = ts.color || '#ffffff';
-        ctx.lineWidth = Math.max(1, fontSize / 15);
-        ctx.moveTo(-lw / 2, lineY + fontSize * 0.45);
-        ctx.lineTo(lw / 2, lineY + fontSize * 0.45);
-        ctx.stroke();
-        ctx.restore();
+    if (needsPerUnit) {
+      const currentTime = layer.timestampSeconds ?? 0;
+      const inDuration = ts.animation?.inDuration || 0.5;
+      const timeSinceStart = currentTime - (clip.startTime || 0);
+      const timeUntilEnd = ((clip.startTime || 0) + (clip.duration || 0)) - currentTime;
+      const outDuration = ts.animation?.outDuration || 0.5;
+      const isInPhase = timeSinceStart < inDuration && timeSinceStart >= 0;
+      const isOutPhase = timeUntilEnd < outDuration && timeUntilEnd >= 0;
+
+      let unitIndex = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const lineY = firstLineY + i * lineHeight;
+        const lineText = lines[i];
+
+        let units: { text: string; x: number; width: number }[] = [];
+        if (perUnit === 'character' || letterSpacingProg !== undefined || waveProgress !== undefined || scrambleProgress !== undefined) {
+          let cursorX = -(ctx.measureText(lineText).width / 2);
+          if (letterSpacingProg !== undefined) {
+            const totalWidth = ctx.measureText(lineText).width;
+            const extraSpacing = (1 - letterSpacingProg) * fontSize * 0.3;
+            const totalExtraWidth = extraSpacing * (lineText.length - 1);
+            cursorX = -((totalWidth + totalExtraWidth) / 2);
+            for (let c = 0; c < lineText.length; c++) {
+              const ch = lineText[c];
+              const chW = ctx.measureText(ch).width;
+              units.push({ text: ch, x: cursorX + chW / 2, width: chW });
+              cursorX += chW + extraSpacing;
+            }
+          } else {
+            for (let c = 0; c < lineText.length; c++) {
+              const ch = lineText[c];
+              const chW = ctx.measureText(ch).width;
+              units.push({ text: ch, x: cursorX + chW / 2, width: chW });
+              cursorX += chW;
+            }
+          }
+        } else {
+          const words = lineText.split(/(\s+)/);
+          let cursorX = -(ctx.measureText(lineText).width / 2);
+          for (const word of words) {
+            const wW = ctx.measureText(word).width;
+            units.push({ text: word, x: cursorX + wW / 2, width: wW });
+            cursorX += wW;
+          }
+        }
+
+        for (const unit of units) {
+          ctx.save();
+          const totalUnits = lines.reduce((sum, l) => sum + (perUnit === 'character' ? l.length : l.split(/\s+/).length), 0);
+          const totalAnimTime = inDuration;
+          const unitAnimTime = Math.max(0.02, totalAnimTime - (totalUnits - 1) * stagger);
+          const unitDelay = unitIndex * stagger;
+          let unitProgress = 1;
+          
+          if (isInPhase) {
+            unitProgress = Math.max(0, Math.min(1, (timeSinceStart - unitDelay) / unitAnimTime));
+          } else if (isOutPhase) {
+            unitProgress = Math.max(0, Math.min(1, 1 - (timeSinceStart - ((clip.duration || 0) - outDuration) - unitDelay) / unitAnimTime));
+          }
+
+          let waveOffsetY = 0;
+          if (waveProgress !== undefined) {
+            waveOffsetY = Math.sin((unitIndex * 0.5) + waveProgress * Math.PI * 4) * fontSize * 0.3 * (1 - waveProgress);
+          }
+
+          let renderText = unit.text;
+          if (scrambleProgress !== undefined && scrambleProgress < 1) {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+            if (Math.random() > scrambleProgress) {
+              renderText = chars[Math.floor(Math.random() * chars.length)];
+            }
+          }
+
+          const unitScale = perUnit !== 'all' ? unitProgress : 1;
+          const unitOpacity = perUnit !== 'all' ? unitProgress : 1;
+
+          ctx.globalAlpha *= unitOpacity;
+          ctx.translate(unit.x, lineY + waveOffsetY);
+          ctx.scale(unitScale, unitScale);
+
+          if (ts.threeD && ts.threeDDepth) {
+            const depth = ts.threeDDepth || 3;
+            for (let d = depth; d > 0; d--) {
+              const shade = Math.max(0, 1 - d * 0.15);
+              ctx.save();
+              ctx.translate(d * 1.5, d * 1.5);
+              ctx.fillStyle = `rgba(0,0,0,${shade * 0.6})`;
+              ctx.fillText(renderText, 0, 0);
+              ctx.restore();
+            }
+          }
+
+          if (ts.outerStrokeColor && ts.outerStrokeWidth) {
+            ctx.strokeStyle = ts.outerStrokeColor;
+            ctx.lineWidth = (ts.outerStrokeWidth || 4) + (ts.strokeWidth || 0);
+            ctx.lineJoin = 'round';
+            ctx.strokeText(renderText, 0, 0);
+          }
+
+          if (ts.strokeColor && ts.strokeWidth) {
+            ctx.strokeStyle = ts.strokeColor;
+            ctx.lineWidth = ts.strokeWidth;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(renderText, 0, 0);
+          }
+
+          ctx.fillStyle = textFillStyle;
+          ctx.fillText(renderText, 0, 0);
+
+          ctx.restore();
+          unitIndex++;
+        }
+      }
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        const lineY = firstLineY + i * lineHeight;
+
+        if (ts.threeD && ts.threeDDepth) {
+          const depth = ts.threeDDepth || 3;
+          for (let d = depth; d > 0; d--) {
+            const shade = Math.max(0, 1 - d * 0.15);
+            ctx.save();
+            ctx.translate(d * 1.5, d * 1.5);
+            ctx.fillStyle = `rgba(0,0,0,${shade * 0.6})`;
+            ctx.fillText(lines[i], 0, lineY);
+            ctx.restore();
+          }
+        }
+
+        if (ts.outerStrokeColor && ts.outerStrokeWidth) {
+          ctx.strokeStyle = ts.outerStrokeColor;
+          ctx.lineWidth = (ts.outerStrokeWidth || 4) + (ts.strokeWidth || 0);
+          ctx.lineJoin = 'round';
+          ctx.strokeText(lines[i], 0, lineY);
+        }
+
+        if (ts.strokeColor && ts.strokeWidth) {
+          ctx.strokeStyle = ts.strokeColor;
+          ctx.lineWidth = ts.strokeWidth;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(lines[i], 0, lineY);
+        }
+
+        ctx.fillStyle = textFillStyle;
+        ctx.fillText(lines[i], 0, lineY);
+
+        if (ts.underline) {
+          const lw = ctx.measureText(lines[i]).width;
+          ctx.save();
+          ctx.shadowColor = 'transparent';
+          ctx.beginPath();
+          ctx.strokeStyle = ts.color || '#ffffff';
+          ctx.lineWidth = Math.max(1, fontSize / 15);
+          ctx.moveTo(-lw / 2, lineY + fontSize * 0.45);
+          ctx.lineTo(lw / 2, lineY + fontSize * 0.45);
+          ctx.stroke();
+          ctx.restore();
+        }
       }
     }
+
+    if (revealWipeProgress !== undefined) ctx.restore();
+    if (colorCyclePhase !== undefined) ctx.filter = 'none';
 
     ctx.restore();
     ctx.globalCompositeOperation = 'source-over';
