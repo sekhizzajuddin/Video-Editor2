@@ -278,12 +278,24 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
     return () => { if (syncIntervalRef.current) clearInterval(syncIntervalRef.current); };
   }, [isPlaying, syncAudio, isWholeTimelineMode]);
 
+  const cuesRef = useRef(cues);
+  cuesRef.current = cues;
+  // Track preview URLs that were adopted into the media library (via handleApply)
+  // so the unmount cleanup doesn't revoke URLs the timeline is still using.
+  const adoptedUrlsRef = useRef(new Set<string>());
   useEffect(() => {
     return () => {
       Object.values(audioPlayersRef.current).forEach((a) => a.pause());
       if (inspectorAudioRef.current) inspectorAudioRef.current.pause();
       // Safely restore timeline audio muting state on modal exit
       useEditorStore.getState().setMuteTimelineAudio(false);
+      cuesRef.current.forEach(cue => {
+        cue.options?.forEach(opt => {
+          if (opt.previewUrl && !adoptedUrlsRef.current.has(opt.previewUrl)) {
+            URL.revokeObjectURL(opt.previewUrl);
+          }
+        });
+      });
     };
   }, []);
 
@@ -643,6 +655,11 @@ export function AiSoundDesigner({ clip: clipProp, cues: initialCues, onClose, mo
           };
           try {
             addMedia(mediaItem, file);
+            // Mark this URL as adopted into the media library so the unmount
+            // cleanup doesn't revoke a URL the timeline is still using.
+            if (option.previewUrl && option.previewUrl.startsWith('blob:')) {
+              adoptedUrlsRef.current.add(option.previewUrl);
+            }
           } finally {
             if (!(option.previewUrl && option.previewUrl.startsWith('blob:'))) {
               setTimeout(() => URL.revokeObjectURL(mediaItem.url), 1000);

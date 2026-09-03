@@ -65,6 +65,8 @@ export function useVoiceoverRecording() {
 
         recorder.onstop = async () => {
           const blob = new Blob(audioChunksRef.current, { type: mimeType });
+          audioChunksRef.current = [];
+          if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
           const elapsed = (Date.now() - recordingStartTimeMsRef.current) / 1000;
           const audioUrl = URL.createObjectURL(blob);
 

@@ -822,6 +822,7 @@ export function MediaPanel() {
         try {
           const url = URL.createObjectURL(file);
           const meta = await probeFile(file);
+          URL.revokeObjectURL(meta.url);
           const id = 'rec_' + Date.now();
           await saveFileToDB(id, file); // Save to OPFS/IDB for persistence
           

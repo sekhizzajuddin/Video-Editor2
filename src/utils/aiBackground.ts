@@ -24,7 +24,7 @@
 
 import * as ortModule from 'onnxruntime-web';
 import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
-import { detectHumanPresence, computeROICrop } from './humanDetection';
+import { detectHumanPresence, computeROICrop, resetClipDetectionState, resetAllDetectionState } from './humanDetection';
 import { stabilizeTemporalAlpha } from './temporalMaskEngine';
 
 import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
@@ -1140,6 +1140,7 @@ export function cleanupClipBackgroundState(clipId: string): void {
     preRenderedMaskCache.delete(clipId);
   }
   updateClipAnalysisStatus(clipId, { status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
+  resetClipDetectionState(clipId);
 }
 
 export function cleanupAllBackgroundState(): void {
@@ -1151,6 +1152,7 @@ export function cleanupAllBackgroundState(): void {
   }
   preRenderedMaskCache.clear();
   analysisProgressMap.clear();
+  resetAllDetectionState();
 }
 
 export const cleanupAllAIResources = cleanupAllBackgroundState;

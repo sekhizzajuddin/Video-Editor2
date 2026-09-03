@@ -28,6 +28,15 @@ interface NormalizeResult {
 // Cache normalized blobs so several clips of the same media transcode once.
 const normalizedCache = new Map<string, Promise<NormalizeResult>>();
 
+export function clearNormalizedCache(): void {
+  for (const [, promise] of normalizedCache) {
+    promise.then(result => {
+      if (result.url) URL.revokeObjectURL(result.url);
+    }).catch(() => {});
+  }
+  normalizedCache.clear();
+}
+
 export interface VideoInspection {
   codec: string | null;
   isoBmff: boolean;
@@ -233,7 +242,7 @@ async function pickEncoderConfig(width: number, height: number, fps: number): Pr
       bitrate,
       framerate: fps,
       hardwareAcceleration: 'prefer-hardware',
-      latencyMode: 'realtime',
+      latencyMode: 'quality',
       bitrateMode: 'variable',
       avc: { format: 'avc' },
     };

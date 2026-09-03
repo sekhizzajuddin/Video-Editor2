@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Copy, Layers, Wand2, Check } from 'lucide-react';
 import type { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 interface ColorGradeTransferSectionProps {
   selectedClip: TimelineClip;
@@ -9,7 +10,8 @@ interface ColorGradeTransferSectionProps {
 }
 
 export function ColorGradeTransferSection({ selectedClip, selectedClipIds }: ColorGradeTransferSectionProps) {
-  const clips = useEditorStore((state) => state.tracks.flatMap((t) => t.clips));
+  const tracks = useEditorStore(useShallow((s) => s.tracks));
+  const clips = useMemo(() => tracks.flatMap((t) => t.clips), [tracks]);
   const updateClip = useEditorStore((state) => state.updateClip);
   
   const [copiedStatus, setCopiedStatus] = useState<string | null>(null);

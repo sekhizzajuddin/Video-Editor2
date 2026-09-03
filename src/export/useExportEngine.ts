@@ -12,6 +12,7 @@ import { ExportPhase } from './types';
 import { defaultExportPipeline } from './ExportPipeline';
 import { promoteCanvasToExportSize } from './exportCanvasSize';
 import { useEditorStore } from '@/store/editorStore';
+import { clearNormalizedCache } from './engine/VideoNormalizer';
 
 export interface Resolution {
   width: number;
@@ -272,8 +273,10 @@ export function useExportEngine() {
       } finally {
         // Terminate the worker immediately — download() reads from OPFS, not the worker.
         // Without this, every export leaves a live worker holding decoded frames + GPU state.
+        // NOTE: Do NOT null exporterRef.current here — downloadFile() needs the instance
+        // to call download() after export completes. The unmount effect handles final cleanup.
         exporterRef.current?.dispose();
-        exporterRef.current = null;
+        clearNormalizedCache();
       }
     } catch (error) {
       if ((error as Error).message === 'AbortError') {

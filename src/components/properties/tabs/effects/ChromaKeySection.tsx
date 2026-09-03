@@ -2,6 +2,7 @@ import type { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
 import React, { useState, useEffect, useRef } from 'react';
 import { KeyframeIcon } from '../../KeyframeIcon';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 
 interface ChromaKeySectionProps {
   selectedClip: TimelineClip;
@@ -24,7 +25,7 @@ const EyedropperIcon = () => (
 export function ChromaKeySection({ selectedClip }: ChromaKeySectionProps) {
   const updateClip = useEditorStore((state) => state.updateClip);
   const saveSnapshot = useEditorStore((state) => state.saveSnapshot);
-  const currentTime = useEditorStore((state) => state.currentTime);
+  const currentTime = usePlaybackTime(10);
 
   const chromaKey = selectedClip.chromaKey || {
     enabled: false,

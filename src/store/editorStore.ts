@@ -31,6 +31,7 @@ import { detectAspectRatio } from '@/utils/aspectRatioHelper';
 import { setPlaybackTime, getPlaybackTime } from '@/utils/playbackClock';
 import { clearImageBitmapPool } from '@/utils/imageBitmapPool';
 import { clearAllMediaWindows } from '@/utils/ramWindowedBlobCache';
+import { clearFrameCache } from '@/utils/frameExtractor';
 import {
   planKineticSync,
   planGroupReflow,
@@ -495,17 +496,47 @@ const initialState: EditorState = {
 };
 
 export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrack, pipId: string | null) => TimelineTrack) => {
+  // Preserve object identity for unchanged tracks — same pattern as mapPipWindowClips.
+  // Without this, every updateClip call creates new references for ALL tracks/clips,
+  // defeating React.memo on every TimelineClipRow even when only 1 clip changed.
+  let tracksChanged = false;
+  const newTracks = state.tracks.map(t => {
+    const origClips = t.clips || [];
+    const input = { ...t, clips: origClips };
+    const result = modifier(input, null);
+    // Check if clips actually changed (the main data modifier touches)
+    const clipsIdentical = result.clips === origClips || (
+      result.clips.length === origClips.length &&
+      result.clips.every((c, i) => c === origClips[i])
+    );
+    if (clipsIdentical) return t; // preserve original reference
+    tracksChanged = true;
+    return result;
+  });
+
+  let pipChanged = false;
+  const newPipEntries = Object.entries(state.pipWindows || {}).map(([pipId, pip]) => {
+    let pipTracksChanged = false;
+    const pipTracks = (pip.tracks || []).map(t => {
+      const origClips = t.clips || [];
+      const input = { ...t, clips: origClips };
+      const result = modifier(input, pipId);
+      const clipsIdentical = result.clips === origClips || (
+        result.clips.length === origClips.length &&
+        result.clips.every((c, i) => c === origClips[i])
+      );
+      if (clipsIdentical) return t;
+      pipTracksChanged = true;
+      return result;
+    });
+    if (!pipTracksChanged) return [pipId, pip] as const;
+    pipChanged = true;
+    return [pipId, { ...pip, tracks: pipTracks }] as const;
+  });
+
   return {
-    tracks: state.tracks.map(t => modifier({ ...t, clips: t.clips || [] }, null)),
-    pipWindows: Object.fromEntries(
-      Object.entries(state.pipWindows || {}).map(([pipId, pip]) => [
-        pipId,
-        {
-          ...pip,
-          tracks: (pip.tracks || []).map(t => modifier({ ...t, clips: t.clips || [] }, pipId))
-        }
-      ])
-    )
+    tracks: tracksChanged ? newTracks : state.tracks,
+    pipWindows: pipChanged ? Object.fromEntries(newPipEntries) : (state.pipWindows || {}),
   };
 };
 
@@ -1115,6 +1146,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('procut-evict-media-cache', { detail: { id } }));
     }
+    clearFrameCache(id);
 
     // Also remove any clips referencing this media
     set((state) => ({
@@ -2172,11 +2204,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const targetTrack = state.tracks.find((t) => t.id === targetTrackId);
       if (targetTrack && targetTrack.locked) return {};
 
-      const newTracks = state.tracks.map((track) => ({
-        ...track,
-        clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
-      }));
-      const newPipWindows: Record<string, PipWindow> = JSON.parse(JSON.stringify(state.pipWindows || {}));
+      const newTracks: TimelineTrack[] = structuredClone(state.tracks);
+      const newPipWindows: Record<string, PipWindow> = structuredClone(state.pipWindows || {});
 
       // Find and remove the clip
       let foundClip: TimelineClip | undefined;
@@ -2334,8 +2363,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         if (targetTrack && targetTrack.locked) return {};
       }
 
-      const newTracks = JSON.parse(JSON.stringify(state.tracks));
-      const newPipWindows = JSON.parse(JSON.stringify(state.pipWindows || {}));
+      const newTracks: TimelineTrack[] = structuredClone(state.tracks);
+      const newPipWindows: Record<string, PipWindow> = structuredClone(state.pipWindows || {});
 
       const movingClipsMap = new Map<string, TimelineClip>();
       const updatedClipIds = new Set(updates.map(u => u.clipId));
@@ -2362,6 +2391,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         if (clip) {
           movingClipsMap.set(update.clipId, clip);
         }
+      }
+
+      const originalPositions = new Map<string, { startTime: number; trackId: string }>();
+      for (const [id, clip] of movingClipsMap) {
+        originalPositions.set(id, { startTime: clip.startTime, trackId: clip.trackId || '' });
       }
 
       const sortedUpdates = [...updates].sort((a, b) => a.newStartTime - b.newStartTime);
@@ -2438,6 +2472,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
+      // Check if any clip actually moved
+      let anyMoved = false;
+      for (const update of updates) {
+        const clip = movingClipsMap.get(update.clipId);
+        if (!clip) continue;
+        const oldPos = originalPositions.get(update.clipId);
+        if (!oldPos || Math.abs(clip.startTime - oldPos.startTime) > 0.0001 || clip.trackId !== oldPos.trackId) {
+          anyMoved = true;
+          break;
+        }
+      }
+      if (!anyMoved) return {};
+
       return { 
         tracks: newTracks,
         pipWindows: newPipWindows
@@ -2450,11 +2497,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (clipIds.length === 0) return;
 
     set((state) => {
-      const newTracks = state.tracks.map((track) => ({
-        ...track,
-        clips: track.clips.map((c) => ({ ...c, transform: { ...c.transform } })),
-      }));
-      const newPipWindows: Record<string, PipWindow> = JSON.parse(JSON.stringify(state.pipWindows || {}));
+      const newTracks: TimelineTrack[] = structuredClone(state.tracks);
+      const newPipWindows: Record<string, PipWindow> = structuredClone(state.pipWindows || {});
 
       const checkOverlapLocal = (
         clips: TimelineClip[],
@@ -3925,12 +3969,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (state.historyIndex <= 0) return {};
       const snap = state.history[state.historyIndex - 1];
       return {
-        tracks: JSON.parse(JSON.stringify(snap.tracks)),
+        tracks: structuredClone(snap.tracks),
         currentTime: snap.currentTime,
-        pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
-        subtitles: JSON.parse(JSON.stringify(snap.subtitles || [])),
-        markers: JSON.parse(JSON.stringify(snap.markers || [])),
-        beatMarkers: JSON.parse(JSON.stringify(snap.beatMarkers || [])),
+        pipWindows: structuredClone(snap.pipWindows || {}),
+        subtitles: structuredClone(snap.subtitles || []),
+        markers: structuredClone(snap.markers || []),
+        beatMarkers: structuredClone(snap.beatMarkers || []),
         historyIndex: state.historyIndex - 1,
       };
     });
@@ -3941,12 +3985,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (state.historyIndex >= state.history.length - 1) return {};
       const snap = state.history[state.historyIndex + 1];
       return {
-        tracks: JSON.parse(JSON.stringify(snap.tracks)),
+        tracks: structuredClone(snap.tracks),
         currentTime: snap.currentTime,
-        pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
-        subtitles: JSON.parse(JSON.stringify(snap.subtitles || [])),
-        markers: JSON.parse(JSON.stringify(snap.markers || [])),
-        beatMarkers: JSON.parse(JSON.stringify(snap.beatMarkers || [])),
+        pipWindows: structuredClone(snap.pipWindows || {}),
+        subtitles: structuredClone(snap.subtitles || []),
+        markers: structuredClone(snap.markers || []),
+        beatMarkers: structuredClone(snap.beatMarkers || []),
         historyIndex: state.historyIndex + 1,
       };
     });
@@ -3957,12 +4001,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (index < 0 || index >= state.history.length) return {};
       const snap = state.history[index];
       return {
-        tracks: JSON.parse(JSON.stringify(snap.tracks)),
+        tracks: structuredClone(snap.tracks),
         currentTime: snap.currentTime,
-        pipWindows: JSON.parse(JSON.stringify(snap.pipWindows || {})),
-        subtitles: JSON.parse(JSON.stringify(snap.subtitles || [])),
-        markers: JSON.parse(JSON.stringify(snap.markers || [])),
-        beatMarkers: JSON.parse(JSON.stringify(snap.beatMarkers || [])),
+        pipWindows: structuredClone(snap.pipWindows || {}),
+        subtitles: structuredClone(snap.subtitles || []),
+        markers: structuredClone(snap.markers || []),
+        beatMarkers: structuredClone(snap.beatMarkers || []),
         historyIndex: index,
         selectedClipId: null,
         selectedClipIds: [],
@@ -4012,6 +4056,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     // that would otherwise leak across project boundaries
     clearImageBitmapPool();
     clearAllMediaWindows();
+    clearFrameCache();
 
     set({
       ...initialState,
@@ -4253,10 +4298,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const cleanedTracks = tracks.filter(
       (t) => !t.isDynamic || t.clips.length > 0
     );
-    const tracksChanged = cleanedTracks.length !== tracks.length || cleanedTracks !== tracks;
+    // filter() always returns a new array, so use length comparison for the semantic check.
+    // When no dynamic tracks were removed, pass the original `tracks` ref to avoid
+    // breaking every useShallow subscriber and React.memo downstream.
+    const tracksChanged = cleanedTracks.length !== tracks.length;
+    const finalTracks = tracksChanged ? cleanedTracks : tracks;
 
     let maxEnd = 0;
-    for (const track of cleanedTracks) {
+    for (const track of finalTracks) {
       for (const clip of track.clips) {
         const end = clip.startTime + clip.duration;
         if (end > maxEnd) maxEnd = end;
@@ -4298,7 +4347,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
     // Set totalDuration with a minimum floor of 0.1 to avoid unusable slider empty state
     set({
-      tracks: cleanedTracks,
+      tracks: finalTracks,
       totalDuration: newTotalDuration,
       ...(pipChanged ? { pipWindows: updatedPipWindows } : {})
     });

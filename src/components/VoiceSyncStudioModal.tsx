@@ -49,12 +49,18 @@ export const VoiceSyncStudioModal: React.FC<{ onClose: () => void }> = ({ onClos
 
   // Audio Playback
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeUrlRef = useRef<string | null>(null);
   const playChunk = (blob: Blob | null, start: number, end: number) => {
     if (!blob) return;
     if (activeAudioRef.current) {
       activeAudioRef.current.pause();
     }
+    if (activeUrlRef.current) {
+      URL.revokeObjectURL(activeUrlRef.current);
+      activeUrlRef.current = null;
+    }
     const url = URL.createObjectURL(blob);
+    activeUrlRef.current = url;
     const audio = new Audio(url);
     audio.currentTime = start;
     audio.play().catch(e => console.warn(e));
@@ -64,6 +70,7 @@ export const VoiceSyncStudioModal: React.FC<{ onClose: () => void }> = ({ onClos
         audio.pause();
         audio.removeEventListener('timeupdate', onTimeUpdate);
         URL.revokeObjectURL(url);
+        activeUrlRef.current = null;
       }
     };
     audio.addEventListener('timeupdate', onTimeUpdate);
@@ -73,6 +80,10 @@ export const VoiceSyncStudioModal: React.FC<{ onClose: () => void }> = ({ onClos
   useEffect(() => {
     return () => {
       if (activeAudioRef.current) activeAudioRef.current.pause();
+      if (activeUrlRef.current) {
+        URL.revokeObjectURL(activeUrlRef.current);
+        activeUrlRef.current = null;
+      }
     };
   }, []);
 

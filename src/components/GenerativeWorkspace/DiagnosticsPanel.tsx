@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   Bug,
   ChevronDown,
@@ -98,6 +98,12 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
   const [running, setRunning] = useState(false);
   const [demoUrl, setDemoUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  
+  useEffect(() => {
+    return () => {
+      if (demoUrl) URL.revokeObjectURL(demoUrl);
+    };
+  }, [demoUrl]);
 
   const patch = useCallback((id: string, next: Partial<Check>) => {
     setChecks((prev) => prev.map((c) => (c.id === id ? { ...c, ...next } : c)));

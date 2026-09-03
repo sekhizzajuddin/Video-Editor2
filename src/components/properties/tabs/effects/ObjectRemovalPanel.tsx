@@ -3,6 +3,7 @@ import type { TimelineClip, ClipObjectRemovalSettings, ObjectRemovalMode, Object
 import { useEditorStore } from '@/store/editorStore';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { KeyframeControl } from '@/components/KeyframeControls';
+import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 
 interface ObjectRemovalPanelProps {
   selectedClip: TimelineClip;
@@ -30,7 +31,7 @@ const defaultSettings: ClipObjectRemovalSettings = {
 export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
   const updateClip = useEditorStore((state) => state.updateClip);
   const saveSnapshot = useEditorStore((state) => state.saveSnapshot);
-  const currentTime = useEditorStore((state) => state.currentTime);
+  const currentTime = usePlaybackTime(10);
 
   const or = selectedClip.objectRemoval || defaultSettings;
   const animations = selectedClip.animations || {};

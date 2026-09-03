@@ -105,7 +105,7 @@ export class WebCodecsBackend implements EncoderBackend {
       height: opts.height,
       bitrate,
       framerate: opts.fps,
-      latencyMode: 'realtime',
+      latencyMode: 'quality',
       bitrateMode: 'variable',
       hardwareAcceleration: 'prefer-hardware',
       avc: { format: 'avc' },

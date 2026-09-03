@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Volume2, Zap } from 'lucide-react';
 import type { TimelineClip } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 interface AutoDuckingSectionProps {
   selectedClip: TimelineClip;
@@ -9,7 +10,8 @@ interface AutoDuckingSectionProps {
 }
 
 export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuckingSectionProps) {
-  const clips = useEditorStore((state) => state.tracks.flatMap((t) => t.clips));
+  const tracks = useEditorStore(useShallow((s) => s.tracks));
+  const clips = useMemo(() => tracks.flatMap((t) => t.clips), [tracks]);
 
   const ducking = selectedClip.audioSettings?.ducking || {
     enabled: false,

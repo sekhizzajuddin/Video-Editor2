@@ -361,7 +361,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     removeTransition,
     addMasterKeyframe,
     deleteMasterKeyframe,
-    history,
+    historyLength,
     historyIndex,
     jumpToHistoryIndex,
     addMedia,
@@ -398,7 +398,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     removeTransition: s.removeTransition,
     addMasterKeyframe: s.addMasterKeyframe,
     deleteMasterKeyframe: s.deleteMasterKeyframe,
-    history: s.history,
+    historyLength: s.history.length,
     historyIndex: s.historyIndex,
     jumpToHistoryIndex: s.jumpToHistoryIndex,
     addMedia: s.addMedia,
@@ -424,6 +424,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const currentTab = (isMobileView && mobileCategory)
     ? (mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : (mobileCategory as any))
     : activePropertiesTab;
+
+  const isHistoryTab = currentTab === 'history';
+  const history = useEditorStore(useShallow(s => isHistoryTab ? s.history : null)) || [];
 
   useEffect(() => {
     if (isMobileView && mobileCategory) {
@@ -1853,7 +1856,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className="p-3 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0 bg-[var(--theme-bg-subpanel)]/30">
               <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Undo/Redo History</span>
               <span className="text-[9px] text-[#8a8a8a] bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded px-1.5 py-0.5 font-mono">
-                {history.length} Actions
+                {historyLength} Actions
               </span>
             </div>
 
@@ -1876,7 +1879,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   >
                     {/* Visual Line Node */}
                     <div className="relative flex items-center justify-center shrink-0 w-4">
-                      {idx < history.length - 1 && (
+                      {idx < historyLength - 1 && (
                         <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
                           isFuture ? 'bg-[var(--theme-bg-subpanel)]/40' : 'bg-amber-500/30'
                         }`} />
@@ -8017,7 +8020,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className="p-3 border border-[var(--theme-border)] rounded-xl bg-[var(--theme-bg-subpanel)] flex items-center justify-between shrink-0 shadow-sm">
               <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Undo/Redo History</span>
               <span className="text-[9px] text-[var(--theme-text-muted)] bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-md px-2 py-0.5 font-mono font-medium">
-                {history.length} Actions
+                {historyLength} Actions
               </span>
             </div>
 
@@ -8040,7 +8043,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   >
                     {/* Visual Line Node */}
                     <div className="relative flex items-center justify-center shrink-0 w-4">
-                      {idx < history.length - 1 && (
+                      {idx < historyLength - 1 && (
                         <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
                           isFuture ? 'bg-[var(--theme-border)]/40' : 'bg-blue-500/30'
                         }`} />

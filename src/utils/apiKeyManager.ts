@@ -165,6 +165,17 @@ export async function fetchWithKeyFailover(
       };
     }
 
+    let retries = 0;
+    while (retries < 3) {
+      const res = await fetch(url, fetchOptions);
+      if (provider === 'gemini' && (res.status === 503 || res.status === 429)) {
+        console.warn(`[GEMINI] Got ${res.status}. Retrying in ${Math.pow(2, retries) * 2}s...`);
+        await new Promise(r => setTimeout(r, Math.pow(2, retries) * 2000));
+        retries++;
+        continue;
+      }
+      return res;
+    }
     return await fetch(url, fetchOptions);
   };
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import { Film, Music, Image, Sparkles, Type, Plus } from 'lucide-react';
 import { getKineticClipLabel, isKineticMediaId } from '@/utils/kineticSync';
 import { useEditorStore } from '@/store/editorStore';
@@ -116,6 +116,18 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
   const clipAnims = clip.animations?.['transform.x'] || [];
   const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
+
+  const dragHandlersRef = useRef<{move: (e: MouseEvent) => void, up: () => void} | null>(null);
+  
+  useEffect(() => {
+    return () => {
+      const h = dragHandlersRef.current;
+      if (h) {
+        window.removeEventListener('mousemove', h.move);
+        window.removeEventListener('mouseup', h.up);
+      }
+    };
+  }, []);
 
   return (
     <div
@@ -333,9 +345,11 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   const onMouseUp = () => {
                     window.removeEventListener('mousemove', onMouseMove);
                     window.removeEventListener('mouseup', onMouseUp);
+                    dragHandlersRef.current = null;
                     useEditorStore.getState().saveSnapshot('Move Keyframe');
                     useEditorStore.getState().endTransaction();
                   };
+                  dragHandlersRef.current = { move: onMouseMove, up: onMouseUp };
                   window.addEventListener('mousemove', onMouseMove);
                   window.addEventListener('mouseup', onMouseUp);
                 }}
