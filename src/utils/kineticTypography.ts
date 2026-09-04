@@ -7,6 +7,16 @@ import { scheduleSaveSnapshot } from './snapshotScheduler';
 
 import { fetchWithKeyFailover } from './apiKeyManager';
 
+export const GEMINI_TYPOGRAPHY_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash-lite',
+];
+
+let workingGeminiTypoModel: string | null = null;
+
 const uuidv4 = () => crypto.randomUUID();
 
 let _measureCanvas: HTMLCanvasElement | null = null;
@@ -246,25 +256,44 @@ ${customPromptInstruction}`
         }
       };
 
-      const response = await fetchWithKeyFailover(
-        (key) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        },
-        'gemini'
-      );
+      const modelsToTry = workingGeminiTypoModel
+        ? [workingGeminiTypoModel, ...GEMINI_TYPOGRAPHY_MODELS.filter(m => m !== workingGeminiTypoModel)]
+        : GEMINI_TYPOGRAPHY_MODELS;
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Gemini API Error: ${response.status} - ${errText}`);
+      let lastGeminiError = '';
+      for (const model of modelsToTry) {
+        try {
+          const response = await fetchWithKeyFailover(
+            (key) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestBody)
+            },
+            'gemini'
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            const textCandidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (textCandidate) {
+              resultJsonStr = textCandidate;
+              workingGeminiTypoModel = model;
+              break;
+            }
+          }
+
+          const errText = await response.text().catch(() => '');
+          lastGeminiError = `${response.status} - ${errText}`;
+          console.warn(`[Kinetic Typography] Gemini model "${model}" failed (${response.status}): ${errText.slice(0, 120)}. Trying next candidate...`);
+        } catch (mErr: any) {
+          lastGeminiError = mErr?.message || String(mErr);
+          console.warn(`[Kinetic Typography] Gemini candidate "${model}" error: ${lastGeminiError}. Trying next candidate...`);
+        }
       }
 
-      const data = await response.json();
-      resultJsonStr = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!resultJsonStr) {
-        throw new Error('No valid response from Gemini for this chunk.');
+        throw new Error(`Gemini API Error across all models. Last error: ${lastGeminiError}`);
       }
     }
 

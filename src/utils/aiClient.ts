@@ -9,9 +9,9 @@ export function getGroqKey(): string {
 }
 
 // ─── Model constants ─────────────────────────────────────────────────────────
-const GEMINI_VISION_MODEL = 'gemini-3.5-flash-lite';          // current stable GA model, good free tier
-const GROQ_VISION_MODEL   = 'llama-3.2-11b-vision-preview'; // Valid Groq vision model
-const GROQ_TEXT_MODEL     = 'llama-3.3-70b-versatile';        // Best Groq reasoning / text model
+const GEMINI_VISION_MODEL = 'gemini-2.5-flash';          // current stable GA model, high reliability
+const GROQ_VISION_MODEL   = 'qwen/qwen3.8-27b';          // Valid Groq vision model
+const GROQ_TEXT_MODEL     = 'openai/gpt-oss-120b';        // Best Groq reasoning / text model
 
 /** Safely strip a data-URI prefix (e.g. "data:image/jpeg;base64,") from a base64 string. */
 function stripDataUri(b64: string): string {
@@ -844,7 +844,7 @@ Output format MUST exactly match this JSON schema:
 
 export async function enhancePromptWithGemini(prompt: string, apiKey: string): Promise<string> {
   const systemPrompt = "You are an expert AI Video and Image prompt engineer. Enhance the following basic prompt into a highly detailed, cinematic, and professional prompt suitable for advanced AI video generators like Sora, Kling, or Midjourney. Focus on lighting, camera angles, atmosphere, and visual fidelity. Return ONLY the enhanced prompt string without any conversational filler or quotes.";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -985,7 +985,7 @@ export async function generateAutoVideoBlueprint(
   characterDescription?: string,
   visualStyle?: string
 ): Promise<AutoVideoBlueprint> {
-  const model = "gemini-3.5-flash-lite"; 
+  const model = "gemini-2.5-flash"; 
   const wordTimestampsStr = JSON.stringify(wordTimestamps.slice(0, 100)); // Sample if too long
   const systemPrompt = `You are an expert video director, stock footage researcher, and AI image prompt engineer.
 I am providing you with a script that has a total audio voiceover duration of ${totalDuration.toFixed(1)} seconds, along with word-level timestamps.
@@ -1121,7 +1121,7 @@ Return ONLY a JSON array, no markdown. Format:
 
   const wordTimestampsStr = JSON.stringify(wordTimestamps);
   
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1164,7 +1164,7 @@ ${targetSource === 'map' ? '- Return "mapAnimation" object with "type" (route/fl
 
 Return ONLY a valid JSON object matching the requested schema, nothing else.`;
 
-  const model = "gemini-3.5-flash-lite";
+  const model = "gemini-2.5-flash";
 
   const payload = {
     contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\nNarration: "${narration}"` }] }],

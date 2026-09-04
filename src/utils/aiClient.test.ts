@@ -131,7 +131,7 @@ Hope this helps!`;
       expect(result).toMatchObject({ keywords: 'ocean waves shoreline splash', alternatives: [] });
 
       const expectedPayload = {
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages: [
           {
             role: 'system',

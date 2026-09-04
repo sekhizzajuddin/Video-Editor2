@@ -14,12 +14,23 @@ import { sanitizeMotionSceneHtml, probeCaptureCapabilities } from './cssSceneRas
  * step — previously a single bad model id killed the entire pipeline.
  */
 const GEMINI_MODEL_CANDIDATES = [
-  'gemini-3.5-flash-lite',
   'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-3.5-flash-lite',
   'gemini-2.5-flash-lite',
 ];
 
-const GROQ_MODEL_CANDIDATES = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+const GROQ_MODEL_CANDIDATES = [
+  'openai/gpt-oss-120b',
+  'gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'gpt-oss-20b',
+  'qwen/qwen3.8-27b',
+  'qwen/qwen3.6-27b',
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+];
 
 export interface GenerativeMotionOptions {
   provider: 'gemini' | 'groq';
@@ -439,8 +450,8 @@ async function requestDesign(
 }
 
 function isModelUnavailable(status: number, body: string): boolean {
-  if (status === 404) return true;
-  return /is not found|not supported for generateContent|model.*not found|unsupported model/i.test(
+  if (status === 404 || status === 503 || status === 429) return true;
+  return /is not found|not supported for generateContent|model.*not found|unsupported model|high demand|temporarily overloaded|service unavailable|resource exhausted/i.test(
     body || ''
   );
 }

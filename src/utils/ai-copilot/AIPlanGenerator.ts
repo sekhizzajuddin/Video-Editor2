@@ -31,7 +31,7 @@ export interface PlanGenerationConfig {
   maxOutputTokens?: number;
 }
 
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+const DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
 const SYSTEM_PROMPT = `You are an expert video-editing automation planner.
 
