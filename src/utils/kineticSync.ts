@@ -201,9 +201,9 @@ export function layoutSentence(words: string[], opts: LayoutOptions = {}): Layou
   // lockstep, so the wrap point never moved — and because a re-flow rebuilt the
   // lines from scratch, a multi-line sentence collapsed onto a single line the
   // moment the user nudged the transform.
-  const maxLineWidth = isColumn ? 420 : 860;
+  const maxLineWidth = isColumn ? 380 : 680;
   const charWidth = fontSize * 0.65;
-  const spaceWidth = fontSize * 0.4;
+  const spaceWidth = fontSize * 0.42;
   const lineHeight = fontSize * 1.35;
 
   const lines: Array<Array<{ text: string; width: number }>> = [[]];

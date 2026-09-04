@@ -9,6 +9,46 @@ import { fetchWithKeyFailover } from './apiKeyManager';
 
 const uuidv4 = () => crypto.randomUUID();
 
+let _measureCanvas: HTMLCanvasElement | null = null;
+let _measureCtx: CanvasRenderingContext2D | null = null;
+
+export function measureWordWidth(
+  text: string,
+  fontSize: number,
+  fontFamily: string = 'Inter',
+  isBold: boolean = false
+): number {
+  if (!text) return 0;
+  if (typeof document !== 'undefined') {
+    try {
+      if (!_measureCanvas) {
+        _measureCanvas = document.createElement('canvas');
+        _measureCtx = _measureCanvas.getContext('2d');
+      }
+      if (_measureCtx) {
+        _measureCtx.font = `${isBold ? 'bold ' : ''}${fontSize}px "${fontFamily}", sans-serif`;
+        const metrics = _measureCtx.measureText(text);
+        if (metrics && metrics.width > 0) {
+          return Math.ceil(metrics.width);
+        }
+      }
+    } catch {
+      // ignore and use fallback below
+    }
+  }
+  // Safe character width fallback based on font family metrics
+  // Anton / Impact / Bebas Neue are condensed (~0.52x)
+  // Georgia / serif fonts are wide (~0.72x)
+  // Inter / Montserrat / sans-serif are ~0.62x
+  const fam = (fontFamily || '').toLowerCase();
+  const factor = (fam.includes('anton') || fam.includes('bebas') || fam.includes('impact') || fam.includes('oswald'))
+    ? 0.52
+    : (fam.includes('georgia') || fam.includes('serif'))
+    ? 0.72
+    : 0.62;
+  return Math.ceil(text.length * fontSize * factor * (isBold ? 1.08 : 1.0));
+}
+
 export interface KineticTypographyOptions {
   script: string;
   englishCasing?: 'all_caps' | 'first_letter_caps' | 'none';
@@ -99,7 +139,7 @@ JSON Schema for EACH word object in the returned array:
 - "text": string (the single spoken word)
 - "start": number (start time in seconds, 0 - ${chunkDuration.toFixed(2)})
 - "end": number (end time in seconds, 0 - ${chunkDuration.toFixed(2)})
-- "fontSize": number (45 - 120)
+- "fontSize": number (38 - 68, default 48)
 - "fontFamily": string ('Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Outfit', 'Inter', 'Montserrat', or 'Georgia')
 - "color": string (vibrant hex color e.g. '#fbbf24')
 - "backgroundColor": string (optional, e.g. 'transparent', '#000000', 'rgba(0,0,0,0.7)', '#ff0055')
@@ -112,8 +152,8 @@ JSON Schema for EACH word object in the returned array:
 - "y": number (0 - 100, 50 is center, 20 is top, 80 is bottom)
 - "breakAfter": boolean (true if line break should follow this word)
 - "emphasis": "high" | "medium" | "low" (HIGH = key nouns/verbs/numbers that carry the sentence meaning. MEDIUM = normal words. LOW = filler words like "the", "a", "and", "is", "to", "of", "in", "it". HIGH words get bigger, bolder, accent colors. LOW words are smaller, muted.)
-- "animationIn": 'fadeIn' | 'zoom' | 'bounce' | 'typewriter' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'spinIn' | 'dropBounce' | 'flipX' | 'flipY' | 'blurIn' | 'expandWidth'
-- "animationOut": 'fadeOut' | 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'spinIn' | 'dropBounce' | 'flipX' | 'flipY' | 'blurIn' | 'expandWidth'
+- "animationIn": 'fadeIn' | 'zoom' | 'bounce' | 'typewriter' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'spinIn' | 'dropBounce' | 'flipX' | 'flipY' | 'blurIn' | 'expandWidth' | 'wave' | 'scramble' | 'letterSpacing'
+- "animationOut": 'fadeOut' | 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'elastic' | 'splitReveal' | 'revealWipe' | 'rollUp' | 'scaleFlip' | 'zoomBlur' | 'glitch' | 'spinIn' | 'dropBounce' | 'flipX' | 'flipY' | 'blurIn' | 'expandWidth' | 'wave' | 'scramble' | 'letterSpacing'
 - "stylePreset": string (e.g. 'MrBeast Hype', 'Alex Hormozi Impact', 'Modern Shorts Pill', 'Neon Cyberpunk', 'Cyber Neon', 'Yellow Warning', 'Golden Glow', 'Bouncy Pop', 'Neon Pink Glow', 'Ruby Red', 'Vibrant Pink', 'Sunset Orange', 'Forest Emerald', 'Electric Indigo', 'Typewriter Green', 'Chunky Shadow', 'Glitch Cyber', 'Bubble Caption')
 
 1. SCRIPT/LANGUAGE:
@@ -125,7 +165,7 @@ JSON Schema for EACH word object in the returned array:
    ${customPromptText ? '- NOTE: Follow the USER CUSTOM INSTRUCTIONS above for target position (e.g. top/bottom/center).' : '- Stagger positions word-by-word (x: 35-65, y: 40-60) unless user custom instruction specifies otherwise.'}
 3. VIBRANT COLORS: Use high contrast colors. HIGH emphasis words get vivid accent colors (yellows, cyans, magentas). LOW emphasis words get neutral/muted colors (white, gray, subtle tones).
 4. TIMING PRECISION: Keep start/end tight based on audio.
-5. EMPHASIS SIZING: HIGH emphasis words MUST have fontSize 80-120 and bold fonts (Anton, Impact, Bebas Neue). LOW emphasis words should have fontSize 45-65. MEDIUM words fontSize 60-85. Vary animations: use dramatic animations (elastic, dropBounce, spinIn, zoom) for HIGH emphasis words and subtle animations (fadeIn, blurIn) for LOW emphasis words.
+5. EMPHASIS SIZING: HIGH emphasis words have fontSize 58-68 and bold fonts (Anton, Impact, Bebas Neue). LOW emphasis words have fontSize 38-44. MEDIUM words fontSize 46-54. Vary animations: use dramatic animations (elastic, dropBounce, spinIn, zoom) for HIGH emphasis words and subtle animations (fadeIn, blurIn) for LOW emphasis words.
 6. ANIMATION VARIETY: Use DIFFERENT animations for different words. Don't repeat the same animationIn for every word. Mix zoom, bounce, elastic, slideUp, dropBounce, spinIn, flipY etc.
 7. PREFERENCES: 
 ${userStyle !== 'random' ? `STYLE PRESET PREFERENCE: Lean towards "${userStyle}" style where possible.` : ''}
@@ -134,7 +174,7 @@ ${options.pipBackgroundArea ? 'BACKGROUND PREFERENCE: DO NOT generate any backgr
 
 
 Output ONLY a valid JSON array, no markdown, no explanation:
-[{"text":"Word","start":0.5,"end":0.85,"fontSize":98,"fontFamily":"Anton","color":"#fbbf24","x":50,"y":50,"breakAfter":false,"emphasis":"high","animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
+[{"text":"Word","start":0.5,"end":0.85,"fontSize":58,"fontFamily":"Anton","color":"#fbbf24","x":50,"y":50,"breakAfter":false,"emphasis":"high","animationIn":"zoom","animationOut":"fadeOut","stylePreset":"Bouncy Pop"}]`;
 
     let resultJsonStr = '';
 
@@ -290,7 +330,7 @@ processedClips.push({
     processedClips.forEach((item: any) => {
       const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (item.stylePreset || '').toLowerCase());
       
-      const fontSz = item.fontSize || (preset?.settings.fontSize ? Math.round(preset.settings.fontSize * 1.1) : 60);
+      const fontSz = Math.min(64, Math.max(36, item.fontSize || (preset?.settings.fontSize ? Math.round(preset.settings.fontSize * 1.1) : 50)));
       const fontFam = item.fontFamily || preset?.settings.fontFamily || 'Anton';
       const clr = item.color || preset?.settings.color || '#ffffff';
       const bgClr = item.backgroundColor || preset?.settings.backgroundColor || 'transparent';
@@ -382,8 +422,26 @@ processedClips.push({
       const posX = Math.round((avgX - 50) * 8.54);
       const posY = Math.round((avgY - 50) * 4.8);
 
-      const fontSz = firstW.fontSize || 54;
+      const fontSz = Math.min(52, Math.max(36, firstW.fontSize ? Math.round(firstW.fontSize * 0.85) : 46));
       const fontFam = firstW.fontFamily || preset?.settings.fontFamily || 'Inter';
+      const isBold = firstW.bold !== undefined ? firstW.bold : true;
+
+      // Smart multi-line wrapping for long sentences
+      const maxSentenceLineWidth = 640;
+      let wrappedSentenceText = '';
+      let curLineW = 0;
+      grp.forEach((w, i) => {
+        const wWidth = measureWordWidth(w.text, fontSz, fontFam, isBold);
+        const spW = Math.round(fontSz * 0.4);
+        if (i > 0 && curLineW + spW + wWidth > maxSentenceLineWidth) {
+          wrappedSentenceText += '\n' + w.text;
+          curLineW = wWidth;
+        } else {
+          wrappedSentenceText += (i === 0 ? '' : ' ') + w.text;
+          curLineW += (i === 0 ? 0 : spW) + wWidth;
+        }
+      });
+
       const clr = firstW.color || preset?.settings.color || '#ffffff';
       const bgClr = firstW.backgroundColor || preset?.settings.backgroundColor || 'transparent';
       const bgStyle = firstW.backgroundStyle || preset?.settings.backgroundStyle;
@@ -395,7 +453,7 @@ processedClips.push({
       const rotation = firstW.rotation || 0;
 
       const textSettings: any = {
-        text: sentenceText,
+        text: wrappedSentenceText || sentenceText,
         fontSize: fontSz,
         fontFamily: fontFam,
         color: clr,
@@ -513,94 +571,138 @@ processedClips.push({
 
       // Smart Non-Overlapping Layout Calculation for Sentence Words
       const isColumn = options.typoLayout === 'column';
-      const maxLineWidth = isColumn ? 420 : 860; // constrain width based on layout
-      
       const totalChars = fullSentenceText.length;
-      let baseFontSize = 54;
-      if (isColumn) {
-        baseFontSize = Math.min(68, Math.max(42, Math.floor(500 / Math.max(1, totalChars * 0.4))));
-      } else {
-        baseFontSize = Math.min(54, Math.max(36, Math.floor(760 / Math.max(1, totalChars * 0.52))));
-      }
       
-      const charWidth = baseFontSize * 0.65;
-      const spaceWidth = baseFontSize * 0.4;
-      const lineHeight = baseFontSize * 1.25;
+      // Responsive base font size: ensure comfortable reading without overwhelming the frame
+      let baseFontSize = 48;
+      if (isColumn) {
+        baseFontSize = Math.min(56, Math.max(38, Math.floor(400 / Math.max(1, grp.length * 1.1))));
+      } else {
+        baseFontSize = Math.min(50, Math.max(36, Math.floor(640 / Math.max(1, totalChars * 0.4))));
+      }
 
-      const lines: { word: any; width: number }[][] = [[]];
+      // Step 1: Pre-resolve each word's styling and measure its EXACT pixel width on canvas
+      const wordStyles = grp.map((word) => {
+        const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (word.stylePreset || '').toLowerCase());
+        const emphasis = word.emphasis || 'medium';
+        const wordFontFamily = word.fontFamily || preset?.settings.fontFamily || (emphasis === 'high' ? 'Anton' : 'Inter');
+        const wordBold = word.bold !== undefined ? word.bold : (preset?.settings.bold !== undefined ? preset.settings.bold : (emphasis === 'high'));
+        
+        let wordFontSize = baseFontSize;
+        if (word.fontSize && typeof word.fontSize === 'number') {
+          // Normalize & clamp AI provided font size to a safe aesthetic range
+          wordFontSize = Math.min(64, Math.max(34, Math.round(word.fontSize)));
+        } else {
+          // Controlled emphasis scale (never creates gigantic unconstrained text)
+          const emphasisScale = emphasis === 'high' ? 1.25 : (emphasis === 'low' ? 0.85 : 1.0);
+          wordFontSize = Math.round(baseFontSize * emphasisScale);
+        }
+
+        // Measure EXACT physical width using HTML5 Canvas measureText (with fallback)
+        const measuredWidth = measureWordWidth(word.text, wordFontSize, wordFontFamily, wordBold);
+        const measuredHeight = Math.round(wordFontSize * 1.25);
+
+        return {
+          word,
+          preset,
+          emphasis,
+          wordFontFamily,
+          wordFontSize,
+          wordBold,
+          measuredWidth,
+          measuredHeight
+        };
+      });
+
+      // Step 2: Calculate breathing space between words (generous gap prevents overlap during pop animations)
+      const avgFontSize = wordStyles.reduce((sum, ws) => sum + ws.wordFontSize, 0) / wordStyles.length;
+      const spaceWidth = Math.max(16, Math.round(avgFontSize * 0.42));
+      // Safe maximum line width on an 854-width canvas (leaves ~100px padding on left/right)
+      const maxLineWidth = isColumn ? 360 : 660;
+
+      // Step 3: Line Wrapping using REAL measured word widths
+      const lines: (typeof wordStyles)[] = [[]];
       let currentLineWidth = 0;
 
-      grp.forEach((w) => {
-        const prevWordInLine = lines[lines.length - 1].length > 0 ? lines[lines.length - 1][lines[lines.length - 1].length - 1].word : null;
-        const wWidth = Math.round(w.text.length * charWidth);
-        const aiBreak = prevWordInLine && prevWordInLine.breakAfter === true;
-        const widthExceeded = currentLineWidth + spaceWidth + wWidth > maxLineWidth;
+      wordStyles.forEach((ws) => {
+        const currentLine = lines[lines.length - 1];
+        const prevItem = currentLine.length > 0 ? currentLine[currentLine.length - 1] : null;
+        const aiBreak = prevItem && prevItem.word.breakAfter === true;
         
-        if (lines[lines.length - 1].length > 0 && (widthExceeded || aiBreak)) {
+        // Column layout wraps every 1 word (or 2 short words)
+        const columnLimit = isColumn && currentLine.length >= (ws.word.text.length > 4 ? 1 : 2);
+        
+        // Check if adding this word exceeds maximum allowed line width
+        const wouldExceed = currentLineWidth + spaceWidth + ws.measuredWidth > maxLineWidth;
+
+        if (currentLine.length > 0 && (wouldExceed || aiBreak || columnLimit)) {
           lines.push([]);
           currentLineWidth = 0;
         }
-        lines[lines.length - 1].push({ word: w, width: wWidth });
-        currentLineWidth += (lines[lines.length - 1].length === 1 ? 0 : spaceWidth) + wWidth;
+
+        lines[lines.length - 1].push(ws);
+        currentLineWidth += (lines[lines.length - 1].length === 1 ? 0 : spaceWidth) + ws.measuredWidth;
       });
 
-      const totalSentenceHeight = lines.length * lineHeight;
-      const startY = -totalSentenceHeight / 2 + lineHeight / 2;
+      // Step 4: Line Heights & Vertical Positioning (calculated from the tallest font on each line)
+      const lineHeights = lines.map(line => {
+        const maxFont = Math.max(...line.map(ws => ws.wordFontSize));
+        return Math.round(maxFont * 1.35); // 1.35x ensures vertical separation without overlap
+      });
 
+      const totalSentenceHeight = lineHeights.reduce((sum, h) => sum + h, 0);
+      
+      // Calculate Y position for the center of each line
+      const lineYPositions: number[] = [];
+      let accumY = -totalSentenceHeight / 2;
+      for (let i = 0; i < lines.length; i++) {
+        const h = lineHeights[i];
+        lineYPositions.push(Math.round(accumY + h / 2));
+        accumY += h;
+      }
 
       // Record the authored line arrangement on the container so later resizes
       // reproduce it exactly instead of re-deriving it from word positions.
       (primaryClip as any).kineticLineStructure = lines.map((l) => l.length);
 
-if (options.pipBackgroundArea) {
+      if (options.pipBackgroundArea) {
         if (!primaryClip.textSettings) primaryClip.textSettings = {} as any;
         primaryClip.textSettings!.text = lines.map(l => l.map(item => item.word.text).join(' ')).join('\n');
-        primaryClip.textSettings!.fontSize = baseFontSize;
+        primaryClip.textSettings!.fontSize = Math.round(avgFontSize);
         primaryClip.textSettings!.color = 'transparent';
         primaryClip.textSettings!.backgroundColor = 'rgba(0,0,0,0.8)';
         primaryClip.textSettings!.backgroundStyle = (options.backgroundSelection && options.backgroundSelection !== 'none' && options.backgroundSelection !== 'random') ? options.backgroundSelection : 'solid_pill';
         primaryClip.textSettings!.fontFamily = grp[0].fontFamily || 'Inter';
       }
 
-
+      // Step 5: Place each word with exact non-overlapping coordinates centered around origin
       lines.forEach((line, lineIdx) => {
-        const lineW = line.reduce((sum, item) => sum + item.width, 0) + (line.length - 1) * spaceWidth;
+        const lineW = line.reduce((sum, item) => sum + item.measuredWidth, 0) + Math.max(0, line.length - 1) * spaceWidth;
         let currentX = -lineW / 2;
-        const lineY = Math.round(startY + lineIdx * lineHeight);
+        const lineY = lineYPositions[lineIdx];
 
-        line.forEach(({ word, width }) => {
-          const posX = Math.round(currentX + width / 2);
+        line.forEach(({ word, preset, emphasis, wordFontFamily, wordFontSize, wordBold, measuredWidth }) => {
+          const posX = Math.round(currentX + measuredWidth / 2);
           const posY = lineY;
-          currentX += width + spaceWidth;
+          currentX += measuredWidth + spaceWidth;
 
           const wordRelStart = Math.max(0, word.start - sStart);
           // CRITICAL: End time inside PiP equals sentence duration (so words remain visible until sentence ends)
           const wordDuration = Math.max(0.1, sDuration - wordRelStart);
 
-          const preset = TEXT_TEMPLATES.find(p => p.name.toLowerCase() === (word.stylePreset || '').toLowerCase());
-          
-          // Emphasis-based variable sizing (MrBeast/Hormozi style)
-          const emphasis = word.emphasis || 'medium';
-          let emphasisScale = 1.0;
           let emphasisColor = word.color || preset?.settings.color || '#fbbf24';
           if (emphasis === 'high') {
-            emphasisScale = 1.5;
-            // HIGH words get vivid accent colors if not already specified
             if (!word.color && !preset?.settings.color) {
               const accentColors = ['#FFE600', '#00FF66', '#00F0FF', '#FF3366', '#FF6600', '#fbbf24'];
               emphasisColor = accentColors[Math.floor(Math.random() * accentColors.length)];
             }
           } else if (emphasis === 'low') {
-            emphasisScale = 0.75;
-            // LOW words get muted/neutral colors
             if (!word.color && !preset?.settings.color) {
               emphasisColor = '#d4d4d4';
             }
           }
           
           const wordColor = emphasisColor;
-          const wordFontFamily = word.fontFamily || preset?.settings.fontFamily || (emphasis === 'high' ? 'Anton' : 'Inter');
-          const wordFontSize = Math.round((word.fontSize || baseFontSize) * emphasisScale);
           const wordBgColor = options.pipBackgroundArea ? 'transparent' : (word.backgroundColor || preset?.settings.backgroundColor || 'transparent');
           const wordBgStyle = options.pipBackgroundArea ? 'none' : (word.backgroundStyle || preset?.settings.backgroundStyle);
           const wordStrokeColor = word.strokeColor || preset?.settings.strokeColor;
@@ -608,12 +710,11 @@ if (options.pipBackgroundArea) {
           const wordShadow = word.shadow !== undefined ? word.shadow : (preset?.settings.shadow !== undefined ? preset.settings.shadow : true);
           const wordShadowColor = word.shadowColor || preset?.settings.shadowColor || '#000000';
           const wordShadowBlur = word.shadowBlur !== undefined ? word.shadowBlur : (preset?.settings.shadowBlur || 12);
-          const wordBold = word.bold !== undefined ? word.bold : (preset?.settings.bold !== undefined ? preset.settings.bold : (emphasis === 'high'));
           const wordItalic = word.italic !== undefined ? word.italic : (preset?.settings.italic || false);
           const wordUnderline = word.underline !== undefined ? word.underline : (preset?.settings.underline || false);
           const rotation = word.rotation || 0;
           
-          // Emphasis-based animation durations: HIGH words get longer, more dramatic entrance
+          // Emphasis-based animation durations
           const inDur = emphasis === 'high' ? 0.2 : (emphasis === 'low' ? 0.08 : 0.12);
           const outDur = emphasis === 'high' ? 0.15 : 0.08;
 
@@ -664,7 +765,7 @@ if (options.pipBackgroundArea) {
             effects: [],
             animations: {
               'transform.scale': [
-                { time: 0, value: 135, easing: 'easeOut' },
+                { time: 0, value: emphasis === 'high' ? 122 : 115, easing: 'easeOut' },
                 { time: 0.12, value: 100, easing: 'easeOut' }
               ],
               'opacity': [
