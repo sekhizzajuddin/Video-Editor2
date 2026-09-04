@@ -4945,7 +4945,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
               );
             })()}
-            </div>
 
             {/* ── Enter / Exit Animation ─────────────────────────── */}
             <div className={`bg-[var(--theme-bg-subpanel)] rounded-lg border border-[var(--theme-border)] ${!isSectionActive('enterExit') ? 'hidden' : ''}`}>
@@ -8363,20 +8362,20 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
         {currentTab === 'pip' && selectedClip && (() => {
           // Find the relevant PIP window
-          let pipId: string | null = null;
-          let pipWin: any = null;
-
+          let pipId = '';
+          
           if (selectedClip.pipWindowIds?.length) {
             // Selected clip is a PIP parent — show the first PIP window config
             pipId = selectedClip.pipWindowIds[0];
-            pipWin = pipWindows?.[pipId];
           } else if (isPipClip && parentPipWindowId) {
             // Selected clip is inside a PIP window — show that PIP window config
             pipId = parentPipWindowId;
-            pipWin = pipWindows?.[pipId];
           }
 
-          if (!pipId || !pipWin) return null;
+          if (!pipId) return null;
+          
+          const pipWin = pipWindows?.[pipId];
+          if (!pipWin) return null;
 
           return (
             <PipTab
