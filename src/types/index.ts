@@ -623,6 +623,8 @@ export interface TimelineClip {
   sequenceIndex?: number; // position in sequence (0, 1, 2...)
   // Map Animation (Auto Video feature)
   mapAnimation?: MapAnimationSettings;
+  // Universal clip in/out animation (works on any clip: video, image, text, PIP)
+  enterExitAnimation?: ClipEnterExitAnimation;
 }
 
 // ─── Sequencer / Interpolation ───────────────────────────────────────────
@@ -702,6 +704,41 @@ export interface TimelineTrack {
   selectedSubtitleLanguage?: string;
 }
 
+// ─── PIP Window Style ─────────────────────────────────────────────────────
+export interface PipWindowStyle {
+  // Outline / Border
+  outlineEnabled: boolean;
+  outlineColor: string;        // hex, e.g. '#ffffff'
+  outlineWidth: number;        // 1 to 20 px
+  outlineRadius: number;       // 0 to 50 px (border-radius)
+  outlineOpacity: number;      // 0 to 100
+
+  // Background
+  backgroundEnabled: boolean;
+  backgroundColor: string;     // hex color
+  backgroundOpacity: number;   // 0 to 100
+  backgroundBlur: number;      // 0 to 20 px (frosted glass effect)
+  backgroundPadding: number;   // 0 to 50 px (extra padding around PIP content)
+
+  // Shadow
+  shadowEnabled: boolean;
+  shadowColor: string;         // hex color
+  shadowBlur: number;          // 0 to 30 px
+  shadowOffsetX: number;       // -20 to 20 px
+  shadowOffsetY: number;       // -20 to 20 px
+}
+
+// ─── Clip Enter / Exit Animation ──────────────────────────────────────────
+/** Universal in/out animation for ANY clip (video, image, text, PIP). */
+export interface ClipEnterExitAnimation {
+  enterType: TextAnimationPreset;
+  exitType: TextAnimationPreset;
+  enterDuration: number;       // seconds (default 0.5)
+  exitDuration: number;        // seconds (default 0.5)
+  enterEasing?: string;        // easing function name
+  exitEasing?: string;         // easing function name
+}
+
 // ─── PIP Window ───────────────────────────────────────────────────────────
 export interface PipWindow {
   id: string;
@@ -716,6 +753,8 @@ export interface PipWindow {
   height?: number;
   zIndex?: number;
   manualDuration?: number;   // user-overridden duration in seconds
+  style?: PipWindowStyle;    // visual styling (outline, background, shadow)
+  enterExitAnimation?: ClipEnterExitAnimation; // container-level in/out animation
 }
 
 // ─── Subtitle ─────────────────────────────────────────────────────────────
@@ -803,7 +842,7 @@ export type EditorTool =
   | 'split'             // razor / split at playhead
   | 'slide';            // slide clip within gap
 export type MediaTab = 'project' | 'stock' | 'ai' | 'audio' | 'text' | 'fx' | 'templates' | 'lut' | 'transitions' | 'effects';
-export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'ai' | 'thumbnail' | 'history';
+export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'ai' | 'thumbnail' | 'history' | 'pip';
 
 // ─── Editor Settings ──────────────────────────────────────────────────────
 export interface EditorSettings {

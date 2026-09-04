@@ -33,6 +33,7 @@ import {
   Pipette,
   Crosshair,
   Film,
+  Layers,
 } from 'lucide-react';
 import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
@@ -77,6 +78,8 @@ import {
 } from './tabs/effects';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
 import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
+import PipTab from './tabs/PipTab';
+import { ENTER_EXIT_PRESETS } from '@/utils/clipEnterExitEngine';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -379,6 +382,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     applyColorGradeToAll,
     pasteClip,
     clipboardData,
+    updatePipWindowStyle,
+    updatePipWindowEnterExit,
+    updateClipEnterExitAnimation,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     selectedClipId: s.selectedClipId,
@@ -414,6 +420,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     copyColorGrade: s.copyColorGrade,
     pasteColorGrade: s.pasteColorGrade,
     applyColorGradeToAll: s.applyColorGradeToAll,
+    updatePipWindowStyle: s.updatePipWindowStyle,
+    updatePipWindowEnterExit: s.updatePipWindowEnterExit,
+    updateClipEnterExitAnimation: s.updateClipEnterExitAnimation,
   })));
 
   const [mobileSubTab, setMobileSubTab] = useState<string>('');
@@ -925,6 +934,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const isTabSupportedForClip = useCallback((tab: PropertiesTab, clip: any, track: any): boolean => {
     if (!clip) return tab === 'history' || tab === 'thumbnail';
     if (tab === 'history' || tab === 'thumbnail') return true;
+    // PIP tab available when clip is a PIP parent or inside a PIP window
+    if (tab === 'pip') return !!(clip.pipWindowIds?.length || isPipClip);
     
     if (track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
       return tab === 'effects' || tab === 'transform';
@@ -940,7 +951,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     
     // Standard video/image clip supports: transform, mask, color, speed, audio, effects
     return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects';
-  }, []);
+  }, [isPipClip]);
 
   const getDefaultTabForClip = useCallback((clip: any, track: any): PropertiesTab => {
     if (track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
@@ -1417,6 +1428,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   // Always append History tab
   baseTabs.push({ id: 'history', label: 'History', icon: History });
   baseTabs.push({ id: 'thumbnail', label: 'Thumbnail', icon: ImageIcon });
+
+  // Show PIP tab when the clip is a PIP parent (has pipWindowIds) or is inside a PIP window
+  if (selectedClip?.pipWindowIds?.length || isPipClip) {
+    baseTabs.push({ id: 'pip', label: 'PIP', icon: Layers });
+  }
 
   const tabs = baseTabs;
 
@@ -4930,6 +4946,80 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               );
             })()}
             </div>
+
+            {/* ── Enter / Exit Animation ─────────────────────────── */}
+            <div className={`bg-[var(--theme-bg-subpanel)] rounded-lg border border-[var(--theme-border)] ${!isSectionActive('enterExit') ? 'hidden' : ''}`}>
+              <div
+                className="flex items-center justify-between p-2.5 cursor-pointer select-none"
+                onClick={() => setCollapsedSections(s => ({ ...s, enterExit: !s.enterExit }))}
+              >
+                <div className="flex items-center gap-2">
+                  <Film size={14} className="text-purple-400" />
+                  <span className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Enter / Exit Animation</span>
+                </div>
+                {collapsedSections.enterExit ? <ChevronRight size={14} className="text-[var(--theme-text-muted)]" /> : <ChevronDown size={14} className="text-[var(--theme-text-muted)]" />}
+              </div>
+              {!collapsedSections.enterExit && (
+                <div className="px-3 pb-3 space-y-3">
+                  {/* Enter Animation */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-semibold text-[var(--theme-text-muted)] uppercase tracking-wider">Enter</label>
+                    <select
+                      value={selectedClip.enterExitAnimation?.enterType || 'none'}
+                      onChange={(e) => updateClipEnterExitAnimation(selectedClip.id, { enterType: e.target.value as any })}
+                      className="w-full bg-[var(--theme-bg-card)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded px-2 py-1.5 text-xs"
+                    >
+                      {ENTER_EXIT_PRESETS.map(p => (
+                        <option key={p.value} value={p.value}>{p.label}</option>
+                      ))}
+                    </select>
+                    {selectedClip.enterExitAnimation?.enterType && selectedClip.enterExitAnimation.enterType !== 'none' && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[var(--theme-text-muted)] w-12 shrink-0">Duration</span>
+                        <input
+                          type="range"
+                          min="0.1" max="3" step="0.1"
+                          value={selectedClip.enterExitAnimation?.enterDuration || 0.5}
+                          onChange={(e) => updateClipEnterExitAnimation(selectedClip.id, { enterDuration: parseFloat(e.target.value) })}
+                          onMouseUp={() => scheduleSaveSnapshot()}
+                          className="flex-1 accent-purple-500 h-1"
+                        />
+                        <span className="text-[10px] text-[var(--theme-text-muted)] w-6 text-right">{(selectedClip.enterExitAnimation?.enterDuration || 0.5).toFixed(1)}s</span>
+                      </div>
+                    )}
+                  </div>
+                  {/* Exit Animation */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-semibold text-[var(--theme-text-muted)] uppercase tracking-wider">Exit</label>
+                    <select
+                      value={selectedClip.enterExitAnimation?.exitType || 'none'}
+                      onChange={(e) => updateClipEnterExitAnimation(selectedClip.id, { exitType: e.target.value as any })}
+                      className="w-full bg-[var(--theme-bg-card)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded px-2 py-1.5 text-xs"
+                    >
+                      {ENTER_EXIT_PRESETS.map(p => (
+                        <option key={p.value} value={p.value}>{p.label}</option>
+                      ))}
+                    </select>
+                    {selectedClip.enterExitAnimation?.exitType && selectedClip.enterExitAnimation.exitType !== 'none' && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[var(--theme-text-muted)] w-12 shrink-0">Duration</span>
+                        <input
+                          type="range"
+                          min="0.1" max="3" step="0.1"
+                          value={selectedClip.enterExitAnimation?.exitDuration || 0.5}
+                          onChange={(e) => updateClipEnterExitAnimation(selectedClip.id, { exitDuration: parseFloat(e.target.value) })}
+                          onMouseUp={() => scheduleSaveSnapshot()}
+                          className="flex-1 accent-purple-500 h-1"
+                        />
+                        <span className="text-[10px] text-[var(--theme-text-muted)] w-6 text-right">{(selectedClip.enterExitAnimation?.exitDuration || 0.5).toFixed(1)}s</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            </div>
           );
         })()}
 
@@ -8270,6 +8360,33 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
           </div>
         )}
+
+        {currentTab === 'pip' && selectedClip && (() => {
+          // Find the relevant PIP window
+          let pipId: string | null = null;
+          let pipWin: any = null;
+
+          if (selectedClip.pipWindowIds?.length) {
+            // Selected clip is a PIP parent — show the first PIP window config
+            pipId = selectedClip.pipWindowIds[0];
+            pipWin = pipWindows?.[pipId];
+          } else if (isPipClip && parentPipWindowId) {
+            // Selected clip is inside a PIP window — show that PIP window config
+            pipId = parentPipWindowId;
+            pipWin = pipWindows?.[pipId];
+          }
+
+          if (!pipId || !pipWin) return null;
+
+          return (
+            <PipTab
+              pipWindow={pipWin}
+              pipId={pipId}
+              onStyleChange={(updates) => updatePipWindowStyle(pipId!, updates)}
+              onEnterExitChange={(updates) => updatePipWindowEnterExit(pipId!, updates)}
+            />
+          );
+        })()}
       </div>
 
       {showSoundDesigner && soundDesignerCues && selectedClip && (

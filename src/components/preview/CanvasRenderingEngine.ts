@@ -53,6 +53,10 @@ import {
   type ActiveTransition,
   type LayerDraw,
 } from '@/utils/transitionEngine';
+import {
+  computeEnterExitModifiers,
+  type EnterExitModifiers,
+} from '@/utils/clipEnterExitEngine';
 
 // ---------------------------------------------------------------------------
 // Module-level track list cache — avoids filter()+sort()+spread on every frame.
@@ -842,12 +846,17 @@ export async function renderCanvasEngine({
     const parentOpacityRaw = (clip as any).__parentOpacity;
     const parentOpacity =
       parentForBlend && typeof parentOpacityRaw === 'number' ? parentOpacityRaw : 1;
+
+    // ── Enter/Exit animation modifiers ──────────────────────────────────────
+    const eeAnim = clip.enterExitAnimation;
+    const eeMods = computeEnterExitModifiers(eeAnim, clip.startTime, clip.duration, currentTime);
+
     const ownBlend = clip.transform.blendMode;
     const blendMode =
       ownBlend && ownBlend !== 'source-over'
         ? ownBlend
         : parentForBlend?.blendMode || 'source-over';
-    const totalAlpha = aOpacity * opacityMultiplier * parentOpacity;
+    const totalAlpha = aOpacity * opacityMultiplier * parentOpacity * eeMods.opacity;
 
     // ── Blend compositing ────────────────────────────────────────────────────
     // Planned by the shared helper in blendCompositor.ts. The old code emulated
@@ -1226,10 +1235,14 @@ export async function renderCanvasEngine({
       if (extraTransform?.translateX !== undefined) tx += extraTransform.translateX;
       if (extraTransform?.translateY !== undefined) ty += extraTransform.translateY;
 
+      // Enter/exit animation translate (in frame fractions)
+      tx += eeMods.translateX * W;
+      ty += eeMods.translateY * H;
+
       ctx.translate(tx, ty);
       ctx.translate(aX, aY);
 
-      let finalScale = (aScale / 100) * fxActionScaleMultiplier;
+      let finalScale = (aScale / 100) * fxActionScaleMultiplier * eeMods.scale;
       if (extraTransform?.scale !== undefined) {
         finalScale *= extraTransform.scale;
       }
@@ -1238,7 +1251,7 @@ export async function renderCanvasEngine({
       const scaleX = finalScale * (isFlippedH ? -1 : 1);
       const scaleY = finalScale * (isFlippedV ? -1 : 1);
       ctx.scale(scaleX, scaleY);
-      ctx.rotate((aRot * Math.PI) / 180);
+      ctx.rotate((aRot * Math.PI) / 180 + eeMods.rotation);
     }
 
     const filters = {
@@ -2446,6 +2459,28 @@ export async function renderCanvasEngine({
 
       const pipAbsStart = parentClip.startTime + (pip.relativeStartTime || 0);
       if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration + 0.001) {
+        // ── PIP Window Enter/Exit animation ─────────────────────────────────
+        const pipEEMods = computeEnterExitModifiers(
+          pip.enterExitAnimation, pipAbsStart, pip.duration, currentTime
+        );
+
+        // ── PIP Background + Shadow decoration (drawn BEFORE children) ──────
+        const pipStyle = pip.style;
+        if (pipStyle && (pipStyle.backgroundEnabled || pipStyle.shadowEnabled)) {
+          drawQueue.push({
+            clip: {
+              __pipDecoration: 'background',
+              __pipStyle: pipStyle,
+              __pipParentTransform: parentClip.transform,
+              __pipParentStartTime: parentClip.startTime,
+              __pipParentAnimations: parentClip.animations,
+              __pipEEMods: pipEEMods,
+              id: `__pip_bg_${pip.id}`,
+            },
+            layer: 199, // Just below PIP children
+          });
+        }
+
         for (const pTrack of pip.tracks) {
           if (pTrack.hidden) continue;
           for (const pClip of pTrack.clips) {
@@ -2461,12 +2496,29 @@ export async function renderCanvasEngine({
                 __parentId: parentClip.id,
                 __parentStartTime: parentClip.startTime,
                 __parentAnimations: parentClip.animations,
-                __parentOpacity: parentClip.opacity,
+                __parentOpacity: parentClip.opacity * pipEEMods.opacity,
                 __parentCrop: parentClip.crop,
+                __pipEEMods: pipEEMods,
               };
               drawQueue.push({ clip: syntheticClip, layer: 200 + (pTrack.type === 'text' ? 100 : 0) });
             }
           }
+        }
+
+        // ── PIP Outline decoration (drawn AFTER children) ───────────────────
+        if (pipStyle && pipStyle.outlineEnabled) {
+          drawQueue.push({
+            clip: {
+              __pipDecoration: 'outline',
+              __pipStyle: pipStyle,
+              __pipParentTransform: parentClip.transform,
+              __pipParentStartTime: parentClip.startTime,
+              __pipParentAnimations: parentClip.animations,
+              __pipEEMods: pipEEMods,
+              id: `__pip_outline_${pip.id}`,
+            },
+            layer: 301, // Above PIP children
+          });
         }
       }
     }
@@ -2573,6 +2625,86 @@ export async function renderCanvasEngine({
   for (const item of drawQueue) {
     if (item.clip.__transition) {
       await drawTransition(item.clip.__transition as ActiveTransition);
+    } else if (item.clip.__pipDecoration) {
+      // ── PIP window decoration rendering (background / outline / shadow) ──
+      const dec = item.clip.__pipDecoration as string;
+      const style = item.clip.__pipStyle;
+      const pt = item.clip.__pipParentTransform;
+      const pStart = item.clip.__pipParentStartTime ?? 0;
+      const pAnims = item.clip.__pipParentAnimations;
+      const eeMod: EnterExitModifiers = item.clip.__pipEEMods || { opacity: 1, translateX: 0, translateY: 0, scale: 1, rotation: 0, blur: 0 };
+
+      if (style && pt) {
+        ctx.save();
+
+        // Apply parent clip's transform (same as PiP children)
+        const pX = getAnimatedValue(pt.x ?? 0, currentTime, pStart, pAnims?.['transform.x']);
+        const pY = getAnimatedValue(pt.y ?? 0, currentTime, pStart, pAnims?.['transform.y']);
+        const pScale = getAnimatedValue(pt.scale ?? 100, currentTime, pStart, pAnims?.['transform.scale']);
+        const pRot = getAnimatedValue(pt.rotation ?? 0, currentTime, pStart, pAnims?.['transform.rotation']);
+
+        const cx = W / 2;
+        const cy = H / 2;
+
+        // Enter/exit translate
+        ctx.translate(cx + pX + eeMod.translateX * W, cy + pY + eeMod.translateY * H);
+        ctx.rotate((pRot * Math.PI) / 180 + eeMod.rotation);
+        const ps = ((pScale || 100) / 100) * eeMod.scale;
+        if (ps !== 1) ctx.scale(ps, ps);
+        ctx.translate(-cx, -cy);
+
+        // The decoration rectangle covers the full frame (PIP children are positioned relative to it)
+        const pad = style.backgroundPadding || 0;
+        const radius = style.outlineRadius || 0;
+        const rx = -pad;
+        const ry = -pad;
+        const rw = W + pad * 2;
+        const rh = H + pad * 2;
+
+        if (dec === 'background') {
+          // Shadow
+          if (style.shadowEnabled) {
+            ctx.shadowColor = style.shadowColor || '#000000';
+            ctx.shadowBlur = style.shadowBlur || 10;
+            ctx.shadowOffsetX = style.shadowOffsetX || 4;
+            ctx.shadowOffsetY = style.shadowOffsetY || 4;
+          }
+
+          // Background fill
+          if (style.backgroundEnabled) {
+            ctx.globalAlpha = ((style.backgroundOpacity ?? 50) / 100) * eeMod.opacity;
+            ctx.fillStyle = style.backgroundColor || '#000000';
+            ctx.beginPath();
+            if (radius > 0) {
+              ctx.roundRect(rx, ry, rw, rh, radius);
+            } else {
+              ctx.rect(rx, ry, rw, rh);
+            }
+            ctx.fill();
+          }
+
+          // Reset shadow for subsequent draws
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+        }
+
+        if (dec === 'outline') {
+          ctx.globalAlpha = ((style.outlineOpacity ?? 100) / 100) * eeMod.opacity;
+          ctx.strokeStyle = style.outlineColor || '#ffffff';
+          ctx.lineWidth = style.outlineWidth || 3;
+          ctx.beginPath();
+          if (radius > 0) {
+            ctx.roundRect(rx, ry, rw, rh, radius);
+          } else {
+            ctx.rect(rx, ry, rw, rh);
+          }
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
     } else {
       await drawSingleClip(item.clip);
     }

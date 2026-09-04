@@ -672,14 +672,19 @@ export function PreviewCanvasOverlay({
 
         if (state.pipWindows) {
           Object.values(state.pipWindows).forEach((pip: any) => {
-            let parentClip = null;
+            let parentClip: any = null;
             for (const t of state.tracks) {
-              parentClip = t.clips.find(c => c.id === pip.parentClipId);
+              parentClip = t.clips.find((c: any) => c.id === pip.parentClipId);
               if (parentClip) break;
             }
             if (!parentClip) return;
             const pipAbsStart = parentClip.startTime + (pip.relativeStartTime || 0);
             if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+              // Add the parent clip itself as a snap reference for PIP children
+              // so PIP layers can align to their container's position
+              if (parentClip.id !== activeClip.id) {
+                otherActiveClips.push(parentClip);
+              }
               pip.tracks.forEach((track: any) => {
                 track.clips.forEach((clip: any) => {
                   if (clip.id === activeClip.id) return;

@@ -224,6 +224,9 @@ interface EditorActions {
   removeTrackFromPip: (pipId: string, trackId: string) => void;
   reorderPipTrack: (pipId: string, trackIndex: number, direction: 'up' | 'down') => void;
   updatePipTrack: (pipId: string, trackId: string, updates: Partial<TimelineTrack>) => void;
+  updatePipWindowStyle: (pipId: string, style: Partial<import('@/types').PipWindowStyle>) => void;
+  updatePipWindowEnterExit: (pipId: string, animation: Partial<import('@/types').ClipEnterExitAnimation>) => void;
+  updateClipEnterExitAnimation: (clipId: string, animation: Partial<import('@/types').ClipEnterExitAnimation>) => void;
 
   // Playback
   play: () => void;
@@ -4728,6 +4731,90 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
     get().saveSnapshot('Update PIP Track');
+  },
+
+  updatePipWindowStyle: (pipId, styleUpdates) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      const defaultStyle: import('@/types').PipWindowStyle = {
+        outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 3,
+        outlineRadius: 8, outlineOpacity: 100,
+        backgroundEnabled: false, backgroundColor: '#000000',
+        backgroundOpacity: 50, backgroundBlur: 0, backgroundPadding: 8,
+        shadowEnabled: false, shadowColor: '#000000',
+        shadowBlur: 10, shadowOffsetX: 4, shadowOffsetY: 4,
+      };
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: { ...pip, style: { ...defaultStyle, ...(pip.style || {}), ...styleUpdates } }
+        }
+      };
+    });
+    get().saveSnapshot('Update PIP Style');
+  },
+
+  updatePipWindowEnterExit: (pipId, animUpdates) => {
+    set((state) => {
+      const pip = state.pipWindows[pipId];
+      if (!pip) return {};
+      const defaultAnim: import('@/types').ClipEnterExitAnimation = {
+        enterType: 'none', exitType: 'none',
+        enterDuration: 0.5, exitDuration: 0.5,
+      };
+      return {
+        pipWindows: {
+          ...state.pipWindows,
+          [pipId]: { ...pip, enterExitAnimation: { ...defaultAnim, ...(pip.enterExitAnimation || {}), ...animUpdates } }
+        }
+      };
+    });
+    get().saveSnapshot('Update PIP Animation');
+  },
+
+  updateClipEnterExitAnimation: (clipId, animUpdates) => {
+    set((state) => {
+      const defaultAnim: import('@/types').ClipEnterExitAnimation = {
+        enterType: 'none', exitType: 'none',
+        enterDuration: 0.5, exitDuration: 0.5,
+      };
+      // Search main tracks
+      for (const track of state.tracks) {
+        const idx = track.clips.findIndex(c => c.id === clipId);
+        if (idx >= 0) {
+          const clip = track.clips[idx];
+          const newAnim = { ...defaultAnim, ...(clip.enterExitAnimation || {}), ...animUpdates };
+          return {
+            tracks: state.tracks.map(t => t.id !== track.id ? t : {
+              ...t,
+              clips: t.clips.map(c => c.id !== clipId ? c : { ...c, enterExitAnimation: newAnim })
+            })
+          };
+        }
+      }
+      // Search PIP windows
+      const newPipWindows = { ...state.pipWindows };
+      for (const [pipId, pip] of Object.entries(newPipWindows)) {
+        for (const pTrack of pip.tracks) {
+          const idx = pTrack.clips.findIndex(c => c.id === clipId);
+          if (idx >= 0) {
+            const clip = pTrack.clips[idx];
+            const newAnim = { ...defaultAnim, ...(clip.enterExitAnimation || {}), ...animUpdates };
+            newPipWindows[pipId] = {
+              ...pip,
+              tracks: pip.tracks.map(t => t.id !== pTrack.id ? t : {
+                ...t,
+                clips: t.clips.map(c => c.id !== clipId ? c : { ...c, enterExitAnimation: newAnim })
+              })
+            };
+            return { pipWindows: newPipWindows };
+          }
+        }
+      }
+      return {};
+    });
+    get().saveSnapshot('Update Clip Enter/Exit Animation');
   },
 
   // Keyboard Delete — remove selected PIP window or clip
