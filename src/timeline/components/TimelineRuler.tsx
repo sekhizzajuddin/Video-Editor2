@@ -299,9 +299,150 @@ export const TimelineRuler = React.memo(function TimelineRuler({
           />
         ))}
 
+        {/* Ruler Export Regions */}
+        <RulerExportRegions zoomLevel={zoomLevel} seek={seek} />
+
         {/* Ruler playhead */}
         <RulerPlayhead zoomLevel={zoomLevel} />
       </div>
     </div>
   );
 });
+
+function RulerExportRegions({ zoomLevel, seek }: { zoomLevel: number; seek: (t: number) => void }) {
+  const exportRegions = useEditorStore((s) => s.exportRegions || []);
+  const selectedExportRegionId = useEditorStore((s) => s.selectedExportRegionId);
+  const selectExportRegion = useEditorStore((s) => s.selectExportRegion);
+  const updateExportRegion = useEditorStore((s) => s.updateExportRegion);
+
+  if (!exportRegions.length) return null;
+
+  return (
+    <>
+      {exportRegions.map((region) => {
+        const startX = region.startTime * zoomLevel;
+        const endX = region.endTime * zoomLevel;
+        const width = Math.max(4, endX - startX);
+        const isSelected = selectedExportRegionId === region.id;
+        const color = region.color || '#10b981';
+
+        const handleStartPointerDown = (e: React.PointerEvent) => {
+          e.stopPropagation();
+          selectExportRegion(region.id);
+          const initialX = e.clientX;
+          const initialStart = region.startTime;
+
+          const onPointerMove = (ev: PointerEvent) => {
+            const deltaSec = (ev.clientX - initialX) / zoomLevel;
+            const newStart = Math.max(0, Math.min(region.endTime - 0.2, initialStart + deltaSec));
+            updateExportRegion(region.id, { startTime: newStart });
+          };
+          const onPointerUp = () => {
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+          };
+          window.addEventListener('pointermove', onPointerMove);
+          window.addEventListener('pointerup', onPointerUp);
+        };
+
+        const handleEndPointerDown = (e: React.PointerEvent) => {
+          e.stopPropagation();
+          selectExportRegion(region.id);
+          const initialX = e.clientX;
+          const initialEnd = region.endTime;
+
+          const onPointerMove = (ev: PointerEvent) => {
+            const deltaSec = (ev.clientX - initialX) / zoomLevel;
+            const newEnd = Math.max(region.startTime + 0.2, initialEnd + deltaSec);
+            updateExportRegion(region.id, { endTime: newEnd });
+          };
+          const onPointerUp = () => {
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+          };
+          window.addEventListener('pointermove', onPointerMove);
+          window.addEventListener('pointerup', onPointerUp);
+        };
+
+        const handleBarPointerDown = (e: React.PointerEvent) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          selectExportRegion(region.id);
+          const initialX = e.clientX;
+          const initialStart = region.startTime;
+          const dur = region.endTime - region.startTime;
+
+          const onPointerMove = (ev: PointerEvent) => {
+            const deltaSec = (ev.clientX - initialX) / zoomLevel;
+            const newStart = Math.max(0, initialStart + deltaSec);
+            updateExportRegion(region.id, { startTime: newStart, endTime: newStart + dur });
+          };
+          const onPointerUp = () => {
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+          };
+          window.addEventListener('pointermove', onPointerMove);
+          window.addEventListener('pointerup', onPointerUp);
+        };
+
+        return (
+          <div
+            key={region.id}
+            className="absolute top-0 h-[20px] pointer-events-auto z-20 group"
+            style={{
+              left: `${startX}px`,
+              width: `${width}px`,
+            }}
+          >
+            {/* Top Bar Background */}
+            <div
+              className={`absolute inset-0 rounded-b flex items-center justify-between px-1.5 cursor-grab active:cursor-grabbing transition-all ${
+                isSelected ? 'ring-2 ring-white/90 shadow-md' : 'opacity-85 hover:opacity-100'
+              }`}
+              style={{
+                backgroundColor: color,
+              }}
+              onPointerDown={handleBarPointerDown}
+              onClick={(e) => {
+                e.stopPropagation();
+                selectExportRegion(region.id);
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                seek(region.startTime);
+              }}
+            >
+              <span className="text-[9px] font-bold text-white truncate drop-shadow-sm select-none leading-none">
+                {region.name || 'Export'} ({(region.endTime - region.startTime).toFixed(1)}s)
+              </span>
+            </div>
+
+            {/* Start handle bracket */}
+            <div
+              className="absolute -left-1.5 top-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center pointer-events-auto z-30"
+              onPointerDown={handleStartPointerDown}
+              title={`Drag to adjust start (${region.startTime.toFixed(2)}s)`}
+            >
+              <div
+                className="w-1.5 h-full rounded-l shadow"
+                style={{ backgroundColor: isSelected ? '#ffffff' : color }}
+              />
+            </div>
+
+            {/* End handle bracket */}
+            <div
+              className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center pointer-events-auto z-30"
+              onPointerDown={handleEndPointerDown}
+              title={`Drag to adjust end (${region.endTime.toFixed(2)}s)`}
+            >
+              <div
+                className="w-1.5 h-full rounded-r shadow"
+                style={{ backgroundColor: isSelected ? '#ffffff' : color }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}

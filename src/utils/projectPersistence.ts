@@ -13,7 +13,7 @@
  * so the project can be completely restored after a page refresh.
  */
 
-import { MediaItem, TimelineTrack } from '@/types';
+import { MediaItem, TimelineTrack, ExportRegion } from '@/types';
 import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
 const DB_NAME = 'procut_editor_db';
@@ -31,6 +31,7 @@ export interface ProcutFileFormat {
   subtitles?: any[];
   markers?: any[];
   beatMarkers?: any[];
+  exportRegions?: ExportRegion[];
   pipWindows?: Record<string, any>;
   sequences?: any[];
   mediaLibrary: any[];
@@ -316,6 +317,7 @@ export async function saveProcutFile(fileHandle: FileSystemFileHandle, data: {
   subtitles?: any[];
   markers?: any[];
   beatMarkers?: any[];
+  exportRegions?: ExportRegion[];
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
@@ -341,6 +343,7 @@ export async function saveProcutFile(fileHandle: FileSystemFileHandle, data: {
     subtitles: data.subtitles,
     markers: data.markers,
     beatMarkers: data.beatMarkers,
+    exportRegions: data.exportRegions,
     pipWindows: data.pipWindows,
     sequences: data.sequences,
     mediaLibrary: cleanMediaLibrary,
@@ -372,6 +375,7 @@ export async function saveProjectToDB(data: {
   subtitles?: any[];
   markers?: any[];
   beatMarkers?: any[];
+  exportRegions?: ExportRegion[];
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
@@ -435,6 +439,9 @@ export async function saveProjectToDB(data: {
       }
       if (data.beatMarkers) {
         store.put(data.beatMarkers, 'beatMarkers');
+      }
+      if (data.exportRegions) {
+        store.put(data.exportRegions, 'exportRegions');
       }
       if (data.sequences) {
         store.put(data.sequences, 'sequences');
@@ -542,6 +549,7 @@ export async function loadProjectFromDB(): Promise<{
   subtitles?: any[];
   markers?: any[];
   beatMarkers?: any[];
+  exportRegions?: ExportRegion[];
   currentTime: number;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
@@ -557,7 +565,7 @@ export async function loadProjectFromDB(): Promise<{
       return reject(e);
     }
     const store = transaction.objectStore('project');
-    const keys = ['tracks', 'mediaLibrary', 'currentTime', 'aspectRatio', 'pipWindows', 'folders', 'subtitles', 'markers', 'beatMarkers', 'sequences'];
+    const keys = ['tracks', 'mediaLibrary', 'currentTime', 'aspectRatio', 'pipWindows', 'folders', 'subtitles', 'markers', 'beatMarkers', 'exportRegions', 'sequences'];
     let pending = keys.length;
     let hasError = false;
     const result: any = {};
@@ -585,6 +593,7 @@ export async function loadProjectFromDB(): Promise<{
                 subtitles: result.subtitles || [],
                 markers: result.markers || [],
                 beatMarkers: result.beatMarkers || [],
+                exportRegions: result.exportRegions || [],
                 sequences: result.sequences || []
               });
             }).catch(reject);

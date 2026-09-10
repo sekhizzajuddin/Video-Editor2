@@ -5,9 +5,10 @@ import { pitchShiftBufferRegion } from '@/utils/audio/phaseVocoder';
 export class AudioMixer {
   private sampleRate = 48000;
 
-  async mix(timeline: any, durationSeconds: number): Promise<AudioBuffer | null> {
+  async mix(timeline: any, durationSeconds: number, startAt: number = 0): Promise<AudioBuffer | null> {
     try {
-      const length = Math.ceil(this.sampleRate * durationSeconds);
+      const totalMixSeconds = startAt + durationSeconds;
+      const length = Math.ceil(this.sampleRate * totalMixSeconds);
       
       // Some browsers enforce a minimum length for OfflineAudioContext
       if (length <= 0) return null;
@@ -178,6 +179,24 @@ export class AudioMixer {
 
       // Start rendering the master mix
       const renderedBuffer = await ctx.startRendering();
+
+      if (startAt > 0) {
+        const startSample = Math.min(renderedBuffer.length, Math.round(startAt * this.sampleRate));
+        const endSample = Math.min(renderedBuffer.length, Math.round(totalMixSeconds * this.sampleRate));
+        const newLength = Math.max(1, endSample - startSample);
+        const slicedBuffer = new AudioBuffer({
+          numberOfChannels: renderedBuffer.numberOfChannels,
+          length: newLength,
+          sampleRate: this.sampleRate,
+        });
+        for (let ch = 0; ch < renderedBuffer.numberOfChannels; ch++) {
+          const srcData = renderedBuffer.getChannelData(ch);
+          const dstData = slicedBuffer.getChannelData(ch);
+          dstData.set(srcData.subarray(startSample, endSample));
+        }
+        return slicedBuffer;
+      }
+
       return renderedBuffer;
     } catch (err) {
       console.error('Audio mix failed:', err);

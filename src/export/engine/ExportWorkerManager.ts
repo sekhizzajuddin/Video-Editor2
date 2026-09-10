@@ -90,8 +90,14 @@ export class ExportWorkerManager {
     const transferables: Transferable[] = [];
 
     try {
+      const startAt = typeof this.options.config.startAt === 'number' ? Math.max(0, this.options.config.startAt) : 0;
+      const endAt = typeof this.options.config.endAt === 'number' && this.options.config.endAt > startAt
+        ? this.options.config.endAt
+        : (serializedTimeline.duration || 10);
+      const rangeDuration = Math.max(0.1, endAt - startAt);
+
       const audioMixer = new AudioMixer();
-      const audioBuffer = await audioMixer.mix(serializedTimeline, serializedTimeline.duration);
+      const audioBuffer = await audioMixer.mix(serializedTimeline, rangeDuration, startAt);
       if (audioBuffer && audioBuffer.length > 0) {
         const ch0 = audioBuffer.getChannelData(0);
         const ch1 = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : ch0;

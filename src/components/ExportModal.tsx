@@ -6,12 +6,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { X, Download, AlertCircle, FolderOpen, Film } from 'lucide-react';
+import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
 import { ExportPhase } from '@/export/types';
 import { recommendedVideoBitrate } from '@/export/quality';
+import { formatCentisecondTime } from '@/timeline/timelineUtils';
 
 const RUNTIME_URL = 'http://127.0.0.1:12589';
 
@@ -24,12 +25,15 @@ function generateFilename(projectName: string): string {
 }
 
 export function ExportModal() {
-  const { showExportModal, setShowExportModal, aspectRatio, projectName } = useEditorStore(
+  const { showExportModal, setShowExportModal, aspectRatio, projectName, exportRegions, selectedExportRegionId, totalDuration } = useEditorStore(
     useShallow(s => ({
       showExportModal: s.showExportModal,
       setShowExportModal: s.setShowExportModal,
       aspectRatio: s.aspectRatio,
       projectName: s.projectName,
+      exportRegions: s.exportRegions || [],
+      selectedExportRegionId: s.selectedExportRegionId,
+      totalDuration: s.totalDuration,
     }))
   );
 
@@ -46,8 +50,10 @@ export function ExportModal() {
   const [filename, setFilename] = useState('');
   const [outputFolder, setOutputFolder] = useState(() => localStorage.getItem('exportOutputFolder') || '');
   const [isBrowsing, setIsBrowsing] = useState(false);
+  const [exportScope, setExportScope] = useState<string>('full');
+  const [batchStatus, setBatchStatus] = useState<{ current: number; total: number; name: string } | null>(null);
 
-  // Auto-generate filename when modal opens
+  // Auto-generate filename and default export scope when modal opens
   useEffect(() => {
     if (showExportModal) {
       setSelectedResolution(initialResolution);
@@ -55,8 +61,18 @@ export function ExportModal() {
       // Refresh saved folder
       const savedFolder = localStorage.getItem('exportOutputFolder');
       if (savedFolder) setOutputFolder(savedFolder);
+
+      // Default scope: selected region if any, else first region, else full
+      if (selectedExportRegionId && exportRegions.some(r => r.id === selectedExportRegionId)) {
+        setExportScope(selectedExportRegionId);
+      } else if (exportRegions.length > 0) {
+        setExportScope(exportRegions[0].id);
+      } else {
+        setExportScope('full');
+      }
+      setBatchStatus(null);
     }
-  }, [showExportModal, initialResolution, projectName]);
+  }, [showExportModal, initialResolution, projectName, selectedExportRegionId, exportRegions]);
 
   const { exportState, startExport, cancelExport, downloadFile } = useExportEngine();
 
@@ -77,12 +93,8 @@ export function ExportModal() {
   }, []);
 
   const handleExport = useCallback(async () => {
-    const exportFilename = filename.trim() || generateFilename(projectName);
+    const baseFilename = filename.trim() || generateFilename(projectName);
 
-    // The save dialog's extension/MIME must match what the worker actually
-    // writes, otherwise players that trust the extension show a black screen.
-    // (ProRes can't be encoded in-browser — the worker produces MP4 instead,
-    // so even the picker advertises .mp4 for it.)
     const PICKER_TYPES: Record<string, { description: string; accept: Record<string, string[]>; ext: string }> = {
       mp4:    { description: 'MP4 Video',     accept: { 'video/mp4': ['.mp4'] },        ext: 'mp4' },
       webm:   { description: 'WebM Video',    accept: { 'video/webm': ['.webm'] },      ext: 'webm' },
@@ -92,16 +104,60 @@ export function ExportModal() {
     };
     const pickerCfg = PICKER_TYPES[format] || PICKER_TYPES.mp4;
 
+    // Batch Export All Marked Regions
+    if (exportScope === 'batch' && exportRegions.length > 0) {
+      for (let i = 0; i < exportRegions.length; i++) {
+        const region = exportRegions[i];
+        const clipName = `${baseFilename}_${(region.name || `clip_${i + 1}`).replace(/\s+/g, '_')}`;
+        setBatchStatus({ current: i + 1, total: exportRegions.length, name: region.name || `Region ${i + 1}` });
+
+        let fileHandle: FileSystemFileHandle | null = null;
+        if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && i === 0) {
+          try {
+            fileHandle = await (window as any).showSaveFilePicker({
+              suggestedName: `${clipName}.${pickerCfg.ext}`,
+              types: [pickerCfg],
+            });
+          } catch (err: any) {
+            if (err.name === 'AbortError') return;
+          }
+        }
+
+        await startExport({
+          fps,
+          width: selectedResolution.width,
+          height: selectedResolution.height,
+          bitrate: recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality),
+          quality,
+          format,
+          filename: clipName,
+          outputFolder: outputFolder || '',
+          aspectRatio,
+          startAt: region.startTime,
+          endAt: region.endTime,
+        }, fileHandle);
+      }
+      setBatchStatus(null);
+      return;
+    }
+
+    // Specific Region Export
+    const activeRegion = exportRegions.find(r => r.id === exportScope);
+    const startAt = activeRegion ? activeRegion.startTime : 0;
+    const endAt = activeRegion ? activeRegion.endTime : (totalDuration || 10);
+    const exportFilename = activeRegion
+      ? `${baseFilename}_${(activeRegion.name || 'region').replace(/\s+/g, '_')}`
+      : baseFilename;
+
     let fileHandle: FileSystemFileHandle | null = null;
-    // Standalone browser direct save dialog (OpenReel Video style)
     if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
       try {
         fileHandle = await (window as any).showSaveFilePicker({
           suggestedName: `${exportFilename}.${pickerCfg.ext}`,
-          types: [pickerCfg]
+          types: [pickerCfg],
         });
       } catch (err: any) {
-        if (err.name === 'AbortError') return; // User cancelled save picker
+        if (err.name === 'AbortError') return;
       }
     }
 
@@ -115,8 +171,10 @@ export function ExportModal() {
       filename: exportFilename,
       outputFolder: outputFolder || '',
       aspectRatio,
+      startAt,
+      endAt,
     }, fileHandle);
-  }, [startExport, selectedResolution, format, fps, quality, filename, outputFolder, projectName, aspectRatio]);
+  }, [startExport, selectedResolution, format, fps, quality, filename, outputFolder, projectName, aspectRatio, exportScope, exportRegions, totalDuration]);
 
   if (!showExportModal) return null;
 
@@ -216,6 +274,94 @@ export function ExportModal() {
             </div>
           </div>
 
+          {/* Export Range / Scope Selector */}
+          {exportRegions.length > 0 && (
+            <div className="bg-[#232323] p-2.5 rounded-lg border border-[#3a3a3a]">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  <Bookmark className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Export Scope</span>
+                </label>
+                <span className="text-[10px] text-emerald-400 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  {exportRegions.length} Mark{exportRegions.length > 1 ? 's' : ''} Set
+                </span>
+              </div>
+
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
+                {/* Full Timeline Option */}
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => setExportScope('full')}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-xs border transition-all text-left ${
+                    exportScope === 'full'
+                      ? 'bg-blue-600/20 border-blue-500 text-white font-medium shadow-sm ring-1 ring-blue-500/40'
+                      : 'bg-[#2a2a2a] border-[#383838] text-[#a0a0a0] hover:text-white hover:border-[#555]'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <Film className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <span className="truncate">Full Timeline</span>
+                  </span>
+                  <span className="font-mono text-[10px] text-[#888] shrink-0 ml-2">
+                    {formatTime(totalDuration || 0)}
+                  </span>
+                </button>
+
+                {/* Individual Export Regions */}
+                {exportRegions.map((region, idx) => (
+                  <button
+                    key={region.id}
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => setExportScope(region.id)}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-xs border transition-all text-left ${
+                      exportScope === region.id
+                        ? 'bg-emerald-600/20 border-emerald-500 text-white font-medium shadow-sm ring-1 ring-emerald-500/40'
+                        : 'bg-[#2a2a2a] border-[#383838] text-[#a0a0a0] hover:text-white hover:border-[#555]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0 shadow-sm"
+                        style={{ backgroundColor: region.color || '#10b981' }}
+                      />
+                      <span className="truncate">{region.name || `Mark ${idx + 1}`}</span>
+                      <span className="text-[10px] text-[#777] font-mono shrink-0">
+                        ({formatCentisecondTime(region.startTime)} - {formatCentisecondTime(region.endTime)})
+                      </span>
+                    </span>
+                    <span className="font-mono text-[10px] text-emerald-400 font-semibold shrink-0 ml-2">
+                      {formatTime(region.endTime - region.startTime)}
+                    </span>
+                  </button>
+                ))}
+
+                {/* Batch Export All Option (if > 1 mark) */}
+                {exportRegions.length > 1 && (
+                  <button
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => setExportScope('batch')}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-xs border transition-all text-left ${
+                      exportScope === 'batch'
+                        ? 'bg-amber-600/20 border-amber-500 text-white font-semibold shadow-sm ring-1 ring-amber-500/40'
+                        : 'bg-[#2a2a2a] border-[#383838] text-[#a0a0a0] hover:text-white hover:border-[#555]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="text-amber-300">Batch Export All ({exportRegions.length} Clips)</span>
+                    </span>
+                    <span className="text-[10px] text-amber-400/80 font-mono shrink-0 ml-2">
+                      Multiple files
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Resolution Selector */}
           <div>
             <label className="text-xs text-[#a0a0a0] block mb-1.5">Resolution</label>
@@ -309,6 +455,15 @@ export function ExportModal() {
           {/* Progress Display */}
           {isWorking && (
             <div className="bg-[#252525] rounded p-4 border border-[#3e3e3e] space-y-3">
+              {batchStatus && (
+                <div className="flex items-center justify-between px-2.5 py-1 bg-amber-500/10 border border-amber-500/25 rounded text-amber-300 text-[11px] font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3" />
+                    <span>Batch Exporting: Clip {batchStatus.current} of {batchStatus.total}</span>
+                  </span>
+                  <span className="text-[10px] text-amber-400 font-mono">({batchStatus.name})</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium text-amber-400">{getPhaseLabel(exportState.phase)}</span>
                 <span className="text-xs font-bold text-white">{exportState.progress.toFixed(1)}%</span>

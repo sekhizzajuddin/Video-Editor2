@@ -544,7 +544,16 @@ export function PreviewCanvasContainer() {
             if (end > maxEndSequence) maxEndSequence = end;
           }
 
-          if (selectedIds.length > 0) {
+          const selectedRegionId = state.selectedExportRegionId;
+          const selectedRegion = selectedRegionId ? (state.exportRegions || []).find((r) => r.id === selectedRegionId) : null;
+
+          if (selectedRegion) {
+            const rStart = selectedRegion.startTime;
+            const rEnd = selectedRegion.endTime;
+            if (newTime >= rEnd || newTime < rStart) {
+              newTime = dir >= 0 ? rStart : rEnd;
+            }
+          } else if (selectedIds.length > 0) {
             const selectedClips = allClips.filter((c) => selectedIds.includes(c.id));
             if (selectedClips.length > 0) {
               let minStart = Infinity;

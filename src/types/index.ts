@@ -787,6 +787,15 @@ export interface BeatMarker {
   time: number;
 }
 
+// ─── Export Region (Specific Timeline Range Mark) ──────────────────────────
+export interface ExportRegion {
+  id: string;
+  name: string;
+  startTime: number;
+  endTime: number;
+  color?: string;
+}
+
 // ─── Project Template ─────────────────────────────────────────────────────
 export interface ProjectTemplate {
   id: string;
@@ -825,6 +834,7 @@ export interface EditorSnapshot {
   subtitles?: SubtitleItem[];
   markers?: TimelineMarker[];
   beatMarkers?: BeatMarker[];
+  exportRegions?: ExportRegion[];
 }
 
 // ─── Editor Tool / Tab ────────────────────────────────────────────────────
@@ -932,9 +942,11 @@ export interface EditorState {
   inPoint: number | null;
   outPoint: number | null;
 
-  // Markers
+  // Markers & Regions
   markers: TimelineMarker[];
   beatMarkers: BeatMarker[];
+  exportRegions: ExportRegion[];
+  selectedExportRegionId: string | null;
 
   // Templates
   projectTemplates: ProjectTemplate[];

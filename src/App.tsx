@@ -236,7 +236,9 @@ function DesktopApp() {
           break;
         case 'delete_selected': {
           const storeState = useEditorStore.getState();
-          if (storeState.selectedKeyframeLines.length > 0) {
+          if (storeState.selectedExportRegionId) {
+            storeState.removeExportRegion(storeState.selectedExportRegionId);
+          } else if (storeState.selectedKeyframeLines.length > 0) {
             removeSelectedKeyframeLines();
           } else if (storeState.selectedClipIds.length > 0) {
             removeClip(storeState.selectedClipIds[0]);

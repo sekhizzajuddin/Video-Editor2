@@ -10,6 +10,8 @@ export interface ExportWorkerConfig {
   aspectRatio: string;
   outputFolder?: string;
   quality?: 'low' | 'medium' | 'high' | 'ultra';
+  startAt?: number;
+  endAt?: number;
 }
 
 export interface AudioExportPayload {
@@ -411,16 +413,21 @@ async function handleExport(
     compositor = new Compositor(canvas, config.aspectRatio);
 
     // Calculate duration reliably
-    let duration = timeline.duration || timeline.totalDuration || 0;
-    if (!duration && timeline.tracks) {
-      for (const track of timeline.tracks) {
-        for (const clip of track.clips || []) {
-          const end = (clip.startTime || 0) + (clip.duration || 0);
-          if (end > duration) duration = end;
+    const startAt = typeof config.startAt === 'number' && config.startAt >= 0 ? config.startAt : 0;
+    let endAt = typeof config.endAt === 'number' && config.endAt > startAt ? config.endAt : 0;
+    if (!endAt) {
+      let fullDuration = timeline.duration || timeline.totalDuration || 0;
+      if (!fullDuration && timeline.tracks) {
+        for (const track of timeline.tracks) {
+          for (const clip of track.clips || []) {
+            const end = (clip.startTime || 0) + (clip.duration || 0);
+            if (end > fullDuration) fullDuration = end;
+          }
         }
       }
+      endAt = Math.max(startAt + 0.1, fullDuration);
     }
-    duration = Math.max(0.1, duration);
+    const duration = Math.max(0.1, endAt - startAt);
     const totalFrames = Math.max(1, Math.ceil(duration * config.fps));
 
     // Audio status & configuration check (codec depends on container)
@@ -653,7 +660,7 @@ async function handleExport(
         throw new Error(videoEncoderError);
       }
       
-      const timestampSeconds = i / config.fps;
+      const timestampSeconds = startAt + (i / config.fps);
       // getFramePlanAtTime also resolves clip-to-clip transitions (layer blend +
       // any full-frame overlay) using the same engine the preview uses, so the
       // exported file matches what the user saw.

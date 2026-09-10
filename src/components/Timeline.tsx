@@ -35,6 +35,7 @@ import {
   PipFloatingWindow,
   DEFAULT_TRACK_HEIGHT,
   ArrangeModeOverlay,
+  ExportRegionOverlay,
 } from '@/timeline';
 
 
@@ -502,6 +503,9 @@ export function Timeline() {
                     style={{ left: `${snapLine}px` }}
                   />
                 )}
+
+                {/* Export Regions Overlay */}
+                <ExportRegionOverlay zoomLevel={zoomLevel} />
 
                 {/* Workspace playhead needle */}
                 <WorkspacePlayhead zoomLevel={zoomLevel} />

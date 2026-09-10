@@ -47,10 +47,10 @@ const debouncedSaveProject = (state: any) => {
   if (saveTimeoutId) {
     clearTimeout(saveTimeoutId);
   }
-  const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences, projectFileHandle } = state;
+  const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences, projectFileHandle } = state;
   const hasAnyMedia = mediaLibrary && mediaLibrary.length > 0;
   const hasAnyClips = tracks && tracks.some((t: any) => t.clips && t.clips.length > 0);
-  const hasAnyExtras = (subtitles && subtitles.length > 0) || (markers && markers.length > 0) || (beatMarkers && beatMarkers.length > 0) || (pipWindows && Object.keys(pipWindows).length > 0);
+  const hasAnyExtras = (subtitles && subtitles.length > 0) || (markers && markers.length > 0) || (beatMarkers && beatMarkers.length > 0) || (exportRegions && exportRegions.length > 0) || (pipWindows && Object.keys(pipWindows).length > 0);
   
   if (!hasAnyMedia && !hasAnyClips && !hasAnyExtras && projectId === 'default') {
     return; // Skip auto-saving empty default projects on startup
@@ -60,7 +60,7 @@ const debouncedSaveProject = (state: any) => {
   saveTimeoutId = setTimeout(async () => {
     // Always save to IndexedDB as a fallback backup
     try {
-      await saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows, sequences } as any);
+      await saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, pipWindows, sequences } as any);
       if (projectId !== 'default') {
         await saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() });
       }
@@ -348,6 +348,13 @@ interface EditorActions {
   updateMarker: (id: string, updates: Partial<import('@/types').TimelineMarker>) => void;
   removeMarker: (id: string) => void;
 
+  // Export Regions (Specific Range Marking)
+  addExportRegion: (startTime?: number, endTime?: number, name?: string, color?: string) => string;
+  updateExportRegion: (id: string, updates: Partial<import('@/types').ExportRegion>) => void;
+  removeExportRegion: (id: string) => void;
+  selectExportRegion: (id: string | null) => void;
+  clearExportRegions: () => void;
+
   // Beat Markers
   addBeatMarkers: (clipId: string, times: number[]) => void;
   clearBeatMarkers: (clipId: string) => void;
@@ -424,6 +431,8 @@ const initialState: EditorState = {
   outPoint: null,
   markers: [],
   beatMarkers: [],
+  exportRegions: [],
+  selectedExportRegionId: null,
   projectTemplates: [],
   aspectRatio: '16:9',
   zoomLevel: 80,
@@ -3216,11 +3225,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Playback
   play: () => {
-    const { tracks, selectedClipIds, currentTime } = get();
+    const { tracks, selectedClipIds, exportRegions, selectedExportRegionId, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0) return;
 
-    if (selectedClipIds.length > 0) {
+    if (selectedExportRegionId) {
+      const activeRegion = (exportRegions || []).find((r) => r.id === selectedExportRegionId);
+      if (activeRegion) {
+        if (currentTime < activeRegion.startTime || currentTime >= activeRegion.endTime) {
+          set({ currentTime: activeRegion.startTime });
+        }
+      }
+    } else if (selectedClipIds.length > 0) {
       const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
       if (selectedClips.length > 0) {
         let minStart = Infinity;
@@ -3243,11 +3259,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // moment playback stops and the media elements re-seek to that stale position.
   pause: () => set({ isPlaying: false, playbackDirection: 0, currentTime: getPlaybackTime() }),
   togglePlayback: () => {
-    const { tracks, isPlaying, selectedClipIds, currentTime } = get();
+    const { tracks, isPlaying, selectedClipIds, exportRegions, selectedExportRegionId, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0 && !isPlaying) return;
 
-    if (!isPlaying && selectedClipIds.length > 0) {
+    if (!isPlaying && selectedExportRegionId) {
+      const activeRegion = (exportRegions || []).find((r) => r.id === selectedExportRegionId);
+      if (activeRegion) {
+        if (currentTime < activeRegion.startTime || currentTime >= activeRegion.endTime) {
+          set({ currentTime: activeRegion.startTime });
+        }
+      }
+    } else if (!isPlaying && selectedClipIds.length > 0) {
       const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
       if (selectedClips.length > 0) {
         let minStart = Infinity;
@@ -3933,6 +3956,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         subtitles: structuredClone(state.subtitles || []),
         markers: structuredClone(state.markers || []),
         beatMarkers: structuredClone(state.beatMarkers || []),
+        exportRegions: structuredClone(state.exportRegions || []),
         label: label || defaultLabel,
       };
 
@@ -3940,8 +3964,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       // Single stringify comparison instead of 10 separate calls
       if (state.historyIndex >= 0 && state.history[state.historyIndex]) {
         const lastSnap = state.history[state.historyIndex];
-        const lastKey = JSON.stringify([lastSnap.tracks, lastSnap.pipWindows, lastSnap.subtitles, lastSnap.markers, lastSnap.beatMarkers]);
-        const newKey = JSON.stringify([snapshot.tracks, snapshot.pipWindows, snapshot.subtitles, snapshot.markers, snapshot.beatMarkers]);
+        const lastKey = JSON.stringify([lastSnap.tracks, lastSnap.pipWindows, lastSnap.subtitles, lastSnap.markers, lastSnap.beatMarkers, lastSnap.exportRegions]);
+        const newKey = JSON.stringify([snapshot.tracks, snapshot.pipWindows, snapshot.subtitles, snapshot.markers, snapshot.beatMarkers, snapshot.exportRegions]);
         if (lastKey === newKey) {
           // Nothing meaningful changed, don't create history entry
           return {};
@@ -3978,6 +4002,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         subtitles: structuredClone(snap.subtitles || []),
         markers: structuredClone(snap.markers || []),
         beatMarkers: structuredClone(snap.beatMarkers || []),
+        exportRegions: structuredClone(snap.exportRegions || []),
         historyIndex: state.historyIndex - 1,
       };
     });
@@ -3994,6 +4019,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         subtitles: structuredClone(snap.subtitles || []),
         markers: structuredClone(snap.markers || []),
         beatMarkers: structuredClone(snap.beatMarkers || []),
+        exportRegions: structuredClone(snap.exportRegions || []),
         historyIndex: state.historyIndex + 1,
       };
     });
@@ -4010,6 +4036,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         subtitles: structuredClone(snap.subtitles || []),
         markers: structuredClone(snap.markers || []),
         beatMarkers: structuredClone(snap.beatMarkers || []),
+        exportRegions: structuredClone(snap.exportRegions || []),
         historyIndex: index,
         selectedClipId: null,
         selectedClipIds: [],
@@ -4094,6 +4121,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const subtitles = (data as any).subtitles || [];
       const markers = (data as any).markers || [];
       const beatMarkers = (data as any).beatMarkers || [];
+      const exportRegions = (data as any).exportRegions || [];
       set({
         tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
@@ -4101,6 +4129,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         subtitles,
         markers,
         beatMarkers,
+        exportRegions,
+        selectedExportRegionId: null,
         currentTime: data.currentTime,
         aspectRatio: data.aspectRatio || '16:9',
         pipWindows: loadedPipWindows,
@@ -4113,6 +4143,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             subtitles: JSON.parse(JSON.stringify(subtitles)),
             markers: JSON.parse(JSON.stringify(markers)),
             beatMarkers: JSON.parse(JSON.stringify(beatMarkers)),
+            exportRegions: JSON.parse(JSON.stringify(exportRegions)),
           }
         ],
         historyIndex: 0
@@ -4817,10 +4848,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Update Clip Enter/Exit Animation');
   },
 
-  // Keyboard Delete — remove selected PIP window or clip
+  // Keyboard Delete — remove selected export region, PIP window or clip
   removeSelected: () => {
     const state = get();
-    if (state.activePipWindowId) {
+    if (state.selectedExportRegionId) {
+      state.removeExportRegion(state.selectedExportRegionId);
+    } else if (state.activePipWindowId) {
       state.deletePipWindow(state.activePipWindowId);
     } else if (state.selectedClipIds.length > 1) {
       // FIX C12: Check multi-select BEFORE single clip so all selected clips are deleted
@@ -4829,6 +4862,75 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     } else if (state.selectedClipId) {
       state.removeClip(state.selectedClipId);
     }
+  },
+
+  // Export Regions (Specific Range Marking)
+  addExportRegion: (startTime, endTime, name, color) => {
+    const state = get();
+    const id = generateId();
+    const curTime = state.currentTime || 0;
+    const dur = state.totalDuration || 60;
+    
+    // Default region start/end: prefer In/Out points if set, otherwise current playhead to +10s
+    let start = startTime !== undefined ? startTime : (state.inPoint !== null ? state.inPoint : curTime);
+    let end = endTime !== undefined ? endTime : (state.outPoint !== null ? state.outPoint : Math.min(dur, start + 10));
+    if (end <= start) {
+      end = Math.min(dur, start + 10);
+      if (end <= start) end = start + 5;
+    }
+    
+    const count = state.exportRegions.length + 1;
+    const regionName = name || `Export Region ${count}`;
+    
+    const REGION_COLORS = ['#10b981', '#06b6d4', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6'];
+    const regionColor = color || REGION_COLORS[(count - 1) % REGION_COLORS.length];
+    
+    const newRegion: import('@/types').ExportRegion = {
+      id,
+      name: regionName,
+      startTime: Math.max(0, start),
+      endTime: Math.max(start + 0.1, end),
+      color: regionColor,
+    };
+    
+    set((s) => ({
+      exportRegions: [...s.exportRegions, newRegion],
+      selectedExportRegionId: id,
+    }));
+    
+    get().saveSnapshot('Add Export Region');
+    return id;
+  },
+
+  updateExportRegion: (id, updates) => {
+    set((state) => ({
+      exportRegions: state.exportRegions.map((r) => {
+        if (r.id !== id) return r;
+        const updated = { ...r, ...updates };
+        if (updated.endTime <= updated.startTime) {
+          updated.endTime = updated.startTime + 0.1;
+        }
+        return updated;
+      }),
+    }));
+    get().saveSnapshot('Update Export Region');
+  },
+
+  removeExportRegion: (id) => {
+    set((state) => ({
+      exportRegions: state.exportRegions.filter((r) => r.id !== id),
+      selectedExportRegionId: state.selectedExportRegionId === id ? null : state.selectedExportRegionId,
+    }));
+    get().saveSnapshot('Remove Export Region');
+  },
+
+  selectExportRegion: (id) => {
+    set({ selectedExportRegionId: id });
+  },
+
+  clearExportRegions: () => {
+    set({ exportRegions: [], selectedExportRegionId: null });
+    get().saveSnapshot('Clear Export Regions');
   },
 
   // Beat Markers
@@ -5144,9 +5246,9 @@ if (typeof window !== 'undefined') {
     if (state.hasUnsavedChanges || saveTimeoutId) {
       if (saveTimeoutId) {
         clearTimeout(saveTimeoutId);
-        const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, projectName, pipWindows } = state;
+        const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, projectName, pipWindows } = state;
         // Immediate save on close
-        saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, currentTime, aspectRatio, projectId, pipWindows } as any).catch(console.error);
+        saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, pipWindows } as any).catch(console.error);
         if (projectId !== 'default') {
           saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() }).catch(console.error);
         }

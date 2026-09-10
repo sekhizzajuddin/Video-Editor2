@@ -51,3 +51,4 @@ export * from './components/TimelineToolbar';
 export * from './components/PlayheadComponents';
 export * from './components/PipFloatingWindow';
 export * from './components/ArrangeModeOverlay';
+export * from './components/ExportRegionOverlay';
