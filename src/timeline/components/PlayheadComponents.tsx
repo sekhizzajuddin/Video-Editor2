@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useEditorStore } from '@/store/editorStore';
-import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
+import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, subscribeTrimPreviewTime } from '@/utils/playbackClock';
 import { formatDetailedTooltipTime } from '../timelineUtils';
 import { RULER_HEIGHT } from '../timelineConstants';
 
@@ -173,4 +173,60 @@ export function PlaybackAutoScroller({
   }, [zoomLevel, totalDuration, trackContainerRef]);
 
   return null;
+}
+
+/**
+ * TrimPlayhead — amber secondary playhead that appears during trim/resize
+ * operations. Shows the user which frame is being previewed in the canvas
+ * while the primary red playhead stays at its original position.
+ */
+export function TrimPlayhead({ zoomLevel }: { zoomLevel: number }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const paint = (t: number) => {
+      if (containerRef.current) {
+        containerRef.current.style.left = `${t * zoomLevel}px`;
+        containerRef.current.style.display = 'block';
+      }
+    };
+
+    const hide = () => {
+      if (containerRef.current) {
+        containerRef.current.style.display = 'none';
+      }
+    };
+
+    // Show immediately if trimPreviewTime is already set
+    const initial = getTrimPreviewTime();
+    if (initial !== null) {
+      paint(initial);
+    } else {
+      hide();
+    }
+
+    const unsubTrim = subscribeTrimPreviewTime(paint);
+
+    // Also listen for store changes to detect when trimming ends
+    // (trimPreviewTime cleared via setTrimPreviewTime(null))
+    const checkInterval = setInterval(() => {
+      if (getTrimPreviewTime() === null) hide();
+    }, 100);
+
+    return () => {
+      unsubTrim();
+      clearInterval(checkInterval);
+    };
+  }, [zoomLevel]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute top-0 bottom-0 z-30 pointer-events-none"
+      style={{ display: 'none' }}
+    >
+      <div className="w-px h-full bg-amber-400" />
+      <div className="absolute top-0 -translate-x-1/2 w-3 h-3 bg-amber-400 rounded-full -translate-y-px" />
+    </div>
+  );
 }

@@ -68,3 +68,41 @@ export function subscribePlaybackTime(listener: ClockListener): () => void {
     listeners.delete(listener);
   };
 }
+
+// ── Trim Preview Time ─────────────────────────────────────────────────────
+// During resize/trim, this holds the edge time for canvas preview rendering.
+// The primary playhead (currentTime) stays at its original position.
+let trimPreviewTime: number | null = null;
+const trimListeners = new Set<ClockListener>();
+
+/** Get the trim preview time, or null if not trimming. */
+export function getTrimPreviewTime(): number | null {
+  return trimPreviewTime;
+}
+
+/**
+ * Set the trim preview time. Pass null to clear (trim finished).
+ * When set, getEffectivePreviewTime() returns this instead of currentTime.
+ */
+export function setTrimPreviewTime(time: number | null): void {
+  trimPreviewTime = time;
+  if (time !== null) {
+    for (const l of trimListeners) {
+      try { l(time); } catch { /* safety */ }
+    }
+  }
+}
+
+/** Subscribe to trim preview time changes. Returns unsubscribe function. */
+export function subscribeTrimPreviewTime(listener: ClockListener): () => void {
+  trimListeners.add(listener);
+  return () => { trimListeners.delete(listener); };
+}
+
+/**
+ * Returns the time the canvas/media should use for rendering:
+ * trimPreviewTime if active, otherwise the normal playback time.
+ */
+export function getEffectivePreviewTime(): number {
+  return trimPreviewTime !== null ? trimPreviewTime : currentTime;
+}

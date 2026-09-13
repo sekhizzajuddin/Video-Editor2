@@ -30,6 +30,7 @@ import {
   TimelineModals,
   FloatingScrubTooltip,
   WorkspacePlayhead,
+  TrimPlayhead,
   PlaybackAutoScroller,
   CLIP_COLORS,
   PipFloatingWindow,
@@ -509,6 +510,8 @@ export function Timeline() {
 
                 {/* Workspace playhead needle */}
                 <WorkspacePlayhead zoomLevel={zoomLevel} />
+                {/* Amber trim preview playhead — visible only during trim/resize */}
+                <TrimPlayhead zoomLevel={zoomLevel} />
               </div>
             </div>
           </div>

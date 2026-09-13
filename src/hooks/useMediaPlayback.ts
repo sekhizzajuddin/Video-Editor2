@@ -30,7 +30,7 @@ import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone'
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
-import { getPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
+import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains, getTransitionWindow } from '@/utils/transitionEngine';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
@@ -1115,6 +1115,43 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
     }
 
+    // ── NON-CONTIGUOUS SPLIT GROUP DETECTION ──────────────────────────
+    // Split segments sharing a <video> element must be time-contiguous.
+    // If the user deleted the middle segment, the remaining clips have a
+    // gap between them — sharing one element forces the browser to seek
+    // back and forth between distant media positions on every playback
+    // tick, causing severe decode stutter.  Detect this and fall back to
+    // per-clip elements for non-contiguous groups.
+    {
+      const splitGroups = new Map<string, { clipId: string; start: number; end: number }[]>();
+      for (const [clipId, info] of neededClips) {
+        if (!info.shareKey.includes('::clip:')) {
+          // This is a split-group shared key
+          let group = splitGroups.get(info.shareKey);
+          if (!group) { group = []; splitGroups.set(info.shareKey, group); }
+          group.push({ clipId, start: info.start, end: info.end });
+        }
+      }
+      for (const [shareKey, members] of splitGroups) {
+        if (members.length < 2) continue;
+        members.sort((a, b) => a.start - b.start);
+        let hasGap = false;
+        for (let i = 1; i < members.length; i++) {
+          if (members[i].start - members[i - 1].end > 0.1) {
+            hasGap = true;
+            break;
+          }
+        }
+        if (hasGap) {
+          // Reassign each clip in this group to its own dedicated element
+          for (const m of members) {
+            const info = neededClips.get(m.clipId)!;
+            info.shareKey = `${info.mediaId}::clip:${m.clipId}`;
+          }
+        }
+      }
+    }
+
     const pool = poolRef.current;
     const videoMap = videoMapRef.current;
 
@@ -1614,6 +1651,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         for (const [, entry] of pool) {
           if (!entry.el.paused) entry.el.pause();
         }
+        // During trim, use trimPreviewTime (amber playhead position) instead
+        // of the primary playhead time so the canvas shows the trim edge frame.
+        const scrubTime = getTrimPreviewTime() ?? ct;
         for (const clip of clips) {
           const entry = pool.get(clip.clipId);
           if (!entry || entry.type !== 'video') continue;
@@ -1628,7 +1668,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             speedRamp: clip.speedRamp,
             isReversed: clip.isReversed,
             freezeFrame: clip.freezeFrame,
-          }, ct)));
+          }, scrubTime)));
           const el = entry.el;
           // Don't fight an in-flight seek — the element's 'seeked' listener
           // triggers a canvas repaint the moment the new frame decodes.

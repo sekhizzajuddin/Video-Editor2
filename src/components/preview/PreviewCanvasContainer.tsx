@@ -38,7 +38,7 @@ import {
   PreviewCanvasTransportControls,
 } from './PreviewCanvasToolbar';
 import { setOnMaskReadyCallback } from '@/utils/aiBackground';
-import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime } from '@/utils/playbackClock';
+import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, subscribeTrimPreviewTime } from '@/utils/playbackClock';
 import { getOverlayMapping } from './previewMath';
 import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
@@ -427,9 +427,17 @@ export function PreviewCanvasContainer() {
       framePendingRef.current = true;
     });
 
+    // Subscribe to trim preview time changes — when trimming, the canvas
+    // needs to render the frame at the trim edge, not the primary playhead.
+    const unsubTrimPreview = subscribeTrimPreviewTime((t) => {
+      currentTimeRef.current = t;
+      framePendingRef.current = true;
+    });
+
     return () => {
       unsubStore();
       unsubClock();
+      unsubTrimPreview();
     };
   }, []);
 
@@ -492,7 +500,9 @@ export function PreviewCanvasContainer() {
       const state = useEditorStore.getState();
       // While paused, the clock and the store agree exactly (seek/pause both flush
       // it), so this is the authoritative position in every state.
-      const actualTime = getPlaybackTime();
+      // During trimming, use the trim preview time for canvas rendering.
+      const trimTime = getTrimPreviewTime();
+      const actualTime = trimTime !== null ? trimTime : getPlaybackTime();
 
       if (state.isPlaying) {
         // RULER-CLICK / SEEK DURING PLAYBACK: if something wrote a NEW position

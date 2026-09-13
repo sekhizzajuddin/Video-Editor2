@@ -270,14 +270,14 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       {showTrimHandles && !trackLocked && (
         <>
           <div 
-            className="absolute left-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
+            className="absolute left-0 top-0 bottom-0 w-[12px] bg-amber-500/40 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center" 
             data-edge="left"
             onPointerDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
           >
             <div className="w-[2px] h-4 bg-white rounded-full shadow pointer-events-none" />
           </div>
           <div 
-            className="absolute right-0 top-0 bottom-0 w-[8px] bg-amber-500/0 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" 
+            className="absolute right-0 top-0 bottom-0 w-[12px] bg-amber-500/40 hover:bg-amber-500/80 cursor-ew-resize z-50 flex items-center justify-center" 
             data-edge="right"
             onPointerDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip); }}
           >

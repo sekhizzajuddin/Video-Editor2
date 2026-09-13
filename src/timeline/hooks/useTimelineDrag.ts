@@ -3,6 +3,7 @@ import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorSt
 import { useShallow } from 'zustand/react/shallow';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
 import { getRampedTrimEndForRightResize, getRampedTrimStartForLeftResize, getSpeedRampEngine } from '@/utils/speedRamp';
+import { setTrimPreviewTime } from '@/utils/playbackClock';
 import { getTrackHeight, getTrackTop, getTrackAtY } from '../trackGeometry';
 
 import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT, OVER_LAYER_ROW_HEIGHT, SNAP_THRESHOLD_PX } from '../timelineConstants';
@@ -1310,13 +1311,15 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           }
         }
 
-        // Live preview of trimmed edge
+        // Live preview of trimmed edge — use trimPreviewTime so the primary
+        // playhead stays at its original position while the canvas renders the
+        // trim edge frame via an amber secondary playhead.
         const store = useEditorStore.getState();
         const updatedClip = findClipDeep(store, resizeState.clipId)?.clip;
         if (updatedClip) {
             // Subtract 0.04 (approx 1 frame at 25fps) from the right edge to ensure we preview the last visible frame of the clip
             const edgeTime = resizeState.edge === 'left' ? updatedClip.startTime : updatedClip.startTime + updatedClip.duration - 0.04;
-            store.seek(Math.max(0, edgeTime));
+            setTrimPreviewTime(Math.max(0, edgeTime));
             window.dispatchEvent(new Event('procut-frame-updated'));
         }
       });
@@ -1502,9 +1505,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       endTransactionSafe();
     }
     if (resizeState) {
-      if (resizeState.originalCurrentTime !== undefined) {
-        useEditorStore.getState().seek(resizeState.originalCurrentTime);
-      }
+      // Clear the secondary trim playhead — the primary playhead never moved
+      setTrimPreviewTime(null);
       useEditorStore.getState().resolveOverlaps([resizeState.clipId]);
       setSnapLine(null);
       setResizeState(null);
