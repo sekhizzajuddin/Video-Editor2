@@ -30,7 +30,7 @@ import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone'
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
-import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime } from '@/utils/playbackClock';
+import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains, getTransitionWindow } from '@/utils/transitionEngine';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
@@ -909,10 +909,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
       lastTime = t;
     });
+    const unsubTrim = subscribeTrimPreviewTime(() => {
+      setSeekRevision((r) => r + 1);
+    });
     const onFrameUpdate = () => setSeekRevision((r) => r + 1);
     window.addEventListener('procut-frame-updated', onFrameUpdate);
     return () => {
       unsub();
+      unsubTrim();
       window.removeEventListener('procut-frame-updated', onFrameUpdate);
     };
   }, []);
@@ -986,7 +990,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const getActiveClips = useCallback((): ActiveClipInfo[] => {
     // Exact playhead — this decides clip activation/deactivation, so a stale value
     // here delays hard-seeks at clip boundaries and shows the wrong frame.
-    const ct = getPlaybackTime();
+    // When trimming, use the trim preview position to evaluate active clips.
+    const ct = getEffectivePreviewTime();
     const result: ActiveClipInfo[] = [];
     const added = new Set<string>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
@@ -1064,6 +1069,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   useEffect(() => {
     if (!isPrimary) return;
     const ct = getPlaybackTime();
+    const trimCt = getTrimPreviewTime();
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio'; shareKey: string; start: number; end: number }>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
 
@@ -1073,7 +1079,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const media = mediaMapRef.current.get(clip.mediaId);
         if (media && media.url && (media.type === 'video' || media.type === 'audio')) {
           const prox = media.type === 'video' ? VIDEO_PROXIMITY_WINDOW : AUDIO_PROXIMITY_WINDOW;
-          if (ct >= clip.startTime - prox && ct < clip.startTime + clip.duration + prox) {
+          const isNearPrimary = ct >= clip.startTime - prox && ct < clip.startTime + clip.duration + prox;
+          const isNearTrim = trimCt !== null && trimCt >= clip.startTime - prox && trimCt < clip.startTime + clip.duration + prox;
+          if (isNearPrimary || isNearTrim) {
             neededClips.set(clip.id, {
               mediaId: clip.mediaId,
               type: media.type,
@@ -1097,7 +1105,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               if (pipMedia && pipMedia.url && (pipMedia.type === 'video' || pipMedia.type === 'audio')) {
                 const absStart = clip.startTime + pip.relativeStartTime + pipClip.startTime;
                 const prox = pipMedia.type === 'video' ? VIDEO_PROXIMITY_WINDOW : AUDIO_PROXIMITY_WINDOW;
-                if (ct >= absStart - prox && ct < absStart + pipClip.duration + prox) {
+                const isNearPrimaryPip = ct >= absStart - prox && ct < absStart + pipClip.duration + prox;
+                const isNearTrimPip = trimCt !== null && trimCt >= absStart - prox && trimCt < absStart + pipClip.duration + prox;
+                if (isNearPrimaryPip || isNearTrimPip) {
                   neededClips.set(pipClip.id, {
                     mediaId: pipClip.mediaId,
                     type: pipMedia.type,
@@ -1573,7 +1583,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // did not exist, modulating playbackRate and, past the hard-seek threshold,
       // issuing spurious seeks that flush the decode pipeline. The clock is updated
       // every animation frame with the exact position, so drift is now real.
-      const ct = getPlaybackTime();
+      // During trim preview, getEffectivePreviewTime() returns the trim edge position.
+      const ct = getEffectivePreviewTime();
       const playing = store.isPlaying;
       const scrubbing = store.isScrubbing;
       const globalSpeed = store.playbackSpeed;
@@ -1651,9 +1662,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         for (const [, entry] of pool) {
           if (!entry.el.paused) entry.el.pause();
         }
-        // During trim, use trimPreviewTime (amber playhead position) instead
-        // of the primary playhead time so the canvas shows the trim edge frame.
-        const scrubTime = getTrimPreviewTime() ?? ct;
+        // During trim, ct is already getEffectivePreviewTime() (amber playhead position)
+        const scrubTime = ct;
         for (const clip of clips) {
           const entry = pool.get(clip.clipId);
           if (!entry || entry.type !== 'video') continue;
@@ -1674,6 +1684,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // triggers a canvas repaint the moment the new frame decodes.
           if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.03) {
             el.currentTime = mediaTime;
+          } else if (el.seeking) {
+            pendingSeeksRef.current.set(clip.clipId, mediaTime);
           }
         }
         lastActiveClipIdsRef.current = playingIds;

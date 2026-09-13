@@ -421,6 +421,8 @@ export function PreviewCanvasContainer() {
     // waiting for the store's React notification.
     const unsubClock = subscribePlaybackTime((t) => {
       if (useEditorStore.getState().isPlaying) return;
+      // Do not overwrite currentTimeRef while trimming is actively previewing
+      if (getTrimPreviewTime() !== null) return;
       if (Math.abs(t - lastTime) <= 0.001) return;
       lastTime = t;
       currentTimeRef.current = t;
@@ -430,7 +432,11 @@ export function PreviewCanvasContainer() {
     // Subscribe to trim preview time changes — when trimming, the canvas
     // needs to render the frame at the trim edge, not the primary playhead.
     const unsubTrimPreview = subscribeTrimPreviewTime((t) => {
-      currentTimeRef.current = t;
+      if (t !== null) {
+        currentTimeRef.current = t;
+      } else {
+        currentTimeRef.current = getPlaybackTime();
+      }
       framePendingRef.current = true;
     });
 

@@ -197,6 +197,14 @@ export function TrimPlayhead({ zoomLevel }: { zoomLevel: number }) {
       }
     };
 
+    const onTimeUpdate = (t: number | null) => {
+      if (t !== null) {
+        paint(t);
+      } else {
+        hide();
+      }
+    };
+
     // Show immediately if trimPreviewTime is already set
     const initial = getTrimPreviewTime();
     if (initial !== null) {
@@ -205,17 +213,10 @@ export function TrimPlayhead({ zoomLevel }: { zoomLevel: number }) {
       hide();
     }
 
-    const unsubTrim = subscribeTrimPreviewTime(paint);
-
-    // Also listen for store changes to detect when trimming ends
-    // (trimPreviewTime cleared via setTrimPreviewTime(null))
-    const checkInterval = setInterval(() => {
-      if (getTrimPreviewTime() === null) hide();
-    }, 100);
+    const unsubTrim = subscribeTrimPreviewTime(onTimeUpdate);
 
     return () => {
       unsubTrim();
-      clearInterval(checkInterval);
     };
   }, [zoomLevel]);
 
