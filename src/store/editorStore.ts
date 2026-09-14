@@ -3004,6 +3004,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           selectedClipIds: [],
           selectedTransitionClipId: null,
           selectedKeyframeLines: [],
+          selectedSpeedFrame: null,
         };
       }
       
@@ -3013,6 +3014,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           selectedClipIds: [id],
           selectedTransitionClipId: null,
           selectedKeyframeLines: [],
+          selectedSpeedFrame: null,
         };
       }
 
@@ -5324,6 +5326,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   commitSpeedFrameDrag: () => {
+    const state = get();
+    const sf = state.selectedSpeedFrame;
+    if (sf) {
+      get().resolveOverlaps([sf.clipId]);
+    }
     get().saveSnapshot('Adjust Speed Frame');
   },
 
@@ -5362,10 +5369,23 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const found = findClipDeep(state, clipId);
     if (!found) return;
 
+    const clip = found.clip;
+    const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+
+    // Recalculate the original duration from source content
+    // sourceSpan = sourceEnd - trimStart; duration = sourceSpan / baseSpeed
+    let restoredDuration = clip.duration;
+    if (mediaItem && mediaItem.duration > 0) {
+      const sourceEnd = mediaItem.duration - (clip.trimEnd || 0);
+      const sourceSpan = Math.max(0.05, sourceEnd - clip.trimStart);
+      restoredDuration = sourceSpan / Math.max(0.01, clip.speed || 1);
+    }
+
     const updatedClip = {
-      ...found.clip,
+      ...clip,
       speedFrames: undefined,
       speedRamp: undefined,
+      duration: restoredDuration,
     };
 
     const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
@@ -5382,6 +5402,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedSpeedFrame: null,
     });
     setTrimPreviewTime(null);
+    get().resolveOverlaps([clipId]);
     get().saveSnapshot('Reset Speed');
   },
 

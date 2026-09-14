@@ -25,7 +25,7 @@ const setAudioParam = (param: AudioParam, target: number, ctxTime: number, rampT
 };
 
 import { useEditorStore } from '@/store/editorStore';
-import { getMediaTimeForClip } from '@/utils/speedRamp';
+import { getMediaTimeForClip, getSpeedForClipAtTime } from '@/utils/speedRamp';
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
@@ -1780,6 +1780,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const rawDrift = currentMediaTime - mediaTime; // positive = ahead
         const justActivated = !lastActiveClipIdsRef.current.has(clip.clipId);
 
+        // Speed-ramp-aware: use current segment speed for playbackRate
+        const currentSegmentSpeed = clip.speedRamp && clip.speedRamp.length >= 2
+          ? getSpeedForClipAtTime({
+              id: clip.clipId,
+              startTime: clip.absStartTime,
+              duration: clip.clipDuration,
+              trimStart: clip.trimStart,
+              speed: clip.speed,
+              speedRamp: clip.speedRamp,
+              isReversed: clip.isReversed,
+              freezeFrame: clip.freezeFrame,
+            }, ct)
+          : clip.speed;
+
         // Lazy init audio graph
         if ((entry.type === 'audio' || entry.type === 'video') && !entry.sourceNode) {
           const el = entry.el as any;
@@ -1846,14 +1860,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               accumulatedDriftAudio += rawDrift * dt;
               let adjustment = (rawDrift * AUDIO_PLL_P) + (accumulatedDriftAudio * AUDIO_PLL_I);
               adjustment = Math.max(-AUDIO_MAX_PLL_ADJUST, Math.min(AUDIO_MAX_PLL_ADJUST, adjustment));
-              const targetRate = Math.max(0.95, Math.min(1.05, globalSpeed * clip.speed * (1 - adjustment)));
+              const targetRate = Math.max(0.95, Math.min(1.05, globalSpeed * currentSegmentSpeed * (1 - adjustment)));
               if (Math.abs(el.playbackRate - targetRate) > 0.001) {
                 el.playbackRate = targetRate;
               }
             } else {
               // Within threshold: return to nominal speed
               accumulatedDriftAudio *= 0.9; // decay integral
-              const nominalRate = globalSpeed * clip.speed;
+              const nominalRate = globalSpeed * currentSegmentSpeed;
               if (Math.abs(el.playbackRate - nominalRate) > 0.001) {
                 el.playbackRate = nominalRate;
               }
@@ -1899,12 +1913,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               // Smoothly modulate playback speed to catch up / slow down without stopping decoder
               let adjustment = rawDrift * 0.4;
               adjustment = Math.max(-VIDEO_MAX_PLL_ADJUST, Math.min(VIDEO_MAX_PLL_ADJUST, adjustment));
-              const targetRate = Math.max(0.1, globalSpeed * clip.speed * (1 - adjustment));
+              const targetRate = Math.max(0.1, globalSpeed * currentSegmentSpeed * (1 - adjustment));
               if (Math.abs(el.playbackRate - targetRate) > 0.005) {
                 el.playbackRate = targetRate;
               }
             } else {
-              const nominalRate = Math.max(0.1, globalSpeed * clip.speed);
+              const nominalRate = Math.max(0.1, globalSpeed * currentSegmentSpeed);
               if (Math.abs(el.playbackRate - nominalRate) > 0.005) {
                 el.playbackRate = nominalRate;
               }
