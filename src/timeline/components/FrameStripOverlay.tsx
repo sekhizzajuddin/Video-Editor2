@@ -2,12 +2,15 @@ import React, { useEffect, useState } from 'react';
 import type { MediaItem } from '@/types';
 import { seededRandom } from '../timelineUtils';
 import { generateFrameStripOnDemand } from '@/utils/mediaProbe';
+import type { SpeedFrameSegment } from '@/utils/speedRamp';
 
 interface FrameStripOverlayProps {
   media: MediaItem | null;
   clip: import('@/types').TimelineClip;
   width: number;
   height: number;
+  /** Speed frame segments for per-segment stretched/squeezed frame strip rendering. */
+  speedFrameSegments?: SpeedFrameSegment[];
 }
 
 // Cache of generated frame strips per media URL, so we only decode once per media item.
@@ -18,6 +21,7 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
   clip,
   width,
   height,
+  speedFrameSegments,
 }: FrameStripOverlayProps) {
   const cachedStrip = media ? stripCache.get(media.url) : undefined;
   const [lazyStrip, setLazyStrip] = useState<string[] | null>(null);
@@ -48,6 +52,51 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
 
   if (frameStrip && frameStrip.length > 0 && media) {
     const totalDuration = media.duration || 1;
+
+    // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
+    if (speedFrameSegments && speedFrameSegments.length > 0) {
+      const thumbBaseWidth = Math.max(32, Math.min(80, Math.round((height || 36) * 1.5)));
+      const allThumbs: { src: string; w: number }[] = [];
+
+      for (const seg of speedFrameSegments) {
+        const segTimelineDur = seg.endOffset - seg.startOffset;
+        const segPx = Math.max(1, (segTimelineDur / clip.duration) * width);
+        const segThumbs = Math.max(1, Math.ceil(segPx / thumbBaseWidth));
+        const segThumbW = segPx / segThumbs;
+
+        // Source range → frame strip indices
+        const srcStartRatio = Math.max(0, seg.sourceStart / totalDuration);
+        const srcEndRatio = Math.min(1, seg.sourceEnd / totalDuration);
+        const startIdx = Math.max(0, Math.floor(srcStartRatio * frameStrip.length));
+        const endIdx = Math.min(frameStrip.length, Math.ceil(srcEndRatio * frameStrip.length));
+        const segFrames = frameStrip.slice(startIdx, Math.max(startIdx + 1, endIdx));
+
+        for (let i = 0; i < segThumbs; i++) {
+          const frameIdx = Math.floor((i / segThumbs) * segFrames.length);
+          allThumbs.push({
+            src: segFrames[Math.min(frameIdx, segFrames.length - 1)],
+            w: segThumbW,
+          });
+        }
+      }
+
+      return (
+        <div className="absolute inset-0 flex overflow-hidden pointer-events-none">
+          {allThumbs.map((t, i) => (
+            <img
+              key={i}
+              src={t.src}
+              alt=""
+              draggable={false}
+              className="h-full object-cover shrink-0 border-r border-white/5"
+              style={{ width: `${t.w}px` }}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    // ── Standard flat-speed rendering ──
     const trimStartRatio = Math.max(0, clip.trimStart / totalDuration);
     const visibleDuration = clip.duration * (clip.speed || 1);
     const trimEndRatio = Math.min(1, (clip.trimStart + visibleDuration) / totalDuration);

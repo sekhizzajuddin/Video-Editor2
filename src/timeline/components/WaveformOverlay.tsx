@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import type { MediaItem } from '@/types';
 import { generateFallbackWaveform } from '../timelineUtils';
+import type { SpeedFrameSegment } from '@/utils/speedRamp';
 
 interface WaveformOverlayProps {
   media: MediaItem | null;
@@ -14,6 +15,8 @@ interface WaveformOverlayProps {
   trimStart?: number;
   clipDuration?: number;
   speed?: number;
+  /** Speed frame segments for per-segment stretched/squeezed waveform rendering. */
+  speedFrameSegments?: SpeedFrameSegment[];
 }
 
 /**
@@ -65,6 +68,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
   trimStart,
   clipDuration,
   speed,
+  speedFrameSegments,
 }: WaveformOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -78,6 +82,35 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
         ? waveformPeaks
         : generateFallbackWaveform(clipId, barCount);
         
+    // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
+    if (speedFrameSegments && speedFrameSegments.length > 0 && media?.duration) {
+      const mediaDuration = media.duration;
+      const totalLen = src.length;
+      const totalTimelineDur = clipDuration || 1;
+      const result: number[] = [];
+
+      for (const seg of speedFrameSegments) {
+        // How many timeline pixels this segment occupies
+        const segTimelineDur = seg.endOffset - seg.startOffset;
+        const segPixels = Math.max(1, Math.round((segTimelineDur / totalTimelineDur) * barCount));
+
+        // Source range for this segment
+        const srcStartRatio = Math.max(0, seg.sourceStart / mediaDuration);
+        const srcEndRatio = Math.min(1, seg.sourceEnd / mediaDuration);
+        const srcStartIdx = Math.max(0, Math.floor(srcStartRatio * totalLen));
+        const srcEndIdx = Math.max(srcStartIdx + 1, Math.min(totalLen, Math.ceil(srcEndRatio * totalLen)));
+
+        const segSrc = src.slice(srcStartIdx, srcEndIdx);
+        const segPeaks = resamplePeaksWindowed(segSrc, segPixels);
+        result.push(...segPeaks);
+      }
+
+      // Ensure result matches barCount exactly
+      if (result.length > barCount) return result.slice(0, barCount);
+      while (result.length < barCount) result.push(0);
+      return result;
+    }
+
     let finalSrc = src;
     if (trimStart !== undefined && clipDuration !== undefined) {
       const mediaDuration = media?.duration || 1;
@@ -95,7 +128,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     }
     
     return resamplePeaksWindowed(finalSrc, barCount);
-  }, [waveformPeaks, clipId, barCount, trimStart, clipDuration, speed, media?.duration]);
+  }, [waveformPeaks, clipId, barCount, trimStart, clipDuration, speed, media?.duration, speedFrameSegments]);
 
   const [r, g, b] = useMemo(() => parseRGB(color ?? 'rgba(255,255,255,1)'), [color]);
 

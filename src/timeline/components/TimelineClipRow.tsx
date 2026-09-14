@@ -133,7 +133,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     return getSpeedFrameSegments(clip, media.duration);
   }, [clip.speedFrames, clip.duration, clip.trimStart, clip.trimEnd, clip.speed, media.duration]);
 
-  const handleLineMouseDown = (e: React.MouseEvent, frameId: string, currentOffset: number) => {
+  const handleLineMouseDown = (e: React.PointerEvent, frameId: string, currentOffset: number) => {
     e.stopPropagation();
     e.preventDefault();
     selectSpeedFrame(clip.id, frameId);
@@ -141,23 +141,23 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     const startX = e.clientX;
     const startOffset = currentOffset;
 
-    const onMouseMove = (moveEvent: MouseEvent) => {
+    const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaX = moveEvent.clientX - startX;
       const newOffset = startOffset + deltaX / zoomLevel;
       updateSpeedFrameLine(clip.id, frameId, newOffset);
     };
 
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+    const onPointerUp = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
       commitSpeedFrameDrag();
     };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
   };
 
-  const handleScrewMouseDown = (e: React.MouseEvent, frameId: string, currentOffset: number) => {
+  const handleScrewMouseDown = (e: React.PointerEvent, frameId: string, currentOffset: number) => {
     e.stopPropagation();
     e.preventDefault();
     selectSpeedFrame(clip.id, frameId);
@@ -165,28 +165,28 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     const startX = e.clientX;
     const startOffset = currentOffset;
 
-    const onMouseMove = (moveEvent: MouseEvent) => {
+    const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaX = moveEvent.clientX - startX;
       const newOffset = startOffset + deltaX / zoomLevel;
       updateSpeedFrameScrew(clip.id, frameId, newOffset);
     };
 
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+    const onPointerUp = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
       commitSpeedFrameDrag();
     };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
   };
   
   useEffect(() => {
     return () => {
       const h = dragHandlersRef.current;
       if (h) {
-        window.removeEventListener('mousemove', h.move);
-        window.removeEventListener('mouseup', h.up);
+        window.removeEventListener('pointermove', h.move);
+        window.removeEventListener('pointerup', h.up);
       }
     };
   }, []);
@@ -277,6 +277,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             trimStart={clip.trimStart}
             clipDuration={clip.duration}
             speed={clip.speed}
+            speedFrameSegments={speedSegments}
           />
         ) : (
           <>
@@ -287,6 +288,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   clip={clip}
                   width={width}
                   height={mainVisualHeight}
+                  speedFrameSegments={speedSegments}
                 />
               </div>
             )}
@@ -321,6 +323,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   trimStart={clip.trimStart}
                   clipDuration={clip.duration}
                   speed={clip.speed}
+                  speedFrameSegments={speedSegments}
                 />
               </div>
             )}
@@ -582,7 +585,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                 {/* Interactive line drag zone (Rate Stretch / Squeeze) */}
                 <div
                   className="absolute top-0 bottom-0 -left-[7px] w-[16px] cursor-ew-resize pointer-events-auto group/line"
-                  onMouseDown={(e) => handleLineMouseDown(e, sf.id, sf.timelineOffset)}
+                  onPointerDown={(e) => handleLineMouseDown(e, sf.id, sf.timelineOffset)}
                   title="Drag Line to Rate-Stretch / Squeeze adjacent segments"
                 >
                   <div className="w-full h-full opacity-0 group-hover/line:opacity-20 bg-white transition-opacity" />
@@ -608,7 +611,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                     {/* Screw Head */}
                     <div
                       className="w-5 h-5 rounded-full bg-gradient-to-br from-neutral-100 via-neutral-300 to-neutral-500 border border-white shadow-xl flex items-center justify-center cursor-ew-resize hover:scale-110 active:scale-95 transition-transform ring-2 ring-purple-500/80"
-                      onMouseDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
+                      onPointerDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
                       title="Screw Head: Drag to reposition Speed Frame within clip"
                     >
                       {/* Slotted screw drive groove */}
