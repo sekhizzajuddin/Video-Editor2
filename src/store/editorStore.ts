@@ -22,13 +22,21 @@ import type {
   SubtitleItem,
   ScopeSettings,
 } from '@/types';
-import { computeSplitHalvesMedia, SpeedRampEngine } from '@/utils/speedRamp';
+import {
+  computeSplitHalvesMedia,
+  SpeedRampEngine,
+  addSpeedFrameToClip,
+  moveSpeedFrameLine,
+  moveSpeedFrameScrew,
+  removeSpeedFrameFromClip,
+  calculateSpeedFramesRamp,
+} from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
 import { cleanupClipBackgroundState } from '@/utils/aiBackground';
 import { detectAspectRatio } from '@/utils/aspectRatioHelper';
-import { setPlaybackTime, getPlaybackTime } from '@/utils/playbackClock';
+import { setPlaybackTime, getPlaybackTime, setTrimPreviewTime } from '@/utils/playbackClock';
 import { clearImageBitmapPool } from '@/utils/imageBitmapPool';
 import { clearAllMediaWindows } from '@/utils/ramWindowedBlobCache';
 import { clearFrameCache } from '@/utils/frameExtractor';
@@ -365,6 +373,15 @@ interface EditorActions {
   applyDynamicStretch: () => void;
   cancelDynamicStretch: () => void;
 
+  // Speed Frames (Non-splitting in-clip dynamic rate stretching)
+  addSpeedFrame: (clipId?: string, timelineOffset?: number) => void;
+  selectSpeedFrame: (clipId: string | null, frameId: string | null) => void;
+  updateSpeedFrameLine: (clipId: string, frameId: string, newTimelineOffset: number) => void;
+  updateSpeedFrameScrew: (clipId: string, frameId: string, newTimelineOffset: number) => void;
+  commitSpeedFrameDrag: () => void;
+  removeSpeedFrame: (clipId: string, frameId: string) => void;
+  clearSpeedFrames: (clipId: string) => void;
+
   // Beat Markers
   addBeatMarkers: (clipId: string, times: number[]) => void;
   clearBeatMarkers: (clipId: string) => void;
@@ -443,6 +460,7 @@ const initialState: EditorState = {
   beatMarkers: [],
   exportRegions: [],
   selectedExportRegionId: null,
+  selectedSpeedFrame: null,
   dynamicStretch: {
     isActive: false,
     clipId: null,
@@ -5109,170 +5127,36 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return;
     }
 
-    const primaryClip = found.clip;
-    const clipIdsToProcess = [primaryClip.id];
-    if (primaryClip.linkedClipId) {
-      clipIdsToProcess.push(primaryClip.linkedClipId);
-    }
-
+    const clip = found.clip;
+    const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
     const markStart = dynamicStretch.markStart;
     const markEnd = dynamicStretch.markEnd;
     const stretchDur = Math.max(0.05, dynamicStretch.stretchedDuration);
-    const maintainDuration = dynamicStretch.maintainDuration;
 
-    const groupId = primaryClip.splitGroupId || generateId();
-    const replacementsMap = new Map<string, TimelineClip[]>();
-    let primaryStretchedId = '';
-    let trackDeltaTime = 0;
+    const relStart = Math.max(0.05, Math.min(clip.duration - 0.1, markStart - clip.startTime));
+    const relEnd = Math.max(relStart + 0.05, Math.min(clip.duration - 0.05, markEnd - clip.startTime));
 
-    for (const id of clipIdsToProcess) {
-      const cFound = findClipDeep(state, id);
-      if (!cFound) continue;
-      const c = cFound.clip;
+    // Add speed frames at mark boundaries without splitting!
+    let { clip: c1 } = addSpeedFrameToClip(clip, relStart, mediaItem?.duration);
+    let { clip: c2, newFrameId: endFrameId } = addSpeedFrameToClip(c1, relEnd, mediaItem?.duration);
 
-      const T0 = c.startTime;
-      const D = c.duration;
-      const S = c.speed || 1;
-      const TS = c.trimStart || 0;
-      const TE = c.trimEnd || 0;
+    // Apply the stretch to the segment by adjusting the end speed frame offset
+    const newEndOffset = Math.min(clip.duration - 0.05, relStart + stretchDur);
+    const updatedClip = moveSpeedFrameLine(c2, endFrameId, newEndOffset, mediaItem?.duration);
 
-      const safeMarkStart = Math.max(T0, Math.min(T0 + D - 0.05, markStart));
-      const safeMarkEnd = Math.min(T0 + D, Math.max(safeMarkStart + 0.05, markEnd));
-      const actualOrigDur = safeMarkEnd - safeMarkStart;
-      const speedRatio = actualOrigDur / stretchDur;
-      const newRegionSpeed = Math.min(50, Math.max(0.05, S * speedRatio));
-
-      const headTimelineDur = safeMarkStart - T0;
-      const hasHead = headTimelineDur >= 0.05;
-
-      const origTailTimelineDur = (T0 + D) - safeMarkEnd;
-      const hasTail = origTailTimelineDur >= 0.05;
-
-      const regionStartTime = hasHead ? T0 + headTimelineDur : T0;
-
-      const headTrimStart = TS;
-      const headTrimEnd = TE + (D - headTimelineDur) * S;
-
-      const regionTrimStart = TS + (hasHead ? headTimelineDur * S : 0);
-      const regionTrimEnd = TE + (origTailTimelineDur * S);
-
-      const clipsForThisId: TimelineClip[] = [];
-
-      if (hasHead) {
-        clipsForThisId.push({
-          ...c,
-          id: generateId(),
-          startTime: T0,
-          duration: headTimelineDur,
-          speed: S,
-          trimStart: headTrimStart,
-          trimEnd: headTrimEnd,
-          splitGroupId: groupId,
-          linkedClipId: undefined,
-          pipWindowIds: undefined,
-        });
-      }
-
-      const stretchedClipId = generateId();
-      if (id === primaryClip.id) {
-        primaryStretchedId = stretchedClipId;
-      }
-
-      clipsForThisId.push({
-        ...c,
-        id: stretchedClipId,
-        startTime: regionStartTime,
-        duration: stretchDur,
-        speed: newRegionSpeed,
-        trimStart: regionTrimStart,
-        trimEnd: regionTrimEnd,
-        splitGroupId: groupId,
-        linkedClipId: undefined,
-        pipWindowIds: undefined,
-      });
-
-      if (hasTail) {
-        let tailTimelineDur: number;
-        let tailSpeed: number;
-
-        if (maintainDuration) {
-          tailTimelineDur = Math.max(0.05, D - (hasHead ? headTimelineDur : 0) - stretchDur);
-          tailSpeed = Math.min(50, Math.max(0.05, (origTailTimelineDur * S) / tailTimelineDur));
-        } else {
-          tailTimelineDur = origTailTimelineDur;
-          tailSpeed = S;
-          trackDeltaTime = stretchDur - actualOrigDur;
-        }
-
-        clipsForThisId.push({
-          ...c,
-          id: c.id,
-          startTime: regionStartTime + stretchDur,
-          duration: tailTimelineDur,
-          speed: tailSpeed,
-          trimStart: regionTrimStart + actualOrigDur * S,
-          trimEnd: TE,
-          splitGroupId: groupId,
-          linkedClipId: undefined,
-          pipWindowIds: undefined,
-        });
-      } else {
-        if (clipsForThisId.length > 0) {
-          clipsForThisId[clipsForThisId.length - 1].id = c.id;
-          if (id === primaryClip.id) {
-            primaryStretchedId = c.id;
-          }
-        }
-        if (!maintainDuration) {
-          trackDeltaTime = stretchDur - actualOrigDur;
-        }
-      }
-
-      replacementsMap.set(id, clipsForThisId);
-    }
-
-    if (primaryClip.linkedClipId && replacementsMap.has(primaryClip.id) && replacementsMap.has(primaryClip.linkedClipId)) {
-      const vClips = replacementsMap.get(primaryClip.id)!;
-      const aClips = replacementsMap.get(primaryClip.linkedClipId)!;
-      if (vClips.length === aClips.length) {
-        for (let i = 0; i < vClips.length; i++) {
-          vClips[i].linkedClipId = aClips[i].id;
-          aClips[i].linkedClipId = vClips[i].id;
-        }
-      }
-    }
-
-    const { tracks, pipWindows } = mapTracksDeep(state, (track) => {
-      let modified = false;
-      const newClips: TimelineClip[] = [];
-
-      for (const clip of track.clips) {
-        if (replacementsMap.has(clip.id)) {
-          modified = true;
-          const replacement = replacementsMap.get(clip.id)!;
-          newClips.push(...replacement);
-        } else {
-          if (!maintainDuration && trackDeltaTime !== 0 && clip.startTime >= primaryClip.startTime + primaryClip.duration - 0.01) {
-            modified = true;
-            newClips.push({
-              ...clip,
-              startTime: Math.max(0, clip.startTime + trackDeltaTime),
-            });
-          } else {
-            newClips.push(clip);
-          }
-        }
-      }
-
-      if (!modified) return track;
-      return { ...track, clips: newClips };
+    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+      if (pipId !== found.pipId || track.id !== found.track.id) return track;
+      return {
+        ...track,
+        clips: track.clips.map((c) => (c.id === clip.id ? updatedClip : c)),
+      };
     });
 
     set({
       tracks,
       pipWindows,
-      selectedClipId: primaryStretchedId || primaryClip.id,
-      selectedClipIds: [primaryStretchedId || primaryClip.id],
+      selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
       dynamicStretch: {
         isActive: false,
         clipId: null,
@@ -5287,8 +5171,218 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       },
     });
 
-    get().recalcTotalDuration();
     get().saveSnapshot('Dynamic Speed Stretch');
+  },
+
+  // ── Speed Frames (Non-splitting in-clip dynamic rate stretching) ────────────
+  addSpeedFrame: (clipId?: string, timelineOffset?: number) => {
+    const state = get();
+    const targetClipId = clipId || state.selectedClipId;
+    if (!targetClipId) return;
+
+    const found = findClipDeep(state, targetClipId);
+    if (!found) return;
+
+    const clip = found.clip;
+    const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+
+    // Default timeline offset: if not provided, use playhead time relative to clip start
+    let offset = timelineOffset;
+    if (offset === undefined) {
+      const liveTime = getPlaybackTime();
+      offset = liveTime - clip.startTime;
+    }
+    // Clamp offset nicely inside clip
+    offset = Math.max(0.05, Math.min(clip.duration - 0.05, offset));
+
+    const { clip: updatedClip, newFrameId } = addSpeedFrameToClip(
+      clip,
+      offset,
+      mediaItem?.duration
+    );
+
+    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+      if (pipId !== found.pipId || track.id !== found.track.id) return track;
+      return {
+        ...track,
+        clips: track.clips.map((c) => (c.id === clip.id ? updatedClip : c)),
+      };
+    });
+
+    // Also sync linked clip (e.g. unlinked audio/video pair)
+    let finalTracks = tracks;
+    let finalPipWindows = pipWindows;
+    if (clip.linkedClipId) {
+      const linkedFound = findClipDeep({ ...state, tracks, pipWindows }, clip.linkedClipId);
+      if (linkedFound) {
+        const linkedMedia = state.mediaLibrary.find((m) => m.id === linkedFound.clip.mediaId);
+        const { clip: updatedLinked } = addSpeedFrameToClip(
+          linkedFound.clip,
+          offset,
+          linkedMedia?.duration
+        );
+        const res = mapTracksDeep({ ...state, tracks, pipWindows }, (track, pipId) => {
+          if (pipId !== linkedFound.pipId || track.id !== linkedFound.track.id) return track;
+          return {
+            ...track,
+            clips: track.clips.map((c) => (c.id === linkedFound.clip.id ? updatedLinked : c)),
+          };
+        });
+        finalTracks = res.tracks;
+        finalPipWindows = res.pipWindows;
+      }
+    }
+
+    set({
+      tracks: finalTracks,
+      pipWindows: finalPipWindows,
+      selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
+      selectedSpeedFrame: { clipId: clip.id, frameId: newFrameId },
+    });
+
+    setTrimPreviewTime(clip.startTime + offset);
+    get().saveSnapshot('Add Speed Frame');
+  },
+
+  selectSpeedFrame: (clipId: string | null, frameId: string | null) => {
+    if (!clipId || !frameId) {
+      set({ selectedSpeedFrame: null });
+      setTrimPreviewTime(null);
+      return;
+    }
+
+    const state = get();
+    const found = findClipDeep(state, clipId);
+    if (!found) {
+      set({ selectedSpeedFrame: null });
+      setTrimPreviewTime(null);
+      return;
+    }
+
+    const sf = found.clip.speedFrames?.find((f) => f.id === frameId);
+    if (!sf) {
+      set({ selectedSpeedFrame: null });
+      setTrimPreviewTime(null);
+      return;
+    }
+
+    set({
+      selectedClipId: clipId,
+      selectedClipIds: [clipId],
+      selectedSpeedFrame: { clipId, frameId },
+    });
+    setTrimPreviewTime(found.clip.startTime + sf.timelineOffset);
+  },
+
+  updateSpeedFrameLine: (clipId: string, frameId: string, newTimelineOffset: number) => {
+    const state = get();
+    const found = findClipDeep(state, clipId);
+    if (!found) return;
+
+    const clip = found.clip;
+    const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+    const updatedClip = moveSpeedFrameLine(clip, frameId, newTimelineOffset, mediaItem?.duration);
+
+    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+      if (pipId !== found.pipId || track.id !== found.track.id) return track;
+      return {
+        ...track,
+        clips: track.clips.map((c) => (c.id === clip.id ? updatedClip : c)),
+      };
+    });
+
+    set({ tracks, pipWindows });
+    const movedFrame = updatedClip.speedFrames?.find((f) => f.id === frameId);
+    if (movedFrame) {
+      setTrimPreviewTime(clip.startTime + movedFrame.timelineOffset);
+    }
+  },
+
+  updateSpeedFrameScrew: (clipId: string, frameId: string, newTimelineOffset: number) => {
+    const state = get();
+    const found = findClipDeep(state, clipId);
+    if (!found) return;
+
+    const clip = found.clip;
+    const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+    const updatedClip = moveSpeedFrameScrew(clip, frameId, newTimelineOffset, mediaItem?.duration);
+
+    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+      if (pipId !== found.pipId || track.id !== found.track.id) return track;
+      return {
+        ...track,
+        clips: track.clips.map((c) => (c.id === clip.id ? updatedClip : c)),
+      };
+    });
+
+    set({ tracks, pipWindows });
+    const movedFrame = updatedClip.speedFrames?.find((f) => f.id === frameId);
+    if (movedFrame) {
+      setTrimPreviewTime(clip.startTime + movedFrame.timelineOffset);
+    }
+  },
+
+  commitSpeedFrameDrag: () => {
+    get().saveSnapshot('Adjust Speed Frame');
+  },
+
+  removeSpeedFrame: (clipId: string, frameId: string) => {
+    const state = get();
+    const found = findClipDeep(state, clipId);
+    if (!found) return;
+
+    const clip = found.clip;
+    const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+    const updatedClip = removeSpeedFrameFromClip(clip, frameId, mediaItem?.duration);
+
+    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+      if (pipId !== found.pipId || track.id !== found.track.id) return track;
+      return {
+        ...track,
+        clips: track.clips.map((c) => (c.id === clip.id ? updatedClip : c)),
+      };
+    });
+
+    const isCurrent = state.selectedSpeedFrame?.frameId === frameId;
+    set({
+      tracks,
+      pipWindows,
+      ...(isCurrent ? { selectedSpeedFrame: null } : {}),
+    });
+
+    if (isCurrent) {
+      setTrimPreviewTime(null);
+    }
+    get().saveSnapshot('Remove Speed Frame');
+  },
+
+  clearSpeedFrames: (clipId: string) => {
+    const state = get();
+    const found = findClipDeep(state, clipId);
+    if (!found) return;
+
+    const updatedClip = {
+      ...found.clip,
+      speedFrames: undefined,
+      speedRamp: undefined,
+    };
+
+    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+      if (pipId !== found.pipId || track.id !== found.track.id) return track;
+      return {
+        ...track,
+        clips: track.clips.map((c) => (c.id === clipId ? updatedClip : c)),
+      };
+    });
+
+    set({
+      tracks,
+      pipWindows,
+      selectedSpeedFrame: null,
+    });
+    setTrimPreviewTime(null);
+    get().saveSnapshot('Reset Speed');
   },
 
   // Beat Markers

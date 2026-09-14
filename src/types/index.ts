@@ -342,6 +342,12 @@ export interface SpeedRampKeyframe {
   };
 }
 
+export interface SpeedFrame {
+  id: string;
+  timelineOffset: number; // seconds from clip.startTime (0 < timelineOffset < clip.duration)
+  sourceTime: number;     // anchored source media time in seconds
+}
+
 export interface BezierControl {
   x: number;
   y: number;
@@ -559,6 +565,7 @@ export interface TimelineClip {
   opacity: number;      // 0-1
   speed: number;        // playback speed multiplier
   speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes (overrides flat speed)
+  speedFrames?: SpeedFrame[]; // embedded speed frames for rate-stretching without splitting
   isReversed?: boolean; // play clip backward (frame-accurate canvas seek engine)
   freezeFrame?: number; // hold this source time (seconds) for the entire clip duration
   animations?: ClipAnimations; // timeline keyframes for properties
@@ -964,6 +971,7 @@ export interface EditorState {
 
   // Dynamic Speed Stretch
   dynamicStretch: DynamicStretchState;
+  selectedSpeedFrame: { clipId: string; frameId: string } | null;
 
   // Templates
   projectTemplates: ProjectTemplate[];

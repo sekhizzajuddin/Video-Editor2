@@ -24,6 +24,12 @@ import {
   getSpeedRampEngine,
   getMediaTimeForClip,
   computeSplitHalvesMedia,
+  addSpeedFrameToClip,
+  moveSpeedFrameLine,
+  moveSpeedFrameScrew,
+  removeSpeedFrameFromClip,
+  getSpeedFrameSegments,
+  calculateSpeedFramesRamp,
 } from './speedRamp';
 import type { SpeedRampKeyframe } from '../types';
 
@@ -374,5 +380,108 @@ describe('computeSplitHalvesMedia — clip splitting', () => {
     }
     // The final chain still covers the full original source range.
     expect(mediaAt(clip, FLAT.startTime + 10)).toBeCloseTo(FLAT.trimStart + 10 * FLAT.speed, 5);
+  });
+});
+
+describe('Speed Frames (Embedded Rate Stretching)', () => {
+  const baseClip: any = {
+    id: 'clip-1',
+    startTime: 0,
+    duration: 10,
+    trimStart: 0,
+    speed: 1.0,
+  };
+
+  it('calculates single speed frame edge-to-edge from clip start (0s) and clip end (10s)', () => {
+    // Add speed frame at 5 seconds
+    const { clip: clipWith1, newFrameId } = addSpeedFrameToClip(baseClip, 5);
+    expect(clipWith1.speedFrames).toHaveLength(1);
+    expect(clipWith1.speedFrames![0].timelineOffset).toBe(5);
+    expect(clipWith1.speedFrames![0].sourceTime).toBe(5);
+
+    // Initial segment speeds should both be 1.0x
+    const segmentsInitial = getSpeedFrameSegments(clipWith1);
+    expect(segmentsInitial).toHaveLength(2);
+    expect(segmentsInitial[0].startOffset).toBe(0);
+    expect(segmentsInitial[0].endOffset).toBe(5);
+    expect(segmentsInitial[0].speed).toBeCloseTo(1.0, 3);
+    expect(segmentsInitial[1].startOffset).toBe(5);
+    expect(segmentsInitial[1].endOffset).toBe(10);
+    expect(segmentsInitial[1].speed).toBeCloseTo(1.0, 3);
+
+    // Now drag the line left from 5s to 2s: squeezes first segment against left edge, stretches second against right edge
+    const moved = moveSpeedFrameLine(clipWith1, newFrameId, 2);
+    expect(moved.speedFrames![0].timelineOffset).toBe(2);
+    expect(moved.speedFrames![0].sourceTime).toBe(5); // source anchor held fixed!
+
+    const segmentsMoved = getSpeedFrameSegments(moved);
+    // Segment 0 (0 to 2s, source 0 to 5s): speed = 5 / 2 = 2.5x (Fast-forward)
+    expect(segmentsMoved[0].startOffset).toBe(0);
+    expect(segmentsMoved[0].endOffset).toBe(2);
+    expect(segmentsMoved[0].speed).toBeCloseTo(2.5, 3);
+
+    // Segment 1 (2 to 10s, source 5 to 10s): speed = 5 / 8 = 0.625x (Slow-motion)
+    expect(segmentsMoved[1].startOffset).toBe(2);
+    expect(segmentsMoved[1].endOffset).toBe(10);
+    expect(segmentsMoved[1].speed).toBeCloseTo(0.625, 3);
+
+    // Frame-accurate playback check via getMediaTimeForClip
+    // At t = 0 -> source 0
+    expect(getMediaTimeForClip(moved, 0)).toBeCloseTo(0, 3);
+    // At t = 1 (half of seg 0) -> source = 1 * 2.5 = 2.5
+    expect(getMediaTimeForClip(moved, 1)).toBeCloseTo(2.5, 3);
+    // At t = 2 (end of seg 0 / speed frame line) -> source 5.0 exactly!
+    expect(getMediaTimeForClip(moved, 2)).toBeCloseTo(5.0, 3);
+    // At t = 6 (half of seg 1: 2 + 4s) -> source = 5 + 4 * 0.625 = 7.5
+    expect(getMediaTimeForClip(moved, 6)).toBeCloseTo(7.5, 3);
+    // At t = 10 (clip end) -> source 10.0 exactly!
+    expect(getMediaTimeForClip(moved, 10)).toBeCloseTo(10.0, 3);
+  });
+
+  it('handles multiple speed frames, stretching between adjacent frames', () => {
+    // Add two speed frames at 3s and 7s
+    const { clip: c1, newFrameId: id1 } = addSpeedFrameToClip(baseClip, 3);
+    const { clip: c2, newFrameId: id2 } = addSpeedFrameToClip(c1, 7);
+    expect(c2.speedFrames).toHaveLength(2);
+
+    // Initial 3 segments all at 1.0x
+    const segs = getSpeedFrameSegments(c2);
+    expect(segs).toHaveLength(3);
+    expect(segs[0].speed).toBeCloseTo(1.0, 2);
+    expect(segs[1].speed).toBeCloseTo(1.0, 2);
+    expect(segs[2].speed).toBeCloseTo(1.0, 2);
+
+    // Drag SF1 from 3s to 1s: left edge bounded by 0, right bounded by SF2 (7s)
+    const moved = moveSpeedFrameLine(c2, id1, 1);
+    const segsMoved = getSpeedFrameSegments(moved);
+    // Seg 0: 0s to 1s, source 0 to 3 -> 3.0x
+    expect(segsMoved[0].speed).toBeCloseTo(3.0, 2);
+    // Seg 1: 1s to 7s (6s wide), source 3 to 7 (4s span) -> 4 / 6 = 0.667x
+    expect(segsMoved[1].speed).toBeCloseTo(0.667, 2);
+    // Seg 2: 7s to 10s (3s wide), source 7 to 10 -> still 1.0x (unaffected!)
+    expect(segsMoved[2].speed).toBeCloseTo(1.0, 2);
+  });
+
+  it('restores uniform playback state when all speed frames are deleted', () => {
+    const { clip: c1, newFrameId: id1 } = addSpeedFrameToClip(baseClip, 5);
+    const moved = moveSpeedFrameLine(c1, id1, 2);
+    expect(moved.speedRamp).toBeDefined();
+
+    const restored = removeSpeedFrameFromClip(moved, id1);
+    expect(restored.speedFrames).toBeUndefined();
+    expect(restored.speedRamp).toBeUndefined();
+    expect(getMediaTimeForClip(restored, 5)).toBeCloseTo(5.0, 3);
+  });
+
+  it('allows repositioning speed frame via screw head without distorting rate curve', () => {
+    const { clip: c1, newFrameId: id1 } = addSpeedFrameToClip(baseClip, 5);
+    // Move screw head from 5s to 6s
+    const screwed = moveSpeedFrameScrew(c1, id1, 6);
+    expect(screwed.speedFrames![0].timelineOffset).toBe(6);
+    // Source time was re-sampled at 6s (since base speed was 1.0, media time is 6.0)
+    expect(screwed.speedFrames![0].sourceTime).toBeCloseTo(6.0, 3);
+    const segs = getSpeedFrameSegments(screwed);
+    expect(segs[0].speed).toBeCloseTo(1.0, 2);
+    expect(segs[1].speed).toBeCloseTo(1.0, 2);
   });
 });

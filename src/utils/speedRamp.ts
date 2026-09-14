@@ -1,4 +1,4 @@
-import { SpeedRampKeyframe } from '../types';
+import { SpeedRampKeyframe, SpeedFrame } from '../types';
 
 export interface Point {
   x: number;
@@ -649,3 +649,268 @@ export function computeSplitHalvesMedia(
     rightSpeedRamp,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBEDDED SPEED FRAMES (Non-splitting in-clip dynamic rate stretching)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SpeedFrameSegment {
+  index: number;
+  startOffset: number; // timeline seconds from clip start
+  endOffset: number;   // timeline seconds from clip start
+  speed: number;       // calculated speed multiplier
+  sourceStart: number;
+  sourceEnd: number;
+}
+
+/**
+ * Calculates the total source media span for a clip.
+ */
+export function getClipSourceEnd(
+  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number },
+  sourceDuration?: number
+): number {
+  const baseSpeed = Math.max(0.01, clip.speed ?? 1);
+  if (sourceDuration !== undefined && sourceDuration > 0 && clip.trimEnd !== undefined) {
+    return Math.max(clip.trimStart + 0.05, sourceDuration - clip.trimEnd);
+  }
+  return clip.trimStart + clip.duration * baseSpeed;
+}
+
+/**
+ * Computes all segments between boundaries (clip start edge 0, speed frames 1..n, clip end edge duration).
+ * If no speed frames exist, returns empty array.
+ * If 1 or more speed frames exist, calculates rates using adjacent speed frames OR clip edges when no adjacent frame exists.
+ */
+export function getSpeedFrameSegments(
+  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[] },
+  sourceDuration?: number
+): SpeedFrameSegment[] {
+  if (!clip.speedFrames || clip.speedFrames.length === 0) return [];
+
+  const sortedFrames = [...clip.speedFrames].sort((a, b) => a.timelineOffset - b.timelineOffset);
+  const s0 = clip.trimStart;
+  const sEnd = getClipSourceEnd(clip, sourceDuration);
+  const d = Math.max(0.05, clip.duration);
+
+  // Boundaries:
+  // Boundary 0: clip start edge (offset 0, source s0)
+  // Boundary 1..n: sorted speed frames (offset t_k, source s_k)
+  // Boundary n+1: clip end edge (offset d, source sEnd)
+  const points: { timelineOffset: number; sourceTime: number }[] = [
+    { timelineOffset: 0, sourceTime: s0 },
+    ...sortedFrames.map((f) => ({ timelineOffset: f.timelineOffset, sourceTime: f.sourceTime })),
+    { timelineOffset: d, sourceTime: sEnd }
+  ];
+
+  const segments: SpeedFrameSegment[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const deltaT = Math.max(0.01, p2.timelineOffset - p1.timelineOffset);
+    const deltaS = Math.max(0.001, p2.sourceTime - p1.sourceTime);
+    const speed = Math.min(50, Math.max(0.05, deltaS / deltaT));
+
+    segments.push({
+      index: i,
+      startOffset: p1.timelineOffset,
+      endOffset: p2.timelineOffset,
+      speed,
+      sourceStart: p1.sourceTime,
+      sourceEnd: p2.sourceTime,
+    });
+  }
+
+  return segments;
+}
+
+/**
+ * Converts a clip's speedFrames into constant-rate 'hold' keyframes for SpeedRampEngine.
+ * Returns undefined if no speedFrames exist.
+ */
+export function calculateSpeedFramesRamp(
+  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[] },
+  sourceDuration?: number
+): SpeedRampKeyframe[] | undefined {
+  if (!clip.speedFrames || clip.speedFrames.length === 0) return undefined;
+
+  const segments = getSpeedFrameSegments(clip, sourceDuration);
+  if (segments.length === 0) return undefined;
+
+  const sortedFrames = [...clip.speedFrames].sort((a, b) => a.timelineOffset - b.timelineOffset);
+
+  // Keyframe 0 at s0: runs with segment 0's speed
+  const keyframes: SpeedRampKeyframe[] = [
+    {
+      id: 'sf-start',
+      sourceTime: segments[0].sourceStart,
+      speed: segments[0].speed,
+      easing: 'hold',
+    }
+  ];
+
+  // Keyframes for each speed frame: runs with segment (i+1)'s speed
+  for (let i = 0; i < sortedFrames.length; i++) {
+    const sf = sortedFrames[i];
+    const seg = segments[i + 1];
+    keyframes.push({
+      id: sf.id,
+      sourceTime: sf.sourceTime,
+      speed: seg ? seg.speed : segments[i].speed,
+      easing: 'hold',
+    });
+  }
+
+  // Keyframe at source end
+  const lastSeg = segments[segments.length - 1];
+  keyframes.push({
+    id: 'sf-end',
+    sourceTime: lastSeg.sourceEnd,
+    speed: lastSeg.speed,
+    easing: 'hold',
+  });
+
+  return keyframes;
+}
+
+/**
+ * Adds a new Speed Frame to a clip at `timelineOffset`.
+ * Anchors the exact current source media time at that timeline position.
+ */
+export function addSpeedFrameToClip<T extends { id: string; startTime: number; duration: number; trimStart: number; trimEnd?: number; speed: number; speedRamp?: SpeedRampKeyframe[]; speedFrames?: SpeedFrame[]; isReversed?: boolean; freezeFrame?: number }>(
+  clip: T,
+  timelineOffset: number,
+  sourceDuration?: number
+): { clip: T; newFrameId: string } {
+  const d = clip.duration;
+  const clampedOffset = Math.max(0.05, Math.min(d - 0.05, timelineOffset));
+
+  // Sample exact media time at this moment
+  const mediaTime = getMediaTimeForClip(clip, clip.startTime + clampedOffset);
+
+  const newFrameId = 'sf_' + Math.random().toString(36).substring(2, 9);
+  const newFrame: SpeedFrame = {
+    id: newFrameId,
+    timelineOffset: clampedOffset,
+    sourceTime: mediaTime,
+  };
+
+  const currentFrames = clip.speedFrames ? [...clip.speedFrames] : [];
+  const updatedFrames = [...currentFrames, newFrame].sort((a, b) => a.timelineOffset - b.timelineOffset);
+
+  const updatedClip = {
+    ...clip,
+    speedFrames: updatedFrames,
+  };
+
+  updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, sourceDuration);
+
+  return { clip: updatedClip, newFrameId };
+}
+
+/**
+ * Moves a Speed Frame line (Rate Stretch / Squeeze).
+ * Keeps sourceTime fixed, moves timelineOffset, bounded by adjacent speed frames OR clip edges.
+ */
+export function moveSpeedFrameLine<T extends { duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[] }>(
+  clip: T,
+  frameId: string,
+  newTimelineOffset: number,
+  sourceDuration?: number
+): T {
+  if (!clip.speedFrames || clip.speedFrames.length === 0) return clip;
+
+  const sorted = [...clip.speedFrames].sort((a, b) => a.timelineOffset - b.timelineOffset);
+  const index = sorted.findIndex((f) => f.id === frameId);
+  if (index === -1) return clip;
+
+  // Boundary check: left adjacent frame or clip start edge (0)
+  const leftBound = index > 0 ? sorted[index - 1].timelineOffset + 0.05 : 0.05;
+  // Boundary check: right adjacent frame or clip end edge (duration)
+  const rightBound = index < sorted.length - 1 ? sorted[index + 1].timelineOffset - 0.05 : clip.duration - 0.05;
+
+  const clampedOffset = Math.max(leftBound, Math.min(rightBound, newTimelineOffset));
+
+  const updatedFrames = sorted.map((f, i) => {
+    if (i === index) {
+      return { ...f, timelineOffset: clampedOffset };
+    }
+    return f;
+  });
+
+  const updatedClip = {
+    ...clip,
+    speedFrames: updatedFrames,
+  };
+
+  updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, sourceDuration);
+  return updatedClip;
+}
+
+/**
+ * Moves a Speed Frame Screw Head (Repositioning within clip).
+ * Re-samples the media time at the new offset to slide the marker without distorting the overall speed curve.
+ */
+export function moveSpeedFrameScrew<T extends { id: string; startTime: number; duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[]; isReversed?: boolean; freezeFrame?: number }>(
+  clip: T,
+  frameId: string,
+  newTimelineOffset: number,
+  sourceDuration?: number
+): T {
+  if (!clip.speedFrames || clip.speedFrames.length === 0) return clip;
+
+  const sorted = [...clip.speedFrames].sort((a, b) => a.timelineOffset - b.timelineOffset);
+  const index = sorted.findIndex((f) => f.id === frameId);
+  if (index === -1) return clip;
+
+  const leftBound = index > 0 ? sorted[index - 1].timelineOffset + 0.05 : 0.05;
+  const rightBound = index < sorted.length - 1 ? sorted[index + 1].timelineOffset - 0.05 : clip.duration - 0.05;
+
+  const clampedOffset = Math.max(leftBound, Math.min(rightBound, newTimelineOffset));
+  const newMediaTime = getMediaTimeForClip(clip, clip.startTime + clampedOffset);
+
+  const updatedFrames = sorted.map((f, i) => {
+    if (i === index) {
+      return { ...f, timelineOffset: clampedOffset, sourceTime: newMediaTime };
+    }
+    return f;
+  });
+
+  const updatedClip = {
+    ...clip,
+    speedFrames: updatedFrames,
+  };
+
+  updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, sourceDuration);
+  return updatedClip;
+}
+
+/**
+ * Removes a Speed Frame from a clip.
+ * If no speed frames remain, restores uniform playback.
+ */
+export function removeSpeedFrameFromClip<T extends { duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[] }>(
+  clip: T,
+  frameId: string,
+  sourceDuration?: number
+): T {
+  if (!clip.speedFrames) return clip;
+
+  const remaining = clip.speedFrames.filter((f) => f.id !== frameId);
+  if (remaining.length === 0) {
+    return {
+      ...clip,
+      speedFrames: undefined,
+      speedRamp: undefined,
+    };
+  }
+
+  const updatedClip = {
+    ...clip,
+    speedFrames: remaining,
+  };
+
+  updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, sourceDuration);
+  return updatedClip;
+}
+

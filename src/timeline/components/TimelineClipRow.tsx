@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import { Film, Music, Image, Sparkles, Type, Plus } from 'lucide-react';
+import { Film, Music, Image, Sparkles, Type, Plus, Zap } from 'lucide-react';
 import { getKineticClipLabel, isKineticMediaId } from '@/utils/kineticSync';
+import { getSpeedFrameSegments } from '@/utils/speedRamp';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineTrack, TimelineClip, MediaItem, EditorState, PipWindow } from '@/types';
 import { getTrackHeight } from '../trackGeometry';
@@ -118,6 +119,67 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
 
   const dragHandlersRef = useRef<{move: (e: MouseEvent) => void, up: () => void} | null>(null);
+
+  const selectedSpeedFrame = useEditorStore((s) => s.selectedSpeedFrame);
+  const addSpeedFrame = useEditorStore((s) => s.addSpeedFrame);
+  const selectSpeedFrame = useEditorStore((s) => s.selectSpeedFrame);
+  const updateSpeedFrameLine = useEditorStore((s) => s.updateSpeedFrameLine);
+  const updateSpeedFrameScrew = useEditorStore((s) => s.updateSpeedFrameScrew);
+  const commitSpeedFrameDrag = useEditorStore((s) => s.commitSpeedFrameDrag);
+  const removeSpeedFrame = useEditorStore((s) => s.removeSpeedFrame);
+
+  const speedSegments = useMemo(() => {
+    if (!clip.speedFrames || clip.speedFrames.length === 0) return [];
+    return getSpeedFrameSegments(clip, media.duration);
+  }, [clip.speedFrames, clip.duration, clip.trimStart, clip.trimEnd, clip.speed, media.duration]);
+
+  const handleLineMouseDown = (e: React.MouseEvent, frameId: string, currentOffset: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    selectSpeedFrame(clip.id, frameId);
+
+    const startX = e.clientX;
+    const startOffset = currentOffset;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newOffset = startOffset + deltaX / zoomLevel;
+      updateSpeedFrameLine(clip.id, frameId, newOffset);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      commitSpeedFrameDrag();
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleScrewMouseDown = (e: React.MouseEvent, frameId: string, currentOffset: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    selectSpeedFrame(clip.id, frameId);
+
+    const startX = e.clientX;
+    const startOffset = currentOffset;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newOffset = startOffset + deltaX / zoomLevel;
+      updateSpeedFrameScrew(clip.id, frameId, newOffset);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      commitSpeedFrameDrag();
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
   
   useEffect(() => {
     return () => {
@@ -450,6 +512,124 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             );
           })}
         </div>
+      )}
+
+      {/* ── + Speed Frame Quick Action Button ────────── */}
+      {isSelected && !trackLocked && activeTool !== 'split' && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            addSpeedFrame(clip.id);
+          }}
+          className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-50 px-2 py-0.5 rounded-full text-[9px] font-bold bg-gradient-to-r from-amber-500 via-purple-600 to-pink-500 text-white shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 border border-white/60 backdrop-blur-sm pointer-events-auto"
+          title="Add Speed Frame at playhead (or clip center) to dynamically rate-stretch this section"
+        >
+          <Zap className="w-2.5 h-2.5 text-amber-200 fill-amber-200" />
+          <span>+ Speed Frame</span>
+        </button>
+      )}
+
+      {/* ── Embedded Speed Frames (Dynamic Rate-Stretching) ────────── */}
+      {clip.speedFrames && clip.speedFrames.length > 0 && (
+        <>
+          {/* Segment speed multiplier badges */}
+          {speedSegments.map((seg) => {
+            const centerT = (seg.startOffset + seg.endOffset) / 2;
+            const centerPx = centerT * zoomLevel;
+            return (
+              <div
+                key={`seg-${seg.index}`}
+                className={`absolute bottom-1 -translate-x-1/2 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-tight shadow pointer-events-none z-30 flex items-center gap-0.5 transition-all ${
+                  seg.speed > 1.05
+                    ? 'bg-emerald-500/90 text-black shadow-emerald-500/30'
+                    : seg.speed < 0.95
+                    ? 'bg-purple-600/90 text-white shadow-purple-500/30'
+                    : 'bg-black/70 text-white/80 border border-white/20'
+                }`}
+                style={{ left: `${centerPx}px` }}
+                title={`Segment ${seg.index + 1}: ${seg.speed.toFixed(2)}x speed`}
+              >
+                <span>{seg.speed.toFixed(1)}x</span>
+              </div>
+            );
+          })}
+
+          {/* Speed Frame lines and screw heads */}
+          {clip.speedFrames.map((sf) => {
+            const isFrameSelected =
+              selectedSpeedFrame?.clipId === clip.id && selectedSpeedFrame?.frameId === sf.id;
+            const posX = sf.timelineOffset * zoomLevel;
+
+            return (
+              <div
+                key={sf.id}
+                className="absolute top-0 bottom-0 z-40 pointer-events-none select-none"
+                style={{ left: `${posX}px` }}
+              >
+                {/* Glowing animated vertical line spanning top to bottom */}
+                <div
+                  className={`absolute top-0 bottom-0 -left-[1px] w-[2px] transition-all ${
+                    isFrameSelected
+                      ? 'shadow-[0_0_10px_#f43f5e,0_0_18px_#a855f7] ring-1 ring-white/80'
+                      : 'shadow-[0_0_6px_rgba(168,85,247,0.8),0_0_12px_rgba(236,72,153,0.6)]'
+                  }`}
+                  style={{
+                    background: 'linear-gradient(180deg, #38bdf8, #a855f7, #ec4899, #f59e0b)',
+                  }}
+                />
+
+                {/* Interactive line drag zone (Rate Stretch / Squeeze) */}
+                <div
+                  className="absolute top-0 bottom-0 -left-[7px] w-[16px] cursor-ew-resize pointer-events-auto group/line"
+                  onMouseDown={(e) => handleLineMouseDown(e, sf.id, sf.timelineOffset)}
+                  title="Drag Line to Rate-Stretch / Squeeze adjacent segments"
+                >
+                  <div className="w-full h-full opacity-0 group-hover/line:opacity-20 bg-white transition-opacity" />
+                </div>
+
+                {/* Top Marker / Screw Head */}
+                {isFrameSelected ? (
+                  /* Selected state: Metallic Precision Screw Head with delete button */
+                  <div className="absolute -top-3.5 -left-2.5 pointer-events-auto flex flex-col items-center">
+                    {/* Quick Delete button (×) */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeSpeedFrame(clip.id, sf.id);
+                      }}
+                      className="mb-1 w-4 h-4 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold shadow-md transition-colors"
+                      title="Delete Speed Frame (Restore uniform speed)"
+                    >
+                      ×
+                    </button>
+
+                    {/* Screw Head */}
+                    <div
+                      className="w-5 h-5 rounded-full bg-gradient-to-br from-neutral-100 via-neutral-300 to-neutral-500 border border-white shadow-xl flex items-center justify-center cursor-ew-resize hover:scale-110 active:scale-95 transition-transform ring-2 ring-purple-500/80"
+                      onMouseDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
+                      title="Screw Head: Drag to reposition Speed Frame within clip"
+                    >
+                      {/* Slotted screw drive groove */}
+                      <div className="w-3 h-[2px] bg-neutral-900 rounded-xs shadow-inner" />
+                    </div>
+                  </div>
+                ) : (
+                  /* Unselected state: glowing marker cap */
+                  <div
+                    className="absolute -top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-gradient-to-br from-pink-500 to-purple-600 border border-white/90 shadow-md cursor-pointer pointer-events-auto hover:scale-125 transition-transform"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectSpeedFrame(clip.id, sf.id);
+                    }}
+                    title="Click to select Speed Frame (convert to Screw Head & preview frame)"
+                  />
+                )}
+              </div>
+            );
+          })}
+        </>
       )}
     </div>
   );
