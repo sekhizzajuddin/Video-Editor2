@@ -150,9 +150,11 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     const onPointerUp = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      dragHandlersRef.current = null;
       commitSpeedFrameDrag();
     };
 
+    dragHandlersRef.current = { move: onPointerMove as any, up: onPointerUp as any };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
   };
@@ -174,13 +176,33 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     const onPointerUp = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      dragHandlersRef.current = null;
       commitSpeedFrameDrag();
     };
 
+    dragHandlersRef.current = { move: onPointerMove as any, up: onPointerUp as any };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
   };
   
+  // Deselect speed frame when clicking anywhere outside of a speed frame element
+  useEffect(() => {
+    if (!selectedSpeedFrame || selectedSpeedFrame.clipId !== clip.id) return;
+
+    const handleGlobalPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('.speed-frame-element')) {
+        return;
+      }
+      selectSpeedFrame(null, null);
+    };
+
+    window.addEventListener('pointerdown', handleGlobalPointerDown, true);
+    return () => {
+      window.removeEventListener('pointerdown', handleGlobalPointerDown, true);
+    };
+  }, [selectedSpeedFrame, clip.id, selectSpeedFrame]);
+
   useEffect(() => {
     return () => {
       const h = dragHandlersRef.current;
@@ -525,7 +547,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             e.stopPropagation();
             addSpeedFrame(clip.id);
           }}
-          className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-50 px-2 py-0.5 rounded-full text-[9px] font-bold bg-gradient-to-r from-amber-500 via-purple-600 to-pink-500 text-white shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 border border-white/60 backdrop-blur-sm pointer-events-auto"
+          className="speed-frame-element absolute -top-3.5 left-1/2 -translate-x-1/2 z-50 px-2 py-0.5 rounded-full text-[9px] font-bold bg-gradient-to-r from-amber-500 via-purple-600 to-pink-500 text-white shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 border border-white/60 backdrop-blur-sm pointer-events-auto"
           title="Add Speed Frame at playhead (or clip center) to dynamically rate-stretch this section"
         >
           <Zap className="w-2.5 h-2.5 text-amber-200 fill-amber-200" />
@@ -584,7 +606,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
                 {/* Interactive line drag zone (Rate Stretch / Squeeze) */}
                 <div
-                  className="absolute top-0 bottom-0 -left-[7px] w-[16px] cursor-ew-resize pointer-events-auto group/line"
+                  className="speed-frame-element absolute top-0 bottom-0 -left-[7px] w-[16px] cursor-ew-resize pointer-events-auto group/line"
                   onPointerDown={(e) => handleLineMouseDown(e, sf.id, sf.timelineOffset)}
                   title="Drag Line to Rate-Stretch / Squeeze adjacent segments"
                 >
@@ -594,7 +616,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                 {/* Top Marker / Screw Head */}
                 {isFrameSelected ? (
                   /* Selected state: Metallic Precision Screw Head with delete button */
-                  <div className="absolute -top-3.5 -left-2.5 pointer-events-auto flex flex-col items-center">
+                  <div className="speed-frame-element absolute -top-3.5 -left-2.5 pointer-events-auto flex flex-col items-center">
                     {/* Quick Delete button (×) */}
                     <button
                       type="button"
@@ -602,7 +624,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                         e.stopPropagation();
                         removeSpeedFrame(clip.id, sf.id);
                       }}
-                      className="mb-1 w-4 h-4 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold shadow-md transition-colors"
+                      className="speed-frame-element mb-1 w-4 h-4 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold shadow-md transition-colors"
                       title="Delete Speed Frame (Restore uniform speed)"
                     >
                       ×
@@ -610,7 +632,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
                     {/* Screw Head */}
                     <div
-                      className="w-5 h-5 rounded-full bg-gradient-to-br from-neutral-100 via-neutral-300 to-neutral-500 border border-white shadow-xl flex items-center justify-center cursor-ew-resize hover:scale-110 active:scale-95 transition-transform ring-2 ring-purple-500/80"
+                      className="speed-frame-element w-5 h-5 rounded-full bg-gradient-to-br from-neutral-100 via-neutral-300 to-neutral-500 border border-white shadow-xl flex items-center justify-center cursor-ew-resize hover:scale-110 active:scale-95 transition-transform ring-2 ring-purple-500/80"
                       onPointerDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
                       title="Screw Head: Drag to reposition Speed Frame within clip"
                     >
@@ -621,7 +643,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                 ) : (
                   /* Unselected state: glowing marker cap */
                   <div
-                    className="absolute -top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-gradient-to-br from-pink-500 to-purple-600 border border-white/90 shadow-md cursor-pointer pointer-events-auto hover:scale-125 transition-transform"
+                    className="speed-frame-element absolute -top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-gradient-to-br from-pink-500 to-purple-600 border border-white/90 shadow-md cursor-pointer pointer-events-auto hover:scale-125 transition-transform"
                     onClick={(e) => {
                       e.stopPropagation();
                       selectSpeedFrame(clip.id, sf.id);

@@ -83,8 +83,10 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
         : generateFallbackWaveform(clipId, barCount);
         
     // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
-    if (speedFrameSegments && speedFrameSegments.length > 0 && media?.duration) {
-      const mediaDuration = media.duration;
+    if (speedFrameSegments && speedFrameSegments.length > 0) {
+      const mediaDuration = media?.duration && media.duration > 0
+        ? media.duration
+        : Math.max(...speedFrameSegments.map((s) => s.sourceEnd), 1);
       const totalLen = src.length;
       const totalTimelineDur = clipDuration || 1;
       const result: number[] = [];

@@ -566,6 +566,7 @@ export interface TimelineClip {
   speed: number;        // playback speed multiplier
   speedRamp?: SpeedRampKeyframe[]; // speed ramp keyframes (overrides flat speed)
   speedFrames?: SpeedFrame[]; // embedded speed frames for rate-stretching without splitting
+  speedFrameSourceEnd?: number; // fixed source media end time (seconds) while speedFrames are active
   isReversed?: boolean; // play clip backward (frame-accurate canvas seek engine)
   freezeFrame?: number; // hold this source time (seconds) for the entire clip duration
   animations?: ClipAnimations; // timeline keyframes for properties

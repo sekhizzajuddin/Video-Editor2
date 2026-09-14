@@ -51,7 +51,11 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
     : cachedStrip ?? lazyStrip ?? undefined;
 
   if (frameStrip && frameStrip.length > 0 && media) {
-    const totalDuration = media.duration || 1;
+    const totalDuration = media.duration && media.duration > 0
+      ? media.duration
+      : (speedFrameSegments && speedFrameSegments.length > 0
+          ? Math.max(...speedFrameSegments.map((s) => s.sourceEnd), 1)
+          : 1);
 
     // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
     if (speedFrameSegments && speedFrameSegments.length > 0) {

@@ -688,9 +688,12 @@ export interface SpeedFrameSegment {
  * Calculates the total source media span for a clip.
  */
 export function getClipSourceEnd(
-  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number },
+  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrameSourceEnd?: number },
   sourceDuration?: number
 ): number {
+  if (clip.speedFrameSourceEnd !== undefined && clip.speedFrameSourceEnd > clip.trimStart) {
+    return clip.speedFrameSourceEnd;
+  }
   const baseSpeed = Math.max(0.01, clip.speed ?? 1);
   if (sourceDuration !== undefined && sourceDuration > 0 && clip.trimEnd !== undefined) {
     return Math.max(clip.trimStart + 0.05, sourceDuration - clip.trimEnd);
@@ -704,7 +707,7 @@ export function getClipSourceEnd(
  * If 1 or more speed frames exist, calculates rates using adjacent speed frames OR clip edges when no adjacent frame exists.
  */
 export function getSpeedFrameSegments(
-  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[] },
+  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
   sourceDuration?: number
 ): SpeedFrameSegment[] {
   if (!clip.speedFrames || clip.speedFrames.length === 0) return [];
@@ -750,7 +753,7 @@ export function getSpeedFrameSegments(
  * Returns undefined if no speedFrames exist.
  */
 export function calculateSpeedFramesRamp(
-  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[] },
+  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
   sourceDuration?: number
 ): SpeedRampKeyframe[] | undefined {
   if (!clip.speedFrames || clip.speedFrames.length === 0) return undefined;
@@ -796,9 +799,10 @@ export function calculateSpeedFramesRamp(
 
 /**
  * Adds a new Speed Frame to a clip at `timelineOffset`.
- * Anchors the exact current source media time at that timeline position.
+ * Anchors the exact current source media time at that timeline position,
+ * and fixes speedFrameSourceEnd so future rate-stretching never alters source boundaries.
  */
-export function addSpeedFrameToClip<T extends { id: string; startTime: number; duration: number; trimStart: number; trimEnd?: number; speed: number; speedRamp?: SpeedRampKeyframe[]; speedFrames?: SpeedFrame[]; isReversed?: boolean; freezeFrame?: number }>(
+export function addSpeedFrameToClip<T extends { id: string; startTime: number; duration: number; trimStart: number; trimEnd?: number; speed: number; speedRamp?: SpeedRampKeyframe[]; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number; isReversed?: boolean; freezeFrame?: number }>(
   clip: T,
   timelineOffset: number,
   sourceDuration?: number
@@ -819,9 +823,13 @@ export function addSpeedFrameToClip<T extends { id: string; startTime: number; d
   const currentFrames = clip.speedFrames ? [...clip.speedFrames] : [];
   const updatedFrames = [...currentFrames, newFrame].sort((a, b) => a.timelineOffset - b.timelineOffset);
 
-  const updatedClip = {
+  // Anchor the source end so stretching/squeezing the clip never shrinks or extends source media
+  const fixedSourceEnd = clip.speedFrameSourceEnd ?? getClipSourceEnd(clip, sourceDuration);
+
+  const updatedClip: T = {
     ...clip,
     speedFrames: updatedFrames,
+    speedFrameSourceEnd: fixedSourceEnd,
   };
 
   updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, sourceDuration);
@@ -841,7 +849,7 @@ export function addSpeedFrameToClip<T extends { id: string; startTime: number; d
  * → clip gets longer. Dragging LEFT → squeezes the left segment (faster) → clip
  * gets shorter. All segments after the moved frame maintain their original speed.
  */
-export function moveSpeedFrameLine<T extends { duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[] }>(
+export function moveSpeedFrameLine<T extends { duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[]; speedFrameSourceEnd?: number }>(
   clip: T,
   frameId: string,
   newTimelineOffset: number,
@@ -855,25 +863,12 @@ export function moveSpeedFrameLine<T extends { duration: number; trimStart: numb
 
   const oldOffset = sorted[index].timelineOffset;
 
-  // Left bound: must stay after the previous speed frame (or clip start)
+  // Left bound: must stay after the previous speed frame (or clip start 0s)
   const leftBound = index > 0 ? sorted[index - 1].timelineOffset + 0.05 : 0.05;
-
-  // Right bound: reasonable max — the segment source / 0.05 (minimum speed)
-  // Calculate the source span of the segment BEFORE this speed frame
-  const prevSourceTime = index > 0 ? sorted[index - 1].sourceTime : clip.trimStart;
-  const thisSourceTime = sorted[index].sourceTime;
-  const segSourceSpan = Math.max(0.01, thisSourceTime - prevSourceTime);
-  const prevOffset = index > 0 ? sorted[index - 1].timelineOffset : 0;
-  const maxSegTimeline = segSourceSpan / 0.05; // at minimum speed 0.05x
-  const rightBound = prevOffset + Math.min(maxSegTimeline, clip.duration * 5);
-
-  const clampedOffset = Math.max(leftBound, Math.min(rightBound, newTimelineOffset));
+  const clampedOffset = Math.max(leftBound, newTimelineOffset);
   const delta = clampedOffset - oldOffset;
 
-  if (Math.abs(delta) < 0.001) return clip;
-
-  // Pin the source end BEFORE changing duration so it doesn't drift
-  const originalSourceEnd = getClipSourceEnd(clip, sourceDuration);
+  if (Math.abs(delta) < 0.0001) return clip;
 
   // Shift the current frame and ALL subsequent frames by delta
   const updatedFrames = sorted.map((f, i) => {
@@ -887,18 +882,15 @@ export function moveSpeedFrameLine<T extends { duration: number; trimStart: numb
   });
 
   // Update clip duration — stretching extends clip, squeezing shrinks it
-  const newDuration = Math.max(0.1, clip.duration + delta);
+  const newDuration = Math.max(0.05, clip.duration + delta);
+  const fixedSourceEnd = clip.speedFrameSourceEnd ?? getClipSourceEnd(clip, sourceDuration);
 
   const updatedClip: T = {
     ...clip,
     speedFrames: updatedFrames,
     duration: newDuration,
+    speedFrameSourceEnd: fixedSourceEnd,
   };
-
-  // Pin source end: set trimEnd so getClipSourceEnd returns the same value
-  if (sourceDuration !== undefined && sourceDuration > 0) {
-    (updatedClip as any).trimEnd = Math.max(0, sourceDuration - originalSourceEnd);
-  }
 
   updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, sourceDuration);
   return updatedClip;
@@ -908,7 +900,7 @@ export function moveSpeedFrameLine<T extends { duration: number; trimStart: numb
  * Moves a Speed Frame Screw Head (Repositioning within clip).
  * Re-samples the media time at the new offset to slide the marker without distorting the overall speed curve.
  */
-export function moveSpeedFrameScrew<T extends { id: string; startTime: number; duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[]; isReversed?: boolean; freezeFrame?: number }>(
+export function moveSpeedFrameScrew<T extends { id: string; startTime: number; duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[]; speedFrameSourceEnd?: number; isReversed?: boolean; freezeFrame?: number }>(
   clip: T,
   frameId: string,
   newTimelineOffset: number,
@@ -933,9 +925,10 @@ export function moveSpeedFrameScrew<T extends { id: string; startTime: number; d
     return f;
   });
 
-  const updatedClip = {
+  const updatedClip: T = {
     ...clip,
     speedFrames: updatedFrames,
+    speedFrameSourceEnd: clip.speedFrameSourceEnd ?? getClipSourceEnd(clip, sourceDuration),
   };
 
   updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, sourceDuration);
@@ -944,9 +937,9 @@ export function moveSpeedFrameScrew<T extends { id: string; startTime: number; d
 
 /**
  * Removes a Speed Frame from a clip.
- * If no speed frames remain, restores uniform playback.
+ * If no speed frames remain, restores uniform playback and original timeline duration.
  */
-export function removeSpeedFrameFromClip<T extends { duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[] }>(
+export function removeSpeedFrameFromClip<T extends { duration: number; trimStart: number; trimEnd?: number; speed: number; speedFrames?: SpeedFrame[]; speedRamp?: SpeedRampKeyframe[]; speedFrameSourceEnd?: number }>(
   clip: T,
   frameId: string,
   sourceDuration?: number
@@ -955,14 +948,20 @@ export function removeSpeedFrameFromClip<T extends { duration: number; trimStart
 
   const remaining = clip.speedFrames.filter((f) => f.id !== frameId);
   if (remaining.length === 0) {
+    const sourceEnd = clip.speedFrameSourceEnd ?? getClipSourceEnd(clip, sourceDuration);
+    const sourceSpan = Math.max(0.05, sourceEnd - clip.trimStart);
+    const restoredDuration = sourceSpan / Math.max(0.01, clip.speed ?? 1);
+
     return {
       ...clip,
       speedFrames: undefined,
       speedRamp: undefined,
+      speedFrameSourceEnd: undefined,
+      duration: restoredDuration,
     };
   }
 
-  const updatedClip = {
+  const updatedClip: T = {
     ...clip,
     speedFrames: remaining,
   };

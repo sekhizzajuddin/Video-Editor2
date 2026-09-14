@@ -238,6 +238,8 @@ function DesktopApp() {
           const storeState = useEditorStore.getState();
           if (storeState.selectedExportRegionId) {
             storeState.removeExportRegion(storeState.selectedExportRegionId);
+          } else if (storeState.selectedSpeedFrame) {
+            storeState.removeSpeedFrame(storeState.selectedSpeedFrame.clipId, storeState.selectedSpeedFrame.frameId);
           } else if (storeState.selectedKeyframeLines.length > 0) {
             removeSelectedKeyframeLines();
           } else if (storeState.selectedClipIds.length > 0) {

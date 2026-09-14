@@ -3034,6 +3034,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedClipIds: clipIds,
       selectedClipId: clipIds[0] || null,
       selectedTransitionClipId: null,
+      selectedSpeedFrame: null,
     }),
   selectTrack: (trackId) => set({ selectedTrackId: trackId }),
 
@@ -5286,7 +5287,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
     const updatedClip = moveSpeedFrameLine(clip, frameId, newTimelineOffset, mediaItem?.duration);
 
-    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+    let { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
       if (pipId !== found.pipId || track.id !== found.track.id) return track;
       return {
         ...track,
@@ -5294,10 +5295,30 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
 
+    // Also sync linked clip (e.g. unlinked audio/video pair)
+    if (clip.linkedClipId) {
+      const linkedFound = findClipDeep({ ...state, tracks, pipWindows }, clip.linkedClipId);
+      if (linkedFound) {
+        const linkedMedia = state.mediaLibrary.find((m) => m.id === linkedFound.clip.mediaId);
+        const updatedLinked = moveSpeedFrameLine(linkedFound.clip, frameId, newTimelineOffset, linkedMedia?.duration);
+        const res = mapTracksDeep({ ...state, tracks, pipWindows }, (track, pipId) => {
+          if (pipId !== linkedFound.pipId || track.id !== linkedFound.track.id) return track;
+          return {
+            ...track,
+            clips: track.clips.map((c) => (c.id === linkedFound.clip.id ? updatedLinked : c)),
+          };
+        });
+        tracks = res.tracks;
+        pipWindows = res.pipWindows;
+      }
+    }
+
     set({ tracks, pipWindows });
+    get().recalcTotalDuration();
+
     const movedFrame = updatedClip.speedFrames?.find((f) => f.id === frameId);
     if (movedFrame) {
-      setTrimPreviewTime(clip.startTime + movedFrame.timelineOffset);
+      setTrimPreviewTime(updatedClip.startTime + movedFrame.timelineOffset);
     }
   },
 
@@ -5310,7 +5331,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
     const updatedClip = moveSpeedFrameScrew(clip, frameId, newTimelineOffset, mediaItem?.duration);
 
-    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+    let { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
       if (pipId !== found.pipId || track.id !== found.track.id) return track;
       return {
         ...track,
@@ -5318,10 +5339,27 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
 
+    if (clip.linkedClipId) {
+      const linkedFound = findClipDeep({ ...state, tracks, pipWindows }, clip.linkedClipId);
+      if (linkedFound) {
+        const linkedMedia = state.mediaLibrary.find((m) => m.id === linkedFound.clip.mediaId);
+        const updatedLinked = moveSpeedFrameScrew(linkedFound.clip, frameId, newTimelineOffset, linkedMedia?.duration);
+        const res = mapTracksDeep({ ...state, tracks, pipWindows }, (track, pipId) => {
+          if (pipId !== linkedFound.pipId || track.id !== linkedFound.track.id) return track;
+          return {
+            ...track,
+            clips: track.clips.map((c) => (c.id === linkedFound.clip.id ? updatedLinked : c)),
+          };
+        });
+        tracks = res.tracks;
+        pipWindows = res.pipWindows;
+      }
+    }
+
     set({ tracks, pipWindows });
     const movedFrame = updatedClip.speedFrames?.find((f) => f.id === frameId);
     if (movedFrame) {
-      setTrimPreviewTime(clip.startTime + movedFrame.timelineOffset);
+      setTrimPreviewTime(updatedClip.startTime + movedFrame.timelineOffset);
     }
   },
 
@@ -5331,6 +5369,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (sf) {
       get().resolveOverlaps([sf.clipId]);
     }
+    get().recalcTotalDuration();
     get().saveSnapshot('Adjust Speed Frame');
   },
 
@@ -5343,13 +5382,30 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
     const updatedClip = removeSpeedFrameFromClip(clip, frameId, mediaItem?.duration);
 
-    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+    let { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
       if (pipId !== found.pipId || track.id !== found.track.id) return track;
       return {
         ...track,
         clips: track.clips.map((c) => (c.id === clip.id ? updatedClip : c)),
       };
     });
+
+    if (clip.linkedClipId) {
+      const linkedFound = findClipDeep({ ...state, tracks, pipWindows }, clip.linkedClipId);
+      if (linkedFound) {
+        const linkedMedia = state.mediaLibrary.find((m) => m.id === linkedFound.clip.mediaId);
+        const updatedLinked = removeSpeedFrameFromClip(linkedFound.clip, frameId, linkedMedia?.duration);
+        const res = mapTracksDeep({ ...state, tracks, pipWindows }, (track, pipId) => {
+          if (pipId !== linkedFound.pipId || track.id !== linkedFound.track.id) return track;
+          return {
+            ...track,
+            clips: track.clips.map((c) => (c.id === linkedFound.clip.id ? updatedLinked : c)),
+          };
+        });
+        tracks = res.tracks;
+        pipWindows = res.pipWindows;
+      }
+    }
 
     const isCurrent = state.selectedSpeedFrame?.frameId === frameId;
     set({
@@ -5361,6 +5417,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (isCurrent) {
       setTrimPreviewTime(null);
     }
+    get().recalcTotalDuration();
+    get().resolveOverlaps([clipId]);
     get().saveSnapshot('Remove Speed Frame');
   },
 
@@ -5372,23 +5430,20 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const clip = found.clip;
     const mediaItem = state.mediaLibrary.find((m) => m.id === clip.mediaId);
 
-    // Recalculate the original duration from source content
-    // sourceSpan = sourceEnd - trimStart; duration = sourceSpan / baseSpeed
-    let restoredDuration = clip.duration;
-    if (mediaItem && mediaItem.duration > 0) {
-      const sourceEnd = mediaItem.duration - (clip.trimEnd || 0);
-      const sourceSpan = Math.max(0.05, sourceEnd - clip.trimStart);
-      restoredDuration = sourceSpan / Math.max(0.01, clip.speed || 1);
-    }
+    // Recalculate original duration from anchored source end
+    const sourceEnd = clip.speedFrameSourceEnd ?? (mediaItem && mediaItem.duration > 0 ? mediaItem.duration - (clip.trimEnd || 0) : clip.trimStart + clip.duration * (clip.speed || 1));
+    const sourceSpan = Math.max(0.05, sourceEnd - clip.trimStart);
+    const restoredDuration = sourceSpan / Math.max(0.01, clip.speed || 1);
 
     const updatedClip = {
       ...clip,
       speedFrames: undefined,
       speedRamp: undefined,
+      speedFrameSourceEnd: undefined,
       duration: restoredDuration,
     };
 
-    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+    let { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
       if (pipId !== found.pipId || track.id !== found.track.id) return track;
       return {
         ...track,
@@ -5396,12 +5451,35 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       };
     });
 
+    if (clip.linkedClipId) {
+      const linkedFound = findClipDeep({ ...state, tracks, pipWindows }, clip.linkedClipId);
+      if (linkedFound) {
+        const updatedLinked = {
+          ...linkedFound.clip,
+          speedFrames: undefined,
+          speedRamp: undefined,
+          speedFrameSourceEnd: undefined,
+          duration: restoredDuration,
+        };
+        const res = mapTracksDeep({ ...state, tracks, pipWindows }, (track, pipId) => {
+          if (pipId !== linkedFound.pipId || track.id !== linkedFound.track.id) return track;
+          return {
+            ...track,
+            clips: track.clips.map((c) => (c.id === linkedFound.clip.id ? updatedLinked : c)),
+          };
+        });
+        tracks = res.tracks;
+        pipWindows = res.pipWindows;
+      }
+    }
+
     set({
       tracks,
       pipWindows,
       selectedSpeedFrame: null,
     });
     setTrimPreviewTime(null);
+    get().recalcTotalDuration();
     get().resolveOverlaps([clipId]);
     get().saveSnapshot('Reset Speed');
   },
