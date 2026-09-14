@@ -34,6 +34,8 @@ import {
   Crosshair,
   Film,
   Layers,
+  Check,
+  Repeat,
 } from 'lucide-react';
 import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
@@ -429,6 +431,15 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [isClipDetailsOpen, setIsClipDetailsOpen] = useState(true);
+
+  const dynamicStretch = useEditorStore((s) => s.dynamicStretch);
+  const startDynamicStretch = useEditorStore((s) => s.startDynamicStretch);
+  const confirmDynamicStretchMark = useEditorStore((s) => s.confirmDynamicStretchMark);
+  const toggleDynamicStretchLoop = useEditorStore((s) => s.toggleDynamicStretchLoop);
+  const applyDynamicStretch = useEditorStore((s) => s.applyDynamicStretch);
+  const cancelDynamicStretch = useEditorStore((s) => s.cancelDynamicStretch);
+  const setDynamicStretchMaintainDuration = useEditorStore((s) => s.setDynamicStretchMaintainDuration);
+  const isPlaying = useEditorStore((s) => s.isPlaying);
 
   const currentTab = (isMobileView && mobileCategory)
     ? (mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : (mobileCategory as any))
@@ -1022,8 +1033,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
 
 
-  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
   const isRamped = selectedClip ? !!(selectedClip.speedRamp && selectedClip.speedRamp.length >= 2) : false;
   const hexToRgb = (hex: string): [number, number, number] => {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -1179,33 +1188,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   //  - Clicks that immediately follow a drag/click are suppressed so a drag
   //    release can never create a stray keyframe.
   // ─────────────────────────────────────────────────────────────────────────
-  const rampDragRef = useRef<{
-    clipId: string;
-    idx: number;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    moved: boolean;
-  } | null>(null);
-  const suppressRampClickRef = useRef(0);
-
-  // Source seconds the clip actually covers on the graph's X axis.
-  const rampGraphSpan = useCallback((clip: any, mediaDuration: number) => {
-    return Math.max(0.001, mediaDuration - (clip.trimStart ?? 0) - (clip.trimEnd ?? 0));
-  }, []);
-
-  const applyRampUpdate = useCallback((liveClip: any, newRamp: SpeedRampKeyframe[], mediaDuration: number) => {
-    const tempEngine = new SpeedRampEngine(newRamp);
-    const sourceEnd = mediaDuration - liveClip.trimEnd;
-    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(liveClip.trimStart);
-    updateClip(liveClip.id, {
-      speedRamp: newRamp,
-      duration: Math.max(0.1, newDuration),
-    }, { ripple: true });
-  }, [updateClip]);
-
-  // Blob sources live on media items at runtime but aren't part of MediaItem's
-  // public type — narrow locally.
   const mediaHasAudioSource = (m: (typeof mediaLibrary)[number]) =>
     !!(m.url || (m as unknown as { _fileBlob?: Blob | File | null; _audioBlob?: Blob | File | null })._fileBlob
       || (m as unknown as { _audioBlob?: Blob | File | null })._audioBlob);
@@ -1218,132 +1200,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       }).length >= 2,
     [tracks, mediaLibrary]
   );
-
-  const handleRampPointerDown = (e: React.PointerEvent, idx: number) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const svg = svgRef.current;
-    if (svg) {
-      try { svg.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
-    }
-    rampDragRef.current = {
-      clipId: selectedClip?.id ?? '',
-      idx,
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      moved: false,
-    };
-    setDraggingIndex(idx);
-  };
-
-  const handleRampPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    const drag = rampDragRef.current;
-    if (!drag || e.pointerId !== drag.pointerId) return;
-    const svg = svgRef.current;
-    if (!svg) return;
-
-    if (Math.abs(e.clientX - drag.startX) > 3 || Math.abs(e.clientY - drag.startY) > 3) {
-      drag.moved = true;
-    }
-
-    const rect = svg.getBoundingClientRect();
-    if (rect.width <= 0.001 || rect.height <= 0.001) return;
-    let p = (e.clientX - rect.left) / rect.width;
-    const sY = (e.clientY - rect.top) / rect.height;
-    p = Math.max(0, Math.min(1, p));
-    let speed = 0.1 + (1 - sY) * 3.9;
-    speed = Math.max(0.1, Math.min(4.0, speed));
-    speed = Math.round(speed * 100) / 100;
-
-    // Read the LATEST clip state — never a stale closure.
-    const state = useEditorStore.getState();
-    const live = findClipDeep(state, drag.clipId)?.clip;
-    if (!live || !live.speedRamp || live.speedRamp.length < 2) return;
-    if (drag.idx >= live.speedRamp.length) return;
-
-    const mediaItem = state.mediaLibrary.find((m) => m.id === live.mediaId);
-    const maxDuration = mediaItem ? mediaItem.duration : live.duration;
-    const span = rampGraphSpan(live, maxDuration);
-    const isBoundary = drag.idx === 0 || drag.idx === live.speedRamp.length - 1;
-
-    const newRamp = [...live.speedRamp];
-    // Linear pointer → source mapping: the keyframe follows the cursor 1:1.
-    let newSourceTime = live.trimStart + p * span;
-    if (isBoundary) {
-      // Boundary keyframes are pinned horizontally — only speed changes.
-      newSourceTime = drag.idx === 0 ? 0 : maxDuration;
-    } else {
-      // Clamp between neighbours + the clip's covered source range.
-      const lo = Math.max(live.speedRamp[drag.idx - 1].sourceTime + 0.05, live.trimStart + 0.0001);
-      const hi = Math.min(live.speedRamp[drag.idx + 1].sourceTime - 0.05, live.trimStart + span - 0.0001);
-      newSourceTime = Math.max(lo, Math.min(hi, newSourceTime));
-    }
-    newRamp[drag.idx] = { ...newRamp[drag.idx], sourceTime: newSourceTime, speed };
-    newRamp.sort((a, b) => a.sourceTime - b.sourceTime);
-
-    applyRampUpdate(live, newRamp, maxDuration);
-  };
-
-  const handleRampPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
-    const drag = rampDragRef.current;
-    if (!drag || e.pointerId !== drag.pointerId) return;
-    rampDragRef.current = null;
-    setDraggingIndex(null);
-    const svg = svgRef.current;
-    if (svg) {
-      try { svg.releasePointerCapture?.(e.pointerId); } catch { /* unsupported */ }
-    }
-    // Suppress the click that follows any pointer interaction on the graph so
-    // releasing a drag (or double-clicking a keyframe away) never spawns a
-    // stray keyframe at the release point.
-    suppressRampClickRef.current = Date.now();
-    if (drag.moved) {
-      scheduleSaveSnapshot();
-    }
-  };
-
-  const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
-    const target = e.target as SVGElement;
-    if (target.tagName === 'circle') return;
-    if (Date.now() - suppressRampClickRef.current < 350) return;
-
-    if (!svgRef.current || !selectedClip) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    if (rect.width <= 0.001) return;
-    let p = (e.clientX - rect.left) / rect.width;
-    let sY = (e.clientY - rect.top) / rect.height;
-
-    p = Math.max(0, Math.min(1, p));
-    let speed = 0.1 + (1 - sY) * 3.9;
-    speed = Math.max(0.1, Math.min(4.0, speed));
-    speed = Math.round(speed * 100) / 100;
-
-    const state = useEditorStore.getState();
-    const live = findClipDeep(state, selectedClip.id)?.clip || selectedClip;
-    const mediaItem = state.mediaLibrary.find((m) => m.id === live.mediaId);
-    const maxDuration = mediaItem ? mediaItem.duration : live.duration;
-    const sourceEnd = maxDuration - live.trimEnd;
-
-    // The graph's X axis is the clip's covered SOURCE range — the same linear
-    // mapping the drag uses — so the new keyframe lands exactly where the
-    // user clicked (no engine inversion needed).
-    const span = rampGraphSpan(live, maxDuration);
-    const newSourceTime = live.trimStart + p * span;
-
-    const minSource = live.trimStart + 0.05;
-    const maxSource = sourceEnd - 0.05;
-    const clampedGuess = Math.max(minSource, Math.min(maxSource, newSourceTime));
-    if (clampedGuess <= minSource || clampedGuess >= maxSource) return;
-
-    const ramp = [...(live.speedRamp || [])];
-    const newId = `kf-${Date.now()}-${Math.random()}`;
-    ramp.push({ id: newId, sourceTime: clampedGuess, speed, easing: 'linear' });
-    const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
-
-    applyRampUpdate(live, sortedRamp, maxDuration);
-    scheduleSaveSnapshot();
-  };
 
   const toggleSection = (section: string) => {
     setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -5668,433 +5524,103 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
             </div>
 
-            {/* Speed Ramping Toggle & Editor */}
-            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-[var(--theme-text-primary)] font-semibold">Speed Ramping</label>
-                <input
-                  type="checkbox"
-                  checked={isRamped}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      const currentSpeed = selectedClip.speed || 1.0;
-                      const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                      const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                      updateClip(selectedClip.id, {
-                        speedRamp: [
-                          { id: 'start', sourceTime: 0.0, speed: currentSpeed, easing: 'linear' },
-                          { id: 'end', sourceTime: maxDuration, speed: currentSpeed, easing: 'linear' },
-                        ],
-                      }, { ripple: true });
-                    } else {
-                      updateClip(selectedClip.id, { speedRamp: undefined }, { ripple: true });
-                    }
-                    scheduleSaveSnapshot();
-                  }}
-                  className="rounded border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] text-amber-500 focus:ring-0 cursor-pointer h-4 w-4"
-                />
-              </div>
+            {/* Dynamic Speed Ramping (Dynamic Stretch) */}
+            {(() => {
+              const isClipInStretch = dynamicStretch?.isActive && dynamicStretch.clipId === selectedClip.id;
+              const speedRatio = isClipInStretch && dynamicStretch.originalRegionDuration > 0 && dynamicStretch.stretchedDuration > 0
+                ? dynamicStretch.originalRegionDuration / dynamicStretch.stretchedDuration
+                : 1;
 
-              {isRamped && (
-                <div className="space-y-3 pt-2">
-                  {/* SVG Editor */}
-                  <div className="relative bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded p-1">
-                    <svg
-                      ref={svgRef}
-                      viewBox="0 0 240 100"
-                      preserveAspectRatio="none"
-                      width="100%"
-                      height="112"
-                      className="w-full h-28 select-none"
-                      style={{
-                        touchAction: 'none',
-                        // Lock the cursor for the whole drag so it never flickers
-                        // between grab/crosshair while the keyframe re-renders.
-                        cursor: draggingIndex !== null ? 'grabbing' : 'crosshair',
-                      }}
-                      onClick={handleSvgClick}
-                      onPointerMove={handleRampPointerMove}
-                      onPointerUp={handleRampPointerUp}
-                      onPointerCancel={handleRampPointerUp}
-                    >
-                      {/* Grid Lines */}
-                      {[0.5, 1.0, 2.0, 3.0, 4.0].map((s) => {
-                        const y = 100 - ((s - 0.1) / 3.9) * 90 - 5;
-                        return (
-                          <g key={s}>
-                            <line
-                              x1={0}
-                              y1={y}
-                              x2={240}
-                              y2={y}
-                              stroke={s === 1.0 ? '#555' : '#333'}
-                              strokeWidth={s === 1.0 ? 1 : 0.5}
-                              strokeDasharray={s === 1.0 ? '' : '3 3'}
-                            />
-                            <text
-                              x={4}
-                              y={y - 2}
-                              fill="#666"
-                              fontSize="6"
-                              className="pointer-events-none select-none font-mono"
+              return (
+                <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-[var(--theme-text-primary)]">
+                      <Gauge className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Dynamic Speed Ramping</span>
+                    </div>
+                    {isClipInStretch && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded-full bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                        {dynamicStretch.isConfirmed ? 'Stretch Mode' : 'Marking'}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-[10px] text-[var(--theme-text-muted)] leading-relaxed">
+                    Mark any region on this clip to squeeze (speed up) or extend (slow down) with audio sync and zero export errors.
+                  </p>
+
+                  {isClipInStretch ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between text-[11px] px-2 py-1.5 bg-black/10 dark:bg-white/5 rounded border border-[var(--theme-border)]/50">
+                        <span className="text-[var(--theme-text-muted)]">Region Speed:</span>
+                        <span className="font-bold text-amber-500 font-mono">
+                          {speedRatio.toFixed(2)}x {speedRatio > 1.05 ? '(Fast)' : speedRatio < 0.95 ? '(Slow)' : '(Normal)'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 pt-1">
+                        {!dynamicStretch.isConfirmed ? (
+                          <>
+                            <button
+                              onClick={toggleDynamicStretchLoop}
+                              className={`flex-1 py-1.5 px-2 text-[10px] font-medium rounded flex items-center justify-center gap-1 transition-all ${
+                                dynamicStretch.isLoopingRegion && isPlaying
+                                  ? 'bg-amber-500 text-black font-bold animate-pulse'
+                                  : 'bg-black/10 dark:bg-white/5 text-[var(--theme-text-primary)] hover:bg-black/20 dark:hover:bg-white/10'
+                              }`}
                             >
-                              {s}x
-                            </text>
-                          </g>
-                        );
-                      })}
-
-                      {/* Slow-mo zone shading */}
-                      <rect
-                        x={0}
-                        y={100 - ((1.0 - 0.1) / 3.9) * 90 - 5}
-                        width={240}
-                        height={((1.0 - 0.1) / 3.9) * 90}
-                        fill="rgba(59, 130, 246, 0.03)"
-                        className="pointer-events-none"
-                      />
-
-                      {/* Fast zone shading */}
-                      <rect
-                        x={0}
-                        y={5}
-                        width={240}
-                        height={100 - ((1.0 - 0.1) / 3.9) * 90 - 10}
-                        fill="rgba(239, 68, 68, 0.03)"
-                        className="pointer-events-none"
-                      />
-
-                      {/* The Spline Curve */}
-                      <path
-                        d={(() => {
-                          const pts: string[] = [];
-                          const ramp = selectedClip.speedRamp || [];
-                          if (ramp.length >= 2) {
-                            const engine = getSpeedRampEngine(selectedClip.id, ramp);
-                            const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                            const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                            // Sample the covered SOURCE range linearly — the same
-                            // axis the keyframe dots use — so the curve passes
-                            // exactly through every keyframe at all times.
-                            const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
-                            for (let x = 0; x <= 240; x += 4) {
-                              const sourceTime = (selectedClip.trimStart ?? 0) + (x / 240) * span;
-                              const speed = engine.getSpeedAtSourceTime(sourceTime);
-                              const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
-                              pts.push(`${x},${y}`);
-                            }
-                          } else {
-                            const speed = ramp[0]?.speed ?? 1;
-                            const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
-                            pts.push(`0,${y}`, `240,${y}`);
-                          }
-                          return `M ${pts.join(' L ')}`;
-                        })()}
-                        stroke="#f59e0b"
-                        strokeWidth={2}
-                        fill="none"
-                        className="pointer-events-none"
-                      />
-
-                      {/* Playhead Indicator */}
-                      {(() => {
-                        const isPlayheadInClip =
-                          currentTime >= selectedClip.startTime &&
-                          currentTime <= selectedClip.startTime + selectedClip.duration;
-                        if (!isPlayheadInClip) return null;
-                        const p = (currentTime - selectedClip.startTime) / selectedClip.duration;
-                        // Map the playhead through the same SOURCE axis as the
-                        // keyframes so the playhead dot sits exactly ON the ramp
-                        // curve at the source position currently being played.
-                        const ramp = selectedClip.speedRamp || [];
-                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                        const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
-                        const engine = getSpeedRampEngine(selectedClip.id, ramp);
-                        const localStart = engine.sourceToTimeline(selectedClip.trimStart);
-                        const sourceTime = engine.timelineToSource(localStart + p * selectedClip.duration);
-                        const x = Math.max(0, Math.min(240, ((sourceTime - (selectedClip.trimStart ?? 0)) / span) * 240));
-                        const speed = engine.getSpeedAtSourceTime(sourceTime);
-                        const y = 100 - ((speed - 0.1) / 3.9) * 90 - 5;
-                        return (
-                          <g>
-                            <line
-                              x1={x}
-                              y1={0}
-                              x2={x}
-                              y2={100}
-                              stroke="#ec4899"
-                              strokeWidth={1.5}
-                              strokeDasharray="2 2"
-                              className="pointer-events-none"
-                            />
-                            <circle
-                              cx={x}
-                              cy={y}
-                              r={4}
-                              fill="#ec4899"
-                              className="pointer-events-none"
-                            />
-                          </g>
-                        );
-                      })()}
-
-                      {/* Keyframe Draggable Handles */}
-                      {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
-                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                        // X axis is the clip's covered SOURCE range — the same
-                        // linear mapping the drag handler uses, so the keyframe
-                        // follows the pointer 1:1 and other keyframes never move.
-                        const span = Math.max(0.001, maxDuration - (selectedClip.trimStart ?? 0) - (selectedClip.trimEnd ?? 0));
-                        const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
-                        const rawX = ((kf.sourceTime - (selectedClip.trimStart ?? 0)) / span) * 240;
-                        const x = isBoundary ? (idx === 0 ? 0 : 240) : Math.max(0, Math.min(240, rawX));
-                        const y = 100 - ((kf.speed - 0.1) / 3.9) * 90 - 5;
-                        return (
-                          <circle
-                            key={kf.id ?? idx}
-                            cx={x}
-                            cy={y}
-                            r={draggingIndex === idx ? 5 : 3.5}
-                            fill={draggingIndex === idx ? '#ec4899' : '#f59e0b'}
-                            stroke="#fff"
-                            strokeWidth={1}
-                            className={draggingIndex === idx
-                              ? 'cursor-grabbing'
-                              : 'cursor-grab'
-                            }
-                            style={{ cursor: draggingIndex === idx ? 'grabbing' : 'grab' }}
-                            onPointerDown={(e) => handleRampPointerDown(e, idx)}
-                            onDoubleClick={(e) => {
-                              e.stopPropagation();
-                              if (isBoundary) return;
-                              const ramp = [...(selectedClip.speedRamp || [])];
-                              if (ramp.length > 2) {
-                                ramp.splice(idx, 1);
-                                const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                                const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                                const tempEngine = new SpeedRampEngine(ramp);
-                                const sourceEnd = maxDuration - selectedClip.trimEnd;
-                                const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-                                updateClip(selectedClip.id, { 
-                                  speedRamp: ramp,
-                                  duration: Math.max(0.1, newDuration)
-                                }, { ripple: true });
-                                scheduleSaveSnapshot();
-                              }
-                            }}
+                              <Repeat className="w-3 h-3" />
+                              <span>{dynamicStretch.isLoopingRegion && isPlaying ? 'Looping' : 'Audition'}</span>
+                            </button>
+                            <button
+                              onClick={confirmDynamicStretchMark}
+                              className="flex-1 py-1.5 px-2 text-[10px] font-bold rounded bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center gap-1 shadow-sm transition-all"
+                            >
+                              <Check className="w-3 h-3" />
+                              <span>Confirm</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={applyDynamicStretch}
+                            className="flex-1 py-1.5 px-2 text-[10px] font-bold rounded bg-amber-500 hover:bg-amber-400 text-black flex items-center justify-center gap-1 shadow-sm transition-all"
                           >
-                            <title>
-                              {isBoundary ? "Drag vertically to adjust speed" : "Drag to adjust position & speed. Double-click to delete."}
-                            </title>
-                          </circle>
-                        );
-                      })}
-                    </svg>
-                  </div>
-                  <div className="text-[10px] text-[var(--theme-text-muted)] flex justify-between px-1 select-none">
-                    <span>Double-click graph to add. Double-click keyframe to delete.</span>
-                  </div>
+                            <Check className="w-3 h-3" />
+                            <span>Apply Dynamic Stretch</span>
+                          </button>
+                        )}
 
-                  {/* Preset Buttons */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-[var(--theme-text-muted)] block font-medium">Speed Ramp Presets</label>
-                    <div className="grid grid-cols-3 gap-1">
-                      {[
-                        { id: 'slowMo', label: 'Slow-Mo' },
-                        { id: 'speedUp', label: 'Speed Up' },
-                        { id: 'slowDown', label: 'Slow Down' },
-                        { id: 'flash', label: 'Flash' },
-                        { id: 'cinematic', label: 'Cinematic' },
-                      ].map((preset) => (
                         <button
-                          key={preset.id}
-                          onClick={() => {
-                            const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                            const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                            const presetId = preset.id as keyof typeof PRESETS_RATIOS;
-                            const ratios = PRESETS_RATIOS[presetId];
-                            const ramp = ratios.map((r, rIdx) => ({
-                              id: `kf-${rIdx}-${Date.now()}-${Math.random()}`,
-                              sourceTime: r.ratio * maxDuration,
-                              speed: r.speed,
-                              easing: r.easing
-                            }));
-                            const tempEngine = new SpeedRampEngine(ramp);
-                            const sourceEnd = maxDuration - selectedClip.trimEnd;
-                            const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-
-                            updateClip(selectedClip.id, { 
-                              speedRamp: ramp,
-                              duration: Math.max(0.1, newDuration)
-                            }, { ripple: true });
-                            scheduleSaveSnapshot();
-                          }}
-                          className="px-1.5 py-1 bg-[var(--theme-bg-subpanel)] hover:bg-[#333] border border-[var(--theme-border)] rounded text-[10px] text-[var(--theme-text-primary)] transition-colors text-center truncate focus:outline-none"
+                          onClick={cancelDynamicStretch}
+                          title="Cancel Stretch"
+                          className="p-1 rounded text-[var(--theme-text-muted)] hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
                         >
-                          {preset.label}
+                          <X className="w-3.5 h-3.5" />
                         </button>
-                      ))}
-                      <button
-                        onClick={() => {
-                          const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                          const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                          const currentSpeed = selectedClip.speed || 1.0;
-                          const ramp = [
-                            { id: 'start', sourceTime: 0.0, speed: currentSpeed, easing: 'linear' as const },
-                            { id: 'end', sourceTime: maxDuration, speed: currentSpeed, easing: 'linear' as const },
-                          ];
-                          const tempEngine = new SpeedRampEngine(ramp);
-                          const sourceEnd = maxDuration - selectedClip.trimEnd;
-                          const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-                          updateClip(selectedClip.id, {
-                            speedRamp: ramp,
-                            duration: Math.max(0.1, newDuration)
-                          }, { ripple: true });
-                          scheduleSaveSnapshot();
-                        }}
-                        className="px-1.5 py-1 bg-[var(--theme-bg-subpanel)] hover:bg-red-950/40 hover:border-red-900 border border-[var(--theme-border)] rounded text-[10px] text-[#ff6b6b] transition-colors text-center focus:outline-none"
-                      >
-                        Reset Ramp
-                      </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <button
+                      onClick={() => startDynamicStretch(selectedClip.id)}
+                      className="w-full py-1.5 px-2.5 text-[11px] font-semibold rounded bg-amber-500 hover:bg-amber-400 text-black flex items-center justify-center gap-1.5 shadow-sm transition-all"
+                    >
+                      <Gauge className="w-3 h-3" />
+                      <span>Mark Region for Speed Ramp</span>
+                    </button>
+                  )}
 
-                  {/* Keyframe List Details */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-[var(--theme-text-muted)] block font-medium">Keyframes</label>
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
-                      {(selectedClip.speedRamp || []).map((kf: any, idx: number) => {
-                        const isBoundary = idx === 0 || idx === (selectedClip.speedRamp || []).length - 1;
-                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                        const maxDuration = mediaItem ? mediaItem.duration : selectedClip.duration;
-                        return (
-                          <div
-                            key={idx}
-                            className="flex flex-col gap-1 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded p-1.5 text-[10px]"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-amber-500 font-mono font-bold">Keyframe #{idx + 1}</span>
-                              <button
-                                disabled={isBoundary}
-                                onClick={() => {
-                                  const ramp = [...(selectedClip.speedRamp || [])];
-                                  ramp.splice(idx, 1);
-                                  const tempEngine = new SpeedRampEngine(ramp);
-                                  const sourceEnd = maxDuration - selectedClip.trimEnd;
-                                  const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-                                  updateClip(selectedClip.id, { 
-                                    speedRamp: ramp,
-                                    duration: Math.max(0.1, newDuration)
-                                  }, { ripple: true });
-                                  scheduleSaveSnapshot();
-                                }}
-                                className="text-red-400 hover:text-red-500 disabled:opacity-30 disabled:pointer-events-none transition-colors focus:outline-none"
-                                title="Delete Keyframe"
-                              >
-                                <Trash2 size={11} />
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-3 gap-1 items-center">
-                              <div className="flex items-center gap-1">
-                                <span className="text-[var(--theme-text-muted)]">Time:</span>
-                                {isBoundary ? (
-                                  <span className="text-white font-mono">{(kf?.sourceTime ?? 0).toFixed(1)}s</span>
-                                ) : (
-                                  <input
-                                    type="number"
-                                    min={0.01}
-                                    max={maxDuration - 0.01}
-                                    step={0.1}
-                                    value={Math.round(kf.sourceTime * 100) / 100}
-                                    onChange={(e) => {
-                                      const val = Math.max(0.01, Math.min(maxDuration - 0.01, Number(e.target.value)));
-                                      const ramp = [...(selectedClip.speedRamp || [])];
-                                      const minSource = idx > 0 ? ramp[idx - 1].sourceTime + 0.05 : 0.0;
-                                      const maxSource = idx < ramp.length - 1 ? ramp[idx + 1].sourceTime - 0.05 : maxDuration;
-                                      ramp[idx] = {
-                                        ...kf,
-                                        sourceTime: Math.max(minSource, Math.min(maxSource, val)),
-                                      };
-                                      const sortedRamp = [...ramp].sort((a, b) => a.sourceTime - b.sourceTime);
-                                      const tempEngine = new SpeedRampEngine(sortedRamp);
-                                      const sourceEnd = maxDuration - selectedClip.trimEnd;
-                                      const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-                                      updateClip(selectedClip.id, { 
-                                        speedRamp: sortedRamp,
-                                        duration: Math.max(0.1, newDuration)
-                                      }, { ripple: true });
-                                    }}
-                                    onBlur={() => scheduleSaveSnapshot()}
-                                    className="w-12 bg-black border border-[var(--theme-border)] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
-                                  />
-                                )}
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-[var(--theme-text-muted)]">Speed:</span>
-                                <input
-                                  type="number"
-                                  min={0.1}
-                                  max={4.0}
-                                  step={0.1}
-                                  value={kf.speed}
-                                  onChange={(e) => {
-                                    const val = Math.max(0.1, Math.min(4.0, Number(e.target.value)));
-                                    const ramp = [...(selectedClip.speedRamp || [])];
-                                    ramp[idx] = { ...kf, speed: val };
-                                    const tempEngine = new SpeedRampEngine(ramp);
-                                    const sourceEnd = maxDuration - selectedClip.trimEnd;
-                                    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-                                    updateClip(selectedClip.id, { 
-                                      speedRamp: ramp,
-                                      duration: Math.max(0.1, newDuration)
-                                    }, { ripple: true });
-                                  }}
-                                  onBlur={() => scheduleSaveSnapshot()}
-                                  className="w-12 bg-black border border-[var(--theme-border)] rounded px-1 py-0.5 text-white text-center font-mono focus:outline-none"
-                                />
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-[var(--theme-text-muted)]">Ease:</span>
-                                <select
-                                  value={kf.easing || 'linear'}
-                                  onChange={(e) => {
-                                    const val = e.target.value as EasingType;
-                                    const ramp = [...(selectedClip.speedRamp || [])];
-                                    ramp[idx] = {
-                                      ...kf,
-                                      easing: val,
-                                      bezierControl: val === 'bezier' ? { out: { x: 0.33, y: 0 }, in: { x: 0.67, y: 1 } } : undefined
-                                    };
-                                    const tempEngine = new SpeedRampEngine(ramp);
-                                    const sourceEnd = maxDuration - selectedClip.trimEnd;
-                                    const newDuration = tempEngine.sourceToTimeline(sourceEnd) - tempEngine.sourceToTimeline(selectedClip.trimStart);
-                                    updateClip(selectedClip.id, { 
-                                      speedRamp: ramp,
-                                      duration: Math.max(0.1, newDuration)
-                                    }, { ripple: true });
-                                    scheduleSaveSnapshot();
-                                  }}
-                                  className="bg-black text-white text-[8px] border border-[var(--theme-border)] rounded px-1 py-0.5 focus:outline-none"
-                                >
-                                  <option value="linear">Linear</option>
-                                  <option value="hold">Hold</option>
-                                  <option value="easeIn">Ease In</option>
-                                  <option value="easeOut">Ease Out</option>
-                                  <option value="easeInOut">Ease In Out</option>
-                                  <option value="bezier">Bezier</option>
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <label className="flex items-center gap-1.5 pt-1 text-[10px] text-[var(--theme-text-muted)] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={dynamicStretch?.maintainDuration ?? true}
+                      onChange={(e) => setDynamicStretchMaintainDuration(e.target.checked)}
+                      className="w-3 h-3 rounded accent-amber-500 cursor-pointer"
+                    />
+                    <span>Maintain clip duration (compensate tail)</span>
+                  </label>
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {/* Clip Timeline Settings */}
             <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5">

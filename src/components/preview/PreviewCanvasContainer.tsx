@@ -529,7 +529,6 @@ export function PreviewCanvasContainer() {
         const currentSeek = state.seek;
         const currentPause = state.pause;
         const allClips = allClipsRef.current;
-        const selectedIds = state.selectedClipIds;
 
         let newTime = currentTimeRef.current;
 
@@ -560,28 +559,21 @@ export function PreviewCanvasContainer() {
             if (end > maxEndSequence) maxEndSequence = end;
           }
 
+          const isStretchLooping = state.dynamicStretch?.isActive && state.dynamicStretch?.isLoopingRegion;
           const selectedRegionId = state.selectedExportRegionId;
           const selectedRegion = selectedRegionId ? (state.exportRegions || []).find((r) => r.id === selectedRegionId) : null;
 
-          if (selectedRegion) {
+          if (isStretchLooping) {
+            const rStart = state.dynamicStretch.markStart;
+            const rEnd = state.dynamicStretch.markEnd;
+            if (newTime >= rEnd || newTime < rStart) {
+              newTime = dir >= 0 ? rStart : rEnd;
+            }
+          } else if (selectedRegion) {
             const rStart = selectedRegion.startTime;
             const rEnd = selectedRegion.endTime;
             if (newTime >= rEnd || newTime < rStart) {
               newTime = dir >= 0 ? rStart : rEnd;
-            }
-          } else if (selectedIds.length > 0) {
-            const selectedClips = allClips.filter((c) => selectedIds.includes(c.id));
-            if (selectedClips.length > 0) {
-              let minStart = Infinity;
-              let maxEnd = -Infinity;
-              for (const c of selectedClips) {
-                if (c.startTime < minStart) minStart = c.startTime;
-                const end = c.startTime + c.duration;
-                if (end > maxEnd) maxEnd = end;
-              }
-              if (newTime >= maxEnd || newTime < minStart) {
-                newTime = dir >= 0 ? minStart : maxEnd;
-              }
             }
           } else {
             if (dir < 0 && newTime <= 0) {

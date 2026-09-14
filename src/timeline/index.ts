@@ -52,3 +52,4 @@ export * from './components/PlayheadComponents';
 export * from './components/PipFloatingWindow';
 export * from './components/ArrangeModeOverlay';
 export * from './components/ExportRegionOverlay';
+export * from './components/DynamicStretchOverlay';

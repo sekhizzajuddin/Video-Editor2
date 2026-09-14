@@ -37,6 +37,7 @@ import {
   DEFAULT_TRACK_HEIGHT,
   ArrangeModeOverlay,
   ExportRegionOverlay,
+  DynamicStretchOverlay,
 } from '@/timeline';
 
 
@@ -507,6 +508,9 @@ export function Timeline() {
 
                 {/* Export Regions Overlay */}
                 <ExportRegionOverlay zoomLevel={zoomLevel} />
+
+                {/* Dynamic Speed Stretch Overlay */}
+                <DynamicStretchOverlay zoomLevel={zoomLevel} />
 
                 {/* Workspace playhead needle */}
                 <WorkspacePlayhead zoomLevel={zoomLevel} />

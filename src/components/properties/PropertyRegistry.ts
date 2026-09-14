@@ -1,4 +1,4 @@
-﻿import {
+import {
   PositionSection,
   ScaleSection,
   RotationSection,
@@ -35,8 +35,7 @@ import {
 
 import {
   SpeedSliderSection,
-  PresetRampsSection,
-  SpeedRampingSection,
+  DynamicStretchSection,
 } from './tabs/speed';
 
 import {
@@ -98,9 +97,8 @@ export const PROPERTY_REGISTRY: Record<string, any[]> = {
     { id: 'sounddesign', label: 'Sound Design', component: AISoundDesignerSection },
   ],
   speed: [
-    { id: 'speed', label: 'Speed', component: SpeedSliderSection },
-    { id: 'presets', label: 'Presets', component: PresetRampsSection },
-    { id: 'ramping', label: 'Ramping', component: SpeedRampingSection },
+    { id: 'dynamicStretch', label: 'Dynamic Stretch', component: DynamicStretchSection },
+    { id: 'speed', label: 'Constant Speed', component: SpeedSliderSection },
   ],
   mask: [
     { id: 'mask', label: 'Enable', component: MaskEnableSection },

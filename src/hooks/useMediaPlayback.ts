@@ -1165,6 +1165,37 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     const pool = poolRef.current;
     const videoMap = videoMapRef.current;
 
+    // ── PRE-PASS: RECONCILE EXISTING POOL ENTRIES ────────────────────
+    // If a clip already in the pool had its shareKey change (e.g. it was split
+    // and received a splitGroupId, or a gap was created and it became dedicated),
+    // migrate its video element in mediaVideoEls and update its stored shareKey
+    // BEFORE allocating new elements. Also ensure videoMap is populated.
+    for (const [clipId, info] of neededClips) {
+      const existing = pool.get(clipId);
+      if (existing && existing.type === 'video') {
+        const oldKey = existing._shareKey;
+        const newKey = info.shareKey;
+        if (oldKey && oldKey !== newKey) {
+          const el = existing.el as HTMLVideoElement;
+          const oldCount = mediaVideoRefCount.get(oldKey) ?? 1;
+          if (oldCount <= 1) {
+            mediaVideoRefCount.delete(oldKey);
+            mediaVideoEls.delete(oldKey);
+          } else {
+            mediaVideoRefCount.set(oldKey, oldCount - 1);
+          }
+          if (!mediaVideoEls.has(newKey)) {
+            mediaVideoEls.set(newKey, el);
+          }
+          mediaVideoRefCount.set(newKey, (mediaVideoRefCount.get(newKey) ?? 0) + 1);
+          existing._shareKey = newKey;
+        }
+        existing._shareStart = info.start;
+        existing._shareEnd = info.end;
+        videoMap.set(clipId, existing.el as HTMLVideoElement);
+      }
+    }
+
     for (const [clipId, info] of neededClips) {
       const media = mediaMapRef.current.get(info.mediaId);
       if (!media || !media.url) continue;
@@ -1204,6 +1235,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               }
             }
             let el = mediaVideoEls.get(key) || null;
+            // Sibling lookup: if mediaVideoEls doesn't have an element under key yet,
+            // check if any existing video entry in pool matches info.mediaId with the
+            // same split group or share key, and reuse its ready element immediately.
+            if (!el && !key.includes('::clip:')) {
+              for (const [, e] of pool) {
+                if (e.type === 'video' && e.mediaId === info.mediaId && e.el && (e.el as HTMLVideoElement).readyState >= 1) {
+                  if (e._shareKey === key || e._shareKey?.startsWith(`${info.mediaId}::`)) {
+                    el = e.el as HTMLVideoElement;
+                    mediaVideoEls.set(key, el);
+                    break;
+                  }
+                }
+              }
+            }
             const elIsNew = !el;
             if (!el) {
               el = document.createElement('video');
@@ -1242,12 +1287,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         entry._shareEnd = info.end;
         entry._handleSeeked = handleSeeked;
         el.addEventListener('seeked', handleSeeked);
-        el.addEventListener('timeupdate', triggerRedraw);
-        el.addEventListener('canplay', triggerRedraw);
-        // Repaint as soon as the first decodable frame / metadata arrives so the
-        // paused preview shows frame 0 without waiting for a seek.
-        el.addEventListener('loadedmetadata', triggerRedraw);
-        el.addEventListener('loadeddata', triggerRedraw);
+        if (elIsNew) {
+          el.addEventListener('timeupdate', triggerRedraw);
+          el.addEventListener('canplay', triggerRedraw);
+          // Repaint as soon as the first decodable frame / metadata arrives so the
+          // paused preview shows frame 0 without waiting for a seek.
+          el.addEventListener('loadedmetadata', triggerRedraw);
+          el.addEventListener('loadeddata', triggerRedraw);
+        }
 
         // ANDROID RECOVERY: a video load that errors or stalls (decoder
         // contention is common on phones) must not stay black forever — the
@@ -1665,7 +1712,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // During trim, ct is already getEffectivePreviewTime() (amber playhead position)
         const scrubTime = ct;
         for (const clip of clips) {
-          const entry = pool.get(clip.clipId);
+          let entry = pool.get(clip.clipId);
+          if (!entry && clip.clip?.splitGroupId) {
+            for (const [, e] of pool) {
+              if (e.mediaId === clip.mediaId && e.type === 'video' && e._shareKey?.includes(clip.clip.splitGroupId)) {
+                entry = e;
+                break;
+              }
+            }
+          }
           if (!entry || entry.type !== 'video') continue;
           const mediaItem = mediaMap.get(clip.mediaId);
           const maxDuration = mediaItem ? mediaItem.duration : 10000;
@@ -1695,7 +1750,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       // ---- 2. Sync each active element ----
       for (const clip of clips) {
-        const entry = pool.get(clip.clipId);
+        let entry = pool.get(clip.clipId);
+        if (!entry && clip.clip?.splitGroupId) {
+          for (const [, e] of pool) {
+            if (e.mediaId === clip.mediaId && (e._shareKey?.includes(clip.clip.splitGroupId) || e.type === 'video')) {
+              entry = e;
+              break;
+            }
+          }
+        }
         if (!entry) continue;
 
         const mediaItem = mediaMap.get(clip.mediaId);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ZoomIn, ZoomOut, Film, Music, Type, Sparkles, Magnet, LayoutGrid, Layers, BookmarkPlus, Trash2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Film, Music, Type, Sparkles, Magnet, LayoutGrid, Layers, BookmarkPlus, Trash2, Gauge, X } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { InsertOverwriteButtons } from './InsertOverwriteButtons';
 
@@ -27,6 +27,11 @@ export function TimelineToolbar({
   const exportRegions = useEditorStore((s) => s.exportRegions || []);
   const addExportRegion = useEditorStore((s) => s.addExportRegion);
   const clearExportRegions = useEditorStore((s) => s.clearExportRegions);
+  const dynamicStretch = useEditorStore((s) => s.dynamicStretch);
+  const startDynamicStretch = useEditorStore((s) => s.startDynamicStretch);
+  const applyDynamicStretch = useEditorStore((s) => s.applyDynamicStretch);
+  const cancelDynamicStretch = useEditorStore((s) => s.cancelDynamicStretch);
+  const setDynamicStretchMaintainDuration = useEditorStore((s) => s.setDynamicStretchMaintainDuration);
   const currentTime = useEditorStore((s) => s.currentTime);
   const selectedClipId = useEditorStore((s) => s.selectedClipId);
   const tracks = useEditorStore((s) => s.tracks);
@@ -181,6 +186,58 @@ export function TimelineToolbar({
             className="ml-0.5 p-1 text-[var(--theme-text-muted)] hover:text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors"
           >
             <Trash2 className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+
+      {/* Dynamic Speed Stretch (Dynamic Speed Ramping) */}
+      <div className="relative flex items-center ml-1 pl-1 border-l border-[var(--theme-border)]/50 gap-1.5">
+        <button
+          onClick={() => {
+            if (dynamicStretch?.isActive) {
+              applyDynamicStretch();
+            } else {
+              startDynamicStretch(selectedClipId || undefined);
+            }
+          }}
+          title={
+            dynamicStretch?.isActive
+              ? dynamicStretch.isConfirmed
+                ? 'Click to Apply Dynamic Speed Stretch to clip'
+                : 'Dynamic Stretch Active — Click to Apply (or adjust handles)'
+              : 'Add Dynamic Speed Stretch mark to stretch or squeeze a specific section'
+          }
+          className={`px-2.5 py-1 text-[11px] rounded-lg flex items-center gap-1.5 transition-all font-medium ${
+            dynamicStretch?.isActive
+              ? 'bg-amber-500/20 text-amber-500 dark:text-amber-400 border border-amber-500/50 font-semibold shadow-sm animate-pulse'
+              : 'text-[var(--theme-text-muted)] hover:text-amber-500 hover:bg-amber-500/10 border border-transparent'
+          }`}
+        >
+          <Gauge className="w-3.5 h-3.5 text-amber-500" />
+          <span>{dynamicStretch?.isActive ? (dynamicStretch.isConfirmed ? 'Apply Stretch ✓' : 'Apply Stretch') : 'Dynamic Stretch'}</span>
+        </button>
+
+        {/* Maintain Original Duration Toggle */}
+        <label
+          className="flex items-center gap-1.5 text-[10px] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] cursor-pointer select-none px-1.5 py-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+          title="Maintain Original Duration (Default: ON): Tail speed is automatically adjusted so the overall clip timeline duration does not change. Uncheck to allow downstream clips to ripple."
+        >
+          <input
+            type="checkbox"
+            checked={dynamicStretch?.maintainDuration ?? true}
+            onChange={(e) => setDynamicStretchMaintainDuration(e.target.checked)}
+            className="w-3 h-3 rounded accent-amber-500 cursor-pointer"
+          />
+          <span className="whitespace-nowrap font-medium">Maintain Duration</span>
+        </label>
+
+        {dynamicStretch?.isActive && (
+          <button
+            onClick={() => cancelDynamicStretch()}
+            title="Cancel Dynamic Stretch"
+            className="p-1 text-[var(--theme-text-muted)] hover:text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors"
+          >
+            <X className="w-3 h-3" />
           </button>
         )}
       </div>

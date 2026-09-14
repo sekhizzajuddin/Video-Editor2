@@ -1,11 +1,7 @@
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import type { TimelineClip } from '@/types';
-import {
-  SpeedSliderSection,
-  SpeedRampingSection,
-  PresetRampsSection,
-} from './speed';
+import { SpeedSliderSection, DynamicStretchSection } from './speed';
 
 interface SpeedTabProps {
   selectedClip: TimelineClip;
@@ -14,7 +10,7 @@ interface SpeedTabProps {
   updateClip: (clipId: string, updates: any, options?: { ripple?: boolean }) => void;
 }
 
-export function SpeedTab({ selectedClip, mediaLibrary, isRamped, updateClip }: SpeedTabProps) {
+export function SpeedTab({ selectedClip, isRamped, updateClip }: SpeedTabProps) {
   const handleSpeedChange = (newSpeed: number) => {
     const sourceDuration = selectedClip.duration * selectedClip.speed;
     const newDuration = sourceDuration / newSpeed;
@@ -27,7 +23,6 @@ export function SpeedTab({ selectedClip, mediaLibrary, isRamped, updateClip }: S
   const handleToggleReverse = () => {
     updateClip(selectedClip.id, {
       isReversed: !selectedClip.isReversed,
-      // Clear freeze frame when toggling reverse
       freezeFrame: undefined,
     });
   };
@@ -50,7 +45,11 @@ export function SpeedTab({ selectedClip, mediaLibrary, isRamped, updateClip }: S
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* ── Dynamic Speed Ramping (Dynamic Stretch) ── */}
+      <DynamicStretchSection selectedClip={selectedClip} />
+
+      {/* ── Constant Speed Slider & Tools ── */}
       <SpeedSliderSection
         speed={selectedClip.speed}
         isRamped={isRamped}
@@ -62,18 +61,7 @@ export function SpeedTab({ selectedClip, mediaLibrary, isRamped, updateClip }: S
         onFreezeFrame={handleFreezeFrame}
         onClearFreeze={handleClearFreeze}
       />
-
-      <SpeedRampingSection
-        selectedClip={selectedClip}
-        isRamped={isRamped}
-        mediaLibrary={mediaLibrary}
-        updateClip={updateClip}
-      />
-
-      <PresetRampsSection
-        isRamped={isRamped}
-        onSpeedChange={handleSpeedChange}
-      />
     </div>
   );
 }
+

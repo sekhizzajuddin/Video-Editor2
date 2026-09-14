@@ -355,6 +355,16 @@ interface EditorActions {
   selectExportRegion: (id: string | null) => void;
   clearExportRegions: () => void;
 
+  // Dynamic Speed Stretch (Dynamic Speed Ramping)
+  startDynamicStretch: (clipId?: string) => void;
+  updateDynamicStretchMark: (updates: { markStart?: number; markEnd?: number }) => void;
+  confirmDynamicStretchMark: () => void;
+  updateDynamicStretchDrag: (newDuration: number) => void;
+  toggleDynamicStretchLoop: () => void;
+  setDynamicStretchMaintainDuration: (maintain: boolean) => void;
+  applyDynamicStretch: () => void;
+  cancelDynamicStretch: () => void;
+
   // Beat Markers
   addBeatMarkers: (clipId: string, times: number[]) => void;
   clearBeatMarkers: (clipId: string) => void;
@@ -433,6 +443,18 @@ const initialState: EditorState = {
   beatMarkers: [],
   exportRegions: [],
   selectedExportRegionId: null,
+  dynamicStretch: {
+    isActive: false,
+    clipId: null,
+    trackId: null,
+    markStart: 0,
+    markEnd: 0,
+    isConfirmed: false,
+    originalRegionDuration: 0,
+    stretchedDuration: 0,
+    maintainDuration: true,
+    isLoopingRegion: false,
+  },
   projectTemplates: [],
   aspectRatio: '16:9',
   zoomLevel: 80,
@@ -2791,7 +2813,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   splitClip: (clipId, splitTime) => {
     set((state) => {
       const isSelected = state.selectedClipIds.includes(clipId);
-      let primaryLeftId = '';
+      let primarySelectedId = '';
 
       // Find the primary clip to check for linked clip
       const primaryFound = findClipDeep(state, clipId);
@@ -2813,7 +2835,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }
       
       if (isSelected) {
-        primaryLeftId = splitMap[clipId].left;
+        primarySelectedId = splitMap[clipId].right;
       }
 
       const { tracks, pipWindows } = mapTracksDeep(state, (track) => {
@@ -2940,12 +2962,12 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       const newSelectedKeyframeLines = state.selectedKeyframeLines.filter(l => !idsToSplit.has(l.clipId));
 
-      if (isSelected && primaryLeftId) {
+      if (isSelected && primarySelectedId) {
         return {
           tracks,
           pipWindows,
-          selectedClipId: primaryLeftId,
-          selectedClipIds: [primaryLeftId],
+          selectedClipId: primarySelectedId,
+          selectedClipIds: [primarySelectedId],
           selectedKeyframeLines: newSelectedKeyframeLines,
         };
       }
@@ -3225,7 +3247,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Playback
   play: () => {
-    const { tracks, selectedClipIds, exportRegions, selectedExportRegionId, currentTime } = get();
+    const { tracks, exportRegions, selectedExportRegionId, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0) return;
 
@@ -3234,20 +3256,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (activeRegion) {
         if (currentTime < activeRegion.startTime || currentTime >= activeRegion.endTime) {
           set({ currentTime: activeRegion.startTime });
-        }
-      }
-    } else if (selectedClipIds.length > 0) {
-      const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
-      if (selectedClips.length > 0) {
-        let minStart = Infinity;
-        let maxEnd = -Infinity;
-        for (const c of selectedClips) {
-          if (c.startTime < minStart) minStart = c.startTime;
-          const end = c.startTime + c.duration;
-          if (end > maxEnd) maxEnd = end;
-        }
-        if (currentTime < minStart || currentTime >= maxEnd) {
-          set({ currentTime: minStart });
         }
       }
     }
@@ -3259,7 +3267,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // moment playback stops and the media elements re-seek to that stale position.
   pause: () => set({ isPlaying: false, playbackDirection: 0, currentTime: getPlaybackTime() }),
   togglePlayback: () => {
-    const { tracks, isPlaying, selectedClipIds, exportRegions, selectedExportRegionId, currentTime } = get();
+    const { tracks, isPlaying, exportRegions, selectedExportRegionId, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0 && !isPlaying) return;
 
@@ -3268,20 +3276,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (activeRegion) {
         if (currentTime < activeRegion.startTime || currentTime >= activeRegion.endTime) {
           set({ currentTime: activeRegion.startTime });
-        }
-      }
-    } else if (!isPlaying && selectedClipIds.length > 0) {
-      const selectedClips = allClips.filter((c) => selectedClipIds.includes(c.id));
-      if (selectedClips.length > 0) {
-        let minStart = Infinity;
-        let maxEnd = -Infinity;
-        for (const c of selectedClips) {
-          if (c.startTime < minStart) minStart = c.startTime;
-          const end = c.startTime + c.duration;
-          if (end > maxEnd) maxEnd = end;
-        }
-        if (currentTime < minStart || currentTime >= maxEnd) {
-          set({ currentTime: minStart });
         }
       }
     }
@@ -4931,6 +4925,370 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   clearExportRegions: () => {
     set({ exportRegions: [], selectedExportRegionId: null });
     get().saveSnapshot('Clear Export Regions');
+  },
+
+  // Dynamic Speed Stretch (Dynamic Speed Ramping)
+  startDynamicStretch: (clipId?: string) => {
+    const state = get();
+    let targetClipId = clipId || state.selectedClipId;
+    let found = targetClipId ? findClipDeep(state, targetClipId) : null;
+
+    if (!found) {
+      for (const track of state.tracks) {
+        const c = track.clips.find(
+          (clip) => state.currentTime >= clip.startTime && state.currentTime <= clip.startTime + clip.duration
+        );
+        if (c) {
+          found = { clip: c, track, isPip: false, pipId: null };
+          break;
+        }
+      }
+    }
+
+    if (!found) {
+      for (const track of state.tracks) {
+        if (track.clips.length > 0) {
+          found = { clip: track.clips[0], track, isPip: false, pipId: null };
+          break;
+        }
+      }
+    }
+
+    if (!found) return;
+
+    const clip = found.clip;
+    const clipStart = clip.startTime;
+    const clipEnd = clip.startTime + clip.duration;
+
+    let markStart: number;
+    let markEnd: number;
+
+    if (state.currentTime >= clipStart + 0.1 && state.currentTime <= clipEnd - 0.1) {
+      const halfWindow = Math.min(clip.duration * 0.25, 1.0);
+      markStart = Math.max(clipStart, state.currentTime - halfWindow);
+      markEnd = Math.min(clipEnd, state.currentTime + halfWindow);
+      if (markEnd - markStart < 0.2) {
+        markStart = clipStart + clip.duration * 0.25;
+        markEnd = clipStart + clip.duration * 0.75;
+      }
+    } else {
+      markStart = clipStart + clip.duration * 0.25;
+      markEnd = clipStart + clip.duration * 0.75;
+    }
+
+    markStart = Math.max(clipStart, markStart);
+    markEnd = Math.min(clipEnd, Math.max(markStart + 0.1, markEnd));
+    const regionDur = markEnd - markStart;
+
+    set({
+      selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
+      dynamicStretch: {
+        isActive: true,
+        clipId: clip.id,
+        trackId: found.track.id,
+        markStart,
+        markEnd,
+        isConfirmed: false,
+        originalRegionDuration: regionDur,
+        stretchedDuration: regionDur,
+        maintainDuration: true,
+        isLoopingRegion: false,
+      },
+    });
+  },
+
+  updateDynamicStretchMark: ({ markStart, markEnd }) => {
+    const { dynamicStretch } = get();
+    if (!dynamicStretch.isActive || !dynamicStretch.clipId) return;
+
+    const found = findClipDeep(get(), dynamicStretch.clipId);
+    if (!found) return;
+    const clip = found.clip;
+    const clipStart = clip.startTime;
+    const clipEnd = clip.startTime + clip.duration;
+
+    let newStart = markStart !== undefined ? markStart : dynamicStretch.markStart;
+    let newEnd = markEnd !== undefined ? markEnd : dynamicStretch.markEnd;
+
+    newStart = Math.max(clipStart, Math.min(clipEnd - 0.05, newStart));
+    newEnd = Math.min(clipEnd, Math.max(newStart + 0.05, newEnd));
+    const dur = newEnd - newStart;
+
+    set((s) => ({
+      dynamicStretch: {
+        ...s.dynamicStretch,
+        markStart: newStart,
+        markEnd: newEnd,
+        originalRegionDuration: dur,
+        stretchedDuration: dur,
+      },
+    }));
+  },
+
+  confirmDynamicStretchMark: () => {
+    set((s) => ({
+      dynamicStretch: {
+        ...s.dynamicStretch,
+        isConfirmed: true,
+        isLoopingRegion: false,
+      },
+    }));
+  },
+
+  updateDynamicStretchDrag: (newDuration: number) => {
+    const { dynamicStretch } = get();
+    if (!dynamicStretch.isActive) return;
+    const clampedDuration = Math.max(0.05, newDuration);
+    set((s) => ({
+      dynamicStretch: {
+        ...s.dynamicStretch,
+        stretchedDuration: clampedDuration,
+      },
+    }));
+  },
+
+  toggleDynamicStretchLoop: () => {
+    const { dynamicStretch, isPlaying } = get();
+    if (!dynamicStretch.isActive) return;
+
+    const nextLoop = !dynamicStretch.isLoopingRegion;
+    set((s) => ({
+      dynamicStretch: {
+        ...s.dynamicStretch,
+        isLoopingRegion: nextLoop,
+      },
+    }));
+
+    if (nextLoop) {
+      get().seek(dynamicStretch.markStart);
+      if (!isPlaying) {
+        get().play();
+      }
+    }
+  },
+
+  setDynamicStretchMaintainDuration: (maintain: boolean) => {
+    set((s) => ({
+      dynamicStretch: {
+        ...s.dynamicStretch,
+        maintainDuration: maintain,
+      },
+    }));
+  },
+
+  cancelDynamicStretch: () => {
+    const { dynamicStretch } = get();
+    if (dynamicStretch.isLoopingRegion) {
+      get().pause();
+    }
+    set({
+      dynamicStretch: {
+        isActive: false,
+        clipId: null,
+        trackId: null,
+        markStart: 0,
+        markEnd: 0,
+        isConfirmed: false,
+        originalRegionDuration: 0,
+        stretchedDuration: 0,
+        maintainDuration: true,
+        isLoopingRegion: false,
+      },
+    });
+  },
+
+  applyDynamicStretch: () => {
+    const state = get();
+    const { dynamicStretch } = state;
+    if (!dynamicStretch.isActive || !dynamicStretch.clipId) return;
+
+    const found = findClipDeep(state, dynamicStretch.clipId);
+    if (!found) {
+      get().cancelDynamicStretch();
+      return;
+    }
+
+    const primaryClip = found.clip;
+    const clipIdsToProcess = [primaryClip.id];
+    if (primaryClip.linkedClipId) {
+      clipIdsToProcess.push(primaryClip.linkedClipId);
+    }
+
+    const markStart = dynamicStretch.markStart;
+    const markEnd = dynamicStretch.markEnd;
+    const stretchDur = Math.max(0.05, dynamicStretch.stretchedDuration);
+    const maintainDuration = dynamicStretch.maintainDuration;
+
+    const groupId = primaryClip.splitGroupId || generateId();
+    const replacementsMap = new Map<string, TimelineClip[]>();
+    let primaryStretchedId = '';
+    let trackDeltaTime = 0;
+
+    for (const id of clipIdsToProcess) {
+      const cFound = findClipDeep(state, id);
+      if (!cFound) continue;
+      const c = cFound.clip;
+
+      const T0 = c.startTime;
+      const D = c.duration;
+      const S = c.speed || 1;
+      const TS = c.trimStart || 0;
+      const TE = c.trimEnd || 0;
+
+      const safeMarkStart = Math.max(T0, Math.min(T0 + D - 0.05, markStart));
+      const safeMarkEnd = Math.min(T0 + D, Math.max(safeMarkStart + 0.05, markEnd));
+      const actualOrigDur = safeMarkEnd - safeMarkStart;
+      const speedRatio = actualOrigDur / stretchDur;
+      const newRegionSpeed = Math.min(50, Math.max(0.05, S * speedRatio));
+
+      const headTimelineDur = safeMarkStart - T0;
+      const hasHead = headTimelineDur >= 0.05;
+
+      const origTailTimelineDur = (T0 + D) - safeMarkEnd;
+      const hasTail = origTailTimelineDur >= 0.05;
+
+      const regionStartTime = hasHead ? T0 + headTimelineDur : T0;
+
+      const headTrimStart = TS;
+      const headTrimEnd = TE + (D - headTimelineDur) * S;
+
+      const regionTrimStart = TS + (hasHead ? headTimelineDur * S : 0);
+      const regionTrimEnd = TE + (origTailTimelineDur * S);
+
+      const clipsForThisId: TimelineClip[] = [];
+
+      if (hasHead) {
+        clipsForThisId.push({
+          ...c,
+          id: generateId(),
+          startTime: T0,
+          duration: headTimelineDur,
+          speed: S,
+          trimStart: headTrimStart,
+          trimEnd: headTrimEnd,
+          splitGroupId: groupId,
+          linkedClipId: undefined,
+          pipWindowIds: undefined,
+        });
+      }
+
+      const stretchedClipId = generateId();
+      if (id === primaryClip.id) {
+        primaryStretchedId = stretchedClipId;
+      }
+
+      clipsForThisId.push({
+        ...c,
+        id: stretchedClipId,
+        startTime: regionStartTime,
+        duration: stretchDur,
+        speed: newRegionSpeed,
+        trimStart: regionTrimStart,
+        trimEnd: regionTrimEnd,
+        splitGroupId: groupId,
+        linkedClipId: undefined,
+        pipWindowIds: undefined,
+      });
+
+      if (hasTail) {
+        let tailTimelineDur: number;
+        let tailSpeed: number;
+
+        if (maintainDuration) {
+          tailTimelineDur = Math.max(0.05, D - (hasHead ? headTimelineDur : 0) - stretchDur);
+          tailSpeed = Math.min(50, Math.max(0.05, (origTailTimelineDur * S) / tailTimelineDur));
+        } else {
+          tailTimelineDur = origTailTimelineDur;
+          tailSpeed = S;
+          trackDeltaTime = stretchDur - actualOrigDur;
+        }
+
+        clipsForThisId.push({
+          ...c,
+          id: c.id,
+          startTime: regionStartTime + stretchDur,
+          duration: tailTimelineDur,
+          speed: tailSpeed,
+          trimStart: regionTrimStart + actualOrigDur * S,
+          trimEnd: TE,
+          splitGroupId: groupId,
+          linkedClipId: undefined,
+          pipWindowIds: undefined,
+        });
+      } else {
+        if (clipsForThisId.length > 0) {
+          clipsForThisId[clipsForThisId.length - 1].id = c.id;
+          if (id === primaryClip.id) {
+            primaryStretchedId = c.id;
+          }
+        }
+        if (!maintainDuration) {
+          trackDeltaTime = stretchDur - actualOrigDur;
+        }
+      }
+
+      replacementsMap.set(id, clipsForThisId);
+    }
+
+    if (primaryClip.linkedClipId && replacementsMap.has(primaryClip.id) && replacementsMap.has(primaryClip.linkedClipId)) {
+      const vClips = replacementsMap.get(primaryClip.id)!;
+      const aClips = replacementsMap.get(primaryClip.linkedClipId)!;
+      if (vClips.length === aClips.length) {
+        for (let i = 0; i < vClips.length; i++) {
+          vClips[i].linkedClipId = aClips[i].id;
+          aClips[i].linkedClipId = vClips[i].id;
+        }
+      }
+    }
+
+    const { tracks, pipWindows } = mapTracksDeep(state, (track) => {
+      let modified = false;
+      const newClips: TimelineClip[] = [];
+
+      for (const clip of track.clips) {
+        if (replacementsMap.has(clip.id)) {
+          modified = true;
+          const replacement = replacementsMap.get(clip.id)!;
+          newClips.push(...replacement);
+        } else {
+          if (!maintainDuration && trackDeltaTime !== 0 && clip.startTime >= primaryClip.startTime + primaryClip.duration - 0.01) {
+            modified = true;
+            newClips.push({
+              ...clip,
+              startTime: Math.max(0, clip.startTime + trackDeltaTime),
+            });
+          } else {
+            newClips.push(clip);
+          }
+        }
+      }
+
+      if (!modified) return track;
+      return { ...track, clips: newClips };
+    });
+
+    set({
+      tracks,
+      pipWindows,
+      selectedClipId: primaryStretchedId || primaryClip.id,
+      selectedClipIds: [primaryStretchedId || primaryClip.id],
+      dynamicStretch: {
+        isActive: false,
+        clipId: null,
+        trackId: null,
+        markStart: 0,
+        markEnd: 0,
+        isConfirmed: false,
+        originalRegionDuration: 0,
+        stretchedDuration: 0,
+        maintainDuration: true,
+        isLoopingRegion: false,
+      },
+    });
+
+    get().recalcTotalDuration();
+    get().saveSnapshot('Dynamic Speed Stretch');
   },
 
   // Beat Markers

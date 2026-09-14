@@ -796,6 +796,20 @@ export interface ExportRegion {
   color?: string;
 }
 
+// ─── Dynamic Speed Ramping (Dynamic Stretch) ───────────────────────────────
+export interface DynamicStretchState {
+  isActive: boolean;
+  clipId: string | null;
+  trackId: string | null;
+  markStart: number;
+  markEnd: number;
+  isConfirmed: boolean;
+  originalRegionDuration: number;
+  stretchedDuration: number;
+  maintainDuration: boolean;
+  isLoopingRegion: boolean;
+}
+
 // ─── Project Template ─────────────────────────────────────────────────────
 export interface ProjectTemplate {
   id: string;
@@ -947,6 +961,9 @@ export interface EditorState {
   beatMarkers: BeatMarker[];
   exportRegions: ExportRegion[];
   selectedExportRegionId: string | null;
+
+  // Dynamic Speed Stretch
+  dynamicStretch: DynamicStretchState;
 
   // Templates
   projectTemplates: ProjectTemplate[];
