@@ -123,19 +123,23 @@ export function ExportModal() {
           }
         }
 
-        await startExport({
-          fps,
-          width: selectedResolution.width,
-          height: selectedResolution.height,
-          bitrate: recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality),
-          quality,
-          format,
-          filename: clipName,
-          outputFolder: outputFolder || '',
-          aspectRatio,
-          startAt: region.startTime,
-          endAt: region.endTime,
-        }, fileHandle);
+        try {
+          await startExport({
+            fps,
+            width: selectedResolution.width,
+            height: selectedResolution.height,
+            bitrate: recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality),
+            quality,
+            format,
+            filename: clipName,
+            outputFolder: outputFolder || '',
+            aspectRatio,
+            startAt: region.startTime,
+            endAt: region.endTime,
+          }, fileHandle);
+        } catch (batchErr) {
+          console.error('[ExportModal] Batch region export failed:', batchErr);
+        }
       }
       setBatchStatus(null);
       return;
@@ -161,19 +165,23 @@ export function ExportModal() {
       }
     }
 
-    await startExport({
-      fps,
-      width: selectedResolution.width,
-      height: selectedResolution.height,
-      bitrate: recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality),
-      quality,
-      format,
-      filename: exportFilename,
-      outputFolder: outputFolder || '',
-      aspectRatio,
-      startAt,
-      endAt,
-    }, fileHandle);
+    try {
+      await startExport({
+        fps,
+        width: selectedResolution.width,
+        height: selectedResolution.height,
+        bitrate: recommendedVideoBitrate(selectedResolution.width, selectedResolution.height, fps, quality),
+        quality,
+        format,
+        filename: exportFilename,
+        outputFolder: outputFolder || '',
+        aspectRatio,
+        startAt,
+        endAt,
+      }, fileHandle);
+    } catch (exportErr: any) {
+      console.error('[ExportModal] Export failed:', exportErr);
+    }
   }, [startExport, selectedResolution, format, fps, quality, filename, outputFolder, projectName, aspectRatio, exportScope, exportRegions, totalDuration]);
 
   if (!showExportModal) return null;

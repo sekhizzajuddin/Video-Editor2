@@ -270,7 +270,10 @@ export function Timeline() {
 
     const handleGlobalClickOutside = (e: MouseEvent | PointerEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target?.closest?.('.speed-frame-element')) {
+      if (
+        target?.closest?.('.speed-frame-element') ||
+        target?.closest?.('[data-speed-frame-action]')
+      ) {
         return;
       }
       selectSpeedFrame(null, null);

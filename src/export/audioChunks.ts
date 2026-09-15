@@ -72,16 +72,26 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
             const segPlayStart = Math.max(opts.startAt, segTimelineStart);
             const dtFromSegStart = segPlayStart - segTimelineStart;
             const segSpeed = seg.speed || 1;
-            const segSourceOffset = seg.sourceStart + dtFromSegStart * segSpeed;
-            const segBufferDuration = Math.max(0, (Math.min(segTimelineEnd, opts.endAt) - segPlayStart) * segSpeed);
+            const segSourceOffset = Math.max(0, seg.sourceStart + dtFromSegStart * segSpeed);
+            if (segSourceOffset >= decodedBuffer.duration) continue;
 
-            if (segBufferDuration > 0) {
-              const segSource = offlineCtx.createBufferSource();
-              segSource.buffer = decodedBuffer;
-              segSource.playbackRate.value = segSpeed;
-              segSource.connect(gainNode);
-              segSource.start(segScheduleTime, segSourceOffset, segBufferDuration);
-              hasActiveAudio = true;
+            const maxAvail = Math.max(0, decodedBuffer.duration - segSourceOffset);
+            const segBufferDuration = Math.min(
+              maxAvail,
+              Math.max(0, (Math.min(segTimelineEnd, opts.endAt) - segPlayStart) * segSpeed)
+            );
+
+            if (segBufferDuration > 0.0001) {
+              try {
+                const segSource = offlineCtx.createBufferSource();
+                segSource.buffer = decodedBuffer;
+                segSource.playbackRate.value = segSpeed;
+                segSource.connect(gainNode);
+                segSource.start(segScheduleTime, segSourceOffset, segBufferDuration);
+                hasActiveAudio = true;
+              } catch (segErr) {
+                console.warn('[audioChunks] Failed to schedule segment:', segErr);
+              }
             }
           }
         } else {

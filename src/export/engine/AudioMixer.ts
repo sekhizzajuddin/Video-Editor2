@@ -44,7 +44,9 @@ export class AudioMixer {
         return null; // No audio to mix
       }
 
-      const decodePromises = audioClips.map(async (clip) => {
+      for (const clip of audioClips) {
+        // Yield to browser event loop between clips to keep UI responsive and prevent tab watchdog crash
+        await new Promise((resolve) => setTimeout(resolve, 0));
         try {
           const arrayBuffer = clip._blob instanceof Blob
             ? await clip._blob.arrayBuffer()
@@ -237,9 +239,7 @@ export class AudioMixer {
         } catch (err) {
           console.error(`Failed to mix audio for clip ${clip.id}`, err);
         }
-      });
-
-      await Promise.all(decodePromises);
+      }
 
       // Start rendering the master mix
       const renderedBuffer = await ctx.startRendering();

@@ -547,39 +547,17 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         </div>
       )}
 
-      {/* ── + Speed Frame Quick Action Button ────────── */}
-      {isSelected && !trackLocked && activeTool !== 'split' && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            addSpeedFrame(clip.id);
-          }}
-          className="speed-frame-element absolute -top-3.5 left-1/2 -translate-x-1/2 z-50 px-2 py-0.5 rounded-full text-[9px] font-bold bg-gradient-to-r from-amber-500 via-purple-600 to-pink-500 text-white shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 border border-white/60 backdrop-blur-sm pointer-events-auto"
-          title="Add Speed Frame at playhead (or clip center) to dynamically rate-stretch this section"
-        >
-          <Zap className="w-2.5 h-2.5 text-amber-200 fill-amber-200" />
-          <span>+ Speed Frame</span>
-        </button>
-      )}
-
       {/* ── Embedded Speed Frames (Dynamic Rate-Stretching) ────────── */}
       {clip.speedFrames && clip.speedFrames.length > 0 && (
         <>
-          {/* Segment speed multiplier badges */}
+          {/* Segment speed multiplier badges (clean, sleek dark frosted tags) */}
           {speedSegments.map((seg) => {
             const centerT = (seg.startOffset + seg.endOffset) / 2;
             const centerPx = centerT * zoomLevel;
             return (
               <div
                 key={`seg-${seg.index}`}
-                className={`absolute bottom-1 -translate-x-1/2 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-tight shadow pointer-events-none z-30 flex items-center gap-0.5 transition-all ${
-                  seg.speed > 1.05
-                    ? 'bg-emerald-500/90 text-black shadow-emerald-500/30'
-                    : seg.speed < 0.95
-                    ? 'bg-purple-600/90 text-white shadow-purple-500/30'
-                    : 'bg-black/70 text-white/80 border border-white/20'
-                }`}
+                className="absolute bottom-1 -translate-x-1/2 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium tracking-tight bg-black/75 backdrop-blur-xs text-white/90 border border-white/20 shadow-xs pointer-events-none z-30 flex items-center gap-0.5 transition-all"
                 style={{ left: `${centerPx}px` }}
                 title={`Segment ${seg.index + 1}: ${seg.speed.toFixed(2)}x speed`}
               >
@@ -588,7 +566,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             );
           })}
 
-          {/* Speed Frame lines and screw heads */}
+          {/* Speed Frame lines and diamond heads */}
           {clip.speedFrames.map((sf) => {
             const isFrameSelected =
               selectedSpeedFrame?.clipId === clip.id && selectedSpeedFrame?.frameId === sf.id;
@@ -600,16 +578,13 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                 className="absolute top-0 bottom-0 z-40 pointer-events-none select-none"
                 style={{ left: `${posX}px` }}
               >
-                {/* Glowing animated vertical line spanning top to bottom */}
+                {/* Crisp vertical line spanning top to bottom */}
                 <div
                   className={`absolute top-0 bottom-0 -left-[1px] w-[2px] transition-all ${
                     isFrameSelected
-                      ? 'shadow-[0_0_10px_#f43f5e,0_0_18px_#a855f7] ring-1 ring-white/80'
-                      : 'shadow-[0_0_6px_rgba(168,85,247,0.8),0_0_12px_rgba(236,72,153,0.6)]'
+                      ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)] ring-1 ring-white/70'
+                      : 'bg-cyan-400/90 shadow-[0_0_4px_rgba(34,211,238,0.5)]'
                   }`}
-                  style={{
-                    background: 'linear-gradient(180deg, #38bdf8, #a855f7, #ec4899, #f59e0b)',
-                  }}
                 />
 
                 {/* Interactive line drag zone (Rate Stretch / Squeeze) */}
@@ -621,12 +596,12 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   <div className="w-full h-full opacity-0 group-hover/line:opacity-20 bg-white transition-opacity" />
                 </div>
 
-                {/* Top Diamond Button (Click to select, drag to shift speed frame line) */}
+                {/* Top Diamond Button (Click to select, drag to reposition speed frame) */}
                 <div
                   className={`speed-frame-element absolute cursor-ew-resize pointer-events-auto transition-all ${
                     isFrameSelected
-                      ? '-top-2 -left-2 w-4 h-4 rotate-45 bg-gradient-to-br from-rose-500 via-pink-500 to-purple-600 border-2 border-white shadow-[0_0_14px_#f43f5e,0_0_20px_#a855f7] ring-2 ring-pink-400 scale-110'
-                      : '-top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-gradient-to-br from-pink-500 to-purple-600 border border-white/90 shadow-md hover:scale-125'
+                      ? '-top-2 -left-2 w-4 h-4 rotate-45 bg-rose-500 border-2 border-white shadow-[0_0_10px_rgba(244,63,94,0.9)] scale-110'
+                      : '-top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-cyan-400 hover:bg-cyan-300 border border-white shadow-sm hover:scale-125'
                   }`}
                   onPointerDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
                   onClick={(e) => {

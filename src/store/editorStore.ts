@@ -5395,6 +5395,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (sf) {
       get().resolveOverlaps([sf.clipId]);
     }
+    setTrimPreviewTime(null);
     get().recalcTotalDuration();
     get().saveSnapshot('Adjust Speed Frame');
   },

@@ -208,19 +208,31 @@ export function TimelineToolbar({
       <div className="relative flex items-center ml-1 pl-1 border-l border-[var(--theme-border)]/50 gap-1.5">
         {selectedSpeedFrame ? (
           <button
+            type="button"
             data-speed-frame-action="delete"
-            onClick={() => {
-              removeSpeedFrame(selectedSpeedFrame.clipId, selectedSpeedFrame.frameId);
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              const sf = useEditorStore.getState().selectedSpeedFrame;
+              if (sf) {
+                removeSpeedFrame(sf.clipId, sf.frameId);
+              }
             }}
             title="Delete selected Speed Frame (Delete / Backspace)"
-            className="px-2.5 py-1 text-[11px] rounded-lg flex items-center gap-1.5 transition-all font-medium text-rose-400 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 font-semibold shadow-xs"
+            className="speed-frame-element px-2.5 py-1 text-[11px] rounded-lg flex items-center gap-1.5 transition-all font-medium text-rose-400 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 font-semibold shadow-xs cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5 text-rose-400" />
             <span>Delete Speed Frame</span>
           </button>
         ) : (
           <button
-            onClick={() => {
+            type="button"
+            data-speed-frame-action="add"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
               if (selectedClipId) {
                 addSpeedFrame(selectedClipId);
               }
@@ -231,9 +243,9 @@ export function TimelineToolbar({
                 ? 'Add a Speed Frame at the playhead to dynamically rate-stretch this section'
                 : 'Select a clip to add a Speed Frame'
             }
-            className={`px-2.5 py-1 text-[11px] rounded-lg flex items-center gap-1.5 transition-all font-medium ${
+            className={`speed-frame-element px-2.5 py-1 text-[11px] rounded-lg flex items-center gap-1.5 transition-all font-medium ${
               selectedClipId
-                ? 'text-amber-500 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 font-semibold shadow-xs'
+                ? 'text-amber-500 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 font-semibold shadow-xs cursor-pointer'
                 : 'text-[var(--theme-text-muted)] opacity-50 cursor-not-allowed border border-transparent'
             }`}
           >

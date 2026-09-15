@@ -40,14 +40,15 @@ export function timeStretchChannelWsola(
     return { output: input.slice(), offsets: new Int32Array(0) };
   }
 
-  const outLen = Math.max(1, Math.round(inLen / speedRatio));
+  const safeSpeed = Math.max(0.05, Math.min(20.0, speedRatio));
+  const outLen = Math.max(1, Math.round(inLen / safeSpeed));
   const output = new Float32Array(outLen);
 
   // Window size: ~20-25ms is optimal for speech and acoustic music (e.g. 1024 samples at 48kHz)
   const N = Math.min(1024, Math.max(256, 1 << Math.floor(Math.log2((sampleRate * 0.022)))));
   const Hs = N >> 1; // Synthesis hop = 50% overlap (512 samples)
-  const Ha = Math.max(1, Math.round(Hs * speedRatio)); // Nominal analysis hop
-  const maxSearch = Math.min(Math.round(N * 0.35), 256); // Search window in samples (+/- 256)
+  const Ha = Math.max(1, Math.round(Hs * safeSpeed)); // Nominal analysis hop
+  const maxSearch = Math.min(Math.round(N * 0.35), 192); // Search window in samples (+/- 192)
 
   // Hann synthesis window
   const win = new Float32Array(N);
@@ -68,7 +69,7 @@ export function timeStretchChannelWsola(
     let chosenDelta = 0;
 
     if (useShared) {
-      chosenDelta = offsets[m];
+      chosenDelta = offsets[m] || 0;
     } else if (m === 0) {
       chosenDelta = 0;
       offsets[m] = 0;
@@ -84,20 +85,42 @@ export function timeStretchChannelWsola(
       const maxDelta = Math.min(maxSearch, inLen - N - nomPos);
 
       if (maxDelta >= minDelta && targetPos + N <= inLen) {
-        // Step by 2 in the inner correlation loop for 2x performance with identical alignment
-        for (let d = minDelta; d <= maxDelta; d += 2) {
+        // Stage 1: Coarse search stepping by 4 for ~4x speedup
+        for (let d = minDelta; d <= maxDelta; d += 4) {
           const candPos = nomPos + d;
           let corr = 0;
-          let energy = 1e-6;
+          let energy = 1e-4;
 
-          for (let k = 0; k < N; k += 4) {
+          for (let k = 0; k < N; k += 8) {
             const tVal = input[targetPos + k];
             const cVal = input[candPos + k];
             corr += tVal * cVal;
             energy += cVal * cVal;
           }
 
-          // Normalized cross-correlation
+          const normCorr = corr / Math.sqrt(energy);
+          if (normCorr > bestCorr) {
+            bestCorr = normCorr;
+            bestDelta = d;
+          }
+        }
+
+        // Stage 2: Fine search around coarse peak (+/- 3 samples)
+        const fineMin = Math.max(minDelta, bestDelta - 3);
+        const fineMax = Math.min(maxDelta, bestDelta + 3);
+        for (let d = fineMin; d <= fineMax; d++) {
+          if (d === bestDelta) continue;
+          const candPos = nomPos + d;
+          let corr = 0;
+          let energy = 1e-4;
+
+          for (let k = 0; k < N; k += 8) {
+            const tVal = input[targetPos + k];
+            const cVal = input[candPos + k];
+            corr += tVal * cVal;
+            energy += cVal * cVal;
+          }
+
           const normCorr = corr / Math.sqrt(energy);
           if (normCorr > bestCorr) {
             bestCorr = normCorr;
@@ -110,11 +133,12 @@ export function timeStretchChannelWsola(
       offsets[m] = chosenDelta;
     }
 
-    const readPos = Math.max(0, Math.min(inLen - N, nomPos + chosenDelta));
+    const maxRead = inLen - N;
+    const readPos = maxRead > 0 ? Math.max(0, Math.min(maxRead, nomPos + chosenDelta)) : 0;
     prevPos = readPos;
 
-    // Overlap-add into output buffer
-    const copyLen = Math.min(N, outLen - outPos);
+    // Overlap-add into output buffer with strict length bounds
+    const copyLen = Math.max(0, Math.min(N, outLen - outPos, inLen - readPos));
     for (let k = 0; k < copyLen; k++) {
       output[outPos + k] += input[readPos + k] * win[k];
     }
