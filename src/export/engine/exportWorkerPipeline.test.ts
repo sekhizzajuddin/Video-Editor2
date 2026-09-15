@@ -107,6 +107,13 @@ class Fake2DContext {
       this.canvas.__maxPixel = 0;
     }
   }
+  clearRect(x: number, y: number, w: number, h: number) {
+    if (x === 0 && y === 0 && w >= this.canvas.width && h >= this.canvas.height) {
+      this.canvas.__hasContent = false;
+      this.canvas.__maxPixel = 0;
+      this.canvas.__pixels = null;
+    }
+  }
   drawImage(src: any) {
     // If src is a FakeVideoFrame, synthesize a pixel buffer with its timestamp
     let pixels: Uint8ClampedArray | null = src?.__pixels ?? null;
@@ -132,9 +139,7 @@ class Fake2DContext {
       this.canvas.__hasContent = true;
       if (srcMax > this.canvas.__maxPixel) this.canvas.__maxPixel = srcMax;
       // Ensure canvas itself has pixels for transferToImageBitmap
-      if (!this.canvas.__pixels) {
-        this.canvas.__pixels = pixels;
-      }
+      this.canvas.__pixels = pixels;
     }
   }
   putImageData(imageData: FakeImageData) {
@@ -196,6 +201,8 @@ class FakeVideoFrame {
   duration: number;
   displayWidth = FRAME_W;
   displayHeight = FRAME_H;
+  codedWidth = FRAME_W;
+  codedHeight = FRAME_H;
   source: any;
   closed = false;
   constructor(source: any, init: any = {}) {
@@ -214,6 +221,8 @@ class FakeVideoFrame {
     });
     f.displayWidth = this.displayWidth;
     f.displayHeight = this.displayHeight;
+    f.codedWidth = this.codedWidth;
+    f.codedHeight = this.codedHeight;
     return f;
   }
   close() {
@@ -396,6 +405,7 @@ beforeAll(() => {
   g.self = g;
   g.postMessage = (msg: any) => postedMessages.push(msg);
   g.OffscreenCanvas = FakeOffscreenCanvas;
+  g.OffscreenCanvasRenderingContext2D = Fake2DContext;
   g.ImageData = FakeImageData;
   g.VideoFrame = FakeVideoFrame;
   g.VideoDecoder = FakeVideoDecoder;
@@ -563,10 +573,7 @@ describe('export worker pipeline (black-screen regression)', () => {
       const targetUs = Math.round((trimStart + i / FPS) * 1_000_000);
       if (srcUs !== null) {
         const diff = Math.abs((srcUs as number) - targetUs);
-        if (diff > FRAME_US) {
-          console.log(`[timing-debug] frame=${i} target=${targetUs} got=${srcUs} diffUs=${diff}`);
-        }
-        expect(diff).toBeLessThanOrEqual(2 * FRAME_US + 4);
+        expect(diff, `frame ${i}: targetUs=${targetUs} srcUs=${srcUs} diff=${diff}`).toBeLessThanOrEqual(2 * FRAME_US + 4);
       } else {
         // In fake env, timestamp marker may be lost due to ImageBitmap conversion;
         // we already verified a draw exists, so treat as non-black.

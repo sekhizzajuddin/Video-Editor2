@@ -72,7 +72,7 @@ function getSpeedRampMediaTime(
   const trim = clip.trimStart ?? clip.startOffset ?? 0;
   const speed = clip.speed ?? 1;
   const ramp = clip.speedRamp;
-  if (!ramp || ramp.length < 2) {
+  if ((!ramp || ramp.length < 2) && (!clip.speedFrames || clip.speedFrames.length === 0)) {
     return elapsed * speed + trim;
   }
   // Use the SAME engine as the preview (`getMediaTimeForClip`): the previous
@@ -90,6 +90,8 @@ function getSpeedRampMediaTime(
         trimStart: trim,
         speed,
         speedRamp: ramp,
+        speedFrames: clip.speedFrames,
+        speedFrameSourceEnd: clip.speedFrameSourceEnd,
       },
       currentTime
     );

@@ -129,22 +129,8 @@ export class AudioMixer {
           }
 
           if (speedSegments && speedSegments.length > 0) {
-            // Per-segment pitch compensation for rate-stretched / squeezed segments
-            if (preservePitch) {
-              for (const seg of speedSegments) {
-                const segPitchSt = baseVocalPitchSt - (seg.speed && seg.speed !== 1 ? 12 * Math.log2(seg.speed) : 0);
-                if (Math.abs(segPitchSt) >= 0.01) {
-                  const shifted = pitchShiftBufferRegion(
-                    (ch, len, sr) => ctx.createBuffer(ch, len, sr),
-                    buffer,
-                    segPitchSt,
-                    seg.sourceStart,
-                    seg.sourceEnd
-                  );
-                  if (shifted) buffer = shifted;
-                }
-              }
-            } else if (Math.abs(baseVocalPitchSt) >= 0.01) {
+            // Apply vocal pitch shift (if requested by user)
+            if (Math.abs(baseVocalPitchSt) >= 0.01) {
               const shifted = pitchShiftBufferRegion(
                 (ch, len, sr) => ctx.createBuffer(ch, len, sr),
                 buffer,
@@ -169,13 +155,7 @@ export class AudioMixer {
             }
           } else {
             // Static speed or single clip logic
-            let totalPitchSt = baseVocalPitchSt;
-            if (clip.speed && clip.speed !== 1 && preservePitch) {
-              const speedShiftSt = 12 * Math.log2(clip.speed);
-              totalPitchSt -= speedShiftSt;
-            }
-
-            if (Math.abs(totalPitchSt) >= 0.01) {
+            if (Math.abs(baseVocalPitchSt) >= 0.01) {
               const sourceDuration = audioBuffer.duration || 0;
               const span = getRampedClipSourceSpan(clip, sourceDuration);
               const startSec = clip.trimStart || 0;
@@ -183,7 +163,7 @@ export class AudioMixer {
               const shifted = pitchShiftBufferRegion(
                 (ch, len, sr) => ctx.createBuffer(ch, len, sr),
                 audioBuffer,
-                totalPitchSt,
+                baseVocalPitchSt,
                 startSec,
                 endSec
               );

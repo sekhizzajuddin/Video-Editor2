@@ -426,7 +426,7 @@ export function getMediaTimeAtPosition(
 }
 
 export function getMediaTimeForClip(
-  clip: { id: string; startTime: number; duration: number; trimStart: number; speed: number; speedRamp?: SpeedRampKeyframe[]; isReversed?: boolean; freezeFrame?: number },
+  clip: { id: string; startTime: number; duration: number; trimStart: number; speed: number; speedRamp?: SpeedRampKeyframe[]; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number; isReversed?: boolean; freezeFrame?: number },
   currentTime: number
 ): number {
   // FREEZE FRAME: ignore timeline position, always return the held frame
@@ -446,6 +446,22 @@ export function getMediaTimeForClip(
     // Clamp to [0, sourceDuration] to avoid seeking outside source bounds
     const clampedElapsed = Math.max(0, Math.min(sourceDuration, mediaElapsed));
     return clip.trimStart + sourceDuration - clampedElapsed;
+  }
+
+  if (clip.speedFrames && clip.speedFrames.length > 0) {
+    const segments = getSpeedFrameSegments(clip);
+    for (const seg of segments) {
+      if (elapsedTimeline >= seg.startOffset && elapsedTimeline <= seg.endOffset) {
+        return seg.sourceStart + (elapsedTimeline - seg.startOffset) * seg.speed;
+      }
+    }
+    if (segments.length > 0) {
+      if (elapsedTimeline < segments[0].startOffset) {
+        return segments[0].sourceStart + (elapsedTimeline - segments[0].startOffset) * segments[0].speed;
+      }
+      const lastSeg = segments[segments.length - 1];
+      return lastSeg.sourceStart + (elapsedTimeline - lastSeg.startOffset) * lastSeg.speed;
+    }
   }
 
   if (!clip.speedRamp || clip.speedRamp.length < 2) {

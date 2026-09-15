@@ -67,16 +67,23 @@ class Fake2DContext {
     }
     this.canvas.__pass.push({ op: 'fill' });
   }
+  clearRect(x: number, y: number, w: number, h: number) {
+    if (x === 0 && y === 0 && w >= this.canvas.width && h >= this.canvas.height) {
+      this.canvas.__hasContent = false;
+      this.canvas.__maxPixel = 0;
+      this.canvas.__pixels = null;
+    }
+  }
   drawImage(src: any) {
     let pixels: Uint8ClampedArray | null = src?.__pixels ?? null;
     // Handle FakeVideoFrame with timestamp
-    if (!pixels && typeof src?.timestamp === 'number') {
+    if (!pixels && typeof src?.timestamp === 'number' && !FakeVideoFrame.emitBlackPixels) {
       const buf = new Uint8ClampedArray(16 * 16 * 4).fill(128);
       new DataView(buf.buffer).setUint32(0, src.timestamp, true);
       pixels = buf;
     }
     // Propagate canvas max pixel as bright fill
-    if (!pixels && src?.__maxPixel) {
+    if (!pixels && src?.__maxPixel && !FakeVideoFrame.emitBlackPixels) {
       pixels = src.__pixels ?? new Uint8ClampedArray(16 * 16 * 4).fill(src.__maxPixel);
     }
     this.canvas.__pass.push({ op: 'draw', pixels });
@@ -84,9 +91,7 @@ class Fake2DContext {
     if (srcMax > 0) {
       this.canvas.__hasContent = true;
       if (srcMax > this.canvas.__maxPixel) this.canvas.__maxPixel = srcMax;
-      if (!this.canvas.__pixels) {
-        this.canvas.__pixels = pixels;
-      }
+      this.canvas.__pixels = pixels;
     }
   }
   putImageData(d: any) {
@@ -146,6 +151,8 @@ class FakeVideoFrame {
   duration: number;
   displayWidth = FRAME_W;
   displayHeight = FRAME_H;
+  codedWidth = FRAME_W;
+  codedHeight = FRAME_H;
   source: any;
   closed = false;
   constructor(source: any, init: any = {}) {
@@ -161,6 +168,8 @@ class FakeVideoFrame {
     const f = new FakeVideoFrame(this.source, { timestamp: this.timestamp, duration: this.duration });
     f.displayWidth = this.displayWidth;
     f.displayHeight = this.displayHeight;
+    f.codedWidth = this.codedWidth;
+    f.codedHeight = this.codedHeight;
     return f;
   }
   close() {
@@ -308,6 +317,7 @@ beforeAll(() => {
   g.self = g;
   g.postMessage = (msg: any) => posted.push(msg);
   g.OffscreenCanvas = FakeOffscreenCanvas;
+  g.OffscreenCanvasRenderingContext2D = Fake2DContext;
   g.ImageData = class {
     data: Uint8ClampedArray;
     width: number;
