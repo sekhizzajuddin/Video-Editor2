@@ -208,6 +208,7 @@ export function TimelineToolbar({
       <div className="relative flex items-center ml-1 pl-1 border-l border-[var(--theme-border)]/50 gap-1.5">
         {selectedSpeedFrame ? (
           <button
+            data-speed-frame-action="delete"
             onClick={() => {
               removeSpeedFrame(selectedSpeedFrame.clipId, selectedSpeedFrame.frameId);
             }}

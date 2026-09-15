@@ -191,7 +191,13 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
     const handleGlobalPointerDown = (e: MouseEvent | PointerEvent) => {
       const target = e.target as HTMLElement | null;
+      // Don't deselect if clicking on a speed-frame element in the timeline
       if (target?.closest?.('.speed-frame-element')) {
+        return;
+      }
+      // Don't deselect if clicking on the toolbar Delete Speed Frame button 
+      // (otherwise the pointerdown capture deselects before onClick fires)
+      if (target?.closest?.('[data-speed-frame-action]')) {
         return;
       }
       selectSpeedFrame(null, null);
@@ -622,7 +628,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                       ? '-top-2 -left-2 w-4 h-4 rotate-45 bg-gradient-to-br from-rose-500 via-pink-500 to-purple-600 border-2 border-white shadow-[0_0_14px_#f43f5e,0_0_20px_#a855f7] ring-2 ring-pink-400 scale-110'
                       : '-top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-gradient-to-br from-pink-500 to-purple-600 border border-white/90 shadow-md hover:scale-125'
                   }`}
-                  onPointerDown={(e) => handleLineMouseDown(e, sf.id, sf.timelineOffset)}
+                  onPointerDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
                   onClick={(e) => {
                     e.stopPropagation();
                     selectSpeedFrame(clip.id, sf.id);

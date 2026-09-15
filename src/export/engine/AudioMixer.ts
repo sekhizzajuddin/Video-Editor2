@@ -144,31 +144,45 @@ export class AudioMixer {
 
             // Schedule a BufferSource for each speed segment
             for (const seg of speedSegments) {
-              const segSource = ctx.createBufferSource();
-              const segTimelineStart = clipStart + seg.startOffset;
-              const segTimelineDur = Math.max(0.001, seg.endOffset - seg.startOffset);
-              const segSourceOffset = seg.sourceStart;
-              const segSourceDuration = Math.max(0.001, seg.sourceEnd - seg.sourceStart);
+              try {
+                const segTimelineStart = clipStart + seg.startOffset;
+                const segTimelineDur = Math.max(0.001, seg.endOffset - seg.startOffset);
+                const segSourceOffset = seg.sourceStart;
+                const segSourceDuration = Math.max(0.001, seg.sourceEnd - seg.sourceStart);
 
-              if (preservePitch && Math.abs(seg.speed - 1.0) > 0.01) {
-                // Pitch-preserved time-stretching via fast time-domain WSOLA
-                const stretched = timeStretchAudioBuffer(
-                  (ch, len, sr) => ctx.createBuffer(ch, len, sr),
-                  buffer,
-                  seg.speed,
-                  segSourceOffset,
-                  segSourceOffset + segSourceDuration
-                );
-                segSource.buffer = stretched as AudioBuffer;
-                segSource.playbackRate.value = 1.0;
-                segSource.connect(vocalF1);
-                segSource.start(segTimelineStart, 0, segTimelineDur);
-              } else {
-                // Native resampling (alters pitch along with speed)
-                segSource.buffer = buffer as AudioBuffer;
-                segSource.playbackRate.value = seg.speed;
-                segSource.connect(vocalF1);
-                segSource.start(segTimelineStart, segSourceOffset, segSourceDuration);
+                // Skip segments with invalid source ranges
+                if (segSourceOffset < 0 || segSourceOffset >= (buffer as AudioBuffer).duration) continue;
+                const clampedSourceEnd = Math.min(seg.sourceEnd, (buffer as AudioBuffer).duration);
+                const clampedSourceDur = Math.max(0.001, clampedSourceEnd - segSourceOffset);
+
+                const segSource = ctx.createBufferSource();
+
+                if (preservePitch && Math.abs(seg.speed - 1.0) > 0.01) {
+                  // Pitch-preserved time-stretching via fast time-domain WSOLA
+                  const stretched = timeStretchAudioBuffer(
+                    (ch, len, sr) => ctx.createBuffer(ch, len, sr),
+                    buffer,
+                    seg.speed,
+                    segSourceOffset,
+                    segSourceOffset + clampedSourceDur
+                  );
+                  segSource.buffer = stretched as AudioBuffer;
+                  segSource.playbackRate.value = 1.0;
+                  segSource.connect(vocalF1);
+                  // Clamp play duration to actual stretched buffer length to prevent
+                  // BufferSourceNode.start() from throwing when floating-point rounding
+                  // makes the stretched buffer slightly shorter than segTimelineDur
+                  const maxDur = (stretched as AudioBuffer).duration;
+                  segSource.start(segTimelineStart, 0, Math.min(segTimelineDur, maxDur));
+                } else {
+                  // Native resampling (alters pitch along with speed)
+                  segSource.buffer = buffer as AudioBuffer;
+                  segSource.playbackRate.value = seg.speed;
+                  segSource.connect(vocalF1);
+                  segSource.start(segTimelineStart, segSourceOffset, clampedSourceDur);
+                }
+              } catch (segErr) {
+                console.warn(`AudioMixer: Failed to schedule speed segment ${seg.index}`, segErr);
               }
             }
           } else {
@@ -197,17 +211,21 @@ export class AudioMixer {
 
             if (preservePitch && Math.abs(effectiveSpeed - 1.0) > 0.01) {
               // Pitch-preserved time-stretching via fast time-domain WSOLA
+              const clampedEnd = Math.min(trimStart + playDuration, (buffer as AudioBuffer).duration);
               const stretched = timeStretchAudioBuffer(
                 (ch, len, sr) => ctx.createBuffer(ch, len, sr),
                 buffer,
                 effectiveSpeed,
                 trimStart,
-                trimStart + playDuration
+                clampedEnd
               );
               source.buffer = stretched as AudioBuffer;
               source.playbackRate.value = 1.0;
               source.connect(vocalF1);
-              source.start(clip.startTime, 0, clip.duration || (playDuration / effectiveSpeed));
+              // Clamp to actual stretched buffer duration to prevent start() overflow
+              const maxDur = (stretched as AudioBuffer).duration;
+              const targetDur = clip.duration || (playDuration / effectiveSpeed);
+              source.start(clip.startTime, 0, Math.min(targetDur, maxDur));
             } else {
               // Native resampling (alters pitch along with speed)
               source.buffer = buffer as AudioBuffer;
