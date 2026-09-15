@@ -30,7 +30,7 @@ import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone'
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
-import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime } from '@/utils/playbackClock';
+import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime, setIsPlayingClock } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains, getTransitionWindow } from '@/utils/transitionEngine';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 
@@ -159,6 +159,8 @@ interface ActiveClipInfo {
   trackType: 'video' | 'audio';
   speed: number;
   speedRamp?: any[];
+  speedFrames?: any[];
+  speedFrameSourceEnd?: number;
   isReversed?: boolean;
   freezeFrame?: number;
   absStartTime: number;
@@ -1009,6 +1011,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         trackType: track.type,
         speed: clip.speed ?? 1,
         speedRamp: clip.speedRamp,
+        speedFrames: clip.speedFrames,
+        speedFrameSourceEnd: clip.speedFrameSourceEnd,
         isReversed: clip.isReversed,
         freezeFrame: clip.freezeFrame,
         absStartTime,
@@ -1640,6 +1644,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const isReversing = direction < 0;
 
       const pool = poolRef.current;
+      setIsPlayingClock(playing);
 
       // PERF + BUG FIX: Cache active clips list with loop/seek-backward detection.
       // Bug: when playback loops (t=30 → t=0), nextClipBoundaryRef was still > 0, so
@@ -1656,6 +1661,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       prevSyncCtRef.current = ct;
 
       if (tracksChanged || crossedBoundary || isJump) {
+        if (tracksChanged) {
+          sortedTracksRef.current = storeTracks.map((t: any) => ({
+            ...t,
+            clips: [...t.clips].sort((a: any, b: any) => a.startTime - b.startTime)
+          }));
+        }
         if (isJump) {
           // Reset boundary so active clips and next boundary are fully re-evaluated at the new jump position
           nextClipBoundaryRef.current = 0;
@@ -1666,7 +1677,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         cachedActiveClipsRef.current = getActiveClips();
         lastCachedStoreTracksRef.current = storeTracks;
 
-        // Compute next boundary: min(clip starts > ct, clip ends > ct)
+        // Compute next boundary: min(clip starts > ct, clip ends > ct, speed frame transitions > ct)
         let nextBoundary = Infinity;
         for (const track of sortedTracksRef.current) {
           for (let i = 0; i < track.clips.length; i++) {
@@ -1674,6 +1685,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             const clipEnd = clip.startTime + clip.duration;
             if (clip.startTime > ct && clip.startTime < nextBoundary) nextBoundary = clip.startTime;
             if (clipEnd > ct && clipEnd < nextBoundary) nextBoundary = clipEnd;
+
+            // Include speed frame boundaries so PLL updates speeds dynamically
+            if (clip.speedFrames && clip.speedFrames.length > 0) {
+              for (const sf of clip.speedFrames) {
+                const sfTime = clip.startTime + sf.timelineOffset;
+                if (sfTime > ct && sfTime < nextBoundary) nextBoundary = sfTime;
+              }
+            }
 
             // Also account for transition boundaries, otherwise the incoming clip
             // isn't activated until its precise startTime, causing a hard-seek stall
@@ -1731,6 +1750,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             trimStart: clip.trimStart,
             speed: clip.speed,
             speedRamp: clip.speedRamp,
+            speedFrames: clip.speedFrames,
+            speedFrameSourceEnd: clip.speedFrameSourceEnd,
             isReversed: clip.isReversed,
             freezeFrame: clip.freezeFrame,
           }, scrubTime)));
@@ -1771,6 +1792,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           trimStart: clip.trimStart,
           speed: clip.speed,
           speedRamp: clip.speedRamp,
+          speedFrames: clip.speedFrames,
+          speedFrameSourceEnd: clip.speedFrameSourceEnd,
           isReversed: clip.isReversed,
           freezeFrame: clip.freezeFrame,
         }, ct)));
@@ -1781,7 +1804,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const justActivated = !lastActiveClipIdsRef.current.has(clip.clipId);
 
         // Speed-ramp-aware: use current segment speed for playbackRate
-        const currentSegmentSpeed = clip.speedRamp && clip.speedRamp.length >= 2
+        const hasSpeedFrames = clip.speedFrames && clip.speedFrames.length > 0;
+        const currentSegmentSpeed = (hasSpeedFrames || (clip.speedRamp && clip.speedRamp.length >= 2))
           ? getSpeedForClipAtTime({
               id: clip.clipId,
               startTime: clip.absStartTime,
@@ -1789,6 +1813,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               trimStart: clip.trimStart,
               speed: clip.speed,
               speedRamp: clip.speedRamp,
+              speedFrames: clip.speedFrames,
+              speedFrameSourceEnd: clip.speedFrameSourceEnd,
               isReversed: clip.isReversed,
               freezeFrame: clip.freezeFrame,
             }, ct)
@@ -2337,6 +2363,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             trimStart: (clip as any).trimStart ?? 0,
             speed: (clip as any).speed ?? 1,
             speedRamp: (clip as any).speedRamp,
+            speedFrames: (clip as any).speedFrames,
+            speedFrameSourceEnd: (clip as any).speedFrameSourceEnd,
+            isReversed: (clip as any).isReversed,
+            freezeFrame: (clip as any).freezeFrame,
           }, newTime)));
 
           if (el.seeking) {

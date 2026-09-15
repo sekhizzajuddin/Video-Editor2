@@ -1,6 +1,7 @@
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
 import { getRampedClipSourceSpan, getSpeedFrameSegments } from '@/utils/speedRamp';
 import { pitchShiftBufferRegion } from '@/utils/audio/phaseVocoder';
+import { timeStretchAudioBuffer } from '@/utils/audio/wsola';
 
 export class AudioMixer {
   private sampleRate = 48000;
@@ -144,14 +145,31 @@ export class AudioMixer {
             // Schedule a BufferSource for each speed segment
             for (const seg of speedSegments) {
               const segSource = ctx.createBufferSource();
-              segSource.buffer = buffer as AudioBuffer;
-              segSource.playbackRate.value = seg.speed;
-              segSource.connect(vocalF1);
-
               const segTimelineStart = clipStart + seg.startOffset;
+              const segTimelineDur = Math.max(0.001, seg.endOffset - seg.startOffset);
               const segSourceOffset = seg.sourceStart;
               const segSourceDuration = Math.max(0.001, seg.sourceEnd - seg.sourceStart);
-              segSource.start(segTimelineStart, segSourceOffset, segSourceDuration);
+
+              if (preservePitch && Math.abs(seg.speed - 1.0) > 0.01) {
+                // Pitch-preserved time-stretching via fast time-domain WSOLA
+                const stretched = timeStretchAudioBuffer(
+                  (ch, len, sr) => ctx.createBuffer(ch, len, sr),
+                  buffer,
+                  seg.speed,
+                  segSourceOffset,
+                  segSourceOffset + segSourceDuration
+                );
+                segSource.buffer = stretched as AudioBuffer;
+                segSource.playbackRate.value = 1.0;
+                segSource.connect(vocalF1);
+                segSource.start(segTimelineStart, 0, segTimelineDur);
+              } else {
+                // Native resampling (alters pitch along with speed)
+                segSource.buffer = buffer as AudioBuffer;
+                segSource.playbackRate.value = seg.speed;
+                segSource.connect(vocalF1);
+                segSource.start(segTimelineStart, segSourceOffset, segSourceDuration);
+              }
             }
           } else {
             // Static speed or single clip logic
@@ -171,18 +189,32 @@ export class AudioMixer {
             }
 
             const source = ctx.createBufferSource();
-            source.buffer = buffer as AudioBuffer;
-            if (clip.speed) {
-              source.playbackRate.value = clip.speed;
-            }
-            source.connect(vocalF1);
-
+            const effectiveSpeed = clip.speed || 1.0;
             const trimStart = clip.trimStart || 0;
             const playDuration = clip.duration 
-              ? clip.duration * (clip.speed || 1) 
+              ? clip.duration * effectiveSpeed 
               : audioBuffer.duration;
-            
-            source.start(clip.startTime, trimStart, playDuration);
+
+            if (preservePitch && Math.abs(effectiveSpeed - 1.0) > 0.01) {
+              // Pitch-preserved time-stretching via fast time-domain WSOLA
+              const stretched = timeStretchAudioBuffer(
+                (ch, len, sr) => ctx.createBuffer(ch, len, sr),
+                buffer,
+                effectiveSpeed,
+                trimStart,
+                trimStart + playDuration
+              );
+              source.buffer = stretched as AudioBuffer;
+              source.playbackRate.value = 1.0;
+              source.connect(vocalF1);
+              source.start(clip.startTime, 0, clip.duration || (playDuration / effectiveSpeed));
+            } else {
+              // Native resampling (alters pitch along with speed)
+              source.buffer = buffer as AudioBuffer;
+              source.playbackRate.value = effectiveSpeed;
+              source.connect(vocalF1);
+              source.start(clip.startTime, trimStart, playDuration);
+            }
           }
         } catch (err) {
           console.error(`Failed to mix audio for clip ${clip.id}`, err);

@@ -99,10 +99,21 @@ export function subscribeTrimPreviewTime(listener: TrimClockListener): () => voi
   return () => { trimListeners.delete(listener); };
 }
 
+let isPlayingClock = false;
+
+/** Set whether playback is currently running. Automatically clears trimPreviewTime when playing. */
+export function setIsPlayingClock(playing: boolean): void {
+  isPlayingClock = playing;
+  if (playing && trimPreviewTime !== null) {
+    setTrimPreviewTime(null);
+  }
+}
+
 /**
  * Returns the time the canvas/media should use for rendering:
- * trimPreviewTime if active, otherwise the normal playback time.
+ * trimPreviewTime if active (and not playing), otherwise the normal playback time.
  */
 export function getEffectivePreviewTime(): number {
-  return trimPreviewTime !== null ? trimPreviewTime : currentTime;
+  return (!isPlayingClock && trimPreviewTime !== null) ? trimPreviewTime : currentTime;
 }
+

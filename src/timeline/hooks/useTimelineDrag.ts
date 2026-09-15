@@ -99,6 +99,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   // P0 FIX: Universal mutable batch buffer to avoid GC pressure from fresh
   // array allocations at 60Hz across ALL drag/resize/ripple/slip operations.
   const batchBufferRef = useRef<Array<{clipId: string; changes: Partial<TimelineClip>}>>([]); 
+  const pendingClipClickSeekRef = useRef<{
+    time: number;
+    startX: number;
+    startY: number;
+    timerId: any;
+  } | null>(null); 
 
 
   const {
@@ -596,7 +602,24 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return;
       }
 
-      seek(Math.max(0, clickTime));
+      // UNIVERSAL LOGIC: Do NOT move playhead immediately on pointerdown.
+      // After release of click, playhead will move to the clicked point.
+      // But if user clicks and holds (>350ms) or drags (>3px), playhead will not move.
+      if (pendingClipClickSeekRef.current?.timerId) {
+        clearTimeout(pendingClipClickSeekRef.current.timerId);
+      }
+      const timerId = setTimeout(() => {
+        if (pendingClipClickSeekRef.current) {
+          pendingClipClickSeekRef.current = null;
+        }
+      }, 350);
+
+      pendingClipClickSeekRef.current = {
+        time: Math.max(0, clickTime),
+        startX: e.clientX,
+        startY: e.clientY,
+        timerId,
+      };
 
       const latestTracks = getLatestTracks(clip.id);
 
@@ -878,6 +901,18 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const rulerDownXRef = useRef<number>(0);
 
   const handlePointerMove = (e: PointerEvent) => {
+    // If pointer moved beyond 3px threshold, cancel pending click-release seek
+    if (pendingClipClickSeekRef.current) {
+      const dx = e.clientX - pendingClipClickSeekRef.current.startX;
+      const dy = e.clientY - pendingClipClickSeekRef.current.startY;
+      if (Math.hypot(dx, dy) > 3) {
+        if (pendingClipClickSeekRef.current.timerId) {
+          clearTimeout(pendingClipClickSeekRef.current.timerId);
+        }
+        pendingClipClickSeekRef.current = null;
+      }
+    }
+
     if (isScrubbing && !resizeState && !dragState && !slipState && !slideState) {
       if (wasPlayingOnRulerDownRef.current && Math.abs(e.clientX - rulerDownXRef.current) > 4) {
         // User dragged during playback — switch from "click to jump" to full scrubbing mode (pause playback)
@@ -1469,6 +1504,17 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   };
 
   const handlePointerUp = () => {
+    // UNIVERSAL LOGIC: Move playhead after release of click on clip (if user didn't drag or hold)
+    if (pendingClipClickSeekRef.current) {
+      if (pendingClipClickSeekRef.current.timerId) {
+        clearTimeout(pendingClipClickSeekRef.current.timerId);
+      }
+      const targetTime = pendingClipClickSeekRef.current.time;
+      pendingClipClickSeekRef.current = null;
+      seek(targetTime);
+      window.dispatchEvent(new Event('procut-frame-updated'));
+    }
+
     if (scrubRafIdRef.current !== null) {
       cancelAnimationFrame(scrubRafIdRef.current);
       scrubRafIdRef.current = null;

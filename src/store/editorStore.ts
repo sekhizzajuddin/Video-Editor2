@@ -3283,6 +3283,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0) return;
 
+    setTrimPreviewTime(null);
+
     if (selectedExportRegionId) {
       const activeRegion = (exportRegions || []).find((r) => r.id === selectedExportRegionId);
       if (activeRegion) {
@@ -3302,6 +3304,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     const { tracks, isPlaying, exportRegions, selectedExportRegionId, currentTime } = get();
     const allClips = tracks.flatMap((t) => t.clips || []);
     if (allClips.length === 0 && !isPlaying) return;
+
+    if (!isPlaying) {
+      setTrimPreviewTime(null);
+    }
 
     if (!isPlaying && selectedExportRegionId) {
       const activeRegion = (exportRegions || []).find((r) => r.id === selectedExportRegionId);
@@ -4874,11 +4880,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Update Clip Enter/Exit Animation');
   },
 
-  // Keyboard Delete — remove selected export region, PIP window or clip
+  // Keyboard Delete — remove selected export region, speed frame, PIP window or clip
   removeSelected: () => {
     const state = get();
     if (state.selectedExportRegionId) {
       state.removeExportRegion(state.selectedExportRegionId);
+    } else if (state.selectedSpeedFrame) {
+      state.removeSpeedFrame(state.selectedSpeedFrame.clipId, state.selectedSpeedFrame.frameId);
     } else if (state.activePipWindowId) {
       state.deletePipWindow(state.activePipWindowId);
     } else if (state.selectedClipIds.length > 1) {

@@ -188,6 +188,15 @@ function DesktopApp() {
         }
       }
 
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const storeState = useEditorStore.getState();
+        if (storeState.selectedSpeedFrame) {
+          e.preventDefault();
+          storeState.removeSpeedFrame(storeState.selectedSpeedFrame.clipId, storeState.selectedSpeedFrame.frameId);
+          return;
+        }
+      }
+
       if (!pressed) return;
 
       const currentSettings = useEditorStore.getState().settings;

@@ -615,44 +615,24 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   <div className="w-full h-full opacity-0 group-hover/line:opacity-20 bg-white transition-opacity" />
                 </div>
 
-                {/* Top Marker / Screw Head */}
-                {isFrameSelected ? (
-                  /* Selected state: Metallic Precision Screw Head with delete button */
-                  <div className="speed-frame-element absolute -top-3.5 -left-2.5 pointer-events-auto flex flex-col items-center">
-                    {/* Quick Delete button (×) */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeSpeedFrame(clip.id, sf.id);
-                      }}
-                      className="speed-frame-element mb-1 w-4 h-4 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold shadow-md transition-colors"
-                      title="Delete Speed Frame (Restore uniform speed)"
-                    >
-                      ×
-                    </button>
-
-                    {/* Screw Head */}
-                    <div
-                      className="speed-frame-element w-5 h-5 rounded-full bg-gradient-to-br from-neutral-100 via-neutral-300 to-neutral-500 border border-white shadow-xl flex items-center justify-center cursor-ew-resize hover:scale-110 active:scale-95 transition-transform ring-2 ring-purple-500/80"
-                      onPointerDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
-                      title="Screw Head: Drag to reposition Speed Frame within clip"
-                    >
-                      {/* Slotted screw drive groove */}
-                      <div className="w-3 h-[2px] bg-neutral-900 rounded-xs shadow-inner" />
-                    </div>
-                  </div>
-                ) : (
-                  /* Unselected state: glowing marker cap */
-                  <div
-                    className="speed-frame-element absolute -top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-gradient-to-br from-pink-500 to-purple-600 border border-white/90 shadow-md cursor-pointer pointer-events-auto hover:scale-125 transition-transform"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      selectSpeedFrame(clip.id, sf.id);
-                    }}
-                    title="Click to select Speed Frame (convert to Screw Head & preview frame)"
-                  />
-                )}
+                {/* Top Diamond Button (Click to select, drag to shift speed frame line) */}
+                <div
+                  className={`speed-frame-element absolute cursor-ew-resize pointer-events-auto transition-all ${
+                    isFrameSelected
+                      ? '-top-2 -left-2 w-4 h-4 rotate-45 bg-gradient-to-br from-rose-500 via-pink-500 to-purple-600 border-2 border-white shadow-[0_0_14px_#f43f5e,0_0_20px_#a855f7] ring-2 ring-pink-400 scale-110'
+                      : '-top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-gradient-to-br from-pink-500 to-purple-600 border border-white/90 shadow-md hover:scale-125'
+                  }`}
+                  onPointerDown={(e) => handleLineMouseDown(e, sf.id, sf.timelineOffset)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selectSpeedFrame(clip.id, sf.id);
+                  }}
+                  title={
+                    isFrameSelected
+                      ? 'Selected Speed Frame (Drag to reposition / shift line)'
+                      : 'Speed Frame: Click to select, Drag to shift line'
+                  }
+                />
               </div>
             );
           })}
