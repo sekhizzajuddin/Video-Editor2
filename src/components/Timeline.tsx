@@ -6,7 +6,7 @@
 //   src/mobile/components/MobileTimeline.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -83,6 +83,8 @@ export function Timeline() {
     setActivePipWindow,
     isArrangeMode,
     setArrangeMode,
+    selectedSpeedFrame,
+    selectSpeedFrame,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     zoomLevel: s.zoomLevel,
@@ -124,6 +126,8 @@ export function Timeline() {
     setActivePipWindow: s.setActivePipWindow,
     isArrangeMode: s.isArrangeMode,
     setArrangeMode: s.setArrangeMode,
+    selectedSpeedFrame: s.selectedSpeedFrame,
+    selectSpeedFrame: s.selectSpeedFrame,
   })));
 
 
@@ -259,6 +263,26 @@ export function Timeline() {
   }, [zoomLevel, totalDuration]);
 
   const timelineWidth = (totalDuration + 30) * zoomLevel;
+
+  // Universal click-outside listener to deselect Speed Frame
+  useEffect(() => {
+    if (!selectedSpeedFrame) return;
+
+    const handleGlobalClickOutside = (e: MouseEvent | PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('.speed-frame-element')) {
+        return;
+      }
+      selectSpeedFrame(null, null);
+    };
+
+    window.addEventListener('pointerdown', handleGlobalClickOutside, true);
+    window.addEventListener('mousedown', handleGlobalClickOutside, true);
+    return () => {
+      window.removeEventListener('pointerdown', handleGlobalClickOutside, true);
+      window.removeEventListener('mousedown', handleGlobalClickOutside, true);
+    };
+  }, [selectedSpeedFrame, selectSpeedFrame]);
 
   return (
     <>

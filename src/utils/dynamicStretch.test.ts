@@ -110,35 +110,16 @@ describe('Dynamic Speed Stretch (Dynamic Speed Ramping)', () => {
     store.applyDynamicStretch();
 
     const track = useEditorStore.getState().tracks[0];
-    // Sliced into 3 pieces: Head, Stretched, Tail
-    expect(track.clips.length).toBe(3);
+    // Sliced into 0 splits — clip is preserved as single clip with embedded speed frames!
+    expect(track.clips.length).toBe(1);
 
-    const [head, mid, tail] = track.clips;
+    const clip = track.clips[0];
+    expect(clip.speedFrames).toBeDefined();
+    expect(clip.speedFrames!.length).toBe(2);
 
-    // Head: 0 to 2s, speed 1.0
-    expect(head.startTime).toBe(0);
-    expect(head.duration).toBeCloseTo(2, 4);
-    expect(head.speed).toBe(1);
-
-    // Mid (Stretched): 2s to 4s (duration 2s, speed 2.0x)
-    expect(mid.startTime).toBeCloseTo(2, 4);
-    expect(mid.duration).toBeCloseTo(2, 4);
-    expect(mid.speed).toBeCloseTo(2, 4);
-
-    // Tail: duration compensated from original 4s to 6s (total clip duration stays exactly 10s: 2 + 2 + 6 = 10s!)
-    expect(tail.startTime).toBeCloseTo(4, 4);
-    expect(tail.duration).toBeCloseTo(6, 4);
-    // Tail played 4s of source in 6s timeline -> speed = 4/6 = 0.6667x
-    expect(tail.speed).toBeCloseTo(4 / 6, 4);
-
-    // Total duration of all 3 parts is exactly 10s (maintained!)
-    const totalDuration = head.duration + mid.duration + tail.duration;
-    expect(totalDuration).toBeCloseTo(10, 4);
-
-    // All slices share the same splitGroupId
-    expect(head.splitGroupId).toBeDefined();
-    expect(head.splitGroupId).toBe(mid.splitGroupId);
-    expect(mid.splitGroupId).toBe(tail.splitGroupId);
+    // Speed frame 1 at 2s, Speed frame 2 moved from 6s to 4s (squeezed 4s to 2s -> 2.0x)
+    expect(clip.speedFrames![0].timelineOffset).toBeCloseTo(2, 4);
+    expect(clip.speedFrames![1].timelineOffset).toBeCloseTo(4, 4);
 
     // Dynamic stretch is now deactivated and mark vanished
     expect(useEditorStore.getState().dynamicStretch.isActive).toBe(false);

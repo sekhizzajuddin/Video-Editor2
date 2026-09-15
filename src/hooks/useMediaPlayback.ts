@@ -1856,11 +1856,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 accumulatedDriftAudio = 0; // Reset integral
               }
             } else if (Math.abs(rawDrift) > AUDIO_PLL_THRESHOLD) {
-              // Gentle PLL: tiny playbackRate adjustments
+              // Gentle PLL: playbackRate adjustments (wider range when speed-ramped)
               accumulatedDriftAudio += rawDrift * dt;
+              const isRamped = (clip.speedRamp && clip.speedRamp.length >= 2) || ((clip.clip as any)?.speedFrames && (clip.clip as any).speedFrames.length > 0);
+              const maxAdjust = isRamped ? 0.35 : AUDIO_MAX_PLL_ADJUST;
               let adjustment = (rawDrift * AUDIO_PLL_P) + (accumulatedDriftAudio * AUDIO_PLL_I);
-              adjustment = Math.max(-AUDIO_MAX_PLL_ADJUST, Math.min(AUDIO_MAX_PLL_ADJUST, adjustment));
-              const targetRate = Math.max(0.95, Math.min(1.05, globalSpeed * currentSegmentSpeed * (1 - adjustment)));
+              adjustment = Math.max(-maxAdjust, Math.min(maxAdjust, adjustment));
+              const nominalRate = globalSpeed * currentSegmentSpeed;
+              const targetRate = Math.max(0.05, nominalRate * (1 - adjustment));
               if (Math.abs(el.playbackRate - targetRate) > 0.001) {
                 el.playbackRate = targetRate;
               }
@@ -1886,9 +1889,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
         // ---- VIDEO SYNC STRATEGY (Smooth PLL without seek-storm stutter) ----
         else if (entry.type === 'video') {
-          const VIDEO_HARD_SEEK_THRESHOLD = 0.45;  // 450ms (prevents false-alarm seeks during decode)
+          const isRamped = (clip.speedRamp && clip.speedRamp.length >= 2) || ((clip.clip as any)?.speedFrames && (clip.clip as any).speedFrames.length > 0);
+          const VIDEO_HARD_SEEK_THRESHOLD = isRamped ? 1.2 : 0.45;  // Relax hard-seek threshold during ramp to prevent audio decode dropouts
           const VIDEO_PLL_THRESHOLD = 0.025;       // 25ms
-          const VIDEO_MAX_PLL_ADJUST = 0.10;       // 10% dynamic playback rate modulation
+          const VIDEO_MAX_PLL_ADJUST = isRamped ? 0.35 : 0.10;       // Dynamic playback rate modulation
 
           // REVERSE / FREEZE FRAME: browsers can't play <video> backward, so we
           // keep the element paused and manually seek each sync tick.
@@ -1899,6 +1903,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               el.currentTime = mediaTime;
             }
           } else if (playing && !isReversing) {
+            // Immediate resume if suspended (ensures video internal audio plays via Web Audio)
+            if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
+              entry.audioCtx.resume().catch(() => {});
+            }
+
             if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
               // Skip the hard seek if the element is ALREADY at (or very near)
               // the target — e.g. after a scrub-seek that positioned it, then
@@ -1913,12 +1922,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               // Smoothly modulate playback speed to catch up / slow down without stopping decoder
               let adjustment = rawDrift * 0.4;
               adjustment = Math.max(-VIDEO_MAX_PLL_ADJUST, Math.min(VIDEO_MAX_PLL_ADJUST, adjustment));
-              const targetRate = Math.max(0.1, globalSpeed * currentSegmentSpeed * (1 - adjustment));
+              const targetRate = Math.max(0.05, globalSpeed * currentSegmentSpeed * (1 - adjustment));
               if (Math.abs(el.playbackRate - targetRate) > 0.005) {
                 el.playbackRate = targetRate;
               }
             } else {
-              const nominalRate = Math.max(0.1, globalSpeed * currentSegmentSpeed);
+              const nominalRate = Math.max(0.05, globalSpeed * currentSegmentSpeed);
               if (Math.abs(el.playbackRate - nominalRate) > 0.005) {
                 el.playbackRate = nominalRate;
               }
@@ -2042,8 +2051,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const animatedVolume = getAnimatedValue(audioSettings.volume, ct, clipStart, fullClip.animations?.['audio.volume']);
       const animatedPan = getAnimatedValue(audioSettings.pan, ct, clipStart, fullClip.animations?.['audio.pan']);
 
-      if (entry.el.preservesPitch !== audioSettings.preservePitch) {
-        entry.el.preservesPitch = audioSettings.preservePitch;
+      const shouldPreserve = audioSettings.preservePitch !== false;
+      if (entry.el.preservesPitch !== shouldPreserve) {
+        entry.el.preservesPitch = shouldPreserve;
+      }
+      if ('webkitPreservesPitch' in entry.el && (entry.el as any).webkitPreservesPitch !== shouldPreserve) {
+        (entry.el as any).webkitPreservesPitch = shouldPreserve;
+      }
+      if ('mozPreservesPitch' in entry.el && (entry.el as any).mozPreservesPitch !== shouldPreserve) {
+        (entry.el as any).mozPreservesPitch = shouldPreserve;
       }
 
       const ctxTime = entry.audioCtx?.currentTime || 0;

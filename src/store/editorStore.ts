@@ -2996,8 +2996,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Split Clip');
   },
 
-  selectClip: (id, multi = false) =>
-    set((state) => {
+  selectClip: (id, multi = false) => {
+    setTrimPreviewTime(null);
+    return set((state) => {
       if (!id) {
         return {
           selectedClipId: null,
@@ -3027,25 +3028,35 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         selectedClipId: newIds.length > 0 ? newIds[0] : null,
         selectedClipIds: newIds,
         selectedTransitionClipId: null,
+        selectedSpeedFrame: null,
       };
-    }),
-  selectClips: (clipIds) =>
-    set({
+    });
+  },
+  selectClips: (clipIds) => {
+    setTrimPreviewTime(null);
+    return set({
       selectedClipIds: clipIds,
       selectedClipId: clipIds[0] || null,
       selectedTransitionClipId: null,
       selectedSpeedFrame: null,
-    }),
-  selectTrack: (trackId) => set({ selectedTrackId: trackId }),
+    });
+  },
+  selectTrack: (trackId) => {
+    setTrimPreviewTime(null);
+    return set({ selectedTrackId: trackId, selectedSpeedFrame: null });
+  },
 
   // Transitions
   setShowTransitionLayer: (show) => set({ showTransitionLayer: show }),
-  selectTransition: (clipId) =>
-    set({
+  selectTransition: (clipId) => {
+    setTrimPreviewTime(null);
+    return set({
       selectedTransitionClipId: clipId,
       selectedClipId: null,
       selectedClipIds: [],
-    }),
+      selectedSpeedFrame: null,
+    });
+  },
   // NOTE: a transition can live on EITHER the incoming clip (`transitionIn`) or
   // the outgoing one (`transitionOut`) — drag-and-drop assigns whichever edge the
   // user dropped nearest. The original implementation only ever updated/removed
@@ -5144,14 +5155,21 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     let { clip: c2, newFrameId: endFrameId } = addSpeedFrameToClip(c1, relEnd, mediaItem?.duration);
 
     // Apply the stretch to the segment by adjusting the end speed frame offset
-    const newEndOffset = Math.min(clip.duration - 0.05, relStart + stretchDur);
+    const newEndOffset = relStart + stretchDur;
     const updatedClip = moveSpeedFrameLine(c2, endFrameId, newEndOffset, mediaItem?.duration);
+    const deltaDuration = updatedClip.duration - clip.duration;
 
-    const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+    let { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
       if (pipId !== found.pipId || track.id !== found.track.id) return track;
       return {
         ...track,
-        clips: track.clips.map((c) => (c.id === clip.id ? updatedClip : c)),
+        clips: track.clips.map((c) => {
+          if (c.id === clip.id) return updatedClip;
+          if (!dynamicStretch.maintainDuration && deltaDuration !== 0 && c.startTime >= clip.startTime + clip.duration - 0.001) {
+            return { ...c, startTime: c.startTime + deltaDuration };
+          }
+          return c;
+        }),
       };
     });
 

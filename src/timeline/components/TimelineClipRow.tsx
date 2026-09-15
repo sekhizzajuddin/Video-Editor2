@@ -189,7 +189,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   useEffect(() => {
     if (!selectedSpeedFrame || selectedSpeedFrame.clipId !== clip.id) return;
 
-    const handleGlobalPointerDown = (e: PointerEvent) => {
+    const handleGlobalPointerDown = (e: MouseEvent | PointerEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest?.('.speed-frame-element')) {
         return;
@@ -198,8 +198,10 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     };
 
     window.addEventListener('pointerdown', handleGlobalPointerDown, true);
+    window.addEventListener('mousedown', handleGlobalPointerDown, true);
     return () => {
       window.removeEventListener('pointerdown', handleGlobalPointerDown, true);
+      window.removeEventListener('mousedown', handleGlobalPointerDown, true);
     };
   }, [selectedSpeedFrame, clip.id, selectSpeedFrame]);
 

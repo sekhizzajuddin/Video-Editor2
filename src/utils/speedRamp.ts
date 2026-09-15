@@ -274,6 +274,17 @@ export class SpeedRampEngine {
     return 1.0;
   }
 
+  getSpeedAtTimelineTime(timelineTime: number): number {
+    if (this.keyframes.length === 0) return 1.0;
+    if (timelineTime <= 0) return this.keyframes[0].speed;
+    if (timelineTime >= this.totalTimelineDuration) {
+      return this.keyframes[this.keyframes.length - 1].speed;
+    }
+
+    const sourceTime = this.timelineToSource(timelineTime);
+    return this.getSpeedAtSourceTime(sourceTime);
+  }
+
   private interpolateSpeed(seg: SpeedSegment, sourceTime: number): number {
     const delta = seg.sourceEnd - seg.sourceStart;
     const t = delta > 0.0001 ? (sourceTime - seg.sourceStart) / delta : 0;
@@ -452,19 +463,33 @@ export function getMediaTimeForClip(
  * returns the flat clip.speed value.
  */
 export function getSpeedForClipAtTime(
-  clip: { id: string; startTime: number; duration: number; trimStart: number; speed: number; speedRamp?: SpeedRampKeyframe[]; isReversed?: boolean; freezeFrame?: number },
+  clip: { id: string; startTime: number; duration: number; trimStart: number; speed: number; speedRamp?: SpeedRampKeyframe[]; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number; isReversed?: boolean; freezeFrame?: number },
   currentTime: number
 ): number {
   if (clip.freezeFrame !== undefined) return 0;
   if (clip.isReversed) return clip.speed;
-  if (!clip.speedRamp || clip.speedRamp.length < 2) return clip.speed;
 
   const elapsedTimeline = Math.max(0, Math.min(clip.duration, currentTime - clip.startTime));
+
+  // If clip has embedded speed frames, resolve the exact segment speed
+  if (clip.speedFrames && clip.speedFrames.length > 0) {
+    const segments = getSpeedFrameSegments(clip);
+    for (const seg of segments) {
+      if (elapsedTimeline >= seg.startOffset && elapsedTimeline <= seg.endOffset) {
+        return seg.speed;
+      }
+    }
+    if (segments.length > 0) {
+      return segments[segments.length - 1].speed;
+    }
+  }
+
+  if (!clip.speedRamp || clip.speedRamp.length < 2) return clip.speed;
+
   const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
   const localTimelineStart = engine.sourceToTimeline(clip.trimStart);
   const targetTimelineTime = localTimelineStart + elapsedTimeline;
-  const sourceTime = engine.timelineToSource(targetTimelineTime);
-  return engine.getSpeedAtSourceTime(sourceTime);
+  return engine.getSpeedAtTimelineTime(targetTimelineTime);
 }
 
 export function getRampedTrimEndForRightResize(

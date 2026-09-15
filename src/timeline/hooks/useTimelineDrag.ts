@@ -66,6 +66,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     seek,
     splitClip,
     setDragPreview,
+    selectedSpeedFrame,
+    selectSpeedFrame,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     zoomLevel: s.zoomLevel,
@@ -88,6 +90,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     seek: s.seek,
     splitClip: s.splitClip,
     setDragPreview: s.setDragPreview,
+    selectedSpeedFrame: s.selectedSpeedFrame,
+    selectSpeedFrame: s.selectSpeedFrame,
   })));
 
   const dragRafIdRef = useRef<number | null>(null);
@@ -519,6 +523,14 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       }
       if (track?.locked) return;
 
+      // If clicking inside the clip body but not on a speed-frame-element, deselect any active speed frame
+      const targetEl = e.target as HTMLElement | null;
+      if (!targetEl?.closest?.('.speed-frame-element')) {
+        if (selectedSpeedFrame) {
+          selectSpeedFrame(null, null);
+        }
+      }
+
       const target = e.currentTarget as HTMLElement;
       const rect = target.getBoundingClientRect();
       const relX = e.clientX - rect.left;
@@ -749,7 +761,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       e.stopPropagation();
     },
-    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, startTransactionSafe, startResize, setDragState, setDraggingClipId, setSlipState, setSlideState],
+    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, startTransactionSafe, startResize, setDragState, setDraggingClipId, setSlipState, setSlideState, selectedSpeedFrame, selectSpeedFrame],
   );
 
   const handleTimelineClick = useCallback(
@@ -763,14 +775,16 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         selectedClipId !== null ||
         selectedClipIds.length > 0 ||
         selectedTransitionClipId !== null ||
-        selectedTrackId !== null;
+        selectedTrackId !== null ||
+        selectedSpeedFrame !== null;
       if (!hasSelection) return;
       selectClip(null);
       selectClips([]);
       selectTransition(null);
       selectTrack(null);
+      selectSpeedFrame(null, null);
     },
-    [activeTool, selectClip, selectClips, selectTransition, selectTrack, selectedClipId, selectedClipIds, selectedTransitionClipId, selectedTrackId],
+    [activeTool, selectClip, selectClips, selectTransition, selectTrack, selectSpeedFrame, selectedClipId, selectedClipIds, selectedTransitionClipId, selectedTrackId, selectedSpeedFrame],
   );
 
   const handleRulerPointerDown = useCallback(
@@ -818,11 +832,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         time = Math.max(0, x / zoomLevel);
       }
 
-      // Clicking the ruler always deselects every clip — nothing should stay
+      // Clicking the ruler always deselects every clip and speed frame — nothing should stay
       // selected when the user jumps to a time.
       const st = useEditorStore.getState();
-      if (st.selectedClipIds.length > 0 || st.selectedClipId) {
+      if (st.selectedClipIds.length > 0 || st.selectedClipId || st.selectedSpeedFrame) {
         st.selectClip(null);
+        st.selectSpeedFrame(null, null);
       }
 
       const wasPlaying = st.isPlaying;

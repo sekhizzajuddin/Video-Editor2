@@ -180,6 +180,14 @@ function DesktopApp() {
         }
       }
 
+      if (e.key === 'Escape') {
+        const storeState = useEditorStore.getState();
+        if (storeState.selectedSpeedFrame) {
+          storeState.selectSpeedFrame(null, null);
+          return;
+        }
+      }
+
       if (!pressed) return;
 
       const currentSettings = useEditorStore.getState().settings;

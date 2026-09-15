@@ -784,14 +784,20 @@ export class FrameScheduler {
     }
     for (const [id, decoder] of this.mediaDecoders) {
       if (!neededMediaIds.has(id)) {
-        decoder.dispose();
+        if (typeof (decoder as any)?.dispose === 'function') {
+          (decoder as any).dispose();
+        }
         this.mediaDecoders.delete(id);
       }
     }
   }
 
   dispose() {
-    this.mediaDecoders.forEach(d => d.dispose());
+    this.mediaDecoders.forEach(d => {
+      if (typeof (d as any)?.dispose === 'function') {
+        (d as any).dispose();
+      }
+    });
     this.mediaDecoders.clear();
   }
 }

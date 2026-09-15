@@ -1,5 +1,5 @@
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
-import { getRampedClipSourceSpan } from '@/utils/speedRamp';
+import { getRampedClipSourceSpan, getSpeedFrameSegments } from '@/utils/speedRamp';
 import { pitchShiftBufferRegion } from '@/utils/audio/phaseVocoder';
 
 export class AudioMixer {
@@ -56,39 +56,12 @@ export class AudioMixer {
           // Only the clip's used source region is shifted; the region keeps
           // its length, so all trim/start math below stays valid.
           let buffer: import('@/utils/audio/phaseVocoder').AudioBufferLike = audioBuffer;
-          let totalPitchSt = effectiveVocalPitchSt(clip.audioSettings);
-
-          // If the clip speed is altered, Web Audio's playbackRate will naturally
-          // shift the pitch up or down. If pitch preservation is enabled (default),
-          // we counter-act that shift here in the offline vocoder phase.
           const preservePitch = clip.audioSettings?.preservePitch !== false;
-          if (clip.speed && clip.speed !== 1 && preservePitch) {
-            const speedShiftSt = 12 * Math.log2(clip.speed);
-            totalPitchSt -= speedShiftSt;
-          }
+          const baseVocalPitchSt = effectiveVocalPitchSt(clip.audioSettings);
 
-          if (Math.abs(totalPitchSt) >= 0.01) {
-            const sourceDuration = audioBuffer.duration || 0;
-            const span = getRampedClipSourceSpan(clip, sourceDuration);
-            const startSec = clip.trimStart || 0;
-            const endSec = Math.min(sourceDuration, startSec + Math.max(0, span));
-            const shifted = pitchShiftBufferRegion(
-              (ch, len, sr) => ctx.createBuffer(ch, len, sr),
-              audioBuffer,
-              totalPitchSt,
-              startSec,
-              endSec
-            );
-            if (shifted) buffer = shifted;
-          }
-
-          const source = ctx.createBufferSource();
-          source.buffer = buffer as AudioBuffer; // real AudioBuffer at runtime
-          
-          // Handle Speed changes
-          if (clip.speed) {
-            source.playbackRate.value = clip.speed;
-          }
+          const speedSegments = (clip.speedFrames && clip.speedFrames.length > 0)
+            ? getSpeedFrameSegments(clip, audioBuffer.duration)
+            : null;
 
           // Handle Volume (Convert dB to linear gain)
           let volume = 1; // Default 0 dB
@@ -124,9 +97,6 @@ export class AudioMixer {
           treble.type = 'highshelf';
           treble.frequency.value = 3000;
           treble.gain.value = clip.audioSettings?.treble || 0;
-          // Multi-band vocal formant filter — mirrors the preview's 3-band
-          // formant compensation (F1/F2/F3) so the exported vocal tone (manual +
-          // tone + auto-match compensation) matches what the user hears while editing.
           const formantVal = effectiveVocalFormant(clip.audioSettings);
           const vocalF1 = ctx.createBiquadFilter();
           vocalF1.type = 'peaking';
@@ -146,7 +116,6 @@ export class AudioMixer {
           const panner = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
           if (panner) panner.pan.value = Math.max(-1, Math.min(1, (clip.audioSettings?.pan || 0) / 100));
 
-          source.connect(vocalF1);
           vocalF1.connect(vocal);
           vocal.connect(vocalF3);
           vocalF3.connect(bass);
@@ -158,18 +127,83 @@ export class AudioMixer {
           } else {
             gainNode.connect(ctx.destination);
           }
-          
-          // start(when, offset, duration)
-          // offset is the time in the source buffer
-          const trimStart = clip.trimStart || 0;
-          
-          // clip.duration is in timeline context time. The start() duration parameter 
-          // specifies how much of the source buffer to consume.
-          const playDuration = clip.duration 
-            ? clip.duration * (clip.speed || 1) 
-            : audioBuffer.duration;
-          
-          source.start(clip.startTime, trimStart, playDuration);
+
+          if (speedSegments && speedSegments.length > 0) {
+            // Per-segment pitch compensation for rate-stretched / squeezed segments
+            if (preservePitch) {
+              for (const seg of speedSegments) {
+                const segPitchSt = baseVocalPitchSt - (seg.speed && seg.speed !== 1 ? 12 * Math.log2(seg.speed) : 0);
+                if (Math.abs(segPitchSt) >= 0.01) {
+                  const shifted = pitchShiftBufferRegion(
+                    (ch, len, sr) => ctx.createBuffer(ch, len, sr),
+                    buffer,
+                    segPitchSt,
+                    seg.sourceStart,
+                    seg.sourceEnd
+                  );
+                  if (shifted) buffer = shifted;
+                }
+              }
+            } else if (Math.abs(baseVocalPitchSt) >= 0.01) {
+              const shifted = pitchShiftBufferRegion(
+                (ch, len, sr) => ctx.createBuffer(ch, len, sr),
+                buffer,
+                baseVocalPitchSt,
+                clip.trimStart || 0,
+                Math.min(audioBuffer.duration, (clip.trimStart || 0) + clip.duration)
+              );
+              if (shifted) buffer = shifted;
+            }
+
+            // Schedule a BufferSource for each speed segment
+            for (const seg of speedSegments) {
+              const segSource = ctx.createBufferSource();
+              segSource.buffer = buffer as AudioBuffer;
+              segSource.playbackRate.value = seg.speed;
+              segSource.connect(vocalF1);
+
+              const segTimelineStart = clipStart + seg.startOffset;
+              const segSourceOffset = seg.sourceStart;
+              const segSourceDuration = Math.max(0.001, seg.sourceEnd - seg.sourceStart);
+              segSource.start(segTimelineStart, segSourceOffset, segSourceDuration);
+            }
+          } else {
+            // Static speed or single clip logic
+            let totalPitchSt = baseVocalPitchSt;
+            if (clip.speed && clip.speed !== 1 && preservePitch) {
+              const speedShiftSt = 12 * Math.log2(clip.speed);
+              totalPitchSt -= speedShiftSt;
+            }
+
+            if (Math.abs(totalPitchSt) >= 0.01) {
+              const sourceDuration = audioBuffer.duration || 0;
+              const span = getRampedClipSourceSpan(clip, sourceDuration);
+              const startSec = clip.trimStart || 0;
+              const endSec = Math.min(sourceDuration, startSec + Math.max(0, span));
+              const shifted = pitchShiftBufferRegion(
+                (ch, len, sr) => ctx.createBuffer(ch, len, sr),
+                audioBuffer,
+                totalPitchSt,
+                startSec,
+                endSec
+              );
+              if (shifted) buffer = shifted;
+            }
+
+            const source = ctx.createBufferSource();
+            source.buffer = buffer as AudioBuffer;
+            if (clip.speed) {
+              source.playbackRate.value = clip.speed;
+            }
+            source.connect(vocalF1);
+
+            const trimStart = clip.trimStart || 0;
+            const playDuration = clip.duration 
+              ? clip.duration * (clip.speed || 1) 
+              : audioBuffer.duration;
+            
+            source.start(clip.startTime, trimStart, playDuration);
+          }
         } catch (err) {
           console.error(`Failed to mix audio for clip ${clip.id}`, err);
         }

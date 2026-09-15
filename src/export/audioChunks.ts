@@ -1,5 +1,5 @@
 import { useEditorStore } from '../store/editorStore';
-import { getMediaTimeForClip } from '../utils/speedRamp';
+import { getMediaTimeForClip, getSpeedFrameSegments } from '../utils/speedRamp';
 
 export interface AudioExportOptions {
   startAt: number;
@@ -58,34 +58,61 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
         // Clamp just like in preview player to prevent clipping
         gainNode.gain.value = Math.max(0, Math.min(1, linearGain * storeLinearGain));
         
-        // Apply static speed (for speedRamps, this is just the base speed)
-        source.playbackRate.value = clip.speed || 1;
-        
-        source.connect(gainNode);
-        gainNode.connect(offlineCtx.destination);
+        const speedSegments = (clip.speedFrames && clip.speedFrames.length > 0)
+          ? getSpeedFrameSegments(clip, decodedBuffer.duration)
+          : null;
 
-        // Calculate precise trim and timeline placement
-        const scheduleTime = Math.max(0, clip.startTime - opts.startAt);
-        const timelinePlayStart = Math.max(opts.startAt, clip.startTime);
-        
-        // Use the exact media time math rather than a simple addition that breaks on speed/splits
-        const offset = getMediaTimeForClip(
-          {
-            id: clip.id,
-            startTime: clip.startTime,
-            duration: clip.duration,
-            trimStart: clip.trimStart,
-            speed: clip.speed || 1,
-            speedRamp: clip.speedRamp
-          },
-          timelinePlayStart
-        );
-        
-        const playDuration = Math.min(clip.duration, duration - scheduleTime);
+        if (speedSegments && speedSegments.length > 0) {
+          for (const seg of speedSegments) {
+            const segTimelineStart = clip.startTime + seg.startOffset;
+            const segTimelineEnd = clip.startTime + seg.endOffset;
+            if (segTimelineEnd <= opts.startAt || segTimelineStart >= opts.endAt) continue;
 
-        if (playDuration > 0) {
-          source.start(scheduleTime, offset, playDuration);
-          hasActiveAudio = true;
+            const segScheduleTime = Math.max(0, segTimelineStart - opts.startAt);
+            const segPlayStart = Math.max(opts.startAt, segTimelineStart);
+            const dtFromSegStart = segPlayStart - segTimelineStart;
+            const segSpeed = seg.speed || 1;
+            const segSourceOffset = seg.sourceStart + dtFromSegStart * segSpeed;
+            const segBufferDuration = Math.max(0, (Math.min(segTimelineEnd, opts.endAt) - segPlayStart) * segSpeed);
+
+            if (segBufferDuration > 0) {
+              const segSource = offlineCtx.createBufferSource();
+              segSource.buffer = decodedBuffer;
+              segSource.playbackRate.value = segSpeed;
+              segSource.connect(gainNode);
+              segSource.start(segScheduleTime, segSourceOffset, segBufferDuration);
+              hasActiveAudio = true;
+            }
+          }
+        } else {
+          const source = offlineCtx.createBufferSource();
+          source.buffer = decodedBuffer;
+          source.playbackRate.value = clip.speed || 1;
+          source.connect(gainNode);
+
+          // Calculate precise trim and timeline placement
+          const scheduleTime = Math.max(0, clip.startTime - opts.startAt);
+          const timelinePlayStart = Math.max(opts.startAt, clip.startTime);
+          
+          // Use the exact media time math rather than a simple addition that breaks on speed/splits
+          const offset = getMediaTimeForClip(
+            {
+              id: clip.id,
+              startTime: clip.startTime,
+              duration: clip.duration,
+              trimStart: clip.trimStart,
+              speed: clip.speed || 1,
+              speedRamp: clip.speedRamp
+            },
+            timelinePlayStart
+          );
+          
+          const playDuration = Math.min(clip.duration, duration - scheduleTime);
+
+          if (playDuration > 0) {
+            source.start(scheduleTime, offset, playDuration * (clip.speed || 1));
+            hasActiveAudio = true;
+          }
         }
       } catch (err) {
         console.warn(`[AudioExport] Could not decode audio for clip ${media?.name || clip.id}:`, err);

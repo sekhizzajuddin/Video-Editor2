@@ -53,7 +53,7 @@ export function DynamicStretchSection({ selectedClip }: DynamicStretchSectionPro
       <div className="flex items-center gap-2">
         <button
           onClick={() => addSpeedFrame(selectedClip.id)}
-          className="flex-1 py-1.5 px-3 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-98"
+          className="speed-frame-element flex-1 py-1.5 px-3 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-98"
         >
           <Zap className="w-3.5 h-3.5 fill-black" />
           <span>+ Add Speed Frame</span>
@@ -63,7 +63,7 @@ export function DynamicStretchSection({ selectedClip }: DynamicStretchSectionPro
           <button
             onClick={() => clearSpeedFrames(selectedClip.id)}
             title="Reset all Speed Frames and restore uniform rate"
-            className="py-1.5 px-2.5 text-xs font-medium rounded-lg text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-colors flex items-center gap-1"
+            className="speed-frame-element py-1.5 px-2.5 text-xs font-medium rounded-lg text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-colors flex items-center gap-1"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset</span>
@@ -117,7 +117,7 @@ export function DynamicStretchSection({ selectedClip }: DynamicStretchSectionPro
                   <div
                     key={sf.id}
                     onClick={() => selectSpeedFrame(selectedClip.id, sf.id)}
-                    className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-all text-[11px] ${
+                    className={`speed-frame-element flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-all text-[11px] ${
                       isSelected
                         ? 'bg-amber-500/20 border border-amber-500/50 text-amber-500 font-semibold'
                         : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[var(--theme-text-muted)] border border-transparent'
@@ -135,7 +135,7 @@ export function DynamicStretchSection({ selectedClip }: DynamicStretchSectionPro
                         e.stopPropagation();
                         removeSpeedFrame(selectedClip.id, sf.id);
                       }}
-                      className="p-1 hover:text-rose-500 rounded transition-colors"
+                      className="speed-frame-element p-1 hover:text-rose-500 rounded transition-colors"
                       title="Delete this Speed Frame"
                     >
                       <Trash2 className="w-3 h-3" />

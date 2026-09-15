@@ -30,6 +30,7 @@ import {
   removeSpeedFrameFromClip,
   getSpeedFrameSegments,
   calculateSpeedFramesRamp,
+  getSpeedForClipAtTime,
 } from './speedRamp';
 import type { SpeedRampKeyframe } from '../types';
 
@@ -502,5 +503,55 @@ describe('Speed Frames (Embedded Rate Stretching)', () => {
     const segs = getSpeedFrameSegments(screwed);
     expect(segs[0].speed).toBeCloseTo(1.0, 2);
     expect(segs[1].speed).toBeCloseTo(1.0, 2);
+  });
+});
+
+describe('getSpeedForClipAtTime & SpeedRampEngine.getSpeedAtTimelineTime', () => {
+  it('returns exact constant segment speeds for clips with speed frames', () => {
+    const clip: any = {
+      id: 'clip-ramp',
+      startTime: 2,
+      duration: 10,
+      trimStart: 0,
+      speed: 1.0,
+    };
+    const { clip: withFrame, newFrameId } = addSpeedFrameToClip(clip, 4);
+    // Move frame to 2s: seg 0 (0..2s) is 4s source in 2s timeline -> 2x. seg 1 (2..8s) is 6s source in 6s timeline -> 1x.
+    const moved = moveSpeedFrameLine(withFrame, newFrameId, 2);
+
+    // Timeline time 2s is clip start: seg 0 -> 2.0x
+    expect(getSpeedForClipAtTime(moved, 2.0)).toBeCloseTo(2.0, 2);
+    expect(getSpeedForClipAtTime(moved, 3.0)).toBeCloseTo(2.0, 2);
+    // Timeline time 4s is exactly at offset 2s (boundary): seg 0/1 -> 2.0x or 1.0x
+    expect(getSpeedForClipAtTime(moved, 4.0)).toBeCloseTo(2.0, 2);
+    // Timeline time 5s (offset 3s) is inside seg 1 -> 1.0x
+    expect(getSpeedForClipAtTime(moved, 5.0)).toBeCloseTo(1.0, 2);
+    expect(getSpeedForClipAtTime(moved, 9.0)).toBeCloseTo(1.0, 2);
+  });
+
+  it('evaluates getSpeedAtTimelineTime on SpeedRampEngine', () => {
+    const ramp = [
+      K('a', 0, 1),
+      K('b', 5, 2),
+      K('c', 10, 0.5),
+    ];
+    const engine = new SpeedRampEngine(ramp);
+    // At t=0, speed should be 1.0
+    expect(engine.getSpeedAtTimelineTime(0)).toBeCloseTo(1.0, 2);
+    // Beyond the end of ramp, should extrapolate with final keyframe speed (0.5)
+    const endTimeline = engine.sourceToTimeline(10);
+    expect(engine.getSpeedAtTimelineTime(endTimeline + 5)).toBeCloseTo(0.5, 2);
+  });
+
+  it('returns flat speed for clips without speed frames or speed ramps', () => {
+    const clip: any = {
+      id: 'flat-clip',
+      startTime: 5,
+      duration: 8,
+      trimStart: 0,
+      speed: 1.75,
+    };
+    expect(getSpeedForClipAtTime(clip, 5)).toBe(1.75);
+    expect(getSpeedForClipAtTime(clip, 9)).toBe(1.75);
   });
 });
