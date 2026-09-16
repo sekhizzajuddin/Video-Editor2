@@ -39,6 +39,7 @@ import {
 } from './PreviewCanvasToolbar';
 import { setOnMaskReadyCallback } from '@/utils/aiBackground';
 import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, subscribeTrimPreviewTime } from '@/utils/playbackClock';
+import { isPreviewSuspendedForExport } from '@/utils/previewSuspension';
 import { getOverlayMapping } from './previewMath';
 import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
@@ -502,6 +503,14 @@ export function PreviewCanvasContainer() {
 
     const tick = (now: number) => {
       rafId = requestAnimationFrame(tick);
+      if (isPreviewSuspendedForExport()) {
+        // Keep the last preview image, but leave decoding/compositing resources
+        // to worker export. Capture fallback releases this suspension first.
+        lastTime = now;
+        lastSyncTime = now;
+        framePendingRef.current = true;
+        return;
+      }
 
       const state = useEditorStore.getState();
       // While paused, the clock and the store agree exactly (seek/pause both flush

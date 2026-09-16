@@ -24,9 +24,19 @@ export class ExportWorkerManager {
   private worker: Worker;
   private options: ExporterOptions;
   private startTime: number = 0;
+  private disposed = false;
+  private workerError: Error | null = null;
+  private rejectPendingExport: ((error: Error) => void) | null = null;
 
   constructor(options: ExporterOptions) {
-    this.options = options;
+    // Never retain the whole Zustand store (history, preview DOM, audio graph,
+    // etc.) in exporterRef after a completed export. Capture only export data,
+    // once, so subsequent edits cannot alter an in-flight render either.
+    this.options = {
+      ...options,
+      config: { ...options.config },
+      timeline: this.serializeTimeline(options.timeline),
+    };
     // Create worker using vite's ?worker import or standard URL
     this.worker = new Worker(new URL('./export.worker.ts', import.meta.url), {
       type: 'module',
@@ -71,16 +81,30 @@ export class ExportWorkerManager {
       }
     };
 
+    const failWorker = (error: Error) => {
+      this.workerError = error;
+      this.options.callbacks.onError(error);
+      // A native Worker error does NOT arrive as a {type: 'ERROR'} message.
+      // Reject the wait as well, so export can clean up and restore preview.
+      this.rejectPendingExport?.(error);
+    };
     this.worker.onerror = (err: ErrorEvent) => {
       console.error('[ExportWorkerManager] Worker script error:', err);
-      this.options.callbacks.onError(new Error(err.message || 'Export worker error occurred'));
+      failWorker(new Error(err.message || 'Export worker error occurred'));
     };
+    this.worker.onmessageerror = () => failWorker(new Error('Export worker response could not be read'));
+  }
+
+  private checkActive(signal: AbortSignal): void {
+    if (signal.aborted || this.disposed) throw new Error('AbortError');
+    if (this.workerError) throw this.workerError;
   }
 
   async export(signal: AbortSignal): Promise<{filename: string, savedViaRuntime: boolean}> {
     this.startTime = Date.now();
     
-    const serializedTimeline = this.serializeTimeline(this.options.timeline);
+    this.checkActive(signal);
+    const serializedTimeline = this.options.timeline;
 
     // Mix audio on main thread where OfflineAudioContext is fully supported
     this.options.callbacks.onPhaseChange('preparing');
@@ -90,7 +114,8 @@ export class ExportWorkerManager {
     // recordings and similar files must be transcoded to MP4 here on the main
     // thread (HTMLVideoElement decode isn't available in workers), otherwise
     // the export renders black frames with working audio.
-    await this.normalizeTimelineMedia(serializedTimeline);
+    await this.normalizeTimelineMedia(serializedTimeline, signal);
+    this.checkActive(signal);
     let audioPayload: any = null;
     const transferables: Transferable[] = [];
 
@@ -103,6 +128,7 @@ export class ExportWorkerManager {
 
       const audioMixer = new AudioMixer();
       const audioBuffer = await audioMixer.mix(serializedTimeline, rangeDuration, startAt);
+      this.checkActive(signal);
       if (audioBuffer && audioBuffer.length > 0) {
         const ch0 = audioBuffer.getChannelData(0);
         const ch1 = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : ch0;
@@ -120,8 +146,11 @@ export class ExportWorkerManager {
         transferables.push(ch0Copy.buffer, ch1Copy.buffer);
       }
     } catch (err) {
+      this.checkActive(signal);
       console.warn('Audio pre-mix failed on main thread:', err);
     }
+
+    this.checkActive(signal);
 
     // Collect all pre-fetched ArrayBuffers from media items and transfer them
     // to the worker to avoid cross-thread blob URL access failures.
@@ -136,51 +165,64 @@ export class ExportWorkerManager {
       delete m._audioBlob;
     }
 
-    // Transfer timeline data, audio PCM, and optional fileHandle to worker
-    this.worker.postMessage({
-      type: 'START_EXPORT',
-      payload: {
-        timeline: serializedTimeline,
-        config: this.options.config,
-        audioData: audioPayload,
-        fileHandle: this.options.fileHandle || null,
-        mediaBuffers,
-      }
-    }, transferables);
-
-    // We rely on the callbacks passed via options, but we can also return a promise
+    // Install completion/error/cancel handlers BEFORE posting START_EXPORT.
+    // This also makes synchronous worker adapters and fast startup errors safe.
     return new Promise<{filename: string, savedViaRuntime: boolean}>((resolve, reject) => {
+      const originalOnMessage = this.worker.onmessage;
       const cleanup = () => {
         signal.removeEventListener('abort', abortHandler);
         this.worker.onmessage = originalOnMessage;
+        this.rejectPendingExport = null;
       };
-      
-      const abortHandler = () => {
-        // Send cancel to worker AND reject the promise (merged from two separate listeners)
-        this.worker.postMessage({ type: 'CANCEL' });
-        reject(new Error('AbortError'));
+      const fail = (error: Error) => {
         cleanup();
+        reject(error);
       };
-      
-      signal.addEventListener('abort', abortHandler);
-      
-      // Hook into the worker onmessage to resolve/reject this promise
-      const originalOnMessage = this.worker.onmessage;
-      this.worker.onmessage = (event) => {
-        if (originalOnMessage) originalOnMessage.call(this.worker, event);
-        
-        const { type, payload } = event.data;
-        if (type === 'COMPLETE') {
-          resolve({ 
-            filename: payload.filename, 
-            savedViaRuntime: !!payload.savedViaRuntime || !!payload.savedDirectly 
-          });
-          cleanup();
-        } else if (type === 'ERROR') {
-          reject(new Error(payload.message));
-          cleanup();
+      const abortHandler = () => {
+        try {
+          if (!this.disposed) this.worker.postMessage({ type: 'CANCEL' });
+        } catch {
+          // A crashed/terminated worker may reject postMessage as well.
+        } finally {
+          fail(new Error('AbortError'));
         }
       };
+
+      this.rejectPendingExport = fail;
+      signal.addEventListener('abort', abortHandler);
+      this.worker.onmessage = (event) => {
+        if (originalOnMessage) originalOnMessage.call(this.worker, event);
+
+        const { type, payload } = event.data;
+        if (type === 'COMPLETE') {
+          cleanup();
+          resolve({
+            filename: payload.filename,
+            savedViaRuntime: !!payload.savedViaRuntime || !!payload.savedDirectly,
+          });
+        } else if (type === 'ERROR') {
+          fail(new Error(payload.message));
+        }
+      };
+
+      try {
+        this.checkActive(signal);
+        this.worker.postMessage({
+          type: 'START_EXPORT',
+          payload: {
+            timeline: serializedTimeline,
+            config: this.options.config,
+            audioData: audioPayload,
+            fileHandle: this.options.fileHandle || null,
+            mediaBuffers,
+          },
+        }, transferables);
+        // Blobs/data now belong to the worker. download() only needs the output
+        // filename and OPFS, not the input project or its undo snapshots.
+        this.options.timeline = null;
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -208,7 +250,15 @@ export class ExportWorkerManager {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.rejectPendingExport?.(new Error('AbortError'));
+    this.worker.onmessage = null;
+    this.worker.onerror = null;
+    this.worker.onmessageerror = null;
     this.worker.terminate();
+    this.options.timeline = null;
+    this.options.fileHandle = null;
   }
 
   /**
@@ -216,7 +266,7 @@ export class ExportWorkerManager {
    * object URLs so the worker's MP4Box demuxer can read every clip. Mutates
    * only the serialized copy — never the store.
    */
-  private async normalizeTimelineMedia(serializedTimeline: any): Promise<void> {
+  private async normalizeTimelineMedia(serializedTimeline: any, signal: AbortSignal): Promise<void> {
     const libraryMap = new Map<string, any>();
     for (const media of (serializedTimeline.media || [])) {
       if (media?.id) libraryMap.set(media.id, media);
@@ -246,6 +296,7 @@ export class ExportWorkerManager {
     // Process sequentially: opening many HEVC decoders/encoders together can
     // exhaust Chrome's media session limit before export even begins.
     for (const m of serializedTimeline.media as any[]) {
+      this.checkActive(signal);
       try {
         let fileBlob: Blob | File | null = null;
 
@@ -299,6 +350,7 @@ export class ExportWorkerManager {
           } catch {}
         }
 
+        this.checkActive(signal);
         if (fileBlob) {
           const originalBlob = fileBlob instanceof Blob ? fileBlob : new Blob([fileBlob as any]);
           const isVideo = m.type === 'video' || originalBlob.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|hevc)$/i.test(m.name || '');
@@ -334,6 +386,7 @@ export class ExportWorkerManager {
           );
         }
       } catch (e: any) {
+        this.checkActive(signal);
         console.warn('[Export] Media prep failed for:', m.id, e);
         this.options.callbacks.onWarning?.(`"${m.name || m.id}" could not be prepared: ${e?.message || e}`);
       }
