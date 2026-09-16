@@ -5277,7 +5277,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedSpeedFrame: { clipId: clip.id, frameId: newFrameId },
     });
 
-    setPlaybackTime(clip.startTime + offset);
+    // Speed Frame navigation is a real seek, not just a preview-clock update.
+    // Keeping store.currentTime stale makes the paused media subscriber and the
+    // RAF sync loop seek the same decoder to two different source positions.
+    get().seek(clip.startTime + offset);
     setTrimPreviewTime(null);
     get().saveSnapshot('Add Speed Frame');
   },
@@ -5309,7 +5312,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedClipIds: [clipId],
       selectedSpeedFrame: { clipId, frameId },
     });
-    setPlaybackTime(found.clip.startTime + sf.timelineOffset);
+    get().seek(found.clip.startTime + sf.timelineOffset);
     setTrimPreviewTime(null);
   },
 
@@ -5399,10 +5402,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
 
   commitSpeedFrameDrag: () => {
-    const state = get();
-    const sf = state.selectedSpeedFrame;
+    const sf = get().selectedSpeedFrame;
     if (sf) {
       get().resolveOverlaps([sf.clipId]);
+      // Commit the dragged marker's final time before dropping trim preview.
+      // Otherwise the preview jumps back to its pre-drag position and history
+      // records a different playhead from the one the user just edited.
+      const found = findClipDeep(get(), sf.clipId);
+      const frame = found?.clip.speedFrames?.find((f) => f.id === sf.frameId);
+      if (found && frame) get().seek(found.clip.startTime + frame.timelineOffset);
     }
     setTrimPreviewTime(null);
     get().recalcTotalDuration();

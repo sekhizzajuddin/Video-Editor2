@@ -14,6 +14,7 @@ import { promoteCanvasToExportSize } from './exportCanvasSize';
 import { useEditorStore } from '@/store/editorStore';
 import { clearNormalizedCache } from './engine/VideoNormalizer';
 import { setTrimPreviewTime } from '@/utils/playbackClock';
+import { suspendPreviewForExport } from '@/utils/previewSuspension';
 
 export interface Resolution {
   width: number;
@@ -68,55 +69,26 @@ export function useExportEngine() {
 
   const exporterRef = useRef<ExportWorkerManager | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const releasePreviewRef = useRef<(() => void) | null>(null);
 
   const startExport = useCallback(async (config: ExportWorkerConfig, fileHandle?: FileSystemFileHandle | null) => {
-    const store = useEditorStore.getState();
-    if (store.isPlaying) store.pause();
-    setTrimPreviewTime(null);
-    store.selectSpeedFrame(null, null);
-
-    // Guard: suppress stray unhandled rejections during export to prevent the
-    // global chunk-error handler from misinterpreting them and reloading the page.
-    // This catches errors from: export Worker, OfflineAudioContext, canvas ops,
-    // browser extension errors (e.g. "Language detection is not supported").
-    let exportActive = true;
-    const exportRejectionGuard = (e: PromiseRejectionEvent) => {
-      if (!exportActive) return;
-      const msg = typeof e.reason === 'string' ? e.reason : (e.reason?.message || '');
-      // Let genuine chunk errors through (handled by main.tsx)
-      const isChunkError =
-        msg.includes('Failed to fetch dynamically imported module') ||
-        msg.includes('Importing a module script failed') ||
-        msg.includes('Expected a JavaScript-or-Wasm module script');
-      if (isChunkError) return; // Don't prevent default for real chunk errors
-
-      // Suppress all other rejections during export — they're logged but shouldn't crash
-      console.warn('[Export] Suppressed unhandled rejection during export:', msg, e.reason);
-      e.preventDefault();
-    };
-    window.addEventListener('unhandledrejection', exportRejectionGuard);
-
-    if (exporterRef.current) {
-      exporterRef.current.dispose();
-      exporterRef.current = null;
-    }
+    // Do not let a second click/batch request overlap an export that is still
+    // preparing or cancelling (both would contend for decoder sessions).
+    if (abortControllerRef.current) return;
+    exporterRef.current?.dispose();
+    exporterRef.current = null;
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    const releasePreview = suspendPreviewForExport();
+    releasePreviewRef.current = releasePreview;
 
     const attemptWysiwygFallback = async (
       workerError: Error,
       duration: number
     ): Promise<{ filename: string; savedViaRuntime: boolean; blob: Blob } | null> => {
-      // Only fallback for black-frame or decode errors — not for user cancel
       const msg = workerError.message || '';
-      const isBlackOrDecodeError =
-        /black frames/i.test(msg) ||
-        /could not be decoded/i.test(msg) ||
-        /No visual layers/i.test(msg) ||
-        /GPU.*decode/i.test(msg);
-      // We fallback for any worker error to guarantee WYSIWYG, except AbortError
-      if (msg === 'AbortError') return null;
+      if (abortController.signal.aborted || msg === 'AbortError') throw new Error('AbortError');
 
       console.warn('[Export] Worker failed, attempting WYSIWYG preview capture fallback:', msg);
       setExportState(prev => ({
@@ -126,8 +98,7 @@ export function useExportEngine() {
       }));
 
       try {
-        const store = useEditorStore.getState();
-        const previewCanvas = store.previewCanvas as HTMLCanvasElement | null;
+        const previewCanvas = useEditorStore.getState().previewCanvas as HTMLCanvasElement | null;
         if (!previewCanvas) {
           throw new Error('Preview canvas not available for fallback export');
         }
@@ -144,8 +115,7 @@ export function useExportEngine() {
         // Use the preview canvas which already renders exactly what user sees
         let outBlob: Blob;
         try {
-        const captureResult = await defaultExportPipeline
-          .start({
+          const captureTask = defaultExportPipeline.start({
             width: config.width,
             height: config.height,
             fps: config.fps,
@@ -164,16 +134,18 @@ export function useExportEngine() {
                 progress: p.percentage,
               }));
             },
-            setStatusMsg: (m) => {
-              console.log('[Fallback Export]', m);
-            },
-          })
-          .promise;
-        outBlob = captureResult.blob;
+            setStatusMsg: (m) => console.log('[Fallback Export]', m),
+          });
+          abortController.signal.addEventListener('abort', captureTask.cancel);
+          if (abortController.signal.aborted) captureTask.cancel();
+          try {
+            const captureResult = await captureTask.promise;
+            if (abortController.signal.aborted) throw new Error('AbortError');
+            outBlob = captureResult.blob;
+          } finally {
+            abortController.signal.removeEventListener('abort', captureTask.cancel);
+          }
         } finally {
-          // Restore preview canvas to its previous size/state regardless of
-          // capture success/failure (also resets the previously-leaked
-          // isExporting flag).
           restoreCanvasSize();
         }
 
@@ -192,6 +164,7 @@ export function useExportEngine() {
 
         return { filename: finalFileName, savedViaRuntime: !!fileHandle, blob: outBlob };
       } catch (fallbackErr: any) {
+        if (abortController.signal.aborted) throw new Error('AbortError');
         console.error('[Export] Fallback also failed:', fallbackErr);
         setExportState(prev => ({
           ...prev,
@@ -202,9 +175,17 @@ export function useExportEngine() {
     };
 
     try {
+      // pause() also flushes the exact preview clock into store.currentTime,
+      // including projects edited before the Speed Frame seek fix was loaded.
+      useEditorStore.getState().pause();
+      setTrimPreviewTime(null);
+      useEditorStore.getState().selectSpeedFrame(null, null);
       setExportState(prev => ({ ...prev, phase: 'analyzing', progress: 0, warnings: [], filename: null }));
-      
-      const timeline = useEditorStore.getState();
+
+      // Keep undo history, DOM refs and audio graphs out of the async export's
+      // retained state. The manager makes its own detached snapshot of this.
+      const { tracks, mediaLibrary, totalDuration, aspectRatio, pipWindows } = useEditorStore.getState();
+      const timeline = { tracks, mediaLibrary, totalDuration, aspectRatio, pipWindows };
       let duration = (timeline as any).totalDuration || (timeline as any).duration || 0;
       if (!duration && timeline.tracks) {
         for (const track of timeline.tracks) {
@@ -278,8 +259,12 @@ export function useExportEngine() {
         }));
       } catch (workerErr: any) {
         // Try WYSIWYG fallback for any worker failure (especially black frames)
-        if (workerErr?.message === 'AbortError') throw workerErr;
+        if (abortController.signal.aborted || workerErr?.message === 'AbortError') throw new Error('AbortError');
 
+        // Shut down the failed worker BEFORE reactivating preview/capture.
+        // Otherwise both pipelines can still hold decoders or write the output.
+        exporter.dispose();
+        releasePreview();
         const fallbackResult = await attemptWysiwygFallback(workerErr, duration);
         if (fallbackResult) {
           const fileSize = fallbackResult.blob.size;
@@ -302,8 +287,7 @@ export function useExportEngine() {
         // Without this, every export leaves a live worker holding decoded frames + GPU state.
         // NOTE: Do NOT null exporterRef.current here — downloadFile() needs the instance
         // to call download() after export completes. The unmount effect handles final cleanup.
-        exporterRef.current?.dispose();
-        clearNormalizedCache();
+        exporter.dispose();
       }
     } catch (error) {
       if ((error as Error).message === 'AbortError') {
@@ -316,9 +300,10 @@ export function useExportEngine() {
         }));
       }
     } finally {
-      // Always clean up the rejection guard when export finishes
-      exportActive = false;
-      window.removeEventListener('unhandledrejection', exportRejectionGuard);
+      clearNormalizedCache();
+      releasePreview();
+      releasePreviewRef.current = null;
+      abortControllerRef.current = null;
     }
   }, []);
 
@@ -335,7 +320,10 @@ export function useExportEngine() {
   
   useEffect(() => {
     return () => {
+      abortControllerRef.current?.abort();
       exporterRef.current?.dispose();
+      releasePreviewRef.current?.();
+      releasePreviewRef.current = null;
     };
   }, []);
 

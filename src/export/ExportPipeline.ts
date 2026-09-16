@@ -36,6 +36,7 @@ export class ExportPipeline {
 
     const promise = (async () => {
       const selectedBackend = await this.selectBestBackend(opts);
+      if (cancelled) throw new Error('Export cancelled by user.');
       this.activeBackend = selectedBackend;
 
       if (import.meta.env.DEV) {

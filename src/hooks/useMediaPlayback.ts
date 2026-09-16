@@ -33,6 +33,7 @@ import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime, setIsPlayingClock } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains, getTransitionWindow } from '@/utils/transitionEngine';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
+import { isPreviewSuspendedForExport, subscribePreviewSuspension } from '@/utils/previewSuspension';
 
 // ---------------------------------------------------------------------------
 // Global Master Audio Context
@@ -887,6 +888,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const muteTimelineAudio = useEditorStore((s) => s.muteTimelineAudio);
   const playbackSpeed = useEditorStore((s) => s.playbackSpeed);
   const isExporting = useEditorStore((s) => s.isExporting);
+  const previewSuspended = useSyncExternalStore(subscribePreviewSuspension, isPreviewSuspendedForExport, () => false);
 
   // PERF (playback stutter fix): this hook is mounted by BOTH PreviewCanvasContainer
   // and PropertiesPanel. Previously it selected `s.currentTime` directly, so every
@@ -943,6 +945,33 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const prevSyncCtRef = useRef<number>(-1);
   // PERF: Persistent Set reused every frame to avoid 2 heap allocations/frame (Array + Set).
   const playingIdsSetRef = useRef<Set<string>>(new Set());
+
+  // Worker export uses independent decoders. A paused <video> still owns a
+  // decoder and decoded surfaces, so pause() alone is not sufficient after a
+  // Speed Frame drag. Unload each shared element exactly once and clear any
+  // queued edit-time seeks BEFORE the export worker opens its own media.
+  useEffect(() => {
+    if (!isPrimary) return;
+    const onSuspensionChange = () => {
+      pendingSeeksRef.current.clear();
+      lastActiveClipIdsRef.current.clear();
+      nextClipBoundaryRef.current = 0;
+      prevSyncCtRef.current = -1;
+      if (!isPreviewSuspendedForExport()) return;
+
+      const unloaded = new Set<HTMLMediaElement>();
+      for (const entry of poolRef.current.values()) {
+        disconnectAudioNode(entry);
+        if (unloaded.has(entry.el)) continue;
+        unloaded.add(entry.el);
+        entry.el.pause();
+        clearClipMediaSrc(entry.el as TaggedMediaElement);
+      }
+    };
+    const unsubscribe = subscribePreviewSuspension(onSuspensionChange);
+    if (isPreviewSuspendedForExport()) onSuspensionChange();
+    return unsubscribe;
+  }, [isPrimary]);
 
   // ---- Cache sorted tracks & media map ----
   useEffect(() => {
@@ -1071,7 +1100,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const MAX_GLOBAL_FRAME_CACHE = 30;
 
   useEffect(() => {
-    if (!isPrimary) return;
+    if (!isPrimary || isPreviewSuspendedForExport()) return;
     const ct = getPlaybackTime();
     const trimCt = getTrimPreviewTime();
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio'; shareKey: string; start: number; end: number }>();
@@ -1278,10 +1307,16 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             mediaVideoRefCount.set(key, (mediaVideoRefCount.get(key) ?? 0) + 1);
 
         const handleSeeked = () => {
+          if (isPreviewSuspendedForExport() || useEditorStore.getState().isPlaying) {
+            pendingSeeksRef.current.delete(clipId);
+            return;
+          }
           triggerRedraw();
           const pendingTime = pendingSeeksRef.current.get(clipId);
-          if (pendingTime !== undefined) {
-            pendingSeeksRef.current.delete(clipId);
+          pendingSeeksRef.current.delete(clipId);
+          // Reassigning the same currentTime starts another native seek. A
+          // queued target often already matches after a drag has settled.
+          if (pendingTime !== undefined && Math.abs(el!.currentTime - pendingTime) > 0.005) {
             el!.currentTime = pendingTime;
           }
         };
@@ -1307,14 +1342,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // is still needed.
         let mediaRetryCount = 0;
         const retryMediaLoad = () => {
-          if (!poolRef.current.has(clipId)) return;
+          if (isPreviewSuspendedForExport() || !poolRef.current.has(clipId)) return;
           if (!el || !el.src || el.src === '') return;
           if (el.readyState >= 1) return;
           if (mediaRetryCount >= 3) return;
           mediaRetryCount++;
           const delay = 400 * mediaRetryCount;
           setTimeout(() => {
-            if (!poolRef.current.has(clipId)) return;
+            if (isPreviewSuspendedForExport() || !poolRef.current.has(clipId)) return;
             if (el && el.readyState >= 1) return;
             try { el.load(); } catch { /* element gone */ }
           }, delay);
@@ -1372,13 +1407,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           el.style.pointerEvents = 'none';
 
         const handleSeeked = () => {
-          if (useEditorStore.getState().isPlaying) {
+          if (isPreviewSuspendedForExport() || useEditorStore.getState().isPlaying) {
             pendingSeeksRef.current.delete(clipId);
             return;
           }
           const pendingTime = pendingSeeksRef.current.get(clipId);
-          if (pendingTime !== undefined) {
-            pendingSeeksRef.current.delete(clipId);
+          pendingSeeksRef.current.delete(clipId);
+          if (pendingTime !== undefined && Math.abs(el.currentTime - pendingTime) > 0.005) {
             el.currentTime = pendingTime;
           }
         };
@@ -1444,11 +1479,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         pendingSeeksRef.current.delete(clipId);
       }
     }
-  }, [tracks, mediaLibrary, ctBucket, seekRevision, triggerRedraw, isPrimary]);
+  }, [tracks, mediaLibrary, ctBucket, seekRevision, triggerRedraw, isPrimary, previewSuspended]);
 
   // ---- Proximity source loader ----
   useEffect(() => {
-    if (!isPrimary) return;
+    if (!isPrimary || isPreviewSuspendedForExport()) return;
     const pool = poolRef.current;
     if (isExporting) {
       for (const [clipId, entry] of pool) {
@@ -1552,6 +1587,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             .then((file) => (file ? URL.createObjectURL(file) : null))
             .then((restoredUrl) => {
               if (!restoredUrl) return;
+              if (isPreviewSuspendedForExport() || !pool.has(ve.clipId)) {
+                URL.revokeObjectURL(restoredUrl);
+                return;
+              }
               if (assignClipMediaSrc(el as TaggedMediaElement, srcKey, restoredUrl)) {
                 el.load();
                 useEditorStore.setState((state) => ({
@@ -1588,7 +1627,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
       }
     }
-  }, [ctBucket, seekRevision, tracks, mediaLibrary, isExporting, isPrimary]);
+  }, [ctBucket, seekRevision, tracks, mediaLibrary, isExporting, isPrimary, previewSuspended]);
 
   // ============================================================
   // SINGLE RAF SYNC LOOP — The Heart of the Fix
@@ -1610,6 +1649,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
     const syncLoop = () => {
       if (!isRunning) return;
+      if (isPreviewSuspendedForExport()) {
+        lastRafTime = performance.now();
+        rafIdRef.current = requestAnimationFrame(syncLoop);
+        return;
+      }
 
       const now = performance.now();
 
@@ -2035,7 +2079,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // Runs on parameter changes, NOT on every currentTime tick
   // ============================================================
   useEffect(() => {
-    if (!isPrimary) return;
+    if (!isPrimary || isPreviewSuspendedForExport()) return;
     const pool = poolRef.current;
     const clips = getActiveClips();
     const playingIds = new Set(clips.map(c => c.clipId));
@@ -2315,7 +2359,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     // Fades, keyframed volume and transition ramps are all applied through
     // AudioParam.setTargetAtTime with an 80 ms time-constant, so a 100 ms update
     // cadence is inaudible while cutting this effect's cost by ~3×.
-  }, [tracks, volume, isMuted, muteTimelineAudio, playbackSpeed, audioParamTime, isPlaying, mediaLibrary, isPrimary]);
+  }, [tracks, volume, isMuted, muteTimelineAudio, playbackSpeed, audioParamTime, isPlaying, mediaLibrary, isPrimary, previewSuspended]);
 
   // ---- Cleanup orphaned analysers ----
   useEffect(() => {
@@ -2332,9 +2376,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // ---- Zustand subscription for paused seek (scrubbing) ----
   useEffect(() => {
     if (!isPrimary) return;
-    const unsub = useEditorStore.subscribe((state) => {
-      if (state.isPlaying) return;
-      const newTime = state.currentTime;
+    const unsub = useEditorStore.subscribe((state, previous) => {
+      if (state.isPlaying || isPreviewSuspendedForExport()) return;
+      // History, export UI and autosave notifications are not seek requests.
+      // During a Speed Frame drag the trim clock is authoritative, just as it
+      // is in the RAF loop; reading store.currentTime here fights that loop.
+      if (state.currentTime === previous.currentTime && state.tracks === previous.tracks &&
+          state.mediaLibrary === previous.mediaLibrary && state.pipWindows === previous.pipWindows &&
+          state.isPlaying === previous.isPlaying) return;
+      const newTime = getEffectivePreviewTime();
       const pool = poolRef.current;
       if (!pool || pool.size === 0) return;
 
@@ -2374,17 +2424,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           } else {
             const drift = Math.abs(el.currentTime - mediaTime);
             if (drift > 0.02) {
+              // The entry's single permanent seeked handler drains the latest
+              // pending target. Do not accumulate a new listener per edit.
               el.currentTime = mediaTime;
-              const onSeeked = () => {
-                const pending = pendingSeeksRef.current.get(clip.id);
-                if (pending !== undefined) {
-                  pendingSeeksRef.current.delete(clip.id);
-                  if (Math.abs(el.currentTime - pending) > 0.005) {
-                    el.currentTime = pending;
-                  }
-                }
-              };
-              el.addEventListener('seeked', onSeeked, { once: true });
             }
           }
         }
