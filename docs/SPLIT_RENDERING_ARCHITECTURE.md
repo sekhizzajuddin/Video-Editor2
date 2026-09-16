@@ -199,13 +199,17 @@ frame each output frame drew).
 | `seekBackoff` (50 ms) | `AssetDecoder` | safety margin when re-positioning (absorbs rounding at cut points) |
 | `forwardSeekThreshold` (0.75 s) | `AssetDecoder` | forward distance beyond which a re-seek beats decoding through |
 | prefetch depth (1 frame) | `export.worker` | decode/composite/encode overlap |
+| `STARVATION_GRACE_MS` (700) | `utils/previewStarvation` | how long a starving preview element may pause the clock (normal re-buffer) before the freeze is refused |
+| `STARVATION_HARD_LIMIT_MS` (4000) | `utils/previewStarvation` | stall age past which recovery escalates from `seek` to `reload` |
+| `RECOVERY_COOLDOWN_MS` (600) | `utils/previewStarvation` | minimum spacing between recovery attempts on the same clip |
+| `MAX_RECOVERY_ATTEMPTS` (3) | `utils/previewStarvation` | attempts before the clip is declared degraded (logged once, playback continues) |
 
 ---
 
 ## 6. Verifying after a change
 
 ```bash
-npx vitest run src/export src/store src/utils/splitClipIdentity.test.ts
+npx vitest run src/export src/store src/utils/splitClipIdentity.test.ts src/utils/previewStarvation.test.ts
 ```
 
 The assertion that matters for this architecture is the last one in
@@ -220,3 +224,51 @@ for (const stream of stats) {
 A non-zero `backwardSeeks` on a timeline whose clips only move forward means
 either the stream planner mis-grouped two clips, or the requests are being issued
 out of order — both regressions of the invariants described above.
+
+---
+
+## 7. Preview starvation watchdog (why the spinner used to latch)
+
+Splitting a clip mid-playback briefly re-keys the preview's `<video>` pool: a
+sibling element is adopted/re-seeked and, depending on timing, the old source
+can be revoked or the decoder dropped. The render loop derived its buffering
+state from a plain predicate — *any* active element with a pending `seeking`, or
+`readyState < 2` while carrying a `src` — and froze the clock whenever that was
+true (`PreviewCanvasContainer`). With no watchdog, one element that could never
+finish loading kept `isBuffering` true forever: the clock never advanced, the
+clip never re-entered the active window, and nothing ever retried it. That is the
+"continuous buffering after split" latch, and it is independent of the decode
+identity work in §3 — those two bugs had to be fixed together.
+
+The gate is now a bounded policy in `src/utils/previewStarvation.ts`:
+
+* **Grace, then never gate.** A starving element may hold the clock for
+  `STARVATION_GRACE_MS` (normal re-buffer stays smooth), after which the gate
+  opens. Seeks already in flight are not mistaken for stalls — `isElementStarved`
+  only counts an element as starving when its pending seek has gone stale or it
+  has no data at all while a real `src` is set.
+* **Escalating recovery.** Each clip's stall is timed; recovery runs at most once
+  per `RECOVERY_COOLDOWN_MS`, first as a `seek` tier (re-issue
+  `currentTime = target` to break a `seeking` that will never complete), then as a
+  `reload` tier (`assignClipMediaSrc(el, shareKey, media.url)` + `load()` +
+  re-seek) once the stall passes `STARVATION_HARD_LIMIT_MS`.
+* **Degrade instead of hang.** After `MAX_RECOVERY_ATTEMPTS` the clip is reported
+  once via `describeDegradedClip` and dropped from the gate entirely. One broken
+  segment loses its own frames; it can no longer hold the whole timeline's
+  transport hostage.
+* **Cleanup.** Timers/attempt counts are pruned when a clip leaves the pool, and
+  the whole map is cleared when playback pauses or scrubbing starts.
+
+Measured with fault injection (blob URL revoked mid-playback right after a split),
+base commit vs this one:
+
+| | base `5cddd26f` | with watchdog |
+| --- | --- | --- |
+| clock at break | 0.53 s | 0.55 s |
+| clock after 30 s | 0.53 s (frozen) | 9.20 s |
+| buffering samples after break | 363 / 363 | 11 / 56 (transitional) |
+| outcome | spinner forever | recovered, playback continues |
+
+Related: `FrameStripOverlay` no longer generates a filmstrip while playing. The
+generator opens its own `<video>` and fires eight seeks, which during a split
+competed with the preview for the same decoders; it now waits for pause.
