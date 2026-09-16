@@ -8,28 +8,53 @@ import './index.css'
 // When a new deployment is pushed, old JS chunks are deleted. If an active client tries to lazy-load them,
 // Vercel returns the index.html (MIME text/html), which fails to execute as JS.
 // We catch this and force a hard refresh to get the latest index.html and chunk mappings.
-const handleChunkError = (e: any) => {
-  const msg = e?.message || e?.reason?.message || '';
-  if (
-    msg.includes('Failed to fetch dynamically imported module') ||
-    msg.includes('Importing a module script failed') ||
-    msg.includes('Expected a JavaScript-or-Wasm module script') ||
-    (e.type === 'vite:preloadError')
-  ) {
-    console.warn('[PWA/Vite] Dynamic chunk error detected, reloading page:', msg, e);
-    sessionStorage.setItem('last-chunk-error', `${Date.now()}: ${msg}`);
-    if (sessionStorage.getItem('vite-chunk-reloaded') === 'true') {
-      sessionStorage.removeItem('vite-chunk-reloaded'); // Prevents infinite loops
-      return;
-    }
-    sessionStorage.setItem('vite-chunk-reloaded', 'true');
-    window.location.reload();
-  }
-};
+//
+// IMPORTANT: This handler must be VERY precise. It previously listened on 'error' and
+// 'unhandledrejection' globally, which meant ANY unhandled error during export (worker
+// crash, AudioContext failure, canvas error, browser extension errors like "Language
+// detection is not supported") would trigger window.location.reload() — crashing the
+// app back to the welcome screen. Now we ONLY handle Vite preload errors and filter
+// rejections strictly to chunk-load patterns.
 
-window.addEventListener('vite:preloadError', handleChunkError);
-window.addEventListener('error', handleChunkError);
-window.addEventListener('unhandledrejection', handleChunkError);
+const CHUNK_ERROR_PATTERNS = [
+  'Failed to fetch dynamically imported module',
+  'Importing a module script failed',
+  'Expected a JavaScript-or-Wasm module script',
+  'Loading chunk',       // Webpack-style (just in case)
+  'Loading CSS chunk',   // Vite CSS chunk errors
+] as const;
+
+function isChunkLoadError(msg: string): boolean {
+  return CHUNK_ERROR_PATTERNS.some(pattern => msg.includes(pattern));
+}
+
+function handleChunkReload(msg: string) {
+  console.warn('[PWA/Vite] Dynamic chunk error detected, reloading page:', msg);
+  sessionStorage.setItem('last-chunk-error', `${Date.now()}: ${msg}`);
+  if (sessionStorage.getItem('vite-chunk-reloaded') === 'true') {
+    sessionStorage.removeItem('vite-chunk-reloaded'); // Prevents infinite loops
+    return;
+  }
+  sessionStorage.setItem('vite-chunk-reloaded', 'true');
+  window.location.reload();
+}
+
+// Vite fires this custom event specifically for preload errors — always handle it.
+window.addEventListener('vite:preloadError', (e: any) => {
+  const msg = e?.payload?.message || e?.message || 'vite:preloadError';
+  handleChunkReload(msg);
+});
+
+// For unhandled promise rejections, ONLY reload if the rejection reason is clearly
+// a chunk/module load failure. Do NOT reload for worker errors, AudioContext errors,
+// browser extension errors, etc.
+window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
+  const reason = e.reason;
+  const msg = typeof reason === 'string' ? reason : (reason?.message || '');
+  if (isChunkLoadError(msg)) {
+    handleChunkReload(msg);
+  }
+});
 
 import App from './App.tsx'
 

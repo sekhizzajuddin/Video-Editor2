@@ -75,6 +75,27 @@ export function useExportEngine() {
     setTrimPreviewTime(null);
     store.selectSpeedFrame(null, null);
 
+    // Guard: suppress stray unhandled rejections during export to prevent the
+    // global chunk-error handler from misinterpreting them and reloading the page.
+    // This catches errors from: export Worker, OfflineAudioContext, canvas ops,
+    // browser extension errors (e.g. "Language detection is not supported").
+    let exportActive = true;
+    const exportRejectionGuard = (e: PromiseRejectionEvent) => {
+      if (!exportActive) return;
+      const msg = typeof e.reason === 'string' ? e.reason : (e.reason?.message || '');
+      // Let genuine chunk errors through (handled by main.tsx)
+      const isChunkError =
+        msg.includes('Failed to fetch dynamically imported module') ||
+        msg.includes('Importing a module script failed') ||
+        msg.includes('Expected a JavaScript-or-Wasm module script');
+      if (isChunkError) return; // Don't prevent default for real chunk errors
+
+      // Suppress all other rejections during export — they're logged but shouldn't crash
+      console.warn('[Export] Suppressed unhandled rejection during export:', msg, e.reason);
+      e.preventDefault();
+    };
+    window.addEventListener('unhandledrejection', exportRejectionGuard);
+
     if (exporterRef.current) {
       exporterRef.current.dispose();
       exporterRef.current = null;
@@ -294,6 +315,10 @@ export function useExportEngine() {
           warnings: [...prev.warnings, (error as Error).message]
         }));
       }
+    } finally {
+      // Always clean up the rejection guard when export finishes
+      exportActive = false;
+      window.removeEventListener('unhandledrejection', exportRejectionGuard);
     }
   }, []);
 
