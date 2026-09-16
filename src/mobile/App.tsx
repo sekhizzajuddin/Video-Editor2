@@ -27,15 +27,18 @@ import { ExportModal } from '@/components/ExportModal';
 const SettingsModal = React.lazy(() => import('@/components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
 const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRatioConflictModal').then((m) => ({ default: m.AspectRatioConflictModal })));
 const HelpModal = React.lazy(() => import('@/components/HelpModal').then((m) => ({ default: m.HelpModal })));
+const AiSpeedSyncModal = React.lazy(() => import('@/components/AiSpeedSyncModal').then((m) => ({ default: m.AiSpeedSyncModal })));
 
 type Sheet = 'none' | 'media' | 'properties';
 
 export function MobileApp() {
-  const { projectId, showExportModal, showSettingsModal, selectedClipId } = useEditorStore(
+  const { projectId, showExportModal, showSettingsModal, showAiSpeedSyncModal, setShowAiSpeedSyncModal, selectedClipId } = useEditorStore(
     useShallow((s) => ({
       projectId: s.projectId,
       showExportModal: s.showExportModal,
       showSettingsModal: s.showSettingsModal,
+      showAiSpeedSyncModal: s.showAiSpeedSyncModal,
+      setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
       selectedClipId: s.selectedClipId,
     }))
   );
@@ -150,6 +153,11 @@ export function MobileApp() {
       {showSettingsModal && (
         <Suspense fallback={null}>
           <SettingsModal />
+        </Suspense>
+      )}
+      {showAiSpeedSyncModal && (
+        <Suspense fallback={null}>
+          <AiSpeedSyncModal onClose={() => setShowAiSpeedSyncModal(false)} />
         </Suspense>
       )}
       <Suspense fallback={null}>

@@ -2,7 +2,7 @@ import React from 'react';
 import {
   Scissors, Bookmark, Copy, Trash2, Trash, Volume2, VolumeX,
   Replace, ArrowRight,
-  Repeat, ArrowLeftRight
+  Repeat, ArrowLeftRight, Sparkles
 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
@@ -47,6 +47,15 @@ export function ClipContextMenu({ x, y, clipId, onClose }: ClipContextMenuProps)
       shortcut: 'M',
       icon: <Bookmark className="w-3.5 h-3.5" />,
       onClick: () => addMarker(state.currentTime),
+    },
+    {
+      id: 'ai-speed-sync',
+      label: 'AI Speed Sync with TTS...',
+      icon: <Sparkles className="w-3.5 h-3.5 text-cyan-400" />,
+      onClick: () => {
+        state.selectClip(clipId);
+        state.setShowAiSpeedSyncModal(true);
+      },
     },
     { id: 'sep1', label: '', separator: true },
     {

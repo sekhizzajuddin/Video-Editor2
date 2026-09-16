@@ -30,7 +30,6 @@ import { probeFile } from '@/utils/mediaProbe';
 import { saveProjectAs, saveProjectToHandle, openProjectFile, serializeProjectData, loadProjectData } from '@/utils/fileSystemAccess';
 import { setActiveProject } from '@/utils/projectPersistence';
 import { RecentProjectsModal } from './RecentProjectsModal';
-import { AiVoiceSyncModal } from './AiVoiceSyncModal';
 import { toast } from 'sonner';
 import { ProCutLogo } from './ProCutLogo';
 
@@ -91,7 +90,6 @@ export function TopToolbar() {
   const [showHelpMenuDropdown, setShowHelpMenuDropdown] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
   const [showRecentModal, setShowRecentModal] = useState(false);
-  const [showAiVoiceSyncModal, setShowAiVoiceSyncModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
@@ -581,10 +579,10 @@ export function TopToolbar() {
           </div>
         )}
 
-        {/* Sync Button */}
+        {/* AI Sync Button */}
         <button
-          onClick={() => setShowAiVoiceSyncModal(true)}
-          title="AI Voice Sync (Align AI Audio to Subtitles)"
+          onClick={() => useEditorStore.getState().setShowAiSpeedSyncModal(true)}
+          title="AI Sync (Sync Video Speed Frames with TTS Voiceover)"
           className="px-2.5 py-1.5 text-xs rounded-md border flex items-center gap-1.5 font-medium transition-all hover:bg-black/5 dark:hover:bg-white/5"
           style={{
             borderColor: 'var(--theme-border)',
@@ -704,9 +702,6 @@ export function TopToolbar() {
         onClose={() => setShowRecentModal(false)}
         onSelect={() => {}}
       />
-      {showAiVoiceSyncModal && (
-        <AiVoiceSyncModal onClose={() => setShowAiVoiceSyncModal(false)} />
-      )}
     </header>
   );
 }

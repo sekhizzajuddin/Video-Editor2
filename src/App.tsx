@@ -33,6 +33,7 @@ const AiCopilot = React.lazy(() => import('@/components/AiCopilot').then(m => ({
 const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRatioConflictModal').then(m => ({ default: m.AspectRatioConflictModal })));
 const HelpModal = React.lazy(() => import('@/components/HelpModal').then(m => ({ default: m.HelpModal })));
 const GenerativeWorkspace = React.lazy(() => import('@/components/GenerativeWorkspace').then(m => ({ default: m.GenerativeWorkspace })));
+const AiSpeedSyncModal = React.lazy(() => import('@/components/AiSpeedSyncModal').then(m => ({ default: m.AiSpeedSyncModal })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -91,11 +92,15 @@ function DesktopApp() {
     setShowTeleprompter,
     showExportModal,
     showSettingsModal,
+    showAiSpeedSyncModal,
+    setShowAiSpeedSyncModal,
     projectId,
     selectedClipIds,
   } = useEditorStore(useShallow(s => ({
     showExportModal: s.showExportModal,
     showSettingsModal: s.showSettingsModal,
+    showAiSpeedSyncModal: s.showAiSpeedSyncModal,
+    setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
     togglePlayback: s.togglePlayback,
     activeTool: s.activeTool,
     setActiveTool: s.setActiveTool,
@@ -810,6 +815,11 @@ function DesktopApp() {
       {showSettingsModal && (
         <Suspense fallback={null}>
           <SettingsModal />
+        </Suspense>
+      )}
+      {showAiSpeedSyncModal && (
+        <Suspense fallback={null}>
+          <AiSpeedSyncModal onClose={() => setShowAiSpeedSyncModal(false)} />
         </Suspense>
       )}
       {showTeleprompter && (

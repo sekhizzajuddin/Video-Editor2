@@ -284,6 +284,8 @@ interface EditorActions {
   setShowSettingsModal: (show: boolean) => void;
   setShowTeleprompter: (show: boolean) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
+  showAiSpeedSyncModal: boolean;
+  setShowAiSpeedSyncModal: (show: boolean) => void;
   setUseProxies: (use: boolean) => void;
   syncSelectedClips: () => void;
   setShowProgressBar: (show: boolean) => void;
@@ -487,6 +489,7 @@ const initialState: EditorState = {
   showSettingsModal: false,
   showTeleprompter: false,
   showHelpMenu: false,
+  showAiSpeedSyncModal: false,
   activeHelpSection: null,
   useProxies: false,
   showProgressBar: false,
@@ -3549,6 +3552,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setShowSettingsModal: (show) => set({ showSettingsModal: show }),
   setShowTeleprompter: (show) => set({ showTeleprompter: show }),
   setShowHelpMenu: (show, section = null) => set({ showHelpMenu: show, activeHelpSection: section }),
+  setShowAiSpeedSyncModal: (show) => set({ showAiSpeedSyncModal: show }),
   setUseProxies: (use) => set({ useProxies: use }),
   syncSelectedClips: () => {
     set((state) => {
