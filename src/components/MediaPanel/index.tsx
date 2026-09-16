@@ -72,6 +72,7 @@ import { repairAudioFile } from '@/utils/audioRepair';
 import demoA from '../../assets/transition_demo_a.webp';
 import demoB from '../../assets/transition_demo_b.webp';
 import { toast } from 'sonner';
+import { shortCodecWarning } from '@/utils/videoCodecSupport';
 import { parseCubeLut } from '@/utils/lutParser';
 import { detectBeats } from '@/utils/beatDetection';
 import { MOTION_TEMPLATES, MotionTemplate } from '@/utils/motionTemplates';
@@ -1581,6 +1582,18 @@ export function MediaPanel() {
                       <div className="h-20 relative bg-black/20 overflow-hidden">
                         {renderMediaThumbnail(media)}
 
+                        {/* Codec this browser cannot decode: the thumbnail is
+                            black because nothing ever decoded — label it so the
+                            clip is not mistaken for an empty/exported-black one. */}
+                        {media.decodeIssue && (
+                          <div
+                            className="absolute bottom-1 left-1 rounded bg-amber-500/90 px-1.5 py-0.5 text-[8px] font-semibold text-black shadow"
+                            title={media.decodeIssue}
+                          >
+                            ⚠ {shortCodecWarning(media.decodeCodec)}
+                          </div>
+                        )}
+
                         {/* Video Play Overlay */}
                         {media.type === 'video' && (
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30 backdrop-blur-[1px]">
@@ -1678,6 +1691,14 @@ export function MediaPanel() {
                         <p className="text-[9px] text-[var(--theme-text-muted)] font-mono">
                           {formatDuration(media.duration)} · {formatSize(media.size)}
                         </p>
+                        {media.decodeIssue && (
+                          <p
+                            className="text-[9px] font-medium text-amber-400 truncate"
+                            title={media.decodeIssue}
+                          >
+                            ⚠ {shortCodecWarning(media.decodeCodec)}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

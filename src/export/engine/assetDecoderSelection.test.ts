@@ -112,3 +112,28 @@ describe('AssetDecoder frame selection', () => {
     decoder.dispose();
   }, 30_000);
 });
+
+/**
+ * Codec diagnostics. When WebCodecs refuses a codec the export cannot decode
+ * that media, and the user has to be told WHICH codec — "codec not supported"
+ * alone is not actionable when the file plays fine in another app (HEVC/H.265
+ * on a browser without hardware decoding is the common case).
+ */
+describe('AssetDecoder codec diagnostics', () => {
+  it('names the codec when WebCodecs refuses it', async () => {
+    const { AssetDecoder } = await import('./AssetDecoder');
+    const original = FakeVideoDecoder.isConfigSupported;
+    (FakeVideoDecoder as any).isConfigSupported = async (config: any) => ({ supported: false, config });
+    try {
+      const decoder = new AssetDecoder('buffer:none');
+      await decoder.load(buildInputMp4(1));
+      expect(decoder.ready).toBe(false);
+      expect(decoder.loadError ?? '').toContain('Codec not supported by browser WebCodecs');
+      // The container in the harness is H.264; the label must come from the
+      // track, not from a hard-coded string.
+      expect(decoder.loadError ?? '').toContain('H.264/AVC');
+    } finally {
+      (FakeVideoDecoder as any).isConfigSupported = original;
+    }
+  });
+});

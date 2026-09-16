@@ -44,6 +44,12 @@ export interface MediaItem {
   frameRate?: number;       // detected or default fps (30)
   width?: number;           // video/image width
   height?: number;          // video/image height
+  // Set when the browser could not decode this file (e.g. HEVC/H.265 without
+  // platform support). The clip imports, but renders as an empty layer and its
+  // frames are skipped on export — so the UI must say so instead of guessing.
+  decodeIssue?: string;
+  // Codec id behind `decodeIssue` (e.g. 'hevc') for badges/labels.
+  decodeCodec?: string | null;
   // Frame strip for timeline rendering
   frameStrip?: string[];    // array of data URLs for frame thumbnails
   // Content

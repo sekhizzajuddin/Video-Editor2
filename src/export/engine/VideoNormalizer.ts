@@ -41,6 +41,8 @@ export interface VideoInspection {
   codec: string | null;
   isoBmff: boolean;
   needsNormalization: boolean;
+  /** False when the container has no video track (audio-only MP4/MOV). */
+  hasVideoTrack: boolean;
 }
 
 export function needsVideoNormalization(isoBmff: boolean, _codec: string | null): boolean {
@@ -65,9 +67,10 @@ export async function inspectVideoBlob(blob: Blob): Promise<VideoInspection> {
       codec,
       isoBmff,
       needsNormalization: needsVideoNormalization(isoBmff, codec),
+      hasVideoTrack: !!track,
     };
   } catch {
-    return { codec: null, isoBmff, needsNormalization: needsVideoNormalization(isoBmff, null) };
+    return { codec: null, isoBmff, needsNormalization: needsVideoNormalization(isoBmff, null), hasVideoTrack: false };
   } finally {
     try { input?.dispose?.(); } catch {}
   }

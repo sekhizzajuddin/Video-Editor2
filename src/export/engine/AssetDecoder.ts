@@ -4,6 +4,7 @@ import {
   BlobSource,
   CanvasSink,
 } from 'mediabunny';
+import { undecodableExportMessage } from '@/utils/videoCodecSupport';
 
 type WrappedCanvas = {
   canvas: CanvasImageSource;
@@ -146,6 +147,15 @@ export class AssetDecoder {
         return;
       }
 
+      // Read the codec first: it belongs in the failure message, and the banner
+      // the user sees has to name the codec to be actionable (HEVC/H.265 on a
+      // browser without hardware decoding is by far the common case).
+      try {
+        this.codec = await videoTrack.getCodec();
+      } catch {
+        this.codec = null;
+      }
+
       let canDecode = true;
       try {
         // Wrap canDecode in a try-catch because VideoDecoder.isConfigSupported
@@ -158,15 +168,9 @@ export class AssetDecoder {
         canDecode = true;
       }
       if (!canDecode) {
-        this.loadError = 'Codec not supported by browser WebCodecs';
+        this.loadError = undecodableExportMessage(this.codec);
         this.dispose();
         return;
-      }
-
-      try {
-        this.codec = await videoTrack.getCodec();
-      } catch {
-        this.codec = null;
       }
       // Hybrid decode policy: HEVC/H.265 relies on the OS/GPU media stack in
       // Chrome; common web codecs use software to avoid exhausting hardware

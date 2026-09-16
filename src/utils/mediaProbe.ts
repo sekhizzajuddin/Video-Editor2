@@ -7,7 +7,9 @@
  */
 
 import type { MediaItem, MediaType } from '@/types';
-import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
+import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer'
+import { assessProbedVideo } from '@/utils/videoCodecSupport';
+import { inspectVideoBlob } from '@/export/engine/VideoNormalizer';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -91,6 +93,31 @@ export async function probeVideo(
   const width = video.videoWidth;
   const height = video.videoHeight;
 
+  // 0x0 after `loadedmetadata` means the browser read the container but could
+  // not describe — let alone decode — the video track: an unsupported codec
+  // (typically HEVC/H.265 on desktop Chrome/Firefox). Everything else about the
+  // element looks healthy (duration, readyState, a currentTime that advances),
+  // so without this check the clip imports as a silently black layer that also
+  // fails later during export. Name the codec so the warning is actionable.
+  let decodeIssue: string | undefined;
+  let decodeCodec: string | null | undefined;
+  if (width === 0 || height === 0) {
+    let codec: string | null = null;
+    let hasVideoTrack: boolean | undefined;
+    try {
+      const inspection = await inspectVideoBlob(file);
+      codec = inspection.codec;
+      hasVideoTrack = inspection.hasVideoTrack;
+    } catch {
+      // Inspector is best-effort: a generic message is still better than none.
+    }
+    const verdict = assessProbedVideo({ width, height, codec, hasVideoTrack });
+    if (!verdict.supported) {
+      decodeIssue = verdict.issue;
+      decodeCodec = verdict.codec ?? codec;
+    }
+  }
+
   // Capture a thumbnail at 1s (or 0 for very short clips)
   const thumbTime = Math.min(1, duration * 0.1);
   const thumbnail = await captureVideoFrame(video, thumbTime, 320);
@@ -121,6 +148,8 @@ export async function probeVideo(
     frameStrip,
     waveformPeaks,
     frameRate: 30, // Browser can't easily detect — default 30fps
+    decodeIssue,
+    decodeCodec,
   };
   } finally {
     // Guarantee the transient probe element leaves the shared container.
@@ -343,5 +372,9 @@ export async function probeFile(file: File): Promise<MediaItem> {
     width: metadata.width,
     height: metadata.height,
     frameStrip: metadata.frameStrip,
+    // Carried through deliberately: without these the UI cannot tell the user
+    // that the file imported but will never render (see utils/videoCodecSupport).
+    decodeIssue: metadata.decodeIssue,
+    decodeCodec: metadata.decodeCodec,
   };
 }

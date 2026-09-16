@@ -50,6 +50,7 @@ import {
   type SyncPlan,
 } from '@/utils/kineticSync';
 import type { AspectRatioConflictData } from '@/types';
+import { toast } from 'sonner';
 
 let saveTimeoutId: any = null;
 const debouncedSaveProject = (state: any) => {
@@ -1185,6 +1186,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }));
     if (file) {
       saveFileToDB(item.id, file).catch(err => console.error('Failed to save file to DB:', err));
+    }
+    // A file whose codec this browser cannot decode (HEVC/H.265 without
+    // platform support) still imports — it just renders as an empty layer and
+    // has its frames dropped from exports. There are a dozen import entry
+    // points (MediaPanel, TopToolbar, drag-and-drop, clip repair, settings,
+    // relink…), and this action is the one place they all funnel through, so
+    // the warning lives here rather than being duplicated at each call site.
+    // Only fresh imports warn: a project reload would otherwise re-announce
+    // media the user already knows about.
+    if (item.decodeIssue && Date.now() - (item.createdAt || 0) < 60_000) {
+      toast.warning(`${item.name}: ${item.decodeIssue}`, { duration: 12000 });
     }
     get().saveSnapshot('Import Media');
   },
